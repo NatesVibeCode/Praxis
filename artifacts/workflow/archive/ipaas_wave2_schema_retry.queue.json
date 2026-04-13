@@ -1,0 +1,20 @@
+{
+  "name": "iPaaS Wave 2 Schema Registry Retry",
+  "phase": "IPAAS-W2",
+  "workflow_id": "ipaas_wave2_schema_retry",
+  "jobs": [
+    {
+      "label": "ipaas_w2_schema_registry_v2",
+      "agent": "anthropic/claude-sonnet-4-6",
+      "prompt": "OBJECTIVE: Build a schema registry that imports OpenAPI specs and stores versioned API schemas in Postgres.\n\nCONTEXT:\n- Praxis connectors are generated from research, not from specs. There's no shared vocabulary for what external APIs expose.\n- The connector builder (Skills/dag-connector/SKILL.md) generates Pydantic models per-connector but they're not registered.\n- Agents need to know what fields/endpoints a service exposes without reading connector source code.\n- We need: import an OpenAPI spec -> store endpoints/schemas -> query by service/resource.\n\nDELIVERABLES:\n\n1. Create Code&DBs/Databases/migrations/workflow/094_schema_registry.sql:\n\n   Table: api_schemas (\n     schema_id TEXT PRIMARY KEY DEFAULT 'asch_' || substr(md5(random()::text), 1, 12),\n     provider_slug TEXT NOT NULL,\n     version TEXT NOT NULL,\n     title TEXT,\n     description TEXT,\n     base_url TEXT,\n     auth_type TEXT,\n     raw_spec JSONB,\n     created_at TIMESTAMPTZ DEFAULT now(),\n     UNIQUE(provider_slug, version)\n   )\n\n   Table: api_endpoints (\n     endpoint_id TEXT PRIMARY KEY DEFAULT 'aend_' || substr(md5(random()::text), 1, 12),\n     schema_id TEXT NOT NULL REFERENCES api_schemas(schema_id) ON DELETE CASCADE,\n     path TEXT NOT NULL,\n     method TEXT NOT NULL,\n     operation_id TEXT,\n     summary TEXT,\n     request_schema JSONB,\n     response_schema JSONB,\n     UNIQUE(schema_id, path, method)\n   )\n\n   Table: api_models (\n     model_id TEXT PRIMARY KEY DEFAULT 'amod_' || substr(md5(random()::text), 1, 12),\n     schema_id TEXT NOT NULL REFERENCES api_schemas(schema_id) ON DELETE CASCADE,\n     name TEXT NOT NULL,\n     fields JSONB NOT NULL,\n     UNIQUE(schema_id, name)\n   )\n\n2. Create Code&DBs/Workflow/runtime/integrations/schema_registry.py:\n\n   - import_openapi_spec(conn, spec_json: dict, provider_slug: str, version: str) -> str (schema_id)\n   - get_schema(conn, provider_slug: str, version: Optional[str] = None) -> dict\n   - list_schemas(conn) -> list[dict]\n   - search_endpoints(conn, provider_slug: str, query: str) -> list[dict]\n   - get_model(conn, provider_slug: str, model_name: str) -> Optional[dict]\n\n3. Create Code&DBs/Workflow/tests/test_schema_registry.py:\n   - Test import of a minimal OpenAPI 3.0 spec\n   - Test endpoint extraction\n   - Test model extraction\n   - Test search_endpoints by keyword\n   - Test version uniqueness constraint\n\nPATTERNS TO FOLLOW:\n- SQL queries use parameterized format: conn.execute(sql, param1, param2)\n- Connection pattern: from storage.postgres import get_workflow_pool\n- Functions take conn as first arg\n- Use dataclasses, not Pydantic, for internal types\n\nDO NOT:\n- Parse YAML (JSON only)\n- Handle OpenAPI 2.x\n- Reference any file paths that may not exist — create all files fresh",
+      "timeout": 300
+    },
+    {
+      "label": "ipaas_w2_review_v2",
+      "agent": "auto/review",
+      "depends_on": ["ipaas_w2_schema_registry_v2"],
+      "prompt": "Review the schema registry code for correctness: SQL injection safety, OpenAPI 3.x parsing coverage, parameterized queries, and test completeness.",
+      "timeout": 180
+    }
+  ]
+}

@@ -1,0 +1,56 @@
+{
+  "name": "authority_cleanup_contracts",
+  "workflow_id": "authority_cleanup_contracts",
+  "phase": "build",
+  "outcome_goal": "Establish DB-owned authority contracts for verifier refs, compiler capability routing, and roadmap registry references so runtime execution no longer depends on fabricated command strings or hardcoded route maps.",
+  "roadmap_alignment": "roadmap_item.authority.cleanup.contracts",
+  "anti_requirements": [
+    "Do not preserve raw shell verification as canonical runtime behavior.",
+    "Do not add new runtime fallbacks that fabricate authority.",
+    "Do not widen this packet into provider or discovery cleanup."
+  ],
+  "registry_paths": [
+    "Code&DBs/Databases/migrations/workflow/006_platform_authority_schema.sql",
+    "Code&DBs/Databases/migrations/workflow/042_roadmap_item_registry_paths.sql",
+    "Code&DBs/Workflow/runtime/verification.py",
+    "Code&DBs/Workflow/runtime/spec_compiler.py",
+    "Code&DBs/Workflow/runtime/workflow/orchestrator.py"
+  ],
+  "target_repo": "/Users/nate/Praxis",
+  "workdir": "/Users/nate/Praxis",
+  "verify_refs": [
+    {
+      "command": "./scripts/workflow.sh validate artifacts/workflow/authority_cleanup/authority_cleanup_contracts.queue.json"
+    }
+  ],
+  "jobs": [
+    {
+      "label": "contracts_authority_packet",
+      "agent": "openai/gpt-5.4-mini",
+      "outcome_goal": "Add the DB-backed verification and compiler contract surfaces.",
+      "anti_vibe_rule": "One contract seam only; no stealth implementation of downstream packets.",
+      "scope": {
+        "read": [
+          "Code&DBs/Databases/migrations/workflow/006_platform_authority_schema.sql",
+          "Code&DBs/Workflow/runtime/verification.py",
+          "Code&DBs/Workflow/runtime/spec_compiler.py",
+          "Code&DBs/Workflow/runtime/workflow/orchestrator.py",
+          "planning/roadmap_reset_and_seed.sql",
+          "artifacts/workflow/authority_cleanup/README.md"
+        ],
+        "write": [
+          "Code&DBs/Databases/migrations/workflow/",
+          "Code&DBs/Workflow/runtime/verification.py",
+          "Code&DBs/Workflow/runtime/spec_compiler.py",
+          "Code&DBs/Workflow/runtime/workflow/orchestrator.py"
+        ]
+      },
+      "verify_refs": [
+        {
+          "command": "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m py_compile 'Code&DBs/Workflow/runtime/verification.py' 'Code&DBs/Workflow/runtime/spec_compiler.py' 'Code&DBs/Workflow/runtime/workflow/orchestrator.py'"
+        }
+      ],
+      "prompt": "OBJECTIVE:\nAdd the contract layer that makes verifier execution and compiler capability routing DB-owned.\n\nTASK:\nIntroduce the canonical DB-backed contract for `verify_refs`, `verification_registry`, and compiler capability/route-hint authority. Update the emitting and consuming runtime surfaces so new producers emit `verify_refs`, legacy `verify_commands` remain read-compatible only, and missing authority rows fail explicitly.\n\nCONSTRAINTS:\nUse typed argv execution with `shell=False`. Do not leak provider-default or integration cleanup into this packet. The roadmap registry-path schema is optional metadata, not a new source of behavior.\n\nOUTPUT_CONTRACT:\nShip the migration(s) and runtime changes required to admit verifier refs and compiler capability authority, plus any test coverage required to prove the contract.\n\nACCEPTANCE_CRITERIA:\n- New runtime producers can emit `verify_refs`.\n- Consumers resolve verifier refs through DB authority only.\n- Compiler capability and route-hint selection no longer depend on hardcoded maps.\n- Missing authority rows fail clearly.\n\nSTOP_BOUNDARY:\nDo not cut over provider defaults, discovery surfaces, or integration metadata in this packet."
+    }
+  ]
+}

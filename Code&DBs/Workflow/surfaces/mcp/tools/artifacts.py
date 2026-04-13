@@ -6,6 +6,21 @@ from typing import Any
 from ..subsystems import _subs
 
 
+_PLACEHOLDER_SANDBOX_IDS = frozenset({"sandbox_abc123"})
+
+
+def _resolve_sandbox_id(store, params: dict) -> tuple[str, str | None]:
+    requested = str(params.get("sandbox_id", "") or "").strip()
+    if requested and requested not in _PLACEHOLDER_SANDBOX_IDS:
+        return requested, None
+    sandbox_id = store.latest_sandbox_id()
+    if not sandbox_id:
+        return "", "sandbox_id is required and no sandbox artifacts were found"
+    if requested in _PLACEHOLDER_SANDBOX_IDS:
+        return sandbox_id, f"{requested} is a placeholder; using latest sandbox {sandbox_id}"
+    return sandbox_id, f"sandbox_id omitted; using latest sandbox {sandbox_id}"
+
+
 def tool_praxis_artifacts(params: dict) -> dict:
     """Sandbox artifact store: list, search, diff, stats."""
     action = params.get("action", "stats")
@@ -18,13 +33,17 @@ def tool_praxis_artifacts(params: dict) -> dict:
         return s
 
     if action == "list":
-        sandbox_id = params.get("sandbox_id", "")
+        sandbox_id, note = _resolve_sandbox_id(store, params)
         if not sandbox_id:
-            return {"error": "sandbox_id is required for list"}
+            return {"error": note or "sandbox_id is required for list"}
         items = store.list_by_sandbox(sandbox_id)
         if not items:
-            return {"count": 0, "message": f"No artifacts for sandbox {sandbox_id}."}
-        return {
+            payload = {"sandbox_id": sandbox_id, "count": 0, "message": f"No artifacts for sandbox {sandbox_id}."}
+            if note:
+                payload["note"] = note
+            return payload
+        payload = {
+            "sandbox_id": sandbox_id,
             "count": len(items),
             "artifacts": [
                 {
@@ -37,6 +56,9 @@ def tool_praxis_artifacts(params: dict) -> dict:
                 for a in items
             ],
         }
+        if note:
+            payload["note"] = note
+        return payload
 
     if action == "search":
         query = params.get("query", "")
@@ -79,6 +101,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "or compare two versions of an artifact.\n\n"
                 "EXAMPLES:\n"
                 "  Overall stats:     praxis_artifacts(action='stats')\n"
+                "  List latest run:   praxis_artifacts(action='list')\n"
                 "  List by sandbox:   praxis_artifacts(action='list', sandbox_id='sandbox_abc123')\n"
                 "  Search outputs:    praxis_artifacts(action='search', query='migration schema')\n"
                 "  Compare versions:  praxis_artifacts(action='diff', artifact_id_a='art_1', artifact_id_b='art_2')"

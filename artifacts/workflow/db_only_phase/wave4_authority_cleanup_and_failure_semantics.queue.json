@@ -1,0 +1,97 @@
+{
+  "name": "db_only_phase_wave4_authority_cleanup_and_failure_semantics",
+  "workflow_id": "db_only_phase_wave4",
+  "phase": "build",
+  "outcome_goal": "Reuse the existing authority-cleanup queue pack and land the remaining failure-semantics follow-ons as small DB-owned packets with explicit proof.",
+  "roadmap_items": [
+    "roadmap_item.authority.cleanup",
+    "roadmap_item.authority.cleanup.contracts",
+    "roadmap_item.authority.cleanup.seam_cutover",
+    "roadmap_item.authority.cleanup.provider_runtime",
+    "roadmap_item.authority.cleanup.dispatch_packets",
+    "roadmap_item.authority.cleanup.validation_review",
+    "roadmap_item.authority.cleanup.failure_semantics",
+    "roadmap_item.authority.cleanup.failure_semantics.contracts",
+    "roadmap_item.authority.cleanup.failure_semantics.runtime_cutover",
+    "roadmap_item.authority.cleanup.failure_semantics.projections",
+    "roadmap_item.authority.cleanup.failure_semantics.route_health",
+    "roadmap_item.authority.cleanup.failure_semantics.proof"
+  ],
+  "reused_queue_refs": [
+    "artifacts/workflow/authority_cleanup/authority_cleanup_inventory.queue.json",
+    "artifacts/workflow/authority_cleanup/authority_cleanup_contracts.queue.json",
+    "artifacts/workflow/authority_cleanup/authority_cleanup_seam_cutover.queue.json",
+    "artifacts/workflow/authority_cleanup/authority_cleanup_provider_runtime.queue.json",
+    "artifacts/workflow/authority_cleanup/authority_cleanup_dispatch_packets.queue.json",
+    "artifacts/workflow/authority_cleanup/authority_cleanup_validation_review.queue.json"
+  ],
+  "absorbed_bug_ids": [
+    "BUG-BDAD34DC",
+    "BUG-D0DC2D32",
+    "BUG-C487AEB4"
+  ],
+  "anti_requirements": [
+    "Do not fork a second authority-cleanup packet set when the existing one is reusable.",
+    "Do not leave legacy failure compatibility fields in the completion path once the new contract is admitted.",
+    "Do not treat proof-only regression checks as fresh architecture work."
+  ],
+  "target_repo": "/Users/nate/Praxis",
+  "workdir": "/Users/nate/Praxis",
+  "verify": [
+    {
+      "command": "./scripts/workflow.sh validate artifacts/workflow/db_only_phase/wave4_authority_cleanup_and_failure_semantics.queue.json"
+    }
+  ],
+  "jobs": [
+    {
+      "label": "failure_contract_unification",
+      "agent": "openai/gpt-5.4-mini",
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/workflow/unified.py",
+        "Code&DBs/Workflow/runtime/receipt_store.py"
+      ],
+      "prompt": "Resolve `BUG-BDAD34DC` by unifying the canonical failure contract and removing surviving legacy compatibility fields from the completion path. Keep one terminal-state model for runs, receipts, and failure metadata."
+    },
+    {
+      "label": "failure_runtime_cutover",
+      "agent": "openai/gpt-5.4-mini",
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/workflow/unified.py"
+      ],
+      "prompt": "Carry `BUG-D0DC2D32` as runtime cutover, not just backfill. Prove every live failure path writes the canonical `failure_zone` and `is_transient` fields instead of relying on migration-era data."
+    },
+    {
+      "label": "failure_projection_cleanup",
+      "agent": "openai/gpt-5.3-codex-spark",
+      "write_scope": [
+        "Code&DBs/Workflow/surfaces/api/operator_read.py",
+        "Code&DBs/Workflow/observability/operator_topology.py"
+      ],
+      "prompt": "Clean up read-model and projection surfaces so they no longer depend on legacy failure compatibility fields once the unified contract is live."
+    },
+    {
+      "label": "failure_route_health_cleanup",
+      "agent": "openai/gpt-5.3-codex-spark",
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/retry_orchestrator.py",
+        "Code&DBs/Workflow/runtime/circuit_breaker.py"
+      ],
+      "prompt": "Keep route-health and responsibility signals aligned with the unified failure contract. Treat `BUG-C487AEB4` only as a regression assertion here: retryability must still drive behavior after the cleanup."
+    },
+    {
+      "label": "failure_semantics_proof",
+      "agent": "openai/gpt-5.4",
+      "depends_on": [
+        "failure_contract_unification",
+        "failure_runtime_cutover",
+        "failure_projection_cleanup",
+        "failure_route_health_cleanup"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/tests/unit/test_unified_workflow.py",
+        "Code&DBs/Workflow/tests/unit/test_auto_retry.py"
+      ],
+      "prompt": "Write the Wave 4 proof packet. It must show that every failure path converges on the canonical fields, retryability still drives real retry decisions, and no hidden compatibility fallback is silently carrying old semantics forward."
+    }
+  ]
+}

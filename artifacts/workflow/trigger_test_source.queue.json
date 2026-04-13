@@ -1,0 +1,20 @@
+{
+  "name": "trigger_test_source",
+  "queue_id": "trigger_test",
+  "phase": "build",
+  "outcome_goal": "Complete successfully to fire the run.succeeded trigger",
+  "jobs": [
+    {
+      "label": "source_step",
+      "agent": "integration/webhook",
+      "prompt": "Simple webhook to prove source workflow ran",
+      "integration_id": "webhook",
+      "integration_action": "post",
+      "integration_args": {
+        "url": "https://httpbin.org/post",
+        "method": "POST",
+        "body": {"source": "trigger_test", "purpose": "fire downstream trigger"}
+      }
+    }
+  ]
+}

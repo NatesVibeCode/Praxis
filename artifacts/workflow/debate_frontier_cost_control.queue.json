@@ -1,0 +1,33 @@
+{
+  "name": "Debate: Stop Frontier Waste",
+  "queue_id": "debate_frontier_waste_2026-04-13",
+  "phase": "build",
+  "outcome_goal": "Determine the right approach to stop frontier models being pulled into basic inference work they're overqualified for",
+  "jobs": [
+    {
+      "label": "position_a_new_task_type",
+      "agent": "auto/debate",
+      "prompt": "## Position: Add an 'analysis' task type for basic inference\n\nThe problem: auto/architecture means deep reasoning and correctly routes to frontier. But people use it for basic 'think about this' tasks because there's no mid-tier equivalent. auto/build is for code generation, not general analysis.\n\nArgue FOR adding auto/analysis (or auto/infer) as a new medium-tier task type specifically for basic synthesis, summarization, and light reasoning. Address why this is better than making routing smarter or adding cost flags to specs.\n\nBe specific. Cite the actual task types that exist today (build, architecture, research, review, test, wiring, debate, refactor) and where the gap is.\n\nEnd with what evidence would change your mind.",
+      "timeout": 180
+    },
+    {
+      "label": "position_b_smart_routing",
+      "agent": "auto/debate",
+      "prompt": "## Position: Make routing complexity-aware\n\nThe problem: spec authors pick auto/architecture for basic tasks because they don't think about cost. The task type system puts the burden on humans to classify work correctly.\n\nArgue FOR making the router analyze prompt complexity and auto-downgrade when frontier isn't needed — regardless of what task type the spec says. The system should protect against misuse, not rely on correct human classification.\n\nAddress the counterargument that prompt complexity is hard to measure reliably. Be specific about what signals you'd use.\n\nEnd with what evidence would change your mind.",
+      "timeout": 180
+    },
+    {
+      "label": "position_c_cost_preference",
+      "agent": "auto/debate",
+      "prompt": "## Position: Expose prefer_cost in the spec schema\n\nThe problem: the router already has a prefer_cost boolean on resolve() that shifts composite scoring weights toward cheaper models. But it's not exposed in workflow specs — there's no way for a spec author to say 'I want architecture-quality routing but optimize for cost.'\n\nArgue FOR exposing this as a spec-level field (e.g. prefer_cost: true on each job). Address why this is better than adding new task types or making routing magically smarter.\n\nBe specific about the scoring weight shift (task_rank 0.60, route_tier 0.25, latency 0.15 vs the prefer_cost weights). The infrastructure exists — it just needs a wire.\n\nEnd with what evidence would change your mind.",
+      "timeout": 180
+    },
+    {
+      "label": "crossfire",
+      "agent": "auto/debate",
+      "depends_on": ["position_a_new_task_type", "position_b_smart_routing", "position_c_cost_preference"],
+      "prompt": "## Crossfire: What Actually Solves This?\n\nThree positions were argued:\nA — Add auto/analysis as a mid-tier task type for basic inference\nB — Make routing complexity-aware so it auto-downgrades\nC — Expose the existing prefer_cost flag in specs\n\nJudge which arguments survived. Kill what's dead. Find the synthesis.\n\nDeliver: Dead Claims, Surviving Insights, Action Board (specific changes), First Move (one thing, one session).",
+      "timeout": 180
+    }
+  ]
+}

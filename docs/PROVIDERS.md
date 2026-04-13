@@ -123,7 +123,7 @@ Check provider health:
 curl http://localhost:8420/health
 
 # MCP
-praxis_health(action="check")
+praxis_health()
 ```
 
 The health endpoint reports per-provider status, recent error rates, and budget consumption.

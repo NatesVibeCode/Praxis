@@ -1,0 +1,35 @@
+{
+  "name": "Name Cleanup DB Migration",
+  "phase": "W",
+  "queue_id": "name_cleanup_migration_20260413",
+  "outcome_goal": "Migration 107 written to rename dag-dispatch, dag-project, dag_research in Praxis.db. Idempotent and safe to re-run.",
+  "anti_requirements": ["Do NOT rename cascade_inactive_to_routes trigger or function — it is legitimate SQL CASCADE terminology", "Do NOT drop or recreate any triggers or functions"],
+  "jobs": [
+    {
+      "label": "write_migration_107",
+      "agent": "openai/gpt-5.4",
+      "task_type": "build",
+      "description": "Write migration SQL to rename DAG references in Praxis.db",
+      "outcome_goal": "Migration file exists at 107_name_cleanup_praxis_branding.sql with idempotent UPDATE statements",
+      "prompt": "Write a new SQL migration file at `Code&DBs/Databases/migrations/workflow/107_name_cleanup_praxis_branding.sql`.\n\nFirst, read the existing migration 094 (`Code&DBs/Databases/migrations/workflow/094_model_capability_audit.sql`) for the comment and formatting style.\n\nThe migration should perform these idempotent updates:\n\n-- 1. Integration registry: rename dag-dispatch to praxis-dispatch\nUPDATE integration_registry\nSET id = 'praxis-dispatch',\n    name = 'Praxis Dispatch',\n    description = REPLACE(description, 'DAG', 'Praxis'),\n    provider = 'praxis'\nWHERE id = 'dag-dispatch';\n\n-- Also update provider for notifications entry\nUPDATE integration_registry\nSET provider = 'praxis'\nWHERE id = 'notifications' AND provider = 'dag';\n\n-- 2. Runtime profile authority: rename dag-project to praxis-project\nUPDATE runtime_profile_authority\nSET runtime_profile_ref = 'praxis-project'\nWHERE runtime_profile_ref = 'dag-project';\n\n-- 3. Model profile candidate bindings: rename dag-project references\nUPDATE model_profile_candidate_bindings\nSET profile_ref = 'praxis-project'\nWHERE profile_ref = 'dag-project';\n\n-- 4. Compilation spine authority: rename dag_research\nUPDATE compilation_spine\nSET spine_ref = 'praxis_research'\nWHERE spine_ref = 'dag_research';\n\n-- 5. Adapter config: rename user-agent\nUPDATE adapter_config\nSET config_value = 'Praxis-APITaskAdapter/1.0'\nWHERE config_value = 'DAG-APITaskAdapter/1.0';\n\nIMPORTANT:\n- Each statement MUST use WHERE clauses that only match old values (idempotent)\n- Do NOT rename cascade_inactive_to_routes() or trg_cascade_inactive_to_routes\n- Do NOT drop or recreate any triggers or functions\n- Add clear section comments\n- Check which tables actually exist first — if a table doesn't exist, wrap that UPDATE in a DO $$ block with exception handling\n- Start with a comment header: -- Migration 107: Rename DAG branding to Praxis",
+      "read": [
+        "Code&DBs/Databases/migrations/workflow/094_model_capability_audit.sql",
+        "Code&DBs/Databases/migrations/workflow/106_acceptance_status_index.sql"
+      ],
+      "write": ["Code&DBs/Databases/migrations/workflow/107_name_cleanup_praxis_branding.sql"],
+      "verify_command": "test -f /Users/nate/Praxis/Code\\&DBs/Databases/migrations/workflow/107_name_cleanup_praxis_branding.sql && grep -q 'praxis-dispatch' /Users/nate/Praxis/Code\\&DBs/Databases/migrations/workflow/107_name_cleanup_praxis_branding.sql && ! grep -q 'cascade_inactive_to_routes' /Users/nate/Praxis/Code\\&DBs/Databases/migrations/workflow/107_name_cleanup_praxis_branding.sql"
+    },
+    {
+      "label": "verify_migration",
+      "agent": "openai/gpt-5.4-mini",
+      "task_type": "review",
+      "depends_on": ["write_migration_107"],
+      "description": "Review migration 107 for correctness and safety",
+      "outcome_goal": "Migration is idempotent, does not touch triggers, and covers all rename targets",
+      "prompt": "Read the migration file `Code&DBs/Databases/migrations/workflow/107_name_cleanup_praxis_branding.sql` and verify:\n\n1. It does NOT rename or reference `cascade_inactive_to_routes` or `trg_cascade_inactive_to_routes`\n2. Each UPDATE statement is idempotent (safe to run multiple times)\n3. It handles the case where old values have already been renamed (WHERE clause won't match)\n4. It does NOT drop or recreate any triggers, functions, or tables\n5. It covers all five rename targets:\n   - integration_registry: dag-dispatch -> praxis-dispatch\n   - integration_registry: provider dag -> praxis (for notifications too)\n   - runtime_profile_authority: dag-project -> praxis-project\n   - compilation_spine: dag_research -> praxis_research\n   - adapter_config: DAG-APITaskAdapter -> Praxis-APITaskAdapter\n\nIf any issue is found, fix the migration file directly.",
+      "read": ["Code&DBs/Databases/migrations/workflow/107_name_cleanup_praxis_branding.sql"],
+      "write": ["Code&DBs/Databases/migrations/workflow/107_name_cleanup_praxis_branding.sql"],
+      "verify_command": "grep -q 'praxis-dispatch' /Users/nate/Praxis/Code\\&DBs/Databases/migrations/workflow/107_name_cleanup_praxis_branding.sql && grep -q 'praxis-project' /Users/nate/Praxis/Code\\&DBs/Databases/migrations/workflow/107_name_cleanup_praxis_branding.sql"
+    }
+  ]
+}

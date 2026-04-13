@@ -1,0 +1,10 @@
+{
+  "name": "add_provider_preflight",
+  "jobs": [
+    {
+      "label": "fix",
+      "agent": "auto/build",
+      "prompt": "Add a provider health pre-check to the workflow dispatch pipeline so unreachable agents are caught before a run is submitted — not after jobs start failing.\n\nCurrent behavior: AgentSpawner().preflight(agent_slug) is called at job execution time in Code&DBs/Workflow/runtime/workflow/_execution_core.py lines ~292-303. If a provider is down, the job starts, then fails with setup_failure. This wastes a run slot and produces misleading failure records.\n\nFix: in WorkflowPipeline.pre_dispatch() (Code&DBs/Workflow/runtime/workflow_pipeline.py, around the posture/governance/loop-detection gates), add a preflight pass that:\n1. Collects all unique agent slugs from the spec jobs\n2. Calls AgentSpawner().preflight(slug) for each\n3. If any are not ready, fail the gate before submission with a clear message naming which agents are unavailable\n\nSkip preflight for 'human' routes and 'integration/*' routes — only check model-backed agents. Keep the check fast (don't wait on slow probes — use the existing readiness result, not a fresh probe)."
+    }
+  ]
+}

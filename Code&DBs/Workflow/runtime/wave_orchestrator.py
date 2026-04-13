@@ -199,6 +199,30 @@ class WaveOrchestrator:
         wave = self._waves[wave_id]
         return all(j.status in ("succeeded", "failed") for j in wave.jobs)
 
+    def resolve_default_wave_id(self, *, action: str = "next") -> str:
+        """Resolve the single obvious wave for the requested action.
+
+        This is intended for CLI/MCP ergonomics only. It refuses to guess when
+        there is no clear authority-owned default.
+        """
+        snapshot = self.observe()
+        if snapshot.current_wave:
+            return snapshot.current_wave
+
+        if len(snapshot.waves) == 1:
+            return snapshot.waves[0].wave_id
+
+        if action == "start":
+            startable = [
+                wave.wave_id
+                for wave in snapshot.waves
+                if wave.status == WaveStatus.PENDING and self.can_start_wave(wave.wave_id)
+            ]
+            if len(startable) == 1:
+                return startable[0]
+
+        raise KeyError(f"no default wave available for action={action}")
+
     def observe(self) -> WaveSnapshot:
         """Full orchestrator state snapshot."""
         waves = tuple(self._waves[wid] for wid in self._wave_order)

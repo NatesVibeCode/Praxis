@@ -1,0 +1,36 @@
+{
+  "name": "p2_refactors_phase_ready",
+  "workflow_id": "p2_refactors_phase_ready",
+  "jobs": [
+    {
+      "label": "frontdoor_split",
+      "agent": "auto/refactor",
+      "timeout": 300,
+      "prompt": "ROADMAP: roadmap.refactor.frontdoor.read.write.split — Split frontdoor admission from status observability.\n\nRead surfaces/api/rest.py and the workflow frontdoor handlers. The frontdoor currently mixes run admission (accepting new workflow submissions) with status observability (polling run state). Split these into two separate handler modules:\n- surfaces/api/handlers/workflow_admission.py — handles workflow submission\n- surfaces/api/handlers/workflow_status.py — handles status polling and result retrieval\n\nEnsure the router in rest.py routes to the correct module. Keep backward compatibility on HTTP paths. Submit code change summary via praxis_submit_code_change."
+    },
+    {
+      "label": "operator_kernel",
+      "agent": "auto/refactor",
+      "timeout": 300,
+      "prompt": "ROADMAP: roadmap.refactor.operator.frontdoor.kernel — Extract shared operator frontdoor kernel.\n\nRead surfaces/api/operator_write.py and surfaces/mcp/tools/operator.py. Both duplicate input normalization, env resolution, and error wrapping. Extract the shared kernel into a new surfaces/api/_operator_kernel.py module with: normalize_params(), resolve_env(), wrap_error(). Both surfaces import from the kernel. Submit code change summary via praxis_submit_code_change."
+    },
+    {
+      "label": "provider_contract_split",
+      "agent": "auto/refactor",
+      "timeout": 300,
+      "prompt": "ROADMAP: roadmap.refactor.provider.contract.separation — Separate provider catalog from transport contracts.\n\nRead the provider-related modules. Provider catalog (what models exist, their capabilities) is mixed with transport contracts (how to call them). Create:\n- runtime/provider_catalog.py — model metadata, cap_ columns, catalog reads\n- runtime/provider_transport_contracts.py — request/response contracts per provider\nUpdate imports. Submit code change summary via praxis_submit_code_change."
+    },
+    {
+      "label": "query_router_split",
+      "agent": "auto/refactor",
+      "timeout": 300,
+      "prompt": "ROADMAP: roadmap.refactor.query.domain.router.split — Split workflow query handler by domain.\n\nRead surfaces/api/handlers/ for query-related handlers. The workflow query handler responds to multiple domains (run state, job state, receipts, bugs, status). Split into domain-specific handlers:\n- handlers/query_runs.py\n- handlers/query_jobs.py\n- handlers/query_receipts.py\nWire up in rest.py router. Submit code change summary via praxis_submit_code_change."
+    },
+    {
+      "label": "surface_unification",
+      "agent": "auto/refactor",
+      "timeout": 300,
+      "prompt": "ROADMAP: roadmap.refactor.workflow.surface.unification — Unify workflow launch and status surfaces.\n\nRead surfaces/api/rest.py and the workflow-runs handlers. The /workflow-runs POST (launch) and /workflow-runs/{id}/status GET (status) use different code paths with duplicated context-building logic. Unify the response envelope format and extract shared context-building into surfaces/api/handlers/_workflow_context.py. Both handlers import from it. Submit code change summary via praxis_submit_code_change."
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "name": "Hardening Smoke Test 2",
+  "phase": "test",
+  "jobs": [
+    {
+      "label": "smoke2_gemini",
+      "agent": "google/gemini-2.5-flash",
+      "prompt": "Reply with exactly one word: SMOKE_OK. Nothing else, no explanation."
+    }
+  ]
+}

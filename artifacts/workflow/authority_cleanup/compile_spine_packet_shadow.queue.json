@@ -1,0 +1,130 @@
+{
+  "name": "compile_spine_packet_shadow",
+  "workflow_id": "compile_spine_packet_shadow",
+  "phase": "build",
+  "outcome_goal": "Compile shadow execution packets with provenance and inspection so migrated LLM jobs stop treating raw prompt text as sufficient authority before the hard cutover.",
+  "roadmap_alignment": "roadmap_item.authority.cleanup.seam_cutover",
+  "anti_requirements": [
+    "Do not switch execution to packet-only behavior in this packet.",
+    "Do not replan explicit jobs or widen into unrelated task_assembler planning paths.",
+    "Do not add mixed hidden fallbacks that fabricate packet provenance."
+  ],
+  "registry_paths": [
+    "Code&DBs/Workflow/adapters/context_adapter.py",
+    "Code&DBs/Workflow/runtime/workflow/runtime_setup.py",
+    "Code&DBs/Workflow/runtime/workflow/orchestrator.py",
+    "Code&DBs/Workflow/runtime/integrations/workflow.py",
+    "Code&DBs/Workflow/surfaces/api/handlers/workflow_query.py",
+    "Code&DBs/Workflow/surfaces/api/operator_read.py",
+    "Code&DBs/Databases/migrations/workflow/006_platform_authority_schema.sql"
+  ],
+  "target_repo": "/Users/nate/Praxis",
+  "workdir": "/Users/nate/Praxis",
+  "verify": [
+    {
+      "command": "./scripts/workflow.sh validate artifacts/workflow/authority_cleanup/compile_spine_packet_shadow.queue.json"
+    }
+  ],
+  "jobs": [
+    {
+      "label": "execution_packet_contract_store",
+      "agent": "openai/gpt-5.4-mini",
+      "outcome_goal": "Add durable ExecutionPacket persistence and provenance lineage keyed to definition and plan revisions.",
+      "anti_vibe_rule": "Persist packet truth first; do not hand-wave provenance into logs only.",
+      "scope": {
+        "read": [
+          "Code&DBs/Databases/migrations/workflow/006_platform_authority_schema.sql",
+          "Code&DBs/Workflow/runtime/workflow/unified.py",
+          "Code&DBs/Workflow/runtime/workflow/_recording.py",
+          "Code&DBs/Workflow/runtime/workflow/orchestrator.py",
+          "Code&DBs/Workflow/runtime/integrations/workflow.py",
+          "Code&DBs/Workflow/docs/RECEIPT_SCHEMA.md"
+        ],
+        "write": [
+          "Code&DBs/Databases/migrations/workflow/",
+          "Code&DBs/Workflow/runtime/workflow/unified.py",
+          "Code&DBs/Workflow/runtime/workflow/_recording.py",
+          "Code&DBs/Workflow/docs/RECEIPT_SCHEMA.md"
+        ]
+      },
+      "verify": [
+        {
+          "command": "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m py_compile 'Code&DBs/Workflow/runtime/workflow/unified.py' 'Code&DBs/Workflow/runtime/workflow/_recording.py'"
+        },
+        {
+          "command": "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_unified_workflow.py' 'Code&DBs/Workflow/tests/unit/test_rest_queue_submit.py'"
+        }
+      ],
+      "prompt": "OBJECTIVE:\nPersist execution packets and their provenance before the runtime cutover.\n\nTASK:\nAdd durable `ExecutionPacket` storage and provenance lineage keyed to `definition_revision` and `plan_revision`. The packet must capture exact model messages, reference bindings, capability bindings, `verify_refs`, packet revision, and the authority/file inputs used to compile it. Wire that persistence into the workflow runtime recording path so packet truth is inspectable and replayable.\n\nCONSTRAINTS:\nDo not cut execution over to packet-only behavior. Do not treat receipt text alone as sufficient provenance. Keep explicit jobs non-replanning.\n\nOUTPUT_CONTRACT:\nMigration(s), runtime persistence wiring, and receipt/provenance documentation for shadow execution packets.\n\nACCEPTANCE_CRITERIA:\n- Execution packets persist with revision lineage.\n- Packet provenance records the exact authority rows and context inputs used.\n- Packet truth is available to runtime inspection without changing job outcomes.\n- Tests cover persistence and submission/read seams.\n\nSTOP_BOUNDARY:\nDo not switch adapters to packet-only execution in this job."
+    },
+    {
+      "label": "shadow_packet_compiler",
+      "agent": "openai/gpt-5.4",
+      "depends_on": [
+        "execution_packet_contract_store"
+      ],
+      "outcome_goal": "Compile a shadow execution packet for every migrated LLM job before adapter execution.",
+      "anti_vibe_rule": "Hydration only; no hidden replanning and no fabricated provenance on failure.",
+      "scope": {
+        "read": [
+          "Code&DBs/Workflow/adapters/context_adapter.py",
+          "Code&DBs/Workflow/runtime/workflow/runtime_setup.py",
+          "Code&DBs/Workflow/runtime/workflow/orchestrator.py",
+          "Code&DBs/Workflow/runtime/integrations/workflow.py",
+          "Code&DBs/Workflow/tests/integration/test_model_routing_and_context_compiler.py",
+          "Code&DBs/Workflow/tests/integration/test_workflow_runner.py",
+          "Code&DBs/Workflow/tests/integration/test_workflow_api.py"
+        ],
+        "write": [
+          "Code&DBs/Workflow/adapters/context_adapter.py",
+          "Code&DBs/Workflow/runtime/workflow/runtime_setup.py",
+          "Code&DBs/Workflow/runtime/workflow/orchestrator.py",
+          "Code&DBs/Workflow/runtime/integrations/workflow.py"
+        ]
+      },
+      "verify": [
+        {
+          "command": "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m py_compile 'Code&DBs/Workflow/adapters/context_adapter.py' 'Code&DBs/Workflow/runtime/workflow/runtime_setup.py' 'Code&DBs/Workflow/runtime/workflow/orchestrator.py' 'Code&DBs/Workflow/runtime/integrations/workflow.py'"
+        },
+        {
+          "command": "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/integration/test_model_routing_and_context_compiler.py' 'Code&DBs/Workflow/tests/integration/test_workflow_runner.py' 'Code&DBs/Workflow/tests/integration/test_workflow_api.py'"
+        }
+      ],
+      "prompt": "OBJECTIVE:\nCompile shadow execution packets ahead of adapter execution on the migrated runtime seam.\n\nTASK:\nUpgrade the context/compiler side of the workflow graph so every migrated LLM job builds a shadow execution packet before execution. The packet must include the compiled system/user messages, scope reads/writes, reference bindings, capability bindings, verifier refs, and provenance. Reuse plan/definition revisions where present, and preserve the rule that explicit `jobs[]` specs are hydrated but not replanned.\n\nCONSTRAINTS:\nDo not switch adapters to packet-only execution yet. Do not widen into unrelated `task_assembler` planner logic. Missing packet authority should fail clearly on the shadow path rather than fabricating values.\n\nOUTPUT_CONTRACT:\nRuntime graph and compiler changes that create and persist shadow packets for migrated LLM jobs.\n\nACCEPTANCE_CRITERIA:\n- Each migrated LLM job builds a shadow packet before execution.\n- Packet provenance captures exact context and authority inputs.\n- Shadow packet creation does not change job outcomes yet.\n- Tests prove deterministic packet assembly and fail-closed behavior.\n\nSTOP_BOUNDARY:\nDo not remove raw prompt execution from adapters in this packet."
+    },
+    {
+      "label": "packet_inspection_surface",
+      "agent": "openai/gpt-5.4-mini",
+      "depends_on": [
+        "shadow_packet_compiler"
+      ],
+      "outcome_goal": "Expose packet and provenance inspection through existing read surfaces so runs can be audited without shell spelunking.",
+      "anti_vibe_rule": "No hidden packet truth; if it executed, it should be inspectable.",
+      "scope": {
+        "read": [
+          "Code&DBs/Workflow/surfaces/api/handlers/workflow_query.py",
+          "Code&DBs/Workflow/surfaces/api/operator_read.py",
+          "Code&DBs/Workflow/runtime/workflow/unified.py",
+          "Code&DBs/Workflow/tests/unit/test_workflow_query_handlers.py",
+          "Code&DBs/Workflow/tests/integration/test_native_operator_query_surface.py",
+          "Code&DBs/Workflow/tests/integration/test_native_observability_cockpit.py"
+        ],
+        "write": [
+          "Code&DBs/Workflow/surfaces/api/handlers/workflow_query.py",
+          "Code&DBs/Workflow/surfaces/api/operator_read.py",
+          "Code&DBs/Workflow/tests/unit/test_workflow_query_handlers.py",
+          "Code&DBs/Workflow/tests/integration/test_native_operator_query_surface.py"
+        ]
+      },
+      "verify": [
+        {
+          "command": "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m py_compile 'Code&DBs/Workflow/surfaces/api/handlers/workflow_query.py' 'Code&DBs/Workflow/surfaces/api/operator_read.py'"
+        },
+        {
+          "command": "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_workflow_query_handlers.py' 'Code&DBs/Workflow/tests/integration/test_native_operator_query_surface.py'"
+        }
+      ],
+      "prompt": "OBJECTIVE:\nMake shadow execution packets inspectable through the supported read surfaces.\n\nTASK:\nExpose packet inspection through the existing workflow query and operator read surfaces so a run can show exact model inputs, authority bindings, `verify_refs`, packet revision, and packet drift versus execution. Keep the surface read-only and operator-friendly; do not require shell log scraping to see packet provenance.\n\nCONSTRAINTS:\nDo not redesign the UI. Do not switch execution to packet-only behavior here. Keep packet inspection aligned to existing workflow/operator read contracts.\n\nOUTPUT_CONTRACT:\nRead-surface endpoints or payload enrichments plus tests that prove packet/provenance inspection works on the shadow path.\n\nACCEPTANCE_CRITERIA:\n- A run can surface its packet revision, bindings, and provenance through existing reads.\n- Packet drift is inspectable without changing execution behavior.\n- Tests prove the new read model shape.\n\nSTOP_BOUNDARY:\nDo not turn packet inspection into a new write surface or a UI redesign."
+    }
+  ]
+}

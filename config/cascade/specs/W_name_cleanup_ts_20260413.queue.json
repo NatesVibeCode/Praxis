@@ -1,0 +1,75 @@
+{
+  "name": "Name Cleanup TypeScript Config",
+  "phase": "W",
+  "queue_id": "name_cleanup_ts_20260413",
+  "outcome_goal": "All DAG/Dag naming removed from TypeScript, CSS, and config files. RunDAG -> RunGraph, DagLayout -> GraphLayout, moon-dag -> moon-graph, dag-app -> praxis-app.",
+  "anti_requirements": ["Do NOT modify Python files — those are handled by Run 1"],
+  "jobs": [
+    {
+      "label": "rename_run_graph",
+      "agent": "openai/gpt-5.4-mini",
+      "task_type": "refactor",
+      "description": "Rename RunDAG component -> RunGraph and .run-dag CSS -> .run-graph",
+      "outcome_goal": "No RunDAG or run-dag references remain in dashboard/",
+      "prompt": "Rename the `RunDAG` function component and its CSS classes in the dashboard:\n\n1. In `Code&DBs/Workflow/surfaces/app/src/dashboard/RunDetailView.tsx`:\n   - Find the function `RunDAG` (around line 81) and rename it to `RunGraph`\n   - Update any JSX references like `<RunDAG` to `<RunGraph`\n   - Update any comments mentioning 'Run DAG' to 'Run graph'\n   - Replace all `run-dag` CSS class references with `run-graph` (e.g. `run-dag__edge` -> `run-graph__edge`, `run-dag__column` -> `run-graph__column`, `run-dag__node` -> `run-graph__node`, etc.)\n\n2. In the dashboard CSS file (find it via grep — likely `Code&DBs/Workflow/surfaces/app/src/dashboard/dashboard.css` or similar):\n   - Replace all `.run-dag` selectors with `.run-graph`\n\nRun: cd Code&DBs/Workflow/surfaces/app && npx tsc --noEmit 2>&1 | head -10",
+      "read": ["Code&DBs/Workflow/surfaces/app/src/dashboard/RunDetailView.tsx"],
+      "write": ["Code&DBs/Workflow/surfaces/app/src/dashboard/RunDetailView.tsx"],
+      "verify_command": "! grep -q 'RunDAG\\|run-dag' /Users/nate/Praxis/Code\\&DBs/Workflow/surfaces/app/src/dashboard/RunDetailView.tsx"
+    },
+    {
+      "label": "rename_graph_layout",
+      "agent": "openai/gpt-5.4-mini",
+      "task_type": "refactor",
+      "description": "Rename DagLayout interface -> GraphLayout",
+      "outcome_goal": "No DagLayout references remain in moon/ directory",
+      "prompt": "Rename the `DagLayout` interface to `GraphLayout` in the Moon UI:\n\n1. In `Code&DBs/Workflow/surfaces/app/src/moon/moonBuildPresenter.ts`:\n   - Line 28: change comment from '--- DAG layout ---' to '--- Graph layout ---'\n   - Line 41: rename `interface DagLayout` to `interface GraphLayout`\n   - Update ALL references to `DagLayout` in the same file (return types, variable types, etc.)\n\n2. In `Code&DBs/Workflow/surfaces/app/src/moon/MoonEdges.tsx`:\n   - Update the import from `DagLayout` to `GraphLayout`\n   - Update any type annotations using `DagLayout`\n\nRun: cd Code&DBs/Workflow/surfaces/app && npx tsc --noEmit 2>&1 | head -10",
+      "read": [
+        "Code&DBs/Workflow/surfaces/app/src/moon/moonBuildPresenter.ts",
+        "Code&DBs/Workflow/surfaces/app/src/moon/MoonEdges.tsx"
+      ],
+      "write": [
+        "Code&DBs/Workflow/surfaces/app/src/moon/moonBuildPresenter.ts",
+        "Code&DBs/Workflow/surfaces/app/src/moon/MoonEdges.tsx"
+      ],
+      "verify_command": "! grep -q 'DagLayout' /Users/nate/Praxis/Code\\&DBs/Workflow/surfaces/app/src/moon/moonBuildPresenter.ts && ! grep -q 'DagLayout' /Users/nate/Praxis/Code\\&DBs/Workflow/surfaces/app/src/moon/MoonEdges.tsx"
+    },
+    {
+      "label": "rename_moon_graph_css",
+      "agent": "openai/gpt-5.4",
+      "task_type": "refactor",
+      "description": "Rename .moon-dag* CSS classes to .moon-graph* in CSS and TSX",
+      "outcome_goal": "No moon-dag references remain in Moon UI files",
+      "prompt": "Rename all moon-dag CSS classes to moon-graph in the Moon UI:\n\n1. In `Code&DBs/Workflow/surfaces/app/src/moon/moon-build.css`:\n   - Replace ALL `.moon-dag` selectors with `.moon-graph`\n   - This includes: `.moon-dag`, `.moon-dag-node`, `.moon-dag-node:hover`, `.moon-dag-node--selected`, `.moon-dag-node--drag-over`, `.moon-dag-node__label`, `.moon-dag-append`, `.moon-dag-append:hover`, `.moon-dag-append--drag-over`\n   - Each becomes: `.moon-graph`, `.moon-graph-node`, `.moon-graph-node:hover`, etc.\n\n2. In `Code&DBs/Workflow/surfaces/app/src/moon/MoonBuildPage.tsx`:\n   - Replace ALL `moon-dag` className strings with `moon-graph`\n   - This includes string literals like `'moon-dag'`, `'moon-dag-node'`, `'moon-dag-node--selected'`, `'moon-dag-node--drag-over'`, `'moon-dag-node__label'`, `'moon-dag-append'`, `'moon-dag-append--drag-over'`\n\nDo a thorough search-and-replace. There should be ~9 CSS class definitions and several className references in the TSX.\n\nRun: cd Code&DBs/Workflow/surfaces/app && npx tsc --noEmit 2>&1 | head -10",
+      "read": [
+        "Code&DBs/Workflow/surfaces/app/src/moon/moon-build.css",
+        "Code&DBs/Workflow/surfaces/app/src/moon/MoonBuildPage.tsx"
+      ],
+      "write": [
+        "Code&DBs/Workflow/surfaces/app/src/moon/moon-build.css",
+        "Code&DBs/Workflow/surfaces/app/src/moon/MoonBuildPage.tsx"
+      ],
+      "verify_command": "! grep -q 'moon-dag' /Users/nate/Praxis/Code\\&DBs/Workflow/surfaces/app/src/moon/moon-build.css && ! grep -q 'moon-dag' /Users/nate/Praxis/Code\\&DBs/Workflow/surfaces/app/src/moon/MoonBuildPage.tsx"
+    },
+    {
+      "label": "rename_configs",
+      "agent": "openai/gpt-5.4-mini",
+      "task_type": "refactor",
+      "description": "Rename dag-app, dag-api, dag-ui in config/launch files",
+      "outcome_goal": "No dag- prefixed names in config or launch files",
+      "prompt": "Update package and launch config names:\n\n1. In `Code&DBs/Workflow/surfaces/app/package-lock.json`:\n   - Find and replace `\"dag-app\"` with `\"praxis-app\"` (appears on lines 2 and 8)\n\n2. In `Code&DBs/Workflow/.claude/launch.json`:\n   - Find and replace `\"dag-api\"` with `\"praxis-api\"`\n\n3. In `Code&DBs/Workflow/surfaces/app/.claude/launch.json`:\n   - Find and replace `\"dag-ui\"` with `\"praxis-ui\"`\n\n4. In `Code&DBs/Workflow/surfaces/app/package.json`:\n   - If it has a `\"name\": \"dag-app\"` field, change to `\"praxis-app\"`",
+      "read": [
+        "Code&DBs/Workflow/surfaces/app/package-lock.json",
+        "Code&DBs/Workflow/.claude/launch.json",
+        "Code&DBs/Workflow/surfaces/app/.claude/launch.json",
+        "Code&DBs/Workflow/surfaces/app/package.json"
+      ],
+      "write": [
+        "Code&DBs/Workflow/surfaces/app/package-lock.json",
+        "Code&DBs/Workflow/.claude/launch.json",
+        "Code&DBs/Workflow/surfaces/app/.claude/launch.json",
+        "Code&DBs/Workflow/surfaces/app/package.json"
+      ],
+      "verify_command": "! grep -q '\"dag-' /Users/nate/Praxis/Code\\&DBs/Workflow/.claude/launch.json && ! grep -q '\"dag-' /Users/nate/Praxis/Code\\&DBs/Workflow/surfaces/app/.claude/launch.json"
+    }
+  ]
+}

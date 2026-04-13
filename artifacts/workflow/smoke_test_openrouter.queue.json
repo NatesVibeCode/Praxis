@@ -1,0 +1,13 @@
+{
+  "name": "OpenRouter Smoke",
+  "phase": "SMOKE",
+  "workflow_id": "smoke_openrouter_v1",
+  "jobs": [
+    {
+      "label": "smoke_openrouter",
+      "agent": "openrouter/deepseek/deepseek-chat-v3-0324",
+      "prompt": "Reply with exactly: SMOKE_OK_OPENROUTER",
+      "timeout": 120
+    }
+  ]
+}

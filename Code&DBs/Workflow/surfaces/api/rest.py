@@ -40,6 +40,7 @@ from pydantic import BaseModel
 from adapters.provider_registry import default_llm_adapter_type, default_provider_slug
 from contracts.domain import validate_workflow_request
 from runtime.native_authority import default_native_authority_refs
+from runtime.integrations.display_names import display_name_for_integration
 from runtime.workflow_graph_compiler import compile_graph_workflow_request, spec_uses_graph_runtime
 from .handlers._subsystems import _Subsystems
 from .handlers import (
@@ -2121,7 +2122,7 @@ def get_catalog() -> dict[str, Any]:
         )
         for row in rows or []:
             integration_id = row.get("id") or ""
-            name = row.get("name") or integration_id
+            name = display_name_for_integration(row)
             auth = row.get("auth_status") or "unknown"
             caps = row.get("capabilities")
             if isinstance(caps, str):

@@ -1,0 +1,53 @@
+{
+  "name": "fix_bugs_wave2",
+  "phase": "build",
+  "outcome_goal": "Wire is_retryable into retry logic, schedule HeartbeatOrchestrator + trigger evaluation loop, populate integration_registry from Python registry, wire event_subscriptions into dispatch trigger flow",
+  "jobs": [
+    {
+      "label": "fix_retry_from_classifier",
+      "agent": "auto/build",
+      "prompt": "Fix BUG-C487AEB4: `is_retryable` from `failure_classifier.py` is computed but thrown away — the retry path re-classifies independently.\n\nRead these files first:\n- `Code&DBs/Workflow/runtime/failure_classifier.py` — understand `FailureClassification` dataclass, especially `is_retryable` and `is_transient`\n- `Code&DBs/Workflow/runtime/workflow/unified.py` — find `complete_job()`, find where `classify_failure()` is called, find where `retry_orchestrator.decide()` is called\n- `Code&DBs/Workflow/runtime/retry_orchestrator.py` — understand `decide()` method internals\n\nThe fix:\n1. In `unified.py` `complete_job()`, the first `classify_failure()` call produces a classification that's currently only used for friction recording. Extract `is_retryable` from it.\n2. If `is_retryable=False`, skip the retry orchestrator entirely and go straight to `failed` status — do NOT invoke `retry_orchestrator.decide()`.\n3. Only call `retry_orchestrator.decide()` when `is_retryable=True` (or when no classification is available). Optionally pass the pre-computed classification to avoid the second `classify_failure()` call inside `retry_orchestrator.decide()` — add an optional `pre_classified` parameter to `RetryOrchestrator.decide()` and skip the internal classify call if provided.\n\nDo not restructure the surrounding code. Guard with try/except so classification failures don't block retry. Verify with:\n```\nPYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m py_compile 'Code&DBs/Workflow/runtime/workflow/unified.py' 'Code&DBs/Workflow/runtime/retry_orchestrator.py'\n```",
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/workflow/unified.py",
+        "Code&DBs/Workflow/runtime/retry_orchestrator.py"
+      ],
+      "read_scope": [
+        "Code&DBs/Workflow/runtime/failure_classifier.py"
+      ]
+    },
+    {
+      "label": "wire_heartbeat_and_triggers",
+      "agent": "auto/build",
+      "prompt": "Fix BUG-C1A2FB09 and BUG-8BEDE037 by adding two heartbeat modules to `Code&DBs/Workflow/runtime/heartbeat_runner.py`.\n\nRead `heartbeat_runner.py` fully first. Wave 1 already added `SystemEventsCleanupModule` and `_CronHeartbeatModule` — match those exact patterns.\n\n**Fix 1 — BUG-C1A2FB09: HeartbeatOrchestrator run_cycle() never scheduled**\nThe `HeartbeatRunner` class has `run_once()` (line ~269) which calls `orchestrator.run_cycle()`. But nothing in the codebase calls `HeartbeatRunner.run_once()` on a schedule. Fix: add a `_HeartbeatOrchestratorModule` that wraps the `HeartbeatOrchestrator` (or the inner orchestrator from `heartbeat.py`) and calls `run_cycle()`. Register it in `build_modules()` in the conn-dependent modules list.\n\n**Fix 2 — BUG-8BEDE037: evaluate_triggers() not in continuous loop**\n`evaluate_triggers(conn)` in `Code&DBs/Workflow/runtime/triggers.py` is only called inside the dispatch worker when jobs are active. If the queue is idle, triggers never fire. Fix: add a `_TriggerEvaluatorModule` that imports and calls `evaluate_triggers(conn)`, capturing the count of fired triggers as `actions_taken`. Register it in `build_modules()` in the conn-dependent modules list.\n\nBoth modules must:\n- Implement the heartbeat module protocol (return `HeartbeatModuleResult` with `module_name`, `findings` tuple, `actions_taken` int, `errors` tuple, `duration_ms` float)\n- Wrap all logic in try/except\n- Use guarded imports (try/except ImportError)\n\nVerify with:\n```\nPYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m py_compile 'Code&DBs/Workflow/runtime/heartbeat_runner.py'\n```",
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/heartbeat_runner.py"
+      ],
+      "read_scope": [
+        "Code&DBs/Workflow/runtime/triggers.py",
+        "Code&DBs/Workflow/runtime/heartbeat.py"
+      ]
+    },
+    {
+      "label": "populate_integration_registry",
+      "agent": "auto/build",
+      "prompt": "Fix BUG-D3DE8841: `integration_registry` Postgres table is queried by the task assembler but never populated — all discovery queries return empty.\n\nRead these files first:\n- `Code&DBs/Workflow/runtime/integrations/__init__.py` — understand `INTEGRATION_TOOLS` or `INTEGRATION_REGISTRY` structure\n- `Code&DBs/Databases/migrations/workflow/020_integration_registry.sql` — understand exact schema (columns, types, constraints)\n- `Code&DBs/Workflow/runtime/task_assembler.py` — understand what columns it queries (auth_status, capabilities, search_vector, etc.)\n\nThe fix in `integrations/__init__.py`:\n1. Add a `sync_integration_registry(conn)` function that:\n   a. Iterates over the Python-side integration definitions (whatever is in `INTEGRATION_TOOLS` or equivalent)\n   b. For each integration, upserts a row into `integration_registry` using `ON CONFLICT (id) DO UPDATE SET ...`\n   c. Sets `auth_status = 'connected'` for all Python-registered integrations\n   d. Sets `capabilities` as a JSON/JSONB array of available action names\n   e. Sets `search_vector = to_tsvector('english', name || ' ' || coalesce(description, ''))` via SQL expression\n   f. Maps the integration's name/id/description from the Python dict\n2. Call `sync_integration_registry(conn)` during module initialization if a conn is available, or expose it so heartbeat can call it on startup\n\nHandle the case where the table doesn't exist yet (catch and ignore `UndefinedTable` errors). Guard all DB ops with try/except.\n\nVerify with:\n```\nPYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m py_compile 'Code&DBs/Workflow/runtime/integrations/__init__.py'\n```",
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/integrations/__init__.py"
+      ],
+      "read_scope": [
+        "Code&DBs/Workflow/runtime/task_assembler.py"
+      ]
+    },
+    {
+      "label": "wire_event_subscriptions",
+      "agent": "auto/build",
+      "prompt": "Fix BUG-D76B1EA9: `event_subscriptions` and `subscription_checkpoints` tables (in migrations) are never read or written — the subscription infrastructure is dormant.\n\nRead these files first:\n- `Code&DBs/Databases/migrations/workflow/006_platform_authority_schema.sql` — find `event_subscriptions` and `subscription_checkpoints` table definitions (exact columns, types)\n- `Code&DBs/Workflow/runtime/triggers.py` — understand `evaluate_triggers(conn)` and how it fires workflows\n- `Code&DBs/Workflow/runtime/workflow/orchestrator.py` — understand how workflows get dispatched (what function to call to trigger a workflow run)\n\nThe design: `event_subscriptions` registers workflows to trigger when certain system events occur (by event_type pattern match). `subscription_checkpoints` tracks which `system_events.id` each subscriber has processed, enabling resumption after crash.\n\nThe fix in `triggers.py`:\n1. Add `evaluate_event_subscriptions(conn)` that:\n   a. Queries active subscriptions from `event_subscriptions` (status='active' or enabled=true — check actual schema)\n   b. For each subscription, queries `subscription_checkpoints` for the last processed `system_events.id` for this subscriber (default: events from the last 24 hours if no checkpoint)\n   c. Queries `system_events` for events since the checkpoint where `event_type` matches the subscription's filter (use LIKE or exact match — check what filter_policy column contains)\n   d. For each unprocessed matching event, triggers the target workflow (look at how `evaluate_triggers` fires workflows and follow the same pattern)\n   e. After processing, upserts `subscription_checkpoints` with `last_evidence_seq = <max processed system_events.id>` and `checkpointed_at = NOW()`\n2. Call `evaluate_event_subscriptions(conn)` from within `evaluate_triggers(conn)` so they run together\n3. Wrap each subscription's processing in its own try/except so one bad subscription doesn't block others\n4. If `subscription_checkpoints` has no checkpoint yet for a subscriber, start from events in the last 24 hours\n\nCheck actual column names in both tables before writing any SQL. The `system_events` table has: `id` (bigint), `event_type` (text), `source_id` (text), `source_type` (text), `payload` (jsonb), `created_at` (timestamptz).\n\nVerify with:\n```\nPYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m py_compile 'Code&DBs/Workflow/runtime/triggers.py'\n```",
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/triggers.py"
+      ],
+      "read_scope": [
+        "Code&DBs/Databases/migrations/workflow/006_platform_authority_schema.sql"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,80 @@
+{
+  "name": "modular_refactor_wave5_memory_ports",
+  "description": "Decouple memory/* from runtime heartbeat and storage details using ports-and-adapters pattern, after lifecycle seams from wave 4 are in place",
+  "phase": "refactor",
+  "jobs": [
+    {
+      "label": "plan_ports",
+      "agent": "auto/wiring",
+      "prompt": "## Goal\nDesign ports-and-adapters boundaries for the `Code&DBs/Workflow/memory/` package (8001 lines, 28 files).\n\n## Current coupling\nThe memory package imports runtime heartbeat and storage/vector helpers directly. Wave 4 established lifecycle seams — this wave uses them.\n\n## What to analyze\n1. Read all files in `Code&DBs/Workflow/memory/` — catalog every import from outside the memory package\n2. Identify coupling points:\n   - Runtime heartbeat imports\n   - Storage-specific imports (Postgres, pgvector)\n   - Embedding service imports\n   - Scheduling/lifecycle imports\n3. Design port interfaces:\n   - `SourceIngestionPort` — abstract source ingestion\n   - `EmbeddingPort` — abstract embedding generation\n   - `VectorSimilarityPort` — abstract vector search\n   - `SchedulingPort` — abstract scheduling/heartbeat\n4. Map each coupling point to which port absorbs it\n\n## Output\nWrite `Code&DBs/Workflow/artifacts/workflow/_wave5_design.json` with:\n```json\n{\n  \"ports\": {\n    \"EmbeddingPort\": { \"methods\": [...], \"current_implementors\": [...] },\n    \"VectorSimilarityPort\": { ... },\n    \"SchedulingPort\": { ... }\n  },\n  \"adapters\": {\n    \"postgres_adapter.py\": { \"implements\": [...] },\n    \"embedding_adapter.py\": { ... }\n  },\n  \"files_to_modify\": { \"memory/retrieval.py\": \"inject VectorSimilarityPort instead of direct pgvector\", ... }\n}\n```\n\nDatabase: `postgresql://nate@127.0.0.1:5432/dag_workflow`",
+      "write_scope": [
+        "Code&DBs/Workflow/artifacts/workflow/_wave5_design.json"
+      ],
+      "context_packs": [
+        {"label": "memory_init", "kind": "file", "sourceRef": "file://memory/__init__.py"},
+        {"label": "memory_retrieval", "kind": "file", "sourceRef": "file://memory/retrieval.py"},
+        {"label": "memory_sync", "kind": "file", "sourceRef": "file://memory/sync.py"},
+        {"label": "memory_ingest", "kind": "file", "sourceRef": "file://memory/ingest.py"},
+        {"label": "memory_engine", "kind": "file", "sourceRef": "file://memory/engine.py"},
+        {"label": "lifecycle", "kind": "file", "sourceRef": "file://surfaces/_lifecycle.py"}
+      ]
+    },
+    {
+      "label": "build_ports",
+      "agent": "auto/build",
+      "depends_on": ["plan_ports"],
+      "prompt": "## Goal\nCreate the port interfaces and adapter modules described in `Code&DBs/Workflow/artifacts/workflow/_wave5_design.json`.\n\nPorts go in `Code&DBs/Workflow/memory/ports/` as Protocol classes (typing.Protocol or ABC).\nAdapters go in `Code&DBs/Workflow/memory/adapters/` implementing each port with the current Postgres/pgvector/embedding backend.\n\n## Rules\n- Ports must be pure interfaces — no implementation logic\n- Adapters must be drop-in replacements for the current direct imports\n- Do NOT modify any existing memory files yet\n- Add `__init__.py` to both new directories\n\nDatabase: `postgresql://nate@127.0.0.1:5432/dag_workflow`",
+      "write_scope": [
+        "Code&DBs/Workflow/memory/ports/__init__.py",
+        "Code&DBs/Workflow/memory/ports/embedding.py",
+        "Code&DBs/Workflow/memory/ports/vector.py",
+        "Code&DBs/Workflow/memory/ports/scheduling.py",
+        "Code&DBs/Workflow/memory/adapters/__init__.py",
+        "Code&DBs/Workflow/memory/adapters/postgres_vector.py",
+        "Code&DBs/Workflow/memory/adapters/embedding.py"
+      ],
+      "context_packs": [
+        {"label": "design", "kind": "file", "sourceRef": "file://../artifacts/workflow/_wave5_design.json"},
+        {"label": "memory_retrieval", "kind": "file", "sourceRef": "file://memory/retrieval.py"},
+        {"label": "memory_sync", "kind": "file", "sourceRef": "file://memory/sync.py"}
+      ]
+    },
+    {
+      "label": "wire_ports",
+      "agent": "auto/refactor",
+      "depends_on": ["build_ports"],
+      "prompt": "## Goal\nModify memory package files to accept port interfaces via constructor injection instead of importing runtime/storage modules directly.\n\nRead `Code&DBs/Workflow/artifacts/workflow/_wave5_design.json` for the exact file-to-port mapping.\n\n## Rules\n- Each memory module that currently imports heartbeat/storage/embedding directly should instead accept the relevant port via constructor parameter\n- Default parameter values should instantiate the concrete adapter, so existing callers don't break\n- Pattern: `def __init__(self, ..., embedder: EmbeddingPort | None = None)` → if None, create default adapter\n- Graph-domain logic stays in `memory/*` — only infrastructure coupling moves to adapters\n- Preserve all existing function signatures for callers that don't pass ports\n\nDatabase: `postgresql://nate@127.0.0.1:5432/dag_workflow`",
+      "write_scope": [
+        "Code&DBs/Workflow/memory/retrieval.py",
+        "Code&DBs/Workflow/memory/sync.py",
+        "Code&DBs/Workflow/memory/ingest.py",
+        "Code&DBs/Workflow/memory/engine.py"
+      ],
+      "context_packs": [
+        {"label": "design", "kind": "file", "sourceRef": "file://../artifacts/workflow/_wave5_design.json"},
+        {"label": "memory_retrieval", "kind": "file", "sourceRef": "file://memory/retrieval.py"},
+        {"label": "memory_sync", "kind": "file", "sourceRef": "file://memory/sync.py"},
+        {"label": "memory_ingest", "kind": "file", "sourceRef": "file://memory/ingest.py"},
+        {"label": "ports_init", "kind": "file", "sourceRef": "file://memory/ports/__init__.py"},
+        {"label": "adapters_init", "kind": "file", "sourceRef": "file://memory/adapters/__init__.py"}
+      ]
+    },
+    {
+      "label": "verify_tests",
+      "agent": "auto/test",
+      "depends_on": ["wire_ports"],
+      "prompt": "## Goal\nVerify the memory ports-and-adapters refactor preserves behavior and enables port-level testing.\n\n## Existing tests\nRun any existing memory tests:\n```bash\nPYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q Code&DBs/Workflow/tests/ -k memory 2>/dev/null || echo 'No memory tests found'\n```\n\n## Port-level smoke test\nVerify that memory logic can run with fake ports:\n```bash\nPYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -c \"\nfrom memory.ports import EmbeddingPort, VectorSimilarityPort, SchedulingPort\nprint('Port imports OK')\nfrom memory.adapters import PostgresVectorAdapter, DefaultEmbeddingAdapter\nprint('Adapter imports OK')\n\"\n```\n\n## Import smoke test\n```bash\nPYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -c \"\nfrom memory.retrieval import *\nfrom memory.sync import *\nfrom memory.ingest import *\nprint('All memory imports OK')\n\"\n```\n\nIf tests fail, fix the issue and re-run.\n\nDatabase: `postgresql://nate@127.0.0.1:5432/dag_workflow`",
+      "write_scope": [
+        "Code&DBs/Workflow/memory/retrieval.py",
+        "Code&DBs/Workflow/memory/sync.py",
+        "Code&DBs/Workflow/memory/ingest.py",
+        "Code&DBs/Workflow/memory/engine.py",
+        "Code&DBs/Workflow/memory/ports/__init__.py",
+        "Code&DBs/Workflow/memory/adapters/__init__.py"
+      ],
+      "context_packs": [
+        {"label": "memory_retrieval", "kind": "file", "sourceRef": "file://memory/retrieval.py"}
+      ]
+    }
+  ]
+}

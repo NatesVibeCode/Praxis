@@ -1,0 +1,96 @@
+{
+  "name": "Platform Capabilities Showcase v4",
+  "queue_id": "showcase_v4_clean_2026-04-13",
+  "phase": "build",
+  "outcome_goal": "Demonstrate Praxis Engine breadth: multi-provider LLM routing, iPaaS integrations, DAG parallelism, quality gates, web research, and notification delivery",
+  "jobs": [
+    {
+      "label": "research_market_trends",
+      "agent": "auto/research",
+      "prompt": "## Objective\nResearch current trends in AI-powered workflow automation and iPaaS platforms for 2026.\n\nSearch the web for:\n- Top iPaaS platforms and their capabilities (Zapier, Make, Workato, Tray.io, n8n)\n- How AI agents are being integrated into workflow automation\n- Enterprise adoption trends for AI-native orchestration\n\n## Expected Output\n- trends: string[] (5-7 key market trends)\n- platforms: array of {name, key_differentiator, ai_capability}\n- market_direction: string (2-3 sentence synthesis)\n\n## Done Criteria\n- At least 3 web sources cited\n- Trends are specific and current (2025-2026)\n- Competitive landscape covers at least 4 platforms",
+      "timeout": 300
+    },
+    {
+      "label": "webhook_pull_signal",
+      "agent": "integration/webhook",
+      "prompt": "POST to httpbin to simulate pulling external market signal data via webhook integration",
+      "integration_id": "webhook",
+      "integration_action": "post",
+      "integration_args": {
+        "url": "https://httpbin.org/post",
+        "method": "POST",
+        "headers": {
+          "X-Praxis-Source": "showcase-pipeline",
+          "X-Signal-Type": "market-intel",
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "pipeline": "platform_showcase",
+          "signal_request": "ai_workflow_market_data",
+          "filters": ["enterprise", "iPaaS", "agent-orchestration"],
+          "requested_at": "2026-04-13T00:00:00Z"
+        }
+      },
+      "timeout": 30
+    },
+    {
+      "label": "analyze_with_frontier",
+      "agent": "auto/architecture",
+      "depends_on": ["research_market_trends", "webhook_pull_signal"],
+      "prompt": "## Objective\nSynthesize the research findings into a strategic analysis of where AI-native workflow platforms are heading.\n\nAnalyze:\n1. Which platforms are leading in agentic orchestration\n2. Where the market gap is for developer-first, evidence-backed automation\n3. What enterprise buyers care about most (governance, observability, multi-provider)\n\n## Expected Output\n- positioning: string (2-3 paragraphs)\n- differentiators: string[] (top 5)\n- opportunities: string[] (3 market gaps)\n\n## Done Criteria\n- Analysis references actual research findings\n- Each differentiator is specific, not generic\n- Opportunities are actionable",
+      "timeout": 180
+    },
+    {
+      "label": "review_quality_gate",
+      "agent": "auto/review",
+      "depends_on": ["analyze_with_frontier"],
+      "prompt": "## Validation Task\nReview the strategic analysis for quality and accuracy.\n\n## Rules to Check\n- [required] Analysis contains specific competitor names (at least 3)\n- [required] Each differentiator maps to a real capability\n- [threshold] Analysis is substantive (not just generic marketing)\n- [required] Opportunities are specific and actionable\n\n## Expected Output\n- pass: boolean\n- score: number (0-100)\n- strengths: string[]\n- issues: string[]",
+      "timeout": 120
+    },
+    {
+      "label": "notify_completion",
+      "agent": "integration/notifications",
+      "depends_on": ["review_quality_gate"],
+      "prompt": "Send completion notification",
+      "integration_id": "notifications",
+      "integration_action": "send",
+      "integration_args": {
+        "channels": [
+          {"kind": "webhook", "target": "https://httpbin.org/post", "label": "External Webhook"},
+          {"kind": "in_app", "target": "nate", "label": "In-App"}
+        ],
+        "subject": "Showcase Pipeline Complete",
+        "body": "Multi-provider research + analysis + review + notification pipeline finished successfully.",
+        "authority": "system"
+      },
+      "timeout": 30
+    },
+    {
+      "label": "webhook_deliver_summary",
+      "agent": "integration/webhook",
+      "depends_on": ["review_quality_gate"],
+      "prompt": "POST final summary to external endpoint",
+      "integration_id": "webhook",
+      "integration_action": "post",
+      "integration_args": {
+        "url": "https://httpbin.org/post",
+        "method": "POST",
+        "headers": {"X-Praxis-Source": "showcase-pipeline", "X-Pipeline-Stage": "delivery"},
+        "body": {
+          "pipeline": "platform_showcase_v4",
+          "status": "complete",
+          "capabilities_demonstrated": [
+            "auto/research -> OpenAI web search",
+            "auto/architecture -> frontier reasoning",
+            "auto/review -> independent quality gate",
+            "integration/webhook -> iPaaS HTTP",
+            "integration/notifications -> multi-channel delivery",
+            "DAG parallelism (research + webhook fan-out)",
+            "evidence capture (receipts for every step)"
+          ]
+        }
+      },
+      "timeout": 30
+    }
+  ]
+}

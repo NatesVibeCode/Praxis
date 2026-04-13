@@ -1,0 +1,139 @@
+....................F...F........                                        [100%]
+=================================== FAILURES ===================================
+______ test_request_workflow_submit_command_bootstraps_and_shapes_intent _______
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10808fc70>
+
+    def test_request_workflow_submit_command_bootstraps_and_shapes_intent(monkeypatch):
+        conn = _FakeConn()
+        bootstrap_calls: list[_FakeConn] = []
+        captured: dict[str, object] = {}
+    
+        def _bootstrap(control_conn):
+            bootstrap_calls.append(control_conn)
+    
+        def _request(control_conn, intent, **kwargs):
+            captured["conn"] = control_conn
+            captured["intent"] = intent
+            captured["kwargs"] = kwargs
+            return SimpleNamespace(
+                command_id="control.command.submit.99",
+                command_status="succeeded",
+                requested_by_kind=intent.requested_by_kind,
+                requested_by_ref=intent.requested_by_ref,
+                idempotency_key=intent.idempotency_key,
+                payload=dict(intent.payload),
+                result_ref="workflow_run:run-99",
+                error_code=None,
+                error_detail=None,
+                to_json=lambda: {
+                    "command_id": "control.command.submit.99",
+                    "command_status": "succeeded",
+                    "result_ref": "workflow_run:run-99",
+                },
+            )
+    
+        monkeypatch.setattr(control_commands, "bootstrap_control_commands_schema", _bootstrap)
+        monkeypatch.setattr(control_commands, "request_control_command", _request)
+    
+        command = control_commands.request_workflow_submit_command(
+            conn,
+            requested_by_kind="operator",
+            requested_by_ref="operator.console",
+            spec_path="spec.queue.json",
+            repo_root="/repo",
+        )
+    
+        assert bootstrap_calls == [conn]
+        assert captured["conn"] is conn
+        intent = captured["intent"]
+        assert intent.command_type == control_commands.ControlCommandType.WORKFLOW_SUBMIT
+        assert intent.requested_by_kind == "operator"
+        assert intent.requested_by_ref == "operator.console"
+        assert intent.payload == {"spec_path": "spec.queue.json", "repo_root": "/repo"}
+        assert str(intent.idempotency_key).startswith("workflow.submit.operator.")
+>       assert captured["kwargs"] == {}
+E       AssertionError: assert {'command_id'...ted_at': None} == {}
+E         
+E         Left contains 2 more items:
+E         {'command_id': None, 'requested_at': None}
+E         Use -v to get more diff
+
+Code&DBs/Workflow/tests/unit/test_control_commands.py:335: AssertionError
+_ test_control_command_confirmation_required_handlers_execute_after_approval[_cancel_intent-cancel_run-handler_return1-control.command.cancel.2-workflow_run:run-7] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10802c110>
+intent_factory = <function _cancel_intent at 0x10809dfe0>
+handler_attr = 'cancel_run'
+handler_return = {'cancelled_jobs': 1, 'labels': ['build_a'], 'run_id': 'run-7'}
+command_id = 'control.command.cancel.2'
+expected_result_ref = 'workflow_run:run-7'
+
+    @pytest.mark.parametrize(
+        "intent_factory, handler_attr, handler_return, command_id, expected_result_ref",
+        [
+            (
+                _retry_intent,
+                "retry_job",
+                {"run_id": "run-7", "label": "build_a", "status": "requeued"},
+                "control.command.retry.1",
+                "workflow_run:run-7",
+            ),
+            (
+                _cancel_intent,
+                "cancel_run",
+                {"run_id": "run-7", "cancelled_jobs": 1, "labels": ["build_a"]},
+                "control.command.cancel.2",
+                "workflow_run:run-7",
+            ),
+        ],
+    )
+    def test_control_command_confirmation_required_handlers_execute_after_approval(
+        monkeypatch,
+        intent_factory,
+        handler_attr,
+        handler_return,
+        command_id,
+        expected_result_ref,
+    ):
+        conn = _FakeConn()
+        intent = intent_factory()
+        called: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    
+        def _handler(*args, **kwargs):
+            called.append((args, kwargs))
+            return handler_return
+    
+        monkeypatch.setattr(control_commands.unified_dispatch, handler_attr, _handler)
+    
+        requested = control_commands.create_control_command(
+            conn,
+            intent,
+            command_id=command_id,
+            requested_at=_fixed_clock(),
+            auto_execute=True,
+        )
+        assert requested.command_status == "requested"
+        assert called == []
+    
+        approved = control_commands.accept_control_command(
+            conn,
+            requested.command_id,
+            approved_by="operator.console",
+            approved_at=_fixed_clock(),
+        )
+        final = control_commands.execute_control_command(conn, approved.command_id)
+        loaded = control_commands.load_control_command(conn, approved.command_id)
+    
+        assert approved.command_status == "accepted"
+>       assert final.command_status == "succeeded"
+E       AssertionError: assert 'failed' == 'succeeded'
+E         
+E         - succeeded
+E         + failed
+
+Code&DBs/Workflow/tests/unit/test_control_commands.py:411: AssertionError
+=========================== short test summary info ============================
+FAILED Code&DBs/Workflow/tests/unit/test_control_commands.py::test_request_workflow_submit_command_bootstraps_and_shapes_intent
+FAILED Code&DBs/Workflow/tests/unit/test_control_commands.py::test_control_command_confirmation_required_handlers_execute_after_approval[_cancel_intent-cancel_run-handler_return1-control.command.cancel.2-workflow_run:run-7]
+2 failed, 31 passed in 5.59s

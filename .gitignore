@@ -43,6 +43,19 @@ artifacts/heartbeat/
 # Runtime state
 Code&DBs/Workflow/artifacts/circuit_breaker_state.json
 Code&DBs/Workflow/artifacts/notifications.jsonl
+Code&DBs/Workflow/artifacts/cloudflare_probe_workdir/
+Code&DBs/Workflow/artifacts/sandbox_probe_default_workdir/
+Code&DBs/Workflow/artifacts/sandbox_probe_workdir/
+Code&DBs/Workflow/artifacts/test_receipts/
+Code&DBs/artifacts/
+
+# Process cache
+.cache/
+
+# Top-level runtime artifacts
+artifacts/debates/
+artifacts/duplicate_absorption/
+artifacts/runtime_receipts/
 
 # External tool leftovers
 $CODEX_HOME/

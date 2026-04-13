@@ -1,0 +1,78 @@
+.......................F........                                         [100%]
+=================================== FAILURES ===================================
+_ test_control_command_confirmation_required_handlers_execute_after_approval[_cancel_intent-cancel_run-handler_return1-control.command.cancel.2-workflow_run:run-7] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1080d13d0>
+intent_factory = <function _cancel_intent at 0x108035850>
+handler_attr = 'cancel_run'
+handler_return = {'cancelled_jobs': 1, 'labels': ['build_a'], 'run_id': 'run-7'}
+command_id = 'control.command.cancel.2'
+expected_result_ref = 'workflow_run:run-7'
+
+    @pytest.mark.parametrize(
+        "intent_factory, handler_attr, handler_return, command_id, expected_result_ref",
+        [
+            (
+                _retry_intent,
+                "retry_job",
+                {"run_id": "run-7", "label": "build_a", "status": "requeued"},
+                "control.command.retry.1",
+                "workflow_run:run-7",
+            ),
+            (
+                _cancel_intent,
+                "cancel_run",
+                {"run_id": "run-7", "cancelled_jobs": 1, "labels": ["build_a"]},
+                "control.command.cancel.2",
+                "workflow_run:run-7",
+            ),
+        ],
+    )
+    def test_control_command_confirmation_required_handlers_execute_after_approval(
+        monkeypatch,
+        intent_factory,
+        handler_attr,
+        handler_return,
+        command_id,
+        expected_result_ref,
+    ):
+        conn = _FakeConn()
+        intent = intent_factory()
+        called: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    
+        def _handler(*args, **kwargs):
+            called.append((args, kwargs))
+            return handler_return
+    
+        monkeypatch.setattr(control_commands.unified_dispatch, handler_attr, _handler)
+    
+        requested = control_commands.create_control_command(
+            conn,
+            intent,
+            command_id=command_id,
+            requested_at=_fixed_clock(),
+            auto_execute=True,
+        )
+        assert requested.command_status == "requested"
+        assert called == []
+    
+        approved = control_commands.accept_control_command(
+            conn,
+            requested.command_id,
+            approved_by="operator.console",
+            approved_at=_fixed_clock(),
+        )
+        final = control_commands.execute_control_command(conn, approved.command_id)
+        loaded = control_commands.load_control_command(conn, approved.command_id)
+    
+        assert approved.command_status == "accepted"
+>       assert final.command_status == "succeeded"
+E       AssertionError: assert 'failed' == 'succeeded'
+E         
+E         - succeeded
+E         + failed
+
+Code&DBs/Workflow/tests/unit/test_control_commands.py:359: AssertionError
+=========================== short test summary info ============================
+FAILED Code&DBs/Workflow/tests/unit/test_control_commands.py::test_control_command_confirmation_required_handlers_execute_after_approval[_cancel_intent-cancel_run-handler_return1-control.command.cancel.2-workflow_run:run-7]
+1 failed, 31 passed in 5.36s

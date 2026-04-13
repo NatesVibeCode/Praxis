@@ -1,0 +1,19 @@
+{
+  "name": "provider_onboarding_wizard",
+  "workflow_id": "provider_onboarding_wizard",
+  "jobs": [
+    {
+      "label": "build_wizard",
+      "agent": "auto/build",
+      "timeout": 300,
+      "prompt": "OBJECTIVE: Build a provider onboarding wizard for Praxis Engine.\n\nROADMAP ITEM: provider.onboarding.wizard\n\nACCEPTANCE CRITERIA:\n1. CLI detection discovers available models from both CLI providers (ollama, lmstudio) and API providers (anthropic, openai, google, deepseek)\n2. User approves capability assignments (cap_ columns) before model enters route table\n3. Smoke probe runs before model marked active\n4. Works for both CLI and API providers\n5. Referenced in BUG-6DDC72E5 — root cause of routing bugs is models entering without validation\n\nCONTEXT:\n- Provider onboarding code lives in: runtime/provider_onboarding.py (3074 lines)\n- Provider model candidates table: provider_model_candidates with cap_ columns\n- The wizard should: detect available models → show proposed capability assignments → require approval → run probe → mark active\n- Read the existing provider_onboarding.py to understand the current flow\n- The wizard orchestration logic should live in a new: runtime/provider_wizard.py\n\nFOCUS: Build a clean wizard entry point (runtime/provider_wizard.py) that wraps the existing detection, probe, and registry logic in a validation-gated flow. Do NOT refactor the underlying modules yet — just wire them behind a validation gate.\n\nDELIVERABLES:\n1. runtime/provider_wizard.py — wizard entry point with gate\n2. surfaces/cli/wizard_runner.py — CLI interface for running the wizard\n3. Brief tests in tests/unit/test_provider_wizard.py\n\nSubmit a code change summary using praxis_submit_code_change when done."
+    },
+    {
+      "label": "review_wizard",
+      "agent": "auto/review",
+      "depends_on": ["build_wizard"],
+      "timeout": 180,
+      "prompt": "Review the provider onboarding wizard code. Check: proper validation gate before model activation, probe logic correctness, no direct DB mutations bypassing the approval step, clean separation of wizard orchestration from detection/probe logic."
+    }
+  ]
+}

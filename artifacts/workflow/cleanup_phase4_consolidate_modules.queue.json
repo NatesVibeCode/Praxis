@@ -1,0 +1,50 @@
+{
+  "name": "cleanup_phase4_consolidate_modules",
+  "queue_id": "cleanup_phase4_001",
+  "phase": "cleanup",
+  "outcome_goal": "Consolidate 4 operator API modules into 2, and 5 observability modules into 2",
+  "jobs": [
+    {
+      "label": "p4a_merge_operator_apis",
+      "agent": "auto/refactor",
+      "prompt": "Merge 4 operator API modules into 2 along a read/write seam.\n\nYou are working in /Users/nate/Praxis. Files are in `Code&DBs/Workflow/surfaces/api/`.\n\n## Current state (4 files, 2113 lines combined):\n- `operator_query.py` (856 lines) — read-only queries: status, metrics, search\n- `operator_flow.py` (443 lines) — read-only flow queries: topology, graph\n- `operator_control.py` (459 lines) — mutations: lane changes, circuit breakers, overrides\n- `operator_dispatch_flows.py` (355 lines) — mutation flows: dispatch control, posture changes\n\n## Target state (2 files):\n- `operator_read.py` — all read-only queries (from operator_query + operator_flow)\n- `operator_write.py` — all mutations (from operator_control + operator_dispatch_flows)\n\n## Steps:\n\n1. Read all 4 source files to understand every function and class.\n\n2. Create `operator_read.py`:\n   - Combine all functions from `operator_query.py` and `operator_flow.py`\n   - Import shared helpers from `_operator_helpers.py` (which was created in Phase 3)\n   - Deduplicate any shared imports\n   - Keep the same function signatures (don't rename public functions)\n\n3. Create `operator_write.py`:\n   - Combine all functions from `operator_control.py` and `operator_dispatch_flows.py`\n   - Same dedup approach\n\n4. Search the entire codebase for imports of the old module names:\n   ```\n   grep -r 'operator_query\\|operator_flow\\|operator_control\\|operator_dispatch_flows' 'Code&DBs/Workflow/'\n   ```\n   Update every import to use the new module names.\n\n5. Delete the 4 old files ONLY after all imports are updated.\n\n6. Verify: `PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -c \"from surfaces.api.operator_read import *; from surfaces.api.operator_write import *; print('OK')\"`",
+      "write_scope": [
+        "Code&DBs/Workflow/surfaces/api/operator_read.py",
+        "Code&DBs/Workflow/surfaces/api/operator_write.py"
+      ],
+      "read_scope": [
+        "Code&DBs/Workflow/surfaces/api/operator_query.py",
+        "Code&DBs/Workflow/surfaces/api/operator_flow.py",
+        "Code&DBs/Workflow/surfaces/api/operator_control.py",
+        "Code&DBs/Workflow/surfaces/api/operator_dispatch_flows.py",
+        "Code&DBs/Workflow/surfaces/api/_operator_helpers.py"
+      ]
+    },
+    {
+      "label": "p4b_merge_observability",
+      "agent": "auto/refactor",
+      "prompt": "Merge 5 observability modules into 2.\n\nYou are working in /Users/nate/Praxis. Files are in `Code&DBs/Workflow/observability/`.\n\n## Current state (5 files, 3603 lines combined):\n- `operator_cockpit.py` (1333 lines) — main dashboard: system overview, alerts, metrics\n- `operator_status.py` (305 lines) — status queries: lane status, health checks\n- `operator_graph.py` (977 lines) — graph topology: node/edge rendering, layout\n- `cutover_graph_status.py` (566 lines) — cutover-specific graph status\n- `cutover_scoreboard.py` (422 lines) — cutover scoreboard: progress tracking\n\n## Target state (2 files):\n- `operator_dashboard.py` — dashboard + status (from operator_cockpit + operator_status)\n- `operator_topology.py` — all graph/topology (from operator_graph + cutover_graph_status + cutover_scoreboard)\n\n## Steps:\n\n1. Read all 5 source files.\n\n2. Create `operator_dashboard.py`:\n   - Combine functions from `operator_cockpit.py` and `operator_status.py`\n   - Deduplicate imports and helpers\n   - Keep public function signatures unchanged\n\n3. Create `operator_topology.py`:\n   - Combine functions from `operator_graph.py`, `cutover_graph_status.py`, `cutover_scoreboard.py`\n   - Deduplicate shared utilities (graph traversal, node formatting, etc.)\n\n4. Search for all imports of old module names:\n   ```\n   grep -r 'operator_cockpit\\|operator_status\\|operator_graph\\|cutover_graph_status\\|cutover_scoreboard' 'Code&DBs/Workflow/'\n   ```\n   Update every import.\n\n5. Delete old files ONLY after imports are updated.\n\n6. Verify: `PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -c \"from observability.operator_dashboard import *; from observability.operator_topology import *; print('OK')\"`",
+      "write_scope": [
+        "Code&DBs/Workflow/observability/operator_dashboard.py",
+        "Code&DBs/Workflow/observability/operator_topology.py"
+      ],
+      "read_scope": [
+        "Code&DBs/Workflow/observability/operator_cockpit.py",
+        "Code&DBs/Workflow/observability/operator_status.py",
+        "Code&DBs/Workflow/observability/operator_graph.py",
+        "Code&DBs/Workflow/observability/cutover_graph_status.py",
+        "Code&DBs/Workflow/observability/cutover_scoreboard.py"
+      ]
+    },
+    {
+      "label": "p4c_update_mcp_wiring",
+      "agent": "auto/wiring",
+      "depends_on": ["p4a_merge_operator_apis", "p4b_merge_observability"],
+      "prompt": "Update all MCP tool wiring to use the new consolidated module names.\n\nYou are working in /Users/nate/Praxis.\n\nThe operator API modules were renamed:\n- `operator_query` → `operator_read`\n- `operator_flow` → `operator_read`\n- `operator_control` → `operator_write`\n- `operator_dispatch_flows` → `operator_write`\n\nThe observability modules were renamed:\n- `operator_cockpit` → `operator_dashboard`\n- `operator_status` → `operator_dashboard`\n- `operator_graph` → `operator_topology`\n- `cutover_graph_status` → `operator_topology`\n- `cutover_scoreboard` → `operator_topology`\n\nSearch the entire `Code&DBs/Workflow/` directory for any remaining references to the old module names:\n```\ngrep -rn 'operator_query\\|operator_flow\\|operator_control\\|operator_dispatch_flows\\|operator_cockpit\\|operator_status\\|operator_graph\\|cutover_graph_status\\|cutover_scoreboard' 'Code&DBs/Workflow/' --include='*.py'\n```\n\nUpdate every reference. Pay special attention to:\n- `surfaces/mcp/tools/` — MCP tool implementations\n- `surfaces/api/serve.py` — API router registration\n- `surfaces/api/workflow_api.py` — dispatch API imports\n- `surfaces/cli/main.py` — CLI command imports\n- Any test files that import these modules\n\nDo NOT modify the new consolidated files themselves — only update references in OTHER files.\n\nVerify by running: `PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -c \"from surfaces.mcp.tools import operator; print('OK')\"`",
+      "write_scope": [
+        "Code&DBs/Workflow/surfaces/mcp/tools/operator.py",
+        "Code&DBs/Workflow/surfaces/api/serve.py"
+      ]
+    }
+  ]
+}

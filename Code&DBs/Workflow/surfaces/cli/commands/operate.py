@@ -7,6 +7,12 @@ from typing import TextIO
 from surfaces.cli.mcp_tools import print_json, render_health_payload, run_cli_tool
 
 
+def _workflow_tool(params: dict[str, object]) -> dict[str, object]:
+    from surfaces.mcp.tools.workflow import tool_praxis_workflow
+
+    return tool_praxis_workflow(params)
+
+
 def _circuits_command(*, stdout: TextIO) -> int:
     """Handle `workflow circuits` — print all circuit breaker states as JSON."""
 
@@ -109,18 +115,20 @@ def _params_command(args: list[str], *, stdout: TextIO) -> int:
 
 
 def _notifications_command(args: list[str], *, stdout: TextIO) -> int:
-    """Handle `workflow notifications [tail]` — show recent workflow notifications."""
+    """Handle `workflow notifications [tail|drain]`."""
 
     import json as _json
     from storage.postgres.connection import SyncPostgresConnection, get_workflow_pool
 
     show_tail = False
+    drain_live = False
     tail_count = 10
     if args:
         if args[0] in {"-h", "--help"}:
             stdout.write(
-                "usage: workflow notifications            show all notifications\n"
-                "       workflow notifications tail [N]   show last N notifications (default: 10)\n"
+                "usage: workflow notifications            show all persisted notifications\n"
+                "       workflow notifications tail [N]   show last N persisted notifications (default: 10)\n"
+                "       workflow notifications drain      drain pending live notifications\n"
             )
             return 2
         if args[0] == "tail":
@@ -131,6 +139,17 @@ def _notifications_command(args: list[str], *, stdout: TextIO) -> int:
                 except ValueError:
                     stdout.write(f"error: tail count must be numeric, got: {args[1]}\n")
                     return 2
+        elif args[0] == "drain":
+            drain_live = True
+
+    if drain_live:
+        payload = _workflow_tool({"action": "notifications"})
+        if payload.get("error"):
+            print_json(stdout, payload)
+            return 1
+        notifications = str(payload.get("notifications") or "").rstrip()
+        stdout.write((notifications or "No pending workflow notifications.") + "\n")
+        return 0
 
     conn = SyncPostgresConnection(get_workflow_pool())
     if show_tail:

@@ -1,0 +1,2 @@
+--glob=!**/artifacts/workflow_outputs/**
+--glob=!**/artifacts/heartbeat/**

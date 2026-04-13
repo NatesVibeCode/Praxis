@@ -1,0 +1,101 @@
+{
+  "name": "fix_bugs_wave1",
+  "phase": "build",
+  "outcome_goal": "Fix 11 tracked bugs: wire orphan subsystems, close feedback loops, add cron scheduler, fix silent failures, add retention, surface metrics, add UI for workflow invocation",
+  "jobs": [
+    {
+      "label": "wire_orchestrator",
+      "agent": "auto/build",
+      "prompt": "Fix three wiring bugs in `Code&DBs/Workflow/runtime/workflow/orchestrator.py`. Read the file carefully first.\n\n## Bug 1 — LoadBalancer never called (BUG-401CF31C)\n`_LOAD_BALANCER = _caps.load_balancer()` is assigned at module/bootstrap level but never referenced again. Provider concurrency limits are completely unenforced.\n\nFind where the actual LLM/provider call executes (look for where provider_slug drives an HTTP call or subprocess). Wrap that execution with the LoadBalancer context manager:\n```python\nif _LOAD_BALANCER is not None:\n    with _LOAD_BALANCER.slot(provider_slug):\n        # existing provider call here\nelse:\n    # existing provider call here\n```\nRead `Code&DBs/Workflow/runtime/load_balancer.py` to confirm the exact context manager API (`slot()` returns a context manager). If `slot()` doesn't exist, use `acquire_slot()`/`release_slot()` in a try/finally.\n\n## Bug 2 — FrictionLedger never called (BUG-8815947C)\nThe FrictionLedger is instantiable via `_caps` but never called. After the failure classification block (where `_caps.failure_classifier` is called and `result[\"failure_classification\"]` is set), add:\n```python\nif _caps.friction_ledger:\n    try:\n        ledger = _caps.friction_ledger()\n        from runtime.friction_ledger import FrictionType\n        friction_type = FrictionType.HARD_FAILURE if not classification.is_retryable else FrictionType.GUARDRAIL_BOUNCE\n        ledger.record(\n            friction_type=friction_type,\n            source=f\"{spec.provider_slug}/{spec.model_slug or ''}\",\n            job_label=spec.label or \"\",\n            message=f\"{classification.category.value}: {classification.recommended_action}\",\n        )\n    except Exception:\n        pass\n```\nRead `Code&DBs/Workflow/runtime/friction_ledger.py` to confirm the `record()` signature.\n\n## Bug 3 — ObservabilityHub.ingest_receipt never called (BUG-D2D7D514)\nIn the completion recording section (where receipt_writer is called and a receipt is persisted), after the receipt is written, call ingest on the hub:\n```python\nif _caps.obs_hub:\n    try:\n        hub = _caps.obs_hub()\n        hub.ingest_receipt(receipt)  # pass the receipt object/path/dict — read observability_hub.py to confirm signature\n    except Exception:\n        pass\n```\nRead `Code&DBs/Workflow/runtime/observability_hub.py` to find the correct `ingest_receipt` / ingestion method and its expected argument type.\n\nAll three changes must be guarded with `if _caps.X:` checks so they degrade gracefully if the subsystem isn't wired. Do not restructure surrounding code.",
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/workflow/orchestrator.py"
+      ],
+      "read_scope": [
+        "Code&DBs/Workflow/runtime/load_balancer.py",
+        "Code&DBs/Workflow/runtime/friction_ledger.py",
+        "Code&DBs/Workflow/runtime/observability_hub.py"
+      ]
+    },
+    {
+      "label": "close_capability_loop",
+      "agent": "auto/build",
+      "prompt": "Fix BUG-2603B020: `CapabilityTracker.record_outcome()` writes to `capability_outcomes` but `capability_router.py` never reads it — routing decisions are static.\n\nRead `Code&DBs/Workflow/runtime/capability_router.py` and `Code&DBs/Workflow/runtime/capability_feedback.py` carefully.\n\nIn `capability_router.py`, the `compute_model_fitness()` function computes per-(provider, model, capability) fitness from receipts. After computing the base fitness scores, apply a quality multiplier from `capability_outcomes`:\n\n1. Import and call `get_capability_tracker()` from `runtime.capability_feedback`.\n2. Call `tracker.model_capability_matrix()` to get a dict mapping `(provider, model) -> {capability -> avg_quality_signal}` from recent outcomes.\n3. For each `ModelFitness` entry in the result dict, look up the quality signal for that `(provider, model, capability)` combo. Multiply `fitness.fitness_score` by a blended weight: `new_score = fitness.fitness_score * (0.7 + 0.3 * quality_signal)` where `quality_signal` is in [0.0, 1.0] (default 0.5 if no data).\n4. Rebuild the returned dict with the updated fitness scores.\n\nGuard the entire block with try/except so routing degrades gracefully if capability_tracker fails. Add a brief comment: `# BUG-2603B020: apply capability outcome quality multiplier`.\n\nDo not change the function signature or the rest of the routing logic.",
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/capability_router.py"
+      ],
+      "read_scope": [
+        "Code&DBs/Workflow/runtime/capability_feedback.py"
+      ]
+    },
+    {
+      "label": "fix_cron_and_trigger_depth",
+      "agent": "auto/build",
+      "prompt": "Fix two bugs related to `Code&DBs/Workflow/runtime/triggers.py` and add a cron scheduler.\n\n## Bug 1 — MAX_TRIGGER_DEPTH silent drop (BUG-4C9F5AF8)\nRead `triggers.py`. When `trigger_depth >= MAX_TRIGGER_DEPTH`, execution is currently silently skipped. Find that guard and replace the silent skip with:\n```python\nimport logging\n_log = logging.getLogger(__name__)  # add at top of file if not present\n# ... in the depth guard:\n_log.warning(\n    \"trigger.depth_exceeded: trigger_id=%s workflow_id=%s depth=%d max=%d — suppressing execution\",\n    trigger.get(\"trigger_id\"), trigger.get(\"workflow_id\"), trigger_depth, MAX_TRIGGER_DEPTH,\n)\ntry:\n    conn.execute(\n        \"INSERT INTO system_events (event_type, source_id, source_type, payload) VALUES ($1, $2, $3, $4)\",\n        \"trigger.depth_exceeded\",\n        str(trigger.get(\"trigger_id\", \"\")),\n        \"workflow_trigger\",\n        json.dumps({\"trigger_id\": trigger.get(\"trigger_id\"), \"workflow_id\": trigger.get(\"workflow_id\"), \"depth\": trigger_depth, \"max_depth\": MAX_TRIGGER_DEPTH}),\n    )\nexcept Exception:\n    pass\n```\nAdjust variable names to match what's actually in scope at the guard site.\n\n## Bug 2 — Cron triggers never fire (BUG-6BC03F58)\nCreate a new file `Code&DBs/Workflow/runtime/cron_scheduler.py` that:\n\n1. Defines `class CronScheduler` with `__init__(self, conn)` taking a SyncPostgresConnection.\n2. Has a `tick()` method that:\n   a. Queries `workflow_triggers` for rows where `trigger_type = 'schedule'` and `cron_expression IS NOT NULL` and `enabled = true` (check schema first — read the DB or look at migrations).\n   b. For each trigger, determines if it's due. Use simple logic: if `last_fired_at IS NULL` or `last_fired_at < NOW() - interval derived from cron_expression`. For simplicity, parse only `@hourly`, `@daily`, `@weekly`, or a 5-field cron like `*/N * * * *` for minute intervals. If `croniter` is importable use it; otherwise implement a minimal parser for `*/N` minute patterns and `@hourly`/`@daily`.\n   c. For due triggers, inserts a row into `system_events`:\n      ```sql\n      INSERT INTO system_events (event_type, source_id, source_type, payload)\n      VALUES ('schedule.fired', <trigger_id>, 'workflow_trigger', <json payload>)\n      ```\n      with payload `{\"trigger_id\": ..., \"workflow_id\": ..., \"cron_expression\": ...}`.\n   d. Updates `last_fired_at = NOW()` on the trigger row.\n3. Wraps everything in try/except with logging.\n\nThen add `CronScheduler` as a module in `Code&DBs/Workflow/runtime/heartbeat_runner.py`:\n- Import it at the top (guarded with try/except).\n- In `build_modules()`, after the existing conn-dependent modules block, add:\n```python\ntry:\n    from runtime.cron_scheduler import CronScheduler\n    modules.append(_CronHeartbeatModule(self._conn))\nexcept Exception:\n    logger.debug(\"cron_scheduler not available, skipping\")\n```\n- Define `_CronHeartbeatModule` as a simple wrapper that calls `CronScheduler(conn).tick()` in its `run()` method, conforming to the `HeartbeatModule` protocol used by the other modules.\n\nRead `heartbeat_runner.py` to understand the HeartbeatModule protocol before implementing.",
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/triggers.py",
+        "Code&DBs/Workflow/runtime/cron_scheduler.py",
+        "Code&DBs/Workflow/runtime/heartbeat_runner.py"
+      ],
+      "read_scope": [
+        "Code&DBs/Workflow/runtime/triggers.py",
+        "Code&DBs/Workflow/runtime/heartbeat_runner.py"
+      ]
+    },
+    {
+      "label": "fix_review_persistence",
+      "agent": "auto/build",
+      "prompt": "Fix BUG-DF90E47A: `ReviewBatchAccumulator` in `Code&DBs/Workflow/runtime/auto_review.py` stores pending reviews in memory only. On process restart all unprocessed reviews are lost.\n\nRead `auto_review.py` fully first.\n\nAdd Postgres persistence:\n\n1. On `queue_auto_review(result)` (after adding to in-memory queue), also persist to DB:\n```python\nif self._conn is not None:\n    try:\n        self._conn.execute(\n            \"\"\"INSERT INTO review_queue (run_id, author_model, job_label, completion_preview, task_type, queued_at)\n               VALUES ($1, $2, $3, $4, $5, NOW())\n               ON CONFLICT (run_id) DO NOTHING\"\"\",\n            pending.run_id, pending.author_model, pending.label,\n            pending.completion_preview[:500], pending.task_type or \"\",\n        )\n    except Exception:\n        pass\n```\n\n2. Add a `load_pending_from_db()` method that SELECTs unprocessed rows from `review_queue` (where `processed_at IS NULL`) and adds them to `self._queue` (deduped by run_id).\n\n3. On `flush()`, after dispatching reviews, mark processed rows: `UPDATE review_queue SET processed_at = NOW() WHERE run_id = ANY($1)` with the list of flushed run_ids.\n\n4. Create the `review_queue` table inline (CREATE TABLE IF NOT EXISTS in the `__init__` or a `_ensure_table()` helper):\n```sql\nCREATE TABLE IF NOT EXISTS review_queue (\n    run_id TEXT PRIMARY KEY,\n    author_model TEXT NOT NULL,\n    job_label TEXT NOT NULL,\n    completion_preview TEXT,\n    task_type TEXT,\n    queued_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    processed_at TIMESTAMPTZ\n);\n```\n\n5. Add `conn=None` parameter to `ReviewBatchAccumulator.__init__()` and store as `self._conn`.\n\n6. Update `get_review_accumulator()` singleton factory to pass the conn if available — add an optional `conn` parameter.\n\nMake all DB operations guarded with try/except so the accumulator still works in-memory if no conn is passed.",
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/auto_review.py"
+      ],
+      "read_scope": []
+    },
+    {
+      "label": "fix_system_events_retention",
+      "agent": "auto/wiring",
+      "prompt": "Fix BUG-1B2267D3: `system_events` has no retention policy and grows without bound.\n\n## Task 1 — Migration\nCreate `Code&DBs/Databases/migrations/workflow/035_system_events_retention.sql`:\n```sql\n-- Add index on created_at if missing (check pg_indexes first)\nCREATE INDEX IF NOT EXISTS idx_system_events_created_at ON system_events (created_at);\n\n-- Retention cleanup function: delete events older than 30 days\nCREATE OR REPLACE FUNCTION cleanup_system_events(retain_days INT DEFAULT 30)\nRETURNS INT LANGUAGE plpgsql AS $$\nDECLARE\n  deleted_count INT;\nBEGIN\n  DELETE FROM system_events\n  WHERE created_at < NOW() - (retain_days || ' days')::INTERVAL;\n  GET DIAGNOSTICS deleted_count = ROW_COUNT;\n  RETURN deleted_count;\nEND;\n$$;\n```\n\n## Task 2 — Wire into heartbeat\nIn `Code&DBs/Workflow/runtime/heartbeat_runner.py`, add a `SystemEventsCleanupModule` to the conn-dependent modules block in `build_modules()`:\n\n```python\nclass SystemEventsCleanupModule:\n    \"\"\"Prune system_events older than 30 days.\"\"\"\n    def __init__(self, conn):\n        self._conn = conn\n    def run(self):\n        try:\n            rows = self._conn.execute(\"SELECT cleanup_system_events(30) as deleted\")\n            deleted = rows[0][\"deleted\"] if rows else 0\n            if deleted > 0:\n                return {\"module_name\": \"system_events_cleanup\", \"findings\": [f\"Pruned {deleted} old events\"], \"actions_taken\": [\"cleanup_system_events\"]}\n            return {\"module_name\": \"system_events_cleanup\", \"findings\": [], \"actions_taken\": []}\n        except Exception as e:\n            return {\"module_name\": \"system_events_cleanup\", \"error\": str(e)}\n```\n\nAdd `SystemEventsCleanupModule(self._conn)` to the modules list inside the `if self._conn is not None:` block.\n\nConform to the HeartbeatModule protocol — read the file first to ensure `run()` returns the right shape.",
+      "write_scope": [
+        "Code&DBs/Databases/migrations/workflow/035_system_events_retention.sql",
+        "Code&DBs/Workflow/runtime/heartbeat_runner.py"
+      ],
+      "read_scope": [
+        "Code&DBs/Workflow/runtime/heartbeat_runner.py"
+      ]
+    },
+    {
+      "label": "surface_invocation_metrics",
+      "agent": "auto/wiring",
+      "prompt": "Fix BUG-6D9B8F8D: `invocation_count` and `last_invoked_at` are tracked on the `workflows` table but never surfaced anywhere.\n\nFind where workflows are listed or retrieved in the API/MCP layer. Check:\n- `Code&DBs/Workflow/surfaces/api/handlers/workflow_query.py` for any `/api/workflows` GET handler\n- `Code&DBs/Workflow/surfaces/mcp/tools/` for any workflow list/get tool\n\nFor each place that queries the `workflows` table and returns rows, ensure `invocation_count` and `last_invoked_at` are included in the SELECT and returned in the response dict.\n\nIf the workflows table SELECT uses `SELECT *` already, just ensure those columns appear in the serialized output. If it uses explicit column lists, add `invocation_count, last_invoked_at`.\n\nAlso check `Code&DBs/Workflow/runtime/integrations/workflow.py` — if there's a `list_workflows()` or `get_workflow()` function, add these fields to its return value.\n\nDo not add new endpoints. Only add the fields to existing response shapes.",
+      "write_scope": [
+        "Code&DBs/Workflow/surfaces/api/handlers/workflow_query.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/operator.py",
+        "Code&DBs/Workflow/runtime/integrations/workflow.py"
+      ],
+      "read_scope": []
+    },
+    {
+      "label": "test_db_bugs_insert_trigger",
+      "agent": "auto/test",
+      "prompt": "Fix BUG-CB056424: the `db.bugs.insert` event path was broken (Postgres trigger crashed on NEW.id). The trigger was fixed. Write an integration test confirming the full path works end-to-end.\n\nCreate `Code&DBs/Workflow/tests/test_db_bugs_insert_trigger.py`:\n\n```python\n\"\"\"Integration test: inserting a bug fires db.bugs.insert system_event.\"\"\"\nimport uuid\nimport pytest\nfrom storage.postgres.connection import SyncPostgresConnection\n\n@pytest.fixture\ndef conn():\n    c = SyncPostgresConnection()\n    yield c\n\ndef test_bug_insert_fires_system_event(conn):\n    bug_id = f\"BUG-TEST-{uuid.uuid4().hex[:8].upper()}\"\n    bug_key = f\"bug_test_{uuid.uuid4().hex[:8]}\"\n    try:\n        # Insert a bug row\n        conn.execute(\n            \"\"\"INSERT INTO bugs (bug_id, bug_key, title, status, severity, priority,\n               summary, source_kind, decision_ref, category, description, filed_by,\n               opened_at, created_at, updated_at)\n               VALUES ($1,$2,$3,'OPEN','P3','low','test','manual','none','other','',\n               'test_suite', NOW(), NOW(), NOW())\"\"\",\n            bug_id, bug_key, \"Trigger e2e test bug\",\n        )\n        # Verify system_event was created\n        rows = conn.execute(\n            \"SELECT event_type, source_id, source_type FROM system_events \"\n            \"WHERE source_id = $1 AND source_type = 'bugs' ORDER BY created_at DESC LIMIT 1\",\n            bug_id,\n        )\n        assert rows, \"Expected a system_event for bug insert but got none\"\n        assert rows[0][\"event_type\"] == \"db.bugs.insert\"\n        assert rows[0][\"source_id\"] == bug_id\n    finally:\n        conn.execute(\"DELETE FROM bugs WHERE bug_id = $1\", bug_id)\n```\n\nRun the test with:\n```\nPYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/test_db_bugs_insert_trigger.py'\n```\n\nFix any import errors (check how SyncPostgresConnection is imported in other tests in that directory). Make it pass.",
+      "write_scope": [
+        "Code&DBs/Workflow/tests/test_db_bugs_insert_trigger.py"
+      ],
+      "read_scope": []
+    },
+    {
+      "label": "fix_workflow_invocation_ui",
+      "agent": "auto/build",
+      "prompt": "Fix BUG-6EB71DBA: workflow-to-workflow invocation is fully wired backend-side but `BuilderPage.tsx` has no UI to pick a target workflow — users must hand-edit JSON.\n\nRead these files first:\n- `Code&DBs/Workflow/surfaces/app/src/builder/BuilderPage.tsx`\n- `Code&DBs/Workflow/surfaces/app/src/builder/stepTypes.ts`\n- `Code&DBs/Workflow/surfaces/app/src/builder/editors/` (all files)\n- `Code&DBs/Workflow/runtime/integrations/workflow.py` (to understand the workflow step shape)\n\nFind where the 'workflow' step type is handled in the editor panel. There should be an editor component or a section in `BuilderPage.tsx` / `PipelineStepCard.tsx` that renders step configuration. Currently the workflow step type likely has no editor or a placeholder.\n\nCreate `Code&DBs/Workflow/surfaces/app/src/builder/editors/WorkflowEditor.tsx`:\n- A component that renders a dropdown/select to pick a target workflow\n- Fetches available workflows from `GET /api/workflows` (or wherever the workflows list is served — check existing API calls in the builder for the right endpoint)\n- Shows workflow name + id in the dropdown\n- On selection, updates the step's config with `target_workflow_id`\n- Follow the exact same props pattern as `HumanEditor.tsx` or `ApiEditor.tsx` (read those files)\n\nThen wire it into the editor dispatch in whichever file routes step types to their editors — add a `case 'workflow':` entry returning `<WorkflowEditor ... />`.\n\nKeep the component minimal and consistent with the existing editor style. Do not add features beyond the workflow selector.",
+      "write_scope": [
+        "Code&DBs/Workflow/surfaces/app/src/builder/editors/WorkflowEditor.tsx",
+        "Code&DBs/Workflow/surfaces/app/src/builder/BuilderPage.tsx",
+        "Code&DBs/Workflow/surfaces/app/src/builder/PipelineStepCard.tsx"
+      ],
+      "read_scope": [
+        "Code&DBs/Workflow/surfaces/app/src/builder/stepTypes.ts",
+        "Code&DBs/Workflow/surfaces/app/src/builder/editors/HumanEditor.tsx",
+        "Code&DBs/Workflow/surfaces/app/src/builder/editors/ApiEditor.tsx"
+      ]
+    }
+  ]
+}

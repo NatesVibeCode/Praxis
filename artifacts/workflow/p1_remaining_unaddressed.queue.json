@@ -1,0 +1,24 @@
+{
+  "name": "p1_remaining_unaddressed",
+  "workflow_id": "p1_remaining_unaddressed",
+  "jobs": [
+    {
+      "label": "runtime_api_facade",
+      "agent": "auto/build",
+      "timeout": 600,
+      "prompt": "ROADMAP: roadmap.add.runtime.api.facade.to.enforce.surface.runtime.boundary\n\nAdd a runtime API facade to enforce the surface/runtime boundary.\n\nRead Code&DBs/Workflow/surfaces/api/rest.py and the runtime modules it imports directly (anything in runtime/). Surfaces should not call runtime internals directly — they should go through a defined facade.\n\nOBJECTIVE: Create runtime/facade.py (or runtime/api/__init__.py) that:\n- Exports the minimal set of functions surfaces need: run_workflow(), get_run_status(), cancel_run(), get_job_output()\n- All surface code imports ONLY from this facade, not from runtime internals\n- Identify the 2-3 most direct runtime imports in surfaces/ and route them through the facade\n- Add a note in the facade about what should NOT be directly accessible from surfaces\n\nFocus on the most impactful violation first. Don't need to be exhaustive — establish the facade with at least one real import routed through it.\n\nSubmit code change summary via praxis_submit_code_change."
+    },
+    {
+      "label": "workflow_observation_authority",
+      "agent": "auto/refactor",
+      "timeout": 600,
+      "prompt": "ROADMAP: roadmap.unify.workflow.recording.into.a.single.workflowobservationauthority\n\nUnify workflow recording into a single WorkflowObservationAuthority.\n\nRead Code&DBs/Workflow/runtime/workflow/ directory — find all places that write to workflow_runs, workflow_jobs, and workflow_receipts tables. Currently these writes are scattered across multiple files.\n\nOBJECTIVE:\n- Create runtime/workflow/observation_authority.py with class WorkflowObservationAuthority\n- It should centralize: record_run_start(), record_job_complete(), record_run_complete(), record_run_failed()\n- At least 3 existing scattered write sites should be routed through it\n- The interface should be the single source of truth for workflow state transitions\n\nThis is a consolidation refactor — don't change behavior, just centralize writes.\n\nSubmit code change summary via praxis_submit_code_change."
+    },
+    {
+      "label": "agent_truth_program",
+      "agent": "auto/build",
+      "timeout": 600,
+      "prompt": "ROADMAP: roadmap.agent.truth.program + roadmap.agent.truth.program.sandbox.contract.substrate\n\nImplement the agent-native truth engine program and sandbox contract substrate.\n\nRead Code&DBs/Workflow/runtime/sandbox_runtime.py and any existing truth/verification modules.\n\nOBJECTIVE — two deliverables:\n\n1. runtime/agent_truth_program.py — agent-native truth engine:\n   - class AgentTruthProgram with verify(claim: str, evidence: list[dict]) -> TruthVerdict\n   - TruthVerdict = dataclass(supported: bool, confidence: float, evidence_count: int, notes: str)\n   - Uses existing receipts/evidence tables to verify claims against recorded evidence\n\n2. Sandbox contract substrate (extend sandbox_runtime.py or add runtime/sandbox_contract.py):\n   - SandboxContract dataclass: defines what a sandbox execution is allowed to read/write\n   - StandardizedSandboxEnvelope: wraps agent prompts with the contract as structured context\n   - Both wired into sandbox_runtime.py's execution path\n\nSubmit code change summary via praxis_submit_code_change."
+    }
+  ]
+}

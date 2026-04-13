@@ -1,0 +1,26 @@
+{
+  "name": "authority_cleanup_unified_operator_write_validation_gate",
+  "workflow_id": "authority_cleanup_unified_operator_write_validation_gate",
+  "jobs": [
+    {
+      "label": "validation_gate_build",
+      "agent": "auto/build",
+      "timeout": 600,
+      "prompt": "ROADMAP: roadmap.authority.cleanup.unified.operator.write.validation.gate\n\nBuild the shared operator write validation and normalization gate.\n\nRead surfaces/api/operator_write.py, surfaces/mcp/tools/operator.py, and any existing operator normalization code.\n\nOBJECTIVE: Extract the shared operator write validation gate into a single canonical module:\n- surfaces/api/_operator_validation_gate.py — shared validate_operator_write(params) function\n  - Normalizes param names (camelCase → snake_case, aliases)\n  - Validates required fields and types\n  - Returns normalized params or raises ValueError with structured error\n- Both surfaces/api/operator_write.py and surfaces/mcp/tools/operator.py import and call it\n- No duplicate validation logic across surfaces\n\nAlso build the canonical native operator binding projection:\n- In surfaces/api/_operator_validation_gate.py, add derive_native_bindings(normalized_params) that returns the canonical {roadmap_key, title, priority, status} projection used by all operator writes\n\nSubmit code change summary via praxis_submit_code_change."
+    },
+    {
+      "label": "frontdoors_wire",
+      "agent": "auto/wiring",
+      "timeout": 300,
+      "depends_on": ["validation_gate_build"],
+      "prompt": "ROADMAP: roadmap.authority.cleanup.unified.operator.write.validation.gate.frontdoors\n\nWire CLI and MCP operator-write front doors to use the new validation gate.\n\nRead surfaces/api/_operator_validation_gate.py (just built), surfaces/api/operator_write.py, surfaces/mcp/tools/operator.py.\n\nOBJECTIVE:\n- Ensure surfaces/api/operator_write.py calls validate_operator_write() at the top of each handler before any DB writes\n- Ensure surfaces/mcp/tools/operator.py calls validate_operator_write() before any mutation\n- Both surfaces must have identical validation semantics (same gate, same errors)\n- Delete any duplicated inline normalization code that the gate now covers\n\nRun the relevant tests to confirm nothing broke.\n\nSubmit code change summary via praxis_submit_code_change."
+    },
+    {
+      "label": "validation_proof",
+      "agent": "auto/review",
+      "timeout": 300,
+      "depends_on": ["frontdoors_wire"],
+      "prompt": "ROADMAP: roadmap.authority.cleanup.unified.operator.write.validation.gate.proof\n\nValidate and prove the unified operator write validation gate works.\n\nRead surfaces/api/_operator_validation_gate.py, surfaces/api/operator_write.py, surfaces/mcp/tools/operator.py.\n\nOBJECTIVE:\n- Write or find tests in tests/unit/ that cover the validation gate's normalization\n- Verify both surfaces call the same gate (no duplicated inline validation)\n- Run the tests and confirm they pass\n- Confirm derive_native_bindings() produces consistent output across both surfaces\n\nSubmit code change summary via praxis_submit_code_change."
+    }
+  ]
+}

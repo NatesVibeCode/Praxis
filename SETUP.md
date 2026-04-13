@@ -209,7 +209,7 @@ Add the Praxis MCP server to your Claude Code configuration:
 }
 ```
 
-Verify with: `praxis_health(action="check")`
+Verify with: `praxis_health()`
 
 ## Verification
 
@@ -223,8 +223,13 @@ curl http://localhost:8420/health
 curl -X POST http://localhost:8420/orient
 
 # Via MCP (in Claude Code)
-praxis_health(action="check")
-praxis_query("status")
+praxis_health()
+praxis_query(question="status")
+
+# Via the canonical CLI frontdoor
+workflow health
+workflow query "status"
+workflow tools list
 ```
 
 Expected output from `/orient`: database connection status, registered providers, active workflows, MCP tool count.

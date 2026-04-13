@@ -8,6 +8,7 @@ import pytest
 
 import memory.retrieval as retrieval_module
 from memory.engine import MemoryEngine
+from memory.ports.vector import VectorFilter
 from memory.retrieval import (
     BM25Scorer,
     HybridRetriever,
@@ -52,6 +53,10 @@ def _make_edge(src: str, tgt: str, weight: float = 0.8) -> Edge:
         metadata={},
         created_at=datetime.utcnow(),
     )
+
+
+def test_memory_vector_filter_normalizes_not_equal_operator() -> None:
+    assert VectorFilter("entity_type", "decision", operator="!=").normalized_operator() == "<>"
 
 
 # ---------------------------------------------------------------------------

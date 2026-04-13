@@ -1,0 +1,83 @@
+{
+  "name": "authority_cleanup_dispatch_follow_ons",
+  "workflow_id": "authority_cleanup_dispatch_follow_ons",
+  "phase": "build",
+  "outcome_goal": "Close the remaining dispatch authority-cleanup follow-ons so cancellation truth and dispatch setup ownership are both explicit, durable, and shared across CLI, MCP, and API front doors.",
+  "roadmap_items": [
+    "roadmap_item.authority.cleanup.dispatch_cancellation_contract",
+    "roadmap_item.authority.cleanup.dispatch_setup_split"
+  ],
+  "anti_requirements": [
+    "Do not leave cancellation success dependent on best-effort status updates.",
+    "Do not preserve parallel setup factories as hidden authority seams.",
+    "Do not widen into unrelated workflow discovery or provider-default cleanup."
+  ],
+  "registry_paths": [
+    "Code&DBs/Workflow/runtime/workflow/unified.py",
+    "Code&DBs/Workflow/runtime/integrations/dag.py",
+    "Code&DBs/Workflow/surfaces/mcp/tools/workflow.py",
+    "Code&DBs/Workflow/surfaces/api/workflow_api.py",
+    "Code&DBs/Workflow/surfaces/api/frontdoor.py",
+    "Code&DBs/Workflow/surfaces/cli/workflow_runner.py",
+    "scripts/workflow.sh"
+  ],
+  "target_repo": "/Users/nate/Praxis",
+  "workdir": "/Users/nate/Praxis",
+  "verify": [
+    {
+      "command": "./scripts/workflow.sh validate artifacts/workflow/authority_cleanup/authority_cleanup_dispatch_follow_ons.queue.json"
+    }
+  ],
+  "jobs": [
+    {
+      "label": "dispatch_cancellation_contract",
+      "agent": "openai/gpt-5.4-mini",
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/workflow/unified.py",
+        "Code&DBs/Workflow/runtime/integrations/dag.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/workflow.py",
+        "Code&DBs/Workflow/surfaces/api/workflow_api.py"
+      ],
+      "read_scope": [
+        "Code&DBs/Workflow/runtime/workflow/unified.py",
+        "Code&DBs/Workflow/runtime/integrations/dag.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/workflow.py",
+        "Code&DBs/Workflow/surfaces/api/workflow_api.py",
+        "scripts/workflow.sh"
+      ],
+      "prompt": "Make cancellation one canonical contract. Cancel requests must converge on the same durable state transition, error shape, and operator-visible proof no matter whether they arrive through CLI, MCP, or API. Fail closed when claimed work cannot be cancelled safely; do not emit fake success."
+    },
+    {
+      "label": "dispatch_setup_authority_split",
+      "agent": "openai/gpt-5.4-mini",
+      "write_scope": [
+        "scripts/workflow.sh",
+        "Code&DBs/Workflow/surfaces/api/frontdoor.py",
+        "Code&DBs/Workflow/surfaces/cli/workflow_runner.py",
+        "Code&DBs/Workflow/surfaces/api/workflow_api.py"
+      ],
+      "read_scope": [
+        "scripts/workflow.sh",
+        "Code&DBs/Workflow/surfaces/api/frontdoor.py",
+        "Code&DBs/Workflow/surfaces/cli/workflow_runner.py",
+        "Code&DBs/Workflow/surfaces/api/workflow_api.py",
+        "Code&DBs/Workflow/runtime/workflow/unified.py"
+      ],
+      "prompt": "Collapse dispatch setup and factory assembly onto one deterministic authority boundary. The repo front doors may stay thin wrappers, but setup, argument shaping, and dispatch-factory ownership cannot remain split across bootstrap helpers and surface-specific glue."
+    },
+    {
+      "label": "dispatch_follow_on_proof",
+      "agent": "openai/gpt-5.4",
+      "depends_on": [
+        "dispatch_cancellation_contract",
+        "dispatch_setup_authority_split"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/tests/unit/test_unified_workflow.py",
+        "Code&DBs/Workflow/tests/integration/test_workflow_api.py",
+        "scripts/test_frontdoor.py"
+      ],
+      "prompt": "Prove the follow-ons instead of hand-waving them closed. Cover durable cancellation outcomes, surface parity across CLI/MCP/API, and the absence of hidden setup/factory fallbacks."
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "name": "phase10_object_scaffolding",
+  "queue_id": "phase10_001",
+  "phase": "build",
+  "outcome_goal": "Generated apps auto-create object types. Ship app-builder landing manifest.",
+  "jobs": [
+    {
+      "label": "p10_auto_object_types",
+      "agent": "anthropic/claude-opus-4-6",
+      "prompt": "You are working in /Users/nate/Praxis/Code&DBs/Workflow/.\n\nUpdate surfaces/api/workflow_api.py POST /api/manifests/generate handler:\n\nCurrently it calls ManifestGenerator.generate() which returns a GeneratedManifest. If the generator also returns object_types (from the LLM), the API should auto-create them.\n\nAdd after the generate() call:\n1. Check if result.manifest has an 'object_types' key\n2. If so, iterate and INSERT each into object_types table (ON CONFLICT DO NOTHING)\n3. Remove 'object_types' from the manifest before saving (it's scaffolding, not layout)\n4. Return the manifest_id so the frontend can navigate to it\n\nAlso add POST /api/manifests/generate-quick — a simpler endpoint that:\n1. Takes {intent, template_id?}\n2. If template_id provided: clone that template with a new ID, return it\n3. If no template_id: search for best match via IntentMatcher, clone if high confidence, else generate\n4. This is the fast path — clone is instant, generate is slow\n\nWrite the updated handler code."
+    },
+    {
+      "label": "p10_app_builder_landing",
+      "agent": "google/gemini-3.1-pro-preview",
+      "prompt": "You are working in /Users/nate/Praxis. Postgres at postgresql://nate@127.0.0.1:5432/dag_workflow. PATH includes /opt/homebrew/bin.\n\nCreate an 'app-builder' landing manifest and update the home manifest to be more useful.\n\nRun this Python script:\n\n```python\nimport sys, json\nsys.path.insert(0, 'Code&DBs/Workflow')\nfrom storage.postgres import ensure_postgres_available\nconn = ensure_postgres_available()\n\n# Update home manifest to be the app builder landing\nmanifest = {\n    'version': 2,\n    'grid': '4x4',\n    'quadrants': {\n        'A1': {'module': 'intent-box', 'span': '4x1'},\n        'B1': {'module': 'stat-row', 'span': '4x1', 'config': {'endpoint': 'dispatch-status', 'stats': [{'path': 'pass_rate', 'label': 'Pass Rate', 'format': 'percent', 'color': '#3fb950'}, {'path': 'total_dispatches', 'label': 'Dispatches', 'color': '#58a6ff'}]}},\n        'C1': {'module': 'activity-feed', 'span': '2x2', 'config': {'title': 'Recent Dispatches'}},\n        'C3': {'module': 'registry-browser', 'span': '2x2'},\n    }\n}\n\nconn.execute(\n    \"\"\"UPDATE app_manifests SET manifest = $1::jsonb, name = 'Home', description = 'App builder home with intent search, platform stats, and recent activity' WHERE id = 'home'\"\"\",\n    json.dumps(manifest),\n)\n\nprint('Home manifest updated')\nprint(f'Total manifests: {conn.fetchval(\"SELECT COUNT(*) FROM app_manifests\")}')\n```\n\nRun the script. Also update App.tsx NavBar to include links: Home, CRM, Demo, Editor."
+    }
+  ]
+}

@@ -11,21 +11,62 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from collections.abc import Sequence
 from typing import Any, Protocol
+from uuid import uuid4
 
 from .docker_image_authority import DOCKER_IMAGE_ENV, resolve_docker_image
 
 _DOCKER_MEMORY_ENV = "PRAXIS_DOCKER_MEMORY"
 _DOCKER_CPUS_ENV = "PRAXIS_DOCKER_CPUS"
+
+
+def _parse_docker_mem_str(mem_str: str) -> int:
+    """Parse a docker stats memory string like '234MiB' or '1.2GiB' to bytes."""
+    mem_str = mem_str.strip()
+    units = {"b": 1, "kib": 1024, "mib": 1024**2, "gib": 1024**3,
+             "kb": 1000, "mb": 1000**2, "gb": 1000**3}
+    lower = mem_str.lower()
+    for suffix, factor in sorted(units.items(), key=lambda x: -len(x[0])):
+        if lower.endswith(suffix):
+            try:
+                return int(float(lower[: -len(suffix)]) * factor)
+            except ValueError:
+                return 0
+    try:
+        return int(float(mem_str))
+    except ValueError:
+        return 0
 _CLOUDFLARE_SANDBOX_URL_ENV = "PRAXIS_CLOUDFLARE_SANDBOX_URL"
 _CLOUDFLARE_SANDBOX_TOKEN_ENV = "PRAXIS_CLOUDFLARE_SANDBOX_TOKEN"
 _IGNORED_MANIFEST_DIRS = frozenset({".git", "__pycache__", ".pytest_cache", ".mypy_cache"})
+
+# CLI auth files to mount read-only into Docker containers.
+# Each entry: (host_path_relative_to_home, container_path).
+_CLI_AUTH_MOUNTS: tuple[tuple[str, str], ...] = (
+    (".codex/auth.json", "/root/.codex/auth.json"),
+    (".gemini/oauth_creds.json", "/root/.gemini/oauth_creds.json"),
+    (".gemini/google_accounts.json", "/root/.gemini/google_accounts.json"),
+    (".gemini/settings.json", "/root/.gemini/settings.json"),
+)
+
+
+def _cli_auth_volume_flags() -> list[str]:
+    """Return docker -v flags for CLI auth files that exist on the host."""
+    home = os.path.expanduser("~")
+    flags: list[str] = []
+    for rel_path, container_path in _CLI_AUTH_MOUNTS:
+        host_path = os.path.join(home, rel_path)
+        if os.path.isfile(host_path):
+            flags.extend(["-v", f"{host_path}:{container_path}:ro"])
+    return flags
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +164,8 @@ class SandboxExecutionResult:
     provider_latency_ms: int
     execution_mode: str
     workspace_root: str
+    container_cpu_percent: float | None = None
+    container_mem_bytes: int | None = None
 
 
 class SandboxProviderAdapter(Protocol):
@@ -240,249 +283,34 @@ def _hydrate_copy(source_root: str, destination_root: str) -> int:
     return copied
 
 
+def _dehydrate_copy(
+    workspace_root: str, host_root: str, artifact_refs: Sequence[str]
+) -> int:
+    """Copy changed files from the sandbox workspace back to the host repo.
+
+    Run after successful execution. Only paths listed in artifact_refs
+    are copied — caller is responsible for filtering to write_scope.
+    """
+    copied = 0
+    workspace = Path(workspace_root)
+    host = Path(host_root)
+    for relpath in artifact_refs:
+        src = workspace / relpath
+        if not src.is_file():
+            continue
+        dst = host / relpath
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        copied += 1
+    return copied
+
+
 def _write_text_artifact(path: str, content: str) -> None:
     artifact_path = Path(path)
     artifact_path.parent.mkdir(parents=True, exist_ok=True)
     artifact_path.write_text(content, encoding="utf-8")
 
 
-def _seatbelt_ancestor_metadata_rules(path: str) -> list[str]:
-    rules: list[str] = []
-    resolved = Path(path).resolve()
-    for ancestor in (resolved, *resolved.parents):
-        rules.append(f'(allow file-read-metadata (literal "{ancestor.as_posix()}"))')
-    return rules
-
-
-def _seatbelt_path_variants(path: str) -> tuple[str, ...]:
-    candidates = {
-        os.path.abspath(path),
-        os.path.realpath(path),
-    }
-    normalized: list[str] = []
-    seen: set[str] = set()
-    for candidate in candidates:
-        if not candidate:
-            continue
-        cleaned = Path(candidate).as_posix()
-        if cleaned not in seen:
-            seen.add(cleaned)
-            normalized.append(cleaned)
-    return tuple(normalized)
-
-
-def _seatbelt_exec_env(base_env: dict[str, str], workspace_root: str) -> dict[str, str]:
-    env = dict(base_env)
-    env.setdefault("HOME", workspace_root)
-    env.setdefault("PWD", workspace_root)
-    env.setdefault("TMPDIR", os.path.join(workspace_root, ".tmp"))
-    Path(env["TMPDIR"]).mkdir(parents=True, exist_ok=True)
-    return env
-
-
-def _default_profile(
-    *,
-    workspace_root: str,
-    network_policy: str,
-) -> str:
-    real_home = os.path.expanduser("~")
-    system_paths = (
-        "/System",
-        "/usr",
-        "/bin",
-        "/sbin",
-        "/dev",
-        "/private/etc",
-        "/private/tmp",
-        "/tmp",
-        # Platform package manager paths (Homebrew on macOS, linuxbrew, etc.)
-        *(p for p in ["/opt/homebrew", "/home/linuxbrew/.linuxbrew"] if os.path.isdir(p)),
-        # CLI auth: claude OAuth tokens, codex auth, gemini config
-        os.path.join(real_home, "Library/Application Support/Claude"),
-        os.path.join(real_home, "Library/Application Support/Codex"),
-        os.path.join(real_home, "Library/Keychains"),
-        os.path.join(real_home, ".claude"),
-        os.path.join(real_home, ".codex"),
-        os.path.join(real_home, ".gemini"),
-    )
-    # CLI session dirs that need write access (todos, debug logs, config)
-    cli_write_paths = (
-        os.path.join(real_home, ".claude"),
-        os.path.join(real_home, ".codex"),
-    )
-    parts = [
-        "(version 1)",
-        '(deny default)',
-        '(import "system.sb")',
-        "(allow process*)",
-        "(allow sysctl-read)",
-        "(allow mach-lookup)",
-    ]
-    for workspace_variant in _seatbelt_path_variants(workspace_root):
-        parts.append(f'(allow file-read* (subpath "{workspace_variant}"))')
-        parts.append(f'(allow file-write* (subpath "{workspace_variant}"))')
-        parts.extend(_seatbelt_ancestor_metadata_rules(workspace_variant))
-    for path in system_paths:
-        parts.append(f'(allow file-read* (subpath "{path}"))')
-        parts.extend(_seatbelt_ancestor_metadata_rules(path))
-    for path in cli_write_paths:
-        parts.append(f'(allow file-write* (subpath "{path}"))')
-        parts.extend(_seatbelt_ancestor_metadata_rules(path))
-    if network_policy != "disabled":
-        parts.append("(allow network*)")
-    return "\n".join(parts)
-
-
-class SeatbeltLocalSandboxProvider:
-    """macOS Seatbelt-backed sandbox provider."""
-
-    provider_name = "seatbelt_local"
-    execution_lane = "local"
-    requires_artifact_sync = False
-
-    def create_session(self, spec: SandboxSessionSpec) -> SandboxSession:
-        if os.uname().sysname.lower() != "darwin":
-            raise RuntimeError("seatbelt_local is only available on macOS")
-        session_root = os.path.realpath(tempfile.mkdtemp(prefix="praxis-sandbox-"))
-        workspace_root = os.path.join(session_root, "workspace")
-        os.makedirs(workspace_root, exist_ok=True)
-        return SandboxSession(
-            sandbox_session_id=spec.sandbox_session_id,
-            sandbox_group_id=spec.sandbox_group_id,
-            provider=self.provider_name,
-            provider_session_id=Path(session_root).name,
-            workspace_root=workspace_root,
-            network_policy=spec.network_policy,
-            workspace_materialization=spec.workspace_materialization,
-            metadata=dict(spec.metadata),
-        )
-
-    def hydrate_workspace(
-        self,
-        session: SandboxSession,
-        snapshot: WorkspaceSnapshot,
-    ) -> HydrationReceipt:
-        copied = _hydrate_copy(snapshot.source_root, session.workspace_root)
-        # Copy CLI auth config dirs so tools can authenticate in the sandbox
-        real_home = os.path.expanduser("~")
-        for config_dir in (".gemini", ".claude", ".codex"):
-            src = os.path.join(real_home, config_dir)
-            dst = os.path.join(session.workspace_root, config_dir)
-            if os.path.isdir(src) and not os.path.exists(dst):
-                shutil.copytree(src, dst, symlinks=True, ignore_dangling_symlinks=True,
-                                ignore=shutil.ignore_patterns(
-                                    "history", "tmp", "antigravity*",
-                                    "debug", "plans", "projects", "file-history",
-                                    "paste-cache", "backups", "sessions",
-                                    "shell_snapshots", "skills", "worktrees",
-                                ))
-        # Strip MCP server configs from codex config.toml (they reference
-        # host-side URLs that aren't reachable inside the sandbox)
-        codex_config = os.path.join(session.workspace_root, ".codex", "config.toml")
-        if os.path.isfile(codex_config):
-            try:
-                lines = Path(codex_config).read_text(encoding="utf-8").splitlines()
-                filtered = []
-                skip_section = False
-                for line in lines:
-                    if line.strip().startswith("[mcp_servers"):
-                        skip_section = True
-                        continue
-                    if skip_section and line.strip().startswith("["):
-                        skip_section = False
-                    if not skip_section:
-                        filtered.append(line)
-                Path(codex_config).write_text("\n".join(filtered) + "\n", encoding="utf-8")
-            except Exception:
-                pass
-        return HydrationReceipt(
-            sandbox_session_id=session.sandbox_session_id,
-            workspace_root=session.workspace_root,
-            hydrated_files=copied,
-            workspace_materialization=snapshot.materialization,
-        )
-
-    def exec(self, session: SandboxSession, request: SandboxExecRequest) -> SandboxExecutionResult:
-        profile_path = os.path.join(Path(session.workspace_root).parent, "seatbelt.sb")
-        Path(profile_path).write_text(
-            _default_profile(
-                workspace_root=session.workspace_root,
-                network_policy=session.network_policy,
-            ),
-            encoding="utf-8",
-        )
-        start = _utc_now()
-        start_monotonic = time.monotonic_ns()
-        proc = subprocess.Popen(
-            [
-                "/usr/bin/sandbox-exec",
-                "-f",
-                profile_path,
-                "bash",
-                "--noprofile",
-                "--norc",
-                "-c",
-                request.command,
-            ],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            cwd=session.workspace_root,
-            env=_seatbelt_exec_env(request.env, session.workspace_root),
-        )
-        timed_out = False
-        try:
-            stdout, stderr = proc.communicate(
-                input=request.stdin_text,
-                timeout=request.timeout_seconds,
-            )
-        except subprocess.TimeoutExpired:
-            timed_out = True
-            proc.kill()
-            stdout, stderr = proc.communicate()
-        end = _utc_now()
-        latency_ms = int((time.monotonic_ns() - start_monotonic) / 1_000_000)
-        return SandboxExecutionResult(
-            sandbox_session_id=session.sandbox_session_id,
-            sandbox_group_id=session.sandbox_group_id,
-            sandbox_provider=self.provider_name,
-            execution_transport=request.execution_transport,
-            exit_code=proc.returncode if proc.returncode is not None else 1,
-            stdout=stdout or "",
-            stderr=stderr or "",
-            timed_out=timed_out,
-            artifact_refs=(),
-            started_at=start.isoformat(),
-            finished_at=end.isoformat(),
-            network_policy=session.network_policy,
-            provider_latency_ms=latency_ms,
-            execution_mode=self.provider_name,
-            workspace_root=session.workspace_root,
-        )
-
-    def collect_artifacts(
-        self,
-        session: SandboxSession,
-        before_manifest: dict[str, tuple[int, int]],
-    ) -> ArtifactReceipt:
-        after_manifest = _workspace_manifest(session.workspace_root)
-        changed = sorted(
-            path for path, metadata in after_manifest.items() if before_manifest.get(path) != metadata
-        )
-        return ArtifactReceipt(
-            sandbox_session_id=session.sandbox_session_id,
-            artifact_refs=tuple(changed),
-            artifact_count=len(changed),
-        )
-
-    def destroy_session(self, session: SandboxSession, disposition: str) -> TeardownReceipt:
-        shutil.rmtree(Path(session.workspace_root).parent, ignore_errors=True)
-        return TeardownReceipt(
-            sandbox_session_id=session.sandbox_session_id,
-            provider=self.provider_name,
-            disposition=disposition,
-        )
 
 
 class DockerLocalSandboxProvider:
@@ -541,11 +369,13 @@ class DockerLocalSandboxProvider:
                 f"{docker_image!r}.{build_hint}"
                 + (f" {detail}" if detail else "")
             )
+        container_name = f"praxis-{uuid4().hex[:12]}"
         docker_cmd = [
             "docker",
             "run",
             "--rm",
             "-i",
+            "--name", container_name,
             "--memory",
             _docker_memory(),
             "--cpus",
@@ -555,11 +385,41 @@ class DockerLocalSandboxProvider:
             "-v",
             f"{session.workspace_root}:/workspace",
         ]
+        docker_cmd.extend(_cli_auth_volume_flags())
         for key, value in sorted(request.env.items()):
             docker_cmd.extend(["-e", f"{key}={value}"])
         if session.network_policy == "disabled":
             docker_cmd.append("--network=none")
         docker_cmd.extend([docker_image, "bash", "-lc", request.command])
+
+        # Background thread: poll docker stats every 2s to capture peak CPU/memory.
+        peak_cpu: list[float] = [0.0]
+        peak_mem: list[int] = [0]
+        stats_stop = threading.Event()
+
+        def _poll_stats() -> None:
+            while not stats_stop.is_set():
+                try:
+                    sr = subprocess.run(
+                        ["docker", "stats", "--no-stream", "--format",
+                         "{{.CPUPerc}}\t{{.MemUsage}}", container_name],
+                        capture_output=True, text=True, timeout=5,
+                    )
+                    if sr.returncode == 0 and sr.stdout.strip():
+                        cpu_part, _, mem_part = sr.stdout.strip().partition("\t")
+                        cpu = float(cpu_part.rstrip("%") or 0)
+                        mem = _parse_docker_mem_str(mem_part.split("/")[0])
+                        if cpu > peak_cpu[0]:
+                            peak_cpu[0] = cpu
+                        if mem > peak_mem[0]:
+                            peak_mem[0] = mem
+                except Exception:
+                    pass
+                stats_stop.wait(timeout=2.0)
+
+        stats_thread = threading.Thread(target=_poll_stats, daemon=True, name=f"docker-stats-{container_name}")
+        stats_thread.start()
+
         start = _utc_now()
         start_monotonic = time.monotonic_ns()
         proc = subprocess.Popen(
@@ -579,6 +439,10 @@ class DockerLocalSandboxProvider:
             timed_out = True
             proc.kill()
             stdout, stderr = proc.communicate()
+        finally:
+            stats_stop.set()
+            stats_thread.join(timeout=3.0)
+
         end = _utc_now()
         latency_ms = int((time.monotonic_ns() - start_monotonic) / 1_000_000)
         return SandboxExecutionResult(
@@ -597,6 +461,8 @@ class DockerLocalSandboxProvider:
             provider_latency_ms=latency_ms,
             execution_mode=self.provider_name,
             workspace_root=session.workspace_root,
+            container_cpu_percent=peak_cpu[0] if peak_cpu[0] > 0 else None,
+            container_mem_bytes=peak_mem[0] if peak_mem[0] > 0 else None,
         )
 
     def collect_artifacts(
@@ -797,7 +663,6 @@ class SandboxRuntime:
 
     def __init__(self) -> None:
         self._providers: dict[str, SandboxProviderAdapter] = {
-            "seatbelt_local": SeatbeltLocalSandboxProvider(),
             "docker_local": DockerLocalSandboxProvider(),
             "cloudflare_remote": CloudflareRemoteSandboxProvider(),
         }
@@ -862,6 +727,11 @@ class SandboxRuntime:
             )
             artifact_receipt = provider.collect_artifacts(session, before_manifest)
             artifact_refs = artifact_receipt.artifact_refs
+            # Dehydrate: copy changed files from sandbox back to host workdir.
+            # Without this, agent-produced files exist only in the ephemeral
+            # container workspace and never reach the host repo.
+            if artifact_refs and getattr(provider, "execution_lane", "") == "local":
+                _dehydrate_copy(session.workspace_root, workdir, artifact_refs)
             if artifact_store is not None:
                 persisted_refs: list[str] = []
                 missing_artifacts: list[str] = []

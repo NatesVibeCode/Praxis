@@ -1,0 +1,63 @@
+{
+  "name": "authority_cleanup_provider_runtime",
+  "workflow_id": "authority_cleanup_provider_runtime",
+  "phase": "build",
+  "outcome_goal": "Move integration discoverability, workflow discovery, and provider operational defaults onto seeded DB authority so runtime selection no longer depends on startup syncs or hardcoded default maps.",
+  "roadmap_alignment": "roadmap_item.authority.cleanup.provider_runtime",
+  "anti_requirements": [
+    "Do not keep Python registry sync as the source of truth.",
+    "Do not leave filesystem queue scanning in place for runtime discovery.",
+    "Do not preserve hardcoded context-window or probe-model maps as canonical behavior."
+  ],
+  "registry_paths": [
+    "Code&DBs/Databases/migrations/workflow/011_runtime_breadth_authority.sql",
+    "Code&DBs/Databases/migrations/workflow/016_app_builder_registries.sql",
+    "Code&DBs/Databases/migrations/workflow/020_integration_registry.sql",
+    "Code&DBs/Workflow/runtime/integrations/__init__.py",
+    "Code&DBs/Workflow/runtime/task_assembler.py",
+    "Code&DBs/Workflow/runtime/chat_tools.py",
+    "Code&DBs/Workflow/runtime/model_context_limits.py",
+    "Code&DBs/Workflow/runtime/rate_limit_prober.py"
+  ],
+  "target_repo": "/Users/nate/Praxis",
+  "workdir": "/Users/nate/Praxis",
+  "verify_refs": [
+    {
+      "command": "./scripts/workflow.sh validate artifacts/workflow/authority_cleanup/authority_cleanup_provider_runtime.queue.json"
+    }
+  ],
+  "jobs": [
+    {
+      "label": "provider_runtime_packet",
+      "agent": "openai/gpt-5.4-mini",
+      "outcome_goal": "Cut integration/discovery/provider selection over to DB-backed runtime authority.",
+      "anti_vibe_rule": "No duplicate seeds, no mirrored truth, no queue-file discovery masquerading as runtime catalog.",
+      "scope": {
+        "read": [
+          "Code&DBs/Databases/migrations/workflow/011_runtime_breadth_authority.sql",
+          "Code&DBs/Databases/migrations/workflow/016_app_builder_registries.sql",
+          "Code&DBs/Databases/migrations/workflow/020_integration_registry.sql",
+          "Code&DBs/Workflow/runtime/integrations/__init__.py",
+          "Code&DBs/Workflow/runtime/task_assembler.py",
+          "Code&DBs/Workflow/runtime/chat_tools.py",
+          "Code&DBs/Workflow/runtime/model_context_limits.py",
+          "Code&DBs/Workflow/runtime/rate_limit_prober.py"
+        ],
+        "write": [
+          "Code&DBs/Workflow/runtime/integrations/__init__.py",
+          "Code&DBs/Workflow/runtime/task_assembler.py",
+          "Code&DBs/Workflow/runtime/chat_tools.py",
+          "Code&DBs/Workflow/runtime/model_context_limits.py",
+          "Code&DBs/Workflow/runtime/rate_limit_prober.py",
+          "Code&DBs/Databases/migrations/workflow/"
+        ]
+      },
+      "verify_refs": [
+        {
+          "command": "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m py_compile 'Code&DBs/Workflow/runtime/integrations/__init__.py' 'Code&DBs/Workflow/runtime/task_assembler.py' 'Code&DBs/Workflow/runtime/chat_tools.py' 'Code&DBs/Workflow/runtime/model_context_limits.py' 'Code&DBs/Workflow/runtime/rate_limit_prober.py'"
+        }
+      ],
+      "prompt": "OBJECTIVE:\nMove integration, discovery, and provider operational defaults onto DB authority.\n\nTASK:\nMake `integration_registry` and the seeded app-builder registries authoritative for runtime discoverability, remove startup sync/bootstrap writes as runtime truth, stop using filesystem queue scanning for runtime workflow discovery, and resolve provider context/probe defaults from admitted DB rows and bindings.\n\nCONSTRAINTS:\nKeep code-owned loader implementations only where they are pure implementation. Do not widen into dispatch resolver or verifier contract work. Preserve idempotent migration/backfill behavior for partially seeded databases.\n\nOUTPUT_CONTRACT:\nShip the migrations, runtime changes, and tests needed so integration selection, workflow discovery, and provider defaults are DB-backed and explicitly seeded.\n\nACCEPTANCE_CRITERIA:\n- `integration_registry` is the discoverability and action-identity source.\n- Runtime startup no longer writes duplicate registry seed data as authority.\n- Chat/operator workflow listing no longer scans queue files as runtime truth.\n- Provider context-window and probe selection derive from DB bindings.\n\nSTOP_BOUNDARY:\nDo not rework UI routing or rebuild the dispatch frontdoor in this packet."
+    }
+  ]
+}

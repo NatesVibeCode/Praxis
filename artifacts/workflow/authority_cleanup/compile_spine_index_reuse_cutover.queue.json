@@ -1,0 +1,135 @@
+{
+  "name": "compile_spine_index_reuse_cutover",
+  "workflow_id": "compile_spine_index_reuse_cutover",
+  "phase": "build",
+  "outcome_goal": "Introduce refreshable compile indexes and content-addressed artifact reuse, then cut migrated runtime seams over to packet-only compile with explicit stale-or-missing-authority failures.",
+  "roadmap_alignment": "roadmap_item.authority.cleanup.validation_review",
+  "anti_requirements": [
+    "Do not preserve mixed fallback behavior on migrated seams.",
+    "Do not broaden into unrelated provider-runtime cleanup.",
+    "Do not change the supported workflow frontdoor surface."
+  ],
+  "registry_paths": [
+    "Code&DBs/Workflow/runtime/compiler.py",
+    "Code&DBs/Workflow/runtime/reference_catalog.py",
+    "Code&DBs/Workflow/runtime/integrations/workflow.py",
+    "Code&DBs/Workflow/runtime/triggers.py",
+    "Code&DBs/Workflow/runtime/workflow/orchestrator.py",
+    "Code&DBs/Workflow/surfaces/api/handlers/workflow_query.py",
+    "Code&DBs/Workflow/surfaces/app/src/dashboard/OperatingModelEditor.tsx"
+  ],
+  "target_repo": "/Users/nate/Praxis",
+  "workdir": "/Users/nate/Praxis",
+  "verify": [
+    {
+      "command": "./scripts/workflow.sh validate artifacts/workflow/authority_cleanup/compile_spine_index_reuse_cutover.queue.json"
+    }
+  ],
+  "jobs": [
+    {
+      "label": "compile_index_snapshot",
+      "agent": "openai/gpt-5.4-mini",
+      "outcome_goal": "Build explicit refreshable compile indexes from authority tables and repo fingerprints without adding an always-on daemon.",
+      "anti_vibe_rule": "Two timescales only: durable refresh, then cheap bind/hydrate.",
+      "scope": {
+        "read": [
+          "Code&DBs/Workflow/runtime/compiler.py",
+          "Code&DBs/Workflow/runtime/reference_catalog.py",
+          "Code&DBs/Workflow/runtime/integration_registry_sync.py",
+          "Code&DBs/Workflow/runtime/workflow_builder.py",
+          "Code&DBs/Workflow/tests/unit/test_runtime_compiler_json.py",
+          "Code&DBs/Workflow/tests/unit/test_startup_wiring.py"
+        ],
+        "write": [
+          "Code&DBs/Workflow/runtime/compiler.py",
+          "Code&DBs/Workflow/runtime/reference_catalog.py",
+          "Code&DBs/Workflow/runtime/",
+          "Code&DBs/Databases/migrations/workflow/"
+        ]
+      },
+      "verify": [
+        {
+          "command": "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m py_compile 'Code&DBs/Workflow/runtime/compiler.py' 'Code&DBs/Workflow/runtime/reference_catalog.py'"
+        },
+        {
+          "command": "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_runtime_compiler_json.py' 'Code&DBs/Workflow/tests/unit/test_startup_wiring.py'"
+        }
+      ],
+      "prompt": "OBJECTIVE:\nSeparate slow index refresh from fast online compile hydration.\n\nTASK:\nBuild explicit refreshable compile indexes from `reference_catalog`, `integration_registry`, `object_types`, compiler route hints, and repo fingerprints. The refresh path should be explicit and durable, not an always-on daemon. The online compiler should bind against those snapshots cheaply and fail clearly when the required authority snapshot is missing or stale.\n\nCONSTRAINTS:\nDo not add background workers or hidden refresh loops. Do not treat raw prompt text as a substitute for missing compile indexes. Keep the compile surface revision-aware.\n\nOUTPUT_CONTRACT:\nIndex refresh and lookup code plus any migration/schema changes needed for snapshot persistence and freshness tracking.\n\nACCEPTANCE_CRITERIA:\n- Compile indexes are refreshable, revision-aware, and DB-backed.\n- Online compile hydration can use those indexes without redoing whole-world discovery.\n- Missing or stale indexes fail clearly.\n- Tests cover refresh, lookup, and stale-index behavior.\n\nSTOP_BOUNDARY:\nDo not cut runtime execution over to packet-only behavior in this job."
+    },
+    {
+      "label": "content_addressed_reuse",
+      "agent": "openai/gpt-5.4",
+      "depends_on": [
+        "compile_index_snapshot"
+      ],
+      "outcome_goal": "Reuse definition, plan, and packet artifacts by authority and file fingerprints so identical work stops recompiling.",
+      "anti_vibe_rule": "Reuse must be exact and explainable, not heuristic magic.",
+      "scope": {
+        "read": [
+          "Code&DBs/Workflow/runtime/compiler.py",
+          "Code&DBs/Workflow/runtime/integrations/workflow.py",
+          "Code&DBs/Workflow/runtime/triggers.py",
+          "Code&DBs/Workflow/runtime/workflow/orchestrator.py",
+          "Code&DBs/Workflow/runtime/result_cache.py",
+          "Code&DBs/Workflow/tests/unit/test_triggers.py",
+          "Code&DBs/Workflow/tests/unit/test_unified_workflow.py",
+          "Code&DBs/Workflow/tests/integration/test_workflow_runner.py"
+        ],
+        "write": [
+          "Code&DBs/Workflow/runtime/compiler.py",
+          "Code&DBs/Workflow/runtime/integrations/workflow.py",
+          "Code&DBs/Workflow/runtime/triggers.py",
+          "Code&DBs/Workflow/runtime/workflow/orchestrator.py",
+          "Code&DBs/Workflow/runtime/result_cache.py"
+        ]
+      },
+      "verify": [
+        {
+          "command": "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m py_compile 'Code&DBs/Workflow/runtime/compiler.py' 'Code&DBs/Workflow/runtime/integrations/workflow.py' 'Code&DBs/Workflow/runtime/triggers.py' 'Code&DBs/Workflow/runtime/workflow/orchestrator.py' 'Code&DBs/Workflow/runtime/result_cache.py'"
+        },
+        {
+          "command": "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_triggers.py' 'Code&DBs/Workflow/tests/unit/test_unified_workflow.py' 'Code&DBs/Workflow/tests/integration/test_workflow_runner.py'"
+        }
+      ],
+      "prompt": "OBJECTIVE:\nStop recompiling identical authority/file states across retries, child workflows, and repeated runs.\n\nTASK:\nAdd content-addressed reuse for compile artifacts so definitions, plans, and execution packets are keyed by authority revision plus file/context fingerprints. Retries and child workflow invocation should reuse existing artifacts when hashes match and only recompile when the inputs actually changed. Reuse decisions must carry provenance and remain auditable.\n\nCONSTRAINTS:\nDo not use fuzzy cache hits. Do not preserve silent fallbacks when a supposedly reusable artifact is stale or malformed. Keep reuse revision-aware and fail-closed.\n\nOUTPUT_CONTRACT:\nArtifact hashing/reuse logic across definition, plan, packet, retry, and child-workflow invocation seams.\n\nACCEPTANCE_CRITERIA:\n- Unchanged authority/file inputs reuse prior compile artifacts.\n- Retries and child workflow invocation stop recompiling identical work.\n- Reuse provenance is inspectable.\n- Tests prove exact-match reuse and stale-artifact rejection.\n\nSTOP_BOUNDARY:\nDo not cut the adapters to packet-only execution in this job."
+    },
+    {
+      "label": "packet_cutover_and_revision_sync",
+      "agent": "openai/gpt-5.4",
+      "depends_on": [
+        "content_addressed_reuse"
+      ],
+      "outcome_goal": "Cut the migrated runtime seam to packet-only compile and expose stale-plan/current-packet state across runtime and editor/read surfaces.",
+      "anti_vibe_rule": "No compatibility theater once the seam is migrated.",
+      "scope": {
+        "read": [
+          "Code&DBs/Workflow/adapters/llm_task.py",
+          "Code&DBs/Workflow/runtime/workflow/runtime_setup.py",
+          "Code&DBs/Workflow/runtime/workflow/orchestrator.py",
+          "Code&DBs/Workflow/surfaces/api/handlers/workflow_query.py",
+          "Code&DBs/Workflow/surfaces/app/src/dashboard/OperatingModelEditor.tsx",
+          "Code&DBs/Workflow/tests/unit/test_workflow_query_handlers.py",
+          "Code&DBs/Workflow/tests/integration/test_workflow_api.py",
+          "Code&DBs/Workflow/tests/integration/test_model_routing_and_context_compiler.py"
+        ],
+        "write": [
+          "Code&DBs/Workflow/adapters/llm_task.py",
+          "Code&DBs/Workflow/runtime/workflow/runtime_setup.py",
+          "Code&DBs/Workflow/runtime/workflow/orchestrator.py",
+          "Code&DBs/Workflow/surfaces/api/handlers/workflow_query.py",
+          "Code&DBs/Workflow/surfaces/app/src/dashboard/OperatingModelEditor.tsx"
+        ]
+      },
+      "verify": [
+        {
+          "command": "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m py_compile 'Code&DBs/Workflow/adapters/llm_task.py' 'Code&DBs/Workflow/runtime/workflow/runtime_setup.py' 'Code&DBs/Workflow/runtime/workflow/orchestrator.py' 'Code&DBs/Workflow/surfaces/api/handlers/workflow_query.py'"
+        },
+        {
+          "command": "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_workflow_query_handlers.py' 'Code&DBs/Workflow/tests/integration/test_workflow_api.py' 'Code&DBs/Workflow/tests/integration/test_model_routing_and_context_compiler.py'"
+        }
+      ],
+      "prompt": "OBJECTIVE:\nCut the migrated runtime seam over to packet-only compile and surface revision drift honestly.\n\nTASK:\nRemove raw-prompt sufficiency from the migrated runtime path so internal execution consumes compiled packets only. Fail explicitly when packet authority or compile indexes are missing or stale. Update the workflow query and operating-model editor/read surfaces so they can show stale plan versus current packet state without UI redesign. Keep explicit-job specs hydrated but not replanned.\n\nCONSTRAINTS:\nDo not change the supported workflow frontdoor. Do not broaden into provider-runtime cleanup. Do not preserve mixed packet/raw-prompt execution on the migrated seam.\n\nOUTPUT_CONTRACT:\nPacket-only runtime cutover on the migrated seam plus revision-drift read-model updates.\n\nACCEPTANCE_CRITERIA:\n- Migrated runtime execution consumes packets only.\n- Missing or stale packet/index authority fails clearly.\n- Editor/read surfaces show stale-plan/current-packet state.\n- Tests prove fail-closed cutover and revision sync behavior.\n\nSTOP_BOUNDARY:\nDo not redesign the editor or widen beyond compile/runtime authority seams."
+    }
+  ]
+}

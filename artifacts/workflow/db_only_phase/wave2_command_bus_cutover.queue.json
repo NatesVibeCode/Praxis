@@ -1,0 +1,68 @@
+{
+  "name": "db_only_phase_wave2_command_bus_cutover",
+  "workflow_id": "db_only_phase_wave2",
+  "phase": "build",
+  "outcome_goal": "Model mutations flow through the workflow command bus only, with direct chat, MCP, and control-command shims removed or demoted to explicit compatibility wrappers.",
+  "roadmap_items": [
+    "roadmap_item.workflow.command_bus.hard_cutover"
+  ],
+  "absorbed_bug_ids": [
+    "BUG-26DAFEBF",
+    "BUG-756CD965",
+    "BUG-5A3AD7C1"
+  ],
+  "anti_requirements": [
+    "Do not preserve direct submission shims as the canonical mutation path.",
+    "Do not widen into trigger/event or orient runtime work.",
+    "Do not remove a compatibility surface without leaving one obvious command-bus authority."
+  ],
+  "target_repo": "/Users/nate/Praxis",
+  "workdir": "/Users/nate/Praxis",
+  "verify_refs": [
+    {
+      "command": "./scripts/workflow.sh validate artifacts/workflow/db_only_phase/wave2_command_bus_cutover.queue.json"
+    }
+  ],
+  "jobs": [
+    {
+      "label": "chat_mutation_cutover",
+      "agent": "openai/gpt-5.4-mini",
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/chat_tools.py"
+      ],
+      "prompt": "Resolve `BUG-26DAFEBF` by removing the remaining chat-side direct workflow mutator shim. Chat surfaces may remain front doors, but their mutation path must hand off into the workflow command bus rather than performing first-class writes on their own."
+    },
+    {
+      "label": "mcp_api_mutation_cutover",
+      "agent": "openai/gpt-5.4-mini",
+      "write_scope": [
+        "Code&DBs/Workflow/surfaces/mcp/tools/workflow.py",
+        "Code&DBs/Workflow/surfaces/api/handlers/workflow_run.py"
+      ],
+      "prompt": "Resolve `BUG-756CD965` by removing MCP and API direct submission shims that bypass the command bus. Keep the user-facing surfaces intact, but make the command bus the only mutation authority."
+    },
+    {
+      "label": "control_command_fallback_delete",
+      "agent": "openai/gpt-5.4-mini",
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/control_commands.py",
+        "Code&DBs/Workflow/runtime/workflow/unified.py"
+      ],
+      "prompt": "Resolve `BUG-5A3AD7C1` by deleting or explicitly demoting the dead control-command fallback if the control bus remains unbound. The system should fail clearly rather than silently falling back to a second mutation path."
+    },
+    {
+      "label": "command_bus_proof",
+      "agent": "openai/gpt-5.4",
+      "depends_on": [
+        "chat_mutation_cutover",
+        "mcp_api_mutation_cutover",
+        "control_command_fallback_delete"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/tests/unit/test_control_commands.py",
+        "Code&DBs/Workflow/tests/integration/test_mcp_workflow_server.py"
+      ],
+      "prompt": "Add proof coverage that chat, MCP, API, and control-command mutations now converge on one workflow command-bus authority. The proof should catch any surviving direct-write path or fallback that bypasses the bus."
+    }
+  ]
+}

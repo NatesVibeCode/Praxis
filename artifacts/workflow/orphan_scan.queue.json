@@ -1,0 +1,53 @@
+{
+  "name": "Orphan Scan",
+  "phase": "review",
+  "jobs": [
+    {
+      "label": "runtime_core_orphans",
+      "agent": "auto/wiring",
+      "context_files": [
+        "Code&DBs/Workflow/runtime/__init__.py",
+        "Code&DBs/Workflow/runtime/heartbeat_runner.py"
+      ],
+      "prompt": "You are scanning for ORPHANED Python modules in `Code&DBs/Workflow/runtime/` (top-level .py files only, not subdirectories).\n\nAn orphan is a module that:\n1. Is never imported by any other Python file in the project\n2. Is never referenced in any __init__.py, heartbeat_runner.py, or registration system\n3. Is not a well-known entry point (like __init__.py, __main__.py)\n\nSteps:\n1. List every .py file in `Code&DBs/Workflow/runtime/` (top-level only)\n2. For EACH file, grep the entire `Code&DBs/Workflow/` tree for imports of that module name (e.g. `from runtime.bug_tracker` or `import runtime.bug_tracker` or `import_module.*bug_tracker`)\n3. Also check if it's referenced in heartbeat_runner.py build_modules() or any __init__.py __all__ list\n4. Report a table with columns: module_name | import_count | imported_by (first 3 files) | verdict (ORPHAN or WIRED)\n\nOnly flag as ORPHAN if import_count == 0. Be thorough — check all import styles including dynamic imports via importlib."
+    },
+    {
+      "label": "runtime_dispatch_orphans",
+      "agent": "auto/wiring",
+      "context_files": [
+        "Code&DBs/Workflow/runtime/workflow/__init__.py"
+      ],
+      "prompt": "Scan for ORPHANED modules inside `Code&DBs/Workflow/runtime/workflow/` (the dispatch subdirectory).\n\nAn orphan is a module that is never imported by anything else.\n\nSteps:\n1. List every .py file in `Code&DBs/Workflow/runtime/workflow/`\n2. For each, grep `Code&DBs/Workflow/` for any import of that module (from runtime.workflow.X, import X, importlib references)\n3. Check dispatch/__init__.py for re-exports\n4. Report: module_name | import_count | imported_by | verdict (ORPHAN/WIRED)"
+    },
+    {
+      "label": "api_handler_orphans",
+      "agent": "auto/wiring",
+      "context_files": [
+        "Code&DBs/Workflow/surfaces/api/__init__.py"
+      ],
+      "prompt": "Scan for ORPHANED API handlers in `Code&DBs/Workflow/surfaces/api/`.\n\nAn orphan handler is one that:\n1. Defines route handler functions but those routes are never mounted in the app\n2. Is never imported by the API surface's __init__.py or router setup\n\nSteps:\n1. List all .py files in `Code&DBs/Workflow/surfaces/api/` and `surfaces/api/handlers/`\n2. For each, grep for imports across the codebase\n3. Check the main API app setup (likely in api/__init__.py or a router file) to see which handlers are actually mounted\n4. Report: handler_file | import_count | routes_defined | routes_mounted | verdict (ORPHAN/WIRED)"
+    },
+    {
+      "label": "mcp_tool_orphans",
+      "agent": "auto/wiring",
+      "context_files": [
+        "Code&DBs/Workflow/surfaces/mcp/__init__.py",
+        "Code&DBs/Workflow/surfaces/mcp_server.py"
+      ],
+      "prompt": "Scan for ORPHANED MCP tools in `Code&DBs/Workflow/surfaces/mcp/`.\n\nAn orphan MCP tool is one whose handler file exists but the tool is never registered in the MCP server.\n\nSteps:\n1. List all .py files in `Code&DBs/Workflow/surfaces/mcp/`\n2. Read the MCP server setup (mcp_server.py or mcp/__init__.py) to find which tools are actually registered\n3. For each handler file, check if its tool is registered\n4. Also check if any registered tools point to functions that no longer exist\n5. Report: tool_file | tool_name | registered | handler_exists | verdict (ORPHAN/WIRED/DEAD_REF)"
+    },
+    {
+      "label": "ui_component_orphans",
+      "agent": "auto/wiring",
+      "context_files": [
+        "Code&DBs/Workflow/surfaces/app/src/App.tsx"
+      ],
+      "prompt": "Scan for ORPHANED React/TypeScript components in `Code&DBs/Workflow/surfaces/app/src/`.\n\nAn orphan UI component is one that:\n1. Exports a React component but is never imported by any other file\n2. Is never referenced in any router, lazy-load, or dynamic import\n3. Is not the root App.tsx\n\nSteps:\n1. Find all .tsx and .ts files in `Code&DBs/Workflow/surfaces/app/src/` recursively\n2. For each file that exports a component (export default, export function, export const), grep the src/ tree for imports of that file\n3. Check the main App.tsx and any router config for lazy/dynamic imports\n4. Report: component_file | export_name | import_count | imported_by | verdict (ORPHAN/WIRED)"
+    },
+    {
+      "label": "db_table_orphans",
+      "agent": "auto/wiring",
+      "prompt": "Scan for ORPHANED database tables — tables that exist in migration SQL but are never queried by any Python code.\n\nSteps:\n1. Read all migration files in `Code&DBs/Databases/migrations/workflow/` and extract every CREATE TABLE statement to get the full list of tables\n2. For EACH table name, grep `Code&DBs/Workflow/` Python files for references to that table name (in SQL strings, ORM references, etc.)\n3. Report: table_name | created_in_migration | referenced_in_code | reference_count | verdict (ORPHAN/WIRED)\n\nBe careful with table names that might be referenced with schema prefixes or quoted identifiers."
+    }
+  ]
+}

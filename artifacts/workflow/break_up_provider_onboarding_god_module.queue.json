@@ -1,0 +1,26 @@
+{
+  "name": "break_up_provider_onboarding_god_module",
+  "workflow_id": "break_up_provider_onboarding_god_module",
+  "jobs": [
+    {
+      "label": "analyze_and_plan",
+      "agent": "auto/architecture",
+      "timeout": 300,
+      "prompt": "ROADMAP: roadmap.break.up.provider.onboarding.py.3.074.line.god.module\n\nAnalyze provider_onboarding.py and produce a split plan.\n\nRead Code&DBs/Workflow/runtime/provider_onboarding.py (it's ~3,074 lines).\n\nOBJECTIVE: Do NOT make code changes yet. Produce a split plan:\n1. Identify natural split boundaries (detection, probing, registration, CLI, wizard flow, etc.)\n2. Propose 4-6 focused modules with names and responsibilities\n3. Identify shared utilities that should go in a new provider_onboarding_utils.py\n4. Note any circular dependencies the split must avoid\n5. Estimate which split would have the most impact if done first\n\nSubmit the plan via praxis_submit_research_result."
+    },
+    {
+      "label": "execute_split",
+      "agent": "auto/refactor",
+      "timeout": 900,
+      "depends_on": ["analyze_and_plan"],
+      "prompt": "ROADMAP: roadmap.break.up.provider.onboarding.py.3.074.line.god.module\n\nExecute the provider_onboarding.py split based on the analysis above.\n\nThe split plan from the previous job is in your context. Implement it.\n\nOBJECTIVE: Split into focused modules. Minimum viable split:\n- runtime/provider_detection.py — model/provider detection logic\n- runtime/provider_probe.py — smoke probing and validation\n- runtime/provider_registry_writer.py — DB writes for model registration\n- provider_onboarding.py becomes a thin orchestrator importing from these\n\nKeep the public interface of provider_onboarding.py intact — no breaking changes to callers.\n\nRun existing tests to confirm nothing broke.\n\nSubmit code change summary via praxis_submit_code_change."
+    },
+    {
+      "label": "verify_split",
+      "agent": "auto/review",
+      "timeout": 300,
+      "depends_on": ["execute_split"],
+      "prompt": "ROADMAP: roadmap.break.up.provider.onboarding.py.3.074.line.god.module\n\nVerify the provider_onboarding.py split.\n\nRead the newly split modules and the updated provider_onboarding.py.\n\nCheck:\n1. No circular imports between the split modules\n2. provider_onboarding.py is now significantly smaller (target: < 500 lines)\n3. Each new module has a clear, single responsibility\n4. Existing callers still work (imports unchanged)\n5. Run tests: PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q Code&DBs/Workflow/tests/unit/ -k 'provider'\n\nSubmit code change summary or list of issues via praxis_submit_code_change."
+    }
+  ]
+}

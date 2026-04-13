@@ -3,7 +3,73 @@
 from __future__ import annotations
 
 import os
+import json
 from typing import TextIO
+
+from surfaces.cli.mcp_tools import load_json_file, print_json
+
+
+def _workflow_tool(params: dict[str, object]) -> dict[str, object]:
+    from surfaces.mcp.tools.workflow import tool_praxis_workflow
+
+    return tool_praxis_workflow(params)
+
+
+def _workflow_subsystems():
+    from surfaces.mcp.subsystems import _subs
+
+    return _subs
+
+
+def _workflow_query_mod():
+    from surfaces.api.handlers import workflow_query as workflow_query_mod
+
+    return workflow_query_mod
+
+
+def _coerce_json_object(raw: object) -> dict[str, object]:
+    if not isinstance(raw, dict):
+        raise ValueError("input must decode to a JSON object")
+    return dict(raw)
+
+
+def _load_input_payload(
+    *,
+    input_json: str | None,
+    input_file: str | None,
+) -> dict[str, object]:
+    if input_json is not None and input_file is not None:
+        raise ValueError("pass only one of --input-json or --input-file")
+    if input_json is not None:
+        return _coerce_json_object(json.loads(input_json))
+    if input_file is not None:
+        return _coerce_json_object(load_json_file(input_file))
+    raise ValueError("one of --input-json or --input-file is required")
+
+
+def _manifest_record_payload(row: dict[str, object]) -> dict[str, object]:
+    from runtime.helm_manifest import normalize_helm_bundle
+
+    manifest_id = str(row.get("id") or row.get("manifest_id") or "").strip()
+    name = str(row.get("name") or manifest_id).strip()
+    description = str(row.get("description") or "").strip()
+    manifest = normalize_helm_bundle(
+        row.get("manifest"),
+        manifest_id=manifest_id,
+        name=name or manifest_id,
+        description=description,
+    )
+    payload: dict[str, object] = {
+        "manifest_id": manifest_id,
+        "name": name or manifest_id,
+        "description": description,
+        "manifest": manifest,
+    }
+    for field in ("version", "status", "created_by", "created_at", "updated_at"):
+        value = row.get(field)
+        if value is not None:
+            payload[field] = value
+    return payload
 
 
 def _workflow_runtime_conn():
@@ -319,6 +385,62 @@ def _status_command(*, stdout: TextIO) -> int:
     history = get_workflow_history()
     stdout.write(_json.dumps(history.summary(), indent=2) + "\n")
     return 0
+
+
+def _run_status_command(args: list[str], *, stdout: TextIO) -> int:
+    """Handle `workflow run-status <run_id>` with optional idle recovery."""
+
+    if not args or args[0] in {"-h", "--help"}:
+        stdout.write(
+            "usage: workflow run-status <run_id> [--kill-if-idle] [--idle-threshold-seconds N]\n"
+        )
+        return 2
+
+    run_id = args[0].strip()
+    kill_if_idle = False
+    idle_threshold_seconds: int | None = None
+    i = 1
+    while i < len(args):
+        if args[i] == "--kill-if-idle":
+            kill_if_idle = True
+            i += 1
+        elif args[i] == "--idle-threshold-seconds" and i + 1 < len(args):
+            try:
+                idle_threshold_seconds = int(args[i + 1])
+            except ValueError:
+                stdout.write(f"error: idle threshold must be an integer, got: {args[i + 1]}\n")
+                return 2
+            i += 2
+        else:
+            stdout.write(f"unknown argument: {args[i]}\n")
+            return 2
+
+    params: dict[str, object] = {"action": "status", "run_id": run_id}
+    if kill_if_idle:
+        params["kill_if_idle"] = True
+    if idle_threshold_seconds is not None:
+        params["idle_threshold_seconds"] = idle_threshold_seconds
+
+    payload = _workflow_tool(params)
+    print_json(stdout, payload)
+    return 0 if not payload.get("error") and payload.get("status") != "not_found" else 1
+
+
+def _inspect_job_command(args: list[str], *, stdout: TextIO) -> int:
+    """Handle `workflow inspect-job <run_id> [label]`."""
+
+    if not args or args[0] in {"-h", "--help"}:
+        stdout.write("usage: workflow inspect-job <run_id> [label]\n")
+        return 2
+
+    run_id = args[0].strip()
+    label = args[1].strip() if len(args) > 1 else ""
+    params: dict[str, object] = {"action": "inspect", "run_id": run_id}
+    if label:
+        params["label"] = label
+    payload = _workflow_tool(params)
+    print_json(stdout, payload)
+    return 0 if not payload.get("error") else 1
 
 
 def _proof_command(args: list[str], *, stdout: TextIO) -> int:
@@ -905,6 +1027,311 @@ def _runs_command(args: list[str], *, stdout: TextIO) -> int:
 
     stdout.write(_json.dumps(runs, indent=2) + "\n")
     return 0
+
+
+def _manifest_command(args: list[str], *, stdout: TextIO) -> int:
+    """Handle manifest lifecycle through a stable CLI front door."""
+
+    if not args or args[0] in {"-h", "--help"}:
+        stdout.write(
+            "usage: workflow manifest get <manifest_id>\n"
+            "       workflow manifest generate <intent...>\n"
+            "       workflow manifest generate-quick <intent...> [--template-id <id>]\n"
+            "       workflow manifest refine <manifest_id> <instruction...>\n"
+            "       workflow manifest save (--input-json <json> | --input-file <path>)\n"
+            "       workflow manifest save-as [--name <name>] [--description <text>] (--input-json <json> | --input-file <path>)\n"
+        )
+        return 2
+
+    subcommand = args[0]
+    tail = args[1:]
+    subsystems = _workflow_subsystems()
+    conn = subsystems.get_pg_conn()
+
+    try:
+        if subcommand == "get":
+            if len(tail) != 1:
+                stdout.write("usage: workflow manifest get <manifest_id>\n")
+                return 2
+            from storage.postgres.workflow_runtime_repository import load_app_manifest_record
+
+            row = load_app_manifest_record(conn, manifest_id=tail[0].strip())
+            if row is None:
+                stdout.write(json.dumps({"error": f"Manifest not found: {tail[0].strip()}"}, indent=2) + "\n")
+                return 1
+            print_json(stdout, _manifest_record_payload(dict(row)))
+            return 0
+
+        if subcommand == "generate":
+            intent = " ".join(part for part in tail if part).strip()
+            if not intent:
+                stdout.write("usage: workflow manifest generate <intent...>\n")
+                return 2
+            from runtime.canonical_manifests import generate_manifest
+
+            result = generate_manifest(
+                conn,
+                matcher=subsystems.get_intent_matcher(),
+                generator=subsystems.get_manifest_generator(),
+                intent=intent,
+            )
+            print_json(
+                stdout,
+                {
+                    "manifest_id": result.manifest_id,
+                    "manifest": result.manifest,
+                    "version": result.version,
+                    "confidence": result.confidence,
+                    "explanation": result.explanation,
+                },
+            )
+            return 0
+
+        if subcommand == "generate-quick":
+            template_id = None
+            intent_parts: list[str] = []
+            i = 0
+            while i < len(tail):
+                if tail[i] == "--template-id" and i + 1 < len(tail):
+                    template_id = tail[i + 1].strip() or None
+                    i += 2
+                else:
+                    intent_parts.append(tail[i])
+                    i += 1
+            intent = " ".join(intent_parts).strip()
+            if not intent:
+                stdout.write("usage: workflow manifest generate-quick <intent...> [--template-id <id>]\n")
+                return 2
+            from runtime.canonical_manifests import generate_manifest_quick
+
+            payload = generate_manifest_quick(
+                conn,
+                matcher=subsystems.get_intent_matcher(),
+                generator=subsystems.get_manifest_generator(),
+                intent=intent,
+                template_id=template_id,
+            )
+            print_json(stdout, payload)
+            return 0
+
+        if subcommand == "refine":
+            if len(tail) < 2:
+                stdout.write("usage: workflow manifest refine <manifest_id> <instruction...>\n")
+                return 2
+            manifest_id = tail[0].strip()
+            instruction = " ".join(tail[1:]).strip()
+            from runtime.canonical_manifests import refine_manifest
+
+            result = refine_manifest(
+                conn,
+                generator=subsystems.get_manifest_generator(),
+                manifest_id=manifest_id,
+                instruction=instruction,
+            )
+            print_json(
+                stdout,
+                {
+                    "manifest_id": result.manifest_id,
+                    "manifest": result.manifest,
+                    "version": result.version,
+                    "confidence": result.confidence,
+                    "explanation": result.explanation,
+                },
+            )
+            return 0
+
+        if subcommand == "save":
+            input_json = None
+            input_file = None
+            i = 0
+            while i < len(tail):
+                if tail[i] == "--input-json" and i + 1 < len(tail):
+                    input_json = tail[i + 1]
+                    i += 2
+                elif tail[i] == "--input-file" and i + 1 < len(tail):
+                    input_file = tail[i + 1]
+                    i += 2
+                else:
+                    stdout.write(f"unknown argument: {tail[i]}\n")
+                    return 2
+            payload = _load_input_payload(input_json=input_json, input_file=input_file)
+            from runtime.canonical_manifests import save_manifest
+            from surfaces.api.handlers.workflow_run import _extract_manifest_save_payload
+
+            manifest_id, name, description, manifest = _extract_manifest_save_payload(payload)
+            saved = save_manifest(
+                conn,
+                manifest_id=manifest_id,
+                name=name,
+                description=description,
+                manifest=manifest,
+            )
+            print_json(stdout, _manifest_record_payload(saved))
+            return 0
+
+        if subcommand == "save-as":
+            input_json = None
+            input_file = None
+            name = None
+            description = ""
+            i = 0
+            while i < len(tail):
+                if tail[i] == "--input-json" and i + 1 < len(tail):
+                    input_json = tail[i + 1]
+                    i += 2
+                elif tail[i] == "--input-file" and i + 1 < len(tail):
+                    input_file = tail[i + 1]
+                    i += 2
+                elif tail[i] == "--name" and i + 1 < len(tail):
+                    name = tail[i + 1].strip()
+                    i += 2
+                elif tail[i] == "--description" and i + 1 < len(tail):
+                    description = tail[i + 1]
+                    i += 2
+                else:
+                    stdout.write(f"unknown argument: {tail[i]}\n")
+                    return 2
+            payload = _load_input_payload(input_json=input_json, input_file=input_file)
+            from runtime.canonical_manifests import save_manifest_as
+
+            body_name = str(payload.get("name") or "").strip()
+            body_description = str(payload.get("description") or "").strip()
+            manifest = payload.get("manifest") if isinstance(payload.get("manifest"), dict) else payload
+            saved = save_manifest_as(
+                conn,
+                name=name or body_name,
+                description=description or body_description,
+                manifest=manifest,
+            )
+            print_json(stdout, _manifest_record_payload(saved))
+            return 0
+    except ValueError as exc:
+        stdout.write(f"error: {exc}\n")
+        return 2
+    except Exception as exc:
+        print_json(stdout, {"error": str(exc)})
+        return 1
+
+    stdout.write(f"unknown manifest subcommand: {subcommand}\n")
+    return 2
+
+
+def _triggers_command(args: list[str], *, stdout: TextIO) -> int:
+    """Handle workflow trigger list/create/update through the CLI."""
+
+    if not args or args[0] in {"-h", "--help"}:
+        stdout.write(
+            "usage: workflow triggers list\n"
+            "       workflow triggers create (--input-json <json> | --input-file <path>)\n"
+            "       workflow triggers update <trigger_id> (--input-json <json> | --input-file <path>)\n"
+        )
+        return 2
+
+    subcommand = args[0]
+    tail = args[1:]
+    query_mod = _workflow_query_mod()
+    conn = _workflow_subsystems().get_pg_conn()
+
+    try:
+        if subcommand == "list":
+            rows = conn.execute(
+                """SELECT t.*, w.name AS workflow_name
+                   FROM public.workflow_triggers t
+                   JOIN public.workflows w ON w.id = t.workflow_id
+                   ORDER BY t.created_at DESC"""
+            )
+            payload = {
+                "triggers": [query_mod._trigger_to_dict(dict(row)) for row in (rows or [])],
+                "count": len(rows or []),
+            }
+            print_json(stdout, payload)
+            return 0
+
+        input_json = None
+        input_file = None
+        trigger_id = None
+        i = 0
+        while i < len(tail):
+            if tail[i] == "--input-json" and i + 1 < len(tail):
+                input_json = tail[i + 1]
+                i += 2
+            elif tail[i] == "--input-file" and i + 1 < len(tail):
+                input_file = tail[i + 1]
+                i += 2
+            elif subcommand == "update" and trigger_id is None:
+                trigger_id = tail[i].strip()
+                i += 1
+            else:
+                stdout.write(f"unknown argument: {tail[i]}\n")
+                return 2
+
+        payload = _load_input_payload(input_json=input_json, input_file=input_file)
+
+        if subcommand == "create":
+            error = query_mod._validate_trigger_body(
+                payload,
+                require_workflow_id=True,
+                require_event_type=True,
+            )
+            if error:
+                stdout.write(f"error: {error}\n")
+                return 2
+            from runtime.canonical_workflows import save_workflow_trigger
+
+            row = save_workflow_trigger(conn, body=payload)
+            print_json(stdout, {"trigger": query_mod._trigger_to_dict(dict(row))})
+            return 0
+
+        if subcommand == "update":
+            if not trigger_id:
+                stdout.write("usage: workflow triggers update <trigger_id> (--input-json <json> | --input-file <path>)\n")
+                return 2
+            error = query_mod._validate_trigger_body(
+                payload,
+                require_workflow_id=False,
+                require_event_type=False,
+            )
+            if error:
+                stdout.write(f"error: {error}\n")
+                return 2
+            from runtime.canonical_workflows import update_workflow_trigger
+
+            row = update_workflow_trigger(
+                conn,
+                trigger_id=trigger_id,
+                body=payload,
+            )
+            print_json(stdout, {"trigger": query_mod._trigger_to_dict(dict(row))})
+            return 0
+    except ValueError as exc:
+        stdout.write(f"error: {exc}\n")
+        return 2
+    except Exception as exc:
+        print_json(stdout, {"error": str(exc)})
+        return 1
+
+    stdout.write(f"unknown triggers subcommand: {subcommand}\n")
+    return 2
+
+
+def _retry_command(args: list[str], *, stdout: TextIO) -> int:
+    """Handle `workflow retry <run_id> <label>` via the bus-backed legacy CLI."""
+    from contextlib import redirect_stdout
+    from io import StringIO
+    from types import SimpleNamespace
+
+    from surfaces.cli import workflow_cli
+
+    if len(args) < 2 or args[0] in {"-h", "--help"}:
+        stdout.write("usage: workflow retry <run_id> <label>\n")
+        return 2
+
+    run_id, label = args[0], args[1]
+    buffer = StringIO()
+    with redirect_stdout(buffer):
+        exit_code = workflow_cli.cmd_retry(SimpleNamespace(run_id=run_id, label=label))
+    stdout.write(buffer.getvalue())
+    return exit_code
 
 
 def _cancel_command(args: list[str], *, stdout: TextIO) -> int:

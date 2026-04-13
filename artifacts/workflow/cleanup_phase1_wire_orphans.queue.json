@@ -1,0 +1,67 @@
+{
+  "name": "cleanup_phase1_wire_orphans",
+  "queue_id": "cleanup_phase1_001",
+  "phase": "cleanup",
+  "outcome_goal": "Wire 5 valuable orphan runtime modules into their natural integration points",
+  "jobs": [
+    {
+      "label": "p1a_wire_composite_scorer",
+      "agent": "auto/refactor",
+      "prompt": "Wire `runtime/composite_scorer.py` into the ranking systems.\n\n## Task 1: Enhance leaderboard sorting\n\nFile: `Code&DBs/Workflow/runtime/leaderboard.py`\n\nThe current `_sort_key()` function (around line 118) does naive tuple sorting:\n```python\ndef _sort_key(s: AgentScore) -> tuple[float, float]:\n    cps = s.cost_per_success if s.cost_per_success is not None else float('inf')\n    return (-s.pass_rate, cps)\n```\n\nReplace this with `CompositeScorer` from `runtime/composite_scorer.py`. Import `CompositeScorer` and `ScaleFn`, create a scorer instance with these weights:\n- pass_rate: weight=0.4, scale=SIGMOID, higher_is_better=True\n- cost_efficiency: weight=0.3, scale=LOGARITHMIC, higher_is_better=True (invert cost_per_success: use 1.0/(1+cps))\n- avg_latency: weight=0.2, scale=LINEAR, higher_is_better=False (normalize: 1 - latency/max_latency)\n- volume: weight=0.1, scale=BUCKET, higher_is_better=True (normalize: dispatches/max_dispatches)\n\nReplace `_sort_key` with a function that calls `scorer.score()` and returns `-result.total_score` as the sort key. Keep the scorer instance at module level (created once).\n\n## Task 2: Enhance model ranking in task_type_router\n\nFile: `Code&DBs/Workflow/runtime/task_type_router.py`\n\nIn `_resolve_auto()` (around line 102), after fetching rows from `task_type_routing` table, add a `CompositeScorer`-based re-ranking step before returning the first row. Create a scorer with:\n- benchmark_score: weight=0.5, scale=LINEAR, higher_is_better=True\n- cost: weight=0.3, scale=LOGARITHMIC, higher_is_better=False\n- rank: weight=0.2, scale=LINEAR, higher_is_better=False\n\nIf `prefer_cost` is True, shift weights to cost=0.5, benchmark=0.3. Score each row, sort by total_score descending, pick the winner.\n\nDo NOT change the SQL query or table schema. Just add a post-query scoring layer.\n\nKeep changes minimal and surgical. Do not refactor surrounding code.",
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/leaderboard.py",
+        "Code&DBs/Workflow/runtime/task_type_router.py"
+      ],
+      "read_scope": [
+        "Code&DBs/Workflow/runtime/composite_scorer.py"
+      ]
+    },
+    {
+      "label": "p1b_wire_debate_metrics",
+      "agent": "auto/refactor",
+      "prompt": "Wire `runtime/debate_metrics.py` into the debate workflow.\n\nFile: `Code&DBs/Workflow/runtime/debate_workflow.py`\n\n## What to do:\n\n1. Import `DebateMetricsCollector` from `runtime.debate_metrics` at the top of the file.\n\n2. In `run_debate()` (around line 189), instantiate a `DebateMetricsCollector()` before the rounds loop.\n\n3. After each `dispatch_parallel()` call returns results for a round, call `collector.record_round()` for each persona's response:\n```python\nfor persona_name, result in round_results.items():\n    collector.record_round(\n        debate_id=config.debate_id or config.topic[:40],\n        persona=persona_name,\n        text=result.output_text,\n        duration_seconds=getattr(result, 'latency_seconds', 0.0)\n    )\n```\n\n4. After the synthesis step (around line 232), call:\n```python\ncollector.record_synthesis(\n    debate_id=config.debate_id or config.topic[:40],\n    consensus_points=[],  # extracted later if needed\n    disagreements=[],\n    synthesis_text=synthesis_text\n)\n```\n\n5. Add a `metrics` field to the `DebateResult` dataclass:\n```python\nmetrics: dict | None = None  # debate quality metrics\n```\n\n6. When constructing the `DebateResult`, include:\n```python\nmetrics={\n    'rounds': [asdict(m) for m in collector._round_metrics],\n    'synthesis': asdict(collector._synthesis_metrics) if collector._synthesis_metrics else None,\n}\n```\n\nKeep changes minimal. Do not restructure the debate workflow.",
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/debate_workflow.py"
+      ],
+      "read_scope": [
+        "Code&DBs/Workflow/runtime/debate_metrics.py"
+      ]
+    },
+    {
+      "label": "p1c_wire_execution_strategy",
+      "agent": "auto/refactor",
+      "prompt": "Wire `runtime/execution_strategy.py` into the dispatch planning system.\n\nFile: `Code&DBs/Workflow/runtime/unified_dispatch.py`\n\n## What to do:\n\n1. Import `StepCompiler` from `runtime.execution_strategy` at the top.\n\n2. In `submit_dispatch()` (around line 33), after parsing the spec but before inserting jobs, add an optional dependency analysis step:\n\n```python\n# After spec is parsed, before job insertion loop:\ntry:\n    compiler = StepCompiler()\n    # Build scope dict from spec jobs\n    scope = {\n        'write_scope': [],\n        'read_scope': {},\n    }\n    for job in spec.jobs:\n        if hasattr(job, 'write_scope') and job.write_scope:\n            for path in job.write_scope:\n                scope['write_scope'].append({'path': path, 'action': 'modify'})\n        if hasattr(job, 'read_scope') and job.read_scope:\n            scope['read_scope'][job.label] = job.read_scope\n    \n    if scope['write_scope']:\n        plan = compiler.compile(scope)\n        # Extract auto-detected dependencies\n        auto_deps = {}\n        for step in plan.steps:\n            if step.depends_on:\n                auto_deps[step.step_id] = list(step.depends_on)\n        # Merge auto-deps with explicit depends_on (explicit wins)\n        for job in spec.jobs:\n            if job.label in auto_deps and not getattr(job, 'depends_on', None):\n                job.depends_on = auto_deps[job.label]\nexcept Exception:\n    pass  # Graceful degradation: if strategy analysis fails, fall through to explicit deps\n```\n\nThis is additive — it auto-detects dependencies from file read/write scopes when jobs don't have explicit `depends_on`. If the analysis fails or there are no scopes, existing behavior is unchanged.\n\nDo NOT modify the CLAIM_QUERY or claim_one() function. Do NOT modify the job insertion SQL. Only add the pre-insertion analysis step.",
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/unified_dispatch.py"
+      ],
+      "read_scope": [
+        "Code&DBs/Workflow/runtime/execution_strategy.py"
+      ]
+    },
+    {
+      "label": "p1d_wire_missing_detector",
+      "agent": "auto/refactor",
+      "prompt": "Wire `runtime/missing_detector.py` into the heartbeat cycle and health tool.\n\n## Task 1: Add as heartbeat module\n\nFile: `Code&DBs/Workflow/runtime/heartbeat_runner.py`\n\n1. Import `MissingContentDetector` and `FindingPrioritizer` from `runtime.missing_detector`.\n\n2. In `build_modules()` (around line 70), add a wrapper class and register it:\n\n```python\nclass MissingContentModule:\n    \"\"\"Heartbeat module adapter for MissingContentDetector.\"\"\"\n    def __init__(self, engine):\n        self._detector = MissingContentDetector(stale_days=30)\n        self._prioritizer = FindingPrioritizer()\n        self._engine = engine\n    \n    def run(self):\n        try:\n            findings = self._detector.detect_stale_topics(self._engine)\n            findings.extend(self._detector.detect_orphaned_actions(self._engine))\n            prioritized = self._prioritizer.prioritize(findings, max_surfaced=5)\n            return {\n                'module_name': 'missing_content',\n                'findings': [f.description for f in prioritized],\n                'count': len(findings),\n                'surfaced': len(prioritized),\n            }\n        except Exception as e:\n            return {'module_name': 'missing_content', 'error': str(e)}\n```\n\n3. Add `MissingContentModule(self._engine)` to the modules list (after the existing GapScanner).\n\nNote: The wrapper class is needed because MissingContentDetector doesn't follow the HeartbeatModule protocol directly. Adapt the interface as needed based on what HeartbeatModule expects (check the base class).\n\n## Task 2: Surface findings in health tool\n\nFile: `Code&DBs/Workflow/surfaces/mcp/tools/health.py`\n\nIn `tool_dag_health()` (around line 38), add a `content_health` key to the response dict:\n\n```python\n# After operator_snapshot, before return:\ntry:\n    from runtime.missing_detector import MissingContentDetector, FindingPrioritizer\n    detector = MissingContentDetector(stale_days=30)\n    prioritizer = FindingPrioritizer()\n    # Use the memory engine if available from subsystems\n    engine = _subs().get('memory_engine')\n    if engine:\n        findings = detector.detect_stale_topics(engine)\n        findings.extend(detector.detect_orphaned_actions(engine))\n        prioritized = prioritizer.prioritize(findings, max_surfaced=5)\n        content_health = {\n            'total_findings': len(findings),\n            'top_findings': [{'description': f.description, 'severity': f.severity} for f in prioritized],\n        }\n    else:\n        content_health = {'status': 'skipped', 'reason': 'no memory engine'}\nexcept Exception as e:\n    content_health = {'status': 'error', 'reason': str(e)}\n```\n\nAdd `'content_health': content_health` to the return dict.\n\nKeep changes minimal and surgical.",
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/heartbeat_runner.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/health.py"
+      ],
+      "read_scope": [
+        "Code&DBs/Workflow/runtime/missing_detector.py",
+        "Code&DBs/Workflow/runtime/heartbeat.py"
+      ]
+    },
+    {
+      "label": "p1e_wire_support_ticket_drafts",
+      "agent": "auto/refactor",
+      "prompt": "Wire `runtime/support_ticket_drafts.py` as a deterministic fallback in the task assembly pipeline.\n\n## Task 1: Add pre-dispatch check in task_assembler\n\nFile: `Code&DBs/Workflow/runtime/task_assembler.py`\n\n1. Import from `runtime.support_ticket_drafts`:\n```python\nfrom runtime.support_ticket_drafts import looks_like_ticket_drafting_task, draft_ticket_responses\n```\n\n2. In the `assemble()` method (around line 102), add a check BEFORE the existing `_pre_suggest()` call:\n\n```python\ndef assemble(self, task: str) -> dict:\n    # Fast path: deterministic support ticket drafting (no LLM needed)\n    if looks_like_ticket_drafting_task(task):\n        drafts = draft_ticket_responses(task=task, card={}, upstream_outputs={})\n        if drafts:\n            return {\n                'manifest_id': None,\n                'plan_summary': f'Drafted {len(drafts)} support ticket response(s) deterministically',\n                'drafts': drafts,\n                'source': 'deterministic_support_fallback',\n            }\n    \n    # Existing flow continues...\n    suggestions = self._pre_suggest(task)\n    ...\n```\n\n## Task 2: Register 'support' as a known task type\n\nFile: `Code&DBs/Workflow/runtime/task_type_router.py`\n\nAdd 'support' to `_KNOWN_TASK_TYPES` (around line 24):\n```python\n_KNOWN_TASK_TYPES = frozenset({\n    \"build\", \"architecture\", \"wiring\", \"test\",\n    \"refactor\", \"debate\", \"review\", \"planner\", \"support\",\n})\n```\n\nKeep changes minimal. Do not restructure the task assembler.",
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/task_assembler.py",
+        "Code&DBs/Workflow/runtime/task_type_router.py"
+      ],
+      "read_scope": [
+        "Code&DBs/Workflow/runtime/support_ticket_drafts.py"
+      ]
+    }
+  ]
+}

@@ -385,6 +385,142 @@ def _execute_workflow_command(
     )
 
 
+def _fmt_bytes(b: int | None) -> str:
+    if b is None:
+        return ""
+    if b >= 1 << 30:
+        return f"{b / (1 << 30):.1f}GB"
+    if b >= 1 << 20:
+        return f"{b / (1 << 20):.0f}MB"
+    if b >= 1 << 10:
+        return f"{b / (1 << 10):.0f}KB"
+    return f"{b}B"
+
+
+def _fmt_tokens(n: int | None) -> str:
+    if n is None or n == 0:
+        return ""
+    if n >= 1000:
+        return f"{n / 1000:.1f}K"
+    return str(n)
+
+
+def _render_dashboard_panel(
+    pg,
+    run_id: str,
+    spec_name: str,
+    total_jobs: int,
+    elapsed_seconds: float,
+) -> str:
+    """Build a compact ASCII dashboard panel for emitter.log()."""
+    try:
+        rows = pg.execute(
+            """
+            SELECT
+                wj.label,
+                wj.status,
+                wj.duration_ms,
+                wj.cost_usd,
+                wj.token_input,
+                wj.token_output,
+                wj.resolved_agent,
+                wj.failure_category,
+                wj.last_error_code,
+                wn.cpu_percent,
+                wn.mem_bytes,
+                wj.started_at
+            FROM workflow_jobs wj
+            LEFT JOIN workflow_notifications wn
+                ON wn.run_id = wj.run_id AND wn.job_label = wj.label
+            WHERE wj.run_id = $1
+            ORDER BY wj.created_at ASC
+            """,
+            run_id,
+        )
+    except Exception:
+        return f"[dashboard unavailable for {run_id}]"
+
+    completed = 0
+    total_cost = 0.0
+    total_tok_in = 0
+    total_tok_out = 0
+    running_lines: list[str] = []
+    done_lines: list[str] = []
+    pending_count = 0
+
+    import time as _time
+
+    for r in rows:
+        status = r.get("status") or "pending"
+        label = r.get("label") or "?"
+
+        if status in _TERMINAL_STATUSES:
+            completed += 1
+            cost = r.get("cost_usd") or 0.0
+            total_cost += cost
+            tok_in = r.get("token_input") or 0
+            tok_out = r.get("token_output") or 0
+            total_tok_in += tok_in
+            total_tok_out += tok_out
+            dur = (r.get("duration_ms") or 0) / 1000.0
+            icon = "✓" if status == "succeeded" else "✗"
+            parts = [f"{icon} {label:<20}", f"{dur:>5.1f}s"]
+            cpu = r.get("cpu_percent")
+            mem = r.get("mem_bytes")
+            if cpu is not None:
+                parts.append(f"{cpu:>5.1f}%cpu")
+            if mem:
+                parts.append(f"{_fmt_bytes(mem):>6}")
+            tok_str = f"{_fmt_tokens(tok_in)}→{_fmt_tokens(tok_out)}"
+            if tok_str != "→":
+                parts.append(f"{tok_str:>12}")
+            if cost:
+                parts.append(f"${cost:.4f}")
+            err = r.get("failure_category") or r.get("last_error_code") or ""
+            if err and status != "succeeded":
+                parts.append(f"[{err}]")
+            done_lines.append("  " + "  ".join(parts))
+
+        elif status in ("running", "executing"):
+            started_at = r.get("started_at")
+            if started_at:
+                try:
+                    from datetime import timezone as _tz
+                    now_ts = datetime.now(_tz.utc)
+                    if hasattr(started_at, "tzinfo") and started_at.tzinfo is None:
+                        from datetime import timezone as _tz2
+                        started_at = started_at.replace(tzinfo=_tz2.utc)
+                    job_elapsed = (now_ts - started_at).total_seconds()
+                    elapsed_str = f"{job_elapsed:.0f}s"
+                except Exception:
+                    elapsed_str = "?"
+            else:
+                elapsed_str = "?"
+            running_lines.append(f"  ~ {label:<20} {elapsed_str:>5}  (running)")
+
+        else:
+            pending_count += 1
+
+    lines: list[str] = []
+    # Header
+    cost_str = f"${total_cost:.4f}" if total_cost else "$0"
+    header = f"━━━ {spec_name} | {completed}/{total_jobs} | {cost_str} | {elapsed_seconds:.0f}s ━━━"
+    lines.append(header)
+
+    lines.extend(done_lines)
+    lines.extend(running_lines)
+    if pending_count:
+        lines.append(f"  · {pending_count} pending")
+
+    # Footer totals
+    tok_summary = ""
+    if total_tok_in or total_tok_out:
+        tok_summary = f"  {_fmt_tokens(total_tok_in)} in / {_fmt_tokens(total_tok_out)} out"
+    lines.append(f"  ─ {cost_str}{tok_summary}")
+
+    return "\n".join(lines)
+
+
 def _poll_run_to_completion(
     pg,
     run_id: str,
@@ -395,16 +531,18 @@ def _poll_run_to_completion(
     poll_interval: float = 3.0,
     max_poll_seconds: float = 3600.0,
 ) -> dict[str, Any]:
-    """Poll a workflow run until terminal, emitting per-job progress."""
+    """Poll a workflow run until terminal, emitting a live dashboard panel after each job batch."""
     import time as _time
     from runtime.workflow.unified import get_run_status
+
+    start_mono = _time.monotonic()
 
     if emitter is not None:
         emitter.log(f"Launched {spec_name} ({total_jobs} jobs) — run_id={run_id}")
         emitter.emit(progress=0, total=total_jobs, message=f"Submitted {spec_name}")
 
     seen_terminal: set[str] = set()
-    deadline = _time.monotonic() + max_poll_seconds
+    deadline = start_mono + max_poll_seconds
 
     while _time.monotonic() < deadline:
         _time.sleep(poll_interval)
@@ -412,45 +550,45 @@ def _poll_run_to_completion(
         if status_data is None:
             continue
 
-        # Emit per-job updates for newly terminal jobs
+        new_terminal: list[str] = []
         for j in status_data.get("jobs", []):
             jlabel = j.get("label", "")
             jstatus = j.get("status", "")
             if jstatus in _TERMINAL_STATUSES and jlabel not in seen_terminal:
                 seen_terminal.add(jlabel)
-                agent = j.get("resolved_agent") or j.get("agent_slug", "")
-                dur = j.get("duration_ms", 0)
-                err = j.get("failure_category") or j.get("last_error_code", "")
-                msg = f"{jlabel}: {jstatus}"
-                if agent:
-                    msg += f" [{agent}]"
-                if dur:
-                    msg += f" ({dur / 1000:.1f}s)"
-                if err:
-                    msg += f" — {err}"
-                level = "info" if jstatus == "succeeded" else "error"
-                if emitter is not None:
-                    emitter.log(msg, level=level)
-                    emitter.emit(
-                        progress=len(seen_terminal),
-                        total=total_jobs,
-                        message=msg,
-                    )
+                new_terminal.append(jlabel)
+
+        if new_terminal and emitter is not None:
+            elapsed = _time.monotonic() - start_mono
+            panel = _render_dashboard_panel(pg, run_id, spec_name, total_jobs, elapsed)
+            emitter.log(panel)
+            emitter.emit(
+                progress=len(seen_terminal),
+                total=total_jobs,
+                message=f"{len(seen_terminal)}/{total_jobs} jobs complete",
+            )
 
         run_status = status_data.get("status", "")
         if run_status in _TERMINAL_STATUSES:
             break
 
-    # Build final summary
-    now = datetime.now(timezone.utc)
+    # Final dashboard + summary
+    elapsed = _time.monotonic() - start_mono
     payload = _run_status_payload(pg, run_id)
+    panel = _render_dashboard_panel(pg, run_id, spec_name, total_jobs, elapsed)
+    payload["dashboard"] = panel
     if emitter is not None:
-        passed = sum(1 for j in payload.get("jobs", []) if j.get("status") == "succeeded")
-        failed = total_jobs - passed
+        emitter.log(panel)
+        run_final_status = payload.get("status", "unknown")
+        level = "info" if run_final_status == "succeeded" else "error"
         emitter.log(
-            f"Done: {spec_name} — {payload.get('status', 'unknown')} "
-            f"({passed} passed, {failed} failed, {payload.get('elapsed_seconds', 0):.0f}s)",
-            level="info" if payload.get("status") == "succeeded" else "error",
+            f"Done: {spec_name} — {run_final_status} ({elapsed:.0f}s)",
+            level=level,
+        )
+        emitter.emit(
+            progress=total_jobs,
+            total=total_jobs,
+            message=f"{spec_name} {run_final_status}",
         )
     return payload
 
@@ -735,6 +873,13 @@ def tool_praxis_workflow_validate(params: dict) -> dict:
 
     spec_mod = _workflow_spec_mod()
     try:
+        # Run authoring-level validation for new-format specs
+        raw = spec_mod.load_raw(spec_path)
+        if spec_mod._is_new_authoring_format(raw):
+            ok, errors = spec_mod.validate_authoring_spec(raw)
+            if not ok:
+                return {"valid": False, "error": "Authoring schema errors:\n  " + "\n  ".join(errors)}
+
         spec = spec_mod.WorkflowSpec.load(spec_path)
         from runtime.workflow_validation import (
             _authority_error_result,
@@ -763,16 +908,19 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "USE WHEN: you need to run a workflow spec, check on a running workflow, retry a "
                 "failed job, or cancel a run.\n\n"
                 "WORKFLOW CONTRACT:\n"
-                "  - action='run' submits and streams per-job progress inline (default wait=true).\n"
-                "  - Pass wait=false for fire-and-forget (returns run_id immediately).\n"
-                "  - Progress is emitted via MCP notifications as each job completes.\n"
-                "  - The final return value is the full status payload with all job results.\n"
+                "  - action='run' is the kickoff call. Treat run_id as the authority and follow with "
+                "status or stream reads on separate channels.\n"
+                "  - Non-streaming callers already receive the short kickoff payload with run_id, "
+                "stream_url, and status_url.\n"
+                "  - Streaming MCP callers can still request inline progress polling with wait=true, "
+                "but that is legacy compatibility, not the preferred control flow.\n"
+                "  - Use wait=false to force kickoff-only behavior even when a progress emitter exists.\n"
                 "  - Use action='status' for a snapshot of a running or completed workflow.\n"
                 "  - Read health.likely_failed, health.signals to detect stuck runs.\n"
                 "  - Use kill_if_idle=true on a status call if the run is clearly idle and unhealthy.\n\n"
                 "EXAMPLES:\n"
-                "  Run and wait:    praxis_workflow(action='run', spec_path='artifacts/workflow/my_spec.queue.json')\n"
-                "  Fire-and-forget: praxis_workflow(action='run', spec_path='...', wait=false)\n"
+                "  Launch:          praxis_workflow(action='run', spec_path='artifacts/workflow/my_spec.queue.json')\n"
+                "  Force kickoff:   praxis_workflow(action='run', spec_path='...', wait=false)\n"
                 "  Check status:    praxis_workflow(action='status', run_id='workflow_abc123')\n"
                 "  Retry a failure: praxis_workflow(action='retry', run_id='workflow_abc123', label='build_step')\n"
                 "  Cancel a run:    praxis_workflow(action='cancel', run_id='workflow_abc123')\n"
@@ -786,7 +934,11 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "spec_path": {"type": "string", "description": "Path to a .queue.json spec file. Required for 'run'."},
                     "wait": {
                         "type": "boolean",
-                        "description": "If true (default), poll and stream per-job results inline. If false, return immediately with run_id.",
+                        "description": (
+                            "If true and the MCP caller provides a progress emitter, the tool may keep "
+                            "polling inline and emit progress notifications. If false, always return the "
+                            "kickoff payload immediately with run_id, stream_url, and status_url."
+                        ),
                         "default": True,
                     },
                     "dry_run": {"type": "boolean", "description": "If true, simulate without actual execution.", "default": False},

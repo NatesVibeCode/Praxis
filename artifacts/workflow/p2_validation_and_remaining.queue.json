@@ -1,0 +1,30 @@
+{
+  "name": "p2_validation_and_remaining",
+  "workflow_id": "p2_validation_and_remaining",
+  "jobs": [
+    {
+      "label": "extract_shared_validation",
+      "agent": "auto/refactor",
+      "timeout": 600,
+      "prompt": "ROADMAP: roadmap.extract.shared.validation.layer.from.surfaces.and.runtime\n\nExtract a shared validation layer from surfaces and runtime.\n\nRead surfaces/api/rest.py, surfaces/mcp/tools/, and runtime/workflow/_admission.py. Find where input validation is duplicated across surfaces and runtime.\n\nOBJECTIVE:\n- Create runtime/validation_layer.py — ValidationLayer class with validate_spec_input(spec: dict) -> ValidationResult\n- ValidationResult = dataclass(valid: bool, errors: list[str], normalized: dict)\n- Both surfaces/api and surfaces/mcp import from this layer for spec input validation\n- Runtime admission also calls ValidationLayer before processing\n- Remove at least 2 duplicated validation blocks\n\nSubmit code change summary via praxis_submit_code_change."
+    },
+    {
+      "label": "flatten_compiler_output_builders",
+      "agent": "auto/refactor",
+      "timeout": 300,
+      "prompt": "ROADMAP: roadmap.flatten.compiler.output.builders.py.flat.function.dump\n\nFlatten compiler_output_builders.py flat function dump.\n\nFind compiler_output_builders.py (search for it). Read the file.\n\nOBJECTIVE: This file is likely a flat dump of disconnected functions. Organize it:\n- Group related functions into classes or modules\n- Add a module docstring explaining what each group does\n- Identify and remove any dead/unused functions\n- At minimum: split into 2-3 logical groups with clear names\n\nThis is a readability/organization refactor. Don't change behavior.\n\nSubmit code change summary via praxis_submit_code_change."
+    },
+    {
+      "label": "realtime_field_validation",
+      "agent": "auto/build",
+      "timeout": 600,
+      "prompt": "ROADMAP: roadmap.real.time.field.validation.for.workflow.spec.and.mcp.tool.inputs\n\nImplement real-time field validation for workflow spec and MCP tool inputs.\n\nRead Code&DBs/Workflow/surfaces/mcp/tools/ and Code&DBs/Workflow/surfaces/api/rest.py.\n\nOBJECTIVE: Add immediate field validation at MCP tool boundaries:\n- Create a field_validator.py in surfaces/mcp/ with @validate_fields decorator\n- The decorator checks required fields, types, and enum values before the tool function runs\n- Apply it to at least 3 MCP tools that accept structured input (praxis_workflow, praxis_operator_write, etc.)\n- Returns structured error with field path and constraint on invalid input\n- Also add spec-level validation to the REST POST /workflow-runs endpoint\n\nThis is a developer-facing improvement — better error messages earlier.\n\nSubmit code change summary via praxis_submit_code_change."
+    },
+    {
+      "label": "dependency_sovereignty",
+      "agent": "auto/architecture",
+      "timeout": 300,
+      "prompt": "ROADMAP: roadmap.dependency.sovereignty\n\nDocument and enforce dependency sovereignty and replacement discipline.\n\nRead Code&DBs/Workflow/pyproject.toml and the main runtime imports.\n\nOBJECTIVE:\n- Identify the top 5 external dependencies that would be painful to replace (e.g., asyncpg, uvicorn, httpx)\n- For each: document what it does, what the replacement path would be, and which module is the single choke point\n- Create docs/dependency_sovereignty.md (or similar) with this inventory\n- Identify 1-2 dependencies where the import is scattered (not isolated) and consolidate them behind a thin wrapper\n\nThis is a risk-reduction exercise. Output is the documentation + any consolidation wrappers.\n\nSubmit code change summary via praxis_submit_code_change."
+    }
+  ]
+}

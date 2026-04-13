@@ -1,0 +1,62 @@
+{
+  "name": "release_proof_and_public_naming",
+  "workflow_id": "release_proof_and_public_naming",
+  "phase": "build",
+  "outcome_goal": "Package one replayable release proof with explicit residual risks and sweep the remaining public dispatch-era naming from outward-facing surfaces.",
+  "roadmap_items": [
+    "roadmap_item.release.proof",
+    "roadmap_item.workflow.public_naming_cleanup"
+  ],
+  "anti_requirements": [
+    "Do not call the system release-ready without a replayable proof packet.",
+    "Do not keep public docs and help text speaking a dead dispatch dialect.",
+    "Do not hide residual risks in chat summaries."
+  ],
+  "registry_paths": [
+    "Code&DBs/Workflow/PLATFORM_SPEC.md",
+    "Code&DBs/Workflow/surfaces/api/frontdoor.py",
+    "Code&DBs/Workflow/surfaces/api/workflow_api.py",
+    "Code&DBs/Workflow/surfaces/api/operator_read.py",
+    "Code&DBs/Workflow/tests/integration/test_bounded_native_primary_proof.py",
+    "Code&DBs/Workflow/tests/integration/test_native_default_parallel_proof.py",
+    "Code&DBs/Workflow/tests/integration/test_native_frontdoor.py",
+    "artifacts/workflow/db_only_phase/README.md"
+  ],
+  "target_repo": "/Users/nate/Praxis",
+  "workdir": "/Users/nate/Praxis",
+  "verify": [
+    {
+      "command": "./scripts/workflow.sh validate artifacts/workflow/release_hardening/release_proof_and_public_naming.queue.json"
+    }
+  ],
+  "jobs": [
+    {
+      "label": "release_proof_packet",
+      "agent": "openai/gpt-5.4",
+      "write_scope": [
+        "artifacts/workflow/release_hardening/RELEASE_PROOF.md",
+        "artifacts/workflow/db_only_phase/README.md"
+      ],
+      "read_scope": [
+        "Code&DBs/Workflow/PLATFORM_SPEC.md",
+        "Code&DBs/Workflow/tests/integration/test_bounded_native_primary_proof.py",
+        "Code&DBs/Workflow/tests/integration/test_native_default_parallel_proof.py",
+        "Code&DBs/Workflow/tests/integration/test_native_frontdoor.py",
+        "artifacts/workflow/db_only_phase/README.md"
+      ],
+      "prompt": "Assemble one replayable release proof with explicit commands, evidence paths, and residual-risk accounting. It should be possible to rerun the proof without remembering this chat."
+    },
+    {
+      "label": "public_naming_cleanup",
+      "agent": "openai/gpt-5.4-mini",
+      "write_scope": [
+        "Code&DBs/Workflow/PLATFORM_SPEC.md",
+        "Code&DBs/Workflow/surfaces/api/frontdoor.py",
+        "Code&DBs/Workflow/surfaces/api/workflow_api.py",
+        "Code&DBs/Workflow/surfaces/api/operator_read.py",
+        "artifacts/workflow/db_only_phase/README.md"
+      ],
+      "prompt": "Sweep remaining public dispatch-era naming from docs, outward-facing help text, artifacts, and operator read models. Preserve compatibility only where the repo still has a real runtime contract behind the words."
+    }
+  ]
+}

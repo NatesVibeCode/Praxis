@@ -7,7 +7,7 @@
 - [x] `surfaces/mcp/registry.py` auto-discovers tool modules
 - [x] `praxis_workflow` is documented and enforced as async kickoff only
 - [x] `praxis_workflow(action='status')` exposes health heuristics and optional `kill_if_idle`
-- [x] `surfaces/MCP_SERVER_README.md` documents the separate stream/status channels
+- [x] `docs/MCP.md` and `MCP_SERVER_INDEX.md` document the separate stream/status channels
 - [x] orient output tells agents not to wait on launch
 
 ## Verification Steps

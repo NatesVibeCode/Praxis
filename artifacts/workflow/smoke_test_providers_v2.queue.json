@@ -1,0 +1,26 @@
+{
+  "name": "Provider Smoke Test v2",
+  "phase": "SMOKE",
+  "workflow_id": "smoke_test_providers_v2",
+  "outcome_goal": "Verify all providers can execute in sandbox after auth fix",
+  "jobs": [
+    {
+      "label": "smoke_anthropic_v2",
+      "agent": "anthropic/claude-sonnet-4-6",
+      "prompt": "Reply with exactly: SMOKE_OK_ANTHROPIC",
+      "timeout": 120
+    },
+    {
+      "label": "smoke_openai_v2",
+      "agent": "openai/gpt-5.4-mini",
+      "prompt": "Reply with exactly: SMOKE_OK_OPENAI",
+      "timeout": 120
+    },
+    {
+      "label": "smoke_google_v2",
+      "agent": "google/gemini-3.1-pro-preview",
+      "prompt": "Reply with exactly: SMOKE_OK_GOOGLE",
+      "timeout": 120
+    }
+  ]
+}

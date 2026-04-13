@@ -1,0 +1,33 @@
+{
+  "name": "action_memory_parity_review",
+  "queue_id": "action_mem_review_001",
+  "phase": "review",
+  "outcome_goal": "Review the semantic parity and carry-forward implementation plan before final verification",
+  "jobs": [
+    {
+      "label": "review_api_semantic_parity",
+      "agent": "openai/gpt-5.4-mini",
+      "prompt": "Review the semantic parity gap across API versus MCP surfaces.\n\nYou are working in /Users/nate/Praxis.\n\nRead these files first:\n- Code&DBs/Workflow/surfaces/mcp/subsystems.py\n- Code&DBs/Workflow/surfaces/api/handlers/_subsystems.py\n- Code&DBs/Workflow/runtime/compiler.py\n- Code&DBs/Workflow/tests/unit/test_runtime_compiler_json.py\n\nTask:\n1. Confirm the concrete parity gaps between MCP and API/compiler entrypoints for embeddings.\n2. Recommend the smallest safe patch set to align behavior without adding new abstraction layers.\n3. Call out any regression risks or tests that absolutely must be added.\n4. Keep the answer focused on exact files, exact wiring, and exact failure modes.\n\nDo not edit files. Produce a concise review memo with findings, recommendations, and test commands.",
+      "scope_read": [
+        "Code&DBs/Workflow/surfaces/mcp/subsystems.py",
+        "Code&DBs/Workflow/surfaces/api/handlers/_subsystems.py",
+        "Code&DBs/Workflow/runtime/compiler.py",
+        "Code&DBs/Workflow/tests/unit/test_runtime_compiler_json.py"
+      ],
+      "max_retries": 1
+    },
+    {
+      "label": "review_carry_forward_hook",
+      "agent": "anthropic/claude-sonnet-4-6",
+      "prompt": "Review the safest first implementation hook for automatic carry-forward persistence.\n\nYou are working in /Users/nate/Praxis.\n\nRead these files first:\n- Code&DBs/Workflow/runtime/session_carry.py\n- Code&DBs/Workflow/runtime/chat_orchestrator.py\n- Code&DBs/Workflow/surfaces/mcp/tools/session.py\n- Code&DBs/Workflow/surfaces/api/handlers/workflow_notify.py\n- Code&DBs/Workflow/tests/unit/test_session_and_compositor.py\n\nTask:\n1. Identify the safest real completion path for saving carry-forward packs in a way that matches current architecture.\n2. Recommend the smallest viable payload to persist first: objective, decisions, constraints, artifacts, next actions, risks, open questions.\n3. Flag any bad hook points that would create fake memory or noisy packs.\n4. Suggest focused tests for the chosen hook.\n\nDo not edit files. Produce a concise recommendation memo with exact hook points and exact tests.",
+      "scope_read": [
+        "Code&DBs/Workflow/runtime/session_carry.py",
+        "Code&DBs/Workflow/runtime/chat_orchestrator.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/session.py",
+        "Code&DBs/Workflow/surfaces/api/handlers/workflow_notify.py",
+        "Code&DBs/Workflow/tests/unit/test_session_and_compositor.py"
+      ],
+      "max_retries": 1
+    }
+  ]
+}

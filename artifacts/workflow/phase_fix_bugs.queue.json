@@ -1,0 +1,18 @@
+{
+  "name": "phase_fix_ui_bugs",
+  "queue_id": "fix_bugs_001",
+  "phase": "build",
+  "outcome_goal": "Fix all UI bugs: empty states, capitalization, broken endpoints, CSS cleanup",
+  "jobs": [
+    {
+      "label": "fix_text_and_states",
+      "agent": "google/gemini-3.1-pro-preview",
+      "prompt": "You are working in /Users/nate/Praxis/Code&DBs/Workflow/surfaces/app/src/.\n\nTwo tasks:\n\n1. Create src/utils/format.ts with these utility functions:\n\n```typescript\nexport function capitalizeLabel(s: string): string {\n  return s.replace(/[_-]/g, ' ').replace(/\\b\\w/g, c => c.toUpperCase()).trim();\n}\n\nexport function formatStatus(s: string): string {\n  return capitalizeLabel(s);\n}\n\nexport function truncate(s: string, max: number): string {\n  return s.length > max ? s.slice(0, max) + '...' : s;\n}\n```\n\n2. Update these modules to use capitalizeLabel for all auto-generated labels:\n\n- src/modules/display/DataTableModule.tsx: when auto-deriving columns from property_definitions, use capitalizeLabel(p.name) for label\n- src/modules/display/KeyValueModule.tsx: when displaying object properties, use capitalizeLabel(key) for label\n- src/modules/composite/BugCardModule.tsx: capitalize severity and status badges\n- src/modules/display/StatusGridModule.tsx: capitalize status text\n\nAlso ensure every module that shows 'No data' or empty state shows a helpful message instead:\n- DataTableModule: 'No records found' instead of 'No data'\n- KeyValueModule when subscribeSelection but nothing selected: 'Click a row to view details'\n- BugCardModule: 'No bugs found'\n- ChartModule with empty data: 'No chart data available'\n\nWrite all files."
+    },
+    {
+      "label": "fix_css_and_grid",
+      "agent": "google/gemini-3.1-pro-preview",
+      "prompt": "You are working in /Users/nate/Praxis/Code&DBs/Workflow/surfaces/app/src/.\n\nFix CSS issues in the quadrant grid:\n\n1. src/grid/QuadrantGrid.css:\n- Don't render empty dashed-border cells for unfilled quadrants. Change .quadrant-empty to be invisible (display: none or visibility: hidden)\n- Ensure grid columns don't crush below 200px even at narrow viewports\n- Add smooth transition on quadrant-cell for hover/drag states\n\n2. src/grid/QuadrantGrid.tsx:\n- Don't render empty quadrant cells at all (return null for cells with no module AND no neighbor span)\n- This prevents the dashed box clutter\n\n3. Verify the grid looks clean at 1400px, 1024px, and 768px widths.\n\nWrite the updated files."
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "name": "dependency_provider_runtime",
+  "workflow_id": "dependency_provider_runtime",
+  "phase": "build",
+  "outcome_goal": "Make first-party provider transport and error mapping explicit enough to stand on their own instead of depending on CLI-only behavior or route-fallback folklore.",
+  "roadmap_alignment": "roadmap_item.dependency.provider.adapter.runtime",
+  "anti_requirements": [
+    "Do not treat the CLI adapter as the canonical provider runtime.",
+    "Do not split transport truth from route and fallback truth.",
+    "Do not widen into generic model-catalog cleanup."
+  ],
+  "registry_paths": [
+    "Code&DBs/Workflow/adapters/llm_client.py",
+    "Code&DBs/Workflow/adapters/cli_llm.py",
+    "Code&DBs/Workflow/adapters/provider_registry.py",
+    "Code&DBs/Workflow/runtime/provider_route_runtime.py",
+    "Code&DBs/Workflow/registry/provider_routing.py",
+    "Code&DBs/Workflow/registry/provider_fallback.py"
+  ],
+  "target_repo": "/Users/nate/Praxis",
+  "workdir": "/Users/nate/Praxis",
+  "verify_refs": [
+    "verify_ref.python.py_compile.test"
+  ],
+  "jobs": [
+    {
+      "label": "provider_adapter_contract",
+      "agent": "openai/gpt-5.4-mini",
+      "write_scope": [
+        "Code&DBs/Workflow/adapters/llm_client.py",
+        "Code&DBs/Workflow/adapters/cli_llm.py",
+        "Code&DBs/Workflow/adapters/provider_registry.py",
+        "Code&DBs/Workflow/tests/contracts/test_deterministic_task_adapter_contract.py"
+      ],
+      "prompt": "Define the first-party provider adapter contract explicitly enough that transport, retry, and error mapping stop depending on CLI-only execution behavior."
+    },
+    {
+      "label": "provider_runtime_route_proof",
+      "agent": "openai/gpt-5.4",
+      "depends_on": [
+        "provider_adapter_contract"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/provider_route_runtime.py",
+        "Code&DBs/Workflow/registry/provider_routing.py",
+        "Code&DBs/Workflow/registry/provider_fallback.py",
+        "Code&DBs/Workflow/tests/integration/test_provider_route_runtime_wiring.py",
+        "Code&DBs/Workflow/tests/integration/test_provider_route_authority.py",
+        "Code&DBs/Workflow/tests/integration/test_provider_route_control_tower.py"
+      ],
+      "prompt": "Prove the runtime route and fallback seams are explicit, observable, and compatible with the first-party provider adapter contract. No implicit CLI bridge and no mystery failover."
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "iPaaS Wave 3 Event Replay Retry",
+  "phase": "IPAAS-W3",
+  "workflow_id": "ipaas_wave3_event_replay_retry",
+  "jobs": [
+    {
+      "label": "ipaas_w3_event_replay_v2",
+      "agent": "anthropic/claude-sonnet-4-6",
+      "prompt": "OBJECTIVE: Add event replay and at-least-once delivery guarantees to the webhook ingestion pipeline.\n\nCONTEXT:\n- The webhook receiver stores received webhooks in webhook_events table but processing is fire-and-forget.\n- If an agent job dies mid-processing, the webhook event is lost.\n- We need: acknowledge after successful processing, replay un-acked events, dead-letter after max retries.\n\nDELIVERABLES:\n\n1. Create Code&DBs/Databases/migrations/workflow/096_event_replay.sql:\n   ALTER TABLE webhook_events ADD COLUMN IF NOT EXISTS:\n   - attempt_count INT DEFAULT 0\n   - max_attempts INT DEFAULT 3\n   - next_retry_at TIMESTAMPTZ\n   - dead_lettered_at TIMESTAMPTZ\n   - acknowledged_at TIMESTAMPTZ\n   - acknowledged_by TEXT\n\n2. Create Code&DBs/Workflow/runtime/integrations/event_replay.py:\n   - claim_next_events(conn, endpoint_id=None, limit=10) — SELECT FOR UPDATE SKIP LOCKED\n   - acknowledge_event(conn, event_id, acknowledged_by)\n   - fail_event(conn, event_id, error_message) — exponential backoff, dead letter after max\n   - replay_event(conn, event_id) — reset dead-lettered event\n   - get_dead_letters(conn, endpoint_id=None, limit=50)\n   - get_replay_stats(conn) — counts by status\n\n3. Create Code&DBs/Workflow/tests/test_event_replay.py\n\nPATTERNS: conn.execute(sql, param1, param2), FOR UPDATE SKIP LOCKED, dataclasses.\nDO NOT reference any files that may not exist. Create all files fresh.",
+      "timeout": 300
+    },
+    {
+      "label": "ipaas_w3_review_v2",
+      "agent": "auto/review",
+      "depends_on": ["ipaas_w3_event_replay_v2"],
+      "prompt": "Review event replay code: FOR UPDATE SKIP LOCKED correctness, exponential backoff formula, dead letter threshold, SQL parameterization.",
+      "timeout": 180
+    }
+  ]
+}

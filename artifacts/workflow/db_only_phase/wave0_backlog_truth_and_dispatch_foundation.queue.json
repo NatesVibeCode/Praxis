@@ -1,0 +1,115 @@
+{
+  "name": "db_only_phase_wave0_backlog_truth_and_dispatch_foundation",
+  "workflow_id": "db_only_phase_wave0",
+  "phase": "build",
+  "outcome_goal": "Backlog truth, dispatch recovery, bootstrap parity, and dirty-file collision guard are DB-owned and runnable without markdown roadmap mirrors.",
+  "roadmap_items": [
+    "roadmap_item.maintenance.alpha.foundation",
+    "roadmap_item.phase.method.bootstrap",
+    "roadmap_item.dispatch.truth.contract"
+  ],
+  "absorbed_bug_ids": [
+    "BUG-6D64923C",
+    "BUG-C1A2FB09",
+    "BUG-C487AEB4",
+    "BUG-CDB5894B",
+    "BUG-D3DE8841",
+    "BUG-D76B1EA9"
+  ],
+  "anti_requirements": [
+    "Do not recreate planning/ROADMAP_TIERS.md.",
+    "Do not leave backlog hygiene in chat-only memory.",
+    "Do not parallelize jobs that write dirty core workflow or routing files until collision guard runs."
+  ],
+  "target_repo": "/Users/nate/Praxis",
+  "workdir": "/Users/nate/Praxis",
+  "verify_refs": [
+    {
+      "command": "./scripts/workflow.sh validate artifacts/workflow/db_only_phase/wave0_backlog_truth_and_dispatch_foundation.queue.json"
+    }
+  ],
+  "jobs": [
+    {
+      "label": "collision_guard",
+      "agent": "openai/gpt-5.3-codex-spark",
+      "write_scope": [
+        "artifacts/workflow/db_only_phase/COLLISION_GUARD.md"
+      ],
+      "read_scope": [
+        "Code&DBs/Workflow/registry/agent_config.py",
+        "Code&DBs/Workflow/runtime/task_type_router.py",
+        "Code&DBs/Workflow/runtime/workflow/unified.py",
+        "scripts/workflow.sh",
+        "scripts/test.sh"
+      ],
+      "prompt": "Refresh `artifacts/workflow/db_only_phase/COLLISION_GUARD.md` from the live dirty worktree. Record which files must remain non-parallel for the next waves, and make ownership explicit for any packet that touches `registry/agent_config.py`, `runtime/task_type_router.py`, `runtime/workflow/unified.py`, `scripts/workflow.sh`, or `scripts/test.sh`. Do not fix runtime behavior in this packet; only sharpen the guard surface."
+    },
+    {
+      "label": "stale_bug_audit_and_close",
+      "agent": "openai/gpt-5.4",
+      "write_scope": [
+        "artifacts/workflow/db_only_phase/db_only_phase_writeback.sql"
+      ],
+      "read_scope": [
+        "artifacts/workflow/db_only_phase/README.md",
+        "artifacts/workflow/db_only_phase/db_only_phase_writeback.sql",
+        "Code&DBs/Workflow/runtime/workflow/unified.py",
+        "Code&DBs/Workflow/runtime/debate_metrics.py",
+        "Code&DBs/Workflow/runtime/debate_workflow.py",
+        "Code&DBs/Workflow/memory/retrieval.py",
+        "Code&DBs/Workflow/memory/retrieval_telemetry.py",
+        "Code&DBs/Workflow/runtime/reference_catalog.py",
+        "Code&DBs/Workflow/runtime/triggers.py"
+      ],
+      "prompt": "Audit the legacy unwired-surface bugs against the actual repo and DB state. Keep `BUG-661DC83D`, `BUG-0388B701`, `BUG-718C3494`, `BUG-965E983B`, and `BUG-D0DC2D32` open unless live evidence disproves them. Treat `BUG-CDB5894B`, `BUG-D3DE8841`, `BUG-D76B1EA9`, `BUG-C487AEB4`, and `BUG-C1A2FB09` as stale-open or verification-only closure candidates if the current repo still proves that call. Update `artifacts/workflow/db_only_phase/db_only_phase_writeback.sql` with explicit resolution summaries; do not widen into runtime fixes."
+    },
+    {
+      "label": "noise_bug_bulk_close",
+      "agent": "openai/gpt-5.3-codex-spark",
+      "depends_on": [
+        "stale_bug_audit_and_close"
+      ],
+      "write_scope": [
+        "artifacts/workflow/db_only_phase/db_only_phase_writeback.sql"
+      ],
+      "prompt": "Refine the Wave 0 backlog-hygiene SQL so synthetic placeholders, repeated dispatch-failure clones, MCP test artifacts, and opaque `a_*/b_*` runtime stubs are bulk-closed with one durable resolution summary. Exclude still-actionable architectural bugs, especially `BUG-6D64923C`. Keep the logic rerunnable and deterministic."
+    },
+    {
+      "label": "dispatch_truth_repair",
+      "agent": "openai/gpt-5.4-mini",
+      "depends_on": [
+        "collision_guard"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/workflow/unified.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/workflow.py",
+        "Code&DBs/Workflow/runtime/integrations/dag.py"
+      ],
+      "read_scope": [
+        "Code&DBs/Workflow/runtime/workflow/unified.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/workflow.py",
+        "Code&DBs/Workflow/runtime/integrations/dag.py"
+      ],
+      "prompt": "Finish the async dispatch truth contract for `BUG-6D64923C`. Keep submit/status durable and async-only, keep wait unsupported when it would cross tool-call boundaries, and make stuck or idle run recovery explicit instead of stranding orchestrations. Work only in the unified dispatch and MCP/integration surfaces needed for submit and status truth."
+    },
+    {
+      "label": "bootstrap_surface_parity",
+      "agent": "openai/gpt-5.4-mini",
+      "depends_on": [
+        "collision_guard"
+      ],
+      "write_scope": [
+        "scripts/workflow.sh",
+        "scripts/test.sh",
+        "artifacts/workflow/authority_cleanup/README.md",
+        "artifacts/workflow/authority_cleanup/authority_cleanup_contracts.queue.json",
+        "artifacts/workflow/authority_cleanup/authority_cleanup_dispatch_packets.queue.json",
+        "artifacts/workflow/authority_cleanup/authority_cleanup_inventory.queue.json",
+        "artifacts/workflow/authority_cleanup/authority_cleanup_provider_runtime.queue.json",
+        "artifacts/workflow/authority_cleanup/authority_cleanup_seam_cutover.queue.json",
+        "artifacts/workflow/authority_cleanup/authority_cleanup_validation_review.queue.json"
+      ],
+      "prompt": "Align repo-local workflow and test front doors with the actually supported DB-only surfaces. Fix stale `artifacts/dispatch/...` references in the authority-cleanup pack so they point to `artifacts/workflow/...`, keep `scripts/workflow.sh` and `scripts/test.sh` as the repo front doors, and do not reintroduce markdown roadmap gating."
+    }
+  ]
+}

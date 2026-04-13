@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from runtime.compiler import (
     _detect_triggers,
+    _enrich_binding_ledger,
     _extract_references,
     _generate_jobs,
     _resolve_references,
@@ -182,3 +183,32 @@ def test_detect_triggers_maps_integration_and_schedule_language() -> None:
     assert triggers[0]["source_ref"] == "@gmail/search"
     assert triggers[1]["event_type"] == "schedule"
     assert triggers[1]["cron_expression"] == "0 2 * * *"
+
+
+def test_enrich_binding_ledger_brands_praxis_tool_targets() -> None:
+    class _Conn:
+        def execute(self, query: str) -> list[dict[str, str]]:
+            assert "FROM integration_registry" in query
+            return [
+                {
+                    "id": "praxis_workflow",
+                    "name": "Workflow",
+                    "description": "Run and inspect workflows",
+                    "provider": "mcp",
+                    "auth_status": "connected",
+                }
+            ]
+
+    ledger = [
+        {
+            "binding_id": "binding-1",
+            "accepted_target": {"target_ref": "@praxis_workflow/kickoff"},
+        }
+    ]
+
+    enriched = _enrich_binding_ledger(ledger, _Conn())
+
+    assert (
+        enriched[0]["accepted_target"]["enrichment"]["integration_name"]
+        == "Praxis: Workflow"
+    )

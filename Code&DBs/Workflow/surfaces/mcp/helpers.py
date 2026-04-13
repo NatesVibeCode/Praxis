@@ -1,6 +1,7 @@
 """Shared utility functions for MCP tool handlers."""
 from __future__ import annotations
 
+from dataclasses import fields, is_dataclass
 from datetime import datetime
 from typing import Any
 
@@ -30,8 +31,11 @@ def _serialize(obj: Any, *, strip_empty: bool = False) -> Any:
         if strip_empty:
             out = [v for v in out if not _is_empty(v)]
         return out
-    if hasattr(obj, "__dataclass_fields__"):
-        out = {k: _serialize(v, strip_empty=strip_empty) for k, v in obj.__dict__.items()}
+    if is_dataclass(obj):
+        out = {
+            field.name: _serialize(getattr(obj, field.name), strip_empty=strip_empty)
+            for field in fields(obj)
+        }
         if strip_empty:
             out = {k: v for k, v in out.items() if not _is_empty(v)}
         return out

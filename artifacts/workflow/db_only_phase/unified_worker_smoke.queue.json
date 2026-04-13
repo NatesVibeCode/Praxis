@@ -1,0 +1,15 @@
+{
+  "name": "db_only_phase_unified_worker_smoke",
+  "workflow_id": "db_only_phase_unified_worker_smoke",
+  "phase": "build",
+  "outcome_goal": "Prove the launchd queue worker is the unified worker and that live jobs write static output paths and canonical receipt rows.",
+  "target_repo": "/Users/nate/Praxis",
+  "workdir": "/Users/nate/Praxis",
+  "jobs": [
+    {
+      "label": "worker_smoke_static_ids",
+      "agent": "openai/gpt-5.4-mini",
+      "prompt": "Reply with exactly `WORKER_SMOKE_OK` and do not use any tools."
+    }
+  ]
+}

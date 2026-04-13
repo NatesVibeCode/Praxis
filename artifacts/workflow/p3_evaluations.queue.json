@@ -1,0 +1,24 @@
+{
+  "name": "p3_evaluations",
+  "workflow_id": "p3_evaluations",
+  "jobs": [
+    {
+      "label": "db_driver_eval",
+      "agent": "auto/architecture",
+      "timeout": 300,
+      "prompt": "ROADMAP: roadmap.dependency.database.driver.replacement\n\nEvaluate database driver replacement options.\n\nRead Code&DBs/Workflow/pyproject.toml and grep for asyncpg/psycopg imports.\n\nOBJECTIVE: Produce a concise evaluation report (submit via praxis_submit_research_result):\n- Current driver: what we use, where it's imported, coupling level\n- Top 2 alternatives (e.g., psycopg3, databases lib) with pros/cons\n- Migration complexity estimate (hours)\n- Recommendation: replace now, replace later, or keep\n- Any isolation wrappers already in place that would make migration easier"
+    },
+    {
+      "label": "pgvector_eval",
+      "agent": "auto/architecture",
+      "timeout": 300,
+      "prompt": "ROADMAP: roadmap.dependency.pgvector.engine.replacement\n\nEvaluate pgvector replacement options.\n\nRead the vector-related code (grep for pgvector, vector, embedding). Find how embeddings are stored and queried.\n\nOBJECTIVE: Produce a concise evaluation report (submit via praxis_submit_research_result):\n- Current usage: what tables/columns use pgvector, which queries use <-> operator\n- Top alternatives: Qdrant, Weaviate, Chroma, Milvus — pick the 2 most relevant\n- Migration complexity estimate\n- Recommendation: keep pgvector (it's already in Postgres), migrate to standalone vector DB, or hybrid\n- Most important: is pgvector actually a bottleneck or is it fine as-is?"
+    },
+    {
+      "label": "docker_eval",
+      "agent": "auto/architecture",
+      "timeout": 300,
+      "prompt": "ROADMAP: roadmap.dependency.docker.engine.replacement\n\nEvaluate Docker engine replacement for sandbox execution.\n\nGrep for docker, container, subprocess in the runtime sandbox code. Find how sandboxed agents are spawned.\n\nOBJECTIVE: Produce a concise evaluation report (submit via praxis_submit_research_result):\n- Current sandbox mechanism: how agents are isolated (subprocess, Docker, none?)\n- If Docker is used: which APIs, what for\n- Top alternatives: Firecracker, gVisor, Podman, or just enhanced subprocess isolation\n- Recommendation: is Docker actually being used? If not, close this as N/A. If yes, what's the migration path?"
+    }
+  ]
+}

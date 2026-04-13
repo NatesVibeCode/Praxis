@@ -1,0 +1,128 @@
+{
+  "name": "compile_spine_ir_contracts",
+  "workflow_id": "compile_spine_ir_contracts",
+  "phase": "build",
+  "outcome_goal": "Establish the canonical compile artifacts and shared compile kernel so meaning, planning, and verification authority no longer depend on prose-only or prompt-only runtime seams.",
+  "roadmap_alignment": "roadmap_item.authority.cleanup.contracts",
+  "anti_requirements": [
+    "Do not cut runtime execution over to packet-only behavior in this packet.",
+    "Do not reintroduce hardcoded capability catalogs or verifier command fabrication.",
+    "Do not widen into UI redesign or background index services."
+  ],
+  "registry_paths": [
+    "Code&DBs/Databases/migrations/workflow/006_platform_authority_schema.sql",
+    "Code&DBs/Workflow/runtime/compiler.py",
+    "Code&DBs/Workflow/runtime/spec_compiler.py",
+    "Code&DBs/Workflow/runtime/operating_model_planner.py",
+    "Code&DBs/Workflow/runtime/workflow_spec.py",
+    "Code&DBs/Workflow/runtime/verification.py",
+    "Code&DBs/Workflow/surfaces/api/handlers/workflow_query.py"
+  ],
+  "target_repo": "/Users/nate/Praxis",
+  "workdir": "/Users/nate/Praxis",
+  "verify": [
+    {
+      "command": "./scripts/workflow.sh validate artifacts/workflow/authority_cleanup/compile_spine_ir_contracts.queue.json"
+    }
+  ],
+  "jobs": [
+    {
+      "label": "compile_ir_contracts_schema",
+      "agent": "openai/gpt-5.4-mini",
+      "outcome_goal": "Add the shared compile artifact store and the DB-backed authority rows required for graph-backed definitions, plan revisions, and verifier refs.",
+      "anti_vibe_rule": "One contract seam only; no stealth packet-runtime cutover.",
+      "scope": {
+        "read": [
+          "Code&DBs/Databases/migrations/workflow/006_platform_authority_schema.sql",
+          "Code&DBs/Workflow/runtime/verification.py",
+          "Code&DBs/Workflow/runtime/workflow_spec.py",
+          "planning/roadmap_reset_and_seed.sql",
+          "artifacts/workflow/authority_cleanup/README.md"
+        ],
+        "write": [
+          "Code&DBs/Databases/migrations/workflow/",
+          "Code&DBs/Workflow/runtime/verification.py",
+          "Code&DBs/Workflow/runtime/workflow_spec.py"
+        ]
+      },
+      "verify": [
+        {
+          "command": "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m py_compile 'Code&DBs/Workflow/runtime/verification.py' 'Code&DBs/Workflow/runtime/workflow_spec.py'"
+        },
+        {
+          "command": "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_workflow_cli_validate.py'"
+        }
+      ],
+      "prompt": "OBJECTIVE:\nAdd the canonical schema and contract rows for the compile spine.\n\nTASK:\nIntroduce the generic compile artifact store shared by definition, plan, and packet lineage. Add or normalize DB-backed authority rows for `capability_catalog` and `verify_refs`, while keeping legacy raw verification command shapes read-compatible only during migration. Update the workflow-spec and verification seams so `verify_refs` is the canonical emitted surface and missing authority rows fail explicitly.\n\nCONSTRAINTS:\nDo not cut runtime execution over to packet-only behavior. Do not add a daemonized indexer or any UI redesign. Preserve compatibility reads for old verification payloads, but stop treating them as canonical producer output.\n\nOUTPUT_CONTRACT:\nShip the migration(s) and runtime contract changes that make compile artifacts and verifier refs DB-owned and revision-aware.\n\nACCEPTANCE_CRITERIA:\n- Canonical compile artifacts exist for definition, plan, and packet lineage.\n- `verify_refs` is the canonical compile/runtime verification surface.\n- Missing capability or verification authority fails closed.\n- Legacy verification command shapes remain read-compatible only.\n\nSTOP_BOUNDARY:\nDo not implement packet runtime execution or content-addressed reuse here."
+    },
+    {
+      "label": "compile_kernel_refactor",
+      "agent": "openai/gpt-5.4",
+      "depends_on": [
+        "compile_ir_contracts_schema"
+      ],
+      "outcome_goal": "Rebase prose compile, minimal-intent compile, and planning onto one shared graph-backed compile kernel.",
+      "anti_vibe_rule": "No giant god-object compiler; expose a kernel plus thin frontends.",
+      "scope": {
+        "read": [
+          "Code&DBs/Workflow/runtime/compiler.py",
+          "Code&DBs/Workflow/runtime/spec_compiler.py",
+          "Code&DBs/Workflow/runtime/operating_model_planner.py",
+          "Code&DBs/Workflow/runtime/workflow_spec.py",
+          "Code&DBs/Workflow/tests/unit/test_runtime_compiler_json.py",
+          "Code&DBs/Workflow/tests/unit/test_workflow_query_handlers.py",
+          "Code&DBs/Workflow/tests/test_compiler.py"
+        ],
+        "write": [
+          "Code&DBs/Workflow/runtime/compiler.py",
+          "Code&DBs/Workflow/runtime/spec_compiler.py",
+          "Code&DBs/Workflow/runtime/operating_model_planner.py",
+          "Code&DBs/Workflow/runtime/"
+        ]
+      },
+      "verify": [
+        {
+          "command": "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m py_compile 'Code&DBs/Workflow/runtime/compiler.py' 'Code&DBs/Workflow/runtime/spec_compiler.py' 'Code&DBs/Workflow/runtime/operating_model_planner.py'"
+        },
+        {
+          "command": "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_runtime_compiler_json.py' 'Code&DBs/Workflow/tests/unit/test_workflow_query_handlers.py' 'Code&DBs/Workflow/tests/test_compiler.py'"
+        }
+      ],
+      "prompt": "OBJECTIVE:\nCreate the shared compile kernel that makes graph-backed definitions the canonical meaning authority.\n\nTASK:\nRefactor the compile surfaces so `runtime/compiler.py`, `runtime/spec_compiler.py`, and `runtime/operating_model_planner.py` share one compile kernel. The kernel must emit a canonical `definition_graph`, with `compiled_prose`, `narrative_blocks`, and `draft_flow` treated as derived projections for compatibility. Preserve `definition_revision`, keep the existing read surfaces working, and avoid turning the kernel into a monolithic one-off service.\n\nCONSTRAINTS:\nDo not cut runtime execution over to packet-only behavior. Do not add background index refresh services. Do not create a second parallel definition model that competes with the existing operating-model flow.\n\nOUTPUT_CONTRACT:\nShared compile kernel code plus the adapter changes required for prose compile, minimal-intent compile, and plan generation to use it.\n\nACCEPTANCE_CRITERIA:\n- Definitions carry canonical `definition_graph` authority.\n- Existing compile/read surfaces still expose compatible projections.\n- Compiler behavior no longer depends on prose-only authority.\n- Tests prove graph-backed definitions and compatibility projections.\n\nSTOP_BOUNDARY:\nDo not implement execution packet persistence or runtime cutover in this packet."
+    },
+    {
+      "label": "definition_plan_bridge",
+      "agent": "openai/gpt-5.4-mini",
+      "depends_on": [
+        "compile_kernel_refactor"
+      ],
+      "outcome_goal": "Bridge definition and plan revisions cleanly so explicit jobs skip plan compile while abstract definitions remain revision-linked and re-plannable.",
+      "anti_vibe_rule": "No hidden replanning for already-explicit jobs.",
+      "scope": {
+        "read": [
+          "Code&DBs/Workflow/runtime/operating_model_planner.py",
+          "Code&DBs/Workflow/runtime/integrations/workflow.py",
+          "Code&DBs/Workflow/runtime/triggers.py",
+          "Code&DBs/Workflow/surfaces/api/handlers/workflow_query.py",
+          "Code&DBs/Workflow/tests/unit/test_workflow_query_handlers.py",
+          "Code&DBs/Workflow/tests/unit/test_triggers.py"
+        ],
+        "write": [
+          "Code&DBs/Workflow/runtime/operating_model_planner.py",
+          "Code&DBs/Workflow/runtime/integrations/workflow.py",
+          "Code&DBs/Workflow/runtime/triggers.py",
+          "Code&DBs/Workflow/surfaces/api/handlers/workflow_query.py"
+        ]
+      },
+      "verify": [
+        {
+          "command": "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m py_compile 'Code&DBs/Workflow/runtime/operating_model_planner.py' 'Code&DBs/Workflow/runtime/integrations/workflow.py' 'Code&DBs/Workflow/runtime/triggers.py' 'Code&DBs/Workflow/surfaces/api/handlers/workflow_query.py'"
+        },
+        {
+          "command": "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_workflow_query_handlers.py' 'Code&DBs/Workflow/tests/unit/test_triggers.py'"
+        }
+      ],
+      "prompt": "OBJECTIVE:\nMake definition-to-plan revision linkage explicit and fail-closed.\n\nTASK:\nAdd `plan_revision` to the compiled-plan surfaces, preserve `definition_revision`, and enforce the runtime rule that explicit `jobs[]` specs skip plan compile and only receive compile hydration. Update workflow invocation, plan persistence, and trigger replay paths so stale plans are invalidated by revision mismatch and abstract definitions remain re-plannable.\n\nCONSTRAINTS:\nDo not cut over runtime packet execution. Do not add shadow packets or content-addressed caches here. Keep explicit-job behavior deterministic and non-replanning.\n\nOUTPUT_CONTRACT:\nRevision-aware bridge changes across planner, API, invocation, and trigger seams.\n\nACCEPTANCE_CRITERIA:\n- Compiled plans carry `plan_revision` plus `definition_revision`.\n- Explicit `jobs[]` specs skip plan compile.\n- Stale plans are rejected or invalidated cleanly.\n- Tests prove revision-link behavior across plan and trigger surfaces.\n\nSTOP_BOUNDARY:\nDo not add execution-packet storage or packet provenance in this packet."
+    }
+  ]
+}

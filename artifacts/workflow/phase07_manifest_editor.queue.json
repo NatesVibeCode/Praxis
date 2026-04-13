@@ -1,0 +1,18 @@
+{
+  "name": "phase07_manifest_editor",
+  "queue_id": "phase07_001",
+  "phase": "build",
+  "outcome_goal": "Split-pane raw JSON editor with live preview",
+  "jobs": [
+    {
+      "label": "p7_manifest_editor",
+      "agent": "anthropic/claude-opus-4-6",
+      "prompt": "You are working in /Users/nate/Praxis/Code&DBs/Workflow/surfaces/app/src/.\n\nCreate src/grid/ManifestEditor.tsx:\n\nA split-pane editor: JSON textarea on the left, live QuadrantGrid preview on the right.\n\nProps: { manifestId: string }\n\nBehavior:\n- Fetch manifest from /api/manifests/{manifestId}\n- Left pane: <textarea> with the manifest JSON, syntax highlighted (just monospace dark bg is fine)\n- Right pane: <QuadrantGrid manifest={parsed} /> rendered in a scaled-down preview\n- On every keystroke (debounced 300ms): try to parse JSON\n  - If valid: update preview, clear error\n  - If invalid: show parse error inline, keep last valid preview\n- Save button: POST to /api/manifests/save\n- Format button: pretty-print the JSON\n\nStyling:\n- Full height (calc(100vh - 60px) for nav)\n- Left pane: 50% width, dark bg, monospace font, no wrap\n- Right pane: 50% width, scaled to 60% with CSS transform for preview\n- Resizable divider between panes\n- Error bar: red background at bottom of left pane when JSON is invalid\n\nCreate src/grid/ManifestEditor.css for styles.\n\nWrite both files."
+    },
+    {
+      "label": "p7_editor_route",
+      "agent": "google/gemini-3.1-pro-preview",
+      "prompt": "You are working in /Users/nate/Praxis/Code&DBs/Workflow/surfaces/app/src/.\n\nUpdate App.tsx to support the manifest editor route:\n\n- When URL has ?manifest=editor&target=<id>, render ManifestEditor instead of QuadrantGrid\n- Import ManifestEditor from './grid/ManifestEditor'\n- The detection should happen before the V1/V2 manifest check\n- Add an 'Edit' link in the NavBar that goes to ?manifest=editor&target=<current_manifest_id>\n\nAlso add 'Editor' to the NavBar links if we're currently viewing the editor.\n\nWrite the updated App.tsx."
+    }
+  ]
+}

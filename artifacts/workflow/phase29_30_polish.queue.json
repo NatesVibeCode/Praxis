@@ -1,0 +1,23 @@
+{
+  "name": "phase29_30_polish",
+  "queue_id": "phase29_30_001",
+  "phase": "build",
+  "outcome_goal": "Final polish: enhanced nav, browser history, home manifest, loading states, error boundaries, TypeScript check",
+  "jobs": [
+    {
+      "label": "p29_enhanced_nav",
+      "agent": "google/gemini-3.1-pro-preview",
+      "prompt": "You are working in /Users/nate/Praxis/Code&DBs/Workflow/surfaces/app/src/App.tsx.\n\nEnhance the NavBar:\n1. Add links: Home, CRM, Objects, Workflows, Editor (Workflows goes to a workflow-builder manifest)\n2. Add app switcher dropdown that lists recent manifests from /api/templates\n3. Add breadcrumb showing current manifest name\n4. Add browser history support: use history.pushState on manifest navigation, listen to popstate events to reload manifest\n5. Make NavBar responsive: collapse to hamburger menu on small screens\n\nAlso update the home manifest in Postgres to include: IntentBox (A1 4x1), StatRow with platform metrics (B1 4x1), ActivityFeed (C1 2x2), RegistryBrowser (C3 2x2).\n\nWrite the updated App.tsx."
+    },
+    {
+      "label": "p30_final_polish",
+      "agent": "openai/gpt-5.4",
+      "prompt": "You are working in /Users/nate/Praxis/Code&DBs/Workflow/surfaces/app/src/.\n\nPolish pass across all modules:\n\n1. Add loading skeletons to all modules that fetch data: show a pulsing gray rectangle while loading instead of blank space. Add a shared LoadingSkeleton component at src/primitives/LoadingSkeleton.tsx.\n\n2. Ensure all modules handle null/undefined config gracefully — no crashes on missing config keys.\n\n3. Add keyboard shortcuts:\n   - Cmd+K: focus RefinementBar (if exists)\n   - Escape: close any open panel (ConfigEditor, ModulePalette, ContextMenu)\n   - Tab: move focus between modules\n\n4. Verify all CSS uses design tokens (no hardcoded colors).\n\n5. Add a global error boundary in App.tsx that catches and displays errors gracefully.\n\nWrite updated files for: LoadingSkeleton.tsx (NEW), App.tsx (error boundary + keyboard shortcuts)."
+    },
+    {
+      "label": "p30_typescript_check",
+      "agent": "google/gemini-3.1-pro-preview",
+      "prompt": "You are working in /Users/nate/Praxis/Code&DBs/Workflow/surfaces/app/.\n\nRun the TypeScript compiler and fix ALL errors:\n\n1. Run: cd /Users/nate/Praxis/Code&DBs/Workflow/surfaces/app && /opt/homebrew/Cellar/node/25.6.1/bin/npx tsc --noEmit 2>&1\n2. For each error: read the file, understand the issue, fix it\n3. Common fixes:\n   - Missing imports: add them\n   - Type mismatches: add casts or fix types\n   - Missing properties: add optional chaining or defaults\n   - world.set() calls: should use world.applyDeltas() or the set() method we added\n4. Re-run tsc --noEmit until zero errors\n5. Report: number of errors fixed, files modified\n\nDo NOT change any functionality — only fix type errors."
+    }
+  ]
+}

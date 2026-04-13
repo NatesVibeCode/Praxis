@@ -26,6 +26,7 @@ Also search when the user asks:
 ### 1. Code Discovery (semantic search over AST fingerprints)
 
 ```
+workflow discover "what you need in plain English"
 praxis_discover(query="what you need in plain English")
 ```
 
@@ -41,6 +42,7 @@ You can filter by kind: `module`, `class`, `function`, `subsystem`.
 ### 2. Knowledge Graph (decisions, patterns, architecture)
 
 ```
+workflow recall "topic"
 praxis_recall(query="topic")
 ```
 
@@ -49,10 +51,21 @@ Search for prior decisions, documented patterns, and architectural context. Use 
 ### 3. Database (receipts, bugs, constraints)
 
 ```
-praxis_query("your question in plain English")
+workflow query "your question in plain English"
+praxis_query(question="your question in plain English")
 ```
 
 Routes automatically to the right subsystem. Use when you need to know about past workflow results, known bugs, or learned constraints.
+
+### 3.5. Schema and safety help
+
+When you are unsure which tool shape to use, ask the catalog before guessing:
+
+```
+workflow tools describe praxis_discover
+workflow tools describe praxis_recall
+workflow tools describe praxis_query
+```
 
 ### 4. Direct code search (when you know what you're looking for)
 
@@ -74,6 +87,7 @@ After searching, decide:
 When you've written or modified code, update the search index:
 
 ```
+workflow discover reindex --yes
 praxis_discover(action="reindex")
 ```
 
@@ -84,3 +98,4 @@ This ensures future searches find your new code.
 - **Naming blindness**: The function you need might exist under a completely different name. `praxis_discover` handles this — use behavioral descriptions, not guessed names.
 - **Layer duplication**: Before adding a new abstraction layer, search for existing ones. The codebase already has routing, validation, and execution infrastructure.
 - **Reinventing DB queries**: Many common queries are already in surfaces or the bug tracker. Search before writing raw SQL.
+- **Catalog blindness**: if you cannot remember the exact tool shape, use `workflow tools describe <tool>` instead of inventing fields from memory.

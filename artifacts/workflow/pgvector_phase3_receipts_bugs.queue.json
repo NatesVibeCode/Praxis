@@ -1,0 +1,50 @@
+{
+  "name": "pgvector_phase3_receipts_bugs",
+  "queue_id": "pgvec_p3_001",
+  "phase": "build",
+  "outcome_goal": "Receipt search and bug tracker use vector similarity for semantic matching; bug filing surfaces near-duplicates",
+  "jobs": [
+    {
+      "label": "p3_receipt_embed_on_write",
+      "agent": "openai/gpt-5.4-mini",
+      "prompt": "Add embedding generation to receipt enrichment so new receipts get vector embeddings on insert.\n\nRead Code&DBs/Workflow/runtime/receipt_enrichment.py first.\n\nThe ReceiptSearchIndex class has a method that inserts enriched receipts into the receipt_search table. Find that method and add embedding generation.\n\nChanges:\n1. Accept an optional EmbeddingService in ReceiptSearchIndex.__init__\n2. When inserting a receipt, build embed text from the searchable content (the same text that goes into the tsvector — typically job_label + agent + status + failure_analysis concatenated)\n3. If embedder is available, call embedder.embed_one(text) and include the vector in the INSERT:\n   Include: embedding = $N::vector\n   Use EmbeddingService.vector_literal(vec) to format\n4. If embedder is None, skip (leave embedding NULL)\n\nImport: from runtime.embedding_service import EmbeddingService\n\nKeep changes minimal — only add to the insert/upsert path.",
+      "scope_write": ["Code&DBs/Workflow/runtime/receipt_enrichment.py"],
+      "scope_read": [
+        "Code&DBs/Workflow/runtime/receipt_enrichment.py",
+        "Code&DBs/Workflow/runtime/embedding_service.py"
+      ],
+      "max_retries": 1
+    },
+    {
+      "label": "p3_receipt_semantic_search",
+      "agent": "anthropic/claude-sonnet-4-6",
+      "prompt": "Add semantic vector search to the receipt search tool, blending with existing FTS.\n\nRead the receipt search implementation:\n- Code&DBs/Workflow/runtime/receipt_enrichment.py (the ReceiptSearchIndex.search method)\n- Code&DBs/Workflow/surfaces/mcp/tools/evidence.py (the dag_receipt_search MCP tool handler)\n\nChanges to ReceiptSearchIndex.search():\n1. Accept optional embedder and conn parameters (or store them from __init__)\n2. If embedder is available:\n   a. Embed the query: vec = embedder.embed_one(query)\n   b. Run vector similarity search:\n      SELECT receipt_id, 1 - (embedding <=> $1::vector) AS cosine_sim\n      FROM receipt_search\n      WHERE embedding IS NOT NULL AND 1 - (embedding <=> $1::vector) >= 0.3\n      ORDER BY embedding <=> $1::vector LIMIT {limit * 2}\n   c. Apply optional status/agent filters to the vector query too\n3. Merge FTS results and vector results using Reciprocal Rank Fusion (RRF with k=60):\n   - Score = sum(1/(k + rank_in_source)) across sources where result appears\n   - This is the same fusion strategy used in module_indexer.py search method\n4. Return merged results sorted by fused score\n5. If embedder is None, fall back to existing FTS-only behavior (backward compatible)\n\nUpdate the MCP tool handler to pass the embedder through from subsystems.\n\nUse the existing EmbeddingService from subsystems.get_embedding_service().",
+      "scope_write": [
+        "Code&DBs/Workflow/runtime/receipt_enrichment.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/evidence.py"
+      ],
+      "scope_read": [
+        "Code&DBs/Workflow/runtime/receipt_enrichment.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/evidence.py",
+        "Code&DBs/Workflow/runtime/embedding_service.py",
+        "Code&DBs/Workflow/runtime/module_indexer.py"
+      ],
+      "max_retries": 1
+    },
+    {
+      "label": "p3_bug_embed_and_dedup",
+      "agent": "anthropic/claude-sonnet-4-6",
+      "prompt": "Add vector embeddings and near-duplicate detection to the bug tracker.\n\nRead Code&DBs/Workflow/runtime/bug_tracker.py first.\n\nChanges:\n\n1. BugTracker.__init__: accept optional EmbeddingService\n\n2. On bug filing (the method that INSERTs into bugs table):\n   a. Build embed text: title + ' ' + description\n   b. Embed: vec = embedder.embed_one(text)\n   c. Before inserting, search for near-duplicates:\n      SELECT bug_id, title, status, severity,\n             1 - (embedding <=> $1::vector) AS similarity\n      FROM bugs\n      WHERE embedding IS NOT NULL\n        AND 1 - (embedding <=> $1::vector) >= 0.85\n      ORDER BY embedding <=> $1::vector\n      LIMIT 5\n   d. If near-duplicates found, include them in the return value as a 'similar_bugs' field\n   e. Still insert the new bug (don't block filing), but surface the matches so the caller can decide\n   f. Include the embedding in the INSERT\n\n3. On bug search:\n   a. If embedder available, run vector search alongside FTS\n   b. Merge with RRF (k=60) like receipt search\n   c. Fall back to FTS-only if no embedder\n\n4. Update the MCP tool handler in Code&DBs/Workflow/surfaces/mcp/tools/bugs.py:\n   a. Pass embedder from subsystems\n   b. When filing a bug, if similar_bugs returned, include them in the tool response so the user sees potential duplicates\n\nImport: from runtime.embedding_service import EmbeddingService\nFormat vectors with: EmbeddingService.vector_literal(vec)",
+      "scope_write": [
+        "Code&DBs/Workflow/runtime/bug_tracker.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/bugs.py"
+      ],
+      "scope_read": [
+        "Code&DBs/Workflow/runtime/bug_tracker.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/bugs.py",
+        "Code&DBs/Workflow/runtime/embedding_service.py"
+      ],
+      "max_retries": 1
+    }
+  ]
+}

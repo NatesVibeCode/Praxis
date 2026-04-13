@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import sys
 from dataclasses import dataclass
 from typing import Any, Literal
 
 TransportKind = Literal["cli", "api", "mcp", "unknown"]
 ExecutionLane = Literal["local", "remote", "unknown"]
 SandboxProviderKind = Literal[
-    "seatbelt_local",
     "docker_local",
     "cloudflare_remote",
     "unknown",
@@ -47,7 +45,7 @@ def _sandbox_provider(agent_config: Any) -> str:
     transport = _transport(agent_config)
     if transport == "mcp":
         return "cloudflare_remote"
-    return "seatbelt_local" if sys.platform == "darwin" else "docker_local"
+    return "docker_local"
 
 
 def _lane_for_provider(provider: str) -> ExecutionLane:

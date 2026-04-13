@@ -1,0 +1,187 @@
+{
+  "name": "Name Cleanup Python",
+  "phase": "W",
+  "queue_id": "name_cleanup_python_20260413",
+  "outcome_goal": "All DAG/Dag naming removed from Python source. NativeDagInstance -> NativeWorkflowInstance, NativeDagFrontdoor -> NativeWorkflowFrontdoor, X-DAG headers -> X-Praxis, dag-dispatch -> praxis-dispatch, all docstrings updated.",
+  "anti_requirements": ["Do NOT rename cascade_inactive_to_routes or _mine_failure_cascades — those are legitimate domain terms", "Do NOT rename any Postgres trigger or function names", "Do NOT modify migration SQL files"],
+  "jobs": [
+    {
+      "label": "rename_native_instance",
+      "agent": "openai/gpt-5.4",
+      "task_type": "refactor",
+      "description": "Rename NativeDagInstance -> NativeWorkflowInstance across 14 files",
+      "outcome_goal": "NativeDagInstance no longer exists anywhere in Python source; NativeWorkflowInstance imports correctly",
+      "prompt": "Rename the class `NativeDagInstance` to `NativeWorkflowInstance` in the Praxis Engine codebase.\n\n1. In `Code&DBs/Workflow/runtime/instance.py`:\n   - Line 1: change docstring from 'Repo-local native DAG instance resolution' to 'Repo-local native workflow instance resolution'\n   - Line 3: change 'native DAG operations' to 'native workflow operations'\n   - Line 33: change 'native DAG instance cannot be resolved' to 'native workflow instance cannot be resolved'\n   - Line 48: rename class `NativeDagInstance` to `NativeWorkflowInstance`\n   - Line 49: change docstring from 'Resolved repo-local native DAG instance contract' to 'Resolved repo-local native workflow instance contract'\n\n2. Update ALL imports of `NativeDagInstance` to `NativeWorkflowInstance` in these files:\n   - `Code&DBs/Workflow/surfaces/api/frontdoor.py`\n   - `Code&DBs/Workflow/surfaces/api/native_operator_surface.py`\n   - `Code&DBs/Workflow/surfaces/api/operator_write.py`\n   - `Code&DBs/Workflow/surfaces/api/_operator_repository.py`\n   - `Code&DBs/Workflow/surfaces/api/native_scheduler.py`\n   - `Code&DBs/Workflow/surfaces/api/_smoke_service.py`\n   - `Code&DBs/Workflow/tests/integration/test_native_frontdoor.py`\n   - `Code&DBs/Workflow/tests/integration/test_native_scheduler_runtime.py`\n   - `Code&DBs/Workflow/tests/integration/test_native_review_repair_fanout_flow.py`\n   - `Code&DBs/Workflow/tests/integration/test_native_default_parallel_proof.py`\n   - `Code&DBs/Workflow/tests/integration/test_native_daily_ops_smoke_loop.py`\n   - `Code&DBs/Workflow/tests/integration/test_native_self_hosted_smoke.py`\n   - `Code&DBs/Workflow/tests/integration/test_operator_path_recurring_flow_adoption.py`\n\nAlso update any type annotations, variable names, or string literals that reference `NativeDagInstance`.\n\nDo NOT rename `NativeInstanceResolutionError` — that name is fine as-is.",
+      "read": [
+        "Code&DBs/Workflow/runtime/instance.py",
+        "Code&DBs/Workflow/surfaces/api/frontdoor.py",
+        "Code&DBs/Workflow/surfaces/api/native_operator_surface.py",
+        "Code&DBs/Workflow/surfaces/api/operator_write.py",
+        "Code&DBs/Workflow/surfaces/api/_operator_repository.py",
+        "Code&DBs/Workflow/surfaces/api/native_scheduler.py",
+        "Code&DBs/Workflow/surfaces/api/_smoke_service.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/runtime/instance.py",
+        "Code&DBs/Workflow/surfaces/api/frontdoor.py",
+        "Code&DBs/Workflow/surfaces/api/native_operator_surface.py",
+        "Code&DBs/Workflow/surfaces/api/operator_write.py",
+        "Code&DBs/Workflow/surfaces/api/_operator_repository.py",
+        "Code&DBs/Workflow/surfaces/api/native_scheduler.py",
+        "Code&DBs/Workflow/surfaces/api/_smoke_service.py",
+        "Code&DBs/Workflow/tests/integration/test_native_frontdoor.py",
+        "Code&DBs/Workflow/tests/integration/test_native_scheduler_runtime.py",
+        "Code&DBs/Workflow/tests/integration/test_native_review_repair_fanout_flow.py",
+        "Code&DBs/Workflow/tests/integration/test_native_default_parallel_proof.py",
+        "Code&DBs/Workflow/tests/integration/test_native_daily_ops_smoke_loop.py",
+        "Code&DBs/Workflow/tests/integration/test_native_self_hosted_smoke.py",
+        "Code&DBs/Workflow/tests/integration/test_operator_path_recurring_flow_adoption.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis/Code\\&DBs/Workflow && python3 -c 'from runtime.instance import NativeWorkflowInstance; print(\"OK\")' && ! grep -rn 'NativeDagInstance' . --include='*.py' | grep -v __pycache__"
+    },
+    {
+      "label": "rename_native_frontdoor",
+      "agent": "openai/gpt-5.4",
+      "task_type": "refactor",
+      "description": "Rename NativeDagFrontdoor -> NativeWorkflowFrontdoor across 4 files",
+      "outcome_goal": "NativeDagFrontdoor no longer exists; NativeWorkflowFrontdoor exports correctly in __all__",
+      "prompt": "Rename the class `NativeDagFrontdoor` to `NativeWorkflowFrontdoor` in the Praxis Engine codebase.\n\n1. In `Code&DBs/Workflow/surfaces/api/frontdoor.py`:\n   - Line 610: rename class `NativeDagFrontdoor` to `NativeWorkflowFrontdoor`\n   - Line 611: update docstring if it mentions 'DAG'\n   - Update the `__all__` export list (around line 902) to use `NativeWorkflowFrontdoor`\n\n2. Update ALL imports of `NativeDagFrontdoor` to `NativeWorkflowFrontdoor` in:\n   - `Code&DBs/Workflow/surfaces/api/_smoke_service.py`\n   - `Code&DBs/Workflow/tests/integration/test_native_frontdoor.py`\n   - `Code&DBs/Workflow/tests/integration/test_native_self_hosted_smoke.py`\n\nAlso update any type annotations or variable names that reference `NativeDagFrontdoor`.",
+      "read": [
+        "Code&DBs/Workflow/surfaces/api/frontdoor.py",
+        "Code&DBs/Workflow/surfaces/api/_smoke_service.py",
+        "Code&DBs/Workflow/tests/integration/test_native_frontdoor.py",
+        "Code&DBs/Workflow/tests/integration/test_native_self_hosted_smoke.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/surfaces/api/frontdoor.py",
+        "Code&DBs/Workflow/surfaces/api/_smoke_service.py",
+        "Code&DBs/Workflow/tests/integration/test_native_frontdoor.py",
+        "Code&DBs/Workflow/tests/integration/test_native_self_hosted_smoke.py"
+      ],
+      "verify_command": "grep -q 'NativeWorkflowFrontdoor' /Users/nate/Praxis/Code\\&DBs/Workflow/surfaces/api/frontdoor.py && ! grep -rn 'NativeDagFrontdoor' /Users/nate/Praxis/Code\\&DBs/Workflow/ --include='*.py' | grep -v __pycache__"
+    },
+    {
+      "label": "rename_http_headers",
+      "agent": "openai/gpt-5.4-mini",
+      "task_type": "refactor",
+      "description": "Rename X-DAG-* HTTP headers to X-Praxis-*",
+      "outcome_goal": "No X-DAG- headers remain in the codebase",
+      "prompt": "In `Code&DBs/Workflow/surfaces/api/handlers/workflow_mcp.py`:\n\n1. Line 1: change module docstring from 'HTTP bridge for the DAG MCP surface' to 'HTTP bridge for the Praxis Engine MCP surface'\n2. Line 23: rename header `X-DAG-Allowed-MCP-Tools` to `X-Praxis-Allowed-MCP-Tools`\n3. Line 45: rename header `X-DAG-Workflow-Token` to `X-Praxis-Workflow-Token`\n\nThese are the only occurrences. Make sure string literals match exactly.",
+      "read": ["Code&DBs/Workflow/surfaces/api/handlers/workflow_mcp.py"],
+      "write": ["Code&DBs/Workflow/surfaces/api/handlers/workflow_mcp.py"],
+      "verify_command": "grep -q 'X-Praxis-Allowed-MCP-Tools' /Users/nate/Praxis/Code\\&DBs/Workflow/surfaces/api/handlers/workflow_mcp.py && grep -q 'X-Praxis-Workflow-Token' /Users/nate/Praxis/Code\\&DBs/Workflow/surfaces/api/handlers/workflow_mcp.py && ! grep -q 'X-DAG-' /Users/nate/Praxis/Code\\&DBs/Workflow/surfaces/api/handlers/workflow_mcp.py"
+    },
+    {
+      "label": "rename_user_agents",
+      "agent": "openai/gpt-5.4-mini",
+      "task_type": "refactor",
+      "description": "Rename DAG user-agent strings to Praxis",
+      "outcome_goal": "No DAG user-agent strings remain",
+      "prompt": "Update user-agent strings in two files:\n\n1. In `Code&DBs/Workflow/runtime/github_integration.py`:\n   - Line 74: change `dag-workflow-github-integration/1.0` to `praxis-workflow-github-integration/1.0`\n   - Line 174: same change if it appears again\n   - Also update any other 'DAG' references in comments/docstrings in this file\n\n2. In `Code&DBs/Workflow/adapters/api_task.py`:\n   - Line 50: change `DAG-APITaskAdapter/1.0` to `Praxis-APITaskAdapter/1.0`\n   - Also update any 'DAG' references in comments/docstrings in this file",
+      "read": [
+        "Code&DBs/Workflow/runtime/github_integration.py",
+        "Code&DBs/Workflow/adapters/api_task.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/runtime/github_integration.py",
+        "Code&DBs/Workflow/adapters/api_task.py"
+      ],
+      "verify_command": "grep -q 'praxis-workflow-github-integration' /Users/nate/Praxis/Code\\&DBs/Workflow/runtime/github_integration.py && grep -q 'Praxis-APITaskAdapter' /Users/nate/Praxis/Code\\&DBs/Workflow/adapters/api_task.py"
+    },
+    {
+      "label": "rename_integration_registry",
+      "agent": "openai/gpt-5.4-mini",
+      "task_type": "refactor",
+      "description": "Rename dag-dispatch -> praxis-dispatch in integration registry sync",
+      "outcome_goal": "No dag-dispatch or provider='dag' in static integrations",
+      "prompt": "In `Code&DBs/Workflow/registry/integration_registry_sync.py`, update the _STATIC_INTEGRATIONS list:\n\n1. Line 21: change `\"id\": \"dag-dispatch\"` to `\"id\": \"praxis-dispatch\"`\n2. Line 22: change `\"name\": \"DAG Dispatch\"` to `\"name\": \"Praxis Dispatch\"`\n3. Line 24: change `\"provider\": \"dag\"` to `\"provider\": \"praxis\"`\n4. Line 28: change description 'Submit a workflow job to the DAG dispatch runtime' to 'Submit a workflow job to the Praxis Engine runtime'\n5. Line 48: change `\"provider\": \"dag\"` to `\"provider\": \"praxis\"` (notifications entry)\n\nKeep the webhook entry unchanged (it has provider: 'http').",
+      "read": ["Code&DBs/Workflow/registry/integration_registry_sync.py"],
+      "write": ["Code&DBs/Workflow/registry/integration_registry_sync.py"],
+      "verify_command": "grep -q '\"praxis-dispatch\"' /Users/nate/Praxis/Code\\&DBs/Workflow/registry/integration_registry_sync.py && ! grep -q '\"dag-dispatch\"' /Users/nate/Praxis/Code\\&DBs/Workflow/registry/integration_registry_sync.py && ! grep -q '\"provider\": \"dag\"' /Users/nate/Praxis/Code\\&DBs/Workflow/registry/integration_registry_sync.py"
+    },
+    {
+      "label": "rename_docstrings_runtime",
+      "agent": "openai/gpt-5.4",
+      "task_type": "refactor",
+      "description": "Update all DAG docstrings/comments in runtime/ directory",
+      "outcome_goal": "No DAG references in runtime/ docstrings except cascade_inactive_to_routes and _mine_failure_cascades",
+      "prompt": "Search all Python files in `Code&DBs/Workflow/runtime/` for docstrings and comments containing 'DAG', 'Dag', or 'dag' (case-insensitive). Replace with the appropriate Praxis naming:\n\n- 'native DAG' -> 'native workflow'\n- 'DAG operations' -> 'workflow operations'\n- 'DAG instance' -> 'workflow instance'\n- 'DAG dispatch' -> 'workflow dispatch'\n- 'DAG runtime' -> 'Praxis Engine runtime'\n- 'DAG execution' -> 'workflow execution'\n- 'DAG spec' -> 'workflow spec'\n- 'workflow DAG' -> 'workflow graph'\n- 'Dag Project' -> 'Praxis'\n- 'DAG autonomous engineering' -> 'Praxis autonomous engineering'\n\nIMPORTANT EXCLUSIONS — do NOT rename these:\n- `cascade_inactive_to_routes` (legitimate SQL cascade term)\n- `_mine_failure_cascades` (legitimate domain term)\n- Any reference to 'DAG' meaning directed acyclic graph in a generic computer science context\n\nKey files to check:\n- runtime/instance.py (lines 1-8 already covered by rename_native_instance, skip those)\n- runtime/health.py (line 1)\n- runtime/execution/__init__.py (line 1)\n- runtime/execution/dependency.py (line 1)\n- runtime/condition_evaluator.py (line 4)\n- runtime/task_assembler.py (lines 83, 88 — change 'DAG Workflow' executor name to 'Praxis Workflow')\n- Any other files in runtime/ that grep finds\n\nRun: grep -rn 'DAG\\|Dag\\|dag' Code&DBs/Workflow/runtime/ --include='*.py' | grep -v __pycache__ | grep -v cascade_inactive | grep -v _mine_failure | grep -v 'import\\|from ' to find all targets.",
+      "read": [
+        "Code&DBs/Workflow/runtime/health.py",
+        "Code&DBs/Workflow/runtime/execution/__init__.py",
+        "Code&DBs/Workflow/runtime/execution/dependency.py",
+        "Code&DBs/Workflow/runtime/condition_evaluator.py",
+        "Code&DBs/Workflow/runtime/task_assembler.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/runtime/health.py",
+        "Code&DBs/Workflow/runtime/execution/__init__.py",
+        "Code&DBs/Workflow/runtime/execution/dependency.py",
+        "Code&DBs/Workflow/runtime/condition_evaluator.py",
+        "Code&DBs/Workflow/runtime/task_assembler.py"
+      ],
+      "verify_command": "! grep -rn 'native DAG\\|DAG operations\\|DAG instance\\|DAG dispatch\\|DAG runtime\\|DAG execution\\|Dag Project\\|DAG Workflow' /Users/nate/Praxis/Code\\&DBs/Workflow/runtime/ --include='*.py' | grep -v __pycache__ | grep -v cascade_inactive | grep -v _mine_failure"
+    },
+    {
+      "label": "rename_docstrings_surfaces",
+      "agent": "openai/gpt-5.4",
+      "task_type": "refactor",
+      "description": "Update all DAG docstrings/comments in adapters/ and surfaces/",
+      "outcome_goal": "No DAG references in adapters/ or surfaces/ docstrings",
+      "prompt": "Search all Python files in `Code&DBs/Workflow/adapters/` and `Code&DBs/Workflow/surfaces/` for docstrings and comments containing 'DAG', 'Dag', or 'dag'. Replace with Praxis naming:\n\n- 'DAG MCP surface' -> 'Praxis Engine MCP surface'\n- 'DAG node' -> 'workflow node'\n- 'Dag Project workflow runner' -> 'Praxis Engine workflow runner'\n- 'DAG autonomous engineering control plane' -> 'Praxis autonomous engineering control plane'\n- 'Start the DAG REST API server' -> 'Start the Praxis REST API server'\n- 'native DAG operations' -> 'native workflow operations'\n- Any other 'DAG'/'Dag' references in comments/docstrings\n\nKey files:\n- adapters/output_parser_adapter.py (line 1)\n- adapters/verify_adapter.py (line 1)\n- adapters/file_writer_adapter.py (line 1)\n- adapters/context_adapter.py (line 1)\n- adapters/deterministic.py (lines 133, 250)\n- surfaces/api/native_ops.py (lines 1, 70)\n- surfaces/cli/workflow_runner.py (lines 89, 674)\n- surfaces/cli/commands/operate.py (lines 821, 833)\n- surfaces/mcp/tools/research_workflow.py (line 234)\n\nRun: grep -rn 'DAG\\|Dag\\|dag' Code&DBs/Workflow/adapters/ Code&DBs/Workflow/surfaces/ --include='*.py' | grep -v __pycache__ | grep -v 'import\\|from ' to find all targets.\n\nDo NOT modify the HTTP headers or class names — those are handled by other jobs.",
+      "read": [
+        "Code&DBs/Workflow/adapters/output_parser_adapter.py",
+        "Code&DBs/Workflow/adapters/verify_adapter.py",
+        "Code&DBs/Workflow/adapters/file_writer_adapter.py",
+        "Code&DBs/Workflow/adapters/context_adapter.py",
+        "Code&DBs/Workflow/surfaces/api/native_ops.py",
+        "Code&DBs/Workflow/surfaces/cli/workflow_runner.py",
+        "Code&DBs/Workflow/surfaces/cli/commands/operate.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/research_workflow.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/adapters/output_parser_adapter.py",
+        "Code&DBs/Workflow/adapters/verify_adapter.py",
+        "Code&DBs/Workflow/adapters/file_writer_adapter.py",
+        "Code&DBs/Workflow/adapters/context_adapter.py",
+        "Code&DBs/Workflow/adapters/deterministic.py",
+        "Code&DBs/Workflow/surfaces/api/native_ops.py",
+        "Code&DBs/Workflow/surfaces/cli/workflow_runner.py",
+        "Code&DBs/Workflow/surfaces/cli/commands/operate.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/research_workflow.py"
+      ],
+      "verify_command": "! grep -rn 'DAG MCP\\|DAG node\\|Dag Project\\|DAG autonomous\\|DAG REST\\|native DAG' /Users/nate/Praxis/Code\\&DBs/Workflow/adapters/ /Users/nate/Praxis/Code\\&DBs/Workflow/surfaces/ --include='*.py' | grep -v __pycache__ | grep -v cascade_inactive"
+    },
+    {
+      "label": "rename_cli_help",
+      "agent": "openai/gpt-5.4-mini",
+      "task_type": "refactor",
+      "description": "Update CLI help text from DAG to Praxis",
+      "outcome_goal": "CLI --help shows Praxis Engine, not DAG/Dag",
+      "prompt": "Update CLI-facing text in these files:\n\n1. `Code&DBs/Workflow/surfaces/cli/workflow_cli.py`:\n   - Line 1: change module docstring from 'Dag Project workflow runner' (or similar) to 'Praxis Engine workflow runner'\n   - Line 539 (argparse description): change any 'DAG'/'Dag' reference to 'Praxis Engine'\n\n2. `Code&DBs/Workflow/surfaces/cli/workflow_runner.py`:\n   - Line 89: update docstring\n   - Any other 'DAG'/'Dag' references in user-facing help text\n\n3. `Code&DBs/Workflow/surfaces/cli/commands/operate.py`:\n   - Lines 821, 833: change 'Start the DAG REST API server' to 'Start the Praxis REST API server'\n\nOnly change user-facing strings (help text, descriptions, docstrings). Do not change variable names or internal logic.",
+      "read": [
+        "Code&DBs/Workflow/surfaces/cli/workflow_cli.py",
+        "Code&DBs/Workflow/surfaces/cli/workflow_runner.py",
+        "Code&DBs/Workflow/surfaces/cli/commands/operate.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/surfaces/cli/workflow_cli.py",
+        "Code&DBs/Workflow/surfaces/cli/workflow_runner.py",
+        "Code&DBs/Workflow/surfaces/cli/commands/operate.py"
+      ],
+      "verify_command": "! grep -rn 'Dag Project\\|DAG REST\\|DAG workflow runner' /Users/nate/Praxis/Code\\&DBs/Workflow/surfaces/cli/ --include='*.py' | grep -v __pycache__"
+    },
+    {
+      "label": "verify_python",
+      "agent": "openai/gpt-5.4-mini",
+      "task_type": "review",
+      "depends_on": ["rename_native_instance", "rename_native_frontdoor", "rename_http_headers", "rename_user_agents", "rename_integration_registry", "rename_docstrings_runtime", "rename_docstrings_surfaces", "rename_cli_help"],
+      "description": "Final verification sweep for any remaining DAG references in Python",
+      "outcome_goal": "Zero remaining DAG/Dag references in Python source (excluding legitimate cascade terms)",
+      "prompt": "Run a comprehensive grep sweep across all Python files in Code&DBs/Workflow/ for any remaining 'DAG', 'Dag', or 'dag' references that should have been renamed.\n\nRun: grep -rn 'NativeDagInstance\\|NativeDagFrontdoor\\|X-DAG-\\|dag-dispatch\\|dag-project\\|DAG-APITask\\|dag-workflow-github\\|DAG Dispatch\\|DAG Workflow\\|Dag Project\\|DAG REST\\|DAG MCP\\|DAG node\\|native DAG\\|DAG operations\\|DAG instance\\|DAG dispatch\\|DAG runtime\\|DAG execution\\|DAG autonomous' Code&DBs/Workflow/ --include='*.py' | grep -v __pycache__ | grep -v cascade_inactive | grep -v _mine_failure\n\nIf any hits are found, fix them by applying the same naming rules:\n- 'DAG' in branding context -> 'Praxis' or 'Praxis Engine'\n- 'DAG' in domain context -> 'workflow' or 'workflow graph'\n- Class/function names: follow the pattern established by other jobs\n\nAlso verify Python imports work: python3 -c 'from runtime.instance import NativeWorkflowInstance; from surfaces.api.frontdoor import NativeWorkflowFrontdoor; print(\"OK\")'",
+      "read": ["Code&DBs/Workflow/runtime/instance.py", "Code&DBs/Workflow/surfaces/api/frontdoor.py"],
+      "write": [],
+      "verify_command": "cd /Users/nate/Praxis/Code\\&DBs/Workflow && ! grep -rn 'NativeDagInstance\\|NativeDagFrontdoor\\|X-DAG-\\|dag-dispatch\\|DAG-APITask\\|dag-workflow-github' . --include='*.py' | grep -v __pycache__"
+    }
+  ]
+}

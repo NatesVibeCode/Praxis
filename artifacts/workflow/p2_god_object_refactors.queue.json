@@ -1,0 +1,42 @@
+{
+  "name": "p2_god_object_refactors",
+  "workflow_id": "p2_god_object_refactors",
+  "jobs": [
+    {
+      "label": "split_observability_hub",
+      "agent": "auto/refactor",
+      "timeout": 600,
+      "prompt": "ROADMAP: roadmap.split.observabilityhub.into.receiptingestor.autobugfiler.and.operatorsignaler\n\nSplit ObservabilityHub into ReceiptIngestor, AutoBugFiler, and OperatorSignaler.\n\nFind ObservabilityHub (search for it with grep). Read the class and understand its responsibilities.\n\nOBJECTIVE:\n- Create runtime/receipt_ingestor.py — ReceiptIngestor(db_conn): handles all receipt ingestion writes\n- Create runtime/auto_bug_filer.py — AutoBugFiler(db_conn): handles automated bug filing from error receipts\n- Create runtime/operator_signaler.py — OperatorSignaler(db_conn): handles operator-visible signals/events\n- ObservabilityHub becomes a thin facade that instantiates all three and delegates\n- All existing callers of ObservabilityHub still work (no breaking changes)\n\nSubmit code change summary via praxis_submit_code_change."
+    },
+    {
+      "label": "split_compiler_god_class",
+      "agent": "auto/refactor",
+      "timeout": 600,
+      "prompt": "ROADMAP: roadmap.split.compiler.py.god.class.into.focused.modules\n\nSplit compiler.py God class into focused modules.\n\nFind compiler.py (likely in runtime/). Read it and identify natural split boundaries.\n\nOBJECTIVE: Split into at minimum 3 focused modules:\n- runtime/compiler_parser.py — spec parsing and validation\n- runtime/compiler_resolver.py — dependency resolution and job ordering\n- runtime/compiler_emitter.py — output generation and job creation\n- The original compiler.py becomes a thin orchestrator importing from these three\n\nPrioritize the cleanest natural splits. If the file is very large, focus on the most tangled part.\n\nSubmit code change summary via praxis_submit_code_change."
+    },
+    {
+      "label": "replace_base_subsystems",
+      "agent": "auto/refactor",
+      "timeout": 600,
+      "prompt": "ROADMAP: roadmap.replace.basesubsystems.god.object.with.a.sealed.subsystemscontract.protocol\n\nReplace _BaseSubsystems god object with a sealed SubsystemsContract protocol.\n\nFind _BaseSubsystems (search for it). Read the class and all its subclasses.\n\nOBJECTIVE:\n- Create a SubsystemsContract Protocol (typing.Protocol) that defines the minimal interface\n- The protocol should have only what is strictly needed: get_pg_conn(), get_cache(), etc.\n- Remove unused methods from _BaseSubsystems by only keeping what's in the protocol\n- Update any type annotations to use SubsystemsContract where possible\n- _BaseSubsystems can stay as the concrete implementation but should implement the protocol\n\nThis is a type-system constraint, not a full rewrite. Focus on shrinking the interface.\n\nSubmit code change summary via praxis_submit_code_change."
+    },
+    {
+      "label": "consolidate_compiler_archipelago",
+      "agent": "auto/refactor",
+      "timeout": 600,
+      "prompt": "ROADMAP: roadmap.consolidate.compiler.archipelago.behind.a.sealed.compilationrequest.interface\n\nConsolidate the compiler archipelago behind a sealed CompilationRequest interface.\n\nFind all compiler-related modules (grep for 'compile', 'compiler', 'CompilationRequest'). Read the main ones.\n\nOBJECTIVE:\n- Create a CompilationRequest dataclass (or TypedDict) that is the single input to compilation\n- All compiler entry points accept CompilationRequest instead of loose kwargs\n- Create a CompilationResult dataclass as the single output\n- Wire at least 2 existing compiler entry points to use CompilationRequest/CompilationResult\n\nThis seals the compiler API surface — callers pass one structured request, get one structured result.\n\nSubmit code change summary via praxis_submit_code_change."
+    },
+    {
+      "label": "unify_provider_routing",
+      "agent": "auto/refactor",
+      "timeout": 600,
+      "prompt": "ROADMAP: roadmap.unify.provider.routing.and.circuit.breaker.behind.a.single.providerroutingdecision.interface\n\nUnify provider routing and circuit breaker behind a single ProviderRoutingDecision interface.\n\nFind provider routing code (grep for circuit_breaker, route_provider, provider_route). Read the main files.\n\nOBJECTIVE:\n- Create a ProviderRoutingDecision dataclass: provider_slug, model_slug, fallback_chain, circuit_open_reason\n- route_provider() returns ProviderRoutingDecision instead of a raw string\n- circuit_breaker logic is incorporated into ProviderRoutingDecision (circuit_open_reason is set when circuit is open)\n- Callers inspect the ProviderRoutingDecision object instead of calling two separate systems\n\nSubmit code change summary via praxis_submit_code_change."
+    },
+    {
+      "label": "wire_capability_columns",
+      "agent": "auto/wiring",
+      "timeout": 300,
+      "prompt": "ROADMAP: router.capability.columns\n\nWire task_type_router to read cap_ columns from provider_model_candidates table.\n\nRead Code&DBs/Workflow/runtime/task_type_router.py and the provider_model_candidates table schema.\n\nThe cap_ columns in provider_model_candidates indicate model capabilities (cap_chat, cap_code, cap_reasoning, etc.).\n\nOBJECTIVE:\n- task_type_router.py should query provider_model_candidates WHERE cap_<task_type>=true when routing\n- For task_type='reasoning', filter on cap_reasoning=true\n- For task_type='code', filter on cap_code=true\n- This replaces any hardcoded model lists for capability routing\n- Add a fallback: if no cap_ column exists for a task type, fall back to existing behavior\n\nSubmit code change summary via praxis_submit_code_change."
+    }
+  ]
+}

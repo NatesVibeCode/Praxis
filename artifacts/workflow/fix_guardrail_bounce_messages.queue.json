@@ -1,0 +1,10 @@
+{
+  "name": "fix_guardrail_bounce_messages",
+  "jobs": [
+    {
+      "label": "fix",
+      "agent": "auto/build",
+      "prompt": "Improve the guardrail bounce error messages in the dispatch pipeline so they tell the caller exactly what to fix.\n\nCurrent behavior: Code&DBs/Workflow/runtime/workflow_pipeline.py line ~179 appends `governance:{gov_result.blocked_reason}` to a blocked list. The model or operator sees a terse string like 'governance:Secrets detected in prompt' with no guidance.\n\nFix: when a governance bounce occurs, return a structured message that includes:\n1. What was blocked and why (already present in blocked_reason)\n2. Which job label triggered it\n3. A concrete remediation hint (e.g. 'Remove or redact the secret from job \\'build_step\\' prompt before resubmitting')\n\nThe governance block result comes from Code&DBs/Workflow/runtime/governance.py lines ~146-156. Look at what fields are available on gov_result and surface them clearly. The output of pre_dispatch (the PipelineGate) should carry enough context that the caller can fix the issue without guessing."
+    }
+  ]
+}

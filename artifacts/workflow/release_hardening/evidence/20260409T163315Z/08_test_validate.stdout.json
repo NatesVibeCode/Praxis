@@ -1,0 +1,19 @@
+{
+  "ok": true,
+  "command": "./scripts/test.sh validate artifacts/workflow/release_hardening/release_proof_and_public_naming.queue.json",
+  "duration_s": 0.921,
+  "results": {
+    "queue_file": "artifacts/workflow/release_hardening/release_proof_and_public_naming.queue.json",
+    "workflow_command": "./scripts/workflow.sh validate artifacts/workflow/release_hardening/release_proof_and_public_naming.queue.json",
+    "workflow_run": {
+      "duration_s": 0.92,
+      "returncode": 1,
+      "stdout": "=== Spec Validation: PASSED ===\nName:             release_proof_and_public_naming\nWorkflow ID:      release_proof_and_public_naming\nPhase:            build\nOutcome Goal:     Package one replayable release proof with explicit residual risks and sweep the ...\nJobs:             2\n\nJobs:\n  - release_proof_packet\n  - public_naming_cleanup\n\n  (Agent resolution check failed: [Errno 1] Operation not permitted)\n",
+      "stderr": ""
+    }
+  },
+  "errors": [],
+  "warnings": [
+    "workflow spec validated, but agent resolution was blocked by the sandbox permission surface"
+  ]
+}

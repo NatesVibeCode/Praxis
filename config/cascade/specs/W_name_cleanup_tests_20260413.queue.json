@@ -1,0 +1,95 @@
+{
+  "name": "Name Cleanup Tests and Final Sweep",
+  "phase": "W",
+  "queue_id": "name_cleanup_tests_20260413",
+  "outcome_goal": "All test classes/functions renamed from Dag/dag to Praxis/praxis. Full codebase sweep confirms zero remaining DAG branding.",
+  "anti_requirements": ["Do NOT rename cascade_inactive_to_routes or _mine_failure_cascades"],
+  "jobs": [
+    {
+      "label": "rename_test_classes",
+      "agent": "openai/gpt-5.4",
+      "task_type": "refactor",
+      "description": "Rename 10 TestDag* classes to TestPraxis* in MCP integration tests",
+      "outcome_goal": "No TestDag* class names remain",
+      "prompt": "In `Code&DBs/Workflow/tests/integration/test_mcp_workflow_server.py`, rename all test classes that use the 'Dag' prefix:\n\n- TestDagValidate (line 661) -> TestPraxisValidate\n- TestDagStatus (line 701) -> TestPraxisStatus\n- TestDagMaintenance (line 731) -> TestPraxisMaintenance\n- TestDagQuery (line 742) -> TestPraxisQuery\n- TestDagBugs (line 777) -> TestPraxisBugs\n- TestDagHealth (line 1000) -> TestPraxisHealth\n- TestDagOperatorView (line 1018) -> TestPraxisOperatorView\n- TestDagRecall (line 1027) -> TestPraxisRecall\n- TestDagIngest (line 1038) -> TestPraxisIngest\n- TestDagDispatchDryRun (line 1091) -> TestPraxisDispatchDryRun\n\nAlso update any internal strings that reference these class names (e.g. error messages like 'TestDagBugs unexpectedly touched live Postgres').\n\nDo NOT change any test logic, assertions, or fixture usage — only rename the classes and update their string references.",
+      "read": ["Code&DBs/Workflow/tests/integration/test_mcp_workflow_server.py"],
+      "write": ["Code&DBs/Workflow/tests/integration/test_mcp_workflow_server.py"],
+      "verify_command": "! grep -q 'class TestDag' /Users/nate/Praxis/Code\\&DBs/Workflow/tests/integration/test_mcp_workflow_server.py && grep -q 'class TestPraxis' /Users/nate/Praxis/Code\\&DBs/Workflow/tests/integration/test_mcp_workflow_server.py"
+    },
+    {
+      "label": "rename_test_funcs",
+      "agent": "openai/gpt-5.4-mini",
+      "task_type": "refactor",
+      "description": "Rename test_tool_dag_* and test_dag_* functions in unit tests",
+      "outcome_goal": "No test_tool_dag or test_dag function names remain",
+      "prompt": "Rename test functions in these files:\n\n1. In `Code&DBs/Workflow/tests/unit/test_mcp_session_tools.py`:\n   - Line 10: `test_tool_dag_decompose_returns_estimate_and_files` -> `test_tool_praxis_decompose_returns_estimate_and_files`\n   - Line 50: `test_tool_dag_heartbeat_status_returns_summary` -> `test_tool_praxis_heartbeat_status_returns_summary`\n   - Line 69: `test_tool_dag_heartbeat_status_with_errors` -> `test_tool_praxis_heartbeat_status_with_errors`\n\n2. In `Code&DBs/Workflow/tests/unit/test_mcp_health_tool.py`:\n   - Line 45: `test_tool_dag_health_uses_workflow_database_env` -> `test_tool_praxis_health_uses_workflow_database_env`\n\n3. In `Code&DBs/Workflow/tests/unit/test_runtime_context_tool.py`:\n   - Line 8: `test_dag_context_shard_summary_reads_current_workflow_session` -> `test_praxis_context_shard_summary_reads_current_workflow_session`\n\nDo NOT change any test logic or assertions — only rename the functions.",
+      "read": [
+        "Code&DBs/Workflow/tests/unit/test_mcp_session_tools.py",
+        "Code&DBs/Workflow/tests/unit/test_mcp_health_tool.py",
+        "Code&DBs/Workflow/tests/unit/test_runtime_context_tool.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/tests/unit/test_mcp_session_tools.py",
+        "Code&DBs/Workflow/tests/unit/test_mcp_health_tool.py",
+        "Code&DBs/Workflow/tests/unit/test_runtime_context_tool.py"
+      ],
+      "verify_command": "! grep -q 'def test_tool_dag_\\|def test_dag_' /Users/nate/Praxis/Code\\&DBs/Workflow/tests/unit/test_mcp_session_tools.py /Users/nate/Praxis/Code\\&DBs/Workflow/tests/unit/test_mcp_health_tool.py /Users/nate/Praxis/Code\\&DBs/Workflow/tests/unit/test_runtime_context_tool.py"
+    },
+    {
+      "label": "rename_test_data",
+      "agent": "openai/gpt-5.4-mini",
+      "task_type": "refactor",
+      "description": "Rename dag-project/dag-dispatch string literals in test files",
+      "outcome_goal": "No dag-project or dag-dispatch string literals in tests",
+      "prompt": "Update string literal references in test files:\n\n1. In `Code&DBs/Workflow/tests/unit/test_startup_wiring.py`:\n   - Find and replace `'dag-dispatch'` with `'praxis-dispatch'`\n   - Find and replace `'dag-project'` with `'praxis-project'`\n   - Also update `'DAG Dispatch'` to `'Praxis Dispatch'` if it appears\n\n2. In `Code&DBs/Workflow/tests/unit/test_native_authority.py`:\n   - Find and replace `'dag-project'` with `'praxis-project'`\n\n3. In `Code&DBs/Workflow/tests/integration/test_native_instance_isolation.py`:\n   - Find and replace `'dag-project'` with `'praxis-project'`\n\nDo NOT change test logic — only update the string values to match the new naming.",
+      "read": [
+        "Code&DBs/Workflow/tests/unit/test_startup_wiring.py",
+        "Code&DBs/Workflow/tests/unit/test_native_authority.py",
+        "Code&DBs/Workflow/tests/integration/test_native_instance_isolation.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/tests/unit/test_startup_wiring.py",
+        "Code&DBs/Workflow/tests/unit/test_native_authority.py",
+        "Code&DBs/Workflow/tests/integration/test_native_instance_isolation.py"
+      ],
+      "verify_command": "! grep -rn 'dag-project\\|dag-dispatch\\|dag_research' /Users/nate/Praxis/Code\\&DBs/Workflow/tests/ --include='*.py' | grep -v __pycache__"
+    },
+    {
+      "label": "rename_existing_spec",
+      "agent": "openai/gpt-5.4-mini",
+      "task_type": "refactor",
+      "description": "Rename dag references in existing W_moon_dag_polish spec",
+      "outcome_goal": "Existing spec uses graph naming instead of dag",
+      "prompt": "Update the existing workflow spec `config/cascade/specs/W_moon_dag_polish_20260413.json`:\n\n1. Change `\"name\": \"Moon DAG Canvas Polish\"` to `\"name\": \"Moon Graph Canvas Polish\"`\n2. Change job slug `\"dag_css\"` to `\"graph_css\"`\n3. Change job slug `\"wire_dag_classes\"` to `\"wire_graph_classes\"`\n4. Update `depends_on` references: `\"dag_css\"` -> `\"graph_css\"`\n5. In all prompt text, replace 'DAG' with 'graph' when referring to the canvas/nodes:\n   - 'DAG canvas nodes' -> 'graph canvas nodes'\n   - 'DAG view' -> 'graph view'\n   - 'DAG Canvas' -> 'Graph Canvas'\n   - 'DAG nodes' -> 'graph nodes'\n6. Update verify_command references from 'moon-dag-node' to 'moon-graph-node' and 'moon-dag-append' to 'moon-graph-append'\n7. In the prompt text, update CSS class names from moon-dag-* to moon-graph-*",
+      "read": ["config/cascade/specs/W_moon_dag_polish_20260413.json"],
+      "write": ["config/cascade/specs/W_moon_dag_polish_20260413.json"],
+      "verify_command": "! grep -qi 'dag' /Users/nate/Praxis/config/cascade/specs/W_moon_dag_polish_20260413.json"
+    },
+    {
+      "label": "import_type_sweep",
+      "agent": "openai/gpt-5.4",
+      "task_type": "test",
+      "description": "Full Python import check + TypeScript tsc --noEmit sweep",
+      "outcome_goal": "All renamed imports resolve correctly, TypeScript compiles clean",
+      "prompt": "Run comprehensive import and type checks to catch any broken references from the name cleanup:\n\n1. Python imports — verify these work:\n   ```\n   cd Code&DBs/Workflow\n   python3 -c 'from runtime.instance import NativeWorkflowInstance; print(\"instance OK\")'\n   python3 -c 'from surfaces.api.frontdoor import NativeWorkflowFrontdoor; print(\"frontdoor OK\")'\n   python3 -c 'from registry.integration_registry_sync import _STATIC_INTEGRATIONS; print(\"registry OK\")'\n   ```\n\n2. TypeScript types — verify:\n   ```\n   cd Code&DBs/Workflow/surfaces/app\n   npx tsc --noEmit 2>&1 | head -20\n   ```\n\n3. If any imports fail or types error, read the failing file and fix the broken reference.\n\n4. Also grep for any stale imports that still reference old names:\n   ```\n   grep -rn 'NativeDagInstance\\|NativeDagFrontdoor\\|DagLayout\\|RunDAG' Code&DBs/Workflow/ --include='*.py' --include='*.ts' --include='*.tsx' | grep -v __pycache__ | grep -v node_modules\n   ```\n   Fix any hits found.",
+      "read": [
+        "Code&DBs/Workflow/runtime/instance.py",
+        "Code&DBs/Workflow/surfaces/api/frontdoor.py"
+      ],
+      "write": [],
+      "verify_command": "cd /Users/nate/Praxis/Code\\&DBs/Workflow && python3 -c 'from runtime.instance import NativeWorkflowInstance; from surfaces.api.frontdoor import NativeWorkflowFrontdoor; print(\"OK\")'"
+    },
+    {
+      "label": "final_grep",
+      "agent": "openai/gpt-5.4-mini",
+      "task_type": "review",
+      "depends_on": ["rename_test_classes", "rename_test_funcs", "rename_test_data", "rename_existing_spec", "import_type_sweep"],
+      "description": "Final comprehensive grep for any remaining DAG/Dag references",
+      "outcome_goal": "Zero remaining DAG branding in codebase (excluding legitimate cascade terms)",
+      "prompt": "Run a final comprehensive grep sweep across the entire Praxis codebase:\n\n```\ngrep -rn 'NativeDagInstance\\|NativeDagFrontdoor\\|X-DAG-\\|\"dag-dispatch\"\\|\"dag-project\"\\|dag_research\\|DagLayout\\|RunDAG\\|dag-app\\|dag-api\\|dag-ui\\|TestDag\\|test_tool_dag_\\|test_dag_context\\|DAG Dispatch\\|DAG Workflow\\|Dag Project\\|DAG REST\\|DAG MCP\\|DAG node\\|native DAG\\|DAG operations\\|DAG instance\\|DAG dispatch\\|DAG runtime\\|DAG execution\\|DAG autonomous\\|DAG-APITask\\|dag-workflow-github' Code&DBs/Workflow/ config/ --include='*.py' --include='*.ts' --include='*.tsx' --include='*.css' --include='*.json' | grep -v node_modules | grep -v __pycache__ | grep -v '.pyc' | grep -v cascade_inactive | grep -v _mine_failure\n```\n\nIf ANY hits are found, fix them by applying the standard rename mapping:\n- Class names: NativeDag* -> NativeWorkflow*\n- Interfaces: DagLayout -> GraphLayout, RunDAG -> RunGraph\n- CSS: moon-dag -> moon-graph, run-dag -> run-graph\n- Strings: dag-dispatch -> praxis-dispatch, dag-project -> praxis-project\n- Docstrings: DAG -> Praxis Engine / workflow as appropriate\n- Test names: TestDag* -> TestPraxis*, test_dag_* -> test_praxis_*\n\nReport the final count of remaining references (should be 0).",
+      "read": [],
+      "write": [],
+      "verify_command": "cd /Users/nate/Praxis && ! grep -rn 'NativeDagInstance\\|NativeDagFrontdoor\\|X-DAG-\\|\"dag-dispatch\"\\|\"dag-project\"\\|DagLayout\\|RunDAG\\|dag-app\\|TestDag\\|test_tool_dag_' Code\\&DBs/Workflow/ config/ --include='*.py' --include='*.ts' --include='*.tsx' --include='*.css' --include='*.json' | grep -v node_modules | grep -v __pycache__"
+    }
+  ]
+}

@@ -12,7 +12,7 @@ def test_resolve_execution_transport_normalizes_cli_to_local() -> None:
 
     assert transport.transport_kind == "cli"
     assert transport.execution_lane == "local"
-    assert transport.sandbox_provider == "seatbelt_local"
+    assert transport.sandbox_provider == "docker_local"
 
 
 def test_resolve_execution_transport_normalizes_api_to_remote() -> None:
@@ -20,7 +20,7 @@ def test_resolve_execution_transport_normalizes_api_to_remote() -> None:
 
     assert transport.transport_kind == "api"
     assert transport.execution_lane == "local"
-    assert transport.sandbox_provider == "seatbelt_local"
+    assert transport.sandbox_provider == "docker_local"
 
 
 def test_resolve_execution_transport_prefers_explicit_provider_and_transport() -> None:

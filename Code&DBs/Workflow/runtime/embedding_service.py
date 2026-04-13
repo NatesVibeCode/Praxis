@@ -1,7 +1,10 @@
 """Shared embedding runtime authority for semantic retrieval tables."""
 from __future__ import annotations
 
+import contextlib
+import io
 import logging
+import os
 import threading
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
@@ -103,6 +106,7 @@ class EmbeddingService:
     _shared_models: ClassVar[dict[str, Any]] = {}
     _shared_model_events: ClassVar[dict[str, threading.Event]] = {}
     _shared_model_lock: ClassVar[threading.Lock] = threading.Lock()
+    _shared_encode_locks: ClassVar[dict[str, threading.Lock]] = {}
     _prewarm_threads: ClassVar[dict[str, threading.Thread]] = {}
     _prewarm_lock: ClassVar[threading.Lock] = threading.Lock()
 
@@ -148,10 +152,87 @@ class EmbeddingService:
         return normalized
 
     @classmethod
-    def _load_model_for_name(cls, model_name: str):
+    @contextlib.contextmanager
+    def _quiet_model_load(cls, model_name: str):
+        captured_stdout = io.StringIO()
+        captured_stderr = io.StringIO()
+        previous_env: dict[str, str | None] = {}
+        quiet_env = {
+            "HF_HUB_DISABLE_PROGRESS_BARS": "1",
+            "TOKENIZERS_PARALLELISM": "false",
+            "TRANSFORMERS_NO_ADVISORY_WARNINGS": "1",
+        }
+
+        for key, value in quiet_env.items():
+            previous_env[key] = os.environ.get(key)
+            os.environ[key] = value
+
+        progress_enabled = False
+        previous_verbosity = None
+        try:
+            from transformers.utils import logging as transformers_logging
+
+            progress_enabled = transformers_logging.is_progress_bar_enabled()
+            previous_verbosity = transformers_logging.get_verbosity()
+            transformers_logging.disable_progress_bar()
+            transformers_logging.set_verbosity_error()
+        except Exception:
+            transformers_logging = None
+        try:
+            with contextlib.redirect_stdout(captured_stdout), contextlib.redirect_stderr(captured_stderr):
+                yield
+        finally:
+            if transformers_logging is not None and previous_verbosity is not None:
+                transformers_logging.set_verbosity(previous_verbosity)
+                if progress_enabled:
+                    transformers_logging.enable_progress_bar()
+            for key, previous_value in previous_env.items():
+                if previous_value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = previous_value
+            suppressed = "\n".join(
+                part.strip()
+                for part in (captured_stdout.getvalue(), captured_stderr.getvalue())
+                if part.strip()
+            ).strip()
+            if suppressed:
+                logger.debug(
+                    "Suppressed sentence-transformer load output for %s: %s",
+                    model_name,
+                    suppressed.splitlines()[0],
+                )
+
+    @classmethod
+    def _construct_model_for_name(cls, model_name: str, *, local_files_only: bool):
         from sentence_transformers import SentenceTransformer
 
-        return SentenceTransformer(model_name)
+        token = os.environ.get("HF_TOKEN", "").strip() or None
+        with cls._quiet_model_load(model_name):
+            return SentenceTransformer(
+                model_name,
+                local_files_only=local_files_only,
+                token=token,
+            )
+
+    @classmethod
+    def _load_model_for_name(cls, model_name: str):
+        try:
+            return cls._construct_model_for_name(
+                model_name,
+                local_files_only=True,
+            )
+        except Exception as exc:
+            if "local_files_only" not in str(exc):
+                raise
+            logger.debug(
+                "Local embedding cache miss for %s; retrying with hub access",
+                model_name,
+            )
+        return cls._construct_model_for_name(
+            model_name,
+            local_files_only=False,
+        )
 
     @classmethod
     def _get_or_load_shared_model(cls, model_name: str):
@@ -240,8 +321,19 @@ class EmbeddingService:
             for event in cls._shared_model_events.values():
                 event.set()
             cls._shared_model_events.clear()
+            cls._shared_encode_locks.clear()
         with cls._prewarm_lock:
             cls._prewarm_threads.clear()
+
+    @classmethod
+    def _get_encode_lock(cls, model_name: str | None = None) -> threading.Lock:
+        normalized = cls._normalize_model_name(model_name)
+        with cls._shared_model_lock:
+            lock = cls._shared_encode_locks.get(normalized)
+            if lock is None:
+                lock = threading.Lock()
+                cls._shared_encode_locks[normalized] = lock
+            return lock
 
     def _get_model(self):
         if self._model is None:
@@ -252,8 +344,14 @@ class EmbeddingService:
         """Embed a batch of texts. Returns list of authoritative-dimension vectors."""
         if not texts:
             return []
-        model = self._get_model()
-        embeddings = model.encode(texts, show_progress_bar=False, convert_to_numpy=True)
+        encode_lock = self._get_encode_lock(self._model_name)
+        with encode_lock:
+            model = self._get_model()
+            embeddings = model.encode(
+                texts,
+                show_progress_bar=False,
+                convert_to_numpy=True,
+            )
         vectors = [e.tolist() for e in embeddings]
         for vector in vectors:
             self._authority.validate_embedding_vector(vector)

@@ -1,0 +1,52 @@
+{
+  "name": "consolidation_phase2_kill_legacy",
+  "queue_id": "consol_p2_002",
+  "phase": "build",
+  "outcome_goal": "Remove all legacy dispatch paths: MCP fallbacks to workflow_runs, legacy worker-class wording, job_queue module + imports, health probe migration, workflow_runner trim",
+  "jobs": [
+    {
+      "label": "remove_mcp_fallbacks",
+      "agent": "auto/build",
+      "prompt": "Remove all legacy fallback paths from the MCP dispatch tool.\n\nRead: Code&DBs/Workflow/surfaces/mcp/tools/workflow.py\n\nThe unified dispatch tables (workflow_runs + workflow_jobs) are now the sole authority. Remove every fallback to workflow_runs and disk scanning:\n\n1. STATUS action (around line 69-86): Remove the fallback try block that queries 'SELECT run_id, current_state, request_envelope FROM workflow_runs WHERE run_id = $1'. If the primary get_run_status() returns nothing, return {job_id: job_id, status: 'not_found'} directly.\n\n2. WAIT action (around line 134-161): Remove the fallback block that uses the old DispatchNotificationConsumer or queries workflow_runs. If wait_for_run() fails, return the error directly.\n\n3. LIST action (around line 191-216): Remove the fallback that queries 'FROM workflow_runs WHERE workflow_id LIKE dispatch.%%' and remove the disk scan fallback for dispatch_*.json files. If workflow_runs returns empty, return {jobs: []}.\n\n4. Remove _DISPATCH_RESULTS_DIR constant at the top if nothing references it after cleanup.\n\n5. Remove any imports only used by fallback paths (_subs.get_dispatch_worker, _subs.get_notification_consumer, etc).\n\nDo NOT change the primary runtime.workflow.unified code paths.",
+      "scope": {"write": ["Code&DBs/Workflow/surfaces/mcp/tools/workflow.py"]}
+    },
+    {
+      "label": "legacy_worker_manifest_cleanup",
+      "agent": "auto/build",
+      "prompt": "Remove the dead legacy worker-class wording from the queue worker manifest.\n\nRead: Code&DBs/Workflow/runtime/queue_worker.py\n\nThe __main__ block already uses runtime.workflow.unified.run_worker_loop(). The class-based compatibility path is dead text.\n\nRemove any language that implies:\n1. A class wrapper is still the active worker surface\n2. queue_worker.py needs a fallback instantiation path\n3. Helper functions are part of the supported entrypoint story\n\nKEEP:\n1. The __main__ block wording that points at run_worker_loop() as the active entry point\n2. Any current-state text that describes the unified dispatch worker\n3. The doc as a short, accurate manifest note rather than a legacy compatibility guide",
+      "scope": {"write": ["Code&DBs/Workflow/runtime/queue_worker.py"]}
+    },
+    {
+      "label": "deprecate_job_queue",
+      "agent": "auto/build",
+      "prompt": "Deprecate the legacy job_queue module and clean up all imports across the codebase.\n\nStep 1: Read Code&DBs/Workflow/runtime/job_queue.py to understand what it exports.\n\nStep 2: Grep the ENTIRE codebase under 'Code&DBs/Workflow/' for these patterns:\n- 'from .job_queue import'\n- 'from runtime.job_queue import'\n- 'from runtime import job_queue'\n- 'import job_queue'\n\nExpected matches (from prior analysis):\n- surfaces/api/handlers/workflow_run.py\n- surfaces/api/rest.py\n- surfaces/cli/commands/workflow.py\n- runtime/job_dependencies.py\n- runtime/auto_review.py\n- runtime/queue_worker.py (should be cleaned by legacy_worker_manifest_cleanup)\n- JOB_DEPENDENCIES_GUIDE.md\n\nStep 3: For each file that imports from job_queue:\n- If the import is dead code (function never called in that file), remove the import line\n- If the import is in a try/except block, remove the entire block\n- If the function IS actively called, wrap the call in a try/except that falls back gracefully, and add a comment: # TODO: migrate to runtime.workflow.unified\n- For .md documentation files, update the text to reference the new system\n\nStep 4: Replace Code&DBs/Workflow/runtime/job_queue.py contents with a short deprecation stub:\n\n\"\"\"DEPRECATED: Replaced by runtime.workflow.unified and workflow_jobs table.\n\nThe job_queue table and this module are superseded by:\n- runtime.workflow.unified.submit_dispatch() for job submission\n- runtime.workflow.unified.run_worker_loop() for job execution\n- workflow_jobs table (migration 028) for job state\n\nThis stub exists to prevent ImportError in any remaining references.\n\"\"\"\n\ndef submit_job(*args, **kwargs):\n    raise DeprecationWarning('job_queue.submit_job is deprecated. Use runtime.workflow.unified.submit_dispatch()')\n\ndef submit_batch(*args, **kwargs):\n    raise DeprecationWarning('job_queue.submit_batch is deprecated.')\n",
+      "scope": {"write": ["Code&DBs/Workflow/runtime/job_queue.py", "Code&DBs/Workflow/surfaces/api/handlers/workflow_run.py", "Code&DBs/Workflow/surfaces/api/rest.py", "Code&DBs/Workflow/surfaces/cli/commands/workflow.py", "Code&DBs/Workflow/runtime/job_dependencies.py", "Code&DBs/Workflow/runtime/auto_review.py"]}
+    },
+    {
+      "label": "update_health_probes",
+      "agent": "auto/build",
+      "depends_on": ["legacy_worker_manifest_cleanup", "deprecate_job_queue"],
+      "prompt": "Update health probes to use the unified dispatch tables instead of the legacy job_queue.\n\nRead: Code&DBs/Workflow/runtime/health_endpoint.py\n\nFind any function that queries the job_queue table (likely check_queue_worker_alive or similar, around line 150).\n\nReplace the job_queue query with workflow_jobs:\n- Worker liveness: SELECT COUNT(*) FROM workflow_jobs WHERE (claimed_at > $1 OR heartbeat_at > $1) AND status IN ('claimed', 'running')\n- Queue depth: SELECT COUNT(*) FROM workflow_jobs WHERE status IN ('pending', 'ready')\n\nRemove any imports from runtime.job_queue.\nUpdate function names/docstrings to reference workflow_jobs.\n\nAlso check if any other health probe references workflow_runs for dispatch status and update those too.",
+      "scope": {"write": ["Code&DBs/Workflow/runtime/health_endpoint.py"]}
+    },
+    {
+      "label": "trim_workflow_runner",
+      "agent": "auto/build",
+      "depends_on": ["remove_mcp_fallbacks"],
+      "prompt": "Trim workflow_runner.py to a library — remove the orchestrator, keep the primitives.\n\nRead the ENTIRE file: Code&DBs/Workflow/surfaces/cli/workflow_runner.py\nAlso read: Code&DBs/Workflow/runtime/workflow/unified.py (check what it imports from workflow_runner)\n\nKEEP (imported by other modules):\n- QueueSpec class and QueueSpec.load()\n- QueueSpecError exception\n- _classify_failure() static method\n- Any dataclasses (JobExecution, RunResult, Telemetry) imported elsewhere\n- _inject_platform_context() and prompt building helpers\n- _ensure_dispatch_workflow_run() ONLY if still called somewhere\n\nDELETE:\n- run_spec() method and its ThreadPoolExecutor orchestration loop (~160 LOC starting around line 347)\n- The two-level retry loop in _execute_single_job() \n- Helper functions ONLY called by run_spec() or _execute_single_job()\n\nCRITICAL: Before deleting ANY function, grep the codebase for its name. If imported anywhere outside workflow_runner.py, keep it.\n\nUpdate module docstring to say: 'Dispatch runner library — spec parsing, prompt building, failure classification. Orchestration moved to runtime.workflow.unified.'",
+      "scope": {"write": ["Code&DBs/Workflow/surfaces/cli/workflow_runner.py"]}
+    },
+    {
+      "label": "clean_pycache",
+      "agent": "auto/build",
+      "prompt": "Clean up stale Python bytecode files for deleted modules.\n\nDelete these files if they exist:\n- Code&DBs/Workflow/runtime/__pycache__/dispatch_worker.cpython-314.pyc\n- Code&DBs/Workflow/runtime/__pycache__/dispatch_worker.cpython-*.pyc (any version)\n\nAlso check for any other .pyc files that reference modules we've deprecated:\n- Code&DBs/Workflow/runtime/__pycache__/unified_dispatch.cpython-*.pyc (old path, now runtime/workflow/unified.py)\n\nUse: find 'Code&DBs/Workflow/runtime/__pycache__/' -name '*dispatch_worker*' -delete\nAnd: find 'Code&DBs/Workflow/runtime/__pycache__/' -name '*unified_dispatch*' -delete",
+      "scope": {"write": ["Code&DBs/Workflow/runtime/__pycache__/"]}
+    },
+    {
+      "label": "phase2_verify",
+      "agent": "auto/review",
+      "depends_on": ["remove_mcp_fallbacks", "legacy_worker_manifest_cleanup", "deprecate_job_queue", "update_health_probes", "trim_workflow_runner", "clean_pycache"],
+      "prompt": "Review all Phase 2 legacy removal changes for correctness.\n\nRead all these files:\n- Code&DBs/Workflow/surfaces/mcp/tools/workflow.py\n- Code&DBs/Workflow/runtime/queue_worker.py\n- Code&DBs/Workflow/runtime/job_queue.py\n- Code&DBs/Workflow/runtime/health_endpoint.py\n- Code&DBs/Workflow/surfaces/cli/workflow_runner.py\n- Code&DBs/Workflow/runtime/auto_review.py\n- Code&DBs/Workflow/runtime/job_dependencies.py\n- Code&DBs/Workflow/surfaces/api/rest.py\n- Code&DBs/Workflow/surfaces/api/handlers/workflow_run.py\n\nVerify:\n1. No active (non-deprecated) imports of job_queue remain\n2. No workflow_runs fallback reads in MCP dispatch tools\n3. Legacy queue worker class references are gone from the worker docs\n4. Health probes reference workflow_jobs not job_queue\n5. workflow_runner.py still exports QueueSpec.load() and it can be imported\n6. runtime.workflow.unified imports from workflow_runner still resolve\n7. No broken imports or syntax errors in ANY modified file\n8. job_queue.py is a deprecation stub with clear migration guidance\n9. No stale dispatch_worker bytecode remains\n\nList all remaining issues."
+    }
+  ]
+}

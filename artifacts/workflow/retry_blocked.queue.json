@@ -1,0 +1,38 @@
+{
+  "name": "retry_blocked_jobs",
+  "queue_id": "retry_blocked_001",
+  "phase": "build",
+  "outcome_goal": "Retry the 6 jobs that were blocked by governance gate",
+  "jobs": [
+    {
+      "label": "retry_p15_commitment_map",
+      "agent": "google/gemini-3.1-pro-preview",
+      "prompt": "You are working in /Users/nate/Praxis/Code&DBs/Workflow/surfaces/app/src/canvas/CommitmentMap.tsx.\n\nUpdate CommitmentMap to accept config.workflowId and config.steps:\n1. If config.workflowId set, fetch workflow template from /api/workflow-templates, convert steps to OperatingModel\n2. If config.steps set (array of step names), generate a simple linear OperatingModel\n3. Keep TEST_MODEL as fallback\n\nWrite the updated file."
+    },
+    {
+      "label": "retry_p17_doc_processor",
+      "agent": "google/gemini-3.1-pro-preview",
+      "prompt": "You are working in /Users/nate/Praxis.\n\n1. Add POST /api/tools/document-process to surfaces/api/workflow_api.py (inline in do_POST). Accepts {content, steps}. Steps: parse, transform, validate, output. Process sequentially. Return {steps: [{name, status, result}], final_output}.\n\n2. Update surfaces/app/src/modules/tool/DocumentProcessorModule.tsx: add textarea input, Process button, call API, show step statuses, write result to World.\n\nWrite both files."
+    },
+    {
+      "label": "retry_p18_data_pipeline",
+      "agent": "google/gemini-3.1-pro-preview",
+      "prompt": "You are working in /Users/nate/Praxis.\n\n1. Add POST /api/tools/data-pipeline to surfaces/api/workflow_api.py. Accepts {source, transforms, output}. Source: objects or API endpoint. Transforms: filter, map, aggregate, sort. Return {result, row_count, columns}.\n\n2. Update surfaces/app/src/modules/tool/DataPipelineModule.tsx: source selector, transform builder, Run Pipeline button, results display.\n\nWrite both files."
+    },
+    {
+      "label": "retry_p19_unified_search",
+      "agent": "google/gemini-3.1-pro-preview",
+      "prompt": "You are working in /Users/nate/Praxis.\n\n1. Add GET /api/search to surfaces/api/workflow_api.py. Params: q, scope. Searches objects, manifests, receipts via FTS. Returns unified [{type, id, title, snippet, score}].\n\n2. Update surfaces/app/src/modules/tool/SearchPanelModule.tsx: use /api/search, add scope tabs, click results to navigate.\n\nWrite both files."
+    },
+    {
+      "label": "retry_p21_object_browser",
+      "agent": "google/gemini-3.1-pro-preview",
+      "prompt": "You are working in /Users/nate/Praxis/Code&DBs/Workflow/surfaces/app/src/.\n\nCreate src/modules/tool/ObjectTypeBrowserModule.tsx: id 'object-type-browser', defaultSpan '2x2'. Lists object types from /api/object-types. Click publishes to World. Create Type inline form with property definitions builder. Register in tool/index.ts.\n\nWrite the file."
+    },
+    {
+      "label": "retry_p22_schema_editor",
+      "agent": "google/gemini-3.1-pro-preview",
+      "prompt": "You are working in /Users/nate/Praxis.\n\n1. Add POST /api/object-types/update to surfaces/api/workflow_api.py. Partial update of type fields.\n\n2. Create surfaces/app/src/modules/tool/SchemaEditorModule.tsx: id 'schema-editor', defaultSpan '2x2'. Subscribes to World selected_object_type. Shows editable property list. Save via POST. Register in tool/index.ts.\n\nWrite both files."
+    }
+  ]
+}

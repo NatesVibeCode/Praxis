@@ -1,0 +1,52 @@
+{
+  "name": "e2e_integration_v3",
+  "queue_id": "e2e_integration",
+  "phase": "build",
+  "outcome_goal": "Prove integration executor works end-to-end through MCP dispatch",
+  "jobs": [
+    {
+      "label": "webhook_test",
+      "agent": "integration/webhook",
+      "prompt": "POST to httpbin to prove webhook integration works",
+      "integration_id": "webhook",
+      "integration_action": "post",
+      "integration_args": {
+        "url": "https://httpbin.org/post",
+        "method": "POST",
+        "headers": {"X-Helm-Test": "integration-v3"},
+        "body": {"source": "helm_builder", "test": "real_integration", "ts": "2026-04-07"}
+      },
+      "timeout": 30
+    },
+    {
+      "label": "notify_test",
+      "agent": "integration/notifications",
+      "prompt": "Send notifications via webhook and in-app",
+      "depends_on": ["webhook_test"],
+      "integration_id": "notifications",
+      "integration_action": "send",
+      "integration_args": {
+        "channels": [
+          {"kind": "webhook", "target": "https://httpbin.org/post", "label": "Webhook Channel"},
+          {"kind": "in_app", "target": "nate", "label": "In-App Channel"}
+        ],
+        "subject": "Integration Pipeline Complete",
+        "body": "Webhook test passed, notifications delivered.",
+        "authority": "system"
+      },
+      "timeout": 30
+    },
+    {
+      "label": "gmail_stub_test",
+      "agent": "integration/gmail",
+      "prompt": "Attempt Gmail search (graceful skip expected)",
+      "depends_on": ["notify_test"],
+      "integration_id": "gmail",
+      "integration_action": "search_emails",
+      "integration_args": {
+        "query": "integration test"
+      },
+      "timeout": 30
+    }
+  ]
+}

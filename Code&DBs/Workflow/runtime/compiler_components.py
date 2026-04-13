@@ -6,6 +6,11 @@ import json
 import re
 from typing import Any
 
+from runtime.integrations.display_names import (
+    base_integration_name,
+    display_name_for_integration,
+)
+
 
 def load_reference_catalog(conn) -> list[dict[str, Any]]:
     rows = conn.execute(
@@ -79,7 +84,8 @@ def load_integrations(conn) -> list[dict[str, Any]]:
         integrations.append(
             {
                 "id": _as_text(item.get("id")),
-                "name": _as_text(item.get("name")),
+                "name": base_integration_name(item),
+                "display_name": display_name_for_integration(item),
                 "provider": _as_text(item.get("provider")),
                 "auth_status": _as_text(item.get("auth_status")),
                 "description": _as_text(item.get("description")),
@@ -223,7 +229,7 @@ def build_capability_catalog(integrations: list[dict[str, Any]]) -> list[dict[st
 
     for integration in integrations:
         integration_id = _slugify(integration.get("id") or integration.get("name"))
-        integration_name = _as_text(integration.get("name")) or integration_id
+        integration_name = _as_text(integration.get("display_name")) or display_name_for_integration(integration)
         if not integration_id:
             continue
         for capability in integration.get("capabilities", []):

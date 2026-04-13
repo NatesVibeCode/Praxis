@@ -1,0 +1,13 @@
+{
+  "name": "build_phase3_renderer",
+  "queue_id": "build_phase3_001",
+  "phase": "build",
+  "outcome_goal": "Build the React app shell that renders app manifests from Postgres",
+  "jobs": [
+    {
+      "label": "build_react_shell",
+      "agent": "anthropic/claude-opus-4-6",
+      "prompt": "You are working in /Users/nate/Praxis. Postgres at postgresql://nate@127.0.0.1:5432/dag_workflow.\n\nCreate a React + Vite + TypeScript app at: Code&DBs/Workflow/surfaces/app/\n\nThis is the frontend shell for the self-configuring app builder. It renders app manifests stored in Postgres.\n\nScaffold with:\n- Vite 5 + React 18 + TypeScript\n- vite.config.ts proxying /api/* to http://127.0.0.1:8420\n- Dark theme (bg: #0d1117, card: #161b22, accent: #58a6ff, text: #c9d1d9)\n\nCreate these files:\n\n1. src/world.ts — Reactive store (port pattern from /Users/nate/Builds/apps/dynamic_ui_shell/src/world.js as reference). Path-based subscriptions, delta updates, committed + proposed layers.\n\n2. src/primitives/registry.ts — Component registry. Maps string IDs to React components. resolve(id) -> Component.\n\n3. src/primitives/PrimitiveRenderer.tsx — Takes a manifest node descriptor, resolves component from registry, subscribes to World path if specified, renders.\n\n4. src/primitives/SlotLayout.tsx — Layout manager with header/grid/footer slots. Reads layout from manifest.\n\n5. src/primitives/ — Implement these 10 seed primitives:\n   - MetricCard.tsx (value + label + optional trend)\n   - DataTable.tsx (columns from props, rows from World path, sortable)\n   - TextBox.tsx (input field, emits onChange)\n   - Button.tsx (label, onClick dispatches action)\n   - Dropdown.tsx (options from props or World path, emits onChange)\n   - ChartView.tsx (bar/line/pie from data in World path — use recharts)\n   - Panel.tsx (collapsible card container)\n   - IconDisplay.tsx (icon name -> rendered icon)\n   - TextDisplay.tsx (rich text / markdown rendering)\n   - Box.tsx (generic container with configurable padding/border)\n\n6. src/hooks/useSlice.ts — Subscribe to a World path, return value, auto-rerender on change.\n\n7. src/hooks/useApi.ts — Fetch wrapper for /api/* endpoints.\n\n8. src/App.tsx — Load manifest from /api/manifests/:id, feed into SlotLayout + PrimitiveRenderer.\n\n9. src/styles/tokens.css — CSS custom properties for the design system.\n\n10. package.json with dependencies: react, react-dom, recharts, vite, @vitejs/plugin-react, typescript.\n\nDo NOT use any packages beyond these. Keep it minimal.\n\nAlso update .claude/launch.json to add a 'dag-app' server config for the Vite dev server on port 5173.\n\nWrite all the files. Run npm install. Verify it builds with npm run build."
+    }
+  ]
+}

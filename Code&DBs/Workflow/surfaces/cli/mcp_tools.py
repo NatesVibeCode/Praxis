@@ -112,6 +112,14 @@ def render_artifacts_payload(payload: dict[str, Any], *, stdout: TextIO) -> None
     if not isinstance(artifacts, list):
         print_json(stdout, payload)
         return
+    note = str(payload.get("note") or "").strip()
+    sandbox_id = str(payload.get("sandbox_id") or "").strip()
+    if note:
+        stdout.write(f"{note}\n")
+    if sandbox_id:
+        stdout.write(f"sandbox: {sandbox_id}\n")
+        if artifacts:
+            stdout.write("\n")
     if not artifacts:
         stdout.write(str(payload.get("message") or "no matching artifacts\n").rstrip() + "\n")
         return
@@ -197,6 +205,21 @@ def tool_preflight_lines(definition: McpToolDefinition, params: dict[str, Any]) 
     return lines
 
 
+def require_confirmation(
+    definition: McpToolDefinition,
+    params: dict[str, Any],
+    *,
+    confirmed: bool,
+    stdout: TextIO,
+) -> int | None:
+    risk = definition.risk_for_params(params)
+    if risk not in {"write", "dispatch"} or confirmed:
+        return None
+    for line in tool_preflight_lines(definition, params):
+        stdout.write(line + "\n")
+    stdout.write("confirmation required: rerun with --yes\n")
+    return 2
+
+
 def get_definition(tool_name: str) -> McpToolDefinition | None:
     return get_tool_catalog().get(tool_name)
-

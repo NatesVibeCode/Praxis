@@ -59,6 +59,7 @@ from runtime.compiler_references import (
     infer_agent_route as _infer_agent_route_impl,
     workflow_id_for_title as _workflow_id_for_title_impl,
 )
+from runtime.integrations.display_names import display_name_for_integration
 
 logger = logging.getLogger(__name__)
 
@@ -516,11 +517,12 @@ def _enrich_binding_ledger(
         for row in rows or []:
             iid = _as_text(row.get("id"))
             if iid:
+                item = dict(row)
                 integration_lookup[iid] = {
-                    "integration_name": _as_text(row.get("name")) or iid,
-                    "provider": _as_text(row.get("provider")) or "",
-                    "auth_status": _as_text(row.get("auth_status")) or "unknown",
-                    "description": _as_text(row.get("description")) or "",
+                    "integration_name": display_name_for_integration(item),
+                    "provider": _as_text(item.get("provider")) or "",
+                    "auth_status": _as_text(item.get("auth_status")) or "unknown",
+                    "description": _as_text(item.get("description")) or "",
                 }
                 integration_lookup[f"@{iid}"] = integration_lookup[iid]
     except Exception:

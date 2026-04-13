@@ -256,6 +256,8 @@ def _result_payload(result, *, timeout: int, parse_json_output: bool) -> dict[st
         "finished_at": result.finished_at,
         "network_policy": result.network_policy,
         "provider_latency_ms": result.provider_latency_ms,
+        "container_cpu_percent": result.container_cpu_percent,
+        "container_mem_bytes": result.container_mem_bytes,
         **telemetry,
     }
 
@@ -353,12 +355,18 @@ def execute_cli(
 
     # Sandbox workspaces exclude .git — codex CLI rejects non-git dirs
     # unless told to skip the check.  The flag belongs to the `exec`
-    # subcommand, so insert it right after "exec".
+    # subcommand, so insert it right after "exec".  We also bypass codex's
+    # internal bwrap sandbox: the Docker container IS the sandbox, and bwrap
+    # requires privileges Docker doesn't grant.
     cmd0_name = os.path.basename(cmd[0]).strip().lower() if cmd else ""
-    if cmd0_name == "codex" and "--skip-git-repo-check" not in cmd:
+    if cmd0_name == "codex":
         try:
             exec_idx = [p.strip().lower() for p in cmd].index("exec")
-            cmd.insert(exec_idx + 1, "--skip-git-repo-check")
+            if "--skip-git-repo-check" not in cmd:
+                cmd.insert(exec_idx + 1, "--skip-git-repo-check")
+            if "--dangerously-bypass-approvals-and-sandbox" not in cmd:
+                insert_at = [p.strip().lower() for p in cmd].index("exec") + 1
+                cmd.insert(insert_at, "--dangerously-bypass-approvals-and-sandbox")
         except ValueError:
             pass
 

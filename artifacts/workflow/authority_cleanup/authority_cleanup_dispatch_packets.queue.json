@@ -1,0 +1,52 @@
+{
+  "name": "authority_cleanup_dispatch_packets",
+  "workflow_id": "authority_cleanup_dispatch_packets",
+  "phase": "build",
+  "outcome_goal": "Package the authority transition into bounded, repeatable dispatch packets and review sweeps so migration, backfill, and discovery cleanup can be re-run without chat context.",
+  "roadmap_alignment": "roadmap_item.authority.cleanup.dispatch_packets",
+  "anti_requirements": [
+    "Do not leave packet definitions implicit in chat history.",
+    "Do not use one-off shell commands as the only migration path.",
+    "Do not conflate registry authority with runtime lifecycle truth."
+  ],
+  "registry_paths": [
+    "Code&DBs/Databases/migrations/workflow/009_bug_and_roadmap_authority.sql",
+    "Code&DBs/Databases/migrations/workflow/016_app_builder_registries.sql",
+    "Code&DBs/Databases/migrations/workflow/020_integration_registry.sql",
+    "planning/roadmap_reset_and_seed.sql",
+    "Code&DBs/Workflow/runtime/chat_tools.py"
+  ],
+  "target_repo": "/Users/nate/Praxis",
+  "workdir": "/Users/nate/Praxis",
+  "verify": [
+    {
+      "command": "./scripts/workflow.sh validate artifacts/workflow/authority_cleanup/authority_cleanup_dispatch_packets.queue.json"
+    }
+  ],
+  "jobs": [
+    {
+      "label": "dispatch_packetization_packet",
+      "agent": "openai/gpt-5.4-mini",
+      "outcome_goal": "Produce the bounded queue packets and review sweeps that carry the authority migration forward.",
+      "anti_vibe_rule": "No monolithic cleanup queue and no ambiguous packet ownership.",
+      "scope": {
+        "read": [
+          "planning/roadmap_reset_and_seed.sql",
+          "scripts/workflow.sh",
+          "Code&DBs/Workflow/surfaces/cli/workflow_runner.py",
+          "artifacts/workflow/authority_cleanup/README.md",
+          "Code&DBs/Workflow/runtime/chat_tools.py"
+        ],
+        "write": [
+          "artifacts/workflow/authority_cleanup/"
+        ]
+      },
+      "verify": [
+        {
+          "command": "test -f artifacts/workflow/authority_cleanup/README.md"
+        }
+      ],
+      "prompt": "OBJECTIVE:\nPackage the authority-cleanup transition into bounded, reusable dispatch artifacts.\n\nTASK:\nCreate or refine the queue packets, review sweeps, and reference docs required to run the authority-cleanup program without depending on chat context. Keep each packet owned by one seam, make registry-path dependencies explicit, and ensure review packets search specifically for surviving bypasses, duplicate seeds, and silent fallback behavior.\n\nCONSTRAINTS:\nDo not widen packet scopes across multiple major design decisions. Do not use filesystem queue lists as runtime discovery. Keep packet ownership aligned to the roadmap child items.\n\nOUTPUT_CONTRACT:\nDispatch artifacts under `artifacts/workflow/authority_cleanup/` that cleanly map roadmap items to runnable packets and review sweeps.\n\nACCEPTANCE_CRITERIA:\n- Every authority-cleanup child item has a concrete packet ref.\n- Packet scopes are narrow and registry paths are explicit.\n- Review sweeps are called out separately from build packets.\n\nSTOP_BOUNDARY:\nDo not implement the runtime code changes themselves in this packet."
+    }
+  ]
+}

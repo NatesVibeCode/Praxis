@@ -49,7 +49,7 @@ _CAP_TO_TASK_TYPES = {
 _TIER_RANK_BASE = {"high": 1, "medium": 4, "low": 7}
 
 
-def tool_praxis_provider_onboard(params: dict) -> dict:
+def tool_praxis_provider_onboard(params: dict, _progress_emitter=None) -> dict:
     """Onboard a CLI or API provider with probing, capability assignment, and routing."""
     from registry.provider_onboarding import (
         normalize_provider_onboarding_spec,
@@ -76,12 +76,19 @@ def tool_praxis_provider_onboard(params: dict) -> dict:
 
     dry_run = action == "probe"
 
+    if _progress_emitter:
+        _progress_emitter.emit(progress=0, total=3, message=f"Normalizing spec for {provider_slug}")
+
     try:
         spec = normalize_provider_onboarding_spec(raw_spec)
     except Exception as exc:
         return {"error": f"Invalid spec: {exc}"}
 
     db_url = resolve_workflow_database_url(env=workflow_database_env())
+
+    if _progress_emitter:
+        label = "probe" if dry_run else "onboard"
+        _progress_emitter.emit(progress=1, total=3, message=f"Running provider {label} ({transport})")
 
     result = run_provider_onboarding(
         database_url=db_url,
@@ -92,12 +99,18 @@ def tool_praxis_provider_onboard(params: dict) -> dict:
     serialized = _serialize(result)
 
     if not dry_run and result.ok:
+        if _progress_emitter:
+            _progress_emitter.emit(progress=2, total=3, message="Syncing caps and routing tables")
         post_onboarding = _post_onboarding_sync(
             db_url=db_url,
             provider_slug=provider_slug,
             model_reports=result.model_reports,
         )
         serialized["post_onboarding"] = post_onboarding
+
+    if _progress_emitter:
+        status = "ok" if result.ok else "failed"
+        _progress_emitter.emit(progress=3, total=3, message=f"Done — {provider_slug} {status}")
 
     return serialized
 

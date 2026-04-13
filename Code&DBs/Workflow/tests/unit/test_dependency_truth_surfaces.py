@@ -73,6 +73,52 @@ def test_orient_includes_dependency_truth(monkeypatch) -> None:
     }
 
 
+def test_orient_advertises_catalog_backed_cli(monkeypatch) -> None:
+    monkeypatch.setattr(workflow_admin, "dependency_truth_report", lambda scope="all": {"ok": True})
+    monkeypatch.setattr(
+        workflow_admin,
+        "_handle_health",
+        lambda subs, body: {
+            "preflight": {"overall": "healthy"},
+            "operator_snapshot": {},
+            "proof_metrics": {},
+            "schema_authority": {},
+            "lane_recommendation": {},
+        },
+    )
+
+    result = workflow_admin._handle_orient(_FakeSubsystems(), {})
+
+    code_discovery = result["search_surfaces"]["code_discovery"]
+    assert "workflow discover" in code_discovery
+    assert "workflow tools describe praxis_discover" in code_discovery
+    assert "praxis_discover" in code_discovery
+
+    knowledge_graph = result["search_surfaces"]["knowledge_graph"]
+    assert "workflow recall" in knowledge_graph
+    assert "workflow tools describe praxis_recall" in knowledge_graph
+
+    cli_surface = result["cli_surface"]
+    assert cli_surface["preferred"] is True
+    assert cli_surface["tool_count"] == 42
+    assert cli_surface["discovery_commands"][0]["command"] == "workflow tools list"
+    assert "failure" in cli_surface["discovery_commands"][1]["examples"][0]
+    assert cli_surface["recommended_reads"][0]["command"] == "workflow query"
+    assert "what is failing right now?" in cli_surface["recommended_reads"][0]["examples"][0]
+    assert cli_surface["recommended_reads"][1]["command"] == "workflow health"
+    assert "retry logic with exponential backoff" in cli_surface["recommended_reads"][2]["examples"][0]
+
+    instructions = result["instructions"]
+    assert "Prefer the catalog-backed `workflow` CLI" in instructions
+    assert "There are currently 42 catalog-backed tools" in instructions
+    assert "workflow tools list" in instructions
+    assert "workflow health" in instructions
+    assert "workflow tools call <tool>" in instructions
+    assert "write/dispatch flows require `--yes`" in instructions
+    assert "workflow query" in instructions
+    assert "kickoff first" in instructions
+
+
 def test_praxis_ctl_doctor_includes_dependency_truth(monkeypatch, tmp_path: Path, capsys) -> None:
     local_alpha = _load_local_alpha()
     fake_dependency_truth = {
@@ -163,5 +209,11 @@ def test_probe_frontdoor_semantics_uses_ui_header_for_workflow_probes(monkeypatc
 
     assert payload["workflow_api_ready"] is True
     assert payload["mcp_bridge_ready"] is True
-    assert ("http://127.0.0.1:8421/orient", "POST", {"X-Praxis-UI": "1"}) in calls
-    assert ("http://127.0.0.1:8421/mcp", "POST", {"X-Praxis-UI": "1"}) in calls
+    assert any(
+        url.endswith("/orient") and method == "POST" and headers == {"X-Praxis-UI": "1"}
+        for url, method, headers in calls
+    )
+    assert any(
+        url.endswith("/mcp") and method == "POST" and headers == {"X-Praxis-UI": "1"}
+        for url, method, headers in calls
+    )

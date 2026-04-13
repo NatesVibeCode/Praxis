@@ -12,7 +12,7 @@ from ..subsystems import _subs, REPO_ROOT, workflow_database_env
 from ..helpers import _serialize
 
 
-def tool_praxis_health(params: dict) -> dict:
+def tool_praxis_health(params: dict, _progress_emitter=None) -> dict:
     """Run health probes, return preflight + operator snapshot + lane recommendation."""
     hs_mod = _subs.get_health_mod()
 
@@ -29,8 +29,18 @@ def tool_praxis_health(params: dict) -> dict:
                 continue
             probes.append(hs_mod.ProviderTransportProbe(provider_slug, adapter_type))
 
+    if _progress_emitter:
+        _progress_emitter.log(f"Running {len(probes)} health probes")
+        _progress_emitter.emit(progress=0, total=len(probes), message="Starting preflight")
+
     runner = hs_mod.PreflightRunner(probes)
     preflight = runner.run()
+
+    if _progress_emitter:
+        for i, c in enumerate(preflight.checks, 1):
+            icon = "+" if c.passed else "x"
+            _progress_emitter.emit(progress=i, total=len(probes),
+                                   message=f"[{icon}] {c.name} — {c.message[:80] if c.message else 'ok'}")
 
     panel = _subs.get_operator_panel()
     snap = panel.snapshot()

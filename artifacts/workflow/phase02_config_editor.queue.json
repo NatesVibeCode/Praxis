@@ -1,0 +1,18 @@
+{
+  "name": "phase02_config_editor",
+  "queue_id": "phase02_001",
+  "phase": "build",
+  "outcome_goal": "Gear icon on each module opens a config editor overlay",
+  "jobs": [
+    {
+      "label": "p2_config_editor_panel",
+      "agent": "anthropic/claude-opus-4-6",
+      "prompt": "You are working in /Users/nate/Praxis/Code&DBs/Workflow/surfaces/app/src/.\n\nCreate src/grid/ConfigEditorPanel.tsx:\n\nA slide-out panel that appears when clicking a gear icon on a module. It lets users edit the module's config.\n\nProps: { quadrantId: string, moduleId: string, config: Record<string, unknown>, onSave: (newConfig: Record<string, unknown>) => void, onClose: () => void }\n\nFor known config keys, render appropriate inputs:\n- endpoint (text input)\n- objectType (text input)\n- title (text input)\n- placeholder (text input)\n- publishSelection (text input — objectType name)\n- subscribeSelection (text input — objectType name)\n- columns (JSON array editor — show each column as a row with key/label/sortable inputs)\n- chartType / type (dropdown: bar, line, pie)\n- refreshInterval (number input)\n- actions (JSON array — show each action as label + variant dropdown)\n\nFor any key not in the known list, show a raw JSON textarea.\n\nStyling:\n- Position: absolute, right side of the quadrant cell, z-index 100\n- Dark theme: bg var(--bg-card), border var(--border), radius var(--radius)\n- Width: 320px, max-height 80vh, overflow-y auto\n- Header with module name + close X button\n- Save button at bottom (accent color)\n\nAlso create src/grid/ConfigEditorPanel.css for styles.\n\nWrite both files."
+    },
+    {
+      "label": "p2_gear_icon_and_overlay",
+      "agent": "google/gemini-3.1-pro-preview",
+      "prompt": "You are working in /Users/nate/Praxis/Code&DBs/Workflow/surfaces/app/src/.\n\nTwo changes:\n\n1. Create src/hooks/useManifestOverlay.ts:\n- Hook that merges original manifest quadrants with runtime overrides from World store\n- Reads from world path 'ui.layout.quadrants' using useSlice\n- Returns merged quadrant definitions: original config merged with overlay config\n- If overlay has a config for a quadrantId, deep-merge it with the original\n\n```typescript\nimport { useSlice } from './useSlice';\nimport { world } from '../world';\nimport { QuadrantManifest } from '../grid/QuadrantGrid';\n\nexport function useManifestOverlay(manifest: QuadrantManifest): QuadrantManifest {\n  const overrides = useSlice(world, 'ui.layout.quadrants') as Record<string, any> | null;\n  if (!overrides) return manifest;\n  \n  const merged = { ...manifest, quadrants: { ...manifest.quadrants } };\n  for (const [qid, override] of Object.entries(overrides)) {\n    if (merged.quadrants[qid]) {\n      merged.quadrants[qid] = {\n        ...merged.quadrants[qid],\n        config: { ...(merged.quadrants[qid].config || {}), ...(override.config || {}) },\n      };\n    }\n  }\n  return merged;\n}\n```\n\n2. Update src/grid/QuadrantGrid.tsx:\n- Import ConfigEditorPanel from './ConfigEditorPanel'\n- Import useManifestOverlay from '../hooks/useManifestOverlay'\n- Apply useManifestOverlay to the manifest before rendering\n- Add state: editingQuadrant (string | null)\n- On each quadrant-cell, add a small gear icon button (position absolute, top-right, opacity 0 until hover)\n- Clicking gear sets editingQuadrant to that cell's ID\n- When editingQuadrant is set, render ConfigEditorPanel for that cell\n- onSave: write updated config to World at 'ui.layout.quadrants.<quadrantId>.config'\n- onClose: set editingQuadrant to null\n- Update QuadrantGrid.css: .quadrant-cell:hover .gear-icon { opacity: 1 }\n\nWrite all files."
+    }
+  ]
+}

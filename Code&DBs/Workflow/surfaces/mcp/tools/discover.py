@@ -12,7 +12,7 @@ from typing import Any
 from ..subsystems import _subs
 
 
-def tool_praxis_discover(params: dict) -> dict:
+def tool_praxis_discover(params: dict, _progress_emitter=None) -> dict:
     """Search for functionally similar code in the codebase.
 
     Actions:
@@ -82,7 +82,13 @@ def tool_praxis_discover(params: dict) -> dict:
     elif action == "reindex":
         force = params.get("force", False)
         subdirs = params.get("subdirs")
+        if _progress_emitter:
+            _progress_emitter.log("Reindexing codebase — scanning files...")
+            _progress_emitter.emit(progress=0, total=1, message="Scanning")
         result = indexer.index_codebase(subdirs=subdirs, force=force)
+        if _progress_emitter:
+            count = result.get("indexed", result.get("count", "?")) if isinstance(result, dict) else "?"
+            _progress_emitter.emit(progress=1, total=1, message=f"Done — {count} entities indexed")
         return {
             "action": "reindex",
             "result": result,

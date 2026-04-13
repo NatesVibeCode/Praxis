@@ -10,8 +10,8 @@ from surfaces.cli.mcp_tools import (
     get_definition,
     load_json_file,
     print_json,
+    require_confirmation,
     run_cli_tool,
-    tool_preflight_lines,
 )
 from surfaces.mcp.catalog import McpToolDefinition, get_tool_catalog
 
@@ -94,6 +94,8 @@ def _tools_list_command(args: list[str], *, stdout: TextIO) -> int:
                 "surface": definition.cli_surface,
                 "tier": definition.cli_tier,
                 "recommended_alias": definition.cli_recommended_alias,
+                "entrypoint": definition.cli_entrypoint,
+                "describe_command": definition.cli_describe_command,
                 "risk_levels": list(definition.risk_levels),
                 "selector_field": definition.selector_field,
                 "selector_enum": list(definition.selector_enum),
@@ -173,6 +175,8 @@ def _tools_describe_command(args: list[str], *, stdout: TextIO) -> int:
         "surface": definition.cli_surface,
         "tier": definition.cli_tier,
         "recommended_alias": definition.cli_recommended_alias,
+        "entrypoint": definition.cli_entrypoint,
+        "describe_command": definition.cli_describe_command,
         "badges": list(definition.cli_badges),
         "when_to_use": definition.cli_when_to_use,
         "when_not_to_use": definition.cli_when_not_to_use,
@@ -192,6 +196,8 @@ def _tools_describe_command(args: list[str], *, stdout: TextIO) -> int:
 
     stdout.write(f"{definition.name}\n")
     stdout.write(f"badges: {format_badges(definition)}\n")
+    stdout.write(f"entrypoint: {definition.cli_entrypoint}\n")
+    stdout.write(f"describe_command: {definition.cli_describe_command}\n")
     stdout.write(f"description: {definition.description.splitlines()[0]}\n")
     if definition.cli_when_to_use:
         stdout.write(f"when_to_use: {definition.cli_when_to_use}\n")
@@ -270,17 +276,18 @@ def _tools_call_command(args: list[str], *, stdout: TextIO) -> int:
         stdout.write(f"invalid tool input: {exc}\n")
         return 2
 
-    risk = definition.risk_for_params(params)
     if definition.requires_workflow_token and not workflow_token:
         stdout.write(f"workflow token required for {definition.name}\n")
         return 2
-    if risk in {"write", "dispatch"} and not confirmed:
-        for line in tool_preflight_lines(definition, params):
-            stdout.write(line + "\n")
-        stdout.write("confirmation required: rerun with --yes\n")
-        return 2
+    confirmation_result = require_confirmation(
+        definition,
+        params,
+        confirmed=confirmed,
+        stdout=stdout,
+    )
+    if confirmation_result is not None:
+        return confirmation_result
 
     exit_code, payload = run_cli_tool(definition.name, params, workflow_token=workflow_token)
     print_json(stdout, payload)
     return exit_code
-

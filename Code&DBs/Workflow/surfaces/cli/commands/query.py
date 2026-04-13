@@ -5,7 +5,9 @@ from __future__ import annotations
 from typing import TextIO
 
 from surfaces.cli.mcp_tools import (
+    get_definition,
     print_json,
+    require_confirmation,
     render_artifacts_payload,
     render_bug_payload,
     render_discover_payload,
@@ -712,13 +714,26 @@ def _discover_command(args: list[str], *, stdout: TextIO) -> int:
             "\n"
             "  workflow discover 'retry with exponential backoff'\n"
             "  workflow discover 'parse JSON from stdin' --kind function\n"
-            "  workflow discover reindex   (re-index the codebase)\n"
+            "  workflow discover reindex --yes   (re-index the codebase)\n"
             "  workflow discover stats     (index statistics)\n"
         )
         return 2
 
     # Special actions
     if args[0] == "reindex":
+        confirmed = "--yes" in args[1:]
+        definition = get_definition("praxis_discover")
+        if definition is None:
+            stdout.write("tool definition not found: praxis_discover\n")
+            return 2
+        confirmation_result = require_confirmation(
+            definition,
+            {"action": "reindex"},
+            confirmed=confirmed,
+            stdout=stdout,
+        )
+        if confirmation_result is not None:
+            return confirmation_result
         exit_code, payload = run_cli_tool("praxis_discover", {"action": "reindex"})
         print_json(stdout, payload)
         return exit_code
@@ -764,19 +779,19 @@ def _discover_command(args: list[str], *, stdout: TextIO) -> int:
 
 
 # ---------------------------------------------------------------------------
-# workflow artifacts [stats|search <q>|list <sandbox_id>]
+# workflow artifacts [stats|search <q>|list [sandbox_id]]
 # ---------------------------------------------------------------------------
 
 def _artifacts_command(args: list[str], *, stdout: TextIO) -> int:
-    """Handle `workflow artifacts [stats|search <query>|list <sandbox_id>]`."""
+    """Handle `workflow artifacts [stats|search <query>|list [sandbox_id]]`."""
 
     if args and args[0] in {"-h", "--help"}:
         stdout.write(
-            "usage: workflow artifacts [stats|search <query>|list <sandbox_id>] [--json]\n"
+            "usage: workflow artifacts [stats|search <query>|list [sandbox_id]] [--json]\n"
             "\n"
             "  stats                 Index statistics (default)\n"
             "  search <query>        Search artifact file paths\n"
-            "  list <sandbox_id>     List artifacts for a sandbox run\n"
+            "  list [sandbox_id]     List artifacts for a sandbox run (defaults to latest)\n"
         )
         return 2
 
@@ -791,10 +806,8 @@ def _artifacts_command(args: list[str], *, stdout: TextIO) -> int:
         params["query"] = query
     elif action == "list":
         sandbox_id = next((arg for arg in args[1:] if arg != "--json"), "")
-        if not sandbox_id:
-            stdout.write("error: sandbox_id required\n")
-            return 2
-        params["sandbox_id"] = sandbox_id
+        if sandbox_id:
+            params["sandbox_id"] = sandbox_id
     elif action not in {"stats", "search", "list"}:
         stdout.write(f"unknown action: {action}\n")
         return 2

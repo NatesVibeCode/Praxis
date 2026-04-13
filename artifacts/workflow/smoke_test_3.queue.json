@@ -1,0 +1,21 @@
+{
+  "name": "Hardening Smoke Test 3 - All Providers",
+  "phase": "test",
+  "jobs": [
+    {
+      "label": "smoke_auto_routing",
+      "agent": "auto/wiring",
+      "prompt": "Reply with exactly: AUTO_OK. Nothing else."
+    },
+    {
+      "label": "smoke_gemini_direct",
+      "agent": "google/gemini-2.5-flash",
+      "prompt": "Reply with exactly: GEMINI_OK. Nothing else."
+    },
+    {
+      "label": "smoke_codex_direct",
+      "agent": "openai/gpt-5.4-mini",
+      "prompt": "Reply with exactly: CODEX_OK. Nothing else."
+    }
+  ]
+}

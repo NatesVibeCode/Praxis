@@ -6,6 +6,8 @@ notifications exist in Postgres regardless of which process reads them.
 """
 from __future__ import annotations
 
+import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING
@@ -26,6 +28,8 @@ class WorkflowNotification:
     failure_code: str
     duration_seconds: float
     created_at: datetime
+    cpu_percent: float | None = None
+    mem_bytes: int | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -36,6 +40,8 @@ class WorkflowNotification:
             "failure_code": self.failure_code,
             "duration_seconds": round(self.duration_seconds, 1),
             "created_at": self.created_at.isoformat() if self.created_at else "",
+            "cpu_percent": self.cpu_percent,
+            "mem_bytes": self.mem_bytes,
         }
 
     def summary(self) -> str:
@@ -74,7 +80,8 @@ class WorkflowNotificationConsumer:
                    LIMIT $1
                )
                RETURNING id, run_id, job_label, spec_name, agent_slug,
-                         status, failure_code, duration_seconds, created_at""",
+                         status, failure_code, duration_seconds,
+                         cpu_percent, mem_bytes, created_at""",
             limit,
         )
 
@@ -89,6 +96,8 @@ class WorkflowNotificationConsumer:
                 failure_code=r["failure_code"] or "",
                 duration_seconds=float(r["duration_seconds"] or 0),
                 created_at=r["created_at"],
+                cpu_percent=r["cpu_percent"],
+                mem_bytes=r["mem_bytes"],
             )
             for r in rows
         ]
@@ -97,7 +106,8 @@ class WorkflowNotificationConsumer:
         """Read undelivered notifications WITHOUT marking them delivered."""
         rows = self._conn.execute(
             """SELECT id, run_id, job_label, spec_name, agent_slug,
-                      status, failure_code, duration_seconds, created_at
+                      status, failure_code, duration_seconds,
+                      cpu_percent, mem_bytes, created_at
                FROM workflow_notifications
                WHERE delivered = false
                ORDER BY created_at ASC
@@ -116,6 +126,8 @@ class WorkflowNotificationConsumer:
                 failure_code=r["failure_code"] or "",
                 duration_seconds=float(r["duration_seconds"] or 0),
                 created_at=r["created_at"],
+                cpu_percent=r["cpu_percent"],
+                mem_bytes=r["mem_bytes"],
             )
             for r in rows
         ]
@@ -143,7 +155,6 @@ class WorkflowNotificationConsumer:
         at timeout. This is the blocking primitive that replaces manual
         wait loops.
         """
-        import time
         use_timeout = timeout_seconds is not None
         deadline = time.monotonic() + timeout_seconds if use_timeout else None
         collected: list[WorkflowNotification] = []
@@ -152,7 +163,8 @@ class WorkflowNotificationConsumer:
         while not use_timeout or time.monotonic() < (deadline or 0):
             rows = self._conn.execute(
                 """SELECT id, run_id, job_label, spec_name, agent_slug,
-                          status, failure_code, duration_seconds, created_at
+                          status, failure_code, duration_seconds,
+                          cpu_percent, mem_bytes, created_at
                    FROM workflow_notifications
                    WHERE run_id = $1 AND id NOT IN (
                        SELECT unnest($2::int[])
@@ -175,6 +187,8 @@ class WorkflowNotificationConsumer:
                         failure_code=r["failure_code"] or "",
                         duration_seconds=float(r["duration_seconds"] or 0),
                         created_at=r["created_at"],
+                        cpu_percent=r["cpu_percent"],
+                        mem_bytes=r["mem_bytes"],
                     ))
 
             if len(collected) >= total_jobs:
@@ -198,6 +212,7 @@ class WorkflowNotificationConsumer:
         total_jobs: int,
         timeout_seconds: float | None = 600,
         poll_interval: float = 2.0,
+        wakeup_event: "threading.Event | None" = None,
     ):
         """Yield notifications for a run_id as they are found.
 
@@ -205,8 +220,11 @@ class WorkflowNotificationConsumer:
         enabling callers to emit progress in real time. Marks all
         yielded notifications as delivered when the generator exits.
         If timeout_seconds is None, stream until all notifications are seen.
+
+        wakeup_event: optional threading.Event that is set by a pg_notify
+        LISTEN thread to wake this loop early instead of sleeping the full
+        poll_interval.
         """
-        import time
         use_timeout = timeout_seconds is not None
         deadline = time.monotonic() + timeout_seconds if use_timeout else None
         seen_ids: set[int] = set()
@@ -216,7 +234,8 @@ class WorkflowNotificationConsumer:
             while count < total_jobs and (not use_timeout or time.monotonic() < (deadline or 0)):
                 rows = self._conn.execute(
                     """SELECT id, run_id, job_label, spec_name, agent_slug,
-                              status, failure_code, duration_seconds, created_at
+                              status, failure_code, duration_seconds,
+                              cpu_percent, mem_bytes, created_at
                        FROM workflow_notifications
                        WHERE run_id = $1 AND id NOT IN (
                            SELECT unnest($2::int[])
@@ -240,10 +259,16 @@ class WorkflowNotificationConsumer:
                             failure_code=r["failure_code"] or "",
                             duration_seconds=float(r["duration_seconds"] or 0),
                             created_at=r["created_at"],
+                            cpu_percent=r["cpu_percent"],
+                            mem_bytes=r["mem_bytes"],
                         )
 
                 if count < total_jobs:
-                    time.sleep(poll_interval)
+                    if wakeup_event is not None:
+                        wakeup_event.wait(timeout=poll_interval)
+                        wakeup_event.clear()
+                    else:
+                        time.sleep(poll_interval)
         finally:
             # Mark all yielded notifications as delivered
             if seen_ids:

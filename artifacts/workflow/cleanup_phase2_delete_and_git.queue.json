@@ -1,0 +1,28 @@
+{
+  "name": "cleanup_phase2_delete_and_git",
+  "queue_id": "cleanup_phase2_001",
+  "phase": "cleanup",
+  "outcome_goal": "Delete commodity boilerplate modules, fix p95 bug, archive reference code, clean git tracking",
+  "jobs": [
+    {
+      "label": "p2a_delete_commodity_archive_reference",
+      "agent": "auto/refactor",
+      "prompt": "Clean up commodity and superseded code.\n\n## Task 1: Delete commodity modules (no novel logic)\n\nDelete these files entirely — they contain boilerplate CRUD/ETL patterns that are trivially replaceable:\n- `Code&DBs/Workflow/runtime/heartbeat_inbox.py`\n- `Code&DBs/Workflow/runtime/registry_embedder.py`\n\nFirst verify with `grep -r` that nothing imports them. If anything does import them, do NOT delete — instead leave a comment at the top of the file noting it should be replaced.\n\n## Task 2: Fix dynamic_timeout.py p95 bug\n\nFile: `Code&DBs/Workflow/runtime/dynamic_timeout.py`\n\nThe p95 calculation has a subtle bug. Find the line:\n```python\nidx = math.ceil(len(durations) * 0.95) - 1\n```\n\nFix to:\n```python\nidx = min(math.floor(len(durations) * 0.95), len(durations) - 1)\n```\n\nThis correctly computes the 95th percentile index (the value below which 95% of observations fall).\n\n## Task 3: Archive postgres_old.py\n\nMove `Code&DBs/Workflow/storage/postgres_old.py` to `Code&DBs/Workflow/docs/archived/postgres_original.py`.\n\nCreate the `docs/archived/` directory if it doesn't exist. Add a comment at the top of the archived file:\n```python\n# ARCHIVED: Original Postgres storage implementation.\n# Superseded by storage/postgres/ package.\n# Preserved as reference for: advisory-lock schema bootstrap pattern,\n# evidence-timeline reconstruction, and fail-closed validation design.\n```\n\nVerify nothing imports `storage.postgres_old` before moving.",
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/heartbeat_inbox.py",
+        "Code&DBs/Workflow/runtime/registry_embedder.py",
+        "Code&DBs/Workflow/runtime/dynamic_timeout.py",
+        "Code&DBs/Workflow/storage/postgres_old.py",
+        "Code&DBs/Workflow/docs/archived/postgres_original.py"
+      ]
+    },
+    {
+      "label": "p2b_clean_git_tracking",
+      "agent": "auto/wiring",
+      "prompt": "Clean up git tracking and fix .gitignore.\n\n## Task 1: Update .gitignore\n\nFile: `.gitignore` (at repo root: `/Users/nate/Praxis/.gitignore`)\n\nAdd these rules (append to existing file, do not remove existing rules):\n```\n# Build artifacts\nCode&DBs/Workflow/surfaces/app/dist/\n\n# OS files (recursive)\n**/.DS_Store\n\n# Logs\n*.log\nartifacts/dispatch_logs/*.log\n\n# Heartbeat telemetry\nartifacts/heartbeat/\n```\n\nAlso check: if the existing `.DS_Store` rule is not recursive (just `.DS_Store` without `**/`), remove the non-recursive one since we're adding the recursive version.\n\n## Task 2: Remove tracked files that should be ignored\n\nRun these git commands:\n```bash\ngit rm --cached -r 'Code&DBs/Workflow/surfaces/app/dist/' 2>/dev/null || true\ngit rm --cached '**/.DS_Store' 2>/dev/null || true\ngit rm --cached -r '.DS_Store' 2>/dev/null || true  \ngit rm --cached 'Code&DBs/.DS_Store' 2>/dev/null || true\n```\n\nDo NOT delete the actual files from disk — only remove from git tracking.\nDo NOT commit. Just stage the changes.",
+      "write_scope": [
+        ".gitignore"
+      ]
+    }
+  ]
+}

@@ -7,6 +7,7 @@ Usage:
     python workflow_cli.py chain-status [<chain_id>] [--limit N]
     python workflow_cli.py status [--since-hours N]
     python workflow_cli.py active
+    python workflow_cli.py retry <run_id> <label>
     python workflow_cli.py cancel <run_id>
 """
 
@@ -228,10 +229,18 @@ def cmd_validate(args: argparse.Namespace) -> int:
     if _WORKFLOW_ROOT not in sys.path:
         sys.path.insert(0, _WORKFLOW_ROOT)
 
-    from runtime.workflow_spec import WorkflowSpec, WorkflowSpecError
+    from runtime.workflow_spec import WorkflowSpec, WorkflowSpecError, load_raw, validate_authoring_spec, _is_new_authoring_format
     from runtime.workflow_validation import validate_workflow_spec
 
     try:
+        raw = load_raw(args.spec)
+        if _is_new_authoring_format(raw):
+            ok, errors = validate_authoring_spec(raw)
+            if not ok:
+                print("INVALID (authoring schema):", file=sys.stderr)
+                for err in errors:
+                    print(f"  - {err}", file=sys.stderr)
+                return 1
         spec = WorkflowSpec.load(args.spec)
     except WorkflowSpecError as exc:
         print(f"INVALID: {exc}", file=sys.stderr)
@@ -447,6 +456,55 @@ def cmd_cancel(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_retry(args: argparse.Namespace) -> int:
+    """Retry one failed workflow job via DB-backed workflow authority."""
+    try:
+        pg_conn = _get_pg_conn()
+        from runtime.control_commands import (
+            ControlCommandType,
+            ControlIntent,
+            execute_control_intent,
+            render_control_command_response,
+        )
+
+        command = execute_control_intent(
+            pg_conn,
+            ControlIntent(
+                command_type=ControlCommandType.WORKFLOW_RETRY,
+                requested_by_kind="cli",
+                requested_by_ref="workflow_cli.retry",
+                idempotency_key=f"workflow.retry.cli.{args.run_id}.{args.label}",
+                payload={"run_id": args.run_id, "label": args.label},
+            ),
+            approved_by="cli.workflow.retry",
+        )
+        result = render_control_command_response(
+            pg_conn,
+            command,
+            action="retry",
+            run_id=args.run_id,
+            label=args.label,
+        )
+        print(json.dumps(result, default=str, indent=2))
+        return 0 if result.get("status") == "requeued" else 1
+    except Exception as exc:
+        try:
+            from runtime.control_commands import render_control_command_failure
+
+            details = getattr(exc, "details", None)
+            failure = render_control_command_failure(
+                error_code=getattr(exc, "reason_code", "control.command.execution_failed"),
+                error_detail=str(exc),
+                run_id=args.run_id,
+                label=args.label,
+                details=details if isinstance(details, dict) else None,
+            )
+            print(json.dumps(failure, default=str, indent=2))
+        except Exception:
+            print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+
 def cmd_chain(args: argparse.Namespace) -> int:
     """Submit one durable multi-wave workflow chain."""
     if _WORKFLOW_ROOT not in sys.path:
@@ -567,6 +625,10 @@ def main() -> int:
     stream_parser.add_argument("--timeout", type=float, default=None, help="Stop streaming after N seconds")
     stream_parser.add_argument("--poll-interval", type=float, default=2.0, help="Poll interval in seconds")
 
+    retry_parser = sub.add_parser("retry", help="Retry one failed workflow job")
+    retry_parser.add_argument("run_id", help="Workflow run id containing the failed job")
+    retry_parser.add_argument("label", help="Workflow job label to retry")
+
     cancel_parser = sub.add_parser("cancel", help="Cancel a workflow run")
     cancel_parser.add_argument("run_id", help="Workflow run id to cancel")
 
@@ -593,6 +655,8 @@ def main() -> int:
         return cmd_active(args)
     elif args.command == "stream":
         return cmd_stream(args)
+    elif args.command == "retry":
+        return cmd_retry(args)
     elif args.command == "cancel":
         return cmd_cancel(args)
     elif args.command == "chain":

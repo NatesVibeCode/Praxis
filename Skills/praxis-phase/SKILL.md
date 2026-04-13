@@ -58,6 +58,8 @@ When this repo's workflow surfaces are involved:
 - use `praxis_workflow(action='status', run_id=run_id)` for health, failure signals, and idle detection
 - use `kill_if_idle=true` only when the run is clearly unhealthy and idle
 - do not rely on legacy wait-style behavior
+- when the exact tool shape is unclear, use `workflow tools describe <tool>` instead of guessing from memory
+- prefer `workflow query`, `workflow discover`, `workflow recall`, and `workflow health` as the operator-facing aliases for read-mostly work
 
 ## Required Inputs
 

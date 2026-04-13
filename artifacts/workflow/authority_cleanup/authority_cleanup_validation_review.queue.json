@@ -1,0 +1,53 @@
+{
+  "name": "authority_cleanup_validation_review",
+  "workflow_id": "authority_cleanup_validation_review",
+  "phase": "review",
+  "outcome_goal": "Prove the authority cleanup through targeted validation, live smoke coverage, and explicit review sweeps for any surviving hardcoded authority behavior.",
+  "roadmap_alignment": "roadmap_item.authority.cleanup.validation_review",
+  "anti_requirements": [
+    "Do not close the program on prose alone.",
+    "Do not accept DB-unavailable fallbacks as success.",
+    "Do not skip live dispatch smoke once the authority seams are cut over."
+  ],
+  "registry_paths": [
+    "Code&DBs/Workflow/runtime/workflow/unified.py",
+    "Code&DBs/Workflow/runtime/verification.py",
+    "Code&DBs/Workflow/runtime/compiler.py",
+    "Code&DBs/Workflow/runtime/model_context_limits.py",
+    "Code&DBs/Workflow/runtime/rate_limit_prober.py"
+  ],
+  "target_repo": "/Users/nate/Praxis",
+  "workdir": "/Users/nate/Praxis",
+  "verify_refs": [
+    {
+      "command": "./scripts/workflow.sh validate artifacts/workflow/authority_cleanup/authority_cleanup_validation_review.queue.json"
+    }
+  ],
+  "jobs": [
+    {
+      "label": "authority_validation_packet",
+      "agent": "openai/gpt-5.4",
+      "outcome_goal": "Run the validation and review pass that proves DB-only runtime authority.",
+      "anti_vibe_rule": "No greenwashing; missing authority failures must be exercised directly.",
+      "scope": {
+        "read": [
+          "Code&DBs/Workflow/runtime/workflow/unified.py",
+          "Code&DBs/Workflow/runtime/verification.py",
+          "Code&DBs/Workflow/runtime/compiler.py",
+          "Code&DBs/Workflow/runtime/model_context_limits.py",
+          "Code&DBs/Workflow/runtime/rate_limit_prober.py",
+          "artifacts/workflow/authority_cleanup/README.md"
+        ],
+        "write": [
+          "artifacts/workflow/authority_cleanup/AUTHORITY_VALIDATION.md"
+        ]
+      },
+      "verify_refs": [
+        {
+          "command": "test -f artifacts/workflow/authority_cleanup/AUTHORITY_VALIDATION.md"
+        }
+      ],
+      "prompt": "OBJECTIVE:\nWrite and execute the validation plan that proves the runtime now honors DB-only authority.\n\nTASK:\nDefine and run the review/validation matrix for registry resolution, verifier ref execution, compiler capability routing, workflow discovery, integration metadata, provider context windows, and probe selection. Include at least one live `dag_dispatch(run|status)` smoke path and explicit negative tests for missing authority rows.\n\nCONSTRAINTS:\nUse the current frontdoor bridge (`dag_dispatch`, `dag_validate`, `./scripts/workflow.sh validate`). Treat DB-unavailable or hardcoded fallback behavior as failure conditions, not compatibility wins.\n\nOUTPUT_CONTRACT:\nWrite `artifacts/workflow/authority_cleanup/AUTHORITY_VALIDATION.md` with the final validation matrix, smoke commands, negative cases, and residual risks.\n\nACCEPTANCE_CRITERIA:\n- Validation covers every authority-cleanup child seam.\n- At least one live dispatch smoke is included.\n- Surviving hardcoded bypasses are either fixed or called out as blockers.\n\nSTOP_BOUNDARY:\nDo not reopen unrelated product or UI work from this packet."
+    }
+  ]
+}

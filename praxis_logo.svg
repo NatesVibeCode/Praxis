@@ -1,0 +1,31 @@
+<svg width="1000" height="1000" viewBox="0 0 500 500" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="500" height="500" fill="white" />
+  
+  <!-- Main Square Frame (Centered) -->
+  <!-- Left: 130, Right: 370, Top: 100, Bottom: 340 -->
+  <path d="M 130 100 L 370 100 L 370 185 M 370 255 L 370 340 L 130 340 L 130 255 M 130 185 L 130 100" 
+        stroke="black" stroke-width="12" fill="none" stroke-linejoin="miter" stroke-linecap="square" />
+
+  <!-- Horizontal Connecting Line (Aligned to node centers) -->
+  <line x1="130" y1="220" x2="370" y2="220" stroke="black" stroke-width="6" />
+
+  <!-- Node 1: Left Edge Circle -->
+  <circle cx="130" cy="220" r="18" fill="black" />
+
+  <!-- Node 2: Center Concentric Circles (Slightly left of true center for visual balance) -->
+  <g transform="translate(225, 220)">
+    <circle cx="0" cy="0" r="38" fill="white" stroke="black" stroke-width="7" />
+    <circle cx="0" cy="0" r="22" fill="white" stroke="black" stroke-width="7" />
+    <circle cx="0" cy="0" r="10" fill="black" />
+  </g>
+
+  <!-- Node 3: Right-Mid Small Circle -->
+  <circle cx="310" cy="220" r="14" fill="black" />
+
+  <!-- Node 4: Right Edge Large Circle -->
+  <circle cx="370" cy="220" r="28" fill="black" />
+
+  <!-- Text: PRAXIS (Perfectly centered) -->
+  <text x="250" y="420" font-family="Futura, 'Avenir Next', Arial, sans-serif" font-weight="900" font-size="72" text-anchor="middle" letter-spacing="4">PRAXIS</text>
+</svg>

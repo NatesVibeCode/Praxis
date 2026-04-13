@@ -1,0 +1,27 @@
+{
+  "name": "Recruiter Migration Audit Progress Notify",
+  "queue_id": "recruiter-migration-audit-progress-notify",
+  "phase": "operate",
+  "outcome_goal": "Publish Recruiter DAG migration audit progress and blockers through notifications/send.",
+  "jobs": [
+    {
+      "label": "notify_recruiter_migration_audit",
+      "agent": "integration/notifications",
+      "prompt": "Recruiter DAG migration audit progress update",
+      "integration_id": "notifications",
+      "integration_action": "send",
+      "integration_args": {
+        "channels": [
+          {
+            "kind": "in_app",
+            "target": "recruiter-migration-audit",
+            "label": "Recruiter Migration Audit"
+          }
+        ],
+        "subject": "Recruiter DAG migration audit progress",
+        "body": "Audit complete for lead-discovery, lead-scoring, company-intel, and opportunity-review. Progress: generic DAG seams exist for workflow.invoke, dag-workflow.dispatch_job, dag-workflow.check_status, and notifications.send. Blockers: recruiter/search_leads, recruiter/score_leads, recruiter/company_intel, and recruiter/review_opportunities do not exist as runtime authorities; dag-workflow/search_receipts currently matches spec_name rather than actual receipt evidence; workflow invocation requires workflowId-backed wiring to stay on the integration path. Live DAG evidence at 2026-04-08T00:11Z: dispatch_34b4ce54ac85 is still running with ps_mnpacbst_1 succeeded and ps_mnpacbst_2 running; the audit notification path already executed successfully as dispatch_b72059742e65 via integration/notifications. No completed Recruiter-plan receipts were returned by dag_receipt_search during this audit window.",
+        "authority": "Recruiter migration audit"
+      }
+    }
+  ]
+}

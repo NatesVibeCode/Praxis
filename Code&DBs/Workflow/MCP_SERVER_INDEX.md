@@ -12,7 +12,8 @@ Key files:
 - `surfaces/mcp/protocol.py` — JSON-RPC transport and MCP notifications
 - `surfaces/mcp/registry.py` — auto-discovers tools from `surfaces/mcp/tools/`
 - `surfaces/mcp/tools/workflow.py` — async workflow contract
-- `surfaces/MCP_SERVER_README.md` — protocol and usage guide
+- `docs/MCP.md` — generated tool reference from the shared catalog metadata
+- `surfaces/cli/main.py` — canonical CLI frontdoor for `workflow ...`
 
 ## Workflow Contract
 
@@ -26,6 +27,24 @@ Models and clients should treat Praxis workflow execution this way:
 6. Do not reintroduce wait-style blocking behavior in the front door.
 
 The point is to keep launch cheap while workers execute elsewhere and status keeps flowing on a separate path.
+
+## Operator CLI Surface
+
+The same catalog-backed inventory is visible from the terminal:
+
+- `workflow tools list`
+- `workflow tools search <text>`
+- `workflow tools describe <tool>`
+- `workflow tools call <tool> --input-json '{...}'`
+
+Curated read-mostly aliases remain flat:
+
+- `workflow query`
+- `workflow bugs`
+- `workflow recall`
+- `workflow discover`
+- `workflow artifacts`
+- `workflow health`
 
 ## Transport Notes
 

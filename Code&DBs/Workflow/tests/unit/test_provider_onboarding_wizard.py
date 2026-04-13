@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from registry import provider_onboarding
 from surfaces.api.handlers import workflow_admin
 from surfaces.cli import native_operator
+from surfaces.mcp.tools.provider_onboard import tool_praxis_provider_onboard
 
 
 class _FakeTx:
@@ -255,6 +256,51 @@ def test_provider_onboarding_handler_serializes_result(monkeypatch) -> None:
             },
             "dry_run": False,
         },
+    )
+
+    assert payload["provider_slug"] == "openai"
+    assert payload["steps"][0]["summary"] == "ok"
+    assert payload["steps"][0]["details"]["binary_found"] is True
+
+
+def test_provider_onboarding_mcp_tool_serializes_slots_dataclass(monkeypatch) -> None:
+    expected = provider_onboarding.ProviderOnboardingResult(
+        ok=True,
+        provider_slug="openai",
+        provider_name="Openai",
+        decision_ref="decision.provider-onboarding.openai.20260409T120000Z",
+        dry_run=True,
+        steps=(
+            provider_onboarding.ProviderOnboardingStepResult(
+                step="verification",
+                status="succeeded",
+                summary="ok",
+                details={"binary_found": True},
+            ),
+        ),
+    )
+
+    monkeypatch.setattr(
+        provider_onboarding,
+        "normalize_provider_onboarding_spec",
+        lambda raw: _openai_api_spec(),
+    )
+    monkeypatch.setattr(
+        provider_onboarding,
+        "run_provider_onboarding",
+        lambda **kwargs: expected,
+    )
+    monkeypatch.setattr(
+        "surfaces.mcp.tools.provider_onboard.resolve_workflow_database_url",
+        lambda env=None: "postgresql://example.test/workflow",
+    )
+
+    payload = tool_praxis_provider_onboard(
+        {
+            "action": "probe",
+            "provider_slug": "openai",
+            "transport": "api",
+        }
     )
 
     assert payload["provider_slug"] == "openai"

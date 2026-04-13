@@ -449,7 +449,7 @@ ONLY JSON."""
         """Run Haiku fan-out work inside the unified sandbox contract."""
         from runtime.workflow.execution_backends import execute_api
 
-        sandbox_provider = "seatbelt_local" if sys.platform == "darwin" else "docker_local"
+        sandbox_provider = "docker_local"
         transient_config = SimpleNamespace(
             provider="anthropic",
             model="claude-haiku-4-5-20251001",
@@ -556,7 +556,7 @@ Build 6-8 cards across 4 columns. Col 0-1: parallel data gathering. Col 2-3: pro
 Each action needs executor:{{name,kind:"app"|"agent"}}, dependencies[], toolPermissions[].
 Kinds: mission(1), decision(1-2), action(3-4), state_knowledge(1).
 Schema: {{"id":"str","name":"str","goal":"str","cards":[{{"kind":"str","id":"str","position":{{"col":N,"row":N}},...}}],"edges":[{{"id":"str","from":"id","to":"id","kind":"proceeds_to|mission_to_decision|decision_to_action|action_to_state"}}]}}
-Be specific: not "get data" but "Query open bugs via praxis_bugs". ONLY JSON."""
+Be specific: not "get data" but "Query open bugs via workflow bugs or praxis_bugs". ONLY JSON."""
 
     def _find_repo_root(self):
         """Find the repo root from the current module location."""

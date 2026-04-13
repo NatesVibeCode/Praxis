@@ -61,6 +61,17 @@ class McpToolDefinition:
         return value or None
 
     @property
+    def cli_entrypoint(self) -> str:
+        alias = self.cli_recommended_alias
+        if alias:
+            return f"workflow {alias}"
+        return f"workflow tools call {self.name}"
+
+    @property
+    def cli_describe_command(self) -> str:
+        return f"workflow tools describe {self.name}"
+
+    @property
     def cli_when_to_use(self) -> str:
         return str(self.cli_metadata.get("when_to_use") or "").strip()
 
@@ -230,6 +241,9 @@ class McpToolDefinition:
         if selector_default:
             return selector_default
         if self.selector_defaults_to_empty:
+            selector_enum = self.selector_enum
+            if selector_enum:
+                return selector_enum[0]
             derived = _strip_tool_prefix(self.name)
             return _slugify_action(derived) or "call"
         selector_enum = self.selector_enum
@@ -263,8 +277,8 @@ class McpToolDefinition:
         raw = _strip_tool_prefix(self.name)
         parts = [part for part in raw.split("_") if part]
         if not parts:
-            return "Praxis Tool"
-        return "Praxis " + " ".join(part.capitalize() for part in parts)
+            return "Tool"
+        return " ".join(part.capitalize() for part in parts)
 
     @property
     def supports_action_argument(self) -> bool:
@@ -318,6 +332,8 @@ class McpToolDefinition:
                 "surface": self.cli_surface,
                 "tier": self.cli_tier,
                 "recommended_alias": self.cli_recommended_alias,
+                "entrypoint": self.cli_entrypoint,
+                "describe_command": self.cli_describe_command,
                 "badges": list(self.cli_badges),
                 "risk_levels": list(self.risk_levels),
             },

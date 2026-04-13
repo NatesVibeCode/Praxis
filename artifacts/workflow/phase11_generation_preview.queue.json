@@ -1,0 +1,13 @@
+{
+  "name": "phase11_generation_preview",
+  "queue_id": "phase11_001",
+  "phase": "build",
+  "outcome_goal": "Preview generated apps before saving, with Accept/Regenerate/Edit buttons",
+  "jobs": [
+    {
+      "label": "p11_app_preview",
+      "agent": "anthropic/claude-opus-4-6",
+      "prompt": "You are working in /Users/nate/Praxis/Code&DBs/Workflow/surfaces/app/src/.\n\nCreate src/grid/AppPreview.tsx:\n\nA preview overlay that shows a generated manifest before saving it permanently.\n\nProps: { manifest: V2 manifest object, explanation: string, confidence: number, onAccept: () => void, onRegenerate: () => void, onEdit: () => void, onClose: () => void }\n\nLayout:\n- Full-screen overlay (position fixed, z-index 1000, dark backdrop)\n- Content card (max-width 1200px, centered, max-height 90vh, overflow-y auto)\n- Header: 'Preview: Generated App' + confidence badge + close X\n- Explanation text in a subtle box\n- Scaled-down QuadrantGrid preview (60% scale via CSS transform)\n- Action bar at bottom: 'Accept & Save' (primary), 'Regenerate' (default), 'Edit JSON' (subtle)\n\nStyling: dark theme, matches existing design tokens.\n\nAlso wire it into IntentBoxModule.tsx:\n- After successful generation, instead of immediately navigating, show AppPreview\n- Accept: navigate to the generated manifest\n- Regenerate: call generate again with same intent\n- Edit: navigate to manifest editor with target=generated_id\n\nCreate src/grid/AppPreview.css for styles.\nWrite all files."
+    }
+  ]
+}

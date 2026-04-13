@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import enum
 import json
-import sys
 import warnings
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -46,7 +45,6 @@ class ExecutionBackend(enum.Enum):
 class SandboxProvider(enum.Enum):
     """Which sandbox substrate isolates execution."""
 
-    seatbelt_local = "seatbelt_local"
     docker_local = "docker_local"
     cloudflare_remote = "cloudflare_remote"
 
@@ -88,7 +86,7 @@ class AgentConfig:
     output_format: str
     execution_backend: ExecutionBackend | None = None
     execution_transport: ExecutionTransport = ExecutionTransport.cli
-    sandbox_provider: SandboxProvider = SandboxProvider.seatbelt_local
+    sandbox_provider: SandboxProvider = SandboxProvider.docker_local
     sandbox_policy: SandboxPolicy = field(default_factory=SandboxPolicy)
 
     def __post_init__(self) -> None:
@@ -109,8 +107,6 @@ class AgentConfig:
 def _default_sandbox_provider(*, transport: ExecutionTransport) -> SandboxProvider:
     if transport is ExecutionTransport.mcp:
         return SandboxProvider.cloudflare_remote
-    if sys.platform == "darwin":
-        return SandboxProvider.seatbelt_local
     return SandboxProvider.docker_local
 
 

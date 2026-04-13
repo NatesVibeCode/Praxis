@@ -43,6 +43,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         when_not_to_use="Do not use it for workflow receipt history or knowledge-graph recall.",
         risks={"default": "read", "actions": {"stats": "read", "list": "read", "search": "read", "diff": "read"}},
         examples=[
+            _example("List the latest sandbox", {"action": "list"}),
             _example("Search generated outputs", {"action": "search", "query": "migration schema"}),
             _example("List one sandbox", {"action": "list", "sandbox_id": "sandbox_abc123"}),
         ],
@@ -172,19 +173,20 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         when_not_to_use="Do not use it as a general quality dashboard or health probe.",
         risks={"default": "read", "actions": {"scan_prompt": "read", "scan_scope": "read"}},
         examples=[
-            _example("Scan a prompt", {"action": "scan_prompt", "prompt": "Ship the API key in the test fixture"}),
-            _example("Scan a scope", {"action": "scan_scope", "paths": ["config/runtime_profiles.json"]}),
+            _example("Scan a prompt", {"action": "scan_prompt", "text": "Ship the API key in the test fixture"}),
+            _example("Scan a scope", {"action": "scan_scope", "write_paths": ["config/runtime_profiles.json"]}),
         ],
     ),
     "praxis_graph": _tool(
         surface="knowledge",
         tier="advanced",
         recommended_alias=None,
-        when_to_use="Inspect blast radius and graph neighbors for a known knowledge-graph entity.",
-        when_not_to_use="Do not use it before you know the target entity id.",
+        when_to_use="Inspect blast radius and graph neighbors for a known or latest knowledge-graph entity.",
+        when_not_to_use="Do not use it for broad knowledge search; use recall first when you need ranked candidates.",
         risks={"default": "read"},
         examples=[
-            _example("Inspect blast radius", {"entity_id": "entity_abc123", "depth": 1}),
+            _example("Inspect the latest entity", {"depth": 1}),
+            _example("Inspect blast radius for one entity", {"entity_id": "entity_abc123", "depth": 1}),
         ],
     ),
     "praxis_heal": _tool(
@@ -195,7 +197,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         when_not_to_use="Do not use it as a generic health command or workflow launcher.",
         risks={"default": "read"},
         examples=[
-            _example("Classify a failure", {"failure_code": "sandbox.timeout", "stderr": "command timed out"}),
+            _example("Classify a failure", {"job_label": "build", "failure_code": "sandbox.timeout", "stderr": "command timed out"}),
         ],
     ),
     "praxis_health": _tool(
@@ -323,7 +325,11 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         when_not_to_use="Do not use it to commit roadmap changes.",
         risks={"default": "read"},
         examples=[
-            _example("Read roadmap state", {"view": "active"}),
+            _example("Read the default roadmap root", {}),
+            _example(
+                "Read one roadmap subtree",
+                {"root_roadmap_item_id": "roadmap_item.authority.cleanup.unified.operator.write.validation.gate"},
+            ),
         ],
     ),
     "praxis_operator_view": _tool(
@@ -531,7 +537,9 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             },
         },
         examples=[
-            _example("Observe a wave", {"action": "observe", "wave_id": "wave_abc123"}),
+            _example("List runnable jobs on the current wave", {"action": "next"}),
+            _example("Observe current wave state", {"action": "observe"}),
+            _example("Record results on the current wave", {"action": "record", "jobs": "build:pass,test:fail"}),
         ],
     ),
     "praxis_workflow": _tool(
@@ -565,7 +573,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         when_not_to_use="Do not use it when you need to actually run the workflow.",
         risks={"default": "read"},
         examples=[
-            _example("Validate a spec", {"spec_path": "config/specs/example.queue.json"}),
+            _example("Validate a spec", {"spec_path": "Code&DBs/Workflow/artifacts/workflow/operating_model_paradigm.queue.json"}),
         ],
     ),
 }

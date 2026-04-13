@@ -1,0 +1,40 @@
+.....................F....................                               [100%]
+=================================== FAILURES ===================================
+_______ test_native_cutover_scoreboard_is_deterministic_and_fail_closed ________
+
+    def test_native_cutover_scoreboard_is_deterministic_and_fail_closed() -> None:
+>       run_id, canonical_evidence = _successful_run()
+                                     ^^^^^^^^^^^^^^^^^
+
+Code&DBs/Workflow/tests/integration/test_native_cutover_scoreboard.py:153: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+Code&DBs/Workflow/tests/integration/test_native_cutover_scoreboard.py:119: in _successful_run
+    RuntimeOrchestrator().execute_deterministic_path(
+Code&DBs/Workflow/runtime/execution/orchestrator.py:556: in execute_deterministic_path
+    _budget = safe_context_budget(_provider, _model)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Code&DBs/Workflow/runtime/model_context_limits.py:163: in safe_context_budget
+    window = context_window_for_model(provider_slug, model_slug)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+provider_slug = 'anthropic', model_slug = None
+
+    def context_window_for_model(
+        provider_slug: str,
+        model_slug: str | None = None,
+    ) -> int:
+        """Return the context window size (in tokens) for a provider/model pair.
+    
+        Context windows are authoritative from Postgres model_profiles.
+        """
+        if not provider_slug or not model_slug:
+>           raise RuntimeError(
+                "model_context_limits requires provider_slug and model_slug for context-window lookup"
+            )
+E           RuntimeError: model_context_limits requires provider_slug and model_slug for context-window lookup
+
+Code&DBs/Workflow/runtime/model_context_limits.py:120: RuntimeError
+=========================== short test summary info ============================
+FAILED Code&DBs/Workflow/tests/integration/test_native_cutover_scoreboard.py::test_native_cutover_scoreboard_is_deterministic_and_fail_closed
+1 failed, 41 passed in 12.37s

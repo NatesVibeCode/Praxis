@@ -1,0 +1,40 @@
+{
+  "name": "pgvector_phase5_constraints_friction",
+  "queue_id": "pgvec_p5_001",
+  "phase": "build",
+  "outcome_goal": "Constraint deduplication via vector similarity; friction event clustering reveals root-cause patterns",
+  "jobs": [
+    {
+      "label": "p5_constraint_dedup",
+      "agent": "openai/gpt-5.4-mini",
+      "prompt": "Add vector-based near-duplicate detection to the constraint ledger.\n\nRead Code&DBs/Workflow/runtime/constraint_ledger.py first.\n\nChanges:\n\n1. ConstraintLedger.__init__: accept optional EmbeddingService\n\n2. When a new constraint is mined/inserted:\n   a. Build embed text from the constraint's pattern + description fields\n   b. Embed it: vec = embedder.embed_one(text)\n   c. Before inserting, check for near-duplicates:\n      SELECT constraint_id, pattern, confidence,\n             1 - (embedding <=> $1::vector) AS similarity\n      FROM dispatch_constraints\n      WHERE embedding IS NOT NULL\n        AND 1 - (embedding <=> $1::vector) >= 0.88\n      ORDER BY embedding <=> $1::vector\n      LIMIT 3\n   d. If a near-duplicate exists with similarity >= 0.88:\n      - Merge: update the existing constraint's confidence = max(old_confidence, new_confidence)\n      - Don't insert a new row\n      - Return info about the merge\n   e. If no near-duplicate: insert normally with the embedding\n\n3. On the 'for_scope' action (finding constraints for specific write paths):\n   a. If embedder available, also run a vector search using the write paths as query text\n   b. Merge with existing results\n\n4. If embedder is None, skip all vector operations (backward compatible)\n\n5. Wire in subsystems.py: pass EmbeddingService to ConstraintLedger construction\n\nFormat vectors with: EmbeddingService.vector_literal(vec)\nImport: from runtime.embedding_service import EmbeddingService",
+      "scope_write": [
+        "Code&DBs/Workflow/runtime/constraint_ledger.py",
+        "Code&DBs/Workflow/surfaces/mcp/subsystems.py"
+      ],
+      "scope_read": [
+        "Code&DBs/Workflow/runtime/constraint_ledger.py",
+        "Code&DBs/Workflow/runtime/embedding_service.py",
+        "Code&DBs/Workflow/surfaces/mcp/subsystems.py"
+      ],
+      "max_retries": 1
+    },
+    {
+      "label": "p5_friction_clustering",
+      "agent": "anthropic/claude-sonnet-4-6",
+      "prompt": "Add vector-based clustering to friction events so dag_friction stats shows distinct patterns instead of raw counts.\n\nRead Code&DBs/Workflow/runtime/friction_ledger.py first.\n\nChanges:\n\n1. FrictionLedger.__init__: accept optional EmbeddingService\n\n2. Embed on write: when a friction event is recorded, embed its message and store the vector.\n   - Build embed text from: friction_type + ' ' + message\n   - Include embedding in INSERT\n\n3. Add a cluster_patterns() method:\n   def cluster_patterns(self, since_hours: int = 24, threshold: float = 0.82, limit: int = 10) -> list[dict]:\n       \"\"\"Group recent friction events by semantic similarity.\n       \n       Returns clusters like:\n       [{'pattern': 'representative message', 'count': 15, 'sources': ['a', 'b'], 'event_ids': [...]}]\n       \"\"\"\n   Implementation:\n   a. Fetch recent friction events that have embeddings:\n      SELECT event_id, friction_type, source, message, embedding\n      FROM friction_events\n      WHERE embedding IS NOT NULL AND created_at >= NOW() - interval '{since_hours} hours'\n   b. For each event, find its nearest neighbor among already-clustered events using cosine similarity\n   c. Simple greedy clustering:\n      - Start with first event as cluster 0\n      - For each subsequent event, compute cosine sim against all cluster centroids\n      - If max_sim >= threshold, add to that cluster\n      - Otherwise start a new cluster\n      - Use numpy for the cosine computations (sentence-transformers already requires it)\n   d. Return clusters sorted by count descending\n\n4. Update the dag_friction stats action in the MCP tool:\n   - After computing existing stats (counts by type/source), also call cluster_patterns()\n   - Include the clusters in the response as a 'patterns' field\n   - Example output: 'patterns': [{'pattern': 'scope violation on test files', 'count': 23, 'sources': ['lint', 'dispatch']}, ...]\n\n5. Wire in subsystems.py: pass EmbeddingService to FrictionLedger\n\n6. If embedder is None, cluster_patterns returns empty list (backward compatible)\n\nImport: from runtime.embedding_service import EmbeddingService",
+      "scope_write": [
+        "Code&DBs/Workflow/runtime/friction_ledger.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/evidence.py",
+        "Code&DBs/Workflow/surfaces/mcp/subsystems.py"
+      ],
+      "scope_read": [
+        "Code&DBs/Workflow/runtime/friction_ledger.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/evidence.py",
+        "Code&DBs/Workflow/runtime/embedding_service.py",
+        "Code&DBs/Workflow/surfaces/mcp/subsystems.py"
+      ],
+      "max_retries": 1
+    }
+  ]
+}

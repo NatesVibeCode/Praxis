@@ -1,0 +1,37 @@
+{
+  "name": "Support Ticket Triage Pipeline",
+  "queue_id": "wf_triage_2026-04-06",
+  "phase": "build",
+  "outcome_goal": "Triage support tickets: read, classify priority, draft response, route to team",
+  "jobs": [
+    {
+      "label": "step_1_read_tickets",
+      "agent": "auto/wiring",
+      "prompt": "## Objective\nRead new unprocessed support tickets from the ticketing system.\n\n## Context\n- [retrieval] Support ticket queue — filter for unassigned tickets\n\n## Expected Output\n- tickets: array of {id, subject, body, sender, created_at}\n- count: number\n\n## Done Criteria\n- All unprocessed tickets retrieved\n- No tickets skipped"
+    },
+    {
+      "label": "step_2_classify",
+      "agent": "auto/build",
+      "prompt": "## Objective\nClassify each support ticket by priority (P0-P3) and category (billing, technical, feature_request, account, other).\n\n## Expected Output\n- classifications: array of {ticket_id, priority: P0|P1|P2|P3, category: string, confidence: number}\n\n## Done Criteria\n- Every ticket assigned a priority and category\n- Classification confidence above 0.8 for all tickets\n- P0 tickets flagged for immediate attention",
+      "depends_on": ["step_1_read_tickets"]
+    },
+    {
+      "label": "step_3_validate_classification",
+      "agent": "auto/review",
+      "prompt": "## Validation Task\nReview the ticket classifications for accuracy. This is a SEPARATE agent from the classifier.\n\n## Rules to Check\n- [threshold] No P0 tickets were misclassified as P2/P3 (check severity alignment)\n- [required] Every ticket has both priority and category\n- [threshold] Average confidence across all classifications >= 0.85\n\n## Expected Output\n- pass: boolean\n- overrides: array of {ticket_id, original_priority, corrected_priority, reason}\n- confidence: number",
+      "depends_on": ["step_2_classify"]
+    },
+    {
+      "label": "step_4_draft_responses",
+      "agent": "auto/build",
+      "prompt": "## Objective\nDraft initial response templates for each ticket based on its classification and content.\n\n## Expected Output\n- drafts: array of {ticket_id, subject, body, tone: professional|urgent|friendly}\n\n## Done Criteria\n- Response drafted for every ticket\n- Tone matches priority (urgent for P0/P1, professional for P2, friendly for P3)\n- No template placeholders left unfilled",
+      "depends_on": ["step_3_validate_classification"]
+    },
+    {
+      "label": "step_5_route_to_team",
+      "agent": "auto/wiring",
+      "prompt": "## Objective\nRoute each ticket to the appropriate support team member based on category and priority.\n\n## Expected Output\n- assignments: array of {ticket_id, assigned_to, team, reason}\n- escalations: array of ticket_ids that need manager attention\n\n## Done Criteria\n- All tickets assigned to a team member\n- P0 tickets escalated to manager\n- No tickets left unassigned",
+      "depends_on": ["step_4_draft_responses"]
+    }
+  ]
+}

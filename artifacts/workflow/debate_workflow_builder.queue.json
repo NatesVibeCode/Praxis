@@ -1,0 +1,83 @@
+{
+  "name": "debate_workflow_builder_improvement",
+  "queue_id": "d1_workflow_builder_2026-04-06_v4",
+  "phase": "debate",
+  "outcome_goal": "Determine the best approach to improve the agentic workflow builder",
+  "jobs": [
+    {
+      "label": "d1_r1_position_a",
+      "agent": "openai/gpt-5.4",
+      "prompt": "Read /Users/nate/Praxis/artifacts/debates/2026-04-06/workflow_builder_improvement/CONTEXT.md for full context.\n\nTake POSITION A: The instant client-side parser should be made smarter with better NLP heuristics. No LLM needed. The speed advantage of instant generation is the killer feature. Argue for improving regex/heuristic approach with better step boundary detection, verb-object extraction, and template matching. Provide concrete technical recommendations. Address all 5 problems in CONTEXT.md.\n\nWrite to /Users/nate/Praxis/artifacts/debates/2026-04-06/workflow_builder_improvement/r1_position_a.md"
+    },
+    {
+      "label": "d1_r1_position_b",
+      "agent": "anthropic/claude-opus-4-6",
+      "prompt": "Read /Users/nate/Praxis/artifacts/debates/2026-04-06/workflow_builder_improvement/CONTEXT.md for full context.\n\nTake POSITION B: Two-phase approach \u2014 instant heuristic scaffold FIRST then a Refine with AI button that dispatches to an LLM. The LLM decomposes steps more granularly, infers richer success criteria, suggests context packs. Address how to merge LLM suggestions without losing manual edits. Address all 5 problems.\n\nWrite to /Users/nate/Praxis/artifacts/debates/2026-04-06/workflow_builder_improvement/r1_position_b.md"
+    },
+    {
+      "label": "d1_r1_position_c",
+      "agent": "anthropic/claude-sonnet-4-6",
+      "prompt": "Read /Users/nate/Praxis/artifacts/debates/2026-04-06/workflow_builder_improvement/CONTEXT.md for full context.\n\nTake POSITION C: The problem is the interaction model, not the parser. The builder should be CONVERSATIONAL \u2014 after the instant scaffold, it asks clarifying questions like 'Should scraping data be a separate step from reading documents?' and 'What criteria should the double-check verify?' This negotiates the workflow with the user. Address all 5 problems.\n\nWrite to /Users/nate/Praxis/artifacts/debates/2026-04-06/workflow_builder_improvement/r1_position_c.md"
+    },
+    {
+      "label": "d1_r2_position_a",
+      "agent": "openai/gpt-5.4",
+      "depends_on": [
+        "d1_r1_position_a",
+        "d1_r1_position_b",
+        "d1_r1_position_c"
+      ],
+      "prompt": "Read all R1 positions in /Users/nate/Praxis/artifacts/debates/2026-04-06/workflow_builder_improvement/ (r1_position_a.md, r1_position_b.md, r1_position_c.md) and CONTEXT.md.\n\nYou argued Position A (better heuristics). Now ATTACK positions B and C, DEFEND yours, and identify BLIND SPOTS in all three.\n\nWrite to /Users/nate/Praxis/artifacts/debates/2026-04-06/workflow_builder_improvement/r2_position_a.md"
+    },
+    {
+      "label": "d1_r2_position_b",
+      "agent": "anthropic/claude-opus-4-6",
+      "depends_on": [
+        "d1_r1_position_a",
+        "d1_r1_position_b",
+        "d1_r1_position_c"
+      ],
+      "prompt": "Read all R1 positions in /Users/nate/Praxis/artifacts/debates/2026-04-06/workflow_builder_improvement/ (r1_position_a.md, r1_position_b.md, r1_position_c.md) and CONTEXT.md.\n\nYou argued Position B (instant + LLM refinement). Now ATTACK positions A and C, DEFEND yours, and identify BLIND SPOTS in all three.\n\nWrite to /Users/nate/Praxis/artifacts/debates/2026-04-06/workflow_builder_improvement/r2_position_b.md"
+    },
+    {
+      "label": "d1_r2_position_c",
+      "agent": "anthropic/claude-sonnet-4-6",
+      "depends_on": [
+        "d1_r1_position_a",
+        "d1_r1_position_b",
+        "d1_r1_position_c"
+      ],
+      "prompt": "Read all R1 positions in /Users/nate/Praxis/artifacts/debates/2026-04-06/workflow_builder_improvement/ (r1_position_a.md, r1_position_b.md, r1_position_c.md) and CONTEXT.md.\n\nYou argued Position C (conversational refinement). Now ATTACK positions A and B, DEFEND yours, and identify BLIND SPOTS in all three.\n\nWrite to /Users/nate/Praxis/artifacts/debates/2026-04-06/workflow_builder_improvement/r2_position_c.md"
+    },
+    {
+      "label": "d1_review_blast_radius",
+      "agent": "anthropic/claude-sonnet-4-6",
+      "depends_on": [
+        "d1_r2_position_a",
+        "d1_r2_position_b",
+        "d1_r2_position_c"
+      ],
+      "prompt": "Read all debate files in /Users/nate/Praxis/artifacts/debates/2026-04-06/workflow_builder_improvement/ and the builder source at Code&DBs/Workflow/surfaces/app/src/builder/.\n\nAnalyze BLAST RADIUS: What files change? How reversible? What breaks if it fails? External dependencies? Migration path?\n\nWrite to /Users/nate/Praxis/artifacts/debates/2026-04-06/workflow_builder_improvement/review_blast_radius.md"
+    },
+    {
+      "label": "d1_review_alternatives",
+      "agent": "openai/gpt-5.4",
+      "depends_on": [
+        "d1_r2_position_a",
+        "d1_r2_position_b",
+        "d1_r2_position_c"
+      ],
+      "prompt": "Read all debate files in /Users/nate/Praxis/artifacts/debates/2026-04-06/workflow_builder_improvement/ and CONTEXT.md.\n\nIdentify SOLUTION ALTERNATIVES the debaters missed. Consider: structured templates + slot-filling, pattern templates with NL customization, task_type_routing for auto-assigning agents, learning from previous workflows, populating context packs from the knowledge graph.\n\nWrite to /Users/nate/Praxis/artifacts/debates/2026-04-06/workflow_builder_improvement/review_alternatives.md"
+    },
+    {
+      "label": "d1_review_platform_fit",
+      "agent": "anthropic/claude-opus-4-6",
+      "depends_on": [
+        "d1_r2_position_a",
+        "d1_r2_position_b",
+        "d1_r2_position_c"
+      ],
+      "prompt": "Read all debate files in /Users/nate/Praxis/artifacts/debates/2026-04-06/workflow_builder_improvement/ and CONTEXT.md.\n\nAssess PLATFORM FIT. The product thesis is: 'Not a workflow builder. Agent operating model designer. Define intent, attach context, set authority, commit action.' Which approach best serves this? Does it feel like operating logic, not plumbing?\n\nWrite to /Users/nate/Praxis/artifacts/debates/2026-04-06/workflow_builder_improvement/review_platform_fit.md"
+    }
+  ]
+}

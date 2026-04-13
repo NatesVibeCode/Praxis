@@ -22,6 +22,11 @@ class _FakeStdin:
         self.buffer = io.BytesIO(payload)
 
 
+class _BinaryStdout:
+    def __init__(self) -> None:
+        self.buffer = io.BytesIO()
+
+
 def _initialize_request_bytes(*, transport: str) -> bytes:
     message = {
         "jsonrpc": "2.0",
@@ -69,6 +74,22 @@ def test_framed_request_mirrors_framed_response(monkeypatch):
     assert response["result"]["serverInfo"]["name"] == "praxis-mcp"
 
 
+def test_framed_response_content_length_counts_utf8_bytes(monkeypatch):
+    stdout = _BinaryStdout()
+    monkeypatch.setattr(sys, "stdout", stdout)
+
+    protocol._send_message(
+        {"jsonrpc": "2.0", "id": 1, "result": {"message": "check \u2713"}},
+        transport="content-length",
+    )
+
+    raw = stdout.buffer.getvalue()
+    header, body = raw.split(b"\r\n\r\n", 1)
+    length = int(header.decode("ascii").split(":", 1)[1].strip())
+    assert length == len(body)
+    assert json.loads(body.decode("utf-8"))["result"]["message"] == "check \u2713"
+
+
 def test_jsonl_override_forces_jsonl_response(monkeypatch):
     monkeypatch.setenv("PRAXIS_MCP_STDIO_TRANSPORT", "jsonl")
     monkeypatch.setattr(sys, "stdin", _FakeStdin(_initialize_request_bytes(transport="content-length")))
@@ -108,12 +129,12 @@ def test_tools_call_rejects_unallowed_tool_before_execution():
 
 
 def test_tools_call_truncates_oversized_result_text(monkeypatch):
-    def _tool(_params: dict) -> dict[str, str]:
-        return {"payload": "x" * 2_000}
-
     monkeypatch.setattr(protocol, "_MAX_TOOL_RESULT_TEXT_CHARS", 300)
-    monkeypatch.setattr(protocol, "get_tool_catalog", lambda: {"oversized_tool": object()})
-    monkeypatch.setattr(protocol, "resolve_tool_entry", lambda _name: (_tool, object()))
+    monkeypatch.setattr(
+        protocol,
+        "invoke_tool",
+        lambda *_args, **_kwargs: {"payload": "x" * 2_000},
+    )
 
     response = protocol.handle_request(
         {
@@ -174,14 +195,13 @@ def test_error_response_truncates_oversized_message(monkeypatch):
 
 
 def test_tools_call_formats_postgres_authority_errors_without_traceback(monkeypatch):
-    def _tool(_params: dict) -> dict[str, str]:
+    def _invoke(*_args, **_kwargs):
         raise PostgresConfigurationError(
             "postgres.authority_unavailable",
             "WORKFLOW_DATABASE_URL authority unavailable: PermissionError: [Errno 1] Operation not permitted",
         )
 
-    monkeypatch.setattr(protocol, "get_tool_catalog", lambda: {"db_tool": object()})
-    monkeypatch.setattr(protocol, "resolve_tool_entry", lambda _name: (_tool, object()))
+    monkeypatch.setattr(protocol, "invoke_tool", _invoke)
 
     response = protocol.handle_request(
         {
@@ -220,12 +240,11 @@ def test_tools_call_rejects_non_object_arguments_without_traceback(monkeypatch):
 def test_tools_call_does_not_mutate_original_arguments_when_meta_embedded(monkeypatch):
     captured: list[dict[str, object]] = []
 
-    def _tool(params: dict) -> dict[str, str]:
+    def _invoke(_tool_name: str, params: dict, **_kwargs) -> dict[str, str]:
         captured.append(params)
         return {"ok": "yes"}
 
-    monkeypatch.setattr(protocol, "get_tool_catalog", lambda: {"meta_tool": object()})
-    monkeypatch.setattr(protocol, "resolve_tool_entry", lambda _name: (_tool, object()))
+    monkeypatch.setattr(protocol, "invoke_tool", _invoke)
 
     arguments = {"question": "status", "_meta": {"progressToken": "tok-1"}}
     response = protocol.handle_request(

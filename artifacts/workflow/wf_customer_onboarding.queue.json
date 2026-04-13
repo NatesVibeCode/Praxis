@@ -1,0 +1,31 @@
+{
+  "name": "Customer Onboarding Pipeline",
+  "queue_id": "wf_onboarding_2026-04-06",
+  "phase": "build",
+  "outcome_goal": "Onboard new customer: collect info, verify identity, set up account, send welcome email",
+  "jobs": [
+    {
+      "label": "step_1_collect_info",
+      "agent": "auto/build",
+      "prompt": "## Objective\nCollect and structure customer information from the signup form submission.\n\n## Expected Output\n- customer: {name: string, email: string, company: string, phone: string, plan: string}\n- missing_fields: string[]\n\n## Done Criteria\n- All required fields present (name, email, company)\n- Email format is valid\n- Phone number matches expected format"
+    },
+    {
+      "label": "step_2_verify_identity",
+      "agent": "auto/review",
+      "prompt": "## Validation Task\nVerify the customer's identity and business information.\n\n## Rules to Check\n- [regex] Email domain is not a disposable email provider\n- [required] Company name returns results in business registry\n- [threshold] Identity confidence score >= 0.9\n\n## Expected Output\n- verified: boolean\n- risk_score: number (0-1)\n- flags: string[]",
+      "depends_on": ["step_1_collect_info"]
+    },
+    {
+      "label": "step_3_create_account",
+      "agent": "auto/wiring",
+      "prompt": "## Objective\nCreate the customer account in the system with the verified information.\n\n## Context\n- [schema] Account creation API schema\n- Only create if identity verification passed\n\n## Expected Output\n- account_id: string\n- api_key: string\n- dashboard_url: string\n\n## Done Criteria\n- Account created successfully\n- API key generated\n- No duplicate accounts",
+      "depends_on": ["step_2_verify_identity"]
+    },
+    {
+      "label": "step_4_send_welcome",
+      "agent": "auto/wiring",
+      "prompt": "## Objective\nSend welcome email to the new customer with their account details and getting-started guide.\n\n## Expected Output\n- sent: boolean\n- message_id: string\n\n## Done Criteria\n- Email delivered successfully\n- Contains account_id and dashboard_url\n- Getting-started link included",
+      "depends_on": ["step_3_create_account"]
+    }
+  ]
+}

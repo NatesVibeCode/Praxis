@@ -44,12 +44,16 @@ The source migration is:
 
 ## Canonical Write Surface
 
-Prefer the bug tracker MCP surface:
+Prefer the bug tracker authority surface:
 
 ```text
-dag_bugs(action="file", ...)
-dag_bugs(action="attach_evidence", ...)
-dag_bugs(action="resolve", ...)
+workflow bugs list
+workflow bugs search "<title>"
+workflow tools describe praxis_bugs
+workflow tools call praxis_bugs --input-json '{...}' --yes
+praxis_bugs(action="file", ...)
+praxis_bugs(action="attach_evidence", ...)
+praxis_bugs(action="resolve", ...)
 ```
 
 Relevant implementation files:
@@ -59,7 +63,7 @@ Relevant implementation files:
 
 ## File Action Mapping
 
-`dag_bugs(action="file", ...)` maps to `BugTracker.file_bug(...)`.
+`praxis_bugs(action="file", ...)` maps to `BugTracker.file_bug(...)`.
 
 Important behavior:
 
@@ -85,7 +89,7 @@ Useful inputs:
 
 ## Evidence Contract
 
-`dag_bugs(action="attach_evidence", ...)` maps to `BugTracker.link_evidence(...)`.
+`praxis_bugs(action="attach_evidence", ...)` maps to `BugTracker.link_evidence(...)`.
 
 Allowed evidence kinds:
 
@@ -109,7 +113,7 @@ Validation is strict:
 
 ## Resolution Contract
 
-`dag_bugs(action="resolve", ...)` only allows terminal statuses:
+`praxis_bugs(action="resolve", ...)` only allows terminal statuses:
 
 - `FIXED`
 - `WONT_FIX`

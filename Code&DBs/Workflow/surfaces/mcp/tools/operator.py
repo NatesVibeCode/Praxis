@@ -237,8 +237,28 @@ def tool_praxis_operator_closeout(params: dict) -> dict:
 def tool_praxis_operator_roadmap_view(params: dict) -> dict:
     """Read one roadmap subtree and its dependency edges from DB-backed authority."""
 
+    root_roadmap_item_id = str(params.get("root_roadmap_item_id", "")).strip()
+    if not root_roadmap_item_id:
+        rows = _subs.get_pg_conn().execute(
+            """
+            SELECT roadmap_item_id
+              FROM roadmap_items
+             WHERE parent_roadmap_item_id IS NULL
+             ORDER BY
+                 CASE WHEN status = 'active' THEN 0 ELSE 1 END,
+                 updated_at DESC,
+                 created_at DESC
+             LIMIT 1
+            """
+        )
+        if not rows:
+            return {"error": "root_roadmap_item_id is required and no roadmap roots were found"}
+        root_roadmap_item_id = str(rows[0].get("roadmap_item_id") or "").strip()
+        if not root_roadmap_item_id:
+            return {"error": "failed to resolve a default roadmap root"}
+
     return operator_read.query_roadmap_tree(
-        root_roadmap_item_id=params.get("root_roadmap_item_id", ""),
+        root_roadmap_item_id=root_roadmap_item_id,
     )
 
 
@@ -449,14 +469,15 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "Read one roadmap subtree and its dependency edges from DB-backed authority.\n\n"
                 "USE WHEN: you want the full package view for a roadmap item, including generated child waves, "
                 "external dependency edges, and a rendered markdown outline.\n\n"
-                "EXAMPLE: praxis_operator_roadmap_view(root_roadmap_item_id='roadmap_item.authority.cleanup.unified.operator.write.validation.gate')"
+                "EXAMPLES:\n"
+                "  praxis_operator_roadmap_view()\n"
+                "  praxis_operator_roadmap_view(root_roadmap_item_id='roadmap_item.authority.cleanup.unified.operator.write.validation.gate')"
             ),
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "root_roadmap_item_id": {"type": "string"},
                 },
-                "required": ["root_roadmap_item_id"],
             },
         },
     ),

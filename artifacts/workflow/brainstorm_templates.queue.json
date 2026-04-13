@@ -1,0 +1,23 @@
+{
+  "name": "brainstorm_templates",
+  "queue_id": "brainstorm_templates_001",
+  "phase": "debate",
+  "outcome_goal": "Brainstorm app templates, registry gaps, and concrete manifest JSON for the app builder",
+  "jobs": [
+    {
+      "label": "brainstorm_templates_opus",
+      "agent": "anthropic/claude-opus-4-6",
+      "prompt": "We have a self-configuring app builder with a 4x4 quadrant grid. Each quadrant holds a module. We have 20 modules:\n\nDisplay: metric, stat-row, chart, activity-feed, status-grid, markdown, key-value\nInput: text-input, intent-box, dropdown-select, button-row, file-drop\nTool: dispatch-form, search-panel, document-processor, data-pipeline\nComposite: workflow-status, bug-card, model-card, registry-browser\n\nModules can span 1x1, 2x1, 1x2, or 2x2 quadrants. Quadrants addressed A1-D4.\n\nDesign 20 app templates. For each provide:\n- id (kebab-case)\n- name\n- description (2 sentences, include keywords users would search for)\n- quadrant layout: which module in which quadrant, with spans\n\nCategories to cover: business (CRM, invoicing, inventory), productivity (tasks, notes, calendar), developer (bug tracker, API monitor, deploy status), analytics (KPI dashboard, sales pipeline, user metrics), content (blog manager, social media, email campaigns), team (standup board, hiring pipeline, OKR tracker).\n\nOutput as a JSON array of objects with keys: id, name, description, quadrants (object mapping quadrant IDs to {module, span?, config?})."
+    },
+    {
+      "label": "brainstorm_registry_gaps_gemini",
+      "agent": "google/gemini-3.1-pro-preview",
+      "prompt": "We have a self-configuring app builder. The registries currently have:\n\nUI Components (10): drag_and_drop_canvas, text_box, table, icon, box, color_scheme, chart, text_format, button, dropdown\n\nCalculations (4): schema_charts_rollups, platform_datasets, platform_algos, common_calcs\n\nWorkflows (12): brainstorming, research, coding_workflow, personal_workflow, collateral_creation, hitl, schedule_based, triggers_and_actions, workflow_composition, data_splitting_logging, handoff_mechanisms, instructions_by_tool\n\nWhat's missing? Think about what you'd need to build: a CRM, a project tracker, an analytics dashboard, a content calendar, an invoicing tool, a hiring pipeline, a support ticket system.\n\nFor each gap, provide:\n- id (kebab-case)\n- name\n- description (rich, include synonyms and use cases so tsvector search matches)\n- category\n- which registry it belongs to (ui_component, calculation, or workflow)\n\nAlso: update descriptions for ALL 26 existing entries to be richer — include synonyms, use cases, and related terms so search works. Output as JSON with two arrays: 'new_entries' and 'updated_descriptions'."
+    },
+    {
+      "label": "brainstorm_manifests_gpt",
+      "agent": "openai/gpt-5.4",
+      "prompt": "Write concrete v2 manifest JSON for 5 app templates using ONLY these existing modules:\n\nmetric, stat-row, chart, activity-feed, status-grid, markdown, key-value, text-input, intent-box, dropdown-select, button-row, file-drop, dispatch-form, search-panel, document-processor, data-pipeline, workflow-status, bug-card, model-card, registry-browser\n\nModules go in a 4x4 grid (A1-D4). Spans: 1x1, 2x1, 1x2, 2x2.\n\nModule config examples:\n- metric: {endpoint, path, label, format, color}\n- chart: {endpoint, path, type, xKey, yKey}\n- activity-feed: {endpoint, title}\n- status-grid: {endpoint, title, columns}\n- key-value: {items: [{label, value}]}\n- button-row: {actions: [{label, variant}]}\n- data-pipeline: {steps: [{name}]}\n- markdown: {content}\n- text-input: {placeholder, worldPath}\n- dropdown-select: {options, label, worldPath}\n\nBuild these 5:\n1. CRM Dashboard (id: crm-dashboard)\n2. Project Tracker (id: project-tracker)\n3. Analytics Dashboard (id: analytics-dashboard)\n4. Content Calendar (id: content-calendar)\n5. Team Status Board (id: team-status)\n\nEach manifest format:\n{\"version\": 2, \"grid\": \"4x4\", \"quadrants\": {\"A1\": {\"module\": \"...\", \"span\": \"...\", \"config\": {...}}, ...}}\n\nMake them look like real apps. Use realistic placeholder data in configs where needed."
+    }
+  ]
+}

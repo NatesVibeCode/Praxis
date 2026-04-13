@@ -1,0 +1,93 @@
+[
+  {
+    "close_with": "Add one repo-local MCP smoke step or an equivalent machine-facing front door that produces durable run and status evidence.",
+    "evidence_paths": [
+      "artifacts/workflow/release_hardening/evidence/latest/summary.json"
+    ],
+    "risk_id": "rr-mcp-live-roundtrip",
+    "severity": "medium",
+    "status": "open",
+    "summary": "The packet does not execute a live MCP launch/status round trip.",
+    "why_open": "The replayable proof uses repo-local CLI wrappers and targeted tests. It does not exercise MCP transport in-session."
+  },
+  {
+    "close_with": "Replay `./scripts/dag-ctl setup` in a bounded clean workspace and capture the resulting proof output.",
+    "evidence_paths": [
+      "artifacts/workflow/release_hardening/evidence/latest/02_dag_ctl_doctor.stdout.json"
+    ],
+    "risk_id": "rr-fresh-setup-not-replayed",
+    "severity": "medium",
+    "status": "open",
+    "summary": "The packet reads `dag-ctl doctor --json`; it does not rerun `dag-ctl setup` from a clean environment.",
+    "why_open": "This proves the current health truth surface and targeted invariants, not first-time setup reproducibility."
+  },
+  {
+    "close_with": "Review or clear the dirty files and rerun the proof from the intended release commit.",
+    "evidence_paths": [
+      "artifacts/workflow/release_hardening/evidence/20260409T175041Z/01_git_status.stdout.txt"
+    ],
+    "risk_id": "rr-dirty-worktree",
+    "severity": "high",
+    "status": "open",
+    "summary": "The worktree is dirty during proof capture.",
+    "why_open": "A green proof packet does not establish that the checked tree is a clean release candidate."
+  },
+  {
+    "close_with": "Install the missing runtime dependencies and rerun `./scripts/dag-ctl doctor --json` plus this packet.",
+    "evidence_paths": [
+      "artifacts/workflow/release_hardening/evidence/20260409T175041Z/02_dag_ctl_doctor.stdout.json"
+    ],
+    "risk_id": "rr-missing-runtime-dependencies",
+    "severity": "high",
+    "status": "open",
+    "summary": "The doctor proof reports missing runtime dependencies.",
+    "why_open": "croniter, psycopg2-binary"
+  },
+  {
+    "close_with": "Repair the failing health fields, rerun `./scripts/dag-ctl doctor --json`, and rerun this packet.",
+    "evidence_paths": [
+      "artifacts/workflow/release_hardening/evidence/20260409T175041Z/02_dag_ctl_doctor.stdout.json"
+    ],
+    "risk_id": "rr-health-truth-not-ready",
+    "severity": "high",
+    "status": "open",
+    "summary": "The runtime health proof does not satisfy the expected ready-state fields.",
+    "why_open": "database_reachable=False, schema_bootstrapped=False"
+  },
+  {
+    "close_with": "Run the bounded repair path and rerun the proof after sync returns to `succeeded`.",
+    "evidence_paths": [
+      "artifacts/workflow/release_hardening/evidence/20260409T175041Z/02_dag_ctl_doctor.stdout.json"
+    ],
+    "risk_id": "rr-sync-status-not-succeeded",
+    "severity": "medium",
+    "status": "open",
+    "summary": "The doctor proof reports a non-succeeded sync status.",
+    "why_open": "sync_status='skipped'"
+  },
+  {
+    "close_with": "Replay queue validation in an environment that can perform the agent-resolution check.",
+    "evidence_paths": [
+      "artifacts/workflow/release_hardening/evidence/20260409T175041Z/08_test_validate.stdout.json"
+    ],
+    "risk_id": "rr-queue-validation-agent-resolution-blocked",
+    "severity": "medium",
+    "status": "open",
+    "summary": "Queue validation passed, but agent resolution was not exercised in this sandbox.",
+    "why_open": "The validation front door surfaced a sandbox-permission warning instead of a full agent-resolution check."
+  },
+  {
+    "close_with": "Ensure `smoke_run_id` is present, capture both native status and inspect outputs, and rerun the proof.",
+    "evidence_paths": [
+      "artifacts/workflow/release_hardening/evidence/20260409T175041Z/11_native_status_smoke_run.stdout.json",
+      "artifacts/workflow/release_hardening/evidence/20260409T175041Z/11_native_status_smoke_run.stderr.txt",
+      "artifacts/workflow/release_hardening/evidence/20260409T175041Z/12_native_inspect_smoke_run.stdout.txt",
+      "artifacts/workflow/release_hardening/evidence/20260409T175041Z/12_native_inspect_smoke_run.stderr.txt"
+    ],
+    "risk_id": "rr-persisted-run-truth-partial",
+    "severity": "medium",
+    "status": "open",
+    "summary": "The packet does not capture live status and inspect evidence for a concrete smoke run.",
+    "why_open": "Native status/inspect readback is blocked by sandboxed socket permissions."
+  }
+]

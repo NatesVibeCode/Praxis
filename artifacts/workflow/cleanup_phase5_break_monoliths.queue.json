@@ -1,0 +1,29 @@
+{
+  "name": "cleanup_phase5_break_monoliths",
+  "queue_id": "cleanup_phase5_001",
+  "phase": "cleanup",
+  "outcome_goal": "Split 3 monolithic files into focused packages: cli/main.py, workflow_api.py, CommitmentMap.tsx",
+  "jobs": [
+    {
+      "label": "p5a_split_cli_main",
+      "agent": "auto/refactor",
+      "prompt": "Split the monolithic cli/main.py (3,021 lines) into a commands/ package.\n\nYou are working in /Users/nate/Praxis/Code&DBs/Workflow.\n\nCurrent state: surfaces/cli/main.py is 3000+ lines handling ALL CLI commands.\n\nTarget:\nsurfaces/cli/\n  main.py              (slim entry: arg parsing + command dispatch, ~200 lines)\n  commands/\n    __init__.py\n    dispatch.py      (dispatch/run/status/wait commands)\n    query.py         (query/search/recall commands)\n    operate.py       (health/operator/friction commands)\n    admin.py         (migrate/reindex/validate commands)\n\nSteps:\n1. Read surfaces/cli/main.py in full.\n2. Group commands by domain (dispatch, query, operate, admin).\n3. Create commands/ package with __init__.py.\n4. Extract each command group into its own module with handler functions.\n5. Slim main.py to: argparse definition + import handlers + dispatch to handler.\n6. Update any imports of surfaces.cli.main elsewhere.\n\nPreserve all existing CLI behavior exactly. Same commands, same args, same output.\n\nVerify: PYTHONPATH='.' /opt/homebrew/bin/python3 -c \"from surfaces.cli.main import main; print('OK')\"",
+      "write_scope": ["Code&DBs/Workflow/surfaces/cli/main.py", "Code&DBs/Workflow/surfaces/cli/commands/__init__.py", "Code&DBs/Workflow/surfaces/cli/commands/workflow.py", "Code&DBs/Workflow/surfaces/cli/commands/query.py", "Code&DBs/Workflow/surfaces/cli/commands/operate.py", "Code&DBs/Workflow/surfaces/cli/commands/admin.py"],
+      "read_scope": ["Code&DBs/Workflow/surfaces/cli/main.py"]
+    },
+    {
+      "label": "p5b_split_workflow_api",
+      "agent": "auto/refactor",
+      "prompt": "Split the monolithic workflow_api.py (2,882 lines) into a handlers/ package.\n\nYou are working in /Users/nate/Praxis/Code&DBs/Workflow.\n\nCurrent state: surfaces/api/workflow_api.py is 2800+ lines handling all dispatch REST endpoints.\n\nTarget:\nsurfaces/api/\n  workflow_api.py      (slim router: mounts sub-routers, ~100 lines)\n  handlers/\n    __init__.py\n    workflow_run.py    (run/wait/status/cancel endpoints)\n    workflow_query.py  (search/receipts/artifacts/list endpoints)\n    workflow_notify.py (notifications/events/streaming endpoints)\n    workflow_admin.py  (validate/health/inspect endpoints)\n\nSteps:\n1. Read surfaces/api/workflow_api.py in full.\n2. Identify all route handlers and group by domain.\n3. Create handlers/ package.\n4. Extract each group into its module.\n5. Slim workflow_api.py to: create router + import and mount sub-routers from handlers/.\n6. Update any imports elsewhere that reference functions from workflow_api.\n\nPreserve all API behavior exactly. Same routes, same responses.\n\nVerify: PYTHONPATH='.' /opt/homebrew/bin/python3 -c \"from surfaces.api.workflow_api import *; print('OK')\"",
+      "write_scope": ["Code&DBs/Workflow/surfaces/api/workflow_api.py", "Code&DBs/Workflow/surfaces/api/handlers/__init__.py", "Code&DBs/Workflow/surfaces/api/handlers/workflow_run.py", "Code&DBs/Workflow/surfaces/api/handlers/workflow_query.py", "Code&DBs/Workflow/surfaces/api/handlers/workflow_notify.py", "Code&DBs/Workflow/surfaces/api/handlers/workflow_admin.py"],
+      "read_scope": ["Code&DBs/Workflow/surfaces/api/workflow_api.py"]
+    },
+    {
+      "label": "p5c_split_commitment_map",
+      "agent": "auto/refactor",
+      "prompt": "Split CommitmentMap.tsx (1,596 lines) into focused sub-components.\n\nYou are working in /Users/nate/Praxis/Code&DBs/Workflow.\n\nCurrent state: surfaces/app/src/canvas/CommitmentMap.tsx is 1596 lines handling canvas rendering, node layout, edge drawing, selection, and interaction all in one file.\n\nTarget:\nsurfaces/app/src/canvas/\n  CommitmentMap.tsx       (slim orchestrator: state + composition, ~300 lines)\n  CanvasContainer.tsx     (viewport, zoom, pan)\n  CanvasContainer.css\n  NodeRenderer.tsx        (renders individual nodes/cards)\n  NodeRenderer.css\n  EdgeLayer.tsx           (SVG edge drawing between nodes)\n  SelectionHandler.tsx    (click/drag selection logic)\n\nSteps:\n1. Read CommitmentMap.tsx and CommitmentMap.css in full.\n2. Identify logical boundaries: canvas container, node rendering, edge drawing, selection.\n3. Extract each concern into its own component.\n4. Keep CommitmentMap.tsx as orchestrator composing sub-components.\n5. Split CSS accordingly.\n6. Type all props with TypeScript interfaces.\n\nPreserve all visual behavior exactly.\n\nVerify: cd 'surfaces/app' && npx tsc --noEmit",
+      "write_scope": ["Code&DBs/Workflow/surfaces/app/src/canvas/CommitmentMap.tsx", "Code&DBs/Workflow/surfaces/app/src/canvas/CanvasContainer.tsx", "Code&DBs/Workflow/surfaces/app/src/canvas/CanvasContainer.css", "Code&DBs/Workflow/surfaces/app/src/canvas/NodeRenderer.tsx", "Code&DBs/Workflow/surfaces/app/src/canvas/NodeRenderer.css", "Code&DBs/Workflow/surfaces/app/src/canvas/EdgeLayer.tsx", "Code&DBs/Workflow/surfaces/app/src/canvas/SelectionHandler.tsx"],
+      "read_scope": ["Code&DBs/Workflow/surfaces/app/src/canvas/CommitmentMap.tsx", "Code&DBs/Workflow/surfaces/app/src/canvas/CommitmentMap.css"]
+    }
+  ]
+}

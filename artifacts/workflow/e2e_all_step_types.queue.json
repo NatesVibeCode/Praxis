@@ -1,0 +1,35 @@
+{
+  "name": "e2e_all_step_types_test",
+  "queue_id": "e2e_test",
+  "phase": "build",
+  "outcome_goal": "Prove every step type (agent, check, api, human) works end-to-end",
+  "jobs": [
+    {
+      "label": "step1_agent_analyze",
+      "agent": "auto/build",
+      "prompt": "## Objective\nAnalyze the top 5 most common dispatch failure error codes from the last 24 hours.\n\nYou have access to a PostgreSQL database at postgresql://nate@127.0.0.1:5432/dag_workflow.\nRun this query:\n\nSELECT last_error_code, COUNT(*) as cnt FROM workflow_jobs WHERE status = 'failed' AND created_at > now() - interval '24 hours' GROUP BY last_error_code ORDER BY cnt DESC LIMIT 5;\n\n## Expected Output\n- error_codes: string[] (the top failure codes)\n- total_failures: number\n- analysis: string (brief explanation of each failure type)\n\n## Done Criteria\n- Query executed successfully\n- All failure codes listed with counts\n- Brief explanation for each code",
+      "timeout": 120
+    },
+    {
+      "label": "step2_check_review",
+      "agent": "auto/review",
+      "depends_on": ["step1_agent_analyze"],
+      "prompt": "## Objective\nReview the analysis from step1_agent_analyze.\n\n## Validation Rules\n1. Type: required_fields — The output must contain error_codes, total_failures, and analysis fields\n2. Type: threshold — total_failures must be >= 0 (sanity check)\n3. Type: type_check — error_codes must be an array of strings\n\n## Review Criteria\n- Is the analysis accurate based on the query results?\n- Are the explanations of each error code reasonable?\n- Is the output structured and complete?\n\nProvide a pass/fail verdict with reasoning.",
+      "timeout": 120
+    },
+    {
+      "label": "step3_api_integration",
+      "agent": "auto/wiring",
+      "depends_on": ["step2_check_review"],
+      "prompt": "## Objective\nFormat the failure analysis as a structured JSON report and write it to a file.\n\nIntegration: DAG Dispatch (dag)\nAction: Write a summary to artifacts/dispatch_outputs/e2e_failure_report.md\n\nCreate a markdown file at artifacts/dispatch_outputs/e2e_failure_report.md with:\n- Title: Dispatch Failure Analysis Report\n- Date: today\n- Table of error codes with counts\n- Recommendations section\n\n## Expected Output\n- file_path: string (path to the written file)\n- status: success | failed",
+      "timeout": 120
+    },
+    {
+      "label": "step4_human_notification",
+      "agent": "auto/wiring",
+      "depends_on": ["step3_api_integration"],
+      "prompt": "## Objective\nSimulate a human notification step.\n\nIn a real system, this would send a notification via email/slack/webhook. For this test, write a notification summary to artifacts/dispatch_outputs/e2e_notification_log.md containing:\n\n- Subject: Dispatch Failure Report Ready\n- Channel: email (simulated)\n- Recipient: nate@example.com\n- Message: The dispatch failure analysis report has been generated and is ready for review at artifacts/dispatch_outputs/e2e_failure_report.md\n- Timestamp: current UTC time\n- Status: delivered (simulated)\n\nNotification Channels:\n- email: nate@example.com\n\nTimeout: 24 hours\n\n## Expected Output\n- notification_sent: boolean\n- channel: string\n- recipient: string",
+      "timeout": 120
+    }
+  ]
+}

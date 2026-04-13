@@ -5,10 +5,11 @@ export PYTHONPATH="${REPO_ROOT}/Code&DBs/Workflow${PYTHONPATH:+:$PYTHONPATH}"
 export WORKFLOW_DATABASE_URL="${WORKFLOW_DATABASE_URL:?"WORKFLOW_DATABASE_URL must be set"}"
 export PATH="${PATH}"
 
+run_frontdoor() {
+  python3 -m surfaces.cli.main "$@"
+}
+
 case "${1:-help}" in
-  generate)
-    python3 -m surfaces.cli.workflow_cli generate "${@:2}"
-    ;;
   run)
     mkdir -p "${REPO_ROOT}/artifacts"
     RESULT_FILE="${REPO_ROOT}/artifacts/workflow_run_result.$(date +%s).$$.${RANDOM}.json"
@@ -57,48 +58,20 @@ PY
     echo "Use 'workflow.sh status' to check progress"
     ;;
   run-managed)
-    # Called by MCP detached workflow launch — runs inline (caller handles detachment)
-    # Passes through --job-id and --result-file for structured result tracking
-        python3 -m surfaces.cli.workflow_cli run "${@:2}"
-    ;;
-  validate)
-        python3 -m surfaces.cli.workflow_cli validate "${@:2}"
-    ;;
-  chain)
-    python3 -m surfaces.cli.workflow_cli chain "${@:2}"
-    ;;
-  chain-status)
-    python3 -m surfaces.cli.workflow_cli chain-status "${@:2}"
-    ;;
-  status)
-        python3 -m surfaces.cli.workflow_cli status "${@:2}"
-    ;;
-  stream)
-        python3 -m surfaces.cli.workflow_cli stream "${@:2}"
-    ;;
-  cancel)
-        python3 -m surfaces.cli.workflow_cli cancel "${@:2}"
-    ;;
-  active)
-        python3 -m surfaces.cli.workflow_cli active "${@:2}"
+    python3 -m surfaces.cli.workflow_cli run "${@:2}"
     ;;
   dry-run)
-        python3 -m surfaces.cli.workflow_cli run --dry-run "${@:2}"
+    python3 -m surfaces.cli.workflow_cli run --dry-run "${@:2}"
+    ;;
+  help|-h|--help)
+    run_frontdoor --help
+    echo ""
+    echo "Detached helpers:"
+    echo "  workflow.sh run <spec.json>         Detached workflow launch wrapper"
+    echo "  workflow.sh run-managed <spec.json> Inline durable launch helper"
+    echo "  workflow.sh dry-run <spec.json>     Durable runner dry-run helper"
     ;;
   *)
-    echo "Usage: workflow.sh {generate|run|run-managed|validate|chain|chain-status|status|active|stream|cancel|dry-run} [args]"
-    echo ""
-    echo "Commands:"
-    echo "  generate <manifest.json> <output.json> Generate a workflow spec from a manifest file"
-    echo "  run <spec.json>            Run a workflow spec (detached, survives session death)"
-    echo "  run-managed <spec.json>    Run inline with --job-id/--result-file (used by MCP)"
-    echo "  validate <spec.json>       Validate a workflow spec without running"
-    echo "  chain <coordination.json>  Submit a durable chained multi-wave workflow program"
-    echo "  chain-status [chain_id]    Show one chain or list recent chains"
-    echo "  status                     Show recent workflow status from receipts"
-    echo "  active                     Show currently active workflow runs"
-    echo "  stream <run_id>            Stream one workflow run in the terminal"
-    echo "  cancel <run_id>            Cancel an in-flight workflow run"
-    echo "  dry-run <spec.json>        Simulate workflow execution without mutating state"
+    run_frontdoor "$@"
     ;;
 esac

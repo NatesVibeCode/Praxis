@@ -89,6 +89,21 @@ class ArtifactStore:
         )
         return [self._row_to_record(r) for r in rows]
 
+    def latest_sandbox_id(self) -> Optional[str]:
+        row = self._conn.fetchrow(
+            """
+            SELECT sandbox_id
+              FROM sandbox_artifacts
+             GROUP BY sandbox_id
+             ORDER BY MAX(captured_at) DESC, sandbox_id DESC
+             LIMIT 1
+            """
+        )
+        if row is None:
+            return None
+        sandbox_id = str(row["sandbox_id"] or "").strip()
+        return sandbox_id or None
+
     def search(self, query: str, limit: int = 20) -> list[ArtifactRecord]:
         """Search by file_path pattern using SQL LIKE."""
         rows = self._conn.execute(

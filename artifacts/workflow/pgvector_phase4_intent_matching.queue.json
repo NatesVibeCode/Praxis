@@ -1,0 +1,39 @@
+{
+  "name": "pgvector_phase4_intent_matching",
+  "queue_id": "pgvec_p4_001",
+  "phase": "build",
+  "outcome_goal": "Intent matching uses vector similarity across all 3 registries; coverage scoring dramatically improved for non-literal queries",
+  "jobs": [
+    {
+      "label": "p4_registry_backfill",
+      "agent": "openai/gpt-5.4-mini",
+      "prompt": "Create a backfill script that embeds all existing registry entries.\n\nCreate file: Code&DBs/Workflow/runtime/registry_embedder.py\n\nThis script reads all rows from registry_ui_components, registry_calculations, and registry_workflows, embeds their description text, and writes the vectors back.\n\nStructure:\n\n```python\n\"\"\"Backfill embeddings for registry tables.\"\"\"\nfrom runtime.embedding_service import EmbeddingService\n\n\nclass RegistryEmbedder:\n    \"\"\"Embeds registry entries for vector similarity search.\"\"\"\n    \n    def __init__(self, conn, embedder: EmbeddingService | None = None) -> None:\n        self._conn = conn\n        self._embedder = embedder or EmbeddingService()\n    \n    def backfill_table(self, table: str, text_column: str = 'description') -> dict:\n        \"\"\"Embed all rows in a registry table that lack embeddings.\n        \n        Returns dict with counts: embedded, skipped, total.\n        \"\"\"\n        rows = self._conn.execute(\n            f'SELECT id, name, {text_column} FROM {table} WHERE embedding IS NULL'\n        )\n        if not rows:\n            return {'embedded': 0, 'skipped': 0, 'total': 0}\n        \n        texts = [f\"{r['name']} {r[text_column]}\" for r in rows]\n        vectors = self._embedder.embed(texts)\n        \n        embedded = 0\n        for row, vec in zip(rows, vectors):\n            vec_lit = EmbeddingService.vector_literal(vec)\n            self._conn.execute(\n                f'UPDATE {table} SET embedding = $1::vector WHERE id = $2',\n                vec_lit, row['id']\n            )\n            embedded += 1\n        \n        return {'embedded': embedded, 'skipped': 0, 'total': len(rows)}\n    \n    def backfill_all(self) -> dict:\n        \"\"\"Backfill all 3 registry tables.\"\"\"\n        results = {}\n        for table in ('registry_ui_components', 'registry_calculations', 'registry_workflows'):\n            results[table] = self.backfill_table(table)\n        return results\n```\n\nAlso add a backfill method for memory_entities, bugs, receipt_search, dispatch_constraints, and friction_events following the same pattern. For each table, build the embed text from the most relevant text columns:\n- memory_entities: name + ' ' + content\n- bugs: title + ' ' + description  \n- receipt_search: use the existing search_text or body column\n- dispatch_constraints: pattern + ' ' + description (or whatever text columns exist)\n- friction_events: message column\n\nRead each table's schema first to use the correct column names.\n\nKeep the code simple and direct. No unnecessary abstractions.",
+      "scope_write": ["Code&DBs/Workflow/runtime/registry_embedder.py"],
+      "scope_read": [
+        "Code&DBs/Databases/migrations/workflow/016_app_builder_registries.sql",
+        "Code&DBs/Databases/migrations/workflow/015_memory_graph.sql",
+        "Code&DBs/Databases/migrations/workflow/009_bugs_roadmap_operator.sql",
+        "Code&DBs/Databases/migrations/workflow/014_dispatch_control_consolidation.sql",
+        "Code&DBs/Workflow/runtime/embedding_service.py"
+      ],
+      "max_retries": 1
+    },
+    {
+      "label": "p4_intent_matcher_vector",
+      "agent": "anthropic/claude-sonnet-4-6",
+      "prompt": "Upgrade the IntentMatcher to use vector similarity alongside FTS for registry search.\n\nRead Code&DBs/Workflow/runtime/intent_matcher.py first.\n\nCurrent approach: Three separate plainto_tsquery FTS queries against registry_ui_components, registry_calculations, registry_workflows.\n\nChanges:\n\n1. IntentMatcher.__init__: accept optional EmbeddingService and store it\n\n2. Add a _vector_search method:\n   def _vector_search(self, table: str, intent: str, limit: int = 10) -> list[RegistryMatch]:\n       vec = self._embedder.embed_one(intent)\n       vec_lit = EmbeddingService.vector_literal(vec)\n       rows = self._conn.execute(\n           f'''SELECT id, name, description, category,\n                      1 - (embedding <=> $1::vector) AS rank\n               FROM {table}\n               WHERE embedding IS NOT NULL\n                 AND 1 - (embedding <=> $1::vector) >= 0.3\n               ORDER BY embedding <=> $1::vector\n               LIMIT $2''',\n           vec_lit, limit\n       )\n       return [RegistryMatch(id=r['id'], name=r['name'], ...for each row]\n\n3. In the main match() method:\n   a. Run FTS search (existing code)\n   b. If embedder available, also run _vector_search for each table\n   c. Merge FTS + vector results using RRF (k=60):\n      - Each result gets score = sum(1/(60 + rank_position)) across sources\n      - Deduplicate by id, keeping highest fused score\n   d. Return merged results\n\n4. If embedder is None, fall through to existing FTS-only behavior.\n\n5. Update the composition plan logic to work with the merged results (should be transparent since it operates on RegistryMatch objects regardless of source).\n\n6. Wire it up: update subsystems.py to pass EmbeddingService when constructing IntentMatcher.\n\n7. Update the intent MCP tool handler (Code&DBs/Workflow/surfaces/mcp/tools/intent.py) if needed to pass embedder from subsystems.\n\nKeep backward compatibility — embedder=None means pure FTS behavior.",
+      "scope_write": [
+        "Code&DBs/Workflow/runtime/intent_matcher.py",
+        "Code&DBs/Workflow/surfaces/mcp/subsystems.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/intent.py"
+      ],
+      "scope_read": [
+        "Code&DBs/Workflow/runtime/intent_matcher.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/intent.py",
+        "Code&DBs/Workflow/surfaces/mcp/subsystems.py",
+        "Code&DBs/Workflow/runtime/embedding_service.py"
+      ],
+      "max_retries": 1
+    }
+  ]
+}

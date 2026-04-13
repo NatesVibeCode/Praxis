@@ -1,0 +1,56 @@
+{
+  "name": "Platform Inventory Catalog",
+  "phase": "review",
+  "jobs": [
+    {
+      "label": "catalog_runtime",
+      "agent": "anthropic/claude-haiku-4-5-20251001",
+      "prompt": "You are cataloging the runtime subsystem of a Python platform. Read every .py file in 'Code&DBs/Workflow/runtime/' (skip __pycache__). For EACH file, produce a structured entry:\n\n- **File**: filename\n- **Purpose**: 1-sentence description of what this module does\n- **Key functions/classes**: list each public function and class with a 1-line description\n- **Connects to**: what other modules it imports from within the project, what DB tables it reads/writes, what APIs it calls\n- **Outcome**: what business/system outcome this module drives (e.g. 'ensures failed jobs get retried', 'routes tasks to cheapest capable provider')\n\nBe precise and factual — read the actual code, don't guess. Output as clean markdown. If a directory has subdirectories, recurse into them."
+    },
+    {
+      "label": "catalog_surfaces",
+      "agent": "anthropic/claude-haiku-4-5-20251001",
+      "prompt": "You are cataloging the surfaces subsystem of a Python platform. Read every .py file in 'Code&DBs/Workflow/surfaces/' recursively (skip __pycache__). This includes api/, cli/, mcp/, and app/ subdirectories. For EACH .py file, produce a structured entry:\n\n- **File**: path relative to surfaces/\n- **Purpose**: 1-sentence description\n- **Key functions/classes**: list each public function and class with a 1-line description\n- **Connects to**: internal module imports, DB tables, external APIs\n- **Outcome**: what user-facing capability this enables\n\nFor .tsx/.ts files in surfaces/app/src/, just list the component names and what they render — don't do deep analysis. Be precise, read actual code."
+    },
+    {
+      "label": "catalog_registry",
+      "agent": "anthropic/claude-haiku-4-5-20251001",
+      "prompt": "You are cataloging the registry subsystem. Read every .py file in 'Code&DBs/Workflow/registry/' (skip __pycache__). For EACH file:\n\n- **File**: filename\n- **Purpose**: 1-sentence description\n- **Key functions/classes**: list with 1-line descriptions\n- **Connects to**: internal imports, DB tables, APIs\n- **Outcome**: what configuration/routing outcome this drives\n\nRead actual code. Output clean markdown."
+    },
+    {
+      "label": "catalog_observability",
+      "agent": "anthropic/claude-haiku-4-5-20251001",
+      "prompt": "You are cataloging the observability subsystem. Read every .py file in 'Code&DBs/Workflow/observability/' (skip __pycache__). For EACH file:\n\n- **File**: filename\n- **Purpose**: 1-sentence description\n- **Key functions/classes**: list with 1-line descriptions\n- **Connects to**: internal imports, DB tables, APIs\n- **Outcome**: what visibility/monitoring outcome this drives\n\nRead actual code. Output clean markdown."
+    },
+    {
+      "label": "catalog_adapters",
+      "agent": "anthropic/claude-haiku-4-5-20251001",
+      "prompt": "You are cataloging the adapters subsystem. Read every .py file in 'Code&DBs/Workflow/adapters/' (skip __pycache__). For EACH file:\n\n- **File**: filename\n- **Purpose**: 1-sentence description\n- **Key functions/classes**: list with 1-line descriptions\n- **Connects to**: internal imports, DB tables, external LLM APIs\n- **Outcome**: what integration outcome this drives\n\nRead actual code. Output clean markdown."
+    },
+    {
+      "label": "catalog_memory",
+      "agent": "anthropic/claude-haiku-4-5-20251001",
+      "prompt": "You are cataloging the memory subsystem. Read every .py file in 'Code&DBs/Workflow/memory/' (skip __pycache__). For EACH file:\n\n- **File**: filename\n- **Purpose**: 1-sentence description\n- **Key functions/classes**: list with 1-line descriptions\n- **Connects to**: internal imports, DB tables (especially memory_graph, entities)\n- **Outcome**: what knowledge/state outcome this drives\n\nRead actual code. Output clean markdown."
+    },
+    {
+      "label": "catalog_storage",
+      "agent": "anthropic/claude-haiku-4-5-20251001",
+      "prompt": "You are cataloging the storage subsystem. Read every .py file in 'Code&DBs/Workflow/storage/' recursively (skip __pycache__). For EACH file:\n\n- **File**: path relative to storage/\n- **Purpose**: 1-sentence description\n- **Key functions/classes**: list with 1-line descriptions\n- **Connects to**: DB tables, connection pooling, Postgres features used\n- **Outcome**: what data persistence outcome this drives\n\nRead actual code. Output clean markdown."
+    },
+    {
+      "label": "catalog_policy",
+      "agent": "anthropic/claude-haiku-4-5-20251001",
+      "prompt": "You are cataloging the policy subsystem. Read every .py file in 'Code&DBs/Workflow/policy/' (skip __pycache__). For EACH file:\n\n- **File**: filename\n- **Purpose**: 1-sentence description\n- **Key functions/classes**: list with 1-line descriptions\n- **Connects to**: internal imports, DB tables, gate/promotion logic\n- **Outcome**: what governance/control outcome this drives\n\nRead actual code. Output clean markdown."
+    },
+    {
+      "label": "catalog_contracts_core_scripts",
+      "agent": "anthropic/claude-haiku-4-5-20251001",
+      "prompt": "You are cataloging three small subsystems. Read every .py file in these directories (skip __pycache__):\n1. 'Code&DBs/Workflow/contracts/'\n2. 'Code&DBs/Workflow/core/'\n3. 'Code&DBs/Workflow/scripts/'\n\nFor EACH file:\n- **File**: directory/filename\n- **Purpose**: 1-sentence description\n- **Key functions/classes**: list with 1-line descriptions\n- **Connects to**: internal imports, DB tables\n- **Outcome**: what outcome this drives\n\nRead actual code. Output clean markdown."
+    },
+    {
+      "label": "catalog_migrations",
+      "agent": "anthropic/claude-haiku-4-5-20251001",
+      "prompt": "You are cataloging all SQL database migrations and DB-side logic for a platform with 84 tables. Read every .sql file in 'Code&DBs/Databases/migrations/workflow/' in order. For EACH migration:\n\n- **File**: filename\n- **Tables created/altered**: list each table and its columns\n- **Indexes**: any indexes created\n- **Functions/Triggers**: any PL/pgSQL functions or triggers defined\n- **Purpose**: what schema capability this migration adds\n- **Used by**: which Python subsystems likely use these tables (infer from table names)\n\nThe database has 6 custom PL/pgSQL functions that implement critical runtime logic:\n1. check_run_completion — trigger on workflow_jobs that tracks completed/failed counts on workflow_runs, marks run as succeeded/failed when all jobs finish, fires pg_notify('run_complete')\n2. notify_job_ready — trigger on workflow_jobs that fires pg_notify('job_ready') when a job enters ready/pending status\n3. release_downstream_jobs — trigger on workflow_jobs that marks dependent jobs as 'ready' when all parents succeed, cancels children when parent fails terminally\n4. project_dispatch_result_trigger — trigger on workflow_runs\n5. workflow_outbox_capture_event — trigger on workflow_events for outbox pattern\n6. workflow_outbox_capture_receipt — trigger on receipts for outbox pattern\n\nDocument EACH function: what it does, what tables it reads/writes, what pg_notify channels it uses, and what Python code consumes those notifications.\n\nRead actual SQL. Output clean markdown sorted by migration number."
+    }
+  ]
+}

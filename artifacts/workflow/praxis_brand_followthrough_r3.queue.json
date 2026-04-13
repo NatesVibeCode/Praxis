@@ -1,0 +1,89 @@
+{
+  "name": "praxis_brand_followthrough_r3",
+  "workflow_id": "praxis_brand_followthrough_r3",
+  "phase": "build",
+  "outcome_goal": "Package the next Praxis Engine rename wave as a proof-backed followthrough packet without blindly renaming internal contracts that still carry real compatibility weight.",
+  "anti_requirements": [
+    "Do not perform another blind global rename.",
+    "Do not mutate runtime or schema internals in this packet.",
+    "Do not treat dag_workflow, com.dag.*, or dispatch-shaped metrics as bugs unless they are still user-facing authority surfaces."
+  ],
+  "target_repo": "/Users/nate/Praxis",
+  "workdir": "/Users/nate/Praxis",
+  "verify_refs": [
+    "./scripts/workflow.sh validate artifacts/workflow/praxis_brand_followthrough_r3.queue.json"
+  ],
+  "jobs": [
+    {
+      "label": "surface_brand_residual_audit_r3",
+      "agent": "openai/gpt-5.4-mini",
+      "write_scope": [
+        "artifacts/workflow/praxis_brand_residual_audit.md"
+      ],
+      "read_scope": [
+        "Code&DBs/Workflow/PUBLIC_NAMING.md",
+        "README.md",
+        "Code&DBs/Workflow/README.md",
+        "Code&DBs/Workflow/DASHBOARD.md",
+        "Code&DBs/Workflow/DASHBOARD_QUICK_REFERENCE.txt",
+        "Code&DBs/Workflow/surfaces/web/README.md",
+        "Code&DBs/Workflow/surfaces/web/QUICK_START.md",
+        "Code&DBs/Workflow/surfaces/web/index.html",
+        "Code&DBs/Workflow/surfaces/web/leaderboard.html",
+        "Code&DBs/Workflow/surfaces/web/receipts.html",
+        "Code&DBs/Workflow/surfaces/app/src/config.ts",
+        "Code&DBs/Workflow/surfaces/app/src/launcher/LauncherFrontdoor.tsx",
+        "Code&DBs/Workflow/surfaces/app/src/workspace/WorkspacePage.tsx",
+        "Code&DBs/Workflow/surfaces/app/src/dashboard/Dashboard.tsx",
+        "Code&DBs/Workflow/surfaces/app/src/builder/BuilderPage.tsx"
+      ],
+      "prompt": "Audit the current human-facing Praxis Engine rename against PUBLIC_NAMING.md. Produce a concise residual surface audit with three sections: confirmed aligned surfaces, still-user-facing legacy terms that should be cleaned next, and deliberate legacy terms that are acceptable because they are internal or compatibility-only. Write only artifacts/workflow/praxis_brand_residual_audit.md. Do not edit code."
+    },
+    {
+      "label": "launcher_alias_and_operator_proof_r3",
+      "agent": "openai/gpt-5.4-mini",
+      "write_scope": [
+        "artifacts/workflow/praxis_launcher_alias_proof.md"
+      ],
+      "read_scope": [
+        "scripts/praxis",
+        "scripts/dag-ctl",
+        "Code&DBs/Workflow/surfaces/api/handlers/workflow_admin.py",
+        "Code&DBs/Workflow/surfaces/api/handlers/workflow_launcher.py",
+        "Code&DBs/Workflow/surfaces/api/rest.py",
+        "README.md",
+        "Code&DBs/Workflow/README.md"
+      ],
+      "prompt": "Review the Praxis Engine launcher alias path and operator copy. Confirm whether scripts/praxis is now the preferred front door, where dag-ctl remains a compatibility alias, and where live operator payloads may still lag until services restart. Include exact proof commands an operator should run, the expected command/help surfaces, and any residual mismatch risk. Write only artifacts/workflow/praxis_launcher_alias_proof.md. Do not edit code."
+    },
+    {
+      "label": "contract_and_compatibility_adjudication_r3",
+      "agent": "openai/gpt-5.4-mini",
+      "write_scope": [
+        "artifacts/workflow/praxis_contract_adjudication.md"
+      ],
+      "read_scope": [
+        "Code&DBs/Workflow/PUBLIC_NAMING.md",
+        "Code&DBs/Workflow/surfaces/api/handlers/workflow_admin.py",
+        "Code&DBs/Workflow/surfaces/api/handlers/workflow_launcher.py",
+        "Code&DBs/Workflow/tests/integration/test_workflow_api.py",
+        "scripts/praxis",
+        "scripts/dag-ctl"
+      ],
+      "prompt": "Decide which remaining dag/dispatch/workflow terms should stay as compatibility contracts versus which deserve a later controlled migration. Focus on platform field names, MCP names, launchd labels, CLI compatibility, and JSON/API field names. Output a must-keep compatibility list, a safe-next-wave rename list, and an explicit do-not-touch-yet list. Write only artifacts/workflow/praxis_contract_adjudication.md. Do not edit code."
+    },
+    {
+      "label": "praxis_brand_followthrough_closeout_r3",
+      "agent": "openai/gpt-5.3-codex-spark",
+      "depends_on": [
+        "surface_brand_residual_audit_r3",
+        "launcher_alias_and_operator_proof_r3",
+        "contract_and_compatibility_adjudication_r3"
+      ],
+      "write_scope": [
+        "artifacts/workflow/praxis_brand_followthrough_closeout.md"
+      ],
+      "prompt": "Read the three Praxis followthrough artifacts from this packet and synthesize one closeout note for Nate. Keep it direct. Include: what is already done, what should be the next bounded rename wave, what should intentionally stay legacy, and the shortest possible operator proof checklist. Write only artifacts/workflow/praxis_brand_followthrough_closeout.md. Do not edit code."
+    }
+  ]
+}

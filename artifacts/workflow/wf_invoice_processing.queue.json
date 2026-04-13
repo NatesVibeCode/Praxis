@@ -1,0 +1,31 @@
+{
+  "name": "Invoice Processing Pipeline",
+  "queue_id": "wf_invoice_2026-04-06",
+  "phase": "build",
+  "outcome_goal": "Process incoming invoices: read, extract data, validate against PO, get human review, enter into accounting",
+  "jobs": [
+    {
+      "label": "step_1_read_invoices",
+      "agent": "auto/wiring",
+      "prompt": "## Objective\nRead incoming invoices from the email inbox.\n\n## Context\n- [retrieval] Email inbox — filter for invoices and payment-related messages\n\n## Expected Output\n- invoice_documents: array of raw invoice text/images\n- count: number of invoices found\n\n## Done Criteria\n- All unprocessed invoices retrieved\n- No invoices skipped or duplicated"
+    },
+    {
+      "label": "step_2_extract_fields",
+      "agent": "auto/build",
+      "prompt": "## Objective\nExtract vendor name, invoice amount, and due date from each invoice document.\n\n## Context\n- [document] Invoice documents from previous step\n\n## Expected Output\n- extracted_fields: Record<string, {vendor: string, amount: number, due_date: string, po_number: string}>\n- confidence: number (0-1)\n\n## Done Criteria\n- All target fields extracted from every invoice\n- Extraction confidence >= 0.85\n- No fields contain placeholder or null values",
+      "depends_on": ["step_1_read_invoices"]
+    },
+    {
+      "label": "step_3_validate_po",
+      "agent": "auto/review",
+      "prompt": "## Validation Task\nValidate the extracted invoice data against purchase orders.\n\n## Rules to Check\n- [required] Every invoice has a matching PO number in the system\n- [threshold] Invoice amount within 5% of PO amount\n- [required] Vendor name matches PO vendor\n- [required] Due date is in the future\n\n## Expected Output\n- pass: boolean\n- issues: string[] (empty if pass)\n- discrepancies: array of {invoice_id, field, expected, actual}",
+      "depends_on": ["step_2_extract_fields"]
+    },
+    {
+      "label": "step_4_enter_accounting",
+      "agent": "auto/wiring",
+      "prompt": "## Objective\nEnter validated and approved invoices into the accounting system.\n\n## Context\n- [schema] Accounting system entry format\n- Only process invoices that passed validation\n\n## Expected Output\n- entries_created: number\n- confirmation_ids: string[]\n\n## Done Criteria\n- All approved invoices entered\n- No duplicate entries created\n- Confirmation received for each entry",
+      "depends_on": ["step_3_validate_po"]
+    }
+  ]
+}

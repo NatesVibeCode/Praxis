@@ -13,7 +13,7 @@ def _agent(**overrides):
         "timeout_seconds": 15,
         "max_output_tokens": 2048,
         "execution_transport": "cli",
-        "sandbox_provider": "seatbelt_local",
+        "sandbox_provider": "docker_local",
         "sandbox_policy": SimpleNamespace(
             network_policy="provider_only",
             workspace_materialization="copy",
@@ -30,8 +30,8 @@ def _sandbox_result(**overrides):
         "stdout": "plain output",
         "stderr": "",
         "timed_out": False,
-        "execution_mode": "seatbelt_local",
-        "sandbox_provider": "seatbelt_local",
+        "execution_mode": "docker_local",
+        "sandbox_provider": "docker_local",
         "execution_transport": "cli",
         "sandbox_session_id": "sandbox_session:run.alpha:job.alpha",
         "sandbox_group_id": "group:run.alpha",
@@ -41,6 +41,8 @@ def _sandbox_result(**overrides):
         "network_policy": "provider_only",
         "provider_latency_ms": 12,
         "workspace_root": "/tmp/workspace",
+        "container_cpu_percent": None,
+        "container_mem_bytes": None,
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -74,7 +76,7 @@ def test_execute_cli_routes_through_sandbox_runtime(monkeypatch, tmp_path) -> No
         },
     )
 
-    assert captured["provider_name"] == "seatbelt_local"
+    assert captured["provider_name"] == "docker_local"
     assert captured["command"] == "wizard-cli --json"
     assert captured["stdin_text"] == "hello from stdin"
     assert captured["execution_transport"] == "cli"
@@ -83,7 +85,7 @@ def test_execute_cli_routes_through_sandbox_runtime(monkeypatch, tmp_path) -> No
     assert captured["env"]["PRAXIS_ALLOWED_MCP_TOOLS"] == "praxis_query,praxis_discover"
     assert captured["env"]["PRAXIS_ALLOWED_MCP_TOOLS"] == "praxis_query,praxis_discover"
     assert result["status"] == "succeeded"
-    assert result["sandbox_provider"] == "seatbelt_local"
+    assert result["sandbox_provider"] == "docker_local"
     assert result["artifact_refs"] == ["README.md"]
 
 
@@ -206,7 +208,7 @@ def test_execute_cli_builds_default_command_from_provider_registry(monkeypatch, 
         str(tmp_path),
     )
 
-    assert captured["command"] == "codex exec --skip-git-repo-check - --json --model gpt-5.4-mini"
+    assert captured["command"] == "codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check - --json --model gpt-5.4-mini"
     assert captured["stdin_text"] == "hello from stdin"
     assert result["status"] == "succeeded"
 

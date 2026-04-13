@@ -468,8 +468,10 @@ def write_job_receipt(
     )
 
     conn.execute(
-        """INSERT INTO workflow_notifications (run_id, job_label, spec_name, agent_slug, status, failure_code, duration_seconds, created_at)
-           VALUES ($1, $2, '', $3, $4, $5, $6, $7)
+        """INSERT INTO workflow_notifications
+               (run_id, job_label, spec_name, agent_slug, status, failure_code,
+                duration_seconds, cpu_percent, mem_bytes, created_at)
+           VALUES ($1, $2, '', $3, $4, $5, $6, $7, $8, $9)
            ON CONFLICT DO NOTHING""",
         run_id,
         label,
@@ -477,8 +479,11 @@ def write_job_receipt(
         status,
         result.get("error_code", ""),
         duration_ms / 1000.0,
+        result.get("container_cpu_percent"),
+        result.get("container_mem_bytes"),
         finished_at,
     )
+    conn.execute("SELECT pg_notify('job_completed', $1)", run_id)
 
     # Mine constraints from failures — fire-and-forget so it never blocks receipts
     if status == "failed" and error_code:

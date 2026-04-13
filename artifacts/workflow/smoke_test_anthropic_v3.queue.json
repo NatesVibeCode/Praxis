@@ -1,0 +1,13 @@
+{
+  "name": "Anthropic Smoke v3",
+  "phase": "SMOKE",
+  "workflow_id": "smoke_anthropic_v3",
+  "jobs": [
+    {
+      "label": "smoke_anthropic_v3",
+      "agent": "anthropic/claude-sonnet-4-6",
+      "prompt": "Reply with exactly: SMOKE_OK_ANTHROPIC",
+      "timeout": 120
+    }
+  ]
+}

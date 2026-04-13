@@ -45,6 +45,8 @@ If the packet uses repo workflow surfaces, write it so the builder:
 - records `run_id` as the tracking handle
 - expects live status from a separate stream or `action='status'`, not from the launch call
 - checks `health.likely_failed`, `health.signals`, and `health.resource_telemetry` before deciding a run is stuck
+- references `workflow tools describe <tool>` when a packet depends on an exact tool schema
+- uses the curated aliases (`workflow query`, `workflow discover`, `workflow recall`, `workflow health`, `workflow bugs`) when they reduce ambiguity for an operator
 
 ## Required Fields
 

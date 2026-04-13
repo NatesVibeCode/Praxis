@@ -1,0 +1,5 @@
+# Generated workflow transcripts and telemetry are not source-of-truth for repo discovery.
+artifacts/workflow_outputs/
+artifacts/heartbeat/
+**/artifacts/workflow_outputs/**
+**/artifacts/heartbeat/**

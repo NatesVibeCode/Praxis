@@ -1,0 +1,57 @@
+{
+  "name": "dependency_embedding_and_vector",
+  "workflow_id": "dependency_embedding_and_vector",
+  "phase": "build",
+  "outcome_goal": "Prove the embedding runtime contract is explicit and the vector-store adapter owns pgvector details, then remove any stale runtime assumptions about model handling or vector literal formatting.",
+  "roadmap_items": [
+    "roadmap_item.dependency.embedding.runtime",
+    "roadmap_item.dependency.vector.store.seam"
+  ],
+  "anti_requirements": [
+    "Do not make embeddings lifecycle authority.",
+    "Do not leak pgvector casts, literals, or threshold syntax back into runtime callers.",
+    "Do not widen into search-product or discovery UX work."
+  ],
+  "registry_paths": [
+    "Code&DBs/Workflow/runtime/embedding_service.py",
+    "Code&DBs/Workflow/runtime/database_maintenance.py",
+    "Code&DBs/Workflow/runtime/task_assembler.py",
+    "Code&DBs/Workflow/runtime/compiler.py",
+    "Code&DBs/Workflow/runtime/intent_matcher.py",
+    "Code&DBs/Workflow/surfaces/_subsystems_base.py",
+    "Code&DBs/Workflow/storage/postgres/vector_store.py"
+  ],
+  "target_repo": "/Users/nate/Praxis",
+  "workdir": "/Users/nate/Praxis",
+  "verify_refs": [
+    "verify_ref.python.py_compile.test"
+  ],
+  "jobs": [
+    {
+      "label": "embedding_runtime_contract",
+      "agent": "openai/gpt-5.4-mini",
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/embedding_service.py",
+        "Code&DBs/Workflow/runtime/database_maintenance.py",
+        "Code&DBs/Workflow/surfaces/_subsystems_base.py",
+        "Code&DBs/Workflow/storage/postgres/vector_store.py",
+        "Code&DBs/Workflow/tests/unit/test_database_maintenance.py"
+      ],
+      "prompt": "Declare one embedding-runtime authority path for model choice, dimensions, refresh policy, and failure handling. The storage adapter must fail closed when the embedder contract disagrees with that authority, and runtime code should stop carrying any leftover vector-formatting responsibility."
+    },
+    {
+      "label": "vector_store_adapter_boundary",
+      "agent": "openai/gpt-5.4-mini",
+      "depends_on": [
+        "embedding_runtime_contract"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/task_assembler.py",
+        "Code&DBs/Workflow/runtime/compiler.py",
+        "Code&DBs/Workflow/runtime/intent_matcher.py",
+        "Code&DBs/Workflow/tests/unit/test_runtime_compiler_json.py"
+      ],
+      "prompt": "Keep runtime callers on the adapter surface. Runtime code may ask for semantic retrieval, but it should not need to know pgvector syntax, literal formatting, or backend-specific threshold behavior to stay correct."
+    }
+  ]
+}

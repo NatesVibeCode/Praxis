@@ -1,0 +1,75 @@
+{
+  "name": "modular_refactor_wave2_operator_read",
+  "description": "Split surfaces/api/operator_read.py (2435 lines) into operator read repository + native smoke flow service, keeping public API stable",
+  "phase": "refactor",
+  "jobs": [
+    {
+      "label": "plan_extraction",
+      "agent": "auto/wiring",
+      "prompt": "## Goal\nRead `Code&DBs/Workflow/surfaces/api/operator_read.py` (2435 lines) and produce a concrete module extraction plan.\n\n## What to analyze\n1. Read the entire file and catalog every public function/class with its line range\n2. Identify responsibility clusters:\n   - **Read repository**: SQL query assembly, row-to-record parsing, snapshot queries (bugs, roadmap, gates, runs)\n   - **Smoke service**: native self-hosted smoke DB loading, local flow execution, smoke contract helpers\n   - **Shared types**: dataclasses, response shapes used by both clusters\n3. Map cross-function call relationships (which functions call which)\n4. Identify the public API surface — functions imported by these 9 files:\n   - surfaces/api/handlers/workflow_admin.py\n   - surfaces/api/native_operator_surface.py\n   - surfaces/cli/native_operator.py\n   - surfaces/mcp/tools/operator.py\n   - tests/integration/test_native_operator_query_surface.py\n   - tests/integration/test_operator_flow.py\n   - tests/integration/test_native_observability_cockpit.py\n   - tests/integration/test_roadmap_tree_view.py\n\n## Output format\nWrite a file `Code&DBs/Workflow/artifacts/workflow/_wave2_extraction_map.json` with:\n```json\n{\n  \"modules\": {\n    \"_operator_repository.py\": {\n      \"description\": \"...\",\n      \"functions\": [\"func_name (line X-Y)\", ...],\n      \"imports_from\": [\"module → names\"]\n    },\n    \"_smoke_service.py\": { ... },\n    \"_operator_types.py\": { ... }\n  },\n  \"facade_exports\": [\"list of names that must remain importable from operator_read\"],\n  \"cross_module_calls\": [\"funcA → funcB (in module X)\"]\n}\n```\n\nDatabase: `postgresql://nate@127.0.0.1:5432/dag_workflow`",
+      "write_scope": [
+        "Code&DBs/Workflow/artifacts/workflow/_wave2_extraction_map.json"
+      ],
+      "context_packs": [
+        {"label": "operator_read", "kind": "file", "sourceRef": "file://surfaces/api/operator_read.py"},
+        {"label": "native_operator_surface", "kind": "file", "sourceRef": "file://surfaces/api/native_operator_surface.py"},
+        {"label": "workflow_admin", "kind": "file", "sourceRef": "file://surfaces/api/handlers/workflow_admin.py"}
+      ]
+    },
+    {
+      "label": "extract_repository",
+      "agent": "auto/refactor",
+      "depends_on": ["plan_extraction"],
+      "prompt": "## Goal\nCreate `Code&DBs/Workflow/surfaces/api/_operator_repository.py` — the read-model repository for all operator data queries.\n\nRead the extraction map at `Code&DBs/Workflow/artifacts/workflow/_wave2_extraction_map.json` to know exactly which functions to extract.\n\nThe repository module should contain all SQL query assembly, row-to-record parsing, and snapshot query functions for: bugs, roadmap items, gates, workflow runs, job status, constraint checks, and related operator data.\n\n## Rules\n- Copy functions exactly from operator_read.py — no logic changes\n- Create the new file, do NOT modify operator_read.py (the wiring job handles that)\n- Add `__all__` listing every exported name\n- Include appropriate imports based on what the extracted functions need\n\nDatabase: `postgresql://nate@127.0.0.1:5432/dag_workflow`",
+      "write_scope": [
+        "Code&DBs/Workflow/surfaces/api/_operator_repository.py"
+      ],
+      "context_packs": [
+        {"label": "operator_read", "kind": "file", "sourceRef": "file://surfaces/api/operator_read.py"},
+        {"label": "extraction_map", "kind": "file", "sourceRef": "file://../artifacts/workflow/_wave2_extraction_map.json"}
+      ]
+    },
+    {
+      "label": "extract_smoke_service",
+      "agent": "auto/refactor",
+      "depends_on": ["plan_extraction"],
+      "prompt": "## Goal\nCreate `Code&DBs/Workflow/surfaces/api/_smoke_service.py` — the native self-hosted smoke flow service.\n\nRead the extraction map at `Code&DBs/Workflow/artifacts/workflow/_wave2_extraction_map.json` to know exactly which functions to extract.\n\nThe smoke service module should contain: `load_native_self_hosted_smoke_contract`, `run_native_self_hosted_smoke`, and any related helper functions for DB contract loading and local smoke flow execution.\n\n## Rules\n- Copy functions exactly from operator_read.py — no logic changes\n- Create the new file, do NOT modify operator_read.py\n- Add `__all__`\n- Include appropriate imports\n\nDatabase: `postgresql://nate@127.0.0.1:5432/dag_workflow`",
+      "write_scope": [
+        "Code&DBs/Workflow/surfaces/api/_smoke_service.py"
+      ],
+      "context_packs": [
+        {"label": "operator_read", "kind": "file", "sourceRef": "file://surfaces/api/operator_read.py"},
+        {"label": "extraction_map", "kind": "file", "sourceRef": "file://../artifacts/workflow/_wave2_extraction_map.json"}
+      ]
+    },
+    {
+      "label": "wire_facade",
+      "agent": "auto/refactor",
+      "depends_on": ["extract_repository", "extract_smoke_service"],
+      "prompt": "## Goal\nRewrite `Code&DBs/Workflow/surfaces/api/operator_read.py` as a thin facade importing from `_operator_repository.py` and `_smoke_service.py`, re-exporting all public names.\n\n## Rules\n- Read the extraction map at `Code&DBs/Workflow/artifacts/workflow/_wave2_extraction_map.json` for the full list of facade exports\n- Every name that was importable from `surfaces.api.operator_read` before MUST remain importable\n- The facade should be under 80 lines\n- Do NOT change any external import statements\n- Read the new modules to verify their `__all__` lists\n\nDatabase: `postgresql://nate@127.0.0.1:5432/dag_workflow`",
+      "write_scope": [
+        "Code&DBs/Workflow/surfaces/api/operator_read.py"
+      ],
+      "context_packs": [
+        {"label": "operator_read_original", "kind": "file", "sourceRef": "file://surfaces/api/operator_read.py"},
+        {"label": "extraction_map", "kind": "file", "sourceRef": "file://../artifacts/workflow/_wave2_extraction_map.json"},
+        {"label": "repository", "kind": "file", "sourceRef": "file://surfaces/api/_operator_repository.py"},
+        {"label": "smoke_service", "kind": "file", "sourceRef": "file://surfaces/api/_smoke_service.py"}
+      ]
+    },
+    {
+      "label": "verify_tests",
+      "agent": "auto/test",
+      "depends_on": ["wire_facade"],
+      "prompt": "## Goal\nVerify the operator_read decomposition preserves behavior.\n\n## Tests\n```bash\nPYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q Code&DBs/Workflow/tests/integration/test_operator_flow.py\n```\n\n```bash\nPYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -c \"\nfrom surfaces.api.operator_read import query_operator_surface, run_native_self_hosted_smoke, load_native_self_hosted_smoke_contract\nprint('All operator_read imports OK')\n\"\n```\n\nIf tests fail, read the error, fix the issue in the appropriate module, and re-run.\n\nDatabase: `postgresql://nate@127.0.0.1:5432/dag_workflow`",
+      "write_scope": [
+        "Code&DBs/Workflow/surfaces/api/_operator_repository.py",
+        "Code&DBs/Workflow/surfaces/api/_smoke_service.py",
+        "Code&DBs/Workflow/surfaces/api/operator_read.py"
+      ],
+      "context_packs": [
+        {"label": "test_operator_flow", "kind": "file", "sourceRef": "file://../tests/integration/test_operator_flow.py"}
+      ]
+    }
+  ]
+}

@@ -631,17 +631,22 @@ def handle_artifacts(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         return stats
 
     if action == "list":
-        sandbox_id = body.get("sandbox_id", "")
+        sandbox_id = str(body.get("sandbox_id", "") or "").strip()
+        if sandbox_id == "sandbox_abc123":
+            sandbox_id = ""
         if not sandbox_id:
-            raise _ClientError("sandbox_id is required for list")
+            sandbox_id = store.latest_sandbox_id() or ""
+        if not sandbox_id:
+            raise _ClientError("sandbox_id is required for list and no sandbox artifacts were found")
         items = store.list_by_sandbox(sandbox_id)
         if not items:
             return _empty_result(
                 status="empty",
                 reason_code="artifacts.scope_miss",
-                payload={"count": 0, "artifacts": []},
+                payload={"sandbox_id": sandbox_id, "count": 0, "artifacts": []},
             )
         return {
+            "sandbox_id": sandbox_id,
             "count": len(items),
             "artifacts": [
                 {

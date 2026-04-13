@@ -11,6 +11,11 @@ import json
 import logging
 from typing import Any, TYPE_CHECKING
 
+from runtime.integrations.display_names import (
+    base_integration_name,
+    display_name_for_integration,
+)
+
 if TYPE_CHECKING:
     from storage.postgres.connection import SyncPostgresConnection
 
@@ -99,6 +104,8 @@ def load_authority(conn: "SyncPostgresConnection", integration_id: str) -> dict[
     if not rows:
         return None
     row = dict(rows[0])
+    row["name"] = base_integration_name(row)
+    row["display_name"] = display_name_for_integration(row)
     row["capabilities"] = normalize_capabilities(row.get("capabilities"))
     return row
 
@@ -119,16 +126,18 @@ def list_integrations(conn: "SyncPostgresConnection") -> list[dict[str, Any]]:
     )
     integrations: list[dict[str, Any]] = []
     for row in rows or []:
+        item = dict(row)
         integrations.append({
-            "id": row["id"],
-            "name": row.get("name", row["id"]),
-            "description": row.get("description", ""),
-            "provider": row.get("provider", ""),
-            "auth_status": row.get("auth_status", ""),
-            "source": row.get("manifest_source", ""),
-            "health_status": row.get("health_status"),
-            "error_rate": row.get("error_rate"),
-            "actions": extract_actions(row.get("capabilities")),
+            "id": item["id"],
+            "name": base_integration_name(item),
+            "display_name": display_name_for_integration(item),
+            "description": item.get("description", ""),
+            "provider": item.get("provider", ""),
+            "auth_status": item.get("auth_status", ""),
+            "source": item.get("manifest_source", ""),
+            "health_status": item.get("health_status"),
+            "error_rate": item.get("error_rate"),
+            "actions": extract_actions(item.get("capabilities")),
         })
     return integrations
 
@@ -154,14 +163,16 @@ def describe_integration(conn: "SyncPostgresConnection", integration_id: str) ->
     caps = parse_jsonb(row.get("capabilities"))
     auth_shape = parse_jsonb(row.get("auth_shape"))
 
+    item = dict(row)
     result: dict[str, Any] = {
-        "id": row["id"],
-        "name": row.get("name", row["id"]),
-        "description": row.get("description", ""),
-        "provider": row.get("provider", ""),
-        "auth_status": row.get("auth_status", ""),
-        "source": row.get("manifest_source", ""),
-        "connector_slug": row.get("connector_slug"),
+        "id": item["id"],
+        "name": base_integration_name(item),
+        "display_name": display_name_for_integration(item),
+        "description": item.get("description", ""),
+        "provider": item.get("provider", ""),
+        "auth_status": item.get("auth_status", ""),
+        "source": item.get("manifest_source", ""),
+        "connector_slug": item.get("connector_slug"),
         "auth_kind": auth_shape.get("kind", ""),
         "capabilities": caps if isinstance(caps, list) else [],
     }
@@ -194,16 +205,18 @@ def health_overview(conn: "SyncPostgresConnection") -> dict[str, Any]:
 
     healthy, degraded, unhealthy, unknown = [], [], [], []
     for row in rows or []:
+        item = dict(row)
         entry = {
-            "id": row["id"],
-            "name": row.get("name", row["id"]),
-            "health_status": row.get("health_status"),
-            "error_rate": row.get("error_rate"),
-            "total_calls": row.get("total_calls", 0),
-            "last_call": _isoformat(row.get("last_call_at")),
+            "id": item["id"],
+            "name": base_integration_name(item),
+            "display_name": display_name_for_integration(item),
+            "health_status": item.get("health_status"),
+            "error_rate": item.get("error_rate"),
+            "total_calls": item.get("total_calls", 0),
+            "last_call": _isoformat(item.get("last_call_at")),
         }
-        error_rate = row.get("error_rate")
-        health = row.get("health_status")
+        error_rate = item.get("error_rate")
+        health = item.get("health_status")
 
         if health is None and error_rate is None:
             unknown.append(entry)

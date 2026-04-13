@@ -1,0 +1,49 @@
+{
+  "phase": "DAGW19A",
+  "workflow_id": "dag_native_default_parallel_proof",
+  "packet_id": "native_default_parallel_proof",
+  "anti_requirements": [
+    "no broad legacy cutover",
+    "no hosted deployment work",
+    "no worker-type expansion"
+  ],
+  "jobs": [
+    {
+      "label": "DAGW19A.1_native_default_parallel_proof_packet",
+      "prompt": "OBJECTIVE:\nProve native default workflow classes resolve through stored class authority and native truth surfaces without widening into hosted or legacy cutover work."
+    }
+  ],
+  "proof_packet": {
+    "authority_path": {
+      "workflow_classes": "policy.workflow_classes.PostgresWorkflowClassRepository",
+      "native_scheduler": "surfaces.api.native_scheduler.NativeSchedulerFrontdoor",
+      "native_truth": "artifacts/workflow/DAG_NATIVE_STATUS_AND_RECEIPT_TRUTH.md"
+    },
+    "parallel_wave": {
+      "target_ref": "workspace.alpha",
+      "schedule_kind": "fanout",
+      "schedule_definition_id": "schedule_definition.fanout.parallel_proof",
+      "workflow_class_id": "workflow_class.fanout.parallel_proof",
+      "workflow_class_name": "fanout",
+      "workflow_lane_id": "workflow_lane.fanout",
+      "parallel_task_refs": [
+        "node_0",
+        "node_1"
+      ],
+      "max_parallel": 2
+    },
+    "native_truth_surfaces": [
+      "python3 -m surfaces.cli.main native-operator status <run_id>",
+      "python3 -m surfaces.cli.main native-operator inspect <run_id>",
+      "canonical evidence and receipts in repo-local Postgres"
+    ]
+  },
+  "verify": [
+    {
+      "command": "PYTHONPATH='/Users/nate/Praxis/Code&DBs/Workflow' python3 -m pytest -q '/Users/nate/Praxis/Code&DBs/Workflow/tests/integration/test_native_default_parallel_proof.py'"
+    },
+    {
+      "command": "cd '/Users/nate/Praxis' && ./scripts/validate-queue.sh'/Users/nate/Praxis/artifacts/workflow/DAG_NATIVE_DEFAULT_PARALLEL_PROOF.queue.json'"
+    }
+  ]
+}

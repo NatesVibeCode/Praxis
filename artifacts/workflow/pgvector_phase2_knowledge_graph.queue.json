@@ -1,0 +1,53 @@
+{
+  "name": "pgvector_phase2_knowledge_graph",
+  "queue_id": "pgvec_p2_001",
+  "phase": "build",
+  "outcome_goal": "HybridRetriever uses 3-signal fusion (text + graph + vector); ingest pipeline embeds on write; dag_recall returns semantically relevant results",
+  "jobs": [
+    {
+      "label": "p2_retriever_vector_fusion",
+      "agent": "anthropic/claude-opus-4-6",
+      "prompt": "Upgrade the HybridRetriever in Code&DBs/Workflow/memory/retrieval.py to add vector similarity as a third signal alongside text and graph scores.\n\nCurrent architecture (read the file first):\n- HybridRetriever.__init__(engine, alpha=0.6) — alpha blends text vs graph\n- search() does: (1) FTS text search → text_scores, (2) graph edge expansion → graph_scores, (3) alpha blend: alpha*text + (1-alpha)*graph\n- NoisyOrFusion class exists but isn't used in the main search path\n\nChanges needed:\n\n1. Add vector search as step 1.5 between text and graph:\n   - Accept an optional EmbeddingService in __init__: `def __init__(self, engine, alpha=0.6, embedder=None, conn=None)`\n   - If embedder is provided, embed the query and run cosine similarity against memory_entities:\n     ```sql\n     SELECT id, 1 - (embedding <=> $1::vector) AS cosine_sim\n     FROM memory_entities\n     WHERE embedding IS NOT NULL\n       AND 1 - (embedding <=> $1::vector) >= 0.3\n     ORDER BY embedding <=> $1::vector\n     LIMIT {limit * 2}\n     ```\n   - If entity_type filter provided, add: AND entity_type = $2\n\n2. Change the merge to use NoisyOrFusion instead of simple alpha blending:\n   - For each entity_id, collect up to 3 scores: text, graph, vector\n   - Normalize each score source to 0..1 range (text scores already are, vector cosine_sim already is)\n   - Use NoisyOrFusion.fuse([text_score, graph_score, vector_score]) — this naturally handles missing signals (entity only found by one or two sources)\n   - Update found_via to include 'vector': possible values become 'text', 'graph', 'vector', 'text+graph', 'text+vector', 'graph+vector', 'all'\n   - Update provenance dict to include vector_score\n\n3. Keep backward compatibility: if embedder is None, behavior is identical to current (text + graph with alpha blending). Only switch to NoisyOrFusion when embedder is present.\n\n4. Apply the same pattern to search_with_seeds().\n\nImport EmbeddingService: `from runtime.embedding_service import EmbeddingService`\n\nThe conn parameter is a SyncPostgresConnection for executing the vector SQL query directly. The engine's internal FTS is still used for text search.\n\nDo NOT change the MemoryEngine class — only HybridRetriever and its callers.",
+      "scope_write": ["Code&DBs/Workflow/memory/retrieval.py"],
+      "scope_read": [
+        "Code&DBs/Workflow/memory/retrieval.py",
+        "Code&DBs/Workflow/memory/engine.py",
+        "Code&DBs/Workflow/runtime/embedding_service.py"
+      ],
+      "max_retries": 1
+    },
+    {
+      "label": "p2_ingest_embeddings",
+      "agent": "anthropic/claude-sonnet-4-6",
+      "prompt": "Update the knowledge graph ingest pipeline to embed content on write, populating the new embedding column on memory_entities.\n\nRead the current ingest code in Code&DBs/Workflow/memory/knowledge_graph.py and Code&DBs/Workflow/memory/engine.py.\n\nThe MemoryEngine is the class that actually writes to memory_entities via INSERT/UPDATE. Find the method(s) that insert or update entities and add embedding generation.\n\nChanges:\n\n1. In the KnowledgeGraph facade class (knowledge_graph.py):\n   - Accept an optional EmbeddingService in __init__\n   - Pass it through to the MemoryEngine or handle embedding at the facade level\n\n2. When an entity is created or updated:\n   - Build the embed text from: entity.name + ' ' + entity.content (same fields used by the tsvector)\n   - Call embedder.embed_one(text) to get the 384-dim vector\n   - Include the vector in the INSERT/UPDATE SQL:\n     UPDATE memory_entities SET embedding = $N::vector WHERE id = $1\n   - Use EmbeddingService.vector_literal(vec) to format the vector\n\n3. Handle the case where EmbeddingService is not available (embedder=None) — just skip embedding, leave column NULL.\n\n4. For batch operations (if any exist), use embedder.embed(texts) for batch efficiency.\n\n5. Update the subsystems.py wiring: when constructing KnowledgeGraph, pass in the EmbeddingService:\n   - In get_knowledge_graph(), get the embedding service and pass it:\n     ```python\n     embedder = self.get_embedding_service()\n     self._kg = KnowledgeGraph(..., embedder=embedder)\n     ```\n\nImport: `from runtime.embedding_service import EmbeddingService`\n\nKeep changes minimal — only add embedding generation to the write path. Don't restructure the existing code.",
+      "scope_write": [
+        "Code&DBs/Workflow/memory/knowledge_graph.py",
+        "Code&DBs/Workflow/memory/engine.py",
+        "Code&DBs/Workflow/surfaces/mcp/subsystems.py"
+      ],
+      "scope_read": [
+        "Code&DBs/Workflow/memory/knowledge_graph.py",
+        "Code&DBs/Workflow/memory/engine.py",
+        "Code&DBs/Workflow/runtime/embedding_service.py",
+        "Code&DBs/Workflow/surfaces/mcp/subsystems.py"
+      ],
+      "max_retries": 1
+    },
+    {
+      "label": "p2_retriever_wiring",
+      "agent": "openai/gpt-5.4-mini",
+      "prompt": "Wire the EmbeddingService into the HybridRetriever construction path in the subsystems container.\n\nEdit Code&DBs/Workflow/surfaces/mcp/subsystems.py:\n\nFind the method that constructs the KnowledgeGraph (which internally creates the HybridRetriever). The HybridRetriever now accepts optional embedder and conn parameters.\n\nUpdate the construction so that:\n1. The EmbeddingService from get_embedding_service() is passed to the HybridRetriever\n2. The Postgres connection from get_pg_conn() is passed to the HybridRetriever\n\nThis may require updating KnowledgeGraph.__init__ to pass these through, OR updating wherever the HybridRetriever is directly constructed.\n\nRead the current code first to understand the construction chain, then make minimal edits to wire in the two new parameters.\n\nAlso update the knowledge MCP tool (Code&DBs/Workflow/surfaces/mcp/tools/knowledge.py) if it constructs a HybridRetriever directly — pass the embedder and conn there too.\n\nKeep changes minimal. Only touch construction/wiring code.",
+      "scope_write": [
+        "Code&DBs/Workflow/surfaces/mcp/subsystems.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/knowledge.py"
+      ],
+      "scope_read": [
+        "Code&DBs/Workflow/surfaces/mcp/subsystems.py",
+        "Code&DBs/Workflow/memory/knowledge_graph.py",
+        "Code&DBs/Workflow/memory/retrieval.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/knowledge.py"
+      ],
+      "max_retries": 1
+    }
+  ]
+}

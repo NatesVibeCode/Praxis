@@ -170,7 +170,7 @@ class TestLoadFromSeedJSON:
         assert agent.provider == "anthropic"
         assert agent.execution_backend is ExecutionBackend.cli
         assert agent.execution_transport is ExecutionTransport.cli
-        assert agent.sandbox_provider is SandboxProvider.seatbelt_local
+        assert agent.sandbox_provider is SandboxProvider.docker_local
         assert agent.context_window == 200_000
         assert agent.capability_tier == "mid"
 

@@ -123,9 +123,9 @@ class SupervisorPaths:
     state_file: Path
     control_file: Path
     database_url: str
-    python_bin: Path = Path(shutil.which("python3") or "python3")
-    postgres_bin: Path = Path(shutil.which("postgres") or "postgres")
-    pg_isready_bin: Path = Path(shutil.which("pg_isready") or "pg_isready")
+    python_bin: Path = field(default_factory=lambda: Path(shutil.which("python3", path=SERVICE_PATH) or "python3"))
+    postgres_bin: Path = field(default_factory=lambda: Path(shutil.which("postgres", path=SERVICE_PATH) or "postgres"))
+    pg_isready_bin: Path = field(default_factory=lambda: Path(shutil.which("pg_isready", path=SERVICE_PATH) or "pg_isready"))
     service_path: str = SERVICE_PATH
 
     @property
@@ -631,8 +631,17 @@ class PraxisSupervisor:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         command = _component_command(spec, self.paths)
         log_handle = open(log_path, "a", encoding="utf-8")
+        # Wrap command so stderr/stdout pass through a filter that strips macOS
+        # MallocStackLogging noise emitted by every Python subprocess fork.
+        # `exec "$@"` preserves PID so signal handling stays intact.
+        wrapped = [
+            "bash",
+            "-c",
+            'exec "$@" > >(grep --line-buffered -v MallocStackLogging) 2>&1',
+            "--",
+        ] + list(command)
         process = subprocess.Popen(
-            command,
+            wrapped,
             cwd=self.paths.workflow_dir,
             env={**os.environ, **self.paths.environment},
             stdout=log_handle,

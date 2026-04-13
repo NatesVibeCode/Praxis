@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import traceback
 import uuid
 from typing import Any
@@ -267,9 +268,16 @@ def _handle_wave(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         }
 
     if action == "start":
-        wave_id = body.get("wave_id", "")
+        wave_id = str(body.get("wave_id", "") or "").strip()
+        if wave_id == "wave_abc123":
+            wave_id = ""
         if not wave_id:
-            raise _ClientError("wave_id is required for start")
+            try:
+                wave_id = orch.resolve_default_wave_id(action=action)
+            except KeyError:
+                wave_id = ""
+        if not wave_id:
+            raise _ClientError("wave_id is required for start because no default wave is available")
         try:
             wave_state = orch.start_wave(wave_id)
             return {
@@ -281,9 +289,16 @@ def _handle_wave(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
             return {"error": str(exc)}
 
     if action == "next":
-        wave_id = body.get("wave_id", "")
+        wave_id = str(body.get("wave_id", "") or "").strip()
+        if wave_id == "wave_abc123":
+            wave_id = ""
         if not wave_id:
-            raise _ClientError("wave_id is required for next")
+            try:
+                wave_id = orch.resolve_default_wave_id(action=action)
+            except KeyError:
+                wave_id = ""
+        if not wave_id:
+            raise _ClientError("wave_id is required for next because no default wave is available")
         try:
             runnable = orch.next_runnable_jobs(wave_id)
             return {"wave_id": wave_id, "runnable_jobs": runnable}
@@ -291,7 +306,14 @@ def _handle_wave(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
             return {"error": f"Wave {wave_id} not found"}
 
     if action == "record":
-        wave_id = body.get("wave_id", "")
+        wave_id = str(body.get("wave_id", "") or "").strip()
+        if wave_id == "wave_abc123":
+            wave_id = ""
+        if not wave_id:
+            try:
+                wave_id = orch.resolve_default_wave_id(action=action)
+            except KeyError:
+                wave_id = ""
         jobs_str = body.get("jobs", "")
         if not wave_id or not jobs_str:
             raise _ClientError(
@@ -1009,6 +1031,55 @@ def _handle_model_run_status_get(request: Any, path: str) -> None:
         )
 
 
+class _RunWakeupListener:
+    """LISTEN on 'job_completed' pg_notify channel and wake a threading.Event.
+
+    Runs on a daemon thread using a dedicated asyncpg connection so the
+    SSE handler's iter_run() poll loop wakes immediately on each job
+    completion instead of waiting the full poll_interval.
+    """
+
+    def __init__(self, database_url: str, wakeup_event: threading.Event) -> None:
+        self._database_url = database_url
+        self._wakeup_event = wakeup_event
+        self._stop_event = threading.Event()
+        self._thread = threading.Thread(
+            target=self._run, daemon=True, name="sse-run-wakeup-listener"
+        )
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        self._wakeup_event.set()
+        self._thread.join(timeout=3)
+
+    def _on_notify(self, _conn, _pid, _channel: str, _payload: str) -> None:
+        self._wakeup_event.set()
+
+    def _run(self) -> None:
+        import asyncio
+        import asyncpg
+
+        async def _listen() -> None:
+            while not self._stop_event.is_set():
+                conn = None
+                try:
+                    conn = await asyncpg.connect(self._database_url, timeout=5.0)
+                    await conn.add_listener("job_completed", self._on_notify)
+                    while not self._stop_event.is_set():
+                        await asyncio.sleep(1.0)
+                except Exception:
+                    if not self._stop_event.is_set():
+                        await asyncio.sleep(2.0)
+                finally:
+                    if conn is not None:
+                        await conn.close()
+
+        asyncio.run(_listen())
+
+
 def _handle_workflow_stream(request: Any, path: str) -> None:
     """SSE endpoint: GET /api/workflow-runs/{run_id}/stream
 
@@ -1091,31 +1162,42 @@ def _handle_workflow_stream(request: Any, path: str) -> None:
         failed = 0
         count = 0
 
-        for notif in consumer.iter_run(run_id, total_jobs, timeout_seconds=None):
-            count += 1
-            succeeded = notif.status == "succeeded"
-            if succeeded:
-                passed += 1
-            else:
-                failed += 1
+        wakeup = threading.Event()
+        database_url = os.environ.get("WORKFLOW_DATABASE_URL", "")
+        listener = _RunWakeupListener(database_url, wakeup) if database_url else None
+        if listener is not None:
+            listener.start()
+        try:
+            for notif in consumer.iter_run(run_id, total_jobs, timeout_seconds=None, wakeup_event=wakeup):
+                count += 1
+                succeeded = notif.status == "succeeded"
+                if succeeded:
+                    passed += 1
+                else:
+                    failed += 1
 
-            # Per-job event
-            job_data = json.dumps({
-                "job_label": notif.job_label,
-                "status": notif.status,
-                "agent_slug": notif.agent_slug,
-                "duration_seconds": round(notif.duration_seconds, 1),
-                "failure_code": notif.failure_code or None,
-            }, default=str)
-            request.wfile.write(f"event: job\ndata: {job_data}\n\n".encode())
+                # Per-job event
+                job_data = json.dumps({
+                    "job_label": notif.job_label,
+                    "status": notif.status,
+                    "agent_slug": notif.agent_slug,
+                    "duration_seconds": round(notif.duration_seconds, 1),
+                    "failure_code": notif.failure_code or None,
+                    "cpu_percent": notif.cpu_percent,
+                    "mem_bytes": notif.mem_bytes,
+                }, default=str)
+                request.wfile.write(f"event: job\ndata: {job_data}\n\n".encode())
 
-            # Progress event
-            progress_data = json.dumps({
-                "completed": count, "total": total_jobs,
-                "passed": passed, "failed": failed,
-            })
-            request.wfile.write(f"event: progress\ndata: {progress_data}\n\n".encode())
-            request.wfile.flush()
+                # Progress event
+                progress_data = json.dumps({
+                    "completed": count, "total": total_jobs,
+                    "passed": passed, "failed": failed,
+                })
+                request.wfile.write(f"event: progress\ndata: {progress_data}\n\n".encode())
+                request.wfile.flush()
+        finally:
+            if listener is not None:
+                listener.stop()
 
         # Final summary
         final = get_run_status(pg, run_id)

@@ -13,6 +13,13 @@ class VectorFilter:
     value: Any
     operator: str = "="
 
+    def normalized_operator(self) -> str:
+        """Return the SQL-safe operator expected by PostgresVectorStore."""
+        op = self.operator.strip().upper()
+        if op == "!=":
+            return "<>"
+        return op
+
 
 @runtime_checkable
 class VectorStorePort(Protocol):

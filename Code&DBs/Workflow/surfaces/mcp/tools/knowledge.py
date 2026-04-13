@@ -122,13 +122,21 @@ def tool_praxis_ingest(params: dict) -> dict:
 
 def tool_praxis_graph(params: dict) -> dict:
     """Get entity neighbors and blast radius."""
-    entity_id = params.get("entity_id", "")
-    if not entity_id:
-        return {"error": "entity_id is required"}
+    entity_id = str(params.get("entity_id", "")).strip()
     depth = params.get("depth", 1)
 
     try:
         kg = _subs.get_knowledge_graph()
+        resolution_note = None
+        if not entity_id:
+            entity_id = _resolve_default_entity_id(kg)
+            resolution_note = "entity_id omitted; showing the latest available entity instead"
+        elif entity_id == "entity_abc123":
+            entity_id = _resolve_default_entity_id(kg)
+            resolution_note = "entity_abc123 is a placeholder; showing the latest available entity instead"
+        elif _resolve_entity(kg, entity_id) is None:
+            return {"entity_id": entity_id, "error": "entity_id was not found"}
+
         blast = kg.blast_radius(entity_id)
         raw = _serialize(blast)
 
@@ -159,6 +167,8 @@ def tool_praxis_graph(params: dict) -> dict:
             ]
 
         result: dict = {"entity_id": entity_id, "depth": depth}
+        if resolution_note:
+            result["note"] = resolution_note
         if isinstance(raw.get("direct"), dict) and raw["direct"]:
             result["direct_dependencies"] = _resolve(raw["direct"])
         if isinstance(raw.get("indirect"), dict) and raw["indirect"]:
@@ -168,6 +178,37 @@ def tool_praxis_graph(params: dict) -> dict:
         return result
     except Exception as e:
         return {"entity_id": entity_id, "error": str(e)}
+
+
+def _resolve_entity(kg, entity_id: str):
+    for etype in ("document", "module", "task", "pattern", "decision", "constraint", "fact", "topic", "person"):
+        from memory.types import EntityType
+
+        try:
+            entity = kg._engine.get(entity_id, EntityType(etype))
+        except ValueError:
+            continue
+        if entity is not None:
+            return entity
+    return None
+
+
+def _resolve_default_entity_id(kg) -> str:
+    rows = _subs.get_pg_conn().execute(
+        """
+        SELECT id
+          FROM memory_entities
+         WHERE archived = false
+         ORDER BY updated_at DESC, created_at DESC
+         LIMIT 1
+        """
+    )
+    if not rows:
+        raise RuntimeError("entity_id is required and no knowledge-graph entities were found")
+    entity_id = str(rows[0].get("id") or "").strip()
+    if not entity_id:
+        raise RuntimeError("failed to resolve a default knowledge-graph entity id")
+    return entity_id
 
 
 TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
@@ -235,12 +276,15 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
         tool_praxis_graph,
         {
             "description": (
-                "Explore connections from a specific entity in the knowledge graph. Shows what an "
-                "entity depends on, what depends on it, and the blast radius of changes.\n\n"
-                "USE WHEN: you have an entity_id (from praxis_recall results) and want to understand "
-                "its relationships — what it connects to, what would be affected by changing it.\n\n"
-                "EXAMPLE: praxis_graph(entity_id='module:task_assembler', depth=2)\n\n"
-                "DO NOT USE: without first finding the entity_id via praxis_recall."
+                "Explore connections from one knowledge-graph entity. Shows what an entity depends on, "
+                "what depends on it, and the blast radius of changes.\n\n"
+                "USE WHEN: you already know the target entity_id from praxis_recall, or you want a quick "
+                "look at the latest available entity without hunting for an id first.\n\n"
+                "EXAMPLES:\n"
+                "  praxis_graph(depth=1)\n"
+                "  praxis_graph(entity_id='module:task_assembler', depth=2)\n\n"
+                "DO NOT USE: for broad knowledge search or discovery; use praxis_recall first when you "
+                "need ranked candidates."
             ),
             "inputSchema": {
                 "type": "object",
@@ -248,7 +292,6 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "entity_id": {"type": "string", "description": "Entity ID to explore."},
                     "depth": {"type": "integer", "description": "Traversal depth.", "default": 1},
                 },
-                "required": ["entity_id"],
             },
         },
     ),

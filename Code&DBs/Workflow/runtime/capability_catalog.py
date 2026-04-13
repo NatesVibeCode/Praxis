@@ -7,6 +7,8 @@ import logging
 import re
 from typing import Any
 
+from runtime.integrations.display_names import display_name_for_integration
+
 logger = logging.getLogger(__name__)
 
 
@@ -292,7 +294,7 @@ def build_capability_catalog_rows(integrations: list[dict[str, Any]]) -> list[di
 
     for integration in integrations:
         integration_id = _slugify(integration.get("id") or integration.get("name"))
-        integration_name = _as_text(integration.get("name")) or integration_id
+        integration_name = _as_text(integration.get("display_name")) or display_name_for_integration(integration)
         if not integration_id:
             continue
         for capability in integration.get("capabilities", []):

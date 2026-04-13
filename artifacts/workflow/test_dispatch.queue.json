@@ -1,0 +1,23 @@
+{
+  "name": "test_dispatch_pipeline",
+  "queue_id": "test_001",
+  "phase": "test",
+  "outcome_goal": "Verify dispatch pipeline works with all 3 frontier models",
+  "jobs": [
+    {
+      "label": "test_opus46",
+      "agent": "anthropic/claude-opus-4-6",
+      "prompt": "Reply with exactly: DISPATCH_PIPELINE_TEST_OK_OPUS"
+    },
+    {
+      "label": "test_gemini31",
+      "agent": "google/gemini-3.1-pro-preview",
+      "prompt": "Reply with exactly: DISPATCH_PIPELINE_TEST_OK_GEMINI"
+    },
+    {
+      "label": "test_gpt54",
+      "agent": "openai/gpt-5.4",
+      "prompt": "Reply with exactly: DISPATCH_PIPELINE_TEST_OK_GPT"
+    }
+  ]
+}

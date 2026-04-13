@@ -41,6 +41,10 @@ from runtime.payload_coercion import (
     json_object as _parse_properties,
     parse_json_field as _parse_json_field,
 )
+from runtime.integrations.display_names import (
+    base_integration_name,
+    display_name_for_integration,
+)
 from . import workflow_query_core as _workflow_query_core
 from ._shared import (
     REPO_ROOT,
@@ -322,19 +326,20 @@ def _source_option_catalog(pg: Any) -> dict[str, dict[str, Any]]:
         integration_id = _text(row.get("id"))
         if not integration_id:
             continue
+        display_name = display_name_for_integration(row)
         auth_status = _text(row.get("auth_status")).lower()
         ready = auth_status in _READY_INTEGRATION_STATUSES
         option_id = f"integration:{integration_id}"
         catalog[option_id] = normalize_source_option(
             option_id,
             {
-                "label": _text(row.get("name")) or integration_id,
+                "label": display_name,
                 "family": "connected",
                 "kind": "integration",
                 "availability": "ready" if ready else "setup_required",
                 "activation": "attach" if ready else "configure",
                 "integration_id": integration_id,
-                "setup_intent": f"Set up the {(_text(row.get('name')) or integration_id)} integration for this workspace."
+                "setup_intent": f"Set up the {display_name} integration for this workspace."
                 if not ready
                 else None,
                 "description": _text(row.get("description")) or f"{_text(row.get('provider'))} integration",
@@ -1824,11 +1829,17 @@ def _handle_integrations_get(request: Any, path: str) -> None:
         rows = pg.execute(
             "SELECT id, name, description, provider, capabilities, auth_status, icon FROM integration_registry ORDER BY name"
         )
+        integrations = []
+        for row in rows:
+            item = dict(row)
+            item["name"] = base_integration_name(item)
+            item["display_name"] = display_name_for_integration(item)
+            integrations.append(item)
         request._send_json(
             200,
             {
-                "integrations": [dict(row) for row in rows],
-                "count": len(rows),
+                "integrations": integrations,
+                "count": len(integrations),
             },
         )
     except Exception as exc:
@@ -1892,7 +1903,7 @@ def _handle_catalog_get(request: Any, path: str) -> None:
             )
             for row in int_rows or []:
                 iid = _t(row.get("id")) or ""
-                name = _t(row.get("name")) or iid
+                name = display_name_for_integration(row)
                 auth = _t(row.get("auth_status")) or "unknown"
                 caps = row.get("capabilities")
                 if isinstance(caps, str):
@@ -1971,7 +1982,8 @@ def _handle_intent_analyze_get(request: Any, path: str) -> None:
                 "integrations": [
                     {
                         "id": row["id"],
-                        "name": row["name"],
+                        "name": base_integration_name(row),
+                        "display_name": display_name_for_integration(row),
                         "description": row.get("description", ""),
                         "icon": row.get("icon", ""),
                         "capabilities": row.get("capabilities", []),

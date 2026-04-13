@@ -9,6 +9,8 @@ Each TaskProfile specifies:
   - default_tier: routing tier when tier is not explicitly set
   - file_attach: whether to attach image/file resources
   - system_prompt_hint: task-specific instruction appended to system prompt
+  - default_scope_read/write: inferred file scope when not explicit in spec
+  - default_authoring_contract/acceptance_contract: fallback contracts
 """
 
 from __future__ import annotations
@@ -17,7 +19,8 @@ import asyncio
 import concurrent.futures
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 _DATABASE_URL_ENV = "WORKFLOW_DATABASE_URL"
 
@@ -31,6 +34,10 @@ class TaskProfile:
     default_tier: str  # "frontier", "mid", "economy"
     file_attach: bool
     system_prompt_hint: str
+    default_scope_read: tuple[str, ...] = ()
+    default_scope_write: tuple[str, ...] = ()
+    default_authoring_contract: dict[str, Any] | None = None
+    default_acceptance_contract: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -44,6 +51,8 @@ TASK_PROFILES: dict[str, TaskProfile] = {
         default_tier="mid",
         file_attach=False,
         system_prompt_hint="Search for information and cite sources.",
+        default_scope_read=(),
+        default_scope_write=("artifacts/",),
     ),
     "code_generation": TaskProfile(
         task_type="code_generation",
@@ -51,6 +60,8 @@ TASK_PROFILES: dict[str, TaskProfile] = {
         default_tier="mid",
         file_attach=False,
         system_prompt_hint="Write clean, tested code.",
+        default_scope_read=("src/", "lib/", "tests/"),
+        default_scope_write=("src/", "tests/"),
     ),
     "code_edit": TaskProfile(
         task_type="code_edit",
@@ -58,6 +69,8 @@ TASK_PROFILES: dict[str, TaskProfile] = {
         default_tier="mid",
         file_attach=False,
         system_prompt_hint="Make targeted edits only.",
+        default_scope_read=("src/", "lib/"),
+        default_scope_write=("src/",),
     ),
     "code_review": TaskProfile(
         task_type="code_review",
@@ -65,6 +78,8 @@ TASK_PROFILES: dict[str, TaskProfile] = {
         default_tier="mid",
         file_attach=False,
         system_prompt_hint="Review code for issues. Be specific.",
+        default_scope_read=("src/", "lib/", "tests/"),
+        default_scope_write=(),
     ),
     "analysis": TaskProfile(
         task_type="analysis",
@@ -72,6 +87,8 @@ TASK_PROFILES: dict[str, TaskProfile] = {
         default_tier="economy",
         file_attach=False,
         system_prompt_hint="Analyze data. Output structured results.",
+        default_scope_read=("src/", "artifacts/"),
+        default_scope_write=("artifacts/",),
     ),
     "creative": TaskProfile(
         task_type="creative",
@@ -79,6 +96,8 @@ TASK_PROFILES: dict[str, TaskProfile] = {
         default_tier="mid",
         file_attach=False,
         system_prompt_hint="Write with voice and personality.",
+        default_scope_read=(),
+        default_scope_write=("artifacts/",),
     ),
     "debug": TaskProfile(
         task_type="debug",
@@ -86,6 +105,8 @@ TASK_PROFILES: dict[str, TaskProfile] = {
         default_tier="mid",
         file_attach=False,
         system_prompt_hint="Find the root cause. Be systematic.",
+        default_scope_read=("src/", "lib/", "tests/", "logs/"),
+        default_scope_write=("src/",),
     ),
     "extraction": TaskProfile(
         task_type="extraction",
@@ -93,6 +114,8 @@ TASK_PROFILES: dict[str, TaskProfile] = {
         default_tier="economy",
         file_attach=False,
         system_prompt_hint="Extract structured data. Output JSON.",
+        default_scope_read=(),
+        default_scope_write=("artifacts/",),
     ),
     "ocr": TaskProfile(
         task_type="ocr",
@@ -100,6 +123,8 @@ TASK_PROFILES: dict[str, TaskProfile] = {
         default_tier="mid",
         file_attach=True,
         system_prompt_hint="Read and transcribe the image content.",
+        default_scope_read=(),
+        default_scope_write=("artifacts/",),
     ),
     "debate": TaskProfile(
         task_type="debate",
@@ -107,6 +132,8 @@ TASK_PROFILES: dict[str, TaskProfile] = {
         default_tier="frontier",
         file_attach=False,
         system_prompt_hint="Take a strong position. Be specific. No hedging.",
+        default_scope_read=(),
+        default_scope_write=(),
     ),
     "brainstorm": TaskProfile(
         task_type="brainstorm",
@@ -114,6 +141,8 @@ TASK_PROFILES: dict[str, TaskProfile] = {
         default_tier="mid",
         file_attach=False,
         system_prompt_hint="Generate ideas. Be creative and concrete.",
+        default_scope_read=(),
+        default_scope_write=("artifacts/",),
     ),
     "architecture": TaskProfile(
         task_type="architecture",
@@ -121,6 +150,8 @@ TASK_PROFILES: dict[str, TaskProfile] = {
         default_tier="frontier",
         file_attach=False,
         system_prompt_hint="Design systems with clear contracts and tradeoffs.",
+        default_scope_read=("src/", "docs/"),
+        default_scope_write=("docs/", "artifacts/"),
     ),
     "review": TaskProfile(
         task_type="review",
@@ -128,6 +159,8 @@ TASK_PROFILES: dict[str, TaskProfile] = {
         default_tier="mid",
         file_attach=False,
         system_prompt_hint="Review thoroughly. Score on dimensions, not pass/fail.",
+        default_scope_read=("src/", "lib/", "tests/"),
+        default_scope_write=(),
     ),
     "general": TaskProfile(
         task_type="general",
@@ -135,6 +168,8 @@ TASK_PROFILES: dict[str, TaskProfile] = {
         default_tier="mid",
         file_attach=False,
         system_prompt_hint="",
+        default_scope_read=(),
+        default_scope_write=(),
     ),
 }
 
@@ -199,7 +234,9 @@ def _load_profiles_from_db() -> None:
             conn = await asyncpg.connect(db_url)
             try:
                 profiles = await conn.fetch(
-                    "SELECT task_type, allowed_tools, default_tier, file_attach, system_prompt_hint "
+                    "SELECT task_type, allowed_tools, default_tier, file_attach, system_prompt_hint,"
+                    "       default_scope_read, default_scope_write,"
+                    "       default_authoring_contract, default_acceptance_contract "
                     "FROM task_type_profiles WHERE status = 'active' ORDER BY task_type"
                 )
                 keywords = await conn.fetch(
@@ -219,12 +256,28 @@ def _load_profiles_from_db() -> None:
                 if isinstance(tools, str):
                     tools = json.loads(tools)
                 task_type = str(row["task_type"])
+                scope_read_raw = row.get("default_scope_read")
+                if isinstance(scope_read_raw, str):
+                    scope_read_raw = json.loads(scope_read_raw)
+                scope_write_raw = row.get("default_scope_write")
+                if isinstance(scope_write_raw, str):
+                    scope_write_raw = json.loads(scope_write_raw)
+                auth_contract_raw = row.get("default_authoring_contract")
+                if isinstance(auth_contract_raw, str):
+                    auth_contract_raw = json.loads(auth_contract_raw)
+                acc_contract_raw = row.get("default_acceptance_contract")
+                if isinstance(acc_contract_raw, str):
+                    acc_contract_raw = json.loads(acc_contract_raw)
                 TASK_PROFILES[task_type] = TaskProfile(
                     task_type=task_type,
                     allowed_tools=tuple(str(t) for t in (tools or [])),
                     default_tier=str(row["default_tier"]),
                     file_attach=bool(row["file_attach"]),
                     system_prompt_hint=str(row["system_prompt_hint"] or ""),
+                    default_scope_read=tuple(str(p) for p in (scope_read_raw or [])),
+                    default_scope_write=tuple(str(p) for p in (scope_write_raw or [])),
+                    default_authoring_contract=auth_contract_raw if isinstance(auth_contract_raw, dict) else None,
+                    default_acceptance_contract=acc_contract_raw if isinstance(acc_contract_raw, dict) else None,
                 )
 
         if keyword_rows:

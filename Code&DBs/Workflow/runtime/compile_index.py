@@ -25,6 +25,10 @@ from typing import Any, Mapping
 
 from runtime.capability_catalog import load_capability_catalog, sync_capability_catalog
 from runtime.compile_reuse import module_surface_manifest
+from runtime.integrations.display_names import (
+    base_integration_name,
+    display_name_for_integration,
+)
 from registry.integration_registry_sync import sync_integration_registry
 from registry.reference_catalog_sync import sync_reference_catalog
 
@@ -847,7 +851,8 @@ def _normalize_integration_row(row: object) -> dict[str, Any]:
             )
     return {
         "id": _slugify(item.get("id")),
-        "name": _as_text(item.get("name")),
+        "name": base_integration_name(item),
+        "display_name": display_name_for_integration(item),
         "provider": _as_text(item.get("provider")),
         "auth_status": _as_text(item.get("auth_status")),
         "description": _as_text(item.get("description")),

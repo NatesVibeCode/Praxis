@@ -1,0 +1,59 @@
+{
+  "name": "authority_cleanup_seam_cutover",
+  "workflow_id": "authority_cleanup_seam_cutover",
+  "phase": "build",
+  "outcome_goal": "Cut dispatch, compiler, and verification seams over to canonical DB authority so the runtime no longer fabricates registry resolution or route selection in memory.",
+  "roadmap_alignment": "roadmap_item.authority.cleanup.seam_cutover",
+  "anti_requirements": [
+    "Do not leave silent resolver fabrication in place.",
+    "Do not reintroduce module allowlists as code-owned runtime truth.",
+    "Do not widen into integration backfill work."
+  ],
+  "registry_paths": [
+    "Code&DBs/Databases/migrations/workflow/002_registry_authority.sql",
+    "Code&DBs/Databases/migrations/workflow/006_platform_authority_schema.sql",
+    "Code&DBs/Databases/migrations/workflow/011_runtime_breadth_authority.sql",
+    "Code&DBs/Workflow/registry/repository.py",
+    "Code&DBs/Workflow/runtime/workflow/orchestrator.py",
+    "Code&DBs/Workflow/runtime/compiler.py",
+    "Code&DBs/Workflow/runtime/manifest_generator.py"
+  ],
+  "target_repo": "/Users/nate/Praxis",
+  "workdir": "/Users/nate/Praxis",
+  "verify_refs": [
+    {
+      "command": "./scripts/workflow.sh validate artifacts/workflow/authority_cleanup/authority_cleanup_seam_cutover.queue.json"
+    }
+  ],
+  "jobs": [
+    {
+      "label": "seam_cutover_packet",
+      "agent": "openai/gpt-5.4-mini",
+      "outcome_goal": "Replace runtime-fabricated authority with DB-loaded authority across the core seams.",
+      "anti_vibe_rule": "No compatibility theater; missing authority must fail visibly.",
+      "scope": {
+        "read": [
+          "Code&DBs/Workflow/registry/repository.py",
+          "Code&DBs/Workflow/runtime/workflow/orchestrator.py",
+          "Code&DBs/Workflow/runtime/compiler.py",
+          "Code&DBs/Workflow/runtime/manifest_generator.py",
+          "Code&DBs/Databases/migrations/workflow/002_registry_authority.sql",
+          "Code&DBs/Databases/migrations/workflow/006_platform_authority_schema.sql",
+          "Code&DBs/Databases/migrations/workflow/011_runtime_breadth_authority.sql"
+        ],
+        "write": [
+          "Code&DBs/Workflow/runtime/workflow/orchestrator.py",
+          "Code&DBs/Workflow/runtime/compiler.py",
+          "Code&DBs/Workflow/runtime/manifest_generator.py",
+          "Code&DBs/Workflow/registry/repository.py"
+        ]
+      },
+      "verify_refs": [
+        {
+          "command": "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m py_compile 'Code&DBs/Workflow/runtime/workflow/orchestrator.py' 'Code&DBs/Workflow/runtime/compiler.py' 'Code&DBs/Workflow/runtime/manifest_generator.py' 'Code&DBs/Workflow/registry/repository.py'"
+        }
+      ],
+      "prompt": "OBJECTIVE:\nCut the core runtime seams over to DB-loaded authority.\n\nTASK:\nReplace fabricated dispatch resolver state, hardcoded compiler route hints, and manifest/module allowlists with DB-loaded authority surfaces. The runtime must stop inventing fallback resolver rows or route catalogs in memory. Missing rows must become explicit failures with clear error paths.\n\nCONSTRAINTS:\nLeave UI implementation loaders alone. Do not perform integration backfills or registry seeding here. Do not use environment or shell defaults as substitutes for admitted authority rows.\n\nOUTPUT_CONTRACT:\nUpdate the core runtime seams and their tests so DB-backed authority is the only runtime-selectable source for resolver and route behavior.\n\nACCEPTANCE_CRITERIA:\n- Dispatch no longer fabricates `RegistryResolver` in memory.\n- Compiler and manifest routing no longer depend on hardcoded selection tables.\n- Failure paths are explicit when authority is missing.\n\nSTOP_BOUNDARY:\nDo not tackle integration metadata, provider probe defaults, or workflow discovery in this packet."
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "name": "Hardening Smoke Test",
+  "phase": "test",
+  "jobs": [
+    {
+      "label": "smoke_claude",
+      "agent": "auto/wiring",
+      "prompt": "Reply with exactly: SMOKE_OK_CLAUDE. Nothing else."
+    },
+    {
+      "label": "smoke_gemini",
+      "agent": "google/gemini-3.1-pro-preview",
+      "prompt": "Reply with exactly: SMOKE_OK_GEMINI. Nothing else."
+    }
+  ]
+}

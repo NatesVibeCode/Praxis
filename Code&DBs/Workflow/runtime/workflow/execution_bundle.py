@@ -218,7 +218,12 @@ def _completion_contract(
     else:
         normalized_submission_required = _default_submission_required(normalized_task_type)
     # verification_required: code task types must pass verify_refs to succeed.
-    verification_required = normalized_task_type in _VERIFICATION_REQUIRED_TASK_TYPES
+    # Only enforce when the spec actually declared verify_refs — specs that
+    # use inline verify_command rely on the outcome_gate instead.
+    verification_required = (
+        normalized_task_type in _VERIFICATION_REQUIRED_TASK_TYPES
+        and bool(verify_refs)
+    )
     result_kind = _submission_result_kind(task_type=normalized_task_type, bucket=bucket)
     submit_tool_names = (
         [_SUBMISSION_RESULT_KIND_TO_TOOL[result_kind], _SUBMISSION_READ_TOOL]

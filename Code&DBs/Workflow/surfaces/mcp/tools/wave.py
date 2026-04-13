@@ -7,6 +7,22 @@ from ..subsystems import _subs
 from ..helpers import _serialize
 
 
+_PLACEHOLDER_WAVE_IDS = frozenset({"wave_abc123"})
+
+
+def _resolve_wave_id(orch, params: dict, *, action: str) -> tuple[str, str | None]:
+    requested = str(params.get("wave_id", "") or "").strip()
+    if requested and requested not in _PLACEHOLDER_WAVE_IDS:
+        return requested, None
+    try:
+        resolved = orch.resolve_default_wave_id(action=action)
+    except KeyError:
+        return "", "wave_id is required because there is no single obvious default wave"
+    if requested in _PLACEHOLDER_WAVE_IDS:
+        return resolved, f"{requested} is a placeholder; using {resolved} instead"
+    return resolved, f"wave_id omitted; using {resolved}"
+
+
 def tool_praxis_wave(params: dict) -> dict:
     """Wave orchestration operations: observe, start, next, record."""
     action = params.get("action", "observe")
@@ -39,30 +55,41 @@ def tool_praxis_wave(params: dict) -> dict:
         }
 
     if action == "start":
-        wave_id = params.get("wave_id", "")
+        wave_id, note = _resolve_wave_id(orch, params, action=action)
         if not wave_id:
-            return {"error": "wave_id is required for start"}
+            return {"error": note or "wave_id is required for start"}
         try:
             ws = orch.start_wave(wave_id)
-            return {"wave_id": ws.wave_id, "status": ws.status.value, "started": True}
+            payload = {"wave_id": ws.wave_id, "status": ws.status.value, "started": True}
+            if note:
+                payload["note"] = note
+            return payload
         except RuntimeError as e:
             return {"error": str(e)}
 
     if action == "next":
-        wave_id = params.get("wave_id", "")
+        wave_id, note = _resolve_wave_id(orch, params, action=action)
         if not wave_id:
-            return {"error": "wave_id is required for next"}
+            return {"error": note or "wave_id is required for next"}
         try:
             runnable = orch.next_runnable_jobs(wave_id)
-            return {"wave_id": wave_id, "runnable_jobs": runnable}
+            payload = {"wave_id": wave_id, "runnable_jobs": runnable}
+            if note:
+                payload["note"] = note
+            return payload
         except KeyError:
             return {"error": f"Wave {wave_id} not found"}
 
     if action == "record":
-        wave_id = params.get("wave_id", "")
+        wave_id, note = _resolve_wave_id(orch, params, action=action)
         jobs_str = params.get("jobs", "")
         if not wave_id or not jobs_str:
-            return {"error": "wave_id and jobs (format: 'label:pass,label2:fail') are required for record"}
+            return {
+                "error": (
+                    note
+                    or "wave_id and jobs (format: 'label:pass,label2:fail') are required for record"
+                )
+            }
         results = []
         for entry in jobs_str.split(","):
             entry = entry.strip()
@@ -72,7 +99,10 @@ def tool_praxis_wave(params: dict) -> dict:
             succeeded = outcome.strip().lower() in ("pass", "true", "succeeded", "ok", "1")
             orch.record_job_result(wave_id, label.strip(), succeeded)
             results.append({"job_label": label.strip(), "succeeded": succeeded})
-        return {"wave_id": wave_id, "recorded": results}
+        payload = {"wave_id": wave_id, "recorded": results}
+        if note:
+            payload["note"] = note
+        return payload
 
     return {"error": f"Unknown wave action: {action}"}
 
@@ -89,8 +119,8 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "WORKFLOW:\n"
                 "  1. praxis_wave(action='observe')                    — see current wave state\n"
                 "  2. praxis_wave(action='start', wave_id='wave_1')    — begin a new wave\n"
-                "  3. praxis_wave(action='next', wave_id='wave_1')     — get jobs ready to run\n"
-                "  4. praxis_wave(action='record', wave_id='wave_1', jobs='build:pass,test:fail')  — record results\n\n"
+                "  3. praxis_wave(action='next')                       — get jobs ready on the current/only wave\n"
+                "  4. praxis_wave(action='record', jobs='build:pass,test:fail')  — record results on the current/only wave\n\n"
                 "DO NOT USE: for simple flat workflow launches (use praxis_workflow). Waves are for complex "
                 "multi-step pipelines with explicit dependency tracking."
             ),

@@ -1,0 +1,13 @@
+{
+  "name": "retry_single_1",
+  "queue_id": "retry_s1_001",
+  "phase": "build",
+  "outcome_goal": "Single job retry for blocked p17 document processor",
+  "jobs": [
+    {
+      "label": "retry_p17_doc_processor_s",
+      "agent": "google/gemini-3.1-pro-preview",
+      "prompt": "You are working in /Users/nate/Praxis.\n\n1. Add POST /api/tools/document-process to surfaces/api/workflow_api.py as an inline handler in do_POST. Accepts {content: string, steps: string[]}. Steps: parse (extract structure), transform (normalize), validate (check fields), output (format JSON). Return {steps: [{name, status, result}], final_output}. Pure Python.\n\n2. Update surfaces/app/src/modules/tool/DocumentProcessorModule.tsx: add textarea, Process button, call API, show step statuses, write to World.\n\nWrite both files."
+    }
+  ]
+}

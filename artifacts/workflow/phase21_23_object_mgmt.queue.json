@@ -1,0 +1,23 @@
+{
+  "name": "phase21_23_object_mgmt",
+  "queue_id": "phase21_23_001",
+  "phase": "build",
+  "outcome_goal": "Object type management UI: browse, create, edit schemas, ship Object Manager app",
+  "jobs": [
+    {
+      "label": "p21_object_type_browser",
+      "agent": "google/gemini-3.1-pro-preview",
+      "prompt": "You are working in /Users/nate/Praxis/Code&DBs/Workflow/surfaces/app/src/.\n\nCreate src/modules/tool/ObjectTypeBrowserModule.tsx:\n\nRegistered as: id 'object-type-browser', type 'tool', defaultSpan '2x2'.\n\nUI:\n- Fetches /api/object-types on mount\n- Shows list of types: name, description snippet, property count, icon/emoji\n- Click a type: publish to World 'shared.selected_object_type' with full type data\n- 'Create Type' button opens inline form:\n  - Name (text input, required)\n  - Description (textarea)\n  - Property definitions: add/remove rows, each with name + type dropdown (text/number/date/email/url/boolean/dropdown/currency) + required checkbox\n  - For dropdown type: show options input (comma-separated)\n  - Submit: POST to /api/object-types, refresh list\n- Selected type highlighted\n\nRegister in src/modules/tool/index.ts.\nDark theme CSS variables. Write the file."
+    },
+    {
+      "label": "p22_schema_editor",
+      "agent": "openai/gpt-5.4",
+      "prompt": "You are working in /Users/nate/Praxis.\n\nTwo changes:\n\n1. Add POST /api/object-types/update to surfaces/api/workflow_api.py:\n- Accepts {type_id, name?, description?, property_definitions?, icon?}\n- Partial update: only update provided fields\n- Return updated type\n\n2. Create surfaces/app/src/modules/tool/SchemaEditorModule.tsx:\nRegistered as: id 'schema-editor', type 'tool', defaultSpan '2x2'.\n\nSubscribes to World 'shared.selected_object_type' via useWorldSelection.\nWhen a type is selected:\n- Show type name (editable), description (editable)\n- Property definitions as editable list: name, type dropdown, required toggle, options (for dropdown type)\n- Add property button, remove property button (X)\n- Save button: POST to /api/object-types/update\n- Show save confirmation\n\nWhen no type selected: show 'Select an object type to edit its schema'\n\nRegister in src/modules/tool/index.ts. Write both files."
+    },
+    {
+      "label": "p23_object_manager_manifest",
+      "agent": "google/gemini-3.1-pro-preview",
+      "prompt": "You are working in /Users/nate/Praxis. Postgres at postgresql://nate@127.0.0.1:5432/dag_workflow. PATH includes /opt/homebrew/bin.\n\nRun this Python script to create the Object Manager manifest and add Objects to NavBar:\n\n```python\nimport sys, json\nsys.path.insert(0, 'Code&DBs/Workflow')\nfrom storage.postgres import ensure_postgres_available\nconn = ensure_postgres_available()\n\nmanifest = {\n    'version': 2, 'grid': '4x4',\n    'quadrants': {\n        'A1': {'module': 'object-type-browser', 'span': '2x2'},\n        'A3': {'module': 'schema-editor', 'span': '2x2'},\n        'C1': {'module': 'data-table', 'span': '2x2', 'config': {'objectType': 'contact', 'publishSelection': 'contact'}},\n        'C3': {'module': 'key-value', 'span': '2x2', 'config': {'subscribeSelection': 'contact', 'title': 'Selected Object'}},\n    }\n}\n\nconn.execute(\n    \"\"\"INSERT INTO app_manifests (id, name, description, manifest, status, created_by)\n    VALUES ($1, $2, $3, $4::jsonb, 'active', 'system')\n    ON CONFLICT (id) DO UPDATE SET manifest = $4::jsonb, description = $3\"\"\",\n    'object-manager', 'Object Manager', 'Browse, create, and edit object types and their schemas. Manage your data model.', json.dumps(manifest),\n)\nprint('object-manager manifest created')\n```\n\nRun the script. Then update App.tsx NavBar to add 'Objects' link pointing to /?manifest=object-manager."
+    }
+  ]
+}

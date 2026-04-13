@@ -1,13 +1,8 @@
 from __future__ import annotations
 
 import base64
-import http.server
 import json
-import platform
-import socket
 import subprocess
-import sys
-import threading
 from pathlib import Path
 
 import pytest
@@ -107,27 +102,6 @@ class _ArtifactStore:
         return type("ArtifactRecord", (), {"artifact_id": f"artifact:{file_path}"})()
 
 
-def _seatbelt_smoke_available() -> bool:
-    if platform.system() != "Darwin" or not Path("/usr/bin/sandbox-exec").exists():
-        return False
-    try:
-        result = subprocess.run(
-            ["/usr/bin/sandbox-exec", "-p", "(version 1) (allow default)", "/usr/bin/true"],
-            capture_output=True,
-            timeout=5,
-        )
-    except (FileNotFoundError, PermissionError, subprocess.TimeoutExpired, OSError):
-        return False
-    return result.returncode == 0
-
-
-def _loopback_bind_available() -> bool:
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.bind(("127.0.0.1", 0))
-    except OSError:
-        return False
-    return True
 
 
 def test_sandbox_runtime_runs_provider_contract_and_persists_artifacts(tmp_path) -> None:
@@ -493,88 +467,3 @@ def test_docker_local_autobuilds_default_image_when_missing(monkeypatch, tmp_pat
     assert result.execution_mode == "docker_local"
 
 
-@pytest.mark.skipif(
-    not _seatbelt_smoke_available(),
-    reason="seatbelt_local smoke test requires runnable macOS sandbox-exec authority",
-)
-def test_seatbelt_local_executes_command_in_real_sandbox(tmp_path) -> None:
-    (tmp_path / "input.txt").write_text("hello from seatbelt\n", encoding="utf-8")
-
-    runtime = SandboxRuntime()
-    result = runtime.execute_command(
-        provider_name="seatbelt_local",
-        sandbox_session_id="sandbox_session:smoke:seatbelt",
-        sandbox_group_id="group:smoke",
-        workdir=str(tmp_path),
-        command="cat input.txt > output.txt && echo seatbelt-ok",
-        stdin_text="",
-        env={"PATH": "/usr/bin:/bin:/usr/local/bin"},
-        timeout_seconds=10,
-        network_policy="disabled",
-        workspace_materialization="copy",
-        execution_transport="cli",
-    )
-
-    assert result.exit_code == 0
-    assert result.stdout.strip() == "seatbelt-ok"
-    assert "output.txt" in result.artifact_refs
-
-
-@pytest.mark.skipif(
-    not (_seatbelt_smoke_available() and _loopback_bind_available()),
-    reason="seatbelt_local loopback test requires runnable sandbox-exec and loopback bind authority",
-)
-def test_seatbelt_local_allows_loopback_only_when_network_enabled(tmp_path) -> None:
-    class _Handler(http.server.BaseHTTPRequestHandler):
-        def do_GET(self):  # noqa: N802
-            payload = b'{"ok":true}'
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(payload)))
-            self.end_headers()
-            self.wfile.write(payload)
-
-        def log_message(self, format, *args):  # noqa: A003
-            del format, args
-
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        python_executable = Path(sys.executable).resolve().as_posix()
-        command = (
-            f"{python_executable} - <<'INNER'\n"
-            "import urllib.request\n"
-            f"print(urllib.request.urlopen('http://127.0.0.1:{server.server_port}', timeout=5).read().decode('utf-8'))\n"
-            "INNER"
-        )
-        runtime = SandboxRuntime()
-        common = dict(
-            provider_name="seatbelt_local",
-            sandbox_session_id="sandbox_session:smoke:loopback",
-            sandbox_group_id="group:smoke",
-            workdir=str(tmp_path),
-            command=command,
-            stdin_text="",
-            env={"PATH": "/usr/local/bin:/usr/bin:/bin"},
-            timeout_seconds=10,
-            workspace_materialization="copy",
-            execution_transport="cli",
-        )
-
-        allowed = runtime.execute_command(
-            network_policy="provider_only",
-            **common,
-        )
-        blocked = runtime.execute_command(
-            network_policy="disabled",
-            **common,
-        )
-
-        assert allowed.exit_code == 0
-        assert '{"ok":true}' in allowed.stdout
-        assert blocked.exit_code != 0
-        assert "Operation not permitted" in blocked.stderr
-    finally:
-        server.shutdown()
-        server.server_close()

@@ -1,0 +1,73 @@
+{
+  "name": "native_control_plane_cutover",
+  "workflow_id": "native_control_plane_cutover",
+  "phase": "build",
+  "outcome_goal": "Make the native control plane the explicit fastest path by hardening cutover admission, bus-brain frontdoor ownership, and cockpit proof into one bounded packet.",
+  "roadmap_items": [
+    "roadmap_item.bus.brain.cutover",
+    "roadmap_item.native.primary.cutover",
+    "roadmap_item.agent.native.cockpit"
+  ],
+  "anti_requirements": [
+    "Do not introduce a hosted dashboard or a second read-model truth seam.",
+    "Do not let shell wrappers or ambient env flags act as the promotion source of truth.",
+    "Do not keep generic builder behavior masquerading as a native control plane."
+  ],
+  "registry_paths": [
+    "Code&DBs/Workflow/policy/native_primary_cutover.py",
+    "Code&DBs/Workflow/surfaces/api/native_operator_surface.py",
+    "Code&DBs/Workflow/surfaces/api/native_ops.py",
+    "Code&DBs/Workflow/surfaces/api/native_scheduler.py",
+    "Code&DBs/Workflow/surfaces/api/operator_read.py",
+    "Code&DBs/Workflow/surfaces/cli/native_operator.py",
+    "Code&DBs/Workflow/docs/36_NATIVE_OPERATOR_COCKPIT_ADOPTION.md",
+    "scripts/native-operator-common.sh"
+  ],
+  "target_repo": "/Users/nate/Praxis",
+  "workdir": "/Users/nate/Praxis",
+  "verify_refs": [
+    "verify_ref.python.py_compile.test"
+  ],
+  "jobs": [
+    {
+      "label": "native_primary_gate_contract",
+      "agent": "openai/gpt-5.4-mini",
+      "write_scope": [
+        "Code&DBs/Workflow/policy/native_primary_cutover.py",
+        "Code&DBs/Workflow/tests/integration/test_native_primary_cutover_gates.py",
+        "Code&DBs/Workflow/tests/integration/test_bounded_native_primary_proof.py"
+      ],
+      "prompt": "Finish the native-primary admission seam so one stored cutover gate, one decision contract, and one proof path define bounded native-primary use. No shell-owned fallback admission."
+    },
+    {
+      "label": "native_frontdoor_and_bus_brain_cutover",
+      "agent": "openai/gpt-5.4-mini",
+      "depends_on": [
+        "native_primary_gate_contract"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/surfaces/api/native_operator_surface.py",
+        "Code&DBs/Workflow/surfaces/api/native_ops.py",
+        "Code&DBs/Workflow/surfaces/api/native_scheduler.py",
+        "Code&DBs/Workflow/surfaces/api/operator_read.py",
+        "Code&DBs/Workflow/surfaces/cli/native_operator.py",
+        "scripts/native-operator-common.sh"
+      ],
+      "prompt": "Cut the bus-brain and native frontdoor story over to one control-plane path. The native surface should prove route, dispatch, and cutover truth without falling back to generic builder or legacy wrapper behavior."
+    },
+    {
+      "label": "native_cockpit_proof",
+      "agent": "openai/gpt-5.4",
+      "depends_on": [
+        "native_frontdoor_and_bus_brain_cutover"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/docs/36_NATIVE_OPERATOR_COCKPIT_ADOPTION.md",
+        "Code&DBs/Workflow/tests/integration/test_native_observability_cockpit.py",
+        "Code&DBs/Workflow/tests/integration/test_native_operator_cockpit_adoption.py",
+        "Code&DBs/Workflow/tests/integration/test_native_operator_query_surface.py"
+      ],
+      "prompt": "Prove the cockpit is the bounded native read model, not a decorative shell. Cover control, truth, drift detection, and fail-closed behavior when route or cutover authority is missing."
+    }
+  ]
+}

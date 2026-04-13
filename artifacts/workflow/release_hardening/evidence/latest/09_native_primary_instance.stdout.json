@@ -1,0 +1,9 @@
+{
+  "dag_instance_name": "dag-project",
+  "dag_receipts_dir": "/Users/nate/Praxis/artifacts/runtime_receipts",
+  "dag_runtime_profile": "dag-project",
+  "dag_topology_dir": "/Users/nate/Praxis/artifacts/runtime_topology",
+  "repo_root": "/Users/nate/Praxis",
+  "runtime_profiles_config": "/Users/nate/Praxis/config/runtime_profiles.json",
+  "workdir": "/Users/nate/Praxis"
+}

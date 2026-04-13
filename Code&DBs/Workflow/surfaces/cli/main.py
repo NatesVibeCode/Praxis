@@ -18,7 +18,6 @@ from observability.read_models import (
     ReplayReadModel,
 )
 
-from . import native_operator
 from .commands.admin import _compile_command, _github_command, _parse_pr_spec
 from .commands.workflow import (
     _active_command,
@@ -28,13 +27,18 @@ from .commands.workflow import (
     _diagnose_command,
     _fan_out_command,
     _heal_command,
+    _inspect_job_command,
+    _manifest_command,
     _pipeline_command,
     _proof_command,
     _queue_command,
+    _retry_command,
+    _run_status_command,
     _run_command,
     _runs_command,
     _scheduler_command,
     _status_command,
+    _triggers_command,
     _verify_command,
     _verify_platform_command,
 )
@@ -179,7 +183,9 @@ _ARG_COMMANDS: dict[str, ArgsCommandHandler] = {
     "health": _health_command,
     "receipts": _receipts_command,
     "diagnose": _diagnose_command,
+    "inspect-job": _inspect_job_command,
     "leaderboard": _leaderboard_command,
+    "manifest": _manifest_command,
     "trust": _trust_command,
     "fitness": _fitness_command,
     "trends": _trends_command,
@@ -188,10 +194,12 @@ _ARG_COMMANDS: dict[str, ArgsCommandHandler] = {
     "pipeline": _pipeline_command,
     "proof": _proof_command,
     "heal": _heal_command,
+    "run-status": _run_status_command,
     "scheduler": _scheduler_command,
     "fan-out": _fan_out_command,
     "debate": _debate_command,
     "runs": _runs_command,
+    "retry": _retry_command,
     "cancel": _cancel_command,
     "params": _params_command,
     "notifications": _notifications_command,
@@ -215,6 +223,7 @@ _ARG_COMMANDS: dict[str, ArgsCommandHandler] = {
     "validate": lambda args, *, stdout: _delegate_legacy_workflow_cli("validate", args, stdout=stdout),
     "stream": lambda args, *, stdout: _delegate_legacy_workflow_cli("stream", args, stdout=stdout),
     "chain-status": lambda args, *, stdout: _delegate_legacy_workflow_cli("chain-status", args, stdout=stdout),
+    "triggers": _triggers_command,
 }
 
 _STDOUT_COMMANDS: dict[str, StdoutCommandHandler] = {
@@ -227,7 +236,7 @@ _STDOUT_COMMANDS: dict[str, StdoutCommandHandler] = {
 
 
 def _usage() -> str:
-    return "usage: workflow <query|bugs|recall|discover|artifacts|health|run|status|costs|receipts|leaderboard|trust|fitness|scope|risk|reviews|diagnose|heal|verify|debate|runs|cancel|active|circuits|slots|inspect|replay|graph-topology|graph-lineage|...> <args>"
+    return "usage: workflow <tools|query|bugs|recall|discover|artifacts|health|run|run-status|status|costs|receipts|leaderboard|trust|fitness|scope|risk|reviews|diagnose|inspect-job|heal|verify|debate|runs|manifest|triggers|retry|cancel|active|circuits|slots|inspect|replay|graph-topology|graph-lineage|...> <args>"
 
 
 def _parse(
@@ -300,6 +309,8 @@ def main(
     stdout = sys.stdout if stdout is None else stdout
     args = list(sys.argv[1:] if argv is None else argv)
     if args and args[0] == "native-operator":
+        from . import native_operator
+
         return native_operator.main(args[1:], env=env, stdout=stdout)
 
     if args:
@@ -334,3 +345,7 @@ if __package__:
     package_module = sys.modules.get(__package__)
     if package_module is not None:
         setattr(package_module, "main", main)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

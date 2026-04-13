@@ -1,0 +1,28 @@
+{
+  "name": "Unified Worker Integration Smoke",
+  "queue_id": "unified-worker-integration-smoke",
+  "phase": "operate",
+  "outcome_goal": "Prove the unified workflow worker can execute a local integration job and write deterministic receipts and outputs.",
+  "jobs": [
+    {
+      "label": "worker_smoke_notification_receipts",
+      "agent": "openai/gpt-5.4-mini",
+      "prompt": "Send a local in-app notification to prove unified worker execution and receipt persistence.",
+      "integration_id": "notifications",
+      "integration_action": "send",
+      "integration_args": {
+        "channels": [
+          {
+            "kind": "in_app",
+            "target": "worker-smoke",
+            "label": "Unified Worker Smoke"
+          }
+        ],
+        "subject": "Unified worker smoke receipts",
+        "body": "Verify deterministic receipt ids, workflow output basenames, and receipt authority writes.",
+        "authority": "db_only_phase"
+      },
+      "timeout": 30
+    }
+  ]
+}

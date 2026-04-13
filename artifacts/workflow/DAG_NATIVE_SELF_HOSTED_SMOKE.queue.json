@@ -1,0 +1,141 @@
+{
+  "name": "Native Self-Hosted Dispatch Smoke",
+  "queue_id": "dag_native_self_hosted_smoke",
+  "workflow_id": "dag_native_self_hosted_smoke",
+  "phase": "DAGW11G",
+  "outcome_goal": "prove a one-shot self-hosted native smoke path from queue contract to durable evidence",
+  "anti_requirements": [
+    "no broad legacy cutover",
+    "no second orchestration state machine",
+    "no transport-specific complexity"
+  ],
+  "verify": [
+    {
+      "command": "PYTHONPATH='/Users/nate/Praxis/Code&DBs/Workflow' python3 -m pytest -q '/Users/nate/Praxis/Code&DBs/Workflow/tests/integration/test_native_self_hosted_smoke.py'"
+    }
+  ],
+  "jobs": [
+    {
+      "label": "DAGW11G.1_build_self_hosted_dag_workflow_smoke",
+      "agent": "openai/gpt-5.4-mini",
+      "prompt": "Build the native self-hosted smoke contract path from queue to durable evidence and keep the sequence repo-local."
+    }
+  ],
+  "native_smoke": {
+    "authority_path": {
+      "queue_contract": "artifacts/workflow/DAG_NATIVE_SELF_HOSTED_SMOKE.queue.json",
+      "instance_resolver": "runtime.instance.resolve_native_instance",
+      "registry_authority": "registry.repository.load_registry_resolver",
+      "frontdoor": "surfaces.api.frontdoor.NativeDagFrontdoor",
+      "durable_run_authority": "workflow_runs",
+      "durable_outcome_authority": [
+        "workflow_events",
+        "receipts",
+        "workflow_outbox"
+      ]
+    },
+    "workflow_request": {
+      "schema_version": 1,
+      "workspace_ref": "dag-project",
+      "runtime_profile_ref": "dag-project",
+      "workflow_id": "workflow.native-self-hosted-smoke",
+      "request_id": "request.native-self-hosted-smoke",
+      "workflow_definition_id": "workflow_definition.native_self_hosted_smoke.v1",
+      "definition_hash": "definition.native_self_hosted_smoke.v1",
+      "nodes": [
+        {
+          "node_id": "node_0",
+          "node_type": "deterministic_task",
+          "adapter_type": "deterministic_task",
+          "display_name": "prepare",
+          "inputs": {
+            "task_name": "prepare",
+            "provider_slug": "openai",
+            "model_slug": "gpt-5.4-mini",
+            "input_payload": {
+              "step": 0
+            }
+          },
+          "expected_outputs": {
+            "result": "prepared"
+          },
+          "success_condition": {
+            "status": "success"
+          },
+          "failure_behavior": {
+            "status": "fail_closed"
+          },
+          "authority_requirements": {
+            "workspace_ref": "dag-project",
+            "runtime_profile_ref": "dag-project"
+          },
+          "execution_boundary": {
+            "workspace_ref": "dag-project"
+          },
+          "position_index": 0
+        },
+        {
+          "node_id": "node_1",
+          "node_type": "deterministic_task",
+          "adapter_type": "deterministic_task",
+          "display_name": "persist",
+          "inputs": {
+            "task_name": "persist",
+            "provider_slug": "openai",
+            "model_slug": "gpt-5.4-mini",
+            "input_payload": {
+              "step": 1
+            }
+          },
+          "expected_outputs": {
+            "result": "persisted"
+          },
+          "success_condition": {
+            "status": "success"
+          },
+          "failure_behavior": {
+            "status": "fail_closed"
+          },
+          "authority_requirements": {
+            "workspace_ref": "dag-project",
+            "runtime_profile_ref": "dag-project"
+          },
+          "execution_boundary": {
+            "workspace_ref": "dag-project"
+          },
+          "position_index": 1
+        }
+      ],
+      "edges": [
+        {
+          "edge_id": "edge_0",
+          "edge_type": "after_success",
+          "from_node_id": "node_0",
+          "to_node_id": "node_1",
+          "release_condition": {
+            "upstream_result": "success"
+          },
+          "payload_mapping": {
+            "prepared_result": "result"
+          },
+          "position_index": 0
+        }
+      ]
+    },
+    "runtime_env": {
+      "WORKFLOW_DATABASE_URL": "postgresql://nate@127.0.0.1:5432/dag_workflow",
+      "DAG_RUNTIME_PROFILES_CONFIG": "config/runtime_profiles.json",
+      "DAG_RUNTIME_PROFILE": "dag-project",
+      "DAG_LOCAL_POSTGRES_DATA_DIR": "Code&DBs/Databases/postgres-dev/data"
+    },
+    "outcome_proof": {
+      "required_terminal_state": "succeeded",
+      "required_node_order": [
+        "node_0",
+        "node_1"
+      ],
+      "inspection_surface": "runtime.execution.RuntimeOrchestrator.inspect_run",
+      "outbox_surface": "runtime.outbox.PostgresWorkflowOutboxSubscriber"
+    }
+  }
+}

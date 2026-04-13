@@ -1,0 +1,10 @@
+{
+  "name": "fix_idempotency_gate",
+  "jobs": [
+    {
+      "label": "fix",
+      "agent": "auto/build",
+      "prompt": "Fix BUG-77632A8C: the idempotency gate blocks workflow reruns when only the agent slug changes.\n\nThe idempotency key is computed in Code&DBs/Workflow/runtime/idempotency.py using a canonical hash of the full request body. When a user retries a spec with a different agent slug (e.g. auto/build → a pinned model), the payload hash differs but the workflow_id, labels, and prompts are identical — so this should be treated as a valid rerun, not a conflict.\n\nFix: exclude agent slug (and any other routing/model hints) from the idempotency hash. The key should be stable across agent changes for the same workflow content (name + job labels + prompt hashes). Look at how the normalized_request is assembled in Code&DBs/Workflow/runtime/intake.py around line 179 to understand what fields feed the key, then strip agent/model fields from the hash input.\n\nDo not change the key format or break existing idempotency semantics for genuinely duplicate submissions."
+    }
+  ]
+}

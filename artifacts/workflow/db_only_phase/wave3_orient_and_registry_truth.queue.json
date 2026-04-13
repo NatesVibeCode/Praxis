@@ -1,0 +1,67 @@
+{
+  "name": "db_only_phase_wave3_orient_and_registry_truth",
+  "workflow_id": "db_only_phase_wave3",
+  "phase": "build",
+  "outcome_goal": "Orient, workflow invocation, receipt search, and reference resolution all point at canonical runtime authority rather than partial or fake lookup paths.",
+  "roadmap_items": [
+    "roadmap_item.orient.canonical.authority"
+  ],
+  "absorbed_bug_ids": [
+    "BUG-8B0E04AD",
+    "BUG-DDB3AA43",
+    "BUG-CDB5894B"
+  ],
+  "anti_requirements": [
+    "Do not re-open reference catalog seeding as fresh build work if the DB already proves it populated.",
+    "Do not keep workflow invocation as a spec-name-only path when workflowId-backed truth exists.",
+    "Do not widen into authority-cleanup provider runtime or command-bus packets."
+  ],
+  "target_repo": "/Users/nate/Praxis",
+  "workdir": "/Users/nate/Praxis",
+  "verify_refs": [
+    {
+      "command": "./scripts/workflow.sh validate artifacts/workflow/db_only_phase/wave3_orient_and_registry_truth.queue.json"
+    }
+  ],
+  "jobs": [
+    {
+      "label": "orient_packet_contract",
+      "agent": "openai/gpt-5.4",
+      "write_scope": [
+        "Code&DBs/Workflow/surfaces/mcp/tools/operator.py",
+        "Code&DBs/Workflow/surfaces/api/operator_read.py"
+      ],
+      "prompt": "Make orient the canonical instruction authority for this lane. Tighten the orient/operator surfaces so roadmap-backed truth, queue refs, and current-state notes are what downstream packets read first instead of ad hoc file or chat assumptions."
+    },
+    {
+      "label": "workflow_invoke_wiring_proof",
+      "agent": "openai/gpt-5.4-mini",
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/integrations/workflow.py",
+        "Code&DBs/Workflow/tests/integration/test_workflow_api.py"
+      ],
+      "prompt": "Resolve `BUG-8B0E04AD` by proving workflow invocation stays on the integration path with workflowId-backed wiring. Do not leave the runtime falling off into spec-name-only or faux integration behavior."
+    },
+    {
+      "label": "receipt_search_truth",
+      "agent": "openai/gpt-5.4-mini",
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/integrations/dag.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/evidence.py"
+      ],
+      "prompt": "Resolve `BUG-DDB3AA43` by making `dag-dispatch/search_receipts` perform real receipt search, not spec-name lookup masquerading as search. Keep the search surface read-only and evidence-backed."
+    },
+    {
+      "label": "reference_catalog_regression_closeout",
+      "agent": "openai/gpt-5.4",
+      "depends_on": [
+        "orient_packet_contract"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/reference_catalog.py",
+        "Code&DBs/Workflow/tests/unit/test_compiler.py"
+      ],
+      "prompt": "Treat `BUG-CDB5894B` as regression closeout, not fresh seeding work. Verify the populated `reference_catalog` remains usable by compiler and subsystem sync paths, then add only the smallest proof coverage or comments needed to keep that state explicit."
+    }
+  ]
+}

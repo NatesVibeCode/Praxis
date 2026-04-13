@@ -203,6 +203,13 @@ class TestArtifactListBySandbox:
         assert len(results) == 2
         assert all(r.sandbox_id == f"{pfx}-s1" for r in results)
 
+    def test_latest_sandbox_id_returns_most_recent_sandbox(self, store):
+        pfx = store._test_prefix
+        store.capture(f"{pfx}/a.py", "1", f"{pfx}-s1")
+        store.capture(f"{pfx}/b.py", "2", f"{pfx}-s2")
+
+        assert store.latest_sandbox_id() == f"{pfx}-s2"
+
 
 class TestArtifactSearch:
     def test_search_by_path(self, store):

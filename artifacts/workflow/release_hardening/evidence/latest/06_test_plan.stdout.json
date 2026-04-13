@@ -1,0 +1,49 @@
+{
+  "ok": true,
+  "command": "./scripts/test.sh plan artifacts/workflow/release_hardening/release_proof_and_public_naming.queue.json",
+  "duration_s": 0.001,
+  "results": {
+    "queue_file": "artifacts/workflow/release_hardening/release_proof_and_public_naming.queue.json",
+    "queue_name": "release_proof_and_public_naming",
+    "workflow_id": "release_proof_and_public_naming",
+    "current_focus": "workflow_first_slice",
+    "queue_paths": [
+      "Code&DBs/Workflow/PLATFORM_SPEC.md",
+      "Code&DBs/Workflow/surfaces/api/frontdoor.py",
+      "Code&DBs/Workflow/surfaces/api/operator_read.py",
+      "Code&DBs/Workflow/surfaces/api/workflow_api.py",
+      "Code&DBs/Workflow/tests/integration/test_bounded_native_primary_proof.py",
+      "Code&DBs/Workflow/tests/integration/test_native_default_parallel_proof.py",
+      "Code&DBs/Workflow/tests/integration/test_native_frontdoor.py",
+      "artifacts/workflow/db_only_phase/README.md",
+      "artifacts/workflow/release_hardening/RELEASE_PROOF.md"
+    ],
+    "affected_suites": [
+      "integration",
+      "workflow_first_slice"
+    ],
+    "selected_suites": [
+      "integration",
+      "workflow_first_slice"
+    ],
+    "selected_test_paths": [
+      "Code&DBs/Workflow/tests/integration",
+      "Code&DBs/Workflow/tests/contracts/test_workflow_intake_contract.py",
+      "Code&DBs/Workflow/tests/contracts/test_inspect_replay_contracts.py",
+      "Code&DBs/Workflow/tests/contracts/test_deterministic_task_adapter_contract.py",
+      "Code&DBs/Workflow/tests/contracts/test_evidence_contracts.py",
+      "Code&DBs/Workflow/tests/unit/test_workflow_cli_validate.py",
+      "Code&DBs/Workflow/tests/unit/test_workflow_cli_run.py"
+    ],
+    "unclassified_paths": [
+      "Code&DBs/Workflow/PLATFORM_SPEC.md",
+      "Code&DBs/Workflow/surfaces/api/frontdoor.py",
+      "Code&DBs/Workflow/surfaces/api/operator_read.py",
+      "Code&DBs/Workflow/surfaces/api/workflow_api.py",
+      "artifacts/workflow/release_hardening/RELEASE_PROOF.md"
+    ],
+    "recommended_command": "PYTHONPATH='/Users/nate/Praxis/Code&DBs/Workflow' /opt/homebrew/opt/python@3.14/bin/python3.14 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/integration' 'Code&DBs/Workflow/tests/contracts/test_workflow_intake_contract.py' 'Code&DBs/Workflow/tests/contracts/test_inspect_replay_contracts.py' 'Code&DBs/Workflow/tests/contracts/test_deterministic_task_adapter_contract.py' 'Code&DBs/Workflow/tests/contracts/test_evidence_contracts.py' 'Code&DBs/Workflow/tests/unit/test_workflow_cli_validate.py' 'Code&DBs/Workflow/tests/unit/test_workflow_cli_run.py'"
+  },
+  "errors": [],
+  "warnings": []
+}

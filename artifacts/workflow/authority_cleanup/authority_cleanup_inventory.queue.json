@@ -1,0 +1,60 @@
+{
+  "name": "authority_cleanup_inventory",
+  "workflow_id": "authority_cleanup_inventory",
+  "phase": "discovery",
+  "outcome_goal": "Produce the DB-authority inventory and proof pack for the runtime authority cleanup program, classifying every remaining runtime-selectable hardcoding as DB authority, bootstrap-only, or allowed code-owned loader.",
+  "roadmap_alignment": "roadmap_item.authority.cleanup",
+  "anti_requirements": [
+    "Do not mutate runtime behavior in this packet.",
+    "Do not treat filesystem queue listings or Python defaults as canonical authority.",
+    "Do not bless silent fallback behavior."
+  ],
+  "registry_paths": [
+    "planning/roadmap_reset_and_seed.sql",
+    "Code&DBs/Databases/migrations/workflow/009_bug_and_roadmap_authority.sql",
+    "Code&DBs/Databases/migrations/workflow/042_roadmap_item_registry_paths.sql"
+  ],
+  "target_repo": "/Users/nate/Praxis",
+  "workdir": "/Users/nate/Praxis",
+  "verify": [
+    {
+      "command": "./scripts/workflow.sh validate artifacts/workflow/authority_cleanup/authority_cleanup_inventory.queue.json"
+    }
+  ],
+  "jobs": [
+    {
+      "label": "authority_inventory_packet",
+      "agent": "openai/gpt-5.4",
+      "outcome_goal": "Write the inventory and classification proof for the authority-cleanup program.",
+      "anti_vibe_rule": "No implementation, no hand-wavy lists, no mixed authority.",
+      "scope": {
+        "read": [
+          "planning/roadmap_reset_and_seed.sql",
+          "Code&DBs/Databases/migrations/workflow/002_registry_authority.sql",
+          "Code&DBs/Databases/migrations/workflow/006_platform_authority_schema.sql",
+          "Code&DBs/Databases/migrations/workflow/011_runtime_breadth_authority.sql",
+          "Code&DBs/Databases/migrations/workflow/016_app_builder_registries.sql",
+          "Code&DBs/Databases/migrations/workflow/020_integration_registry.sql",
+          "Code&DBs/Workflow/runtime/integrations/__init__.py",
+          "Code&DBs/Workflow/runtime/task_assembler.py",
+          "Code&DBs/Workflow/runtime/workflow/orchestrator.py",
+          "Code&DBs/Workflow/runtime/verification.py",
+          "Code&DBs/Workflow/runtime/compiler.py",
+          "Code&DBs/Workflow/runtime/manifest_generator.py",
+          "Code&DBs/Workflow/runtime/chat_tools.py",
+          "Code&DBs/Workflow/runtime/model_context_limits.py",
+          "Code&DBs/Workflow/runtime/rate_limit_prober.py"
+        ],
+        "write": [
+          "artifacts/workflow/authority_cleanup/AUTHORITY_INVENTORY.md"
+        ]
+      },
+      "verify": [
+        {
+          "command": "test -f artifacts/workflow/authority_cleanup/AUTHORITY_INVENTORY.md"
+        }
+      ],
+      "prompt": "OBJECTIVE:\nWrite the authority inventory and proof pack for the runtime authority cleanup program.\n\nTASK:\nAudit the registry, dispatch, verification, compiler, workflow discovery, and provider-default seams listed in this queue's registry_paths and read scope. Classify every remaining hardcoded behavior into exactly one bucket: DB authority required, bootstrap-only allowed, or code-owned loader allowed. Record the justification, the missing DB authority row/table if applicable, and the runtime consequence of leaving it hardcoded.\n\nCONSTRAINTS:\nTreat Postgres as the only canonical runtime authority. Thin wrappers may remain wrappers only. Do not propose filesystem-derived runtime truth. Do not mix implementation with the inventory.\n\nOUTPUT_CONTRACT:\nWrite `artifacts/workflow/authority_cleanup/AUTHORITY_INVENTORY.md` with a table of seam, current source of truth, required DB authority surface, allowed fallback policy, and follow-on packet owner.\n\nACCEPTANCE_CRITERIA:\n- Every currently known authority-bypass seam in the queue read scope is classified.\n- The output makes the parent roadmap item executable without needing chat history.\n- Allowed code-owned loaders are called out explicitly and narrowly.\n\nSTOP_BOUNDARY:\nDo not edit runtime code or migrations in this packet."
+    }
+  ]
+}

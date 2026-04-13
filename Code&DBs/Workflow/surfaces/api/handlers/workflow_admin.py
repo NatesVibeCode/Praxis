@@ -9,6 +9,7 @@ from runtime.dependency_contract import dependency_truth_report
 from storage.postgres.connection import resolve_workflow_database_url
 from surfaces.api import operator_read, operator_write
 from surfaces.api.handlers import workflow_launcher
+from surfaces.mcp.catalog import get_tool_catalog
 
 from ._shared import (
     REPO_ROOT,
@@ -19,6 +20,33 @@ from ._shared import (
     _serialize,
 )
 from .workflow_run import _handle_status
+
+
+def _tool_definition(tool_name: str):
+    definition = get_tool_catalog().get(tool_name)
+    if definition is None:
+        raise KeyError(f"unknown MCP tool: {tool_name}")
+    return definition
+
+
+def _tool_surface_hint(
+    tool_name: str,
+    *,
+    http_hint: str | None = None,
+    suffix: str | None = None,
+) -> str:
+    definition = _tool_definition(tool_name)
+    parts = [
+        f"CLI `{definition.cli_entrypoint}`",
+        f"MCP `{definition.name}`",
+    ]
+    if http_hint:
+        parts.append(f"HTTP {http_hint}")
+    text = f"Use {'; '.join(parts)}. {definition.cli_when_to_use}"
+    if suffix:
+        text += f" {suffix}"
+    text += f" Schema/help: `{definition.cli_describe_command}`."
+    return text
 
 
 def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
@@ -72,6 +100,14 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         }
     except Exception as exc:
         recent_activity = {"error": f"Could not load receipts: {exc}"}
+
+    discover_tool = _tool_definition("praxis_discover")
+    recall_tool = _tool_definition("praxis_recall")
+    query_tool = _tool_definition("praxis_query")
+    workflow_tool = _tool_definition("praxis_workflow")
+    health_tool = _tool_definition("praxis_health")
+    bugs_tool = _tool_definition("praxis_bugs")
+    tool_count = len(get_tool_catalog())
 
     return {
         "platform": "praxis-workflow",
@@ -134,37 +170,159 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         "dependency_truth": dependency_truth,
         "recent_activity": recent_activity,
         "search_surfaces": {
-            "code_discovery": "Use praxis_discover or /query with 'find <term>' — vector similarity over AST fingerprints, finds functionally similar code even with different names. ALWAYS search here before building new code.",
-            "knowledge_graph": "Use /recall or praxis_recall — FTS5 over entities, decisions, and architectural patterns",
-            "bugs": "Use /bugs action=search — FTS5 over bug titles and descriptions",
-            "receipts": "Use /receipts — canonical workflow receipt search + token burn",
+            "code_discovery": _tool_surface_hint(
+                "praxis_discover",
+                http_hint="`/query` with `find <term>`",
+                suffix=(
+                    "Always search here before building new code. Reindex after code changes with "
+                    "`workflow discover reindex --yes` or `praxis_discover(action='reindex')`."
+                ),
+            ),
+            "knowledge_graph": _tool_surface_hint(
+                "praxis_recall",
+                http_hint="`/recall`",
+                suffix="Use it for decisions, patterns, and prior context, not code similarity.",
+            ),
+            "bugs": _tool_surface_hint(
+                "praxis_bugs",
+                http_hint="`/bugs` with `action=search`",
+                suffix="Prefer read/search before filing or resolving so duplicates stay down.",
+            ),
+            "receipts": _tool_surface_hint(
+                "praxis_receipts",
+                http_hint="`/receipts`",
+                suffix="Use it for canonical workflow evidence and token-burn analysis.",
+            ),
+        },
+        "cli_surface": {
+            "kind": "catalog_backed_cli",
+            "preferred": True,
+            "tool_count": tool_count,
+            "directive": (
+                "Prefer the catalog-backed `workflow` CLI as the default operator surface. "
+                "Use discovery commands first, then switch to direct aliases for day-to-day reads."
+            ),
+            "discovery_commands": [
+                {
+                    "command": "workflow tools list",
+                    "description": "List the full catalog-backed CLI surface with tier, risk, and recommended alias data.",
+                    "examples": [
+                        "workflow tools list",
+                        "workflow tools list --surface query --json",
+                    ],
+                },
+                {
+                    "command": "workflow tools search <text>",
+                    "description": "Search the tool catalog by intent, noun, or task before guessing a command name.",
+                    "examples": [
+                        "workflow tools search failure",
+                        "workflow tools search roadmap",
+                    ],
+                },
+                {
+                    "command": "workflow tools describe <tool>",
+                    "description": "Inspect one tool's schema, risk, badges, and example payloads before calling it.",
+                    "examples": [
+                        "workflow tools describe praxis_query",
+                        "workflow tools describe praxis_workflow",
+                    ],
+                },
+                {
+                    "command": "workflow tools call <tool> --input-json '{...}'",
+                    "description": "Use the generic direct-call surface when no friendly alias fits or when you want exact schema control.",
+                    "examples": [
+                        "workflow tools call praxis_query --input-json '{\"question\":\"what is failing right now?\"}'",
+                        "workflow tools call praxis_health --input-json '{}'",
+                    ],
+                },
+            ],
+            "recommended_reads": [
+                {
+                    "tool": query_tool.name,
+                    "command": query_tool.cli_entrypoint,
+                    "description": "Best first stop for natural-language questions when you are not yet sure which specialist surface you need.",
+                    "examples": [
+                        "workflow query 'what is failing right now?'",
+                        "workflow query 'which runs are stuck?'",
+                        "workflow query 'show me quality metrics'",
+                    ],
+                },
+                {
+                    "tool": health_tool.name,
+                    "command": health_tool.cli_entrypoint,
+                    "description": "Run the preflight and operator snapshot when the platform feels degraded or before dispatching work.",
+                    "examples": [
+                        "workflow health",
+                        "workflow health --json",
+                    ],
+                },
+                {
+                    "tool": discover_tool.name,
+                    "command": discover_tool.cli_entrypoint,
+                    "description": "Search for existing code by behavior before adding new functions, modules, or patterns.",
+                    "examples": [
+                        "workflow discover 'retry logic with exponential backoff'",
+                        "workflow discover 'Postgres connection pooling' --kind function",
+                        "workflow discover stats",
+                    ],
+                },
+                {
+                    "tool": recall_tool.name,
+                    "command": recall_tool.cli_entrypoint,
+                    "description": "Search the knowledge graph for decisions, patterns, and prior context instead of code similarity.",
+                    "examples": [
+                        "workflow recall 'provider routing' --type decision",
+                        "workflow recall 'dispatch run completion trigger retirement'",
+                    ],
+                },
+                {
+                    "tool": bugs_tool.name,
+                    "command": bugs_tool.cli_entrypoint,
+                    "description": "Inspect bug state before filing or resolving so you reuse existing evidence and avoid duplicates.",
+                    "examples": [
+                        "workflow bugs list --limit 10",
+                        "workflow bugs search routing",
+                        "workflow bugs stats",
+                    ],
+                },
+            ],
+            "guardrails": [
+                "Write and dispatch tools require explicit confirmation (`--yes`).",
+                "Session tools require a workflow token and only work inside an active workflow MCP session.",
+                "Workflow launches are kickoff-first: run once, then inspect status/stream separately.",
+            ],
         },
         "instructions": (
             "You are operating the Praxis Engine autonomous engineering control plane.\n"
+            "Prefer the catalog-backed `workflow` CLI as the default human/operator surface.\n"
+            f"There are currently {tool_count} catalog-backed tools. Start with `workflow tools list`, "
+            "`workflow tools search <text>`, and `workflow tools describe <tool>` when you need the current "
+            "surface instead of memorizing a static list.\n"
+            f"For common reads, go straight to `{query_tool.cli_entrypoint}`, `{health_tool.cli_entrypoint}`, "
+            f"`{discover_tool.cli_entrypoint}`, `{recall_tool.cli_entrypoint}`, and `{bugs_tool.cli_entrypoint}`.\n"
+            "Use `workflow tools call <tool> --input-json '{...}'` as the generic fallback when no direct alias fits.\n"
+            "CLI guardrails are intentional: write/dispatch flows require `--yes`, and session-only tools require a "
+            "workflow token.\n"
             "SEARCH BEFORE YOU BUILD: Before writing any new function, module, class, or pattern, "
-            "use praxis_discover (MCP) or /query with 'find <term>' (HTTP) to check if similar code "
-            "already exists. The codebase is large — duplicating existing infrastructure wastes time "
-            "and creates maintenance burden. praxis_discover uses vector similarity over AST fingerprints "
-            "and finds matches even when naming differs. Use praxis_recall for architectural decisions "
-            "and patterns. After code changes, call praxis_discover(action='reindex') to update the index.\n"
-            "Use /query for natural-language questions.\n"
+            f"use `{discover_tool.cli_entrypoint}` in the CLI, `{discover_tool.name}` via MCP, or `/query` with "
+            "`find <term>` over HTTP to check if similar code already exists. The codebase is large — duplicating "
+            "existing infrastructure wastes time and creates maintenance burden. Use "
+            f"`{recall_tool.cli_entrypoint}` / `{recall_tool.name}` for architectural decisions and patterns.\n"
+            f"Use `{query_tool.cli_entrypoint}` or `/query` for natural-language questions.\n"
             "Use /workflow-runs to enqueue a workflow spec run. Treat it as fire-and-observe, never wait-for-completion.\n"
             "The launch call should stay short so the client can keep issuing new commands while execution happens elsewhere.\n"
             "For HTTP clients, POST /workflow-runs to get run_id, then use the dedicated channels "
             "GET /api/workflow-runs/{run_id}/stream for live SSE updates and GET /api/workflow-runs/{run_id}/status "
             "for snapshots.\n"
-            "For MCP use, prefer praxis_workflow(action='run', spec_path='...'). It returns run_id plus "
-            "stream_url and status_url. Follow with praxis_workflow(action='status', run_id=run_id) "
-            "or inspect/cancel/retry as needed.\n"
-            "Do not use legacy wait-style behavior. Workflow launch and live status are separate channels by design.\n"
+            f"For MCP use, prefer `{workflow_tool.name}(action='run', spec_path='...')`. It returns run_id plus "
+            "stream_url and status_url. Follow with action='status', inspect, cancel, or retry as needed.\n"
+            "Legacy inline wait can still exist for streaming MCP callers, but the supported mental model is kickoff "
+            "first and observation on separate status/stream channels.\n"
             "When checking status, read health.likely_failed + health.signals + health.resource_telemetry "
             "(tokens_total, tokens_per_minute, heartbeat freshness) as the expected-failure heuristic.\n"
             "For MCP status calls, use kill_if_idle=true if a running run is idle and unhealthy.\n"
             "CPU is currently proxied through heartbeat + throughput signals, not native CPU telemetry.\n"
-            "Use /recall to search the knowledge graph.\n"
-            "Use /bugs to track and resolve defects.\n"
-            "Use /receipts to search workflow receipts or get token burn analytics.\n"
-            "Start with /health to check system state."
+            "Use `/health` or `workflow health` to check system state first when the platform feels degraded."
         ),
         "infrastructure": {
             "service_manager": "scripts/praxis",

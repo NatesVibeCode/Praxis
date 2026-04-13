@@ -1,0 +1,100 @@
+{
+  "database_reachable": false,
+  "dependency_truth": {
+    "available_count": 9,
+    "manifest_path": "/Users/nate/Praxis/Code&DBs/Workflow/requirements.runtime.txt",
+    "missing": [
+      {
+        "available": false,
+        "distribution": "croniter",
+        "import_name": "croniter",
+        "installed_version": null
+      },
+      {
+        "available": false,
+        "distribution": "psycopg2-binary",
+        "import_name": "psycopg2",
+        "installed_version": null
+      }
+    ],
+    "missing_count": 2,
+    "ok": false,
+    "packages": [
+      {
+        "available": true,
+        "distribution": "asyncpg",
+        "import_name": "asyncpg",
+        "installed_version": "0.31.0"
+      },
+      {
+        "available": true,
+        "distribution": "fastapi",
+        "import_name": "fastapi",
+        "installed_version": "0.135.1"
+      },
+      {
+        "available": true,
+        "distribution": "pydantic",
+        "import_name": "pydantic",
+        "installed_version": "2.12.5"
+      },
+      {
+        "available": true,
+        "distribution": "uvicorn",
+        "import_name": "uvicorn",
+        "installed_version": "0.41.0"
+      },
+      {
+        "available": true,
+        "distribution": "anthropic",
+        "import_name": "anthropic",
+        "installed_version": "0.86.0"
+      },
+      {
+        "available": true,
+        "distribution": "google-genai",
+        "import_name": "google.genai",
+        "installed_version": "1.70.0"
+      },
+      {
+        "available": true,
+        "distribution": "openai",
+        "import_name": "openai",
+        "installed_version": "2.24.0"
+      },
+      {
+        "available": true,
+        "distribution": "numpy",
+        "import_name": "numpy",
+        "installed_version": "2.4.4"
+      },
+      {
+        "available": true,
+        "distribution": "sentence-transformers",
+        "import_name": "sentence_transformers",
+        "installed_version": "5.3.0"
+      },
+      {
+        "available": false,
+        "distribution": "croniter",
+        "import_name": "croniter",
+        "installed_version": null
+      },
+      {
+        "available": false,
+        "distribution": "psycopg2-binary",
+        "import_name": "psycopg2",
+        "installed_version": null
+      }
+    ],
+    "required_count": 11,
+    "scope": "all"
+  },
+  "persisted": true,
+  "schema_bootstrapped": false,
+  "services_ready": true,
+  "smoke_run_id": "run:workflow.native-self-hosted-smoke:09fb04b8da790549",
+  "sync_cycle_id": null,
+  "sync_error_count": 0,
+  "sync_status": "skipped"
+}

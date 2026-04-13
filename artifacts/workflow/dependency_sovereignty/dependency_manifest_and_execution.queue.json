@@ -1,0 +1,94 @@
+{
+  "name": "dependency_manifest_and_execution",
+  "workflow_id": "dependency_manifest_and_execution",
+  "phase": "build",
+  "outcome_goal": "Give dependency manifest truth and execution-runtime behavior one explicit contract so setup, packaging, and execution read the same declared dependency authority and prove the backend-agnostic seam.",
+  "roadmap_alignment": "roadmap_item.dependency.manifest.truth",
+  "roadmap_items": [
+    "roadmap_item.dependency.manifest.truth",
+    "roadmap_item.dependency.execution.runtime.seam"
+  ],
+  "anti_requirements": [
+    "Do not treat the UI app manifest generator as dependency authority.",
+    "Do not keep setup-time manifest guesses separate from runtime dependency truth.",
+    "Do not leak backend-specific details through the execution seam."
+  ],
+  "registry_paths": [
+    "Code&DBs/Workflow/pyproject.toml",
+    "Code&DBs/Workflow/requirements.runtime.txt",
+    "Code&DBs/Workflow/runtime/dependency_contract.py",
+    "Code&DBs/Workflow/runtime/embedding_service.py",
+    "Code&DBs/Workflow/surfaces/_subsystems_base.py",
+    "Code&DBs/Workflow/adapters/docker_runner.py",
+    "Code&DBs/Workflow/adapters/cli_llm.py",
+    "Code&DBs/Workflow/registry/agent_config.py"
+  ],
+  "target_repo": "/Users/nate/Praxis",
+  "workdir": "/Users/nate/Praxis",
+  "verify_refs": [
+    "verify_ref.python.py_compile.test"
+  ],
+  "jobs": [
+    {
+      "label": "dependency_manifest_truth_contract",
+      "agent": "openai/gpt-5.4-mini",
+      "outcome_goal": "Make setup, packaging, and runtime all read the same dependency manifest truth.",
+      "anti_vibe_rule": "One dependency authority only; no second manifest layer and no runtime guesswork.",
+      "scope": {
+        "read": [
+          "Code&DBs/Workflow/pyproject.toml",
+          "Code&DBs/Workflow/requirements.runtime.txt",
+          "Code&DBs/Workflow/runtime/dependency_contract.py",
+          "Code&DBs/Workflow/runtime/embedding_service.py",
+          "Code&DBs/Workflow/surfaces/_subsystems_base.py",
+          "Code&DBs/Workflow/tests/unit/test_dependency_contract.py",
+          "Code&DBs/Workflow/tests/unit/test_dependency_truth_surfaces.py",
+          "Code&DBs/Workflow/tests/unit/test_startup_wiring.py",
+          "Code&DBs/Workflow/tests/unit/test_database_maintenance.py"
+        ],
+        "write": [
+          "Code&DBs/Workflow/pyproject.toml",
+          "Code&DBs/Workflow/requirements.runtime.txt",
+          "Code&DBs/Workflow/runtime/dependency_contract.py",
+          "Code&DBs/Workflow/runtime/embedding_service.py",
+          "Code&DBs/Workflow/surfaces/_subsystems_base.py",
+          "Code&DBs/Workflow/tests/unit/test_dependency_contract.py",
+          "Code&DBs/Workflow/tests/unit/test_dependency_truth_surfaces.py",
+          "Code&DBs/Workflow/tests/unit/test_startup_wiring.py",
+          "Code&DBs/Workflow/tests/unit/test_database_maintenance.py"
+        ]
+      },
+      "prompt": "OBJECTIVE:\nCollapse dependency truth into one manifest and one startup/reporting surface.\n\nTASK:\nReview and adjust the dependency manifest contract so `pyproject.toml`, `requirements.runtime.txt`, `runtime/dependency_contract.py`, `runtime/embedding_service.py`, and `surfaces/_subsystems_base.py` all describe the same authoritative dependency state. Make sure orient/doctor and subsystem startup read that same truth, not a second derived list.\n\nCONSTRAINTS:\n- Do not reintroduce a second dependency manifest.\n- Do not treat startup syncs as authority.\n- Do not widen into unrelated app-manifest generation.\n\nOUTPUT_CONTRACT:\nUpdated dependency truth code paths and tests that prove the manifest, startup wiring, and dependency-report surfaces all point at the same authority.\n\nACCEPTANCE_CRITERIA:\n- `dependency_truth_report()` and subsystem startup read the same manifest authority.\n- `orient` and `doctor` surface dependency truth explicitly.\n- The embedding authority stays explicit and testable.\n- Targeted pytest on dependency truth and startup wiring passes.\n\nSTOP_BOUNDARY:\nDo not rewrite UI manifest generation or add a parallel dependency source of truth."
+    },
+    {
+      "label": "dependency_execution_runtime_seam",
+      "agent": "openai/gpt-5.4-mini",
+      "depends_on": [
+        "dependency_manifest_truth_contract"
+      ],
+      "outcome_goal": "Keep execution runtime behind one backend-agnostic seam so Docker, CLI, and agent routing stay explicit instead of leaking backend details.",
+      "anti_vibe_rule": "No backend folklore; keep the transport contract observable and explicit.",
+      "scope": {
+        "read": [
+          "Code&DBs/Workflow/adapters/docker_runner.py",
+          "Code&DBs/Workflow/adapters/cli_llm.py",
+          "Code&DBs/Workflow/registry/agent_config.py",
+          "Code&DBs/Workflow/runtime/execution_transport.py",
+          "Code&DBs/Workflow/tests/unit/test_docker_runner.py",
+          "Code&DBs/Workflow/tests/unit/test_transport_support_and_parity.py",
+          "Code&DBs/Workflow/tests/unit/test_agent_config.py"
+        ],
+        "write": [
+          "Code&DBs/Workflow/adapters/docker_runner.py",
+          "Code&DBs/Workflow/adapters/cli_llm.py",
+          "Code&DBs/Workflow/registry/agent_config.py",
+          "Code&DBs/Workflow/runtime/execution_transport.py",
+          "Code&DBs/Workflow/tests/unit/test_docker_runner.py",
+          "Code&DBs/Workflow/tests/unit/test_transport_support_and_parity.py",
+          "Code&DBs/Workflow/tests/unit/test_agent_config.py"
+        ]
+      },
+      "prompt": "OBJECTIVE:\nKeep execution runtime behind one backend-agnostic seam.\n\nTASK:\nConcentrate transport, timeout, kill, and agent-selection behavior behind `docker_runner.py`, `cli_llm.py`, `registry/agent_config.py`, and `runtime/execution_transport.py` so the runtime exposes generic execution labels instead of backend folklore.\n\nCONSTRAINTS:\n- Do not replace Docker or the CLI backend in this packet.\n- Do not leak provider-specific defaults through the execution contract.\n- Do not widen into the dependency manifest work above.\n\nOUTPUT_CONTRACT:\nRuntime seam changes and tests that prove execution transport is backend-agnostic and still observable.\n\nACCEPTANCE_CRITERIA:\n- Transport labels stay backend-agnostic.\n- Docker host fallback remains explicit.\n- CLI and agent routing still resolve through one contract.\n- Targeted pytest on docker runner, transport parity, and agent config passes.\n\nSTOP_BOUNDARY:\nDo not turn this into a backend swap or a provider-catalog cleanup."
+    }
+  ]
+}

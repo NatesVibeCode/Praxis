@@ -82,6 +82,12 @@ class _Subsystems(_BaseSubsystems):
     def _postgres_env(self) -> dict[str, str]:
         return workflow_database_env()
 
+    def _should_start_heartbeat_background(self) -> bool:
+        # MCP tool invocations are short-lived request/response processes.
+        # Starting background maintenance threads here adds noise, cold-start
+        # work, and embedder contention without helping the caller.
+        return False
+
     def _handle_reference_catalog_sync_error(self, exc: Exception) -> None:
         logger.debug("reference catalog sync skipped: %s", exc)
 

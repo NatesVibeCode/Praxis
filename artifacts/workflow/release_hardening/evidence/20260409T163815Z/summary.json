@@ -1,0 +1,374 @@
+{
+  "all_required_steps_passed": true,
+  "claim_matrix": [
+    {
+      "claim": "traceability",
+      "description": "Evidence ties back to a concrete commit and worktree state.",
+      "evidence_paths": [
+        "artifacts/workflow/release_hardening/evidence/20260409T163815Z/00_git_head.stdout.txt",
+        "artifacts/workflow/release_hardening/evidence/20260409T163815Z/01_git_status.stdout.txt"
+      ],
+      "status": "proved",
+      "step_ids": [
+        "git_head",
+        "git_status"
+      ]
+    },
+    {
+      "claim": "health_governance",
+      "description": "Canonical runtime health proof is readable through `dag-ctl doctor --json`.",
+      "evidence_paths": [
+        "artifacts/workflow/release_hardening/evidence/20260409T163815Z/02_dag_ctl_doctor.stdout.json"
+      ],
+      "status": "proved",
+      "step_ids": [
+        "dag_ctl_doctor"
+      ]
+    },
+    {
+      "claim": "frontdoor_contract",
+      "description": "The machine-readable test front door covers the required queue/test commands.",
+      "evidence_paths": [
+        "artifacts/workflow/release_hardening/evidence/20260409T163815Z/03_test_selftest.stdout.json",
+        "artifacts/workflow/release_hardening/evidence/20260409T163815Z/04_test_suite_list.stdout.json",
+        "artifacts/workflow/release_hardening/evidence/20260409T163815Z/05_test_suite_focus.stdout.json",
+        "artifacts/workflow/release_hardening/evidence/20260409T163815Z/06_test_plan.stdout.json",
+        "artifacts/workflow/release_hardening/evidence/20260409T163815Z/07_test_check_affected.stdout.json",
+        "artifacts/workflow/release_hardening/evidence/20260409T163815Z/08_test_validate.stdout.json"
+      ],
+      "status": "proved",
+      "step_ids": [
+        "test_selftest",
+        "test_suite_list",
+        "test_suite_focus",
+        "test_plan",
+        "test_check_affected",
+        "test_validate"
+      ]
+    },
+    {
+      "claim": "native_contract",
+      "description": "Repo-local native instance resolution stays on the checked-in contract.",
+      "evidence_paths": [
+        "artifacts/workflow/release_hardening/evidence/20260409T163815Z/09_native_primary_instance.stdout.json"
+      ],
+      "status": "proved",
+      "step_ids": [
+        "native_primary_instance"
+      ]
+    },
+    {
+      "claim": "proof_slice",
+      "description": "Targeted tests prove the bounded native/frontdoor/control surfaces that back this packet.",
+      "evidence_paths": [
+        "artifacts/workflow/release_hardening/evidence/20260409T163815Z/10_release_pytest_slice.stdout.txt"
+      ],
+      "status": "proved",
+      "step_ids": [
+        "release_pytest_slice"
+      ]
+    },
+    {
+      "claim": "persisted_run_truth",
+      "description": "A concrete smoke run can be read back through native status and inspect surfaces.",
+      "evidence_paths": [
+        "artifacts/workflow/release_hardening/evidence/20260409T163815Z/11_native_status_smoke_run.stdout.json",
+        "artifacts/workflow/release_hardening/evidence/20260409T163815Z/12_native_inspect_smoke_run.stdout.txt"
+      ],
+      "status": "blocked",
+      "step_ids": [
+        "native_status_smoke_run",
+        "native_inspect_smoke_run"
+      ]
+    }
+  ],
+  "evidence_dir": "artifacts/workflow/release_hardening/evidence/20260409T163815Z",
+  "generated_at": "2026-04-09T16:38:32.757285+00:00",
+  "latest_evidence_dir": "artifacts/workflow/release_hardening/evidence/latest",
+  "proof_packet": "release_hardening",
+  "queue_file": "artifacts/workflow/release_hardening/release_proof_and_public_naming.queue.json",
+  "repo_root": "/Users/nate/Praxis",
+  "residual_risks": [
+    {
+      "close_with": "Add one repo-local MCP smoke step or an equivalent machine-facing front door that produces durable run and status evidence.",
+      "evidence_paths": [
+        "artifacts/workflow/release_hardening/evidence/latest/summary.json"
+      ],
+      "risk_id": "rr-mcp-live-roundtrip",
+      "severity": "medium",
+      "status": "open",
+      "summary": "The packet does not execute a live MCP launch/status round trip.",
+      "why_open": "The replayable proof uses repo-local CLI wrappers and targeted tests. It does not exercise MCP transport in-session."
+    },
+    {
+      "close_with": "Replay `./scripts/dag-ctl setup` in a bounded clean workspace and capture the resulting proof output.",
+      "evidence_paths": [
+        "artifacts/workflow/release_hardening/evidence/latest/02_dag_ctl_doctor.stdout.json"
+      ],
+      "risk_id": "rr-fresh-setup-not-replayed",
+      "severity": "medium",
+      "status": "open",
+      "summary": "The packet reads `dag-ctl doctor --json`; it does not rerun `dag-ctl setup` from a clean environment.",
+      "why_open": "This proves the current health truth surface and targeted invariants, not first-time setup reproducibility."
+    },
+    {
+      "close_with": "Review or clear the dirty files and rerun the proof from the intended release commit.",
+      "evidence_paths": [
+        "artifacts/workflow/release_hardening/evidence/20260409T163815Z/01_git_status.stdout.txt"
+      ],
+      "risk_id": "rr-dirty-worktree",
+      "severity": "high",
+      "status": "open",
+      "summary": "The worktree is dirty during proof capture.",
+      "why_open": "A green proof packet does not establish that the checked tree is a clean release candidate."
+    },
+    {
+      "close_with": "Install the missing runtime dependencies and rerun `./scripts/dag-ctl doctor --json` plus this packet.",
+      "evidence_paths": [
+        "artifacts/workflow/release_hardening/evidence/20260409T163815Z/02_dag_ctl_doctor.stdout.json"
+      ],
+      "risk_id": "rr-missing-runtime-dependencies",
+      "severity": "high",
+      "status": "open",
+      "summary": "The doctor proof reports missing runtime dependencies.",
+      "why_open": "croniter, psycopg2-binary"
+    },
+    {
+      "close_with": "Repair the failing health fields, rerun `./scripts/dag-ctl doctor --json`, and rerun this packet.",
+      "evidence_paths": [
+        "artifacts/workflow/release_hardening/evidence/20260409T163815Z/02_dag_ctl_doctor.stdout.json"
+      ],
+      "risk_id": "rr-health-truth-not-ready",
+      "severity": "high",
+      "status": "open",
+      "summary": "The runtime health proof does not satisfy the expected ready-state fields.",
+      "why_open": "database_reachable=False, schema_bootstrapped=False"
+    },
+    {
+      "close_with": "Run the bounded repair path and rerun the proof after sync returns to `succeeded`.",
+      "evidence_paths": [
+        "artifacts/workflow/release_hardening/evidence/20260409T163815Z/02_dag_ctl_doctor.stdout.json"
+      ],
+      "risk_id": "rr-sync-status-not-succeeded",
+      "severity": "medium",
+      "status": "open",
+      "summary": "The doctor proof reports a non-succeeded sync status.",
+      "why_open": "sync_status='skipped'"
+    },
+    {
+      "close_with": "Replay queue validation in an environment that can perform the agent-resolution check.",
+      "evidence_paths": [
+        "artifacts/workflow/release_hardening/evidence/20260409T163815Z/08_test_validate.stdout.json"
+      ],
+      "risk_id": "rr-queue-validation-agent-resolution-blocked",
+      "severity": "medium",
+      "status": "open",
+      "summary": "Queue validation passed, but agent resolution was not exercised in this sandbox.",
+      "why_open": "The validation front door surfaced a sandbox-permission warning instead of a full agent-resolution check."
+    },
+    {
+      "close_with": "Ensure `smoke_run_id` is present, capture both native status and inspect outputs, and rerun the proof.",
+      "evidence_paths": [
+        "artifacts/workflow/release_hardening/evidence/20260409T163815Z/11_native_status_smoke_run.stdout.json",
+        "artifacts/workflow/release_hardening/evidence/20260409T163815Z/11_native_status_smoke_run.stderr.txt",
+        "artifacts/workflow/release_hardening/evidence/20260409T163815Z/12_native_inspect_smoke_run.stdout.txt",
+        "artifacts/workflow/release_hardening/evidence/20260409T163815Z/12_native_inspect_smoke_run.stderr.txt"
+      ],
+      "risk_id": "rr-persisted-run-truth-partial",
+      "severity": "medium",
+      "status": "open",
+      "summary": "The packet does not capture live status and inspect evidence for a concrete smoke run.",
+      "why_open": "Native status/inspect readback is blocked by sandboxed socket permissions."
+    }
+  ],
+  "steps": [
+    {
+      "claim": "traceability",
+      "command": "git rev-parse HEAD",
+      "duration_s": 0.019,
+      "errors": [],
+      "exit_code": 0,
+      "label": "Record git commit",
+      "ok": true,
+      "required": false,
+      "stderr_path": "artifacts/workflow/release_hardening/evidence/20260409T163815Z/00_git_head.stderr.txt",
+      "stdout_path": "artifacts/workflow/release_hardening/evidence/20260409T163815Z/00_git_head.stdout.txt",
+      "step_id": "git_head",
+      "warnings": []
+    },
+    {
+      "claim": "traceability",
+      "command": "git status --short",
+      "duration_s": 0.04,
+      "errors": [],
+      "exit_code": 0,
+      "label": "Record git status",
+      "ok": true,
+      "required": false,
+      "stderr_path": "artifacts/workflow/release_hardening/evidence/20260409T163815Z/01_git_status.stderr.txt",
+      "stdout_path": "artifacts/workflow/release_hardening/evidence/20260409T163815Z/01_git_status.stdout.txt",
+      "step_id": "git_status",
+      "warnings": []
+    },
+    {
+      "claim": "health_governance",
+      "command": "./scripts/dag-ctl doctor --json",
+      "duration_s": 1.314,
+      "errors": [],
+      "exit_code": 0,
+      "label": "Read runtime health proof",
+      "ok": true,
+      "required": true,
+      "stderr_path": "artifacts/workflow/release_hardening/evidence/20260409T163815Z/02_dag_ctl_doctor.stderr.txt",
+      "stdout_path": "artifacts/workflow/release_hardening/evidence/20260409T163815Z/02_dag_ctl_doctor.stdout.json",
+      "step_id": "dag_ctl_doctor",
+      "warnings": []
+    },
+    {
+      "claim": "frontdoor_contract",
+      "command": "./scripts/test.sh selftest",
+      "duration_s": 1.542,
+      "errors": [],
+      "exit_code": 0,
+      "label": "Run test frontdoor selftest",
+      "ok": true,
+      "required": true,
+      "stderr_path": "artifacts/workflow/release_hardening/evidence/20260409T163815Z/03_test_selftest.stderr.txt",
+      "stdout_path": "artifacts/workflow/release_hardening/evidence/20260409T163815Z/03_test_selftest.stdout.json",
+      "step_id": "test_selftest",
+      "warnings": []
+    },
+    {
+      "claim": "frontdoor_contract",
+      "command": "./scripts/test.sh suite list",
+      "duration_s": 0.184,
+      "errors": [],
+      "exit_code": 0,
+      "label": "List supported test suites",
+      "ok": true,
+      "required": true,
+      "stderr_path": "artifacts/workflow/release_hardening/evidence/20260409T163815Z/04_test_suite_list.stderr.txt",
+      "stdout_path": "artifacts/workflow/release_hardening/evidence/20260409T163815Z/04_test_suite_list.stdout.json",
+      "step_id": "test_suite_list",
+      "warnings": []
+    },
+    {
+      "claim": "frontdoor_contract",
+      "command": "./scripts/test.sh suite focus workflow_first_slice",
+      "duration_s": 0.419,
+      "errors": [],
+      "exit_code": 0,
+      "label": "Focus workflow_first_slice suite",
+      "ok": true,
+      "required": true,
+      "stderr_path": "artifacts/workflow/release_hardening/evidence/20260409T163815Z/05_test_suite_focus.stderr.txt",
+      "stdout_path": "artifacts/workflow/release_hardening/evidence/20260409T163815Z/05_test_suite_focus.stdout.json",
+      "step_id": "test_suite_focus",
+      "warnings": []
+    },
+    {
+      "claim": "frontdoor_contract",
+      "command": "./scripts/test.sh plan artifacts/workflow/release_hardening/release_proof_and_public_naming.queue.json",
+      "duration_s": 0.175,
+      "errors": [],
+      "exit_code": 0,
+      "label": "Plan release proof queue coverage",
+      "ok": true,
+      "required": true,
+      "stderr_path": "artifacts/workflow/release_hardening/evidence/20260409T163815Z/06_test_plan.stderr.txt",
+      "stdout_path": "artifacts/workflow/release_hardening/evidence/20260409T163815Z/06_test_plan.stdout.json",
+      "step_id": "test_plan",
+      "warnings": []
+    },
+    {
+      "claim": "frontdoor_contract",
+      "command": "./scripts/test.sh check-affected artifacts/workflow/release_hardening/release_proof_and_public_naming.queue.json",
+      "duration_s": 0.155,
+      "errors": [],
+      "exit_code": 0,
+      "label": "Check affected suites for release proof queue",
+      "ok": true,
+      "required": true,
+      "stderr_path": "artifacts/workflow/release_hardening/evidence/20260409T163815Z/07_test_check_affected.stderr.txt",
+      "stdout_path": "artifacts/workflow/release_hardening/evidence/20260409T163815Z/07_test_check_affected.stdout.json",
+      "step_id": "test_check_affected",
+      "warnings": []
+    },
+    {
+      "claim": "frontdoor_contract",
+      "command": "./scripts/test.sh validate artifacts/workflow/release_hardening/release_proof_and_public_naming.queue.json",
+      "duration_s": 1.314,
+      "errors": [],
+      "exit_code": 0,
+      "label": "Validate release proof queue",
+      "ok": true,
+      "required": true,
+      "stderr_path": "artifacts/workflow/release_hardening/evidence/20260409T163815Z/08_test_validate.stderr.txt",
+      "stdout_path": "artifacts/workflow/release_hardening/evidence/20260409T163815Z/08_test_validate.stdout.json",
+      "step_id": "test_validate",
+      "warnings": [
+        "workflow spec validated, but agent resolution was blocked by the sandbox permission surface"
+      ]
+    },
+    {
+      "claim": "native_contract",
+      "command": "./scripts/native-primary.sh",
+      "duration_s": 1.856,
+      "errors": [],
+      "exit_code": 0,
+      "label": "Read repo-local native instance contract",
+      "ok": true,
+      "required": true,
+      "stderr_path": "artifacts/workflow/release_hardening/evidence/20260409T163815Z/09_native_primary_instance.stderr.txt",
+      "stdout_path": "artifacts/workflow/release_hardening/evidence/20260409T163815Z/09_native_primary_instance.stdout.json",
+      "step_id": "native_primary_instance",
+      "warnings": []
+    },
+    {
+      "claim": "proof_slice",
+      "command": "/opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/integration/test_repo_local_primary_operator_entrypoint.py' 'Code&DBs/Workflow/tests/integration/test_bounded_native_primary_proof.py' 'Code&DBs/Workflow/tests/integration/test_native_default_parallel_proof.py' 'Code&DBs/Workflow/tests/integration/test_native_frontdoor.py' 'Code&DBs/Workflow/tests/integration/test_native_operator_surface_consolidation.py' 'Code&DBs/Workflow/tests/unit/test_dependency_truth_surfaces.py' 'Code&DBs/Workflow/tests/unit/test_control_commands.py'",
+      "duration_s": 7.28,
+      "errors": [],
+      "exit_code": 0,
+      "label": "Run bounded release proof test slice",
+      "ok": true,
+      "required": true,
+      "stderr_path": "artifacts/workflow/release_hardening/evidence/20260409T163815Z/10_release_pytest_slice.stderr.txt",
+      "stdout_path": "artifacts/workflow/release_hardening/evidence/20260409T163815Z/10_release_pytest_slice.stdout.txt",
+      "step_id": "release_pytest_slice",
+      "warnings": []
+    },
+    {
+      "claim": "persisted_run_truth",
+      "command": "/opt/homebrew/bin/python3 -c 'from surfaces.cli.main import main; import sys; raise SystemExit(main(sys.argv[1:]))' native-operator status run:workflow.native-self-hosted-smoke:09fb04b8da790549",
+      "duration_s": 1.424,
+      "errors": [
+        "command exited with code 1"
+      ],
+      "exit_code": 1,
+      "label": "Read native status for the doctor smoke run",
+      "ok": false,
+      "required": false,
+      "stderr_path": "artifacts/workflow/release_hardening/evidence/20260409T163815Z/11_native_status_smoke_run.stderr.txt",
+      "stdout_path": "artifacts/workflow/release_hardening/evidence/20260409T163815Z/11_native_status_smoke_run.stdout.json",
+      "step_id": "native_status_smoke_run",
+      "warnings": []
+    },
+    {
+      "claim": "persisted_run_truth",
+      "command": "/opt/homebrew/bin/python3 -c 'from surfaces.cli.main import main; import sys; raise SystemExit(main(sys.argv[1:]))' native-operator inspect run:workflow.native-self-hosted-smoke:09fb04b8da790549",
+      "duration_s": 1.002,
+      "errors": [
+        "command exited with code 1"
+      ],
+      "exit_code": 1,
+      "label": "Render inspect view for the doctor smoke run",
+      "ok": false,
+      "required": false,
+      "stderr_path": "artifacts/workflow/release_hardening/evidence/20260409T163815Z/12_native_inspect_smoke_run.stderr.txt",
+      "stdout_path": "artifacts/workflow/release_hardening/evidence/20260409T163815Z/12_native_inspect_smoke_run.stdout.txt",
+      "step_id": "native_inspect_smoke_run",
+      "warnings": []
+    }
+  ]
+}

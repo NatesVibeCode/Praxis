@@ -1,0 +1,23 @@
+{
+  "name": "debate_ui_architecture",
+  "queue_id": "debate_ui_001",
+  "phase": "debate",
+  "outcome_goal": "Three frontier models independently explore the UI architecture space for a self-configuring app builder",
+  "jobs": [
+    {
+      "label": "debate_opus46_open",
+      "agent": "anthropic/claude-opus-4-6",
+      "prompt": "We are building a self-configuring app builder. The platform has 62 Postgres tables (workflow engine, operator control, provider registry, model profiles, gates, promotions), 21 MCP tools, and a proven dynamic UI shell prototype (React + Vite with a World reactive store, PrimitiveRenderer, SlotLayout, and ~25 registered UI primitives). The vision is: AI generates initial configuration connecting workflow primitives to UI primitives, everything is discoverable via drag-and-drop and autofill, and agentic workflows exist to serve user outcomes rather than being the product themselves.\n\nWhat are we not seeing? What architectural patterns from other domains should we be studying? Where will this break first and what would you build to prevent that? Think broadly \u2014 consider game engines, ERP systems, spreadsheet paradigms, no-code tools, IDE plugin systems, whatever is relevant. No constraints on format \u2014 just think deeply and tell us what matters."
+    },
+    {
+      "label": "debate_gemini31_open",
+      "agent": "openai/gpt-5.4",
+      "prompt": "We are building a self-configuring app builder. The platform has 62 Postgres tables (workflow engine, operator control, provider registry, model profiles, gates, promotions), 21 MCP tools, and a proven dynamic UI shell prototype (React + Vite with a World reactive store, PrimitiveRenderer, SlotLayout, and ~25 registered UI primitives). The vision is: AI generates initial configuration connecting workflow primitives to UI primitives, everything is discoverable via drag-and-drop and autofill, and agentic workflows exist to serve user outcomes rather than being the product themselves.\n\nWhat would you build first and why? What would you explicitly NOT build? Where are the false economies \u2014 things that look like shortcuts but create debt? What can we learn from systems that tried this before us and what happened to them? Think freely \u2014 no format constraints."
+    },
+    {
+      "label": "debate_gpt54_open",
+      "agent": "anthropic/claude-sonnet-4-6",
+      "prompt": "We are building a self-configuring app builder. The platform has 62 Postgres tables (workflow engine, operator control, provider registry, model profiles, gates, promotions), 21 MCP tools, and a proven dynamic UI shell prototype (React + Vite with a World reactive store, PrimitiveRenderer, SlotLayout, and ~25 registered UI primitives). The vision is: AI generates initial configuration connecting workflow primitives to UI primitives, everything is discoverable via drag-and-drop and autofill, and agentic workflows exist to serve user outcomes rather than being the product themselves.\n\nIf you had to mass this down to the smallest possible kernel that proves the concept works \u2014 what is it? What is the one interaction that, if it works, means the whole vision is viable? And what is the one failure mode that, if it happens, means the architecture is wrong? Think from first principles."
+    }
+  ]
+}

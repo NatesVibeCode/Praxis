@@ -1,0 +1,79 @@
+{
+  "ok": true,
+  "command": "./scripts/test.sh selftest",
+  "duration_s": 1.494,
+  "results": {
+    "suite_registry": {
+      "current_focus": "workflow_first_slice",
+      "suites": [
+        {
+          "name": "workflow_first_slice",
+          "description": "First runnable slice covering workflow front-door validation and the vertical-slice contract checks.",
+          "paths": [
+            "Code&DBs/Workflow/tests/contracts/test_workflow_intake_contract.py",
+            "Code&DBs/Workflow/tests/contracts/test_inspect_replay_contracts.py",
+            "Code&DBs/Workflow/tests/contracts/test_deterministic_task_adapter_contract.py",
+            "Code&DBs/Workflow/tests/contracts/test_evidence_contracts.py",
+            "Code&DBs/Workflow/tests/integration/test_first_slice_end_to_end.py",
+            "Code&DBs/Workflow/tests/integration/test_workflow_intake_slice.py",
+            "Code&DBs/Workflow/tests/integration/test_inspect_and_replay_slice.py",
+            "Code&DBs/Workflow/tests/integration/test_cli_inspect_replay.py",
+            "Code&DBs/Workflow/tests/integration/test_native_frontdoor.py",
+            "Code&DBs/Workflow/tests/integration/test_repo_local_primary_operator_entrypoint.py",
+            "Code&DBs/Workflow/tests/unit/test_workflow_cli_validate.py",
+            "Code&DBs/Workflow/tests/unit/test_workflow_cli_run.py"
+          ],
+          "focused": true,
+          "pytest_command": "PYTHONPATH='/Users/nate/Praxis/Code&DBs/Workflow' /opt/homebrew/opt/python@3.14/bin/python3.14 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/contracts/test_workflow_intake_contract.py' 'Code&DBs/Workflow/tests/contracts/test_inspect_replay_contracts.py' 'Code&DBs/Workflow/tests/contracts/test_deterministic_task_adapter_contract.py' 'Code&DBs/Workflow/tests/contracts/test_evidence_contracts.py' 'Code&DBs/Workflow/tests/integration/test_first_slice_end_to_end.py' 'Code&DBs/Workflow/tests/integration/test_workflow_intake_slice.py' 'Code&DBs/Workflow/tests/integration/test_inspect_and_replay_slice.py' 'Code&DBs/Workflow/tests/integration/test_cli_inspect_replay.py' 'Code&DBs/Workflow/tests/integration/test_native_frontdoor.py' 'Code&DBs/Workflow/tests/integration/test_repo_local_primary_operator_entrypoint.py' 'Code&DBs/Workflow/tests/unit/test_workflow_cli_validate.py' 'Code&DBs/Workflow/tests/unit/test_workflow_cli_run.py'"
+        },
+        {
+          "name": "unit",
+          "description": "Fast module, policy, and validator tests.",
+          "paths": [
+            "Code&DBs/Workflow/tests/unit"
+          ],
+          "focused": false,
+          "pytest_command": "PYTHONPATH='/Users/nate/Praxis/Code&DBs/Workflow' /opt/homebrew/opt/python@3.14/bin/python3.14 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit'"
+        },
+        {
+          "name": "integration",
+          "description": "End-to-end workflow, persistence, replay, and surface interaction tests.",
+          "paths": [
+            "Code&DBs/Workflow/tests/integration"
+          ],
+          "focused": false,
+          "pytest_command": "PYTHONPATH='/Users/nate/Praxis/Code&DBs/Workflow' /opt/homebrew/opt/python@3.14/bin/python3.14 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/integration'"
+        },
+        {
+          "name": "contracts",
+          "description": "Contract tests that prove the boundary envelopes and replay rules.",
+          "paths": [
+            "Code&DBs/Workflow/tests/contracts"
+          ],
+          "focused": false,
+          "pytest_command": "PYTHONPATH='/Users/nate/Praxis/Code&DBs/Workflow' /opt/homebrew/opt/python@3.14/bin/python3.14 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/contracts'"
+        },
+        {
+          "name": "all",
+          "description": "The whole workflow test tree.",
+          "paths": [
+            "Code&DBs/Workflow/tests"
+          ],
+          "focused": false,
+          "pytest_command": "PYTHONPATH='/Users/nate/Praxis/Code&DBs/Workflow' /opt/homebrew/opt/python@3.14/bin/python3.14 -m pytest --noconftest -q 'Code&DBs/Workflow/tests'"
+        }
+      ]
+    },
+    "pytest_collection": {
+      "command": "PYTHONPATH='/Users/nate/Praxis/Code&DBs/Workflow' /opt/homebrew/opt/python@3.14/bin/python3.14 -m pytest --noconftest -q --collect-only 'Code&DBs/Workflow/tests/unit/test_workflow_cli_validate.py' 'Code&DBs/Workflow/tests/unit/test_workflow_cli_run.py'",
+      "run": {
+        "duration_s": 1.493,
+        "returncode": 0,
+        "stdout": "tests/unit/test_workflow_cli_validate.py::test_cmd_validate_returns_error_when_agent_not_in_postgres_registry\ntests/unit/test_workflow_cli_validate.py::test_cmd_validate_passes_when_all_agents_are_known\ntests/unit/test_workflow_cli_run.py::test_cmd_run_writes_async_result_file\n\n3 tests collected in 0.14s\n",
+        "stderr": ""
+      }
+    }
+  },
+  "errors": [],
+  "warnings": []
+}

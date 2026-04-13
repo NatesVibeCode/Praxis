@@ -20,6 +20,16 @@ from .runtime_context import (
 )
 from .subsystems import _subs
 
+_EMBEDDING_PREWARM_TOOLS = frozenset(
+    {
+        "praxis_discover",
+        "praxis_recall",
+        "praxis_intent_match",
+        "praxis_query",
+        "praxis_research",
+    }
+)
+
 
 @dataclass(frozen=True, slots=True)
 class ToolInvocationError(RuntimeError):
@@ -111,6 +121,9 @@ def invoke_tool(
                 reason_code="workflow_mcp.token_required",
             )
 
+    if canonical_name in _EMBEDDING_PREWARM_TOOLS:
+        _maybe_start_embedding_prewarm()
+
     handler, _ = resolve_tool_entry(canonical_name)
     call_context = _context_manager_for_claims(claims)
     try:
@@ -140,6 +153,22 @@ def _context_manager_for_claims(claims: dict[str, Any] | None):
         allowed_tools=claims.get("allowed_tools") or [],
         expires_at=int(claims.get("exp") or 0),
     )
+
+
+def _maybe_start_embedding_prewarm() -> None:
+    try:
+        from runtime.embedding_service import (
+            EmbeddingService,
+            resolve_embedding_runtime_authority,
+        )
+
+        EmbeddingService.start_background_prewarm(
+            resolve_embedding_runtime_authority().model_name
+        )
+    except Exception:
+        # Tool execution still works if prewarm cannot be scheduled; this is
+        # only a latency optimization for embedding-backed read paths.
+        return
 
 
 def _call_handler(

@@ -1,0 +1,13 @@
+{
+  "name": "cleanup_phase7_artifact_hygiene",
+  "queue_id": "cleanup_phase7_001",
+  "phase": "cleanup",
+  "outcome_goal": "Implement artifact rotation script and clean up empty directories",
+  "jobs": [
+    {
+      "label": "p7a_artifact_rotation",
+      "agent": "auto/build",
+      "prompt": "Create an artifact rotation script and clean up stale artifacts.\n\nYou are working in /Users/nate/Praxis.\n\n## Task 1: Create rotation script\n\nCreate `scripts/artifact-rotate.sh` (executable) that:\n\n1. Archives dispatch receipts older than 14 days:\n   - Move files from `artifacts/dispatch_receipts/` to `artifacts/archive/receipts/YYYY-MM/`\n   - Only move files whose filename timestamp is older than 14 days\n   - Filename format: `YYYYMMDDTHHMMSS_hash_status.json`\n\n2. Archives dispatch outputs older than 14 days:\n   - Move files from `artifacts/dispatch_outputs/` to `artifacts/archive/outputs/YYYY-MM/`\n   - Same timestamp-based logic\n\n3. Rotates heartbeat telemetry:\n   - Delete heartbeat files older than 7 days from `artifacts/heartbeat/`\n\n4. Cleans empty directories:\n   - Remove `artifacts/runtime_topology/` if empty\n   - Remove `artifacts/session_carry/` if empty\n\n5. Reports what was moved/deleted:\n   - Print summary: `Archived N receipts, N outputs. Deleted N heartbeat files. Cleaned N empty dirs.`\n\nThe script should:\n- Use bash, be POSIX-compatible where possible\n- Use `date` command for date math (macOS compatible: use `-v-14d` for date subtraction)\n- Be idempotent (safe to run repeatedly)\n- Create archive directories as needed\n- NOT delete anything from `artifacts/dispatch/` (those are active specs)\n\nMake it executable: `chmod +x scripts/artifact-rotate.sh`\n\n## Task 2: Run the script\n\nExecute the script to clean up current artifacts. Report what was archived/deleted."
+    }
+  ]
+}

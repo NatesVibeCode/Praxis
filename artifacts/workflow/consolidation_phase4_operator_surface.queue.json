@@ -1,0 +1,44 @@
+{
+  "name": "consolidation_phase4_operator_surface",
+  "queue_id": "consol_p4_001",
+  "phase": "build",
+  "outcome_goal": "Add cancel/inspect/retry MCP actions, per-run cost aggregation, and LISTEN/NOTIFY wiring",
+  "jobs": [
+    {
+      "label": "cancel_action",
+      "agent": "auto/build",
+      "prompt": "Add 'cancel' action to the MCP dispatch tool.\n\nRead first:\n- Code&DBs/Workflow/runtime/unified_dispatch.py\n- Code&DBs/Workflow/surfaces/mcp/tools/workflow.py\n\n1. Add cancel_run() to unified_dispatch.py:\n\ndef cancel_run(conn, run_id: str) -> dict:\n    # Cancel all non-terminal jobs in the run\n    rows = conn.execute(\n        \"\"\"UPDATE workflow_jobs SET status = 'cancelled', finished_at = now()\n           WHERE run_id = $1 AND status IN ('pending', 'ready', 'claimed')\n           RETURNING id, label\"\"\",\n        run_id,\n    )\n    cancelled = [dict(r) for r in (rows or [])]\n    # Update run status\n    if cancelled:\n        conn.execute(\n            \"\"\"UPDATE workflow_runs SET status = 'cancelled', finished_at = now(),\n                      terminal_reason = $2\n               WHERE run_id = $1 AND status IN ('pending', 'running')\"\"\",\n            run_id, f'{len(cancelled)} jobs cancelled',\n        )\n    return {'run_id': run_id, 'cancelled_jobs': len(cancelled), 'labels': [r['label'] for r in cancelled]}\n\n2. Wire in dispatch.py: Add an action=='cancel' branch that requires job_id param and calls cancel_run(pg, job_id).",
+      "scope": {"write": ["Code&DBs/Workflow/runtime/unified_dispatch.py", "Code&DBs/Workflow/surfaces/mcp/tools/workflow.py"]}
+    },
+    {
+      "label": "inspect_action",
+      "agent": "auto/build",
+      "prompt": "Add 'inspect' action to the MCP dispatch tool for deep job inspection.\n\nRead first:\n- Code&DBs/Workflow/runtime/unified_dispatch.py\n- Code&DBs/Workflow/surfaces/mcp/tools/workflow.py\n\n1. Add inspect_job() to unified_dispatch.py:\n\ndef inspect_job(conn, run_id: str, label: str | None = None) -> dict:\n    if label:\n        rows = conn.execute(\n            'SELECT * FROM workflow_jobs WHERE run_id = $1 AND label = $2', run_id, label)\n    else:\n        rows = conn.execute(\n            'SELECT * FROM workflow_jobs WHERE run_id = $1 ORDER BY created_at', run_id)\n    if not rows:\n        return {'error': 'not_found'}\n    jobs = []\n    for r in rows:\n        j = dict(r)\n        # Add computed heartbeat freshness\n        if j.get('heartbeat_at'):\n            from datetime import datetime, timezone\n            age = (datetime.now(timezone.utc) - j['heartbeat_at']).total_seconds()\n            j['heartbeat_age_seconds'] = round(age, 1)\n            j['heartbeat_fresh'] = age < 60\n        # Serialize timestamps\n        for k in ('created_at','ready_at','claimed_at','started_at','finished_at','heartbeat_at','next_retry_at'):\n            if j.get(k):\n                j[k] = j[k].isoformat()\n        jobs.append(j)\n    return {'run_id': run_id, 'jobs': jobs}\n\n2. Wire in dispatch.py: action=='inspect' with job_id (required) and optional label param.",
+      "scope": {"write": ["Code&DBs/Workflow/runtime/unified_dispatch.py", "Code&DBs/Workflow/surfaces/mcp/tools/workflow.py"]}
+    },
+    {
+      "label": "retry_single_action",
+      "agent": "auto/build",
+      "prompt": "Add 'retry' action to the MCP dispatch tool for re-queuing a single failed job.\n\nRead first:\n- Code&DBs/Workflow/runtime/unified_dispatch.py\n- Code&DBs/Workflow/surfaces/mcp/tools/workflow.py\n\n1. Add retry_job() to unified_dispatch.py:\n\ndef retry_job(conn, run_id: str, label: str) -> dict:\n    rows = conn.execute(\n        \"\"\"UPDATE workflow_jobs\n           SET status = 'ready', ready_at = now(),\n               last_error_code = NULL, claimed_by = NULL, claimed_at = NULL,\n               finished_at = NULL, heartbeat_at = NULL, exit_code = NULL,\n               stdout_preview = NULL, receipt_id = NULL, output_path = NULL,\n               duration_ms = 0, token_input = 0, token_output = 0, cost_usd = 0\n           WHERE run_id = $1 AND label = $2 AND status IN ('failed', 'dead_letter')\n           RETURNING id, label, attempt\"\"\",\n        run_id, label,\n    )\n    if not rows:\n        return {'error': f'No failed job found: {run_id}/{label}'}\n    job = dict(rows[0])\n    # Reset run back to running if it was terminal\n    conn.execute(\n        \"\"\"UPDATE workflow_runs SET status = 'running', finished_at = NULL\n           WHERE run_id = $1 AND status IN ('failed', 'cancelled')\"\"\",\n        run_id,\n    )\n    return {'run_id': run_id, 'label': label, 'status': 'requeued', 'attempt': job['attempt']}\n\n2. Wire in dispatch.py: action=='retry' requires job_id and label params.",
+      "scope": {"write": ["Code&DBs/Workflow/runtime/unified_dispatch.py", "Code&DBs/Workflow/surfaces/mcp/tools/workflow.py"]}
+    },
+    {
+      "label": "per_run_cost",
+      "agent": "auto/build",
+      "prompt": "Add per-run cost aggregation to the status response.\n\nRead first:\n- Code&DBs/Workflow/runtime/unified_dispatch.py (find get_run_status function)\n- Code&DBs/Workflow/surfaces/mcp/tools/workflow.py (find status action)\n\n1. In unified_dispatch.py get_run_status(), add an aggregation query:\n\n    agg = conn.execute(\n        'SELECT COALESCE(SUM(cost_usd),0) as total_cost, COALESCE(SUM(token_input),0) as total_tokens_in, COALESCE(SUM(token_output),0) as total_tokens_out, COALESCE(SUM(duration_ms),0) as total_duration_ms FROM workflow_jobs WHERE run_id = $1',\n        run_id,\n    )\n    if agg:\n        run_row['total_cost_usd'] = float(agg[0]['total_cost'])\n        run_row['total_tokens_in'] = int(agg[0]['total_tokens_in'])\n        run_row['total_tokens_out'] = int(agg[0]['total_tokens_out'])\n        run_row['total_duration_ms'] = int(agg[0]['total_duration_ms'])\n\n2. In dispatch.py status response, pass through these new fields from status_data.",
+      "scope": {"write": ["Code&DBs/Workflow/runtime/unified_dispatch.py", "Code&DBs/Workflow/surfaces/mcp/tools/workflow.py"]}
+    },
+    {
+      "label": "wire_listen_notify",
+      "agent": "auto/build",
+      "prompt": "Wire LISTEN/NOTIFY in the unified dispatch worker for faster wakeup.\n\nRead first:\n- Code&DBs/Workflow/runtime/unified_dispatch.py (find run_worker_loop function)\n- Code&DBs/Workflow/storage/postgres/connection.py (understand SyncPostgresConnection)\n\nThe trigger notify_job_ready() already exists in migration 028 and fires pg_notify('job_ready', ...) on INSERT/UPDATE to workflow_jobs.\n\nIn run_worker_loop():\n\n1. At the top of the function, try to issue LISTEN commands:\n   try:\n       conn.execute(\"LISTEN job_ready\")\n       conn.execute(\"LISTEN run_complete\")\n       logger.info('LISTEN registered for job_ready and run_complete')\n   except Exception as exc:\n       logger.warning('LISTEN registration failed (polling fallback): %s', exc)\n\n2. Implement adaptive poll interval:\n   - When active_futures has running jobs: sleep 0.5s (check completions frequently)\n   - When no active work and no jobs claimed: sleep the full poll_interval (2s default)\n   - Add a comment: '# LISTEN/NOTIFY provides instant wakeup via trigger; polling is the fallback'\n\nNote: SyncPostgresConnection wraps asyncpg which does support LISTEN, but the sync wrapper may not surface notifications. The LISTEN commands register interest; even if we can't consume notifications directly, Postgres still receives them and the adaptive polling covers the gap. Add a TODO comment about implementing proper async LISTEN when the sync wrapper is upgraded.",
+      "scope": {"write": ["Code&DBs/Workflow/runtime/unified_dispatch.py"]}
+    },
+    {
+      "label": "phase4_verify",
+      "agent": "auto/review",
+      "depends_on": ["cancel_action", "inspect_action", "retry_single_action", "per_run_cost", "wire_listen_notify"],
+      "prompt": "Review all Phase 4 operator surface additions.\n\nRead:\n- Code&DBs/Workflow/runtime/unified_dispatch.py\n- Code&DBs/Workflow/surfaces/mcp/tools/workflow.py\n\nVerify:\n1. cancel_run(): cancels pending/ready/claimed jobs, updates workflow_runs, returns count\n2. inspect_job(): returns full rows with heartbeat freshness, handles not_found\n3. retry_job(): re-queues single failed job, resets run to running, clears old state\n4. get_run_status(): includes total_cost_usd, total_tokens_in, total_tokens_out, total_duration_ms\n5. LISTEN commands issued at worker startup\n6. Adaptive poll interval: 0.5s when active, 2s when idle\n7. All new actions properly routed in tool_dag_dispatch() with correct param handling\n8. Parameterized queries everywhere (no SQL injection)\n9. Consistent error handling and response format\n10. No duplicate function definitions or merge conflicts from parallel jobs\n\nIf Phase 4 jobs wrote conflicting code to the same functions, identify the conflicts and describe how to resolve them."
+    }
+  ]
+}

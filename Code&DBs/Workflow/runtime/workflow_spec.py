@@ -4,11 +4,20 @@ This module owns both workflow-spec contracts used in the repo today:
 
 1. Queue specs submitted through workflow command surfaces.
 2. Single-run workflow specs consumed by the deterministic runtime.
+
+Queue specs come in two formats:
+
+- **New authoring format**: requires ``name``, ``outcome_goal``,
+  ``task_type``, ``authoring_contract``, ``acceptance_contract`` at spec
+  level.  Prompts, labels, scope are auto-derived.
+- **Legacy format**: requires ``name`` and ``jobs`` with per-job
+  ``prompt``.  Still supported but deprecated.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -21,6 +30,33 @@ from runtime.workflow_graph_compiler import (
 
 if TYPE_CHECKING:
     from .workflow import WorkflowSpec as RuntimeWorkflowSpec
+
+_log = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# New authoring format field sets
+# ---------------------------------------------------------------------------
+_AUTHORING_REQUIRED = frozenset({"name", "outcome_goal", "task_type", "authoring_contract", "acceptance_contract"})
+_AUTHORING_OPTIONAL_SPEC = frozenset({
+    "anti_requirements", "verify_refs",
+    # Single-job shorthand fields (promote to spec level)
+    "agent", "tier", "capabilities", "allowed_tools", "context_sections", "submission_required",
+})
+_AUTHORING_JOB_FIELDS = frozenset({
+    "task_type", "authoring_contract", "acceptance_contract", "sprint",
+    "agent", "tier", "capabilities", "replicate", "replicate_with",
+    "allowed_tools", "verify_refs", "context_sections", "submission_required",
+})
+# Fields removed from authoring — rejected with clear messages
+_REMOVED_AUTHORING_FIELDS = frozenset({
+    "prompt", "label", "output_schema", "scope_read", "scope_write", "read", "write",
+    "provider_slug", "model_slug", "adapter_type", "persist", "use_cache",
+    "timeout", "max_tokens", "temperature", "max_retries",
+    "definition_revision", "plan_revision", "packet_provenance",
+    "workspace_ref", "runtime_profile_ref",
+    "skip_auto_review", "reviews_workflow_id", "review_target_modules",
+    "system_prompt", "phase", "depends_on",
+})
 
 
 class WorkflowSpecError(ValueError):
@@ -37,6 +73,7 @@ class WorkflowSpec:
         workflow_id: str,
         phase: str,
         jobs: list[dict[str, Any]],
+        task_type: str = "",
         verify_refs: list[str] | None = None,
         outcome_goal: str,
         anti_requirements: list[str],
@@ -48,6 +85,7 @@ class WorkflowSpec:
         self.workflow_id = workflow_id
         self.phase = phase
         self.jobs = jobs
+        self.task_type = task_type
         self.verify_refs = verify_refs or []
         self.outcome_goal = outcome_goal
         self.anti_requirements = anti_requirements
@@ -64,6 +102,132 @@ class WorkflowSpec:
         if not isinstance(raw, dict):
             raise WorkflowSpecError(f"Spec file must contain a JSON object: {path}")
 
+        if _is_new_authoring_format(raw):
+            return cls._load_new_format(raw)
+
+        _log.debug("Loading spec in legacy format: %s", path)
+        return cls._load_legacy_format(raw)
+
+    # ------------------------------------------------------------------
+    # New authoring format
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def _load_new_format(cls, raw: dict[str, Any]) -> "WorkflowSpec":
+        from adapters.task_profiles import resolve_profile
+        from runtime.prompt_generation import generate_job_prompt
+
+        normalized = dict(raw)
+
+        # --- required spec fields ---
+        name = _require_string(normalized, "name")
+        outcome_goal = _require_string(normalized, "outcome_goal")
+        task_type = _require_string(normalized, "task_type")
+        authoring_contract = _require_dict(normalized, "authoring_contract")
+        acceptance_contract = _require_dict(normalized, "acceptance_contract")
+
+        anti_requirements = _as_string_list(normalized.get("anti_requirements"))
+        verify_refs = _as_string_list(normalized.get("verify_refs"))
+
+        profile = resolve_profile(task_type)
+
+        # --- build job list ---
+        if "jobs" in normalized:
+            raw_jobs = normalized["jobs"]
+            if not isinstance(raw_jobs, list) or len(raw_jobs) == 0:
+                raise WorkflowSpecError("'jobs' must be a non-empty list")
+            jobs: list[dict[str, Any]] = []
+            for index, item in enumerate(raw_jobs):
+                if not isinstance(item, dict):
+                    raise WorkflowSpecError(f"Job '{index}' must be an object")
+                jobs.append(dict(item))
+        else:
+            # Single-job shorthand: spec-level fields are the job
+            jobs = [{}]
+            # Promote single-job shorthand fields from spec level
+            for field in ("agent", "tier", "capabilities", "allowed_tools",
+                          "context_sections", "submission_required"):
+                if field in normalized:
+                    jobs[0][field] = normalized[field]
+
+        # --- enrich each job ---
+        for index, job in enumerate(jobs):
+            # Inherit task_type from spec unless overridden
+            job_task_type = str(job.get("task_type") or task_type).strip()
+            job_profile = resolve_profile(job_task_type) if job_task_type != task_type else profile
+
+            # Contract inheritance: full replace, not merge.
+            # If task_type overridden without contract override, try profile defaults first.
+            if "authoring_contract" not in job:
+                if job.get("task_type") and job_profile.default_authoring_contract:
+                    job["authoring_contract"] = job_profile.default_authoring_contract
+                else:
+                    job["authoring_contract"] = authoring_contract
+            if "acceptance_contract" not in job:
+                if job.get("task_type") and job_profile.default_acceptance_contract:
+                    job["acceptance_contract"] = job_profile.default_acceptance_contract
+                else:
+                    job["acceptance_contract"] = acceptance_contract
+
+            # Scope inference from task_type profile
+            scope = job.get("scope") or {}
+            if not isinstance(scope, dict):
+                scope = {}
+            if "read" not in scope and job_profile.default_scope_read:
+                scope["read"] = list(job_profile.default_scope_read)
+            if "write" not in scope and job_profile.default_scope_write:
+                scope["write"] = list(job_profile.default_scope_write)
+            if scope:
+                job["scope"] = scope
+
+            # Generate prompt
+            job["prompt"] = generate_job_prompt(
+                outcome_goal=outcome_goal,
+                task_type=job_task_type,
+                authoring_contract=job["authoring_contract"],
+                acceptance_contract=job["acceptance_contract"],
+                anti_requirements=anti_requirements,
+                scope_read=scope.get("read"),
+                scope_write=scope.get("write"),
+                verify_refs=_as_string_list(job.get("verify_refs")) or verify_refs,
+                system_prompt_hint=job_profile.system_prompt_hint,
+            )
+
+            # Auto-generate label
+            job["label"] = f"job_{index + 1}"
+
+            # Defaults
+            job["task_type"] = job_task_type
+            job.setdefault("agent", normalized.get("agent", "auto/build"))
+            if "system_prompt" not in job and job_profile.system_prompt_hint:
+                job["system_prompt"] = job_profile.system_prompt_hint
+
+        # --- ordering ---
+        jobs = _expand_replicate_jobs(jobs)
+        if any("sprint" in job for job in jobs):
+            jobs.sort(key=lambda j: j.get("sprint", 0))
+            _generate_sprint_dependencies(jobs)
+        elif len(jobs) > 1:
+            _generate_sequential_dependencies(jobs)
+
+        return cls(
+            name=name,
+            workflow_id=_auto_workflow_id(name),
+            phase="execute",
+            jobs=jobs,
+            task_type=task_type,
+            verify_refs=verify_refs,
+            outcome_goal=outcome_goal,
+            anti_requirements=anti_requirements,
+            raw=normalized,
+        )
+
+    # ------------------------------------------------------------------
+    # Legacy format (deprecated — still supported for existing specs)
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def _load_legacy_format(cls, raw: dict[str, Any]) -> "WorkflowSpec":
         normalized = dict(raw)
         if "workflow_id" not in normalized and "name" in normalized:
             normalized["workflow_id"] = _auto_workflow_id(normalized["name"])
@@ -131,8 +295,6 @@ class WorkflowSpec:
 
         if any("sprint" in job for job in normalized_jobs):
             normalized_jobs.sort(key=lambda job: job.get("sprint", 0))
-            # Auto-generate depends_on from sprint ordering:
-            # sprint N+1 jobs depend on all sprint N jobs
             _generate_sprint_dependencies(normalized_jobs)
 
         if "verify" in normalized:
@@ -156,6 +318,7 @@ class WorkflowSpec:
             "name": self.name,
             "workflow_id": self.workflow_id,
             "phase": self.phase,
+            "task_type": self.task_type,
             "job_count": len(self.jobs),
             "verify_count": len(self.verify_refs),
             "verify_ref_count": len(self.verify_refs),
@@ -165,6 +328,89 @@ class WorkflowSpec:
             "runtime_profile_ref": self.runtime_profile_ref,
             "job_labels": [job["label"] for job in self.jobs],
         }
+
+
+# ---------------------------------------------------------------------------
+# Format detection
+# ---------------------------------------------------------------------------
+
+def _is_new_authoring_format(raw: dict[str, Any]) -> bool:
+    """New format has all required authoring fields at spec level."""
+    return all(field in raw for field in _AUTHORING_REQUIRED)
+
+
+# ---------------------------------------------------------------------------
+# Helpers for new format
+# ---------------------------------------------------------------------------
+
+def _require_string(raw: dict[str, Any], field: str) -> str:
+    value = raw.get(field)
+    if not isinstance(value, str) or not value.strip():
+        raise WorkflowSpecError(f"'{field}' must be a non-empty string")
+    return value.strip()
+
+
+def _require_dict(raw: dict[str, Any], field: str) -> dict[str, Any]:
+    value = raw.get(field)
+    if not isinstance(value, dict):
+        raise WorkflowSpecError(f"'{field}' must be an object")
+    return value
+
+
+def _generate_sequential_dependencies(jobs: list[dict[str, Any]]) -> None:
+    """Array order = sequential: job[i+1] depends on job[i]."""
+    for i in range(1, len(jobs)):
+        if not jobs[i].get("depends_on"):
+            prev_label = jobs[i - 1].get("label")
+            if prev_label:
+                jobs[i]["depends_on"] = [prev_label]
+
+
+# ---------------------------------------------------------------------------
+# Authoring-format validation
+# ---------------------------------------------------------------------------
+
+def validate_authoring_spec(raw: dict[str, Any]) -> tuple[bool, list[str]]:
+    """Validate a raw dict as a new-format authoring spec."""
+    errors: list[str] = []
+
+    for field in sorted(_AUTHORING_REQUIRED):
+        if field not in raw:
+            errors.append(f"missing required field: {field}")
+
+    if "name" in raw and (not isinstance(raw["name"], str) or not raw["name"].strip()):
+        errors.append("name must be a non-empty string")
+    if "outcome_goal" in raw and (not isinstance(raw["outcome_goal"], str) or not raw["outcome_goal"].strip()):
+        errors.append("outcome_goal must be a non-empty string")
+    if "task_type" in raw and (not isinstance(raw["task_type"], str) or not raw["task_type"].strip()):
+        errors.append("task_type must be a non-empty string")
+
+    if "authoring_contract" in raw:
+        errors.extend(_validate_authoring_contract(raw["authoring_contract"]))
+    if "acceptance_contract" in raw:
+        errors.extend(_validate_acceptance_contract(raw["acceptance_contract"]))
+
+    if "jobs" in raw:
+        if not isinstance(raw["jobs"], list) or len(raw["jobs"]) == 0:
+            errors.append("'jobs' must be a non-empty list")
+        else:
+            for i, job in enumerate(raw["jobs"]):
+                if not isinstance(job, dict):
+                    errors.append(f"jobs[{i}] must be an object")
+                    continue
+                unknown_job = set(job.keys()) - _AUTHORING_JOB_FIELDS
+                removed_job = unknown_job & _REMOVED_AUTHORING_FIELDS
+                for key in sorted(removed_job):
+                    errors.append(f"jobs[{i}].{key}: removed from authoring schema (auto-derived at runtime)")
+                for key in sorted(unknown_job - removed_job):
+                    errors.append(f"jobs[{i}]: unknown field '{key}'")
+
+    # Reject removed fields at spec level
+    removed_at_spec = set(raw.keys()) & _REMOVED_AUTHORING_FIELDS
+    for key in sorted(removed_at_spec):
+        errors.append(f"'{key}' is removed from the authoring schema (auto-derived at runtime)")
+
+    return len(errors) == 0, errors
 
 
 def _generate_sprint_dependencies(jobs: list[dict[str, Any]]) -> None:
@@ -809,5 +1055,6 @@ __all__ = [
     "load_raw",
     "load_workflow_batch",
     "load_workflow_spec",
+    "validate_authoring_spec",
     "validate_workflow_spec",
 ]

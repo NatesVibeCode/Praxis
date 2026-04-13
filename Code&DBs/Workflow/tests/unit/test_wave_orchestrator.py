@@ -109,6 +109,27 @@ class TestNextRunnableJobs:
         orch.record_job_result("w1", "j1", succeeded=False)
         assert orch.next_runnable_jobs("w1") == []
 
+    def test_resolve_default_wave_id_prefers_current_wave(self):
+        orch = WaveOrchestrator("orch-9b")
+        orch.add_wave("w1", [{"label": "j1"}])
+        orch.start_wave("w1")
+
+        assert orch.resolve_default_wave_id(action="next") == "w1"
+
+    def test_resolve_default_wave_id_uses_only_wave_when_not_running(self):
+        orch = WaveOrchestrator("orch-9c")
+        orch.add_wave("w1", [{"label": "j1"}])
+
+        assert orch.resolve_default_wave_id(action="start") == "w1"
+
+    def test_resolve_default_wave_id_refuses_ambiguous_choice(self):
+        orch = WaveOrchestrator("orch-9d")
+        orch.add_wave("w1", [{"label": "j1"}])
+        orch.add_wave("w2", [{"label": "j2"}])
+
+        with pytest.raises(KeyError):
+            orch.resolve_default_wave_id(action="next")
+
 
 class TestGateVerdict:
     def test_gate_verdict_controls_wave_progression(self):
