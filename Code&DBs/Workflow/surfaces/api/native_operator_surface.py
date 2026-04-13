@@ -40,9 +40,9 @@ from authority.operator_control import (
     OperatorControlAuthority,
     load_operator_control_authority,
 )
-from registry.provider_fallback import (
-    ProviderRouteControlTower,
-    load_provider_route_control_tower_snapshot,
+from registry.provider_routing import (
+    ProviderRouteAuthority as ProviderRouteControlTower,
+    load_provider_route_authority_snapshot as load_provider_route_control_tower_snapshot,
 )
 from runtime._helpers import _dedupe
 from runtime.instance import NativeDagInstance, resolve_native_instance

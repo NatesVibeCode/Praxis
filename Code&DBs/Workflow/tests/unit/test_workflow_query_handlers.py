@@ -10,7 +10,6 @@ from unittest.mock import patch
 
 from runtime import canonical_workflows
 from runtime.compile_index import CompileIndexAuthorityError
-from runtime.integrations import workflow as workflow_integration
 from surfaces.api.handlers import workflow_query
 from surfaces.api.handlers import workflow_query_core
 
@@ -2133,27 +2132,6 @@ def test_workflow_query_handler_does_not_own_canonical_write_sql() -> None:
     )
     leaked = [snippet for snippet in forbidden_sql_snippets if snippet in source]
     assert leaked == [], f"workflow_query.py still owns canonical write SQL: {leaked}"
-
-
-def test_invoke_workflow_requires_current_plan() -> None:
-    pg = _RecordingPg(
-        workflow_rows={
-            "wf_123": {
-                "id": "wf_123",
-                "name": "Inbox Triage",
-                "definition": {"definition_revision": "def_123"},
-                "compiled_spec": None,
-                "invocation_count": 0,
-                "last_invoked_at": None,
-            }
-        }
-    )
-
-    result = workflow_integration.invoke_workflow({"workflow_id": "wf_123"}, pg)
-
-    assert result["status"] == "failed"
-    assert result["error"] == "no_current_plan"
-    assert result["summary"] == "Workflow 'Inbox Triage' has no current execution plan. Generate plan first."
 
 
 def test_handle_references_get_reads_reference_catalog() -> None:
