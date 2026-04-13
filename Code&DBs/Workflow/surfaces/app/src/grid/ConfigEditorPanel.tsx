@@ -143,6 +143,9 @@ const CHART_TYPE_KEYS = new Set(['chartType', 'type']);
 
 const DATA_SOURCES = [
   { value: 'platform-overview', label: 'Platform Overview' },
+  { value: 'observability/platform', label: 'Platform Observability' },
+  { value: 'observability/code-hotspots', label: 'Code Hotspots' },
+  { value: 'observability/bug-scoreboard', label: 'Bug Scoreboard' },
   { value: 'runs/recent', label: 'Recent Runs' },
   { value: 'leaderboard', label: 'Model Leaderboard' },
   { value: 'workflow-status', label: 'Workflow Status' },

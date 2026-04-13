@@ -432,6 +432,15 @@ def _build_job_execution_bundles(
             if isinstance(job.get("submission_required"), bool)
             else None,
             downstream_labels=downstream_by_label.get(label) or [],
+            output_schema=job.get("output_schema")
+            if isinstance(job.get("output_schema"), dict)
+            else None,
+            authoring_contract=job.get("authoring_contract")
+            if isinstance(job.get("authoring_contract"), dict)
+            else None,
+            acceptance_contract=job.get("acceptance_contract")
+            if isinstance(job.get("acceptance_contract"), dict)
+            else None,
         )
     return bundles
 
@@ -654,6 +663,15 @@ def _runtime_execution_bundle(
         if isinstance(source_job.get("submission_required"), bool)
         else None,
         downstream_labels=downstream_labels,
+        output_schema=source_job.get("output_schema")
+        if isinstance(source_job.get("output_schema"), dict)
+        else None,
+        authoring_contract=source_job.get("authoring_contract")
+        if isinstance(source_job.get("authoring_contract"), dict)
+        else None,
+        acceptance_contract=source_job.get("acceptance_contract")
+        if isinstance(source_job.get("acceptance_contract"), dict)
+        else None,
     )
 
 

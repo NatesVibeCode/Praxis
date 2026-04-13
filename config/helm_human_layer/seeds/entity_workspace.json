@@ -1,0 +1,82 @@
+{
+  "version": 4,
+  "kind": "helm_surface_bundle",
+  "title": "Entity Workspace",
+  "default_tab_id": "main",
+  "tabs": [
+    {
+      "id": "main",
+      "label": "Entities",
+      "surface_id": "main",
+      "source_option_ids": ["workspace_records", "connected_crm", "external_api"]
+    }
+  ],
+  "surfaces": {
+    "main": {
+      "id": "main",
+      "title": "Entities",
+      "kind": "quadrant_manifest",
+      "manifest": {
+        "version": 2,
+        "grid": "4x4",
+        "title": "Entity Workspace",
+        "quadrants": {
+          "A1": {
+            "module": "search-panel",
+            "span": "2x1",
+            "config": {
+              "placeholder": "Find records, entities, or artifacts"
+            }
+          },
+          "A3": {
+            "module": "data-table",
+            "span": "2x2",
+            "config": {
+              "objectType": "task",
+              "columns": []
+            }
+          },
+          "C1": {
+            "module": "key-value",
+            "span": "2x2",
+            "config": {
+              "title": "Selection Details",
+              "subscribeSelection": "task"
+            }
+          }
+        }
+      }
+    }
+  },
+  "source_options": {
+    "workspace_records": {
+      "id": "workspace_records",
+      "label": "Workspace Records",
+      "family": "workspace",
+      "kind": "object",
+      "availability": "ready",
+      "activation": "attach",
+      "description": "Attach local records from the workspace object store."
+    },
+    "connected_crm": {
+      "id": "connected_crm",
+      "label": "Connected CRM",
+      "family": "connected",
+      "kind": "integration",
+      "availability": "preview",
+      "activation": "open",
+      "description": "Preview connected CRM entities before wiring them into the surface."
+    },
+    "external_api": {
+      "id": "external_api",
+      "label": "External API",
+      "family": "external",
+      "kind": "api",
+      "availability": "setup_required",
+      "activation": "configure",
+      "setup_intent": "Set up an external entity API source for this workspace.",
+      "description": "Configure a third-party entity API before using it here."
+    }
+  },
+  "description": "Workspace seed for browsing and inspecting records with compact source pills."
+}

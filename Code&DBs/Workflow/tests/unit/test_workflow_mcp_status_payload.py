@@ -55,6 +55,7 @@ def test_run_status_payload_includes_submission_summary(monkeypatch) -> None:
         "summary": "sealed result",
         "measured_summary": {"create": 0, "update": 1, "delete": 0, "rename": 0, "total": 1},
         "comparison_status": "matched",
+        "integrity_status": "matched",
         "latest_review_decision": "approve",
     }
 

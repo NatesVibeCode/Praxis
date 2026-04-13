@@ -1,0 +1,16 @@
+{
+  "name": "praxis-cloudflare-sandbox-bridge",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@cloudflare/sandbox": "0.8.10"
+  },
+  "devDependencies": {
+    "wrangler": "4.82.1"
+  }
+}

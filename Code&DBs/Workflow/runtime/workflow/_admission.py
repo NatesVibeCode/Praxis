@@ -450,6 +450,11 @@ def _do_submit_workflow(
         depends_on = [dep for dep in job.get("depends_on", []) if dep not in replayed_labels]
         prompt_hash = hashlib.sha256(prompt.encode()).hexdigest()[:16]
 
+        # Step complexity — spec author declares; "low" triggers prefer_cost routing
+        complexity = str(job.get("complexity", "moderate")).strip().lower()
+        if complexity not in ("low", "moderate", "high"):
+            complexity = "moderate"
+
         # Integration metadata (for direct tool execution)
         integration_id = job.get("integration_id")
         integration_action = job.get("integration_action")
@@ -508,9 +513,9 @@ def _do_submit_workflow(
                 route_origin_slug, idempotency_key,
                 max_attempts, created_at,
                 integration_id, integration_action, integration_args, touch_keys,
-                dependency_threshold)
+                dependency_threshold, complexity)
                VALUES ($1, $2, 'dispatch', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-                       $15, $16, $17, $18::jsonb, $19::jsonb, $20)
+                       $15, $16, $17, $18::jsonb, $19::jsonb, $20, $21)
                ON CONFLICT (run_id, label) DO UPDATE SET status = EXCLUDED.status
                RETURNING id""",
             run_id, label, spec.phase, agent_slug,
@@ -525,6 +530,7 @@ def _do_submit_workflow(
             integration_args if integration_args else None,
             json.dumps(_derive_touch_keys(job)),
             dependency_threshold,
+            complexity,
         )
         job_id = rows[0]["id"]
         record_idempotency(conn, "workflow.run", ledger_idempotency_key, payload_hash, run_id=run_id)

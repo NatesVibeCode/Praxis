@@ -80,6 +80,7 @@ _WORKFLOW_MIGRATION_SEQUENCE = (
     "090_workflow_chain_cancellation_and_alignment.sql",
     "091_control_operator_frame_uniqueness.sql",
     "095_model_profile_auto_seed_trigger.sql",
+    "096_workflow_submission_acceptance.sql",
 )
 
 
@@ -436,6 +437,12 @@ _WORKFLOW_MIGRATION_EXPECTED_OBJECTS = {
         indexes=(
             "workflow_job_submissions_run_job_attempt_key",
             "workflow_job_submission_reviews_submission_reviewed_idx",
+        ),
+    ),
+    "096_workflow_submission_acceptance.sql": _expected_objects(
+        columns=(
+            "workflow_job_submissions.acceptance_status",
+            "workflow_job_submissions.acceptance_report",
         ),
     ),
     "012_task_type_route_eligibility.sql": _expected_objects(

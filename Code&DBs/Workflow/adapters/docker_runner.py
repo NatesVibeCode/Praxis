@@ -22,17 +22,22 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from runtime.docker_image_authority import DOCKER_IMAGE_ENV, resolve_docker_image
+
 if TYPE_CHECKING:
     from .deterministic import DeterministicExecutionControl
 
 
-_PRAXIS_DOCKER_IMAGE_ENV = "PRAXIS_DOCKER_IMAGE"
 _PRAXIS_DOCKER_MEMORY_ENV = "PRAXIS_DOCKER_MEMORY"
 _PRAXIS_DOCKER_CPUS_ENV = "PRAXIS_DOCKER_CPUS"
 
 
 def _docker_image() -> str:
-    return os.environ.get(_PRAXIS_DOCKER_IMAGE_ENV, "").strip() or "praxis-worker:latest"
+    image, _metadata = resolve_docker_image(
+        requested_image=None,
+        image_exists=_has_docker_image,
+    )
+    return image
 
 
 def _docker_memory() -> str:
@@ -157,13 +162,18 @@ def run_in_docker(
     cpus:
         CPU limit. Defaults to PRAXIS_DOCKER_CPUS env var.
     """
-    docker_image = image or _docker_image()
+    docker_image, image_meta = resolve_docker_image(
+        requested_image=image,
+        image_exists=_has_docker_image,
+    )
     docker_memory = memory or _docker_memory()
     docker_cpus = cpus or _docker_cpus()
     if not _has_docker_image(docker_image):
+        detail = str(image_meta.get("build_error") or "").strip()
         raise RuntimeError(
             f"Docker image {docker_image!r} is unavailable. Build it or set "
-            f"{_PRAXIS_DOCKER_IMAGE_ENV} before execution."
+            f"{DOCKER_IMAGE_ENV} before execution."
+            + (f" {detail}" if detail else "")
         )
 
     docker_cmd = [

@@ -5,6 +5,7 @@ The CLI is a parser and renderer. It does not own runtime truth.
 
 from __future__ import annotations
 
+import contextlib
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -45,6 +46,7 @@ from .commands.operate import (
     _config_command,
     _dashboard_command,
     _events_command,
+    _health_command,
     _health_map_command,
     _metrics_command,
     _notifications_command,
@@ -53,9 +55,14 @@ from .commands.operate import (
     _supervisor_command,
 )
 from .commands.query import (
+    _artifacts_command,
+    _bugs_command,
     _costs_command,
+    _discover_command,
     _fitness_command,
     _leaderboard_command,
+    _query_command,
+    _recall_command,
     _receipts_command,
     _reviews_command,
     _risk_command,
@@ -63,6 +70,7 @@ from .commands.query import (
     _trends_command,
     _trust_command,
 )
+from .commands.tools import _tools_command
 from .render import (
     render_graph_lineage,
     render_graph_topology,
@@ -143,9 +151,32 @@ class StdoutCommandHandler(Protocol):
         """Execute the command with stdout sink."""
 
 
+def _delegate_legacy_workflow_cli(
+    command_name: str,
+    args: list[str],
+    *,
+    stdout: TextIO,
+) -> int:
+    from . import workflow_cli as legacy_workflow_cli
+
+    original_argv = sys.argv
+    try:
+        sys.argv = ["workflow_cli", command_name, *args]
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stdout):
+            return legacy_workflow_cli.main()
+    finally:
+        sys.argv = original_argv
+
+
 _ARG_COMMANDS: dict[str, ArgsCommandHandler] = {
     "run": _run_command,
     "chain": _chain_command,
+    "query": _query_command,
+    "bugs": _bugs_command,
+    "recall": _recall_command,
+    "discover": _discover_command,
+    "artifacts": _artifacts_command,
+    "health": _health_command,
     "receipts": _receipts_command,
     "diagnose": _diagnose_command,
     "leaderboard": _leaderboard_command,
@@ -179,6 +210,11 @@ _ARG_COMMANDS: dict[str, ArgsCommandHandler] = {
     "github": _github_command,
     "api": _api_command,
     "supervisor": _supervisor_command,
+    "tools": _tools_command,
+    "generate": lambda args, *, stdout: _delegate_legacy_workflow_cli("generate", args, stdout=stdout),
+    "validate": lambda args, *, stdout: _delegate_legacy_workflow_cli("validate", args, stdout=stdout),
+    "stream": lambda args, *, stdout: _delegate_legacy_workflow_cli("stream", args, stdout=stdout),
+    "chain-status": lambda args, *, stdout: _delegate_legacy_workflow_cli("chain-status", args, stdout=stdout),
 }
 
 _STDOUT_COMMANDS: dict[str, StdoutCommandHandler] = {
@@ -191,7 +227,7 @@ _STDOUT_COMMANDS: dict[str, StdoutCommandHandler] = {
 
 
 def _usage() -> str:
-    return "usage: workflow <capabilities|config|dashboard|run|pipeline|fan-out|proof|heal|queue|runs|scheduler|circuits|slots|params|cancel|active|notifications|status|costs|receipts|diagnose|verify|verify-platform|leaderboard|trust|fitness|scope|inspect|replay|graph-topology|graph-lineage> <run_id|spec.json|-p prompt>"
+    return "usage: workflow <query|bugs|recall|discover|artifacts|health|run|status|costs|receipts|leaderboard|trust|fitness|scope|risk|reviews|diagnose|heal|verify|debate|runs|cancel|active|circuits|slots|inspect|replay|graph-topology|graph-lineage|...> <args>"
 
 
 def _parse(

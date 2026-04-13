@@ -21,7 +21,7 @@ _EXECUTION_BUNDLE_ENV = "PRAXIS_EXECUTION_BUNDLE"
 _ALLOWED_MCP_TOOLS_ENV = "PRAXIS_ALLOWED_MCP_TOOLS"
 _LEGACY_ALLOWED_MCP_TOOLS_ENV = "PRAXIS_ALLOWED_MCP_TOOLS"
 _ALLOWED_SKILLS_ENV = "PRAXIS_ALLOWED_SKILLS"
-_DEFAULT_NODE_PATH_PREFIX = ""
+_SANDBOX_PATH_PREFIX = "/opt/homebrew/bin:/usr/local/bin:"
 
 
 def _env_flag_enabled(name: str, *, default: bool) -> bool:
@@ -60,7 +60,7 @@ def _sanitize_base_env() -> dict[str, str]:
         "CLAUDE_CODE_DISABLE_CRON",
     ):
         env.pop(key, None)
-    env["PATH"] = _DEFAULT_NODE_PATH_PREFIX + env.get("PATH", "")
+    env["PATH"] = _SANDBOX_PATH_PREFIX + env.get("PATH", "")
     return env
 
 
@@ -208,9 +208,14 @@ def _parse_llm_output(stdout: str) -> tuple[str, dict[str, Any]]:
         "cost_usd": data.get("total_cost_usd", 0.0) or data.get("cost_usd", 0.0),
     }
     for key in ("result", "response", "output", "text"):
-        if key in data and isinstance(data[key], str):
+        if key in data and isinstance(data[key], str) and data[key].strip():
             parsed_stdout = data[key]
             break
+    # CLI error envelope: extract error messages so they're not silently lost
+    if not parsed_stdout.strip() and data.get("errors"):
+        errors = data["errors"]
+        if isinstance(errors, list):
+            parsed_stdout = "\n".join(str(e) for e in errors[:5])
     return parsed_stdout, telemetry
 
 
@@ -349,7 +354,8 @@ def execute_cli(
     # Sandbox workspaces exclude .git — codex CLI rejects non-git dirs
     # unless told to skip the check.  The flag belongs to the `exec`
     # subcommand, so insert it right after "exec".
-    if cmd and cmd[0].strip().lower() in ("codex",) and "--skip-git-repo-check" not in cmd:
+    cmd0_name = os.path.basename(cmd[0]).strip().lower() if cmd else ""
+    if cmd0_name == "codex" and "--skip-git-repo-check" not in cmd:
         try:
             exec_idx = [p.strip().lower() for p in cmd].index("exec")
             cmd.insert(exec_idx + 1, "--skip-git-repo-check")

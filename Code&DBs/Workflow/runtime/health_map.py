@@ -170,7 +170,7 @@ class HealthMapper:
 
         for py_file in root_path.rglob("*.py"):
             # Skip test files
-            if "test" in py_file.parts:
+            if self._should_skip_path(py_file):
                 continue
 
             str_path = str(py_file)
@@ -191,7 +191,7 @@ class HealthMapper:
         # First pass: analyze all modules to build import graph
         root_path = Path(root)
         for py_file in root_path.rglob("*.py"):
-            if "test" in py_file.parts:
+            if self._should_skip_path(py_file):
                 continue
             str_path = str(py_file)
             self.analyze_module(str_path)
@@ -253,6 +253,18 @@ class HealthMapper:
             return path.stem
         # It's already a module name
         return path_or_name.split(".")[0]
+
+    def _should_skip_path(self, path: Path) -> bool:
+        """Return True when a Python file is clearly test-only code."""
+        name = path.name.lower()
+        parts = {part.lower() for part in path.parts}
+        if "test" in parts or "tests" in parts:
+            return True
+        return (
+            name.startswith("test_")
+            or name.endswith("_test.py")
+            or name.endswith("_tests.py")
+        )
 
     def _estimate_function_lines(self, node: ast.AST) -> int:
         """Estimate function line count when end_lineno is unavailable."""

@@ -199,7 +199,22 @@ def _normalize_auto_route_key(value: str) -> str:
     key = (value or "").strip().lower()
     if key.startswith("auto/"):
         key = key.split("/", 1)[1]
+    # Strip tier suffix if present (e.g. "build/medium" → "build")
+    if "/" in key and key.rsplit("/", 1)[-1] in _ROUTE_TIER_BUCKETS:
+        key = key.rsplit("/", 1)[0]
     return key
+
+
+def _parse_auto_tier_override(value: str) -> str | None:
+    """Extract tier override from 'auto/build/medium' → 'medium', or None."""
+    key = (value or "").strip().lower()
+    if key.startswith("auto/"):
+        key = key.split("/", 1)[1]
+    if "/" in key:
+        tier = key.rsplit("/", 1)[-1]
+        if tier in _ROUTE_TIER_BUCKETS:
+            return tier
+    return None
 
 
 def _coerce_json_object(value: object, *, field_name: str) -> dict[str, Any]:
@@ -558,13 +573,14 @@ class TaskTypeRouter:
         task_type: str,
         prefer_cost: bool,
         *,
+        tier_override: str | None = None,
         runtime_profile_ref: str | None = None,
     ) -> list[TaskRouteDecision]:
         if task_type in _ROUTE_TIER_BUCKETS:
             return self._resolve_profile_chain(profile_column="route_tier", profile_rank_column="route_tier_rank", profile_value=task_type, prefer_cost=prefer_cost, runtime_profile_ref=runtime_profile_ref)
         if task_type in _LATENCY_CLASS_BUCKETS:
             return self._resolve_profile_chain(profile_column="latency_class", profile_rank_column="latency_rank", profile_value=task_type, prefer_cost=prefer_cost, runtime_profile_ref=runtime_profile_ref)
-        return self._resolve_chain(task_type, prefer_cost, runtime_profile_ref=runtime_profile_ref)
+        return self._resolve_chain(task_type, prefer_cost, tier_override=tier_override, runtime_profile_ref=runtime_profile_ref)
 
     def _load_active_catalog_candidates(self) -> list[dict[str, Any]]:
         rows = self._conn.execute(
@@ -805,6 +821,7 @@ class TaskTypeRouter:
         task_type: str,
         prefer_cost: bool = False,
         *,
+        tier_override: str | None = None,
         runtime_profile_ref: str | None = None,
     ) -> list[TaskRouteDecision]:
         profile = self._task_profiles.get(task_type)
@@ -823,6 +840,13 @@ class TaskTypeRouter:
             raise ValueError(f"No permitted models for task type '{task_type}'")
         policy = self._policy_for(task_type)
         rows = _rerank_rows(rows, prefer_cost, policy)
+
+        # Tier override: filter to requested tier (e.g. auto/build/medium)
+        if tier_override:
+            tier_rows = [r for r in rows if str(r.get("route_tier") or "").lower() == tier_override]
+            if tier_rows:
+                rows = tier_rows
+
         for index, row in enumerate(rows, start=1):
             row["effective_rank"] = index
         self._materialize_derived_rows(task_type, rows)
@@ -1022,6 +1046,7 @@ class TaskTypeRouter:
         self,
         agent_slug: str,
         prefer_cost: bool = False,
+        tier_override: str | None = None,
         runtime_profile_ref: str | None = None,
     ) -> list[TaskRouteDecision]:
         """Return the full ranked failover chain for an auto/ slug.
@@ -1031,9 +1056,12 @@ class TaskTypeRouter:
         different providers.
         """
         if agent_slug.startswith("auto/"):
+            slug_tier = _parse_auto_tier_override(agent_slug)
+            effective_tier = tier_override or slug_tier
             return self._resolve_auto_chain(
                 _normalize_auto_route_key(agent_slug),
                 prefer_cost=prefer_cost,
+                tier_override=effective_tier,
                 runtime_profile_ref=runtime_profile_ref,
             )
         # Explicit slug — resolve primary, then build cross-provider failover
@@ -1114,8 +1142,10 @@ class TaskTypeRouter:
                 else runtime_profile_ref
             )
             if slug.startswith("auto/"):
+                job_complexity = str(job.get("complexity", "moderate")).strip().lower()
                 chain = self.resolve_failover_chain(
                     slug,
+                    prefer_cost=(job_complexity == "low"),
                     runtime_profile_ref=job_runtime_profile_ref,
                 )
                 task_type = chain[0].task_type
@@ -1125,10 +1155,12 @@ class TaskTypeRouter:
                 # If the chain has only 1 entry, try to enrich it with
                 # cross-provider candidates so quota exhaustion on the
                 # primary doesn't kill the entire wave (BUG-45B10C25).
+                slug_tier = _parse_auto_tier_override(slug)
                 if task_type in _ROTATION_TASK_TYPES and len(chain) <= 1:
                     try:
                         broader = self._resolve_auto_chain(
-                            task_type, prefer_cost=False,
+                            task_type, prefer_cost=(job_complexity == "low"),
+                            tier_override=slug_tier,
                             runtime_profile_ref=job_runtime_profile_ref,
                         )
                         primary_provider = chain[0].provider_slug if chain else None

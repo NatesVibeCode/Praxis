@@ -125,6 +125,10 @@ def test_run_model_fails_closed_when_docker_is_unavailable(monkeypatch):
 def test_run_in_docker_requires_local_image(monkeypatch):
     monkeypatch.setattr("adapters.docker_runner._has_docker", lambda: True)
     monkeypatch.setattr("adapters.docker_runner._has_docker_image", lambda image: False)
+    monkeypatch.setattr(
+        "adapters.docker_runner.resolve_docker_image",
+        lambda **kwargs: ("praxis-worker:latest", {"source": "default", "build_error": None}),
+    )
 
     with pytest.raises(RuntimeError, match="PRAXIS_DOCKER_IMAGE"):
         run_model(
@@ -155,4 +159,35 @@ def test_run_in_docker_reads_image_from_env_per_call(monkeypatch):
     )
 
     assert seen["image"] == "dag-worker:test"
+    assert result.execution_mode == "docker"
+
+
+def test_run_in_docker_accepts_autobuilt_default_image(monkeypatch):
+    seen: dict[str, str] = {}
+
+    monkeypatch.delenv("PRAXIS_DOCKER_IMAGE", raising=False)
+    monkeypatch.setattr(
+        "adapters.docker_runner.resolve_docker_image",
+        lambda **kwargs: ("praxis-worker:latest", {"source": "default", "built_default": True, "build_error": None}),
+    )
+    monkeypatch.setattr(
+        "adapters.docker_runner._has_docker_image",
+        lambda image: seen.setdefault("image", image) or True,
+    )
+    monkeypatch.setattr("adapters.docker_runner.subprocess.Popen", lambda *args, **kwargs: type(
+        "_Proc",
+        (),
+        {
+            "returncode": 0,
+            "communicate": staticmethod(lambda input=None, timeout=None: ("ok", "")),
+        },
+    )())
+
+    result = run_in_docker(
+        command="echo hello",
+        stdin_text="",
+        timeout=1,
+    )
+
+    assert seen["image"] == "praxis-worker:latest"
     assert result.execution_mode == "docker"

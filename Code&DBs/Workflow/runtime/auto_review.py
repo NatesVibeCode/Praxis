@@ -28,6 +28,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
+from runtime.workflow.artifact_contracts import render_acceptance_contract
+
 if TYPE_CHECKING:
     from .workflow import WorkflowSpec, WorkflowResult
     from storage.postgres.connection import SyncPostgresConnection
@@ -273,6 +275,32 @@ class ReviewBatchAccumulator:
             "max_wait_seconds": self._max_wait_seconds,
         }
 
+    def _acceptance_contract_for(self, item: _PendingReview) -> dict[str, Any]:
+        if self._conn is None or not item.label:
+            return {}
+        rows = self._conn.execute(
+            """
+            SELECT execution_bundle
+            FROM workflow_job_runtime_context
+            WHERE run_id = $1 AND job_label = $2
+            LIMIT 1
+            """,
+            item.run_id,
+            item.label,
+        )
+        if not rows:
+            return {}
+        execution_bundle = rows[0].get("execution_bundle")
+        if isinstance(execution_bundle, str):
+            try:
+                execution_bundle = json.loads(execution_bundle)
+            except json.JSONDecodeError:
+                execution_bundle = {}
+        if not isinstance(execution_bundle, dict):
+            return {}
+        acceptance_contract = execution_bundle.get("acceptance_contract")
+        return dict(acceptance_contract) if isinstance(acceptance_contract, dict) else {}
+
     def _run_batch_review(self, batch: list[_PendingReview]) -> str | None:
         """Build and dispatch one review covering the entire batch."""
         from .workflow.orchestrator import WorkflowSpec, run_workflow
@@ -290,10 +318,18 @@ class ReviewBatchAccumulator:
         run_ids = []
         for item in batch:
             run_ids.append(item.run_id)
+            acceptance_contract = self._acceptance_contract_for(item)
+            rendered_acceptance = render_acceptance_contract(acceptance_contract)
+            contract_block = (
+                f"Acceptance Contract:\n{rendered_acceptance}\n"
+                if rendered_acceptance
+                else "Acceptance Contract: none provided. Findings are advisory only; do not issue an authoritative acceptance decision.\n"
+            )
             sections.append(
                 f"### Module: {item.label or item.run_id}\n"
                 f"Author: {item.author_model}\n"
                 f"Task: {item.task_type or 'unknown'}\n"
+                f"{contract_block}"
                 f"```\n{item.completion_preview}\n```\n"
             )
 
@@ -306,6 +342,9 @@ class ReviewBatchAccumulator:
         )
 
         review_prompt = f"""You are reviewing a batch of {len(batch)} code outputs. Score EACH module on seven dimensions using a 0-3 scale.
+
+If a module includes an Acceptance Contract, you must judge it against that contract instead of using hidden expectations.
+If a module does not include an Acceptance Contract, your review is advisory only. In that case, set `authoritative_acceptance` to false and `decision` to null.
 
 ## Scoring Rubric
 
@@ -363,6 +402,11 @@ Output a JSON object with this exact shape:
   "modules": [
     {{
       "module": "label or run_id",
+      "authoritative_acceptance": true,
+      "decision": "approve|request_changes|reject|null",
+      "criteria_results": [
+        {{"criterion": "criterion text", "met": true, "evidence": "brief evidence"}}
+      ],
       "scores": {{"outcome": 0-3, "correctness": 0-3, "safety": 0-3, "resilience": 0-3, "integration": 0-3, "scope": 0-3, "diligence": 0-3}},
       "composite": average of the seven scores,
       "findings": [
@@ -379,7 +423,11 @@ Output a JSON object with this exact shape:
 }}
 ```
 
-Be rigorous. A score of 3 means you found NOTHING wrong in that dimension. Default to 2 unless you have specific evidence for 3 or specific findings for 1/0."""
+Rules:
+- When an Acceptance Contract is present, evaluate every listed criterion explicitly in `criteria_results`.
+- Only emit `decision` when the Acceptance Contract is present. Otherwise use `null`.
+- A score of 3 means you found nothing wrong in that dimension.
+- Default to 2 unless you have specific evidence for 3 or specific findings for 1/0."""
 
         review_spec = WorkflowSpec(
             prompt=review_prompt,

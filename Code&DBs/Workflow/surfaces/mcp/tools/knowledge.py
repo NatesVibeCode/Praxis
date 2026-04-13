@@ -39,10 +39,11 @@ def tool_praxis_recall(params: dict) -> dict:
     if not query:
         return {"error": "query is required"}
     entity_type = params.get("entity_type", "") or None
+    limit = max(1, int(params.get("limit", 20) or 20))
 
     try:
         kg = _subs.get_knowledge_graph()
-        results = kg.search(query, entity_type=entity_type, limit=20)
+        results = kg.search(query, entity_type=entity_type, limit=limit)
 
         # Build clean results — no internal scoring, no empty fields, readable names
         clean = []
@@ -192,6 +193,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "properties": {
                     "query": {"type": "string", "description": "Search query."},
                     "entity_type": {"type": "string", "description": "Optional entity type filter (person, topic, decision, etc.)."},
+                    "limit": {"type": "integer", "description": "Maximum results to return.", "default": 20},
                 },
                 "required": ["query"],
             },

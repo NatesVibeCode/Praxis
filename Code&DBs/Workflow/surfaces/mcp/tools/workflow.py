@@ -160,10 +160,19 @@ def _run_status_payload(
         submission = j.get("submission")
         if isinstance(submission, dict):
             sub_entry = {}
-            for sk in ("submission_id", "result_kind", "summary", "measured_summary", "comparison_status"):
+            for sk in (
+                "submission_id",
+                "result_kind",
+                "summary",
+                "measured_summary",
+                "comparison_status",
+                "acceptance_status",
+            ):
                 sv = submission.get(sk)
                 if sv is not None:
                     sub_entry[sk] = sv
+            if sub_entry.get("comparison_status") is not None:
+                sub_entry["integrity_status"] = sub_entry["comparison_status"]
             review = submission.get("latest_review")
             if isinstance(review, dict) and review.get("decision"):
                 sub_entry["latest_review_decision"] = review["decision"]

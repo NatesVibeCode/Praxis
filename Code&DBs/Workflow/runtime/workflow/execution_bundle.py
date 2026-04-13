@@ -13,6 +13,12 @@ from typing import Any
 
 from adapters.task_profiles import infer_task_type, merge_allowed_tools, resolve_profile
 from surfaces.mcp.catalog import canonical_tool_name, get_tool_catalog
+from .artifact_contracts import (
+    normalize_acceptance_contract,
+    normalize_authoring_contract,
+    render_acceptance_contract,
+    render_authoring_contract,
+)
 
 
 _BUCKET_MCP_TOOLS: dict[str, tuple[str, ...]] = {
@@ -180,6 +186,11 @@ _SUBMISSION_DEFAULT_REQUIRED_TASK_TYPES = frozenset({
     "debate", "research", "analysis", "architecture",
 })
 
+_VERIFICATION_REQUIRED_TASK_TYPES = frozenset({
+    "build", "implement", "code_generation", "code_edit",
+    "refactor", "test", "wiring",
+})
+
 
 def _default_submission_required(task_type: str) -> bool:
     """Auto-require submission for output-oriented task types (debate, research,
@@ -194,6 +205,7 @@ def _completion_contract(
     bucket: str,
     submission_required: bool | None,
     downstream_labels: Sequence[str] | None,
+    verify_refs: Sequence[str] = (),
 ) -> dict[str, Any]:
     normalized_task_type = task_type.strip().lower()
     # For output-critical task types (debate, research, etc.), always require
@@ -205,6 +217,8 @@ def _completion_contract(
         normalized_submission_required = bool(submission_required)
     else:
         normalized_submission_required = _default_submission_required(normalized_task_type)
+    # verification_required: code task types must pass verify_refs to succeed.
+    verification_required = normalized_task_type in _VERIFICATION_REQUIRED_TASK_TYPES
     result_kind = _submission_result_kind(task_type=normalized_task_type, bucket=bucket)
     submit_tool_names = (
         [_SUBMISSION_RESULT_KIND_TO_TOOL[result_kind], _SUBMISSION_READ_TOOL]
@@ -218,6 +232,7 @@ def _completion_contract(
     )
     return {
         "submission_required": normalized_submission_required,
+        "verification_required": verification_required,
         "result_kind": result_kind,
         "submit_tool_names": submit_tool_names,
         "review_tool_names": review_tool_names,
@@ -272,6 +287,9 @@ def build_execution_bundle(
     workflow_id: str | None = None,
     submission_required: bool | None = None,
     downstream_labels: Sequence[str] | None = None,
+    output_schema: Mapping[str, Any] | None = None,
+    authoring_contract: Mapping[str, Any] | None = None,
+    acceptance_contract: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     normalized_task_type = str(task_type or "").strip() or infer_task_type(prompt, label=job_label)
     normalized_capabilities = _dedupe_strings(_string_list(capabilities))
@@ -290,6 +308,18 @@ def build_execution_bundle(
         bucket=bucket,
         submission_required=submission_required,
         downstream_labels=downstream_labels,
+        verify_refs=normalized_verify_refs,
+    )
+    normalized_authoring_contract = normalize_authoring_contract(
+        output_schema=output_schema,
+        authoring_contract=authoring_contract,
+        acceptance_contract=acceptance_contract,
+    )
+    normalized_acceptance_contract = normalize_acceptance_contract(
+        output_schema=output_schema,
+        authoring_contract=authoring_contract,
+        acceptance_contract=acceptance_contract,
+        verify_refs=normalized_verify_refs,
     )
     normalized_mcp_tools = _select_mcp_tool_names(
         bucket=bucket,
@@ -326,6 +356,8 @@ def build_execution_bundle(
         "mcp_tool_names": normalized_mcp_tools,
         "skill_refs": normalized_skill_refs,
         "completion_contract": completion_contract,
+        "authoring_contract": normalized_authoring_contract,
+        "acceptance_contract": normalized_acceptance_contract,
         "orient": _orient_hint(
             bucket=bucket,
             label=job_label,
@@ -388,6 +420,24 @@ def render_execution_bundle(bundle: Mapping[str, Any] | None) -> str:
             )
         else:
             parts.append("completion_contract: " + json.dumps(dict(completion_contract), default=str))
+        if completion_contract.get("verification_required"):
+            parts.append(
+                "\n** VERIFICATION REQUIRED **\n"
+                "This job requires all verify_refs to pass. The job will be marked FAILED "
+                "if verification does not pass, regardless of other output.\n"
+            )
+
+    authoring_contract = bundle.get("authoring_contract")
+    if isinstance(authoring_contract, Mapping) and authoring_contract:
+        rendered_authoring = render_authoring_contract(authoring_contract)
+        if rendered_authoring:
+            parts.append("\n" + rendered_authoring)
+
+    acceptance_contract = bundle.get("acceptance_contract")
+    if isinstance(acceptance_contract, Mapping) and acceptance_contract:
+        rendered_acceptance = render_acceptance_contract(acceptance_contract)
+        if rendered_acceptance:
+            parts.append("\n" + rendered_acceptance)
 
     parts.extend(_render_list("skill_refs", bundle.get("skill_refs")))
 

@@ -6,6 +6,7 @@ import json
 import platform
 import socket
 import subprocess
+import sys
 import threading
 from pathlib import Path
 
@@ -335,6 +336,10 @@ def test_cloudflare_remote_syncs_artifacts_for_capture(monkeypatch, tmp_path) ->
 def test_docker_local_requires_available_image(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("runtime.sandbox_runtime._docker_available", lambda: True)
     monkeypatch.setattr("runtime.sandbox_runtime._docker_image_available", lambda image: False)
+    monkeypatch.setattr(
+        "runtime.sandbox_runtime.resolve_docker_image",
+        lambda **kwargs: ("praxis-worker:latest", {"source": "default", "build_error": None}),
+    )
 
     provider = DockerLocalSandboxProvider()
     session = provider.create_session(
@@ -427,6 +432,67 @@ def test_docker_local_reads_image_from_env_per_exec(monkeypatch, tmp_path) -> No
     assert result.execution_mode == "docker_local"
 
 
+def test_docker_local_autobuilds_default_image_when_missing(monkeypatch, tmp_path) -> None:
+    seen: dict[str, str] = {}
+
+    monkeypatch.delenv("PRAXIS_DOCKER_IMAGE", raising=False)
+    monkeypatch.setattr("runtime.sandbox_runtime._docker_available", lambda: True)
+    monkeypatch.setattr(
+        "runtime.sandbox_runtime.resolve_docker_image",
+        lambda **kwargs: ("praxis-worker:latest", {"source": "default", "build_error": None, "built_default": True}),
+    )
+    monkeypatch.setattr(
+        "runtime.sandbox_runtime._docker_image_available",
+        lambda image: seen.setdefault("image", image) or True,
+    )
+    monkeypatch.setattr(
+        "runtime.sandbox_runtime.subprocess.Popen",
+        lambda *args, **kwargs: type(
+            "_Proc",
+            (),
+            {
+                "returncode": 0,
+                "communicate": staticmethod(lambda input=None, timeout=None: ("ok", "")),
+            },
+        )(),
+    )
+
+    provider = DockerLocalSandboxProvider()
+    session = provider.create_session(
+        type(
+            "Spec",
+            (),
+            {
+                "sandbox_session_id": "sandbox_session:run.alpha:job.alpha",
+                "sandbox_group_id": "group:run.alpha",
+                "network_policy": "disabled",
+                "workspace_materialization": "copy",
+                "timeout_seconds": 30,
+                "metadata": {},
+            },
+        )()
+    )
+
+    result = provider.exec(
+        session,
+        type(
+            "Request",
+            (),
+            {
+                "command": "echo hi",
+                "stdin_text": "",
+                "env": {"PATH": "/usr/bin:/bin"},
+                "timeout_seconds": 30,
+                "execution_transport": "cli",
+                "image": None,
+            },
+        )(),
+    )
+
+    assert seen["image"] == "praxis-worker:latest"
+    assert result.execution_mode == "docker_local"
+
+
 @pytest.mark.skipif(
     not _seatbelt_smoke_available(),
     reason="seatbelt_local smoke test requires runnable macOS sandbox-exec authority",
@@ -475,8 +541,9 @@ def test_seatbelt_local_allows_loopback_only_when_network_enabled(tmp_path) -> N
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
+        python_executable = Path(sys.executable).resolve().as_posix()
         command = (
-            "python3 - <<'INNER'\n"
+            f"{python_executable} - <<'INNER'\n"
             "import urllib.request\n"
             f"print(urllib.request.urlopen('http://127.0.0.1:{server.server_port}', timeout=5).read().decode('utf-8'))\n"
             "INNER"

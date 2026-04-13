@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from runtime.workflow.execution_bundle import _VERIFICATION_REQUIRED_TASK_TYPES
+
 
 def _authority_error_result(spec, message: str) -> dict[str, Any]:
     summary = spec.summary()
@@ -131,12 +133,26 @@ def validate_workflow_spec(spec, *, pg_conn) -> dict[str, Any]:
         agent_resolution[requested_slug] = detail["status"]
         details.append(detail)
 
+    # ── verify_refs enforcement for code task types ────────────────────────
+    verification_warnings: list[str] = []
+    for job in getattr(spec, "jobs", ()):
+        task_type = str(job.get("task_type") or "").strip().lower()
+        job_verify_refs = job.get("verify_refs") or []
+        job_label = str(job.get("label") or "?")
+        if task_type in _VERIFICATION_REQUIRED_TASK_TYPES and not job_verify_refs:
+            verification_warnings.append(
+                f"job '{job_label}': task_type '{task_type}' requires verify_refs "
+                f"but none are specified — job will fail at the verification gate"
+            )
+
     result: dict[str, Any] = {
         "valid": not unresolved,
         "summary": summary,
         "agent_resolution": agent_resolution,
         "agent_resolution_details": details,
     }
+    if verification_warnings:
+        result["verification_warnings"] = verification_warnings
     if unresolved:
         result["error"] = "one or more agent routes could not be resolved from Postgres authority"
     return result

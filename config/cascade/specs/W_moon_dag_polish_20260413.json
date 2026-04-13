@@ -1,0 +1,40 @@
+{
+  "name": "Moon DAG Canvas Polish",
+  "phase": "W",
+  "jobs": [
+    {
+      "sprint": 1,
+      "slug": "dag_css",
+      "description": "Add DAG node CSS classes for hover, selection, transitions",
+      "outcome_goal": "moon-dag-node CSS class exists with hover, selected, and transition rules",
+      "verify_command": "grep -q 'moon-dag-node' 'Code&DBs/Workflow/surfaces/app/src/moon/moon-build.css'",
+      "prompt": "Add CSS for the DAG canvas nodes in Code&DBs/Workflow/surfaces/app/src/moon/moon-build.css.\n\nThe DAG view renders nodes as absolutely-positioned divs. They currently use .moon-chain__ring classes for ring state (unresolved, decided-grounded, etc) which still work. But they need their own wrapper class for hover, selection, and transitions.\n\nAdd these rules after the existing .moon-chain section (around line 700):\n\n/* === DAG Canvas === */\n.moon-dag {\n  position: relative;\n  overflow: visible;\n}\n\n.moon-dag-node {\n  position: absolute;\n  width: var(--moon-node-size, 60px);\n  height: var(--moon-node-size, 60px);\n  border-radius: 50%;\n  cursor: pointer;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  transition: transform 180ms ease, box-shadow 180ms ease;\n}\n\n.moon-dag-node:hover {\n  transform: scale(1.08);\n  z-index: 2;\n}\n\n.moon-dag-node--selected {\n  outline: 3px solid var(--moon-accent, #6CB6FF);\n  outline-offset: 3px;\n  z-index: 3;\n}\n\n.moon-dag-node--drag-over {\n  outline: 2px dashed var(--moon-accent, #6CB6FF);\n  outline-offset: 4px;\n}\n\n.moon-dag-node__label {\n  position: absolute;\n  top: calc(var(--moon-node-size, 60px) + 8px);\n  left: 50%;\n  transform: translateX(-50%);\n  white-space: nowrap;\n  font-size: 11px;\n  color: var(--moon-fg-dim, #8b949e);\n  pointer-events: none;\n  max-width: 120px;\n  overflow: hidden;\n  text-overflow: ellipsis;\n}\n\n.moon-dag-append {\n  position: absolute;\n  width: 40px;\n  height: 40px;\n  border-radius: 50%;\n  border: 1.5px dashed var(--moon-muted, #484f58);\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  cursor: pointer;\n  transition: border-color 180ms ease, transform 180ms ease;\n}\n\n.moon-dag-append:hover {\n  border-color: var(--moon-accent, #6CB6FF);\n  transform: scale(1.1);\n}\n\n.moon-dag-append--drag-over {\n  border-color: var(--moon-accent, #6CB6FF);\n  background: rgba(108, 182, 255, 0.08);\n}\n\nDo NOT modify any existing CSS. Only append new rules.",
+      "write": ["Code&DBs/Workflow/surfaces/app/src/moon/moon-build.css"],
+      "read": ["Code&DBs/Workflow/surfaces/app/src/moon/moon-build.css"],
+      "agent": "auto/build"
+    },
+    {
+      "sprint": 1,
+      "slug": "edge_labels",
+      "description": "Render gate labels and branch_reason on SVG edges",
+      "outcome_goal": "MoonEdges renders gateLabel text at edge midpoints",
+      "verify_command": "grep -q 'gateLabel' 'Code&DBs/Workflow/surfaces/app/src/moon/MoonEdges.tsx'",
+      "prompt": "Update Code&DBs/Workflow/surfaces/app/src/moon/MoonEdges.tsx to render edge labels.\n\nThe OrbitEdge type has gateLabel?: string and gateFamily?: string fields. When an edge has a gateLabel, render it at the midpoint of the bezier curve.\n\nIn the MoonEdgesProps interface, add: edges need their gateLabel. The OrbitEdge type already has it.\n\nAfter each <path> element, if the edge has a gateLabel, add:\n\n{edge.gateLabel && (() => {\n  const mx = (x1 + x2) / 2;\n  const my = (y1 + y2) / 2;\n  const textLen = edge.gateLabel!.length * 6.5 + 12;\n  return (\n    <g key={`label-${edge.id}`}>\n      <rect\n        x={mx - textLen / 2}\n        y={my - 10}\n        width={textLen}\n        height={20}\n        rx={4}\n        fill=\"var(--moon-surface, #161b22)\"\n        stroke=\"var(--moon-border, #30363d)\"\n        strokeWidth={1}\n      />\n      <text\n        x={mx}\n        y={my + 4}\n        textAnchor=\"middle\"\n        fontSize={11}\n        fill=\"var(--moon-fg-dim, #8b949e)\"\n        style={{ pointerEvents: 'none' }}\n      >\n        {edge.gateLabel}\n      </text>\n    </g>\n  );\n})()}\n\nWrap both the path and the optional label group in a <g> fragment so they stay together.\n\nRun: cd Code&DBs/Workflow/surfaces/app && npx tsc --noEmit 2>&1 | grep -v test | head -10",
+      "write": ["Code&DBs/Workflow/surfaces/app/src/moon/MoonEdges.tsx"],
+      "read": ["Code&DBs/Workflow/surfaces/app/src/moon/MoonEdges.tsx"],
+      "agent": "auto/build"
+    },
+    {
+      "sprint": 2,
+      "slug": "wire_dag_classes",
+      "description": "Use new CSS classes on DAG nodes in MoonBuildPage, fix popout positioning",
+      "depends_on": ["dag_css", "edge_labels"],
+      "outcome_goal": "DAG nodes use moon-dag-node classes, popout renders at container level",
+      "verify_command": "grep -q 'moon-dag-node' 'Code&DBs/Workflow/surfaces/app/src/moon/MoonBuildPage.tsx' && grep -q 'moon-dag-append' 'Code&DBs/Workflow/surfaces/app/src/moon/MoonBuildPage.tsx'",
+      "prompt": "Update Code&DBs/Workflow/surfaces/app/src/moon/MoonBuildPage.tsx to use the new DAG CSS classes and fix popout positioning.\n\nRead the file first. Find the DAG canvas section (div with className 'moon-dag').\n\nChanges:\n\n1. On each node div, replace the inline styles with the new CSS classes:\n   - Change: className={ringClass(node, isSelected)}\n   - To: className={`moon-dag-node ${ringClass(node, isSelected)}${isSelected ? ' moon-dag-node--selected' : ''}${state.previewTarget === node.id ? ' moon-dag-node--drag-over' : ''}`}\n   - Remove the inline style object (position, left, top, width, height, cursor, display, alignItems, justifyContent)\n   - Add style={{ left: node.x + 120 - 30, top: node.y + 120 - 30 }} (only positioning)\n\n2. Replace the inline <span> label with the CSS class:\n   - Change the label span to: <span className=\"moon-dag-node__label\">{node.title}</span>\n   - Remove all inline styles from the label span\n\n3. On the append (+) button, replace inline styles with CSS classes:\n   - className={`moon-dag-append${state.previewTarget === '__append__' ? ' moon-dag-append--drag-over' : ''}`}\n   - style={{ left: viewModel.layout.width + 120 + 30, top: (viewModel.layout.height > 0 ? viewModel.layout.height / 2 + 120 - 20 : 120 - 20) }}\n\n4. Move popout rendering OUTSIDE the node loop. After the nodes div, add a separate popout anchor:\n   {state.selectedNodeId && state.popoutOpen && viewModel.selectedNode && (() => {\n     const selNode = viewModel.nodes.find(n => n.id === state.selectedNodeId);\n     if (!selNode) return null;\n     return (\n       <div style={{ position: 'absolute', left: selNode.x + 120, top: selNode.y + 120 - 80, zIndex: 10 }}>\n         <MoonPopout\n           node={viewModel.selectedNode}\n           content={viewModel.dockContent}\n           onClose={() => dispatch({ type: 'CLOSE_POPOUT' })}\n           onSelect={handleNodeAction}\n           catalog={catalog}\n         />\n       </div>\n     );\n   })()}\n\n5. Remove the popout from inside the node loop (the old isSelected && state.popoutOpen block inside each node div).\n\nRun: cd Code&DBs/Workflow/surfaces/app && npx tsc --noEmit 2>&1 | grep -v test | head -10\nThen: npx vite build 2>&1 | tail -5",
+      "write": ["Code&DBs/Workflow/surfaces/app/src/moon/MoonBuildPage.tsx"],
+      "read": ["Code&DBs/Workflow/surfaces/app/src/moon/MoonBuildPage.tsx", "Code&DBs/Workflow/surfaces/app/src/moon/moon-build.css"],
+      "agent": "auto/build"
+    }
+  ]
+}

@@ -15,6 +15,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable
 
+from .cli_metadata import CLI_TOOL_METADATA
+
 _TOOLS_ROOT = Path(__file__).resolve().parent / "tools"
 _MCP_SERVER_ID = "praxis-workflow-mcp"
 
@@ -37,6 +39,129 @@ class McpToolDefinition:
     def input_schema(self) -> dict[str, Any]:
         schema = self.metadata.get("inputSchema")
         return dict(schema) if isinstance(schema, dict) else {}
+
+    @property
+    def cli_metadata(self) -> dict[str, Any]:
+        raw = self.metadata.get("cli")
+        local = dict(raw) if isinstance(raw, dict) else {}
+        overlay = CLI_TOOL_METADATA.get(self.name, {})
+        return _deep_merge_dicts(local, overlay)
+
+    @property
+    def cli_surface(self) -> str:
+        return str(self.cli_metadata.get("surface") or "general").strip() or "general"
+
+    @property
+    def cli_tier(self) -> str:
+        return str(self.cli_metadata.get("tier") or "advanced").strip() or "advanced"
+
+    @property
+    def cli_recommended_alias(self) -> str | None:
+        value = str(self.cli_metadata.get("recommended_alias") or "").strip()
+        return value or None
+
+    @property
+    def cli_when_to_use(self) -> str:
+        return str(self.cli_metadata.get("when_to_use") or "").strip()
+
+    @property
+    def cli_when_not_to_use(self) -> str:
+        return str(self.cli_metadata.get("when_not_to_use") or "").strip()
+
+    @property
+    def cli_examples(self) -> tuple[dict[str, Any], ...]:
+        raw = self.cli_metadata.get("examples")
+        if not isinstance(raw, list):
+            return ()
+        return tuple(item for item in raw if isinstance(item, dict))
+
+    @property
+    def cli_risks(self) -> dict[str, Any]:
+        raw = self.cli_metadata.get("risks")
+        return dict(raw) if isinstance(raw, dict) else {"default": "read"}
+
+    def risk_for_selector(self, selector_value: object | None = None) -> str:
+        selector_name = _slugify_action(selector_value)
+        selector_field = self.selector_field
+        risks = self.cli_risks
+        scoped_key = "actions" if selector_field == "action" else "views"
+        scoped = risks.get(scoped_key)
+        if isinstance(scoped, dict) and selector_name:
+            match = str(scoped.get(selector_name) or "").strip()
+            if match:
+                return match
+        default_risk = str(risks.get("default") or "").strip()
+        if default_risk:
+            return default_risk
+        return "read"
+
+    def risk_for_params(self, params: dict[str, Any] | None = None) -> str:
+        if not isinstance(params, dict):
+            params = {}
+        selector_field = self.selector_field
+        if selector_field is None:
+            return self.risk_for_selector(None)
+        selector_value = params.get(selector_field, self.selector_default or self.default_action)
+        return self.risk_for_selector(selector_value)
+
+    @property
+    def risk_levels(self) -> tuple[str, ...]:
+        values = {self.risk_for_selector(None)}
+        for selector in self.selector_enum:
+            values.add(self.risk_for_selector(selector))
+        return tuple(sorted(value for value in values if value))
+
+    @property
+    def requires_workflow_token(self) -> bool:
+        return "session" in self.risk_levels or self.cli_tier == "session"
+
+    @property
+    def cli_badges(self) -> tuple[str, ...]:
+        badges = [self.cli_tier, self.cli_surface]
+        if self.cli_recommended_alias:
+            badges.append(f"alias:{self.cli_recommended_alias}")
+        if self.requires_workflow_token:
+            badges.append("session-only")
+        if "write" in self.risk_levels:
+            badges.append("mutates-state")
+        if "dispatch" in self.risk_levels:
+            badges.append("dispatches-work")
+        return tuple(badges)
+
+    def cli_search_text(self) -> str:
+        parts = [
+            self.name,
+            self.display_name,
+            self.description,
+            self.cli_surface,
+            self.cli_tier,
+            self.cli_when_to_use,
+            self.cli_when_not_to_use,
+        ]
+        for example in self.cli_examples:
+            parts.append(str(example.get("title") or ""))
+            parts.append(str(example.get("input") or ""))
+        return " ".join(part for part in parts if part)
+
+    def example_input(self) -> dict[str, Any]:
+        examples = self.cli_examples
+        if examples:
+            payload = examples[0].get("input")
+            if isinstance(payload, dict):
+                return dict(payload)
+        skeleton: dict[str, Any] = {}
+        selector_field = self.selector_field
+        if selector_field is not None:
+            skeleton[selector_field] = self.selector_default or self.default_action
+        for name, schema in self.input_properties.items():
+            if name == selector_field:
+                continue
+            if isinstance(schema, dict) and "default" in schema:
+                skeleton[name] = schema["default"]
+                continue
+            if name in self.required_args:
+                skeleton[name] = _example_value_for_schema(schema)
+        return skeleton
 
     def _selector_enum(self, field_name: str) -> tuple[str, ...]:
         properties = self.input_schema.get("properties")
@@ -126,10 +251,12 @@ class McpToolDefinition:
 
     @property
     def inputs(self) -> tuple[str, ...]:
+        return tuple(name for name in self.input_properties if name != "action")
+
+    @property
+    def input_properties(self) -> dict[str, Any]:
         properties = self.input_schema.get("properties")
-        if not isinstance(properties, dict):
-            return ()
-        return tuple(name for name in properties if name != "action")
+        return dict(properties) if isinstance(properties, dict) else {}
 
     @property
     def display_name(self) -> str:
@@ -190,6 +317,37 @@ def _slugify_action(value: object) -> str:
     if not text:
         return ""
     return text.replace(" ", "_").replace("-", "_")
+
+
+def _deep_merge_dicts(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(left)
+    for key, value in right.items():
+        existing = merged.get(key)
+        if isinstance(existing, dict) and isinstance(value, dict):
+            merged[key] = _deep_merge_dicts(existing, value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _example_value_for_schema(schema: object) -> object:
+    if not isinstance(schema, dict):
+        return ""
+    enum_values = schema.get("enum")
+    if isinstance(enum_values, list) and enum_values:
+        return enum_values[0]
+    schema_type = str(schema.get("type") or "").strip().lower()
+    if schema_type == "integer":
+        return 0
+    if schema_type == "number":
+        return 0
+    if schema_type == "boolean":
+        return False
+    if schema_type == "array":
+        return []
+    if schema_type == "object":
+        return {}
+    return ""
 
 
 def canonical_tool_name(tool_name: object) -> str:

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.dag.workflow-worker</string>
+	<key>Program</key>
+	<string>python3</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>python3</string>
+		<string>-m</string>
+		<string>runtime.workflow_worker</string>
+	</array>
+	<key>WorkingDirectory</key>
+	<string>/Users/nate/Praxis/Code&DBs/Workflow</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PYTHONPATH</key>
+		<string>/Users/nate/Praxis/Code&DBs/Workflow</string>
+		<key>WORKFLOW_DATABASE_URL</key>
+		<string>postgresql://localhost:5432/praxis</string>
+		<key>PATH</key>
+		<string>/usr/local/bin:/usr/bin:/bin</string>
+	</dict>
+	<key>KeepAlive</key>
+	<true/>
+	<key>StandardOutPath</key>
+	<string>/tmp/dag-workflow-worker.log</string>
+	<key>StandardErrorPath</key>
+	<string>/tmp/dag-workflow-worker.err</string>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>ProcessType</key>
+	<string>Background</string>
+</dict>
+</plist>

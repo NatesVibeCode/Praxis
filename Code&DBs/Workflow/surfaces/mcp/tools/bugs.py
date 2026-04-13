@@ -195,7 +195,7 @@ def tool_praxis_bugs(params: dict) -> dict:
         title = params.get("title", "")
         if not title:
             return {"error": "title is required for search"}
-        bugs = bt.search(title, limit=20)
+        bugs = bt.search(title, limit=max(1, int(params.get("limit", 20) or 20)))
         return {"bugs": [_compact_bug(b) for b in bugs], "count": len(bugs)}
 
     if action == "stats":

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.dag.scheduler</string>
+	<key>Program</key>
+	<string>python3</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>python3</string>
+		<string>-m</string>
+		<string>runtime.scheduler</string>
+		<string>tick</string>
+	</array>
+	<key>WorkingDirectory</key>
+	<string>/Users/nate/Praxis/Code&DBs/Workflow</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PYTHONPATH</key>
+		<string>/Users/nate/Praxis/Code&DBs/Workflow</string>
+		<key>WORKFLOW_DATABASE_URL</key>
+		<string>postgresql://localhost:5432/praxis</string>
+	</dict>
+	<key>StartInterval</key>
+	<integer>60</integer>
+	<key>StandardOutPath</key>
+	<string>/tmp/dag-scheduler.log</string>
+	<key>StandardErrorPath</key>
+	<string>/tmp/dag-scheduler.err</string>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>ProcessType</key>
+	<string>Background</string>
+</dict>
+</plist>

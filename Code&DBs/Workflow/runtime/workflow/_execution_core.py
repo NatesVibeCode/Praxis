@@ -365,12 +365,19 @@ def execute_job(
 
     # ── Outcome gate: run verify_command if specified ─────────────────────
     if final_status == "succeeded":
+        acceptance_contract = (
+            dict(execution_bundle.get("acceptance_contract"))
+            if isinstance(execution_bundle, dict)
+            and isinstance(execution_bundle.get("acceptance_contract"), dict)
+            else {}
+        )
+        acceptance_verify_refs = acceptance_contract.get("verify_refs")
         verify_cmd = str(job.get("verify_command") or "").strip()
-        if not verify_cmd:
+        if not verify_cmd and not acceptance_verify_refs and not verification_artifact_refs:
             # Check spec snapshot for verify_command
             spec_job = _spec_snapshot_job_for_verify(conn, run_id, label)
             verify_cmd = str(spec_job.get("verify_command") or "").strip()
-        if verify_cmd:
+        if verify_cmd and not acceptance_verify_refs and not verification_artifact_refs:
             outcome_goal = str(
                 job.get("outcome_goal")
                 or _spec_snapshot_job_for_verify(conn, run_id, label).get("outcome_goal")

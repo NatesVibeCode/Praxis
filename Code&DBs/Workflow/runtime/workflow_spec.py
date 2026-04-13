@@ -389,6 +389,8 @@ _SPEC_FIELD_NAMES = {
     "plan_revision",
     "packet_provenance",
     "output_schema",
+    "authoring_contract",
+    "acceptance_contract",
     "max_context_tokens",
     "persist",
     "capabilities",
@@ -400,6 +402,103 @@ _SPEC_FIELD_NAMES = {
     "review_target_modules",
 }
 _ALLOWED_SPEC_KEYS = _SPEC_FIELD_NAMES | {"system_prompt", "context_sections"}
+
+
+def _validate_authoring_contract(value: object) -> list[str]:
+    errors: list[str] = []
+    if value is None:
+        return errors
+    if not isinstance(value, dict):
+        return ["authoring_contract must be a dict or null"]
+    if "artifact_kind" in value and value["artifact_kind"] is not None and not isinstance(value["artifact_kind"], str):
+        errors.append("authoring_contract.artifact_kind must be a string or null")
+    if "required_sections" in value:
+        sections = value["required_sections"]
+        if sections is not None:
+            if not isinstance(sections, list):
+                errors.append("authoring_contract.required_sections must be a list of strings or null")
+            elif not all(isinstance(section, str) and section.strip() for section in sections):
+                errors.append("authoring_contract.required_sections entries must all be non-empty strings")
+    if "required_fields" in value:
+        fields = value["required_fields"]
+        if fields is not None:
+            if not isinstance(fields, list):
+                errors.append("authoring_contract.required_fields must be a list of strings or null")
+            elif not all(isinstance(field, str) and field.strip() for field in fields):
+                errors.append("authoring_contract.required_fields entries must all be non-empty strings")
+    if "output_schema" in value and value["output_schema"] is not None and not isinstance(value["output_schema"], dict):
+        errors.append("authoring_contract.output_schema must be a dict or null")
+    if "stop_boundary" in value and value["stop_boundary"] is not None and not isinstance(value["stop_boundary"], str):
+        errors.append("authoring_contract.stop_boundary must be a string or null")
+    if "submission_format" in value and value["submission_format"] is not None and not isinstance(value["submission_format"], str):
+        errors.append("authoring_contract.submission_format must be a string or null")
+    if "notes" in value:
+        notes = value["notes"]
+        if notes is not None:
+            if not isinstance(notes, list):
+                errors.append("authoring_contract.notes must be a list of strings or null")
+            elif not all(isinstance(note, str) and note.strip() for note in notes):
+                errors.append("authoring_contract.notes entries must all be non-empty strings")
+    return errors
+
+
+def _validate_acceptance_contract(value: object) -> list[str]:
+    errors: list[str] = []
+    if value is None:
+        return errors
+    if not isinstance(value, dict):
+        return ["acceptance_contract must be a dict or null"]
+    structural = value.get("structural")
+    if structural is not None:
+        if not isinstance(structural, dict):
+            errors.append("acceptance_contract.structural must be a dict or null")
+        else:
+            if "required_sections" in structural:
+                sections = structural["required_sections"]
+                if sections is not None:
+                    if not isinstance(sections, list):
+                        errors.append("acceptance_contract.structural.required_sections must be a list of strings or null")
+                    elif not all(isinstance(section, str) and section.strip() for section in sections):
+                        errors.append("acceptance_contract.structural.required_sections entries must all be non-empty strings")
+            if "required_fields" in structural:
+                fields = structural["required_fields"]
+                if fields is not None:
+                    if not isinstance(fields, list):
+                        errors.append("acceptance_contract.structural.required_fields must be a list of strings or null")
+                    elif not all(isinstance(field, str) and field.strip() for field in fields):
+                        errors.append("acceptance_contract.structural.required_fields entries must all be non-empty strings")
+            if "output_schema" in structural and structural["output_schema"] is not None and not isinstance(structural["output_schema"], dict):
+                errors.append("acceptance_contract.structural.output_schema must be a dict or null")
+    if "assertions" in value:
+        assertions = value["assertions"]
+        if assertions is not None:
+            if not isinstance(assertions, list):
+                errors.append("acceptance_contract.assertions must be a list of objects or null")
+            elif not all(isinstance(assertion, dict) for assertion in assertions):
+                errors.append("acceptance_contract.assertions entries must all be objects")
+    if "verify_refs" in value:
+        verify_refs = value["verify_refs"]
+        if verify_refs is not None:
+            if not isinstance(verify_refs, list):
+                errors.append("acceptance_contract.verify_refs must be a list of strings or null")
+            elif not all(isinstance(verify_ref, str) and verify_ref.strip() for verify_ref in verify_refs):
+                errors.append("acceptance_contract.verify_refs entries must all be non-empty strings")
+    review = value.get("review")
+    if review is not None:
+        if not isinstance(review, dict):
+            errors.append("acceptance_contract.review must be a dict or null")
+        else:
+            if "criteria" in review:
+                criteria = review["criteria"]
+                if criteria is not None:
+                    if not isinstance(criteria, list):
+                        errors.append("acceptance_contract.review.criteria must be a list of strings or null")
+                    elif not all(isinstance(item, str) and item.strip() for item in criteria):
+                        errors.append("acceptance_contract.review.criteria entries must all be non-empty strings")
+            if "required_decision" in review and review["required_decision"] is not None:
+                if not isinstance(review["required_decision"], str) or not review["required_decision"].strip():
+                    errors.append("acceptance_contract.review.required_decision must be a non-empty string or null")
+    return errors
 
 def validate_workflow_spec(raw: dict[str, Any]) -> tuple[bool, list[str]]:
     """Validate a raw dict as a single runtime workflow spec."""
@@ -530,6 +629,12 @@ def validate_workflow_spec(raw: dict[str, Any]) -> tuple[bool, list[str]]:
         if output_schema is not None and not isinstance(output_schema, dict):
             errors.append("output_schema must be a dict or null")
 
+    if "authoring_contract" in raw:
+        errors.extend(_validate_authoring_contract(raw["authoring_contract"]))
+
+    if "acceptance_contract" in raw:
+        errors.extend(_validate_acceptance_contract(raw["acceptance_contract"]))
+
     if "use_cache" in raw and not isinstance(raw["use_cache"], bool):
         errors.append("use_cache must be a boolean")
 
@@ -618,6 +723,8 @@ def _raw_to_runtime_workflow_spec(raw: dict[str, Any]) -> "RuntimeWorkflowSpec":
         plan_revision=raw.get("plan_revision"),
         packet_provenance=raw.get("packet_provenance"),
         output_schema=raw.get("output_schema"),
+        authoring_contract=raw.get("authoring_contract"),
+        acceptance_contract=raw.get("acceptance_contract"),
         persist=bool(raw.get("persist", False)),
         use_cache=bool(raw.get("use_cache", False)),
         capabilities=raw.get("capabilities"),

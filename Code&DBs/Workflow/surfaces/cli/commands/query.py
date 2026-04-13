@@ -5,6 +5,22 @@ from __future__ import annotations
 from typing import TextIO
 
 
+# ---------------------------------------------------------------------------
+# Shared Postgres connection helper — lazy singleton for CLI commands that
+# need direct DB access (bug tracker, knowledge graph, discover, artifacts).
+# ---------------------------------------------------------------------------
+
+_cli_pg_conn = None
+
+
+def _get_conn():
+    global _cli_pg_conn
+    if _cli_pg_conn is None:
+        from storage.postgres import ensure_postgres_available
+        _cli_pg_conn = ensure_postgres_available()
+    return _cli_pg_conn
+
+
 def _receipts_command(args: list[str], *, stdout: TextIO) -> int:
     """Handle `workflow receipts [receipt_id]`."""
 
@@ -507,3 +523,389 @@ def _reviews_command(args: list[str], *, stdout: TextIO) -> int:
         return 0
     stdout.write(_json.dumps(summary, indent=2) + "\n")
     return 0
+
+
+# ---------------------------------------------------------------------------
+# workflow query <question> — natural language router (mirrors praxis_query)
+# ---------------------------------------------------------------------------
+
+def _query_command(args: list[str], *, stdout: TextIO) -> int:
+    """Handle `workflow query <question>` — route a natural language question."""
+
+    import json as _json
+
+    if not args or args[0] in {"-h", "--help"}:
+        stdout.write(
+            "usage: workflow query <question>\n"
+            "\n"
+            "  Routes a natural language question to the right subsystem.\n"
+            "  Examples:\n"
+            "    workflow query 'what is the pass rate?'\n"
+            "    workflow query 'are there any open bugs?'\n"
+            "    workflow query 'schema for workflow_runs'\n"
+            "    workflow query 'import path for BugTracker'\n"
+            "    workflow query 'test command for runtime/compiler.py'\n"
+        )
+        return 2
+
+    question = " ".join(args)
+
+    from surfaces.mcp.tools.query import tool_praxis_query
+
+    result = tool_praxis_query({"question": question})
+    stdout.write(_json.dumps(result, indent=2, default=str) + "\n")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# workflow bugs [list|search|stats] — bug tracker surface
+# ---------------------------------------------------------------------------
+
+def _bugs_command(args: list[str], *, stdout: TextIO) -> int:
+    """Handle `workflow bugs [list|search <query>|stats] [--status S] [--severity S] [--json]`."""
+
+    import json as _json
+
+    if args and args[0] in {"-h", "--help"}:
+        stdout.write(
+            "usage: workflow bugs [list|search <query>|stats] [--status S] [--severity S] [--limit N]\n"
+            "\n"
+            "  list               List bugs (default: open only)\n"
+            "  search <query>     Full-text search across bugs\n"
+            "  stats              Bug counts by category/severity/status\n"
+            "\n"
+            "  --status S         Filter: OPEN, IN_PROGRESS, FIXED, WONT_FIX, DEFERRED\n"
+            "  --severity S       Filter: P0, P1, P2, P3\n"
+            "  --limit N          Max results (default 25)\n"
+            "  --all              Include resolved bugs (default: open only)\n"
+        )
+        return 2
+
+    from runtime.bug_tracker import BugTracker
+    from surfaces.api.handlers._shared import _bug_to_dict
+
+    conn = _get_conn()
+    bt = BugTracker(conn)
+
+    action = "list"
+    search_query = ""
+    status_filter = None
+    severity_filter = None
+    limit = 25
+    open_only = True
+    i = 0
+
+    if args and not args[0].startswith("-"):
+        action = args[0]
+        i = 1
+        if action == "search" and i < len(args) and not args[i].startswith("-"):
+            search_query = args[i]
+            i += 1
+
+    while i < len(args):
+        if args[i] == "--status" and i + 1 < len(args):
+            status_filter = args[i + 1].upper()
+            i += 2
+        elif args[i] == "--severity" and i + 1 < len(args):
+            severity_filter = args[i + 1].upper()
+            i += 2
+        elif args[i] == "--limit" and i + 1 < len(args):
+            limit = int(args[i + 1])
+            i += 2
+        elif args[i] == "--all":
+            open_only = False
+            i += 1
+        else:
+            i += 1
+
+    if action == "stats":
+        rows = conn.execute(
+            "SELECT category, severity, status, COUNT(*) as cnt "
+            "FROM bugs GROUP BY category, severity, status "
+            "ORDER BY cnt DESC"
+        )
+        data = [dict(r) for r in (rows or [])]
+        stdout.write(_json.dumps(data, indent=2, default=str) + "\n")
+        return 0
+
+    if action == "search" and search_query:
+        results = bt.search(search_query, limit=limit)
+        bugs = [_bug_to_dict(b) for b in results]
+    else:
+        kwargs: dict = {"limit": limit}
+        if status_filter:
+            kwargs["status"] = status_filter
+        if severity_filter:
+            kwargs["severity"] = severity_filter
+        if open_only and not status_filter:
+            kwargs["open_only"] = True
+        results = bt.list_bugs(**kwargs)
+        bugs = [_bug_to_dict(b) for b in results]
+
+    if not bugs:
+        stdout.write("no bugs found\n")
+        return 0
+
+    # Compact table format for terminal
+    header = f"{'BUG ID':<16} {'SEV':>3} {'STATUS':<12} {'CATEGORY':<12} TITLE"
+    stdout.write(header + "\n")
+    stdout.write("-" * len(header) + "-" * 20 + "\n")
+    for b in bugs:
+        title = (b.get("title") or "")[:60]
+        stdout.write(
+            f"{b.get('bug_id', ''):<16} "
+            f"{b.get('severity', ''):>3} "
+            f"{b.get('status', ''):<12} "
+            f"{b.get('category', ''):<12} "
+            f"{title}\n"
+        )
+    stdout.write(f"\n{len(bugs)} bug(s)\n")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# workflow recall <query> — knowledge graph search
+# ---------------------------------------------------------------------------
+
+def _recall_command(args: list[str], *, stdout: TextIO) -> int:
+    """Handle `workflow recall <query> [--type T] [--json] [--limit N]`."""
+
+    import json as _json
+
+    if not args or args[0] in {"-h", "--help"}:
+        stdout.write(
+            "usage: workflow recall <query> [--type T] [--limit N] [--json]\n"
+            "\n"
+            "  Search the knowledge graph by semantic similarity.\n"
+            "  Types: task, fact, document, decision, constraint, topic,\n"
+            "         table, code_unit, pattern, metric, module, person\n"
+        )
+        return 2
+
+    query_parts: list[str] = []
+    entity_type = None
+    limit = 15
+    as_json = False
+    i = 0
+
+    while i < len(args):
+        if args[i] == "--type" and i + 1 < len(args):
+            entity_type = args[i + 1]
+            i += 2
+        elif args[i] == "--limit" and i + 1 < len(args):
+            limit = int(args[i + 1])
+            i += 2
+        elif args[i] == "--json":
+            as_json = True
+            i += 1
+        else:
+            query_parts.append(args[i])
+            i += 1
+
+    query = " ".join(query_parts)
+    if not query:
+        stdout.write("error: query is required\n")
+        return 2
+
+    from memory.knowledge_graph import KnowledgeGraph
+    from runtime.embedding_service import EmbeddingService, resolve_embedding_runtime_authority
+
+    conn = _get_conn()
+    embedder = EmbeddingService(authority=resolve_embedding_runtime_authority())
+    kg = KnowledgeGraph(conn=conn, embedder=embedder)
+    results = kg.search(query, entity_type=entity_type, limit=limit)
+
+    if as_json:
+        rows = []
+        for r in results:
+            entry = {
+                "name": r.entity.name,
+                "type": r.entity.entity_type.value if hasattr(r.entity.entity_type, "value") else str(r.entity.entity_type),
+                "score": round(r.score, 2),
+                "source": r.entity.source or "",
+            }
+            content = (r.entity.content or "").strip()
+            if content:
+                entry["content"] = content[:300]
+            rows.append(entry)
+        stdout.write(_json.dumps(rows, indent=2, default=str) + "\n")
+        return 0
+
+    if not results:
+        stdout.write("no results found\n")
+        return 0
+
+    for r in results:
+        score = round(r.score, 2)
+        etype = r.entity.entity_type.value if hasattr(r.entity.entity_type, "value") else str(r.entity.entity_type)
+        name = r.entity.name or "(unnamed)"
+        stdout.write(f"  [{score:.2f}] {etype:<12} {name}\n")
+        content = (r.entity.content or "").strip()
+        if content:
+            preview = content[:120].replace("\n", " ")
+            stdout.write(f"           {preview}\n")
+    stdout.write(f"\n{len(results)} result(s)\n")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# workflow discover <query> — code similarity search
+# ---------------------------------------------------------------------------
+
+def _discover_command(args: list[str], *, stdout: TextIO) -> int:
+    """Handle `workflow discover <query> [--kind K] [--limit N] [--json]`."""
+
+    import json as _json
+
+    if not args or args[0] in {"-h", "--help"}:
+        stdout.write(
+            "usage: workflow discover <query> [--kind K] [--limit N] [--json]\n"
+            "\n"
+            "  Find functionally similar code using vector similarity over AST fingerprints.\n"
+            "  Kinds: module, class, function (default: all)\n"
+            "\n"
+            "  workflow discover 'retry with exponential backoff'\n"
+            "  workflow discover 'parse JSON from stdin' --kind function\n"
+            "  workflow discover reindex   (re-index the codebase)\n"
+            "  workflow discover stats     (index statistics)\n"
+        )
+        return 2
+
+    from runtime.module_indexer import ModuleIndexer
+    from pathlib import Path
+
+    conn = _get_conn()
+    repo_root = str(Path(__file__).resolve().parents[5])
+    indexer = ModuleIndexer(conn=conn, repo_root=repo_root)
+
+    # Special actions
+    if args[0] == "reindex":
+        indexer.reindex()
+        stdout.write("reindex complete\n")
+        return 0
+    if args[0] == "stats":
+        stats = indexer.stats()
+        stdout.write(_json.dumps(stats, indent=2, default=str) + "\n")
+        return 0
+
+    query_parts: list[str] = []
+    kind = None
+    limit = 10
+    as_json = False
+    i = 0
+
+    while i < len(args):
+        if args[i] == "--kind" and i + 1 < len(args):
+            kind = args[i + 1]
+            i += 2
+        elif args[i] == "--limit" and i + 1 < len(args):
+            limit = int(args[i + 1])
+            i += 2
+        elif args[i] == "--json":
+            as_json = True
+            i += 1
+        else:
+            query_parts.append(args[i])
+            i += 1
+
+    query = " ".join(query_parts)
+    if not query:
+        stdout.write("error: query is required\n")
+        return 2
+
+    raw = indexer.search(query=query, limit=limit, kind=kind, threshold=0.3)
+
+    if as_json:
+        clean = []
+        for r in raw:
+            clean.append({
+                "name": r.get("name", ""),
+                "kind": r.get("kind", ""),
+                "path": r.get("module_path", "").replace("Code&DBs/Workflow/", ""),
+                "similarity": round(r.get("cosine_similarity", 0), 2),
+                "docstring": (r.get("docstring_preview") or "")[:200],
+            })
+        stdout.write(_json.dumps(clean, indent=2) + "\n")
+        return 0
+
+    if not raw:
+        stdout.write("no matches found\n")
+        return 0
+
+    for r in raw:
+        sim = round(r.get("cosine_similarity", 0), 2)
+        kind_str = r.get("kind", "")
+        name = r.get("name", "")
+        path = r.get("module_path", "").replace("Code&DBs/Workflow/", "")
+        stdout.write(f"  [{sim:.2f}] {kind_str:<10} {name}\n")
+        stdout.write(f"           {path}\n")
+        doc = (r.get("docstring_preview") or "").strip()
+        if doc:
+            stdout.write(f"           {doc[:100]}\n")
+    stdout.write(f"\n{len(raw)} match(es)\n")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# workflow artifacts [stats|search <q>|list <sandbox_id>]
+# ---------------------------------------------------------------------------
+
+def _artifacts_command(args: list[str], *, stdout: TextIO) -> int:
+    """Handle `workflow artifacts [stats|search <query>|list <sandbox_id>]`."""
+
+    import json as _json
+
+    if args and args[0] in {"-h", "--help"}:
+        stdout.write(
+            "usage: workflow artifacts [stats|search <query>|list <sandbox_id>]\n"
+            "\n"
+            "  stats                 Index statistics (default)\n"
+            "  search <query>        Search artifact file paths\n"
+            "  list <sandbox_id>     List artifacts for a sandbox run\n"
+        )
+        return 2
+
+    from runtime.sandbox_artifacts import ArtifactStore
+
+    conn = _get_conn()
+    store = ArtifactStore(conn)
+    action = args[0] if args else "stats"
+
+    if action == "stats":
+        s = store.stats()
+        if s.get("total_artifacts", 0) == 0:
+            stdout.write("no artifacts captured yet\n")
+            return 0
+        stdout.write(_json.dumps(s, indent=2, default=str) + "\n")
+        return 0
+
+    if action == "search":
+        query = " ".join(args[1:])
+        if not query:
+            stdout.write("error: search query required\n")
+            return 2
+        items = store.search(query, limit=20)
+        if not items:
+            stdout.write("no matching artifacts\n")
+            return 0
+        for a in items:
+            stdout.write(f"  {a.artifact_id[:12]}  {a.file_path}  ({a.byte_count} bytes)\n")
+        stdout.write(f"\n{len(items)} artifact(s)\n")
+        return 0
+
+    if action == "list":
+        sandbox_id = args[1] if len(args) > 1 else ""
+        if not sandbox_id:
+            stdout.write("error: sandbox_id required\n")
+            return 2
+        items = store.list_by_sandbox(sandbox_id)
+        if not items:
+            stdout.write(f"no artifacts for sandbox {sandbox_id}\n")
+            return 0
+        for a in items:
+            stdout.write(f"  {a.file_path}  ({a.byte_count} bytes, {a.line_count} lines)\n")
+        stdout.write(f"\n{len(items)} artifact(s)\n")
+        return 0
+
+    stdout.write(f"unknown action: {action}\n")
+    return 2

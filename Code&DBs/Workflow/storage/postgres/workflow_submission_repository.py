@@ -46,6 +46,8 @@ _SUBMISSION_COLUMNS = """
     operation_set,
     comparison_status,
     comparison_report,
+    acceptance_status,
+    acceptance_report,
     diff_artifact_ref,
     artifact_refs,
     verification_artifact_refs,
@@ -218,6 +220,8 @@ def _normalize_submission_payload(
     operation_set: object | None,
     comparison_status: str,
     comparison_report: object | None,
+    acceptance_status: str,
+    acceptance_report: object | None,
     diff_artifact_ref: object | None,
     artifact_refs: object | None,
     verification_artifact_refs: object | None,
@@ -246,6 +250,14 @@ def _normalize_submission_payload(
         "comparison_report": _normalize_json_value(
             {} if comparison_report is None else comparison_report,
             field_name="comparison_report",
+        ),
+        "acceptance_status": _require_text(
+            acceptance_status,
+            field_name="acceptance_status",
+        ),
+        "acceptance_report": _normalize_json_value(
+            {} if acceptance_report is None else acceptance_report,
+            field_name="acceptance_report",
         ),
         "diff_artifact_ref": _normalize_optional_text(
             diff_artifact_ref,
@@ -290,6 +302,11 @@ def _submission_row_payload(row: Mapping[str, Any]) -> dict[str, Any]:
             field_name="comparison_status",
         ),
         "comparison_report": _json_field(row.get("comparison_report"), default={}),
+        "acceptance_status": _require_text(
+            row.get("acceptance_status") or "not_requested",
+            field_name="acceptance_status",
+        ),
+        "acceptance_report": _json_field(row.get("acceptance_report"), default={}),
         "diff_artifact_ref": row["diff_artifact_ref"],
         "artifact_refs": list(_json_field(row.get("artifact_refs"), default=[])),
         "verification_artifact_refs": list(
@@ -314,6 +331,8 @@ def _submission_fields_from_payload(payload: Mapping[str, Any]) -> dict[str, Any
         "operation_set": payload["operation_set"],
         "comparison_status": payload["comparison_status"],
         "comparison_report": payload["comparison_report"],
+        "acceptance_status": payload["acceptance_status"],
+        "acceptance_report": payload["acceptance_report"],
         "diff_artifact_ref": payload["diff_artifact_ref"],
         "artifact_refs": payload["artifact_refs"],
         "verification_artifact_refs": payload["verification_artifact_refs"],
@@ -336,6 +355,8 @@ def _submission_difference_fields(
         "operation_set",
         "comparison_status",
         "comparison_report",
+        "acceptance_status",
+        "acceptance_report",
         "diff_artifact_ref",
         "artifact_refs",
         "verification_artifact_refs",
@@ -370,6 +391,8 @@ class PostgresWorkflowSubmissionRepository:
         operation_set: object | None = None,
         comparison_status: str,
         comparison_report: object | None = None,
+        acceptance_status: str = "not_requested",
+        acceptance_report: object | None = None,
         diff_artifact_ref: object | None = None,
         artifact_refs: object | None = None,
         verification_artifact_refs: object | None = None,
@@ -391,6 +414,8 @@ class PostgresWorkflowSubmissionRepository:
             operation_set=operation_set,
             comparison_status=comparison_status,
             comparison_report=comparison_report,
+            acceptance_status=acceptance_status,
+            acceptance_report=acceptance_report,
             diff_artifact_ref=diff_artifact_ref,
             artifact_refs=artifact_refs,
             verification_artifact_refs=verification_artifact_refs,
@@ -420,6 +445,8 @@ class PostgresWorkflowSubmissionRepository:
                     operation_set,
                     comparison_status,
                     comparison_report,
+                    acceptance_status,
+                    acceptance_report,
                     diff_artifact_ref,
                     artifact_refs,
                     verification_artifact_refs,
@@ -427,8 +454,8 @@ class PostgresWorkflowSubmissionRepository:
                 ) VALUES (
                     $1, $2, $3, $4, $5, $6, $7,
                     $8::jsonb, $9::jsonb, $10, $11::jsonb, $12::jsonb,
-                    $13::jsonb, $14, $15::jsonb, $16, $17::jsonb,
-                    $18::jsonb, $19
+                    $13::jsonb, $14, $15::jsonb, $16, $17::jsonb, $18,
+                    $19::jsonb, $20::jsonb, $21
                 )
                 ON CONFLICT (run_id, job_label, attempt_no) DO NOTHING
                 RETURNING {_SUBMISSION_COLUMNS}
@@ -453,6 +480,11 @@ class PostgresWorkflowSubmissionRepository:
                 _encode_jsonb(
                     normalized_payload["comparison_report"],
                     field_name="comparison_report",
+                ),
+                normalized_payload["acceptance_status"],
+                _encode_jsonb(
+                    normalized_payload["acceptance_report"],
+                    field_name="acceptance_report",
                 ),
                 normalized_payload["diff_artifact_ref"],
                 _encode_jsonb(normalized_payload["artifact_refs"], field_name="artifact_refs"),
@@ -607,6 +639,48 @@ class PostgresWorkflowSubmissionRepository:
             _encode_jsonb(
                 normalized_refs,
                 field_name="verification_artifact_refs",
+            ),
+        )
+        if row is None:
+            raise WorkflowSubmissionRepositoryError(
+                "workflow_submission.not_found",
+                "submission_id did not resolve to a sealed submission row",
+                details={"submission_id": normalized_submission_id},
+            )
+        return dict(row)
+
+    def update_submission_acceptance(
+        self,
+        *,
+        submission_id: str,
+        acceptance_status: str,
+        acceptance_report: object | None,
+    ) -> dict[str, Any]:
+        normalized_submission_id = _require_text(
+            submission_id,
+            field_name="submission_id",
+        )
+        normalized_status = _require_text(
+            acceptance_status,
+            field_name="acceptance_status",
+        )
+        normalized_report = _normalize_json_value(
+            {} if acceptance_report is None else acceptance_report,
+            field_name="acceptance_report",
+        )
+        row = self._conn.fetchrow(
+            f"""
+            UPDATE workflow_job_submissions
+            SET acceptance_status = $2,
+                acceptance_report = $3::jsonb
+            WHERE submission_id = $1
+            RETURNING {_SUBMISSION_COLUMNS}
+            """,
+            normalized_submission_id,
+            normalized_status,
+            _encode_jsonb(
+                normalized_report,
+                field_name="acceptance_report",
             ),
         )
         if row is None:

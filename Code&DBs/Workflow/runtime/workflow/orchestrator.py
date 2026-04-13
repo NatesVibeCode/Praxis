@@ -103,6 +103,8 @@ class WorkflowSpec:
     plan_revision: str | None = None
     packet_provenance: dict[str, Any] | None = None
     output_schema: dict | None = None
+    authoring_contract: dict[str, Any] | None = None
+    acceptance_contract: dict[str, Any] | None = None
     max_context_tokens: int | None = None
     persist: bool = True
     capabilities: list[str] | None = None  # capability-based routing (overrides tier)

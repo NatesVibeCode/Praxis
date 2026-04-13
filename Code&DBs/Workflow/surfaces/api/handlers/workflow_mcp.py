@@ -59,6 +59,7 @@ def _intersect_allowed_tools(token_allowed_tools: list[str], request_allowed_too
 
 def _handle_mcp_post(request: Any, path: str) -> None:
     del path
+    workflow_token = _workflow_token(request)
     try:
         body = _read_json_body(request)
         if not isinstance(body, dict):
@@ -70,7 +71,7 @@ def _handle_mcp_post(request: Any, path: str) -> None:
     method = str(body.get("method") or "").strip()
     if method in {"tools/list", "tools/call"}:
         try:
-            claims = verify_workflow_mcp_session_token(_workflow_token(request))
+            claims = verify_workflow_mcp_session_token(workflow_token)
         except WorkflowMcpSessionError as exc:
             request._send_json(401, {"error": str(exc), "reason_code": exc.reason_code})
             return
@@ -90,6 +91,7 @@ def _handle_mcp_post(request: Any, path: str) -> None:
                     body,
                     transport="jsonl",
                     allowed_tool_names=allowed_tool_names,
+                    workflow_token=workflow_token,
                 )
             except Exception as exc:
                 request._send_json(
@@ -107,6 +109,7 @@ def _handle_mcp_post(request: Any, path: str) -> None:
                 body,
                 transport="jsonl",
                 allowed_tool_names=allowed_tool_names,
+                workflow_token=workflow_token,
             )
         except Exception as exc:
             request._send_json(

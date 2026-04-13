@@ -14,6 +14,13 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, TYPE_CHECKING
 
+from runtime.workflow.artifact_contracts import (
+    normalize_acceptance_contract,
+    normalize_authoring_contract,
+    render_acceptance_contract,
+    render_authoring_contract,
+)
+
 if TYPE_CHECKING:
     from .workflow import WorkflowSpec
 
@@ -97,6 +104,24 @@ def render_prompt(
 
     # --- user message -----------------------------------------------------
     user_parts: list[str] = [spec.prompt]
+
+    authoring_contract = normalize_authoring_contract(
+        output_schema=getattr(spec, "output_schema", None),
+        authoring_contract=getattr(spec, "authoring_contract", None),
+        acceptance_contract=getattr(spec, "acceptance_contract", None),
+    )
+    acceptance_contract = normalize_acceptance_contract(
+        output_schema=getattr(spec, "output_schema", None),
+        authoring_contract=getattr(spec, "authoring_contract", None),
+        acceptance_contract=getattr(spec, "acceptance_contract", None),
+        verify_refs=getattr(spec, "verify_refs", None),
+    )
+    rendered_authoring = render_authoring_contract(authoring_contract)
+    if rendered_authoring:
+        user_parts.append(f"\n\n{rendered_authoring}")
+    rendered_acceptance = render_acceptance_contract(acceptance_contract)
+    if rendered_acceptance:
+        user_parts.append(f"\n\n{rendered_acceptance}")
 
     for section in frozen_sections:
         user_parts.append(f"\n\n--- {section['name']} ---\n{section['content']}")

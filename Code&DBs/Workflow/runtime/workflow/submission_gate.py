@@ -25,6 +25,8 @@ def _auto_seal_text_only(
     attempt_no: int,
     summary: str,
     result_kind: str,
+    execution_bundle: dict[str, Any] | None = None,
+    verification_artifact_refs: list[str] | None = None,
 ) -> dict[str, Any]:
     """Insert a minimal submission row for text-only output (no write_scope).
 
@@ -32,30 +34,41 @@ def _auto_seal_text_only(
     produced text output but no baseline was captured because the job has
     no write_scope (research, debate, architecture tasks).
     """
-    import json
-    import uuid
-    from datetime import datetime, timezone
+    from runtime.workflow.artifact_contracts import evaluate_submission_acceptance
+    from storage.postgres.workflow_submission_repository import (
+        PostgresWorkflowSubmissionRepository,
+    )
 
-    submission_id = f"sub_{uuid.uuid4().hex[:12]}"
-    now = datetime.now(timezone.utc)
     # Truncate summary to 250k chars to stay within DB limits
     truncated = summary[:250_000] if len(summary) > 250_000 else summary
-
-    conn.execute(
-        """INSERT INTO workflow_job_submissions
-           (submission_id, run_id, workflow_id, job_label, attempt_no,
-            result_kind, summary, primary_paths, comparison_status, sealed_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10)
-           ON CONFLICT (run_id, job_label, attempt_no) DO NOTHING""",
-        submission_id, run_id, workflow_id, job_label, attempt_no,
-        result_kind, truncated, json.dumps([]), "text_only", now,
+    acceptance_contract = (
+        dict(execution_bundle.get("acceptance_contract"))
+        if isinstance(execution_bundle, dict)
+        and isinstance(execution_bundle.get("acceptance_contract"), dict)
+        else {}
     )
-    return {
-        "submission_id": submission_id,
-        "result_kind": result_kind,
-        "comparison_status": "text_only",
-        "sealed_at": now.isoformat(),
-    }
+    acceptance_status, acceptance_report = evaluate_submission_acceptance(
+        submission={
+            "summary": truncated,
+            "verification_artifact_refs": list(verification_artifact_refs or []),
+        },
+        acceptance_contract=acceptance_contract,
+    )
+    repository = PostgresWorkflowSubmissionRepository(conn)
+    return repository.record_submission(
+        run_id=run_id,
+        workflow_id=workflow_id,
+        job_label=job_label,
+        attempt_no=attempt_no,
+        result_kind=result_kind,
+        summary=truncated,
+        primary_paths=[],
+        comparison_status="text_only",
+        comparison_report="",
+        acceptance_status=acceptance_status,
+        acceptance_report=acceptance_report,
+        verification_artifact_refs=list(verification_artifact_refs or []),
+    )
 
 
 @dataclass
@@ -98,6 +111,24 @@ def resolve_submission_for_job(
 
     submission_required = _submission_required_for_bundle(execution_bundle)
     submission_state: dict[str, Any] | None = None
+
+    # ── Stage 0: enforce verification_required ─────────────────────────────
+    # If the completion contract says verification is required, the job must
+    # have run verify_refs and they must have passed. If verification never
+    # ran (no verify_refs, so no artifact refs) the job fails here.
+    verification_required = bool(
+        ((execution_bundle or {}).get("completion_contract") or {}).get("verification_required")
+    )
+    if verification_required and final_status == "succeeded" and not verification_artifact_refs:
+        final_status = "failed"
+        final_error_code = "verification.required_not_run"
+        result = {
+            **result,
+            "stderr": (
+                str(result.get("stderr") or "")
+                + "\nverification_required=true but no verify_refs were executed"
+            ).strip(),
+        }
 
     # ── Stage 1: check for an existing sealed submission ────────────────────
     try:
@@ -167,6 +198,8 @@ def resolve_submission_for_job(
                         attempt_no=attempt_no,
                         summary=output_text,
                         result_kind=result_kind,
+                        execution_bundle=execution_bundle,
+                        verification_artifact_refs=verification_artifact_refs,
                     )
                     logger.info(
                         "Auto-sealed text-only submission for %s/%s",
@@ -191,6 +224,8 @@ def resolve_submission_for_job(
                         attempt_no=attempt_no,
                         summary=output_text,
                         result_kind=result_kind,
+                        execution_bundle=execution_bundle,
+                        verification_artifact_refs=verification_artifact_refs,
                     )
                     logger.info(
                         "Auto-sealed text-only submission (fallback) for %s/%s",
@@ -227,6 +262,27 @@ def resolve_submission_for_job(
                 + "\nsubmission_required=true but no sealed submission exists for the current attempt"
             ).strip(),
         }
+
+    # ── Stage 4: enforce acceptance contract ──────────────────────────────
+    # If the submission was sealed and has an acceptance_status of "failed",
+    # the job fails regardless of other status.
+    if final_status == "succeeded" and isinstance(submission_state, dict):
+        acceptance_status = str(submission_state.get("acceptance_status") or "").strip().lower()
+        if acceptance_status == "failed":
+            final_status = "failed"
+            final_error_code = "acceptance.contract_failed"
+            hard_failures = []
+            acceptance_report = submission_state.get("acceptance_report")
+            if isinstance(acceptance_report, dict):
+                hard_failures = acceptance_report.get("hard_failures") or []
+            failure_summary = "; ".join(str(f) for f in hard_failures[:5]) if hard_failures else "acceptance contract not met"
+            result = {
+                **result,
+                "stderr": (
+                    str(result.get("stderr") or "")
+                    + f"\nacceptance_status=failed: {failure_summary}"
+                ).strip(),
+            }
 
     return SubmissionGateResult(
         submission_state=submission_state,

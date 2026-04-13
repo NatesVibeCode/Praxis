@@ -1,5 +1,6 @@
 export type PresetCategory =
   | 'overview'
+  | 'engineering'
   | 'workflows'
   | 'models'
   | 'bugs'
@@ -19,6 +20,7 @@ export interface ModulePreset {
 
 const CATEGORY_ORDER: PresetCategory[] = [
   'overview',
+  'engineering',
   'workflows',
   'models',
   'bugs',
@@ -28,6 +30,7 @@ const CATEGORY_ORDER: PresetCategory[] = [
 
 export const CATEGORY_LABELS: Record<PresetCategory, string> = {
   overview: 'Platform Overview',
+  engineering: 'Engineering Observability',
   workflows: 'Workflow Runs',
   models: 'Model Performance',
   bugs: 'Bug Tracking',
@@ -123,6 +126,114 @@ const MODULE_PRESETS: ModulePreset[] = [
     icon: '≡',
     config: {
       endpoint: 'platform-overview',
+    },
+  },
+
+  // ── Engineering Observability ────────────────────────────
+  {
+    presetId: 'platform-observability-row',
+    moduleId: 'stat-row',
+    span: '2x1',
+    name: 'Platform Pulse',
+    description: 'Live probe and operator-state summary',
+    category: 'engineering',
+    icon: '≣',
+    config: {
+      endpoint: 'observability/platform',
+      stats: [
+        { path: 'summary.overall', label: 'Overall' },
+        { path: 'summary.queue_depth', label: 'Queue' },
+        { path: 'summary.failed_checks', label: 'Failed', color: 'var(--danger)' },
+        { path: 'summary.write_conflicts', label: 'Conflicts', color: 'var(--danger)' },
+      ],
+    },
+  },
+  {
+    presetId: 'platform-probes-grid',
+    moduleId: 'status-grid',
+    span: '2x2',
+    name: 'Platform Probes',
+    description: 'Probe-by-probe platform health',
+    category: 'engineering',
+    icon: '▦',
+    config: {
+      endpoint: 'observability/platform',
+      path: 'checks',
+      title: 'Platform Probes',
+    },
+  },
+  {
+    presetId: 'code-hotspots-table',
+    moduleId: 'data-table',
+    span: '2x2',
+    name: 'Code Hotspots',
+    description: 'Files where code risk, bugs, and regressions cluster',
+    category: 'engineering',
+    icon: '▤',
+    config: {
+      endpoint: 'observability/code-hotspots',
+      path: 'files',
+      columns: [
+        { key: 'file_path', label: 'File' },
+        { key: 'component', label: 'Component' },
+        { key: 'hotspot_score', label: 'Score' },
+        { key: 'open_bug_count', label: 'Open Bugs' },
+        { key: 'regression_count', label: 'Regressions' },
+      ],
+    },
+  },
+  {
+    presetId: 'hotspot-components-chart',
+    moduleId: 'chart',
+    span: '2x2',
+    name: 'Hotspot Components',
+    description: 'Which subsystems are concentrating pain',
+    category: 'engineering',
+    icon: '▥',
+    config: {
+      endpoint: 'observability/code-hotspots',
+      path: 'components',
+      type: 'bar',
+      xKey: 'component',
+      yKey: 'score',
+      title: 'Hotspot Components',
+    },
+  },
+  {
+    presetId: 'bug-scoreboard-row',
+    moduleId: 'stat-row',
+    span: '2x1',
+    name: 'Bug Scoreboard',
+    description: 'Replay readiness, regressions, and bug pressure',
+    category: 'engineering',
+    icon: '═',
+    config: {
+      endpoint: 'observability/bug-scoreboard',
+      stats: [
+        { path: 'summary.total_bugs', label: 'Total Bugs' },
+        { path: 'summary.open_bugs', label: 'Open Bugs', color: 'var(--danger)' },
+        { path: 'summary.replay_ready_bugs', label: 'Replay Ready' },
+        { path: 'summary.regression_bugs', label: 'Regressions', color: 'var(--danger)' },
+      ],
+    },
+  },
+  {
+    presetId: 'recurring-bugs-table',
+    moduleId: 'data-table',
+    span: '2x2',
+    name: 'Recurring Bugs',
+    description: 'Open bugs with repeated impact and observability gaps',
+    category: 'engineering',
+    icon: '▤',
+    config: {
+      endpoint: 'observability/bug-scoreboard',
+      path: 'top_recurring',
+      columns: [
+        { key: 'title', label: 'Bug' },
+        { key: 'severity', label: 'Severity' },
+        { key: 'recurrence_count', label: 'Recurrences' },
+        { key: 'observability_state', label: 'Observability' },
+      ],
     },
   },
 

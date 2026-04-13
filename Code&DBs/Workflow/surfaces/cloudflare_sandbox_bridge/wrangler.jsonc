@@ -1,0 +1,35 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "praxis-sandbox-bridge",
+  "main": "src/index.js",
+  "workers_dev": true,
+  "compatibility_date": "2026-04-13",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "vars": {
+    "SANDBOX_TRANSPORT": "websocket"
+  },
+  "containers": [
+    {
+      "class_name": "Sandbox",
+      "image": "./Dockerfile"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "class_name": "Sandbox",
+        "name": "Sandbox"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "new_sqlite_classes": [
+        "Sandbox"
+      ],
+      "tag": "v1"
+    }
+  ]
+}

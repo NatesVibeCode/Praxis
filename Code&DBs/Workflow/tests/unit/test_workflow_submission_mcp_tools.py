@@ -32,7 +32,7 @@ def test_tool_wrappers_forward_parameters(monkeypatch) -> None:
 
     monkeypatch.setattr(submission_tools.workflow_submission, "submit_code_change", _submit_code_change)
 
-    payload = submission_tools.tool_dag_submit_code_change(
+    payload = submission_tools.tool_praxis_submit_code_change(
         {
             "summary": "Done",
             "primary_paths": ["runtime/workflow/submission_capture.py"],

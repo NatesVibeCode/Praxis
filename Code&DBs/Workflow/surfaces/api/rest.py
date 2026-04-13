@@ -162,6 +162,8 @@ class WorkflowRunRequest(BaseModel):
     plan_revision: str | None = None
     packet_provenance: dict[str, Any] | None = None
     output_schema: dict | None = None
+    authoring_contract: dict | None = None
+    acceptance_contract: dict | None = None
     max_context_tokens: int | None = None
     persist: bool = True
     capabilities: list[str] | None = None
@@ -251,6 +253,8 @@ def _spec_from_request(req: WorkflowRunRequest):
         plan_revision=req.plan_revision,
         packet_provenance=req.packet_provenance,
         output_schema=req.output_schema,
+        authoring_contract=req.authoring_contract,
+        acceptance_contract=req.acceptance_contract,
         max_context_tokens=req.max_context_tokens,
         persist=req.persist,
         capabilities=req.capabilities,
@@ -1779,6 +1783,75 @@ def get_metrics_heatmap(days: int = Query(default=7, ge=1)) -> list[dict[str, An
 
     view = get_workflow_metrics_view()
     return view.failure_heatmap(days=days)
+
+
+@app.get("/api/observability/code-hotspots")
+def get_code_hotspots(
+    limit: int = Query(default=20, ge=1, le=200),
+    roots: str | None = Query(
+        default=None,
+        description="Comma-separated repo roots to scan (defaults to runtime,surfaces/api,surfaces/cli)",
+    ),
+    path_prefix: str | None = Query(
+        default=None,
+        description="Optional repo-relative path prefix to filter hotspot results",
+    ),
+) -> dict[str, Any]:
+    """Return merged code hotspot rollups across static health, receipt risk, and bug packets."""
+    from runtime.engineering_observability import build_code_hotspots
+
+    subsystems = _ensure_shared_subsystems(app)
+    bug_tracker = None
+    if subsystems is not None:
+        try:
+            bug_tracker = subsystems.get_bug_tracker()
+        except Exception:
+            bug_tracker = None
+
+    roots_list = [part.strip() for part in (roots or "").split(",") if part.strip()] or None
+    return build_code_hotspots(
+        repo_root=REPO_ROOT,
+        bug_tracker=bug_tracker,
+        limit=limit,
+        roots=roots_list,
+        path_prefix=path_prefix,
+    )
+
+
+@app.get("/api/observability/bug-scoreboard")
+def get_bug_scoreboard(limit: int = Query(default=20, ge=1, le=200)) -> dict[str, Any]:
+    """Return aggregate bug observability focused on replay readiness, regressions, and recurrence."""
+    from runtime.engineering_observability import build_bug_scoreboard
+
+    subsystems = _ensure_shared_subsystems(app)
+    bug_tracker = None
+    if subsystems is not None:
+        try:
+            bug_tracker = subsystems.get_bug_tracker()
+        except Exception:
+            bug_tracker = None
+    return build_bug_scoreboard(
+        bug_tracker=bug_tracker,
+        limit=limit,
+        repo_root=REPO_ROOT,
+    )
+
+
+@app.get("/api/observability/platform")
+def get_platform_observability() -> dict[str, Any]:
+    """Return operator-facing platform probe status with lane cues and degraded causes."""
+    from runtime.engineering_observability import build_platform_observability
+    from surfaces.api.handlers.workflow_admin import _handle_health
+
+    subsystems = _ensure_shared_subsystems(app)
+    payload = None
+    error = None
+    if subsystems is not None:
+        try:
+            payload = _handle_health(subsystems, {})
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+    return build_platform_observability(platform_payload=payload, error=error)
 
 
 @app.get("/api/events")

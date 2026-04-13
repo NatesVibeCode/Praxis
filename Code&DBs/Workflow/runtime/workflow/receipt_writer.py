@@ -345,9 +345,17 @@ def write_job_receipt(
         comparison_status = str(submission.get("comparison_status") or "").strip()
         if comparison_status:
             receipt_outputs["submission_comparison_status"] = comparison_status
+            receipt_outputs["submission_integrity_status"] = comparison_status
         comparison_report = submission.get("comparison_report")
         if comparison_report is not None:
             receipt_outputs["submission_comparison_report"] = _json_safe(comparison_report)
+            receipt_outputs["submission_integrity_report"] = _json_safe(comparison_report)
+        acceptance_status = str(submission.get("acceptance_status") or "").strip()
+        if acceptance_status:
+            receipt_outputs["submission_acceptance_status"] = acceptance_status
+        acceptance_report = submission.get("acceptance_report")
+        if acceptance_report is not None:
+            receipt_outputs["submission_acceptance_report"] = _json_safe(acceptance_report)
         measured_summary = submission.get("measured_summary")
         if measured_summary is not None:
             receipt_outputs["submission_measured_summary"] = _json_safe(measured_summary)

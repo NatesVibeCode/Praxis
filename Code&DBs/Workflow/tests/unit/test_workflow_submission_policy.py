@@ -48,6 +48,18 @@ class _FakeRepository:
             return ()
         return tuple(dict(review) for review in self.reviews)
 
+    def update_submission_acceptance(
+        self,
+        *,
+        submission_id: str,
+        acceptance_status: str,
+        acceptance_report: object | None,
+    ) -> dict[str, Any]:
+        assert submission_id == self.submission["submission_id"]
+        self.submission["acceptance_status"] = acceptance_status
+        self.submission["acceptance_report"] = acceptance_report or {}
+        return dict(self.submission)
+
 
 @dataclass
 class _FakeConn:
@@ -75,6 +87,8 @@ def test_publish_policy_review_projects_gate_and_promotion_rows(monkeypatch) -> 
         "operation_set": [{"path": "runtime/workflow/submission_capture.py", "action": "update"}],
         "comparison_status": "matched",
         "comparison_report": {"matched": True},
+        "acceptance_status": "pending_review",
+        "acceptance_report": {"contract_requested": True},
         "diff_artifact_ref": "workflow_submission_diff:abc123",
         "artifact_refs": ["workflow_submission_artifact:current:abc123:runtime/workflow/submission_capture.py"],
         "verification_artifact_refs": ["receipt:verify:sub-1"],
@@ -126,4 +140,3 @@ def test_publish_policy_review_projects_gate_and_promotion_rows(monkeypatch) -> 
     executed_queries = [query for query, _ in conn.executed]
     assert any("INSERT INTO gate_evaluations" in query for query in executed_queries)
     assert any("INSERT INTO promotion_decisions" in query for query in executed_queries)
-

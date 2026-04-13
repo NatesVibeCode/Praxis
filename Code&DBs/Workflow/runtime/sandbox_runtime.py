@@ -19,8 +19,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
 
+from .docker_image_authority import DOCKER_IMAGE_ENV, resolve_docker_image
 
-_DOCKER_IMAGE_ENV = "PRAXIS_DOCKER_IMAGE"
 _DOCKER_MEMORY_ENV = "PRAXIS_DOCKER_MEMORY"
 _DOCKER_CPUS_ENV = "PRAXIS_DOCKER_CPUS"
 _CLOUDFLARE_SANDBOX_URL_ENV = "PRAXIS_CLOUDFLARE_SANDBOX_URL"
@@ -181,7 +181,11 @@ def _docker_image_available(image: str) -> bool:
 
 
 def _docker_image() -> str:
-    return os.environ.get(_DOCKER_IMAGE_ENV, "praxis-worker:latest")
+    image, _metadata = resolve_docker_image(
+        requested_image=None,
+        image_exists=_docker_image_available,
+    )
+    return image
 
 
 def _docker_memory() -> str:
@@ -288,6 +292,7 @@ def _default_profile(
         "/bin",
         "/sbin",
         "/dev",
+        "/private/etc",
         "/private/tmp",
         "/tmp",
         # Platform package manager paths (Homebrew on macOS, linuxbrew, etc.)
@@ -299,6 +304,11 @@ def _default_profile(
         os.path.join(real_home, ".claude"),
         os.path.join(real_home, ".codex"),
         os.path.join(real_home, ".gemini"),
+    )
+    # CLI session dirs that need write access (todos, debug logs, config)
+    cli_write_paths = (
+        os.path.join(real_home, ".claude"),
+        os.path.join(real_home, ".codex"),
     )
     parts = [
         "(version 1)",
@@ -314,6 +324,9 @@ def _default_profile(
         parts.extend(_seatbelt_ancestor_metadata_rules(workspace_variant))
     for path in system_paths:
         parts.append(f'(allow file-read* (subpath "{path}"))')
+        parts.extend(_seatbelt_ancestor_metadata_rules(path))
+    for path in cli_write_paths:
+        parts.append(f'(allow file-write* (subpath "{path}"))')
         parts.extend(_seatbelt_ancestor_metadata_rules(path))
     if network_policy != "disabled":
         parts.append("(allow network*)")
@@ -510,11 +523,23 @@ class DockerLocalSandboxProvider:
         )
 
     def exec(self, session: SandboxSession, request: SandboxExecRequest) -> SandboxExecutionResult:
-        docker_image = request.image or _docker_image()
+        docker_image, image_meta = resolve_docker_image(
+            requested_image=request.image,
+            image_exists=_docker_image_available,
+        )
         if not _docker_image_available(docker_image):
+            build_hint = f" Build or configure {DOCKER_IMAGE_ENV} before sandbox execution."
+            if image_meta.get("source") == "default":
+                build_hint = (
+                    " Praxis auto-build also failed."
+                    if image_meta.get("build_error")
+                    else " Build or configure PRAXIS_DOCKER_IMAGE before sandbox execution."
+                )
+            detail = str(image_meta.get("build_error") or "").strip()
             raise RuntimeError(
                 "docker_local requires image "
-                f"{docker_image!r}. Build or configure {_DOCKER_IMAGE_ENV} before sandbox execution."
+                f"{docker_image!r}.{build_hint}"
+                + (f" {detail}" if detail else "")
             )
         docker_cmd = [
             "docker",

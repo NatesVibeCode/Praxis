@@ -17,6 +17,7 @@ from runtime.workflow.job_runtime_context import (
     load_workflow_job_runtime_context,
     persist_workflow_job_runtime_contexts,
 )
+from runtime.workflow.artifact_contracts import evaluate_submission_acceptance
 from runtime.workflow.submission_diff import (
     _artifact_ref,
     _comparison_result,
@@ -218,10 +219,12 @@ def _submission_manifest_hash(submission: Mapping[str, Any]) -> str:
     payload = {
         "submission_id": _s("submission_id"), "result_kind": _s("result_kind"),
         "summary": _s("summary"), "comparison_status": _s("comparison_status"),
+        "acceptance_status": _s("acceptance_status"),
         "diff_artifact_ref": _s("diff_artifact_ref"),
         "primary_paths": _l("primary_paths"), "changed_paths": _l("changed_paths"),
         "operation_set": _l("operation_set"), "artifact_refs": _l("artifact_refs"),
         "verification_artifact_refs": _l("verification_artifact_refs"),
+        "acceptance_report": submission.get("acceptance_report") or {},
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
     return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
@@ -382,6 +385,29 @@ def _completion_contract(execution_bundle: Mapping[str, Any]) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
 
 
+def _acceptance_contract(execution_bundle: Mapping[str, Any]) -> dict[str, Any]:
+    value = execution_bundle.get("acceptance_contract")
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _persist_submission_acceptance(
+    repository: PostgresWorkflowSubmissionRepository,
+    *,
+    submission: Mapping[str, Any],
+    execution_bundle: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    status, report = evaluate_submission_acceptance(
+        submission=_enriched_submission(repository, submission),
+        acceptance_contract=_acceptance_contract(execution_bundle or {}),
+    )
+    updated = repository.update_submission_acceptance(
+        submission_id=str(submission["submission_id"]),
+        acceptance_status=status,
+        acceptance_report=report,
+    )
+    return _enriched_submission(repository, updated)
+
+
 def capture_submission_baseline_for_job(
     conn,
     *,
@@ -497,6 +523,7 @@ def _serialize_submission(row: Mapping[str, Any]) -> dict[str, Any]:
         "changed_paths",
         "operation_set",
         "comparison_report",
+        "acceptance_report",
         "artifact_refs",
         "verification_artifact_refs",
     ):
@@ -604,7 +631,16 @@ def attach_verification_artifact_refs_for_job(
         submission_id=str(row["submission_id"]),
         verification_artifact_refs=merged_refs,
     )
-    return _enriched_submission(repository, updated)
+    _, execution_bundle, _ = _load_runtime_context_state(
+        conn,
+        run_id=run_id,
+        job_label=job_label,
+    )
+    return _persist_submission_acceptance(
+        repository,
+        submission=updated,
+        execution_bundle=execution_bundle,
+    )
 
 
 def get_submission_for_job_attempt(
@@ -777,7 +813,11 @@ def _submit_submission(
                         "comparison_status": "text_only",
                     },
                 )
-            return recorded
+            return _persist_submission_acceptance(
+                repository,
+                submission=recorded,
+                execution_bundle=execution_bundle,
+            )
         raise WorkflowSubmissionServiceError(
             "workflow_submission.write_scope_missing",
             "submission baseline is missing write_scope authority",
@@ -893,7 +933,11 @@ def _submit_submission(
             execution_context_shard=updated_shard,
             execution_bundle=execution_bundle,
         )
-    return _enriched_submission(repository, recorded)
+    return _persist_submission_acceptance(
+        repository,
+        submission=recorded,
+        execution_bundle=execution_bundle,
+    )
 
 
 def get_submission(
@@ -990,22 +1034,35 @@ def review_submission(
             "reviewer_role": reviewer_role,
         },
     )
-    enriched_submission = _enriched_submission(repository, target_submission)
+    target_job_label = _normalize_text(
+        target_submission.get("job_label"),
+        field_name="job_label",
+    )
+    _, execution_bundle, _ = _load_runtime_context_state(
+        active_conn,
+        run_id=normalized_run_id,
+        job_label=target_job_label,
+    )
+    enriched_submission = _persist_submission_acceptance(
+        repository,
+        submission=target_submission,
+        execution_bundle=execution_bundle,
+    )
     enriched_review = _serialize_review(review)
 
     policy_projection = None
     if reviewer_role in _PUBLISH_REVIEW_ROLE_TASK_TYPES:
-        normalized_submission = _serialize_submission(target_submission)
-        sub_id = str(target_submission["submission_id"])
+        normalized_submission = _serialize_submission(enriched_submission)
+        sub_id = str(enriched_submission["submission_id"])
         verify_refs = _normalize_text_list(normalized_submission.get("verification_artifact_refs"), field_name="verification_artifact_refs")
         derived_head_ref = _git_head_ref(_target_workspace_root(
             active_conn, run_id=normalized_run_id,
-            target_job_label=_normalize_text(normalized_submission.get("job_label"), field_name="job_label"),
+            target_job_label=target_job_label,
         ))
         effective_head = ((_normalize_text(current_head_ref, field_name="current_head_ref") if current_head_ref is not None else None)
             or derived_head_ref or str(normalized_submission.get("diff_artifact_ref") or "").strip() or sub_id)
         policy_projection = evaluate_publish_policy(
-            active_conn, submission=target_submission, submission_id=sub_id,
+            active_conn, submission=enriched_submission, submission_id=sub_id,
             run_id=normalized_run_id, workflow_id=normalized_workflow_id,
             reviewer_job_label=normalized_reviewer_job_label, reviewer_role=reviewer_role,
             review_decision=str(review["decision"]), policy_snapshot_ref=policy_snapshot_ref,
@@ -1021,7 +1078,7 @@ def review_submission(
 
     response = {
         **enriched_review,
-        "submission_id": target_submission["submission_id"],
+        "submission_id": enriched_submission["submission_id"],
         "submission": enriched_submission,
         "review_timeline": enriched_submission["review_timeline"],
     }

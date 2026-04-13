@@ -184,7 +184,7 @@ Located at `config/runtime_profiles.json`. Defines provider routing policy:
 | `WORKFLOW_DATABASE_URL` | (none) | PostgreSQL connection string |
 | `PRAXIS_API_PORT` | `8420` | HTTP API port |
 | `PRAXIS_API_HOST` | `0.0.0.0` | HTTP API bind address |
-| `PRAXIS_DOCKER_IMAGE` | `praxis-worker:latest` | Docker image for sandboxed execution |
+| `PRAXIS_DOCKER_IMAGE` | `praxis-worker:latest` | Docker image for sandboxed execution. If unset and the default image is missing, Praxis will build it from `Code&DBs/Workflow/docker/praxis-worker.Dockerfile` on first use. |
 | `PRAXIS_DOCKER_MEMORY` | `4g` | Memory limit for Docker workers |
 | `PRAXIS_DOCKER_CPUS` | `2` | CPU limit for Docker workers |
 

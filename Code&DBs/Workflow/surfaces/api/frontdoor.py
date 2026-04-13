@@ -183,12 +183,13 @@ SELECT
     s.result_kind AS submission_result_kind,
     s.summary AS submission_summary,
     s.comparison_status AS submission_comparison_status,
+    s.acceptance_status AS submission_acceptance_status,
     s.operation_set AS submission_operation_set,
     r.decision AS latest_submission_review_decision,
     r.summary AS latest_submission_review_summary
 FROM workflow_jobs AS j
 LEFT JOIN LATERAL (
-    SELECT submission_id, result_kind, summary, comparison_status, operation_set
+    SELECT submission_id, result_kind, summary, comparison_status, acceptance_status, operation_set
     FROM workflow_job_submissions
     WHERE run_id = j.run_id AND job_label = j.label
     ORDER BY attempt_no DESC, sealed_at DESC, submission_id DESC
@@ -261,6 +262,8 @@ def _submission_summary_from_row(row: Mapping[str, Any]) -> dict[str, Any] | Non
         "result_kind": str(row.get("submission_result_kind") or "").strip() or None,
         "summary": str(row.get("submission_summary") or "").strip() or None,
         "comparison_status": str(row.get("submission_comparison_status") or "").strip() or None,
+        "integrity_status": str(row.get("submission_comparison_status") or "").strip() or None,
+        "acceptance_status": str(row.get("submission_acceptance_status") or "").strip() or None,
         "measured_summary": _measured_summary(row.get("submission_operation_set")),
         "latest_review_decision": str(row.get("latest_submission_review_decision") or "").strip() or None,
         "latest_review_summary": str(row.get("latest_submission_review_summary") or "").strip() or None,

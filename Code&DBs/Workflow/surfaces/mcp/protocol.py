@@ -21,6 +21,7 @@ from typing import Any, Callable, Optional
 from storage.postgres import PostgresStorageError
 
 from .catalog import canonical_tool_name, get_tool_catalog, resolve_tool_entry
+from .invocation import ToolInvocationError, invoke_tool, normalize_allowed_tool_names
 
 
 _TRANSPORT_JSONL = "jsonl"
@@ -75,11 +76,20 @@ def _send_message(msg: dict[str, Any], *, transport: str = _TRANSPORT_CONTENT_LE
     if transport == _TRANSPORT_JSONL:
         sys.stdout.write(body)
         sys.stdout.write("\n")
+        sys.stdout.flush()
     else:
-        header = f"Content-Length: {len(body)}\r\n\r\n"
-        sys.stdout.write(header)
-        sys.stdout.write(body)
-    sys.stdout.flush()
+        body_bytes = body.encode("utf-8")
+        header = f"Content-Length: {len(body_bytes)}\r\n\r\n"
+        out = getattr(sys.stdout, "buffer", None)
+        if out is not None:
+            out.write(header.encode("ascii"))
+            out.write(body_bytes)
+            out.flush()
+        else:
+            # StringIO in tests — no binary buffer available
+            sys.stdout.write(header)
+            sys.stdout.write(body)
+            sys.stdout.flush()
 
 
 def _make_response(request_id: Any, result: Any = None, error: str | None = None) -> dict[str, Any]:
@@ -231,25 +241,11 @@ def handle_initialize(request_id: Any, params: dict) -> dict:
     })
 
 
-def _normalize_allowed_tool_names(value: object) -> set[str] | None:
-    if value is None:
-        return None
-    raw_values: list[str]
-    if isinstance(value, str):
-        raw_values = [part.strip() for part in value.replace("\n", ",").split(",")]
-    elif isinstance(value, Sequence):
-        raw_values = [str(part or "").strip() for part in value]
-    else:
-        return None
-    allowed = {canonical_tool_name(item) for item in raw_values if item}
-    return allowed or set()
-
-
 def _resolved_allowed_tool_names(value: object | None) -> set[str] | None:
-    explicit = _normalize_allowed_tool_names(value)
+    explicit = normalize_allowed_tool_names(value)
     if explicit is not None:
         return explicit
-    return _normalize_allowed_tool_names(
+    return normalize_allowed_tool_names(
         os.environ.get("PRAXIS_ALLOWED_MCP_TOOLS")
         or os.environ.get("PRAXIS_ALLOWED_MCP_TOOLS")
     )
@@ -276,6 +272,7 @@ def handle_tools_call(
     *,
     transport: str = _TRANSPORT_CONTENT_LENGTH,
     allowed_tool_names: object | None = None,
+    workflow_token: str = "",
 ) -> dict:
     tool_name = params.get("name")
     canonical_name = canonical_tool_name(tool_name)
@@ -291,8 +288,6 @@ def handle_tools_call(
             f"Tool arguments must be a JSON object: {tool_name}",
         )
     tool_input = dict(raw_tool_input)
-    if canonical_name not in get_tool_catalog():
-        return _make_error_response(request_id, f"Tool not found: {tool_name}")
 
     # Extract MCP progress token from _meta if the client sent one
     meta = params.get("_meta")
@@ -303,19 +298,19 @@ def handle_tools_call(
     progress_token = meta.get("progressToken")
     emitter = ProgressEmitter(progress_token, transport)
 
-    func, _ = resolve_tool_entry(canonical_name)
     try:
-        # Tool handlers that accept a _progress_emitter kwarg get streaming.
-        # Others are called normally (backward compatible).
-        import inspect
-        sig = inspect.signature(func)
-        if "_progress_emitter" in sig.parameters:
-            result = func(tool_input, _progress_emitter=emitter)
-        else:
-            result = func(tool_input)
+        result = invoke_tool(
+            canonical_name,
+            tool_input,
+            allowed_tool_names=allowed,
+            workflow_token=workflow_token,
+            progress_emitter=emitter,
+        )
         return _make_response(request_id, {
             "content": [{"type": "text", "text": _serialize_tool_result(result)}],
         })
+    except ToolInvocationError as exc:
+        return _make_error_response(request_id, exc.message)
     except Exception as e:
         return _make_error_response(request_id, _format_tool_error(e))
 
@@ -325,6 +320,7 @@ def handle_request(
     *,
     transport: str = _TRANSPORT_CONTENT_LENGTH,
     allowed_tool_names: object | None = None,
+    workflow_token: str = "",
 ) -> dict | None:
     """Route a JSON-RPC request to the appropriate handler."""
     request_id = msg.get("id")
@@ -345,6 +341,7 @@ def handle_request(
             params,
             transport=transport,
             allowed_tool_names=allowed_tool_names,
+            workflow_token=workflow_token,
         )
     else:
         if request_id is not None:

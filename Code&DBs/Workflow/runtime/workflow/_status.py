@@ -117,6 +117,7 @@ def _attach_submission_state(
         job_row["submission"] = submission_state
         job_row["submission_id"] = submission_state.get("submission_id")
         job_row["submission_comparison_status"] = submission_state.get("comparison_status")
+        job_row["submission_acceptance_status"] = submission_state.get("acceptance_status")
         latest_review = submission_state.get("latest_review")
         if isinstance(latest_review, dict):
             job_row["latest_submission_review_decision"] = latest_review.get("decision")
