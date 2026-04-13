@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from policy.workflow_classes import PostgresWorkflowClassRepository
-from runtime.instance import NativeDagInstance
+from runtime.instance import NativeWorkflowInstance
 from surfaces.api import native_scheduler
 
 _QUEUE_FILENAME = "PRAXIS_NATIVE_DEFAULT_PARALLEL_PROOF.queue.json"
@@ -27,9 +27,9 @@ def _load_queue() -> dict[str, object]:
     return json.loads(_queue_path().read_text(encoding="utf-8"))
 
 
-def _native_instance() -> NativeDagInstance:
+def _native_instance() -> NativeWorkflowInstance:
     root = str(_repo_root())
-    return NativeDagInstance(
+    return NativeWorkflowInstance(
         instance_name="praxis",
         runtime_profile_ref="praxis",
         repo_root=root,

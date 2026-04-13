@@ -1,0 +1,113 @@
+{
+  "name": "Route Authority Readonly Resolution",
+  "phase": "W",
+  "queue_id": "route_authority_readonly_resolution_20260413",
+  "outcome_goal": "Task-type routing becomes a read-mostly authority path with cached snapshot loading, no per-resolution write amplification, and cheaper route-feedback updates without changing route-selection semantics.",
+  "anti_requirements": [
+    "Do NOT change the winning-route semantics for explicit overrides, eligibility, or failover ordering without tests proving equivalence",
+    "Do NOT remove task_type_routing or the existing authority tables",
+    "Do NOT widen writes outside Code&DBs/Workflow/runtime/ and the matching tests"
+  ],
+  "jobs": [
+    {
+      "label": "route_authority_plan",
+      "agent": "openai/gpt-5.4",
+      "task_type": "architecture",
+      "description": "Define the authority split between route snapshot loading, pure resolution, and feedback persistence",
+      "outcome_goal": "Implementation jobs have one explicit design for snapshot lifetime, invalidation, and side-effect boundaries",
+      "prompt": "Read the routing hot path and produce a concrete plan before touching code.\n\nFocus files:\n- `Code&DBs/Workflow/runtime/task_type_router.py`\n- `Code&DBs/Workflow/runtime/workflow/_routing.py`\n- `Code&DBs/Workflow/runtime/workflow/_recording.py`\n- `Code&DBs/Workflow/runtime/review_tracker.py`\n- `Code&DBs/Workflow/runtime/workflow/_execution_core.py`\n- `Code&DBs/Workflow/tests/unit/test_task_type_router_route_health.py`\n- `Code&DBs/Workflow/tests/integration/test_provider_route_runtime_wiring.py`\n\nProduce an implementation plan that makes these boundaries explicit:\n1. What data belongs in a reusable authority snapshot vs. per-resolution runtime state\n2. How to make `resolve()` read-only on the hot path\n3. Where derived-row materialization or benchmark sync should move if it still needs to exist\n4. How route feedback (`record_outcome`, `record_review_feedback`) can update durable state with fewer round-trips\n5. Which tests must prove routing semantics stayed intact",
+      "read": [
+        "Code&DBs/Workflow/runtime/task_type_router.py",
+        "Code&DBs/Workflow/runtime/workflow/_routing.py",
+        "Code&DBs/Workflow/runtime/workflow/_recording.py",
+        "Code&DBs/Workflow/runtime/review_tracker.py",
+        "Code&DBs/Workflow/runtime/workflow/_execution_core.py",
+        "Code&DBs/Workflow/tests/unit/test_task_type_router_route_health.py",
+        "Code&DBs/Workflow/tests/integration/test_provider_route_runtime_wiring.py"
+      ],
+      "write": [],
+      "verify_command": "true"
+    },
+    {
+      "label": "extract_route_authority_snapshot",
+      "agent": "openai/gpt-5.4",
+      "task_type": "refactor",
+      "depends_on": [
+        "route_authority_plan"
+      ],
+      "description": "Separate reusable route authority loading from per-call resolution work",
+      "outcome_goal": "TaskTypeRouter no longer reloads static authority tables every time a hot-path caller constructs it",
+      "prompt": "Refactor the routing authority load path so static authority is reusable instead of rebuilt on every `TaskTypeRouter(...)` construction.\n\nTarget outcome:\n- Separate snapshot loading for route policy, failure zones, task profiles, benchmark metric registry, and any other effectively static authority read\n- Make the lifetime/invalidation rules explicit in code\n- Keep the public router API usable by existing call sites\n- Preserve current semantics for explicit routes, eligibility filtering, reranking, and failover decisions\n\nYou may add a helper module under `Code&DBs/Workflow/runtime/` if that makes the snapshot contract clearer than leaving everything inside `task_type_router.py`.",
+      "read": [
+        "Code&DBs/Workflow/runtime/task_type_router.py",
+        "Code&DBs/Workflow/runtime/workflow/_routing.py",
+        "Code&DBs/Workflow/runtime/workflow/_execution_core.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/runtime/task_type_router.py",
+        "Code&DBs/Workflow/runtime/workflow/_routing.py",
+        "Code&DBs/Workflow/runtime/workflow/_execution_core.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/integration/test_provider_route_runtime_wiring.py -k route"
+    },
+    {
+      "label": "make_resolution_readonly",
+      "agent": "openai/gpt-5.4",
+      "task_type": "refactor",
+      "depends_on": [
+        "extract_route_authority_snapshot"
+      ],
+      "description": "Remove per-resolution derived-row write amplification from the route-selection path",
+      "outcome_goal": "Resolving `auto/...` routes no longer upserts or updates task_type_routing on every hot-path call",
+      "prompt": "Make the route-selection hot path read-only.\n\nFocus in `Code&DBs/Workflow/runtime/task_type_router.py`:\n- `_build_profile_task_rows()`\n- `_materialize_derived_rows()`\n- `_persist_explicit_benchmark_scores()`\n- `_resolve_chain()`\n\nGoal:\n1. Route resolution should compute and return decisions without writing derived rows or benchmark values on every call\n2. If materialization still matters for observability, move it behind an explicit sync hook or refresh mechanism that is not on the hot path\n3. Preserve operator visibility into rank/economics/benchmark reasoning in the returned decision chain\n4. Add tests that prove route ordering and eligibility behavior did not regress\n\nDo not hand-wave this by deleting observability with no replacement.",
+      "read": [
+        "Code&DBs/Workflow/runtime/task_type_router.py",
+        "Code&DBs/Workflow/tests/unit/test_task_type_router_route_health.py",
+        "Code&DBs/Workflow/tests/integration/test_provider_route_runtime_wiring.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/runtime/task_type_router.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/unit/test_task_type_router_route_health.py"
+    },
+    {
+      "label": "batch_route_feedback_updates",
+      "agent": "openai/gpt-5.4",
+      "task_type": "refactor",
+      "depends_on": [
+        "make_resolution_readonly"
+      ],
+      "description": "Reduce round-trips and repeated router construction for route feedback recording",
+      "outcome_goal": "Route feedback updates use fewer queries and callers stop rebuilding the router just to record one outcome",
+      "prompt": "Refactor route feedback persistence to cut round-trips and constructor churn.\n\nTargets:\n- `Code&DBs/Workflow/runtime/task_type_router.py` (`record_outcome`, `record_review_feedback`)\n- `Code&DBs/Workflow/runtime/workflow/_recording.py`\n- `Code&DBs/Workflow/runtime/workflow/_routing.py`\n- `Code&DBs/Workflow/runtime/review_tracker.py`\n\nRequired outcome:\n1. `record_outcome` should avoid the current update-then-select-then-select-then-update pattern where possible\n2. Route demotion/swap logic should happen with the fewest practical round-trips, ideally inside one transactionally coherent path\n3. Callers should not rebuild a fresh `TaskTypeRouter` if a shared authority object or feedback-only helper would do\n4. Preserve existing health and demotion semantics\n\nAdd or tighten tests around repeated failures, demotion, and review-feedback penalties.",
+      "read": [
+        "Code&DBs/Workflow/runtime/task_type_router.py",
+        "Code&DBs/Workflow/runtime/workflow/_recording.py",
+        "Code&DBs/Workflow/runtime/workflow/_routing.py",
+        "Code&DBs/Workflow/runtime/review_tracker.py",
+        "Code&DBs/Workflow/tests/unit/test_task_type_router_route_health.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/runtime/task_type_router.py",
+        "Code&DBs/Workflow/runtime/workflow/_recording.py",
+        "Code&DBs/Workflow/runtime/workflow/_routing.py",
+        "Code&DBs/Workflow/runtime/review_tracker.py",
+        "Code&DBs/Workflow/tests/unit/test_task_type_router_route_health.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/unit/test_task_type_router_route_health.py -k 'demot or review or outcome'"
+    },
+    {
+      "label": "route_authority_review",
+      "agent": "openai/gpt-5.4",
+      "task_type": "review",
+      "depends_on": [
+        "extract_route_authority_snapshot",
+        "make_resolution_readonly",
+        "batch_route_feedback_updates"
+      ],
+      "description": "Review the routing-authority rewrite for semantic drift, stale-cache risk, and feedback regressions",
+      "outcome_goal": "Remaining risks in snapshot invalidation, route ordering, and health updates are called out before merge",
+      "prompt": "Review the routing-authority rewrite as a code review.\n\nPrioritize findings on:\n- stale or unsafe snapshot invalidation behavior\n- route-ordering drift vs. the pre-refactor semantics\n- lost observability after removing hot-path writes\n- feedback-update correctness, especially demotion and review penalties\n- missing tests around explicit overrides, eligibility, and failover\n\nFindings first. If no findings remain, say so and mention residual test gaps."
+    }
+  ]
+}

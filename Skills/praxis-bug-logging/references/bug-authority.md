@@ -51,9 +51,6 @@ workflow bugs list
 workflow bugs search "<title>"
 workflow tools describe praxis_bugs
 workflow tools call praxis_bugs --input-json '{...}' --yes
-praxis_bugs(action="file", ...)
-praxis_bugs(action="attach_evidence", ...)
-praxis_bugs(action="resolve", ...)
 ```
 
 Relevant implementation files:
@@ -63,7 +60,7 @@ Relevant implementation files:
 
 ## File Action Mapping
 
-`praxis_bugs(action="file", ...)` maps to `BugTracker.file_bug(...)`.
+`workflow tools call praxis_bugs --input-json '{"action":"file",...}'` maps to `BugTracker.file_bug(...)`.
 
 Important behavior:
 
@@ -89,7 +86,7 @@ Useful inputs:
 
 ## Evidence Contract
 
-`praxis_bugs(action="attach_evidence", ...)` maps to `BugTracker.link_evidence(...)`.
+`workflow tools call praxis_bugs --input-json '{"action":"attach_evidence",...}'` maps to `BugTracker.link_evidence(...)`.
 
 Allowed evidence kinds:
 

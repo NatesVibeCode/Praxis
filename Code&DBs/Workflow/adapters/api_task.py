@@ -47,7 +47,7 @@ def _default_expected_status() -> int:
 
 
 def _default_user_agent() -> str:
-    return str(_resolve_adapter_config("api_task.user_agent", "DAG-APITaskAdapter/1.0"))
+    return str(_resolve_adapter_config("api_task.user_agent", "Praxis-APITaskAdapter/1.0"))
 
 
 def _is_non_empty_text(value: object) -> bool:

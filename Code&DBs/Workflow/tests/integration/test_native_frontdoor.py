@@ -20,7 +20,7 @@ from observability.read_models import (
 from registry.domain import RegistryResolver, RuntimeProfileAuthorityRecord, WorkspaceAuthorityRecord
 from runtime.instance import (
     PRAXIS_RUNTIME_PROFILE_ENV,
-    NativeDagInstance,
+    NativeWorkflowInstance,
     NativeInstanceResolutionError,
 )
 from surfaces.api import frontdoor
@@ -198,7 +198,7 @@ class _FakeConnection:
 def test_native_frontdoor_status_serializes_operator_frame_summaries(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    native_instance = NativeDagInstance(
+    native_instance = NativeWorkflowInstance(
         instance_name="praxis",
         runtime_profile_ref="praxis",
         repo_root=_REPO_ROOT,
@@ -312,7 +312,7 @@ def test_native_frontdoor_stays_repo_local_and_fails_closed_without_native_insta
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     request_payload = _request_payload()
-    native_instance = NativeDagInstance(
+    native_instance = NativeWorkflowInstance(
         instance_name="praxis",
         runtime_profile_ref="praxis",
         repo_root=_REPO_ROOT,
@@ -455,7 +455,7 @@ def test_native_frontdoor_stays_repo_local_and_fails_closed_without_native_insta
 def test_native_frontdoor_surfaces_shadow_packet_inspection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    native_instance = NativeDagInstance(
+    native_instance = NativeWorkflowInstance(
         instance_name="praxis",
         runtime_profile_ref="praxis",
         repo_root=_REPO_ROOT,
@@ -616,7 +616,7 @@ def test_native_frontdoor_surfaces_shadow_packet_inspection(
 def test_native_frontdoor_status_tolerates_legacy_schema_without_packet_inspection_column(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    native_instance = NativeDagInstance(
+    native_instance = NativeWorkflowInstance(
         instance_name="praxis",
         runtime_profile_ref="praxis",
         repo_root=_REPO_ROOT,

@@ -1,4 +1,4 @@
-"""HTTP bridge for the DAG MCP surface."""
+"""HTTP bridge for the Praxis Engine MCP surface."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ def _allowed_tool_names(request: Any) -> list[str] | None:
     values: list[str] = []
     raw_params = _query_params(getattr(request, "path", ""))
     values.extend(raw_params.get("allowed_tools", []))
-    header_value = request.headers.get("X-DAG-Allowed-MCP-Tools")
+    header_value = request.headers.get("X-Praxis-Allowed-MCP-Tools")
     if header_value:
         values.append(header_value)
     normalized: list[str] = []
@@ -42,7 +42,7 @@ def _workflow_token(request: Any) -> str:
     if query_values:
         token = str(query_values[-1] or "").strip()
     if not token:
-        token = str(request.headers.get("X-DAG-Workflow-Token") or "").strip()
+        token = str(request.headers.get("X-Praxis-Workflow-Token") or "").strip()
     if not token:
         auth_header = str(request.headers.get("Authorization") or "").strip()
         if auth_header.lower().startswith("bearer "):

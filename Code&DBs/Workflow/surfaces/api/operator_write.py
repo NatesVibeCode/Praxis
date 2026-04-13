@@ -21,7 +21,7 @@ from policy.native_primary_cutover import (
     NativePrimaryCutoverRuntime,
     PostgresNativePrimaryCutoverRepository,
 )
-from runtime.instance import NativeDagInstance, resolve_native_instance
+from runtime.instance import NativeWorkflowInstance, resolve_native_instance
 from runtime.recurring_review_repair_flow import (
     RecurringReviewRepairFlowRequest,
     RecurringReviewRepairFlowResolution,
@@ -2368,7 +2368,7 @@ class NativeWorkflowFlowFrontdoor:
         self,
         *,
         env: Mapping[str, str] | None,
-    ) -> tuple[Mapping[str, str], NativeDagInstance]:
+    ) -> tuple[Mapping[str, str], NativeWorkflowInstance]:
         source = env if env is not None else os.environ
         return source, resolve_native_instance(env=source)
 

@@ -225,9 +225,12 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "EXAMPLES:\n"
                 "  praxis_recall(query='how does job dependency resolution work')\n"
                 "  praxis_recall(query='provider routing', entity_type='decision')\n"
-                "  praxis_recall(query='dispatch run completion trigger retirement')\n\n"
+                "  praxis_recall(query='dispatch run completion trigger retirement')\n"
+                "  praxis_recall(query='workflow_runs', entity_type='table')\n"
+                "  praxis_recall(query='retry policy', entity_type='pattern')\n\n"
                 "DO NOT USE: for searching code by similarity (use praxis_discover), for searching "
-                "workflow receipts (use praxis_receipts), or for general questions (use praxis_query)."
+                "workflow receipts (use praxis_receipts), for exact architecture drift checks "
+                "(`workflow architecture scan`), or for general questions (use praxis_query)."
             ),
             "inputSchema": {
                 "type": "object",

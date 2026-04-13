@@ -2,12 +2,11 @@
 
 Praxis is an autonomous engineering control plane. The execution runtime is **Praxis Engine**, backed by **Praxis.db** (Postgres).
 
-Built-in MCP tools are exposed via the `praxis` MCP server. The canonical operator CLI frontdoor is `workflow`.
+The canonical operator CLI frontdoor is `workflow`.
 
-Orient with one of these, depending on surface:
+Orient with:
 
 - `workflow query "status"`
-- `praxis_query(question="status")`
 - `POST /orient` when only HTTP is available
 
 ## Database
@@ -47,31 +46,28 @@ The registry/integration projection is a read model. Tool truth lives in `Code&D
 
 Before writing new infrastructure, search first:
 
-- CLI: `workflow discover "<behavior>"`
-- MCP: `praxis_discover(query="<behavior>")`
-- Architecture/context: `workflow recall "<topic>"` or `praxis_recall(query="<topic>")`
+- `workflow discover "<behavior>"`
+- `workflow recall "<topic>"` for architecture/context
 
-`praxis_discover` uses vector embeddings over AST-extracted behavioral fingerprints, so it finds equivalent code even when names differ. After code changes, refresh the index with:
+Uses vector embeddings over AST-extracted behavioral fingerprints. After code changes, refresh the index with:
 
 - `workflow discover reindex --yes`
-- `praxis_discover(action="reindex")`
 
 ## Workflow Contract
 
 Use the platform surfaces, not ad hoc bash wrappers, to launch workflows.
 
 ```text
-praxis_workflow(action="run", spec_path="...")
+workflow run <spec.json>
 ```
 
 Treat launch as kickoff-first:
 
 - `run_id` is the tracking handle
-- use `praxis_workflow(action="status", run_id=run_id)` for health, failure signals, and idle detection
+- use `workflow run-status <run_id>` for health, failure signals, and idle detection
 - use stream/status URLs as the live observation channels
-- legacy inline wait can still exist for streaming MCP callers, but it is not the preferred control flow
 
-Use `kill_if_idle=true` only when a run is clearly unhealthy and idle.
+Use `--kill-if-idle` only when a run is clearly unhealthy and idle.
 
 ## Naming Convention
 
@@ -92,6 +88,6 @@ Per `PUBLIC_NAMING.md`:
 Shared repo-local skills live under `Skills/*/SKILL.md`.
 
 - Use `Skills/praxis-bug-logging/SKILL.md` when filing, deduplicating, evidence-linking, or resolving bugs in Praxis.db.
-- Prefer `praxis_bugs` for bug mutations. For CLI-first operators, inspect with `workflow bugs ...` and mutate with `workflow tools call praxis_bugs --input-json '{...}' --yes`.
+- Inspect with `workflow bugs ...` and mutate with `workflow tools call praxis_bugs --input-json '{...}' --yes`.
 - Use `Skills/praxis-discover/SKILL.md` before adding new code or helpers.
 - Use `Skills/praxis-phase/SKILL.md` and `Skills/praxis-lunchbox/SKILL.md` for bounded delivery and packaging.

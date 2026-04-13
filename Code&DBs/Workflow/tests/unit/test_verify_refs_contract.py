@@ -16,6 +16,7 @@ from runtime.operating_model_planner import (
     current_compiled_spec,
     plan_definition,
 )
+from runtime.workflow_graph_compiler import compile_graph_workflow_request, spec_uses_graph_runtime
 from runtime.workflow_spec import validate_workflow_spec
 
 
@@ -437,6 +438,91 @@ def test_plan_definition_materializes_legacy_projections_from_definition_graph()
     assert result["compiled_spec"]["definition_revision"] == definition["definition_revision"]
     assert result["compiled_spec"]["jobs"][0]["agent"] == "auto/review"
     assert result["compiled_spec"]["triggers"][0]["event_type"] == definition["trigger_intent"][0]["event_type"]
+
+
+def test_plan_definition_emits_after_failure_dependency_edges_from_moon_edge_gates() -> None:
+    result = plan_definition(
+        {
+            "source_prose": "Run fallback remediation when the primary step fails.",
+            "compiled_prose": "Run fallback remediation when the primary step fails.",
+            "definition_revision": "def_after_failure_gate",
+            "references": [],
+            "narrative_blocks": [],
+            "draft_flow": [
+                {
+                    "id": "step-001",
+                    "title": "Primary step",
+                    "summary": "Run the primary step.",
+                    "depends_on": [],
+                    "order": 1,
+                },
+                {
+                    "id": "step-002",
+                    "title": "Fallback step",
+                    "summary": "Run only when the primary step fails.",
+                    "depends_on": ["step-001"],
+                    "order": 2,
+                },
+            ],
+            "execution_setup": {
+                "edge_gates": [
+                    {
+                        "edge_id": "edge-step-001-step-002",
+                        "from_node_id": "step-001",
+                        "to_node_id": "step-002",
+                        "family": "after_failure",
+                        "label": "On Failure",
+                    }
+                ]
+            },
+            "trigger_intent": [],
+        }
+    )
+
+    jobs = result["compiled_spec"]["jobs"]
+    assert jobs[1]["depends_on"] == ["primary-step"]
+    assert jobs[1]["dependency_edges"] == [
+        {
+            "label": "primary-step",
+            "edge_type": "after_failure",
+        }
+    ]
+
+
+def test_compile_graph_workflow_request_honors_after_failure_dependency_edges() -> None:
+    spec = {
+        "name": "Failure Path",
+        "workflow_id": "workflow.failure_path",
+        "phase": "build",
+        "jobs": [
+            {
+                "label": "primary",
+                "agent": "auto/build",
+                "prompt": "Run the primary job.",
+            },
+            {
+                "label": "fallback",
+                "agent": "auto/build",
+                "prompt": "Run only if the primary job fails.",
+                "depends_on": ["primary"],
+                "dependency_edges": [
+                    {
+                        "label": "primary",
+                        "edge_type": "after_failure",
+                    }
+                ],
+            },
+        ],
+    }
+
+    assert spec_uses_graph_runtime(spec) is True
+
+    request = compile_graph_workflow_request(spec)
+
+    assert len(request.edges) == 1
+    assert request.edges[0].from_node_id == "primary"
+    assert request.edges[0].to_node_id == "fallback"
+    assert request.edges[0].edge_type == "after_failure"
 
 
 def test_compile_prose_fails_closed_when_compile_index_snapshot_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:

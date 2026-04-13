@@ -1,0 +1,59 @@
+{
+  "name": "Market Models Query Pushdown",
+  "phase": "W",
+  "queue_id": "market_models_query_pushdown_20260413",
+  "outcome_goal": "The `/api/models/market` handler pushes filtering, sorting, pagination, and facet work into SQL or a repository helper instead of loading the full market registry and recomputing everything in Python.",
+  "anti_requirements": [
+    "Do NOT change the public response shape of `/api/models/market` without tests proving compatibility",
+    "Do NOT add a new external service for query acceleration",
+    "Do NOT widen writes outside the market-model query path and the matching tests"
+  ],
+  "jobs": [
+    {
+      "label": "market_models_query_plan",
+      "agent": "openai/gpt-5.4",
+      "task_type": "architecture",
+      "description": "Design a SQL-first implementation for `/api/models/market`",
+      "outcome_goal": "Implementation jobs have one explicit SQL/repository plan for filters, sort modes, pagination, and facets",
+      "prompt": "Read the current `/api/models/market` implementation and design a SQL-first replacement.\n\nFocus files:\n- `Code&DBs/Workflow/surfaces/api/handlers/workflow_query.py`\n- `Code&DBs/Workflow/tests/unit/test_workflow_query_handlers.py`\n- `Code&DBs/Workflow/tests/unit/test_sync_market_model_registry.py`\n\nProduce a plan that covers:\n1. Which parts of `_handle_market_models_get()` should move into SQL or a repository helper\n2. How to preserve the existing response shape and sort modes\n3. How to compute facets and counts without materializing the full filtered set in Python\n4. Whether a helper module is cleaner than leaving everything in the handler\n5. The tests needed to prove compatibility",
+      "read": [
+        "Code&DBs/Workflow/surfaces/api/handlers/workflow_query.py",
+        "Code&DBs/Workflow/tests/unit/test_workflow_query_handlers.py",
+        "Code&DBs/Workflow/tests/unit/test_sync_market_model_registry.py"
+      ],
+      "write": [],
+      "verify_command": "true"
+    },
+    {
+      "label": "push_market_models_to_sql",
+      "agent": "openai/gpt-5.4",
+      "task_type": "build",
+      "depends_on": [
+        "market_models_query_plan"
+      ],
+      "description": "Rewrite `/api/models/market` so filtering, sort, pagination, and facet counts are no longer Python-only",
+      "outcome_goal": "The handler stops loading the entire registry into Python for every request and uses a SQL/repository fast path instead",
+      "prompt": "Implement the SQL-first plan for `/api/models/market`.\n\nCurrent hot path in `Code&DBs/Workflow/surfaces/api/handlers/workflow_query.py`:\n- loads all market rows\n- loads all binding rows\n- joins them in Python\n- filters in Python\n- sorts in Python\n- paginates in Python\n- computes facets in Python\n\nRefactor this into a SQL/repository-driven path while preserving the existing response payload.\n\nAllowed moves:\n- keep the handler thin and move SQL/query shaping into a helper module if that improves clarity\n- compute facet/count queries separately if that is cleaner than one giant query\n\nNot allowed:\n- changing the public response contract without tests\n- silently dropping sort modes or facet behavior",
+      "read": [
+        "Code&DBs/Workflow/surfaces/api/handlers/workflow_query.py",
+        "Code&DBs/Workflow/tests/unit/test_workflow_query_handlers.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/surfaces/api/handlers/workflow_query.py",
+        "Code&DBs/Workflow/tests/unit/test_workflow_query_handlers.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/unit/test_workflow_query_handlers.py -k market"
+    },
+    {
+      "label": "market_models_handler_review",
+      "agent": "openai/gpt-5.4",
+      "task_type": "review",
+      "depends_on": [
+        "push_market_models_to_sql"
+      ],
+      "description": "Review the market-model query rewrite for payload drift, SQL edge cases, and count/facet bugs",
+      "outcome_goal": "Any response-compatibility or query-correctness risks are surfaced before this optional wave lands",
+      "prompt": "Review the `/api/models/market` rewrite as a code review.\n\nPrioritize:\n- payload drift in counts, page_count, filters, and facets\n- SQL edge cases around empty filters, null metrics, and binding joins\n- missing coverage for sort modes (`intelligence_desc`, `coding_desc`, `price_asc`, `speed_desc`, default sort)\n- any new performance trap introduced by the replacement query design\n\nFindings first with file/line references."
+    }
+  ]
+}

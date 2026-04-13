@@ -353,22 +353,24 @@ def execute_cli(
                 "error_code": "sandbox_error",
             }
 
-    # Sandbox workspaces exclude .git — codex CLI rejects non-git dirs
-    # unless told to skip the check.  The flag belongs to the `exec`
-    # subcommand, so insert it right after "exec".  We also bypass codex's
-    # internal bwrap sandbox: the Docker container IS the sandbox, and bwrap
-    # requires privileges Docker doesn't grant.
+    # Normalize codex flags for Docker-sandboxed execution.  The Docker
+    # container IS the sandbox, so codex's internal bwrap sandbox must be
+    # bypassed (it requires privileges Docker doesn't grant).  --full-auto
+    # is mutually exclusive with --dangerously-bypass-approvals-and-sandbox,
+    # so strip it if a legacy template still includes it.  Sandbox workspaces
+    # also exclude .git, so codex needs --skip-git-repo-check.
     cmd0_name = os.path.basename(cmd[0]).strip().lower() if cmd else ""
     if cmd0_name == "codex":
         try:
             exec_idx = [p.strip().lower() for p in cmd].index("exec")
+        except ValueError:
+            exec_idx = -1
+        if exec_idx >= 0:
+            cmd = [part for part in cmd if part != "--full-auto"]
             if "--skip-git-repo-check" not in cmd:
                 cmd.insert(exec_idx + 1, "--skip-git-repo-check")
             if "--dangerously-bypass-approvals-and-sandbox" not in cmd:
-                insert_at = [p.strip().lower() for p in cmd].index("exec") + 1
-                cmd.insert(insert_at, "--dangerously-bypass-approvals-and-sandbox")
-        except ValueError:
-            pass
+                cmd.insert(exec_idx + 1, "--dangerously-bypass-approvals-and-sandbox")
 
     cmd = augment_cli_command_for_workflow_mcp(
         provider_slug=provider_slug,

@@ -14,7 +14,7 @@ from typing import Any, Protocol
 import asyncpg
 
 from runtime.instance import (
-    NativeDagInstance,
+    NativeWorkflowInstance,
     resolve_native_instance,
 )
 from runtime.work_item_assessment import WorkItemAssessmentRecord, assess_work_items
@@ -1368,7 +1368,7 @@ class NativeOperatorQueryFrontdoor:
         self,
         *,
         env: Mapping[str, str] | None,
-    ) -> tuple[Mapping[str, str], NativeDagInstance]:
+    ) -> tuple[Mapping[str, str], NativeWorkflowInstance]:
         source = env if env is not None else os.environ
         return source, resolve_native_instance(env=source)
 

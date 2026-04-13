@@ -71,7 +71,7 @@ class GitHubClient:
         req_headers = {
             "Authorization": f"token {self.token}",
             "Accept": "application/vnd.github.v3+json",
-            "User-Agent": "dag-workflow-github-integration/1.0",
+            "User-Agent": "praxis-workflow-github-integration/1.0",
         }
         if headers:
             req_headers.update(headers)
@@ -171,7 +171,7 @@ class GitHubClient:
         url = f"https://api.github.com{path}"
         req_headers_full = {
             "Authorization": f"token {self.token}",
-            "User-Agent": "dag-workflow-github-integration/1.0",
+            "User-Agent": "praxis-workflow-github-integration/1.0",
         }
         req_headers_full.update(req_headers)
 

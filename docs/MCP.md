@@ -13,7 +13,7 @@ CLI discovery is generated from the same catalog metadata:
 
 | Tool | Surface | Tier | Alias | Risks | Description |
 | --- | --- | --- | --- | --- | --- |
-| `praxis_discover` | `code` | `stable` | `workflow discover` | `read`, `write` | Find existing code that already does what you need — BEFORE writing new code. Uses vector embeddings over AST-extracted behavioral fingerprints to find functionally similar modules, classes, and functions even when naming differs. |
+| `praxis_discover` | `code` | `stable` | `workflow discover` | `read`, `write` | Find existing code that already does what you need — BEFORE writing new code. Uses hybrid retrieval: vector embeddings over AST-extracted behavioral fingerprints plus Postgres full-text search, fused with reciprocal rank fusion so you get both semantic and exact-ish matches even when naming differs. |
 | `praxis_artifacts` | `evidence` | `stable` | `workflow artifacts` | `read` | Browse and compare files produced by workflow sandbox runs. Each workflow job can write artifacts (code, logs, reports) — this tool lets you find, search, and diff them. |
 | `praxis_bugs` | `evidence` | `stable` | `workflow bugs` | `dispatch`, `read`, `write` | Track bugs in the platform's Postgres-backed bug tracker. List open bugs, file new ones, search by keyword, inspect similar historical fixes, replay a bug from canonical evidence, bulk backfill replay provenance, or resolve existing bugs. |
 | `praxis_constraints` | `evidence` | `advanced` | - | `read` | View automatically-mined constraints from past workflow failures. The system learns rules like 'files in runtime/ must include imports' from repeated failures. |
@@ -41,7 +41,7 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_manifest_generate` | `planning` | `advanced` | - | `write` | Generate a complete app manifest (UI layout, data flow, integrations) from a natural language description. Combines intent matching with LLM generation to produce a ready-to-render manifest. |
 | `praxis_manifest_refine` | `planning` | `advanced` | - | `write` | Iterate on a previously generated app manifest. Apply user feedback to adjust layout, add/remove modules, change data sources, or modify behavior. |
 | `praxis_session` | `planning` | `advanced` | - | `read` | View or validate session carry-forward packs — compressed context snapshots that help new sessions pick up where previous ones left off. |
-| `praxis_query` | `query` | `stable` | `workflow query` | `read` | Ask any question about the system in plain English. This is the best starting point when you're unsure which tool to use — it automatically routes your question to the right subsystem. |
+| `praxis_query` | `query` | `stable` | `workflow query` | `read` | Ask any question about the system in plain English. This is the best starting point when you're unsure which tool to use — it automatically routes your question to the right subsystem. Think of it as a router, not as the deep authority for every domain. |
 | `praxis_research_workflow` | `research` | `advanced` | - | `dispatch`, `read` | Run a parallel multi-angle research workflow on any topic. One call generates a DAG spec (seed decomposition, N parallel research workers via replicate, synthesis) and launches it through the service bus. |
 | `praxis_context_shard` | `session` | `session` | - | `session` | Return the bounded execution shard for the current workflow MCP session. This is only valid inside workflow Docker jobs using the signed MCP bridge. |
 | `praxis_session_context` | `session` | `session` | - | `session` | Read or write persistent context on your agent session. Context survives across tool calls and is available on retry. |
@@ -68,7 +68,7 @@ CLI discovery is generated from the same catalog metadata:
 - Risks: `read`, `write`
 - CLI entrypoint: `workflow discover`
 - CLI schema help: `workflow tools describe praxis_discover`
-- When to use: Search for functionally similar code before building something new.
+- When to use: Search for existing code by behavior with hybrid retrieval before building something new.
 - When not to use: Do not use it for architectural decisions or receipt analytics.
 - Recommended alias: `workflow discover`
 - Selector: `action`; default `search`; values `search`, `reindex`, `stats`
@@ -115,7 +115,7 @@ Example input:
 - Risks: `dispatch`, `read`, `write`
 - CLI entrypoint: `workflow bugs`
 - CLI schema help: `workflow tools describe praxis_bugs`
-- When to use: Inspect the bug tracker, file a new bug, or drive replay-ready bug workflows.
+- When to use: Inspect the bug tracker, run keyword or hybrid search, file a new bug, or drive replay-ready bug workflows.
 - When not to use: Do not use it for general system status or semantic knowledge search.
 - Recommended alias: `workflow bugs`
 - Selector: `action`; default `list`; values `list`, `file`, `search`, `stats`, `packet`, `history`, `replay`, `backfill_replay`, `attach_evidence`, `resolve`
@@ -342,7 +342,7 @@ Example input:
 - Risks: `read`
 - CLI entrypoint: `workflow recall`
 - CLI schema help: `workflow tools describe praxis_recall`
-- When to use: Search the knowledge graph for decisions, patterns, entities, and prior analysis.
+- When to use: Search the knowledge graph for decisions, patterns, entities, and prior analysis using ranked text, graph, and vector retrieval.
 - When not to use: Do not use it for code similarity or workflow receipt queries.
 - Recommended alias: `workflow recall`
 - Selector: none
@@ -690,7 +690,7 @@ Example input:
 - Risks: `read`
 - CLI entrypoint: `workflow query`
 - CLI schema help: `workflow tools describe praxis_query`
-- When to use: Route a natural-language question to the right platform subsystem from the terminal.
+- When to use: Route a natural-language question to the right platform subsystem from the terminal when you are not sure which exact tool to use.
 - When not to use: Do not use it when you already know the exact specialist tool you need.
 - Recommended alias: `workflow query`
 - Selector: none

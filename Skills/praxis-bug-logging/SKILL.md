@@ -31,7 +31,6 @@ Operator surface:
 - inspect via `workflow bugs ...`
 - inspect schema/help via `workflow tools describe praxis_bugs`
 - mutate via `workflow tools call praxis_bugs --input-json '{...}' --yes`
-- call `praxis_bugs(...)` directly when you are already inside an MCP-aware client
 
 ## Mission
 
@@ -55,9 +54,7 @@ Keep bug state under one obvious authority:
 ### 1. Inspect Before Filing
 
 - Search or list first to avoid duplicate noise.
-- For operator CLI flows, start with `workflow bugs search "<title>"` or `workflow bugs list --severity P1`.
-- Prefer `praxis_bugs(action="search", title="...")` for title-based checks.
-- Use `praxis_bugs(action="list", open_only=true, title_like="...")` when searching broader symptoms.
+- Start with `workflow bugs search "<title>"` or `workflow bugs list --severity P1`.
 
 ### 2. Classify The Bug
 
@@ -81,7 +78,6 @@ Prefer:
 
 ```text
 workflow tools call praxis_bugs --input-json '{"action":"file","title":"...","severity":"P1","category":"RUNTIME","description":"...","filed_by":"...","source_kind":"..."}' --yes
-praxis_bugs(action="file", title="...", severity="P1", category="RUNTIME", description="...", filed_by="...", source_kind="...")
 ```
 
 Do not:
@@ -105,7 +101,6 @@ After filing, attach authoritative evidence with:
 
 ```text
 workflow tools call praxis_bugs --input-json '{"action":"attach_evidence","bug_id":"BUG-...","evidence_kind":"receipt","evidence_ref":"receipt-...","evidence_role":"observed_in"}' --yes
-praxis_bugs(action="attach_evidence", bug_id="BUG-...", evidence_kind="receipt", evidence_ref="receipt-...", evidence_role="observed_in")
 ```
 
 Canonical evidence kinds:
@@ -139,7 +134,6 @@ Prefer:
 
 ```text
 workflow tools call praxis_bugs --input-json '{"action":"resolve","bug_id":"BUG-...","status":"FIXED"}' --yes
-praxis_bugs(action="resolve", bug_id="BUG-...", status="FIXED")
 ```
 
 Before resolving `FIXED`:

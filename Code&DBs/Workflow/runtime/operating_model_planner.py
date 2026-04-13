@@ -168,6 +168,7 @@ def _plan_jobs(definition: dict[str, Any]) -> list[dict[str, Any]]:
     references = definition.get("references") if isinstance(definition.get("references"), list) else []
     narrative_blocks = definition.get("narrative_blocks") if isinstance(definition.get("narrative_blocks"), list) else []
     draft_flow = definition.get("draft_flow") if isinstance(definition.get("draft_flow"), list) else []
+    execution_setup = definition.get("execution_setup") if isinstance(definition.get("execution_setup"), dict) else {}
 
     references_by_slug = {
         _as_text(reference.get("slug")): reference
@@ -178,6 +179,13 @@ def _plan_jobs(definition: dict[str, Any]) -> list[dict[str, Any]]:
         _as_text(block.get("id")): block
         for block in narrative_blocks
         if isinstance(block, dict) and _as_text(block.get("id"))
+    }
+    edge_gate_by_pair = {
+        (_as_text(edge_gate.get("from_node_id")), _as_text(edge_gate.get("to_node_id"))): edge_gate
+        for edge_gate in execution_setup.get("edge_gates", [])
+        if isinstance(edge_gate, dict)
+        and _as_text(edge_gate.get("from_node_id"))
+        and _as_text(edge_gate.get("to_node_id"))
     }
 
     label_by_step_id: dict[str, str] = {}
@@ -203,6 +211,16 @@ def _plan_jobs(definition: dict[str, Any]) -> list[dict[str, Any]]:
         ]
 
     for index, step in enumerate(ordered_steps, start=1):
+        step_id = _as_text(step.get("id"))
+        if not step_id:
+            continue
+        label = _unique_label(_slugify(_as_text(step.get("title")) or f"step-{index}"), used_labels)
+        label_by_step_id[step_id] = label
+
+    for index, step in enumerate(ordered_steps, start=1):
+        step_id = _as_text(step.get("id"))
+        if not step_id:
+            continue
         reference_slugs = _string_list(step.get("reference_slugs"))
         capability_slugs = _string_list(step.get("capability_slugs"))
         source_block_ids = _string_list(step.get("source_block_ids"))
@@ -213,8 +231,7 @@ def _plan_jobs(definition: dict[str, Any]) -> list[dict[str, Any]]:
             references_by_slug=references_by_slug,
             blocks_by_id=blocks_by_id,
         )
-        label = _unique_label(_slugify(_as_text(step.get("title")) or f"step-{index}"), used_labels)
-        label_by_step_id[_as_text(step.get("id"))] = label
+        label = label_by_step_id[step_id]
 
         source_text = "\n".join(
             _as_text(blocks_by_id[block_id].get("text"))
@@ -250,13 +267,27 @@ def _plan_jobs(definition: dict[str, Any]) -> list[dict[str, Any]]:
             job["system_prompt"] = (
                 f"You are {agent_slug}. Execute only the responsibilities assigned in this planned operating-model step."
             )
-        depends_on = [
-            label_by_step_id[step_id]
-            for step_id in _string_list(step.get("depends_on"))
-            if step_id in label_by_step_id
-        ]
+        dependency_edges: list[dict[str, Any]] = []
+        depends_on: list[str] = []
+        for dependency_step_id in _string_list(step.get("depends_on")):
+            dependency_label = label_by_step_id.get(dependency_step_id)
+            if not dependency_label:
+                continue
+            depends_on.append(dependency_label)
+            edge_type = "after_success"
+            edge_gate = edge_gate_by_pair.get((dependency_step_id, step_id))
+            if isinstance(edge_gate, dict) and _as_text(edge_gate.get("family")) == "after_failure":
+                edge_type = "after_failure"
+            dependency_edges.append(
+                {
+                    "label": dependency_label,
+                    "edge_type": edge_type,
+                }
+            )
         if depends_on:
             job["depends_on"] = depends_on
+        if any(edge.get("edge_type") != "after_success" for edge in dependency_edges):
+            job["dependency_edges"] = dependency_edges
         jobs.append(job)
 
     return jobs

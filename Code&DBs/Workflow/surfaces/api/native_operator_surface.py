@@ -45,7 +45,7 @@ from registry.provider_routing import (
     load_provider_route_authority_snapshot as load_provider_route_control_tower_snapshot,
 )
 from runtime._helpers import _dedupe
-from runtime.instance import NativeDagInstance, resolve_native_instance
+from runtime.instance import NativeWorkflowInstance, resolve_native_instance
 from registry.persona_authority import (
     ForkOwnershipSelector,
     PersonaActivationSelector,
@@ -595,7 +595,7 @@ class NativeOperatorSurfaceReadModel:
     """One consolidated native operator surface."""
 
     provenance: NativeOperatorSurfaceProvenance
-    native_instance: NativeDagInstance
+    native_instance: NativeWorkflowInstance
     run_id: str
     as_of: datetime
     instruction_authority: Mapping[str, Any]
@@ -1326,7 +1326,7 @@ class NativeOperatorSurfaceFrontdoor:
         self,
         *,
         env: Mapping[str, str] | None,
-    ) -> tuple[Mapping[str, str], NativeDagInstance]:
+    ) -> tuple[Mapping[str, str], NativeWorkflowInstance]:
         source = env if env is not None else os.environ
         return source, resolve_native_instance(env=source)
 
@@ -1940,7 +1940,7 @@ class NativeOperatorSurfaceFrontdoor:
         self,
         *,
         env: Mapping[str, str] | None,
-        instance: NativeDagInstance,
+        instance: NativeWorkflowInstance,
         run_id: str,
         as_of: datetime,
         persona_payload: Mapping[str, Any],

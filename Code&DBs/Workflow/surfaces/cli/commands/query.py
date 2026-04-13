@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TextIO
+import ast
+import re
+from pathlib import Path
+from typing import Any, TextIO
 
 from surfaces.cli.mcp_tools import (
     get_definition,
@@ -22,6 +25,15 @@ from surfaces.cli.mcp_tools import (
 # ---------------------------------------------------------------------------
 
 _cli_pg_conn = None
+WORKFLOW_ROOT = Path(__file__).resolve().parents[3]
+_SQL_KEYWORD_RE = re.compile(
+    r"\b(SELECT|INSERT\s+INTO|UPDATE|DELETE\s+FROM|WITH|CREATE\s+TABLE|ALTER\s+TABLE|DROP\s+TABLE)\b",
+    re.IGNORECASE,
+)
+_SQL_CONTEXT_RE = re.compile(
+    r"\b(FROM|WHERE|VALUES|SET|JOIN|RETURNING|LIMIT|GROUP\s+BY|ORDER\s+BY)\b",
+    re.IGNORECASE,
+)
 
 
 def _get_conn():
@@ -30,6 +42,239 @@ def _get_conn():
         from storage.postgres import ensure_postgres_available
         _cli_pg_conn = ensure_postgres_available()
     return _cli_pg_conn
+
+
+def _compact_excerpt(text: str, *, limit: int = 140) -> str:
+    collapsed = " ".join(text.split())
+    if len(collapsed) <= limit:
+        return collapsed
+    return collapsed[: limit - 3] + "..."
+
+
+def _looks_like_sql_literal(value: str) -> bool:
+    if len(value.strip()) < 20:
+        return False
+    if not _SQL_KEYWORD_RE.search(value):
+        return False
+    return "$1" in value or bool(_SQL_CONTEXT_RE.search(value))
+
+
+def _scan_sql_literals(path: Path) -> list[dict[str, object]]:
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    except (OSError, SyntaxError, UnicodeDecodeError):
+        return []
+
+    violations: list[dict[str, object]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and _looks_like_sql_literal(node.value):
+            violations.append(
+                {
+                    "path": str(path.relative_to(WORKFLOW_ROOT)),
+                    "line": int(getattr(node, "lineno", 1)),
+                    "excerpt": _compact_excerpt(node.value),
+                }
+            )
+    return violations
+
+
+def _scan_boundary_imports(path: Path, *, frontdoor: str) -> list[dict[str, object]]:
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    except (OSError, SyntaxError, UnicodeDecodeError):
+        return []
+
+    violations: list[dict[str, object]] = []
+
+    def _record(module_name: str, *, line: int) -> None:
+        if module_name == "runtime" or module_name.startswith("runtime."):
+            violations.append(
+                {
+                    "rule": f"{frontdoor}_imports_runtime",
+                    "path": str(path.relative_to(WORKFLOW_ROOT)),
+                    "line": line,
+                    "import": module_name,
+                }
+            )
+        if module_name == "storage.postgres" or module_name.startswith("storage.postgres."):
+            violations.append(
+                {
+                    "rule": f"{frontdoor}_imports_storage_postgres",
+                    "path": str(path.relative_to(WORKFLOW_ROOT)),
+                    "line": line,
+                    "import": module_name,
+                }
+            )
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                _record(alias.name, line=int(getattr(node, "lineno", 1)))
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            _record(node.module, line=int(getattr(node, "lineno", 1)))
+
+    return violations
+
+
+def _iter_python_files(root: Path) -> list[Path]:
+    return sorted(path for path in root.rglob("*.py") if path.is_file())
+
+
+def _scan_architecture(scope: str) -> dict[str, Any]:
+    roots: list[tuple[str, Path]] = []
+    if scope in {"all", "surfaces"}:
+        roots.append(("surfaces", WORKFLOW_ROOT / "surfaces"))
+    if scope in {"all", "scripts"}:
+        roots.append(("scripts", WORKFLOW_ROOT / "scripts"))
+
+    sql_literals: list[dict[str, object]] = []
+    boundary_imports: list[dict[str, object]] = []
+    scanned_files = 0
+
+    for frontdoor, root in roots:
+        if not root.exists():
+            continue
+        for path in _iter_python_files(root):
+            scanned_files += 1
+            sql_literals.extend(_scan_sql_literals(path))
+            boundary_imports.extend(_scan_boundary_imports(path, frontdoor=frontdoor))
+
+    summary = {
+        "scanned_files": scanned_files,
+        "sql_literals_outside_storage": len(sql_literals),
+        "frontdoor_runtime_imports": sum(
+            1 for violation in boundary_imports if str(violation.get("rule", "")).endswith("_imports_runtime")
+        ),
+        "frontdoor_storage_postgres_imports": sum(
+            1
+            for violation in boundary_imports
+            if str(violation.get("rule", "")).endswith("_imports_storage_postgres")
+        ),
+    }
+    summary["total_violations"] = (
+        summary["sql_literals_outside_storage"]
+        + summary["frontdoor_runtime_imports"]
+        + summary["frontdoor_storage_postgres_imports"]
+    )
+
+    return {
+        "scope": scope,
+        "rule_set": {
+            "sql_literals_outside_storage": (
+                "Raw SQL string literals should stay in storage or repository authority modules, "
+                "not in CLI/API/scripts front doors."
+            ),
+            "frontdoor_imports_runtime": (
+                "Front-door modules importing runtime.* are probably reaching past a stable service boundary."
+            ),
+            "frontdoor_imports_storage_postgres": (
+                "Front-door modules importing storage.postgres.* are coupling directly to SQL authority."
+            ),
+        },
+        "summary": summary,
+        "violations": {
+            "sql_literals_outside_storage": sql_literals,
+            "frontdoor_imports": boundary_imports,
+        },
+    }
+
+
+def _render_architecture_payload(payload: dict[str, Any], *, stdout: TextIO, limit: int) -> None:
+    summary = payload.get("summary", {})
+    stdout.write(f"Architecture scan ({payload.get('scope', 'all')})\n")
+    stdout.write(
+        "  files scanned: {files} | total violations: {violations}\n".format(
+            files=summary.get("scanned_files", 0),
+            violations=summary.get("total_violations", 0),
+        )
+    )
+    stdout.write(
+        "  raw SQL outside storage: {sql} | front-door runtime imports: {runtime} | "
+        "front-door storage.postgres imports: {storage}\n".format(
+            sql=summary.get("sql_literals_outside_storage", 0),
+            runtime=summary.get("frontdoor_runtime_imports", 0),
+            storage=summary.get("frontdoor_storage_postgres_imports", 0),
+        )
+    )
+
+    sql_literals = list(payload.get("violations", {}).get("sql_literals_outside_storage", []))
+    if sql_literals:
+        stdout.write("\nRaw SQL literals outside storage:\n")
+        for violation in sql_literals[:limit]:
+            stdout.write(
+                f"  {violation['path']}:{violation['line']}  {violation['excerpt']}\n"
+            )
+
+    boundary_imports = list(payload.get("violations", {}).get("frontdoor_imports", []))
+    if boundary_imports:
+        stdout.write("\nFront-door imports reaching inward:\n")
+        for violation in boundary_imports[:limit]:
+            stdout.write(
+                f"  {violation['path']}:{violation['line']}  {violation['rule']} -> {violation['import']}\n"
+            )
+
+    if not sql_literals and not boundary_imports:
+        stdout.write("\nNo violations found.\n")
+
+
+def _architecture_command(args: list[str], *, stdout: TextIO) -> int:
+    """Handle `workflow architecture [scan] [--scope S] [--limit N] [--json]`."""
+
+    if args and (
+        args[0] in {"-h", "--help"}
+        or (args[0] == "scan" and len(args) > 1 and args[1] in {"-h", "--help"})
+    ):
+        stdout.write(
+            "usage: workflow architecture [scan] [--scope all|surfaces|scripts] [--limit N] [--json]\n"
+            "\n"
+            "  Exact static scan for front-door architecture drift.\n"
+            "  Reports raw SQL literals in `surfaces/` or `scripts/`, plus front-door imports\n"
+            "  of `runtime.*` and `storage.postgres.*`.\n"
+            "\n"
+            "  Examples:\n"
+            "    workflow architecture scan\n"
+            "    workflow architecture scan --scope surfaces\n"
+            "    workflow architecture scan --scope surfaces --json\n"
+            "    workflow architecture --scope scripts --limit 10\n"
+        )
+        return 2
+
+    action = "scan"
+    scope = "all"
+    limit = 20
+    as_json = False
+    i = 0
+
+    if args and args[0] == "scan":
+        i = 1
+
+    while i < len(args):
+        if args[i] == "--scope" and i + 1 < len(args):
+            scope = args[i + 1].strip()
+            i += 2
+        elif args[i] == "--limit" and i + 1 < len(args):
+            limit = int(args[i + 1])
+            i += 2
+        elif args[i] == "--json":
+            as_json = True
+            i += 1
+        else:
+            stdout.write(f"unknown argument: {args[i]}\n")
+            return 2
+
+    if action != "scan":
+        stdout.write(f"unknown architecture action: {action}\n")
+        return 2
+    if scope not in {"all", "surfaces", "scripts"}:
+        stdout.write("error: --scope must be one of all, surfaces, scripts\n")
+        return 2
+
+    payload = _scan_architecture(scope)
+    if as_json:
+        print_json(stdout, payload)
+        return 0
+    _render_architecture_payload(payload, stdout=stdout, limit=limit)
+    return 0
 
 
 def _receipts_command(args: list[str], *, stdout: TextIO) -> int:
@@ -554,13 +799,16 @@ def _query_command(args: list[str], *, stdout: TextIO) -> int:
         stdout.write(
             "usage: workflow query <question> [--json]\n"
             "\n"
-            "  Routes a natural language question to the right subsystem.\n"
+            "  Natural-language router for the platform. Best first stop when you do not yet know\n"
+            "  which exact specialist command to use.\n"
             "  Examples:\n"
+            "    workflow query 'what is failing right now?'\n"
             "    workflow query 'what is the pass rate?'\n"
             "    workflow query 'are there any open bugs?'\n"
             "    workflow query 'schema for workflow_runs'\n"
             "    workflow query 'import path for BugTracker'\n"
             "    workflow query 'test command for runtime/compiler.py'\n"
+            "    workflow query 'how much did we spend on tokens today?'\n"
         )
         return 2
 
@@ -582,13 +830,19 @@ def _bugs_command(args: list[str], *, stdout: TextIO) -> int:
             "usage: workflow bugs [list|search <query>|stats] [--status S] [--severity S] [--limit N] [--json]\n"
             "\n"
             "  list               List bugs (default: open only)\n"
-            "  search <query>     Full-text search across bugs\n"
+            "  search <query>     Hybrid bug search (Postgres FTS plus vector ranking when enabled)\n"
             "  stats              Bug counts by category/severity/status\n"
             "\n"
             "  --status S         Filter: OPEN, IN_PROGRESS, FIXED, WONT_FIX, DEFERRED\n"
             "  --severity S       Filter: P0, P1, P2, P3\n"
             "  --limit N          Max results (default 25)\n"
             "  --all              Include resolved bugs (default: open only)\n"
+            "\n"
+            "  Examples:\n"
+            "    workflow bugs list --severity P1\n"
+            "    workflow bugs search routing\n"
+            "    workflow bugs search timeout --status OPEN --limit 5\n"
+            "    workflow bugs stats\n"
         )
         return 2
 
@@ -656,9 +910,14 @@ def _recall_command(args: list[str], *, stdout: TextIO) -> int:
         stdout.write(
             "usage: workflow recall <query> [--type T] [--limit N] [--json]\n"
             "\n"
-            "  Search the knowledge graph by semantic similarity.\n"
+            "  Search the knowledge graph by ranked text match, graph traversal, and vector similarity.\n"
             "  Types: task, fact, document, decision, constraint, topic,\n"
             "         table, code_unit, pattern, metric, module, person\n"
+            "\n"
+            "  Examples:\n"
+            "    workflow recall 'provider routing' --type decision\n"
+            "    workflow recall 'dispatch run completion trigger retirement'\n"
+            "    workflow recall 'workflow_runs' --type table --limit 5\n"
         )
         return 2
 
@@ -709,11 +968,14 @@ def _discover_command(args: list[str], *, stdout: TextIO) -> int:
         stdout.write(
             "usage: workflow discover <query> [--kind K] [--limit N] [--json]\n"
             "\n"
-            "  Find functionally similar code using vector similarity over AST fingerprints.\n"
+            "  Find related code with hybrid retrieval: AST fingerprint vectors + Postgres full-text search,\n"
+            "  fused into one ranked result set.\n"
             "  Kinds: module, class, function (default: all)\n"
             "\n"
             "  workflow discover 'retry with exponential backoff'\n"
             "  workflow discover 'parse JSON from stdin' --kind function\n"
+            "  workflow discover 'rate limit backoff' --limit 5\n"
+            "  workflow discover 'Postgres connection pooling' --kind module\n"
             "  workflow discover reindex --yes   (re-index the codebase)\n"
             "  workflow discover stats     (index statistics)\n"
         )

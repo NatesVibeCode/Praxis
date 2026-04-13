@@ -27,7 +27,6 @@ Also search when the user asks:
 
 ```
 workflow discover "what you need in plain English"
-praxis_discover(query="what you need in plain English")
 ```
 
 This uses vector embeddings over AST-extracted behavioral fingerprints — it finds functionally similar code even when naming is completely different. Be descriptive about the *behavior* you need, not the name you'd give it.
@@ -43,7 +42,6 @@ You can filter by kind: `module`, `class`, `function`, `subsystem`.
 
 ```
 workflow recall "topic"
-praxis_recall(query="topic")
 ```
 
 Search for prior decisions, documented patterns, and architectural context. Use this when you need to understand *why* something was built a certain way, not just *where* it is.
@@ -52,7 +50,6 @@ Search for prior decisions, documented patterns, and architectural context. Use 
 
 ```
 workflow query "your question in plain English"
-praxis_query(question="your question in plain English")
 ```
 
 Routes automatically to the right subsystem. Use when you need to know about past workflow results, known bugs, or learned constraints.
@@ -88,7 +85,6 @@ When you've written or modified code, update the search index:
 
 ```
 workflow discover reindex --yes
-praxis_discover(action="reindex")
 ```
 
 This ensures future searches find your new code.

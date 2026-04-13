@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "${REPO_ROOT}/scripts/_workflow_env.sh"
+workflow_load_repo_env
 export PYTHONPATH="${REPO_ROOT}/Code&DBs/Workflow${PYTHONPATH:+:$PYTHONPATH}"
-export WORKFLOW_DATABASE_URL="${WORKFLOW_DATABASE_URL:?"WORKFLOW_DATABASE_URL must be set"}"
 export PATH="${PATH}"
+PYTHON_BIN="${PYTHON_BIN:-$(command -v python3.14 || command -v python3.13 || command -v python3)}"
 
 run_frontdoor() {
-  python3 -m surfaces.cli.main "$@"
+  "${PYTHON_BIN}" -m surfaces.cli.main "$@"
 }
 
 case "${1:-help}" in
@@ -15,14 +17,14 @@ case "${1:-help}" in
     RESULT_FILE="${REPO_ROOT}/artifacts/workflow_run_result.$(date +%s).$$.${RANDOM}.json"
     LAUNCH_ID="workflow-launch-$(date +%s)-$$"
     # Run detached so the workflow survives if the calling session dies
-    nohup python3 -m surfaces.cli.workflow_cli run "${@:2}" \
+    nohup "${PYTHON_BIN}" -m surfaces.cli.workflow_cli run "${@:2}" \
       --job-id "${LAUNCH_ID}" \
       --result-file "${RESULT_FILE}" \
       >> "${REPO_ROOT}/artifacts/workflow.log" 2>&1 &
     WORKFLOW_PID=$!
     for _ in 1 2 3 4 5; do
       if [ -s "${RESULT_FILE}" ]; then
-        python3 - "${RESULT_FILE}" <<'PY'
+        "${PYTHON_BIN}" - "${RESULT_FILE}" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -58,10 +60,10 @@ PY
     echo "Use 'workflow.sh status' to check progress"
     ;;
   run-managed)
-    python3 -m surfaces.cli.workflow_cli run "${@:2}"
+    "${PYTHON_BIN}" -m surfaces.cli.workflow_cli run "${@:2}"
     ;;
   dry-run)
-    python3 -m surfaces.cli.workflow_cli run --dry-run "${@:2}"
+    "${PYTHON_BIN}" -m surfaces.cli.workflow_cli run --dry-run "${@:2}"
     ;;
   help|-h|--help)
     run_frontdoor --help

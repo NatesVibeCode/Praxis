@@ -121,6 +121,87 @@ def test_query_alias_uses_catalog_backed_tool_runner(monkeypatch: pytest.MonkeyP
     }
 
 
+def test_help_text_explains_search_semantics() -> None:
+    discover_stdout = StringIO()
+    recall_stdout = StringIO()
+    query_stdout = StringIO()
+
+    assert workflow_cli_main(["discover", "--help"], stdout=discover_stdout) == 2
+    assert workflow_cli_main(["recall", "--help"], stdout=recall_stdout) == 2
+    assert workflow_cli_main(["query", "--help"], stdout=query_stdout) == 2
+
+    assert "hybrid retrieval" in discover_stdout.getvalue()
+    assert "graph traversal" in recall_stdout.getvalue()
+    assert "Best first stop" in query_stdout.getvalue()
+
+
+def test_architecture_scan_alias_renders_exact_static_findings(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        query_commands,
+        "_scan_architecture",
+        lambda scope: {
+            "scope": scope,
+            "summary": {
+                "scanned_files": 12,
+                "sql_literals_outside_storage": 2,
+                "frontdoor_runtime_imports": 1,
+                "frontdoor_storage_postgres_imports": 1,
+                "total_violations": 4,
+            },
+            "violations": {
+                "sql_literals_outside_storage": [
+                    {"path": "surfaces/api/rest.py", "line": 656, "excerpt": "SELECT * FROM workflow_runs WHERE run_id = $1"},
+                ],
+                "frontdoor_imports": [
+                    {
+                        "path": "surfaces/api/rest.py",
+                        "line": 12,
+                        "rule": "surfaces_imports_runtime",
+                        "import": "runtime.receipt_store",
+                    },
+                ],
+            },
+        },
+    )
+    stdout = StringIO()
+
+    assert workflow_cli_main(["architecture", "scan", "--scope", "surfaces"], stdout=stdout) == 0
+
+    rendered = stdout.getvalue()
+    assert "Architecture scan (surfaces)" in rendered
+    assert "raw SQL outside storage: 2" in rendered
+    assert "surfaces/api/rest.py:656" in rendered
+    assert "surfaces_imports_runtime" in rendered
+
+
+def test_architecture_scan_alias_supports_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        query_commands,
+        "_scan_architecture",
+        lambda scope: {
+            "scope": scope,
+            "summary": {
+                "scanned_files": 3,
+                "sql_literals_outside_storage": 0,
+                "frontdoor_runtime_imports": 0,
+                "frontdoor_storage_postgres_imports": 0,
+                "total_violations": 0,
+            },
+            "violations": {
+                "sql_literals_outside_storage": [],
+                "frontdoor_imports": [],
+            },
+        },
+    )
+    stdout = StringIO()
+
+    assert workflow_cli_main(["architecture", "--json"], stdout=stdout) == 0
+
+    payload = json.loads(stdout.getvalue())
+    assert payload["scope"] == "all"
+    assert payload["summary"]["total_violations"] == 0
+
+
 def test_health_alias_uses_catalog_backed_tool_runner(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 

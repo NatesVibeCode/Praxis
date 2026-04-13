@@ -2,8 +2,10 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "${REPO_ROOT}/scripts/_workflow_env.sh"
+workflow_load_repo_env
 export PYTHONPATH="${REPO_ROOT}/Code&DBs/Workflow${PYTHONPATH:+:$PYTHONPATH}"
-export WORKFLOW_DATABASE_URL="${WORKFLOW_DATABASE_URL:?"WORKFLOW_DATABASE_URL must be set"}"
 export PATH="${PATH}"
+PYTHON_BIN="${PYTHON_BIN:-$(command -v python3.14 || command -v python3.13 || command -v python3)}"
 
-exec python3 "${REPO_ROOT}/scripts/test_frontdoor.py" "$@"
+exec "${PYTHON_BIN}" "${REPO_ROOT}/scripts/test_frontdoor.py" "$@"

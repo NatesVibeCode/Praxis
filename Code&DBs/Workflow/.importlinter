@@ -1,0 +1,18 @@
+[importlinter]
+root_package = surfaces
+
+[importlinter:contract:api_not_cli]
+name = API surfaces must not import CLI surfaces
+type = forbidden
+source_modules =
+    surfaces.api
+forbidden_modules =
+    surfaces.cli
+
+[importlinter:contract:mcp_not_cli]
+name = MCP surfaces must not import CLI surfaces
+type = forbidden
+source_modules =
+    surfaces.mcp
+forbidden_modules =
+    surfaces.cli

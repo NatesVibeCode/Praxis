@@ -23,7 +23,7 @@ from observability.status_observability import build_frontdoor_observability
 from policy.domain import AdmissionDecisionRecord
 from registry.domain import RegistryResolver
 from runtime.execution import RuntimeOrchestrator
-from runtime.instance import NativeDagInstance, resolve_native_instance
+from runtime.instance import NativeWorkflowInstance, resolve_native_instance
 from runtime.intake import WorkflowIntakeOutcome, WorkflowIntakePlanner
 from storage.dev_postgres import local_postgres_bootstrap, local_postgres_health
 from storage.postgres import (
@@ -647,7 +647,7 @@ class NativeDagFrontdoor:
             )
         return self.registry
 
-    def _resolve_instance(self, *, env: Mapping[str, str] | None) -> tuple[Mapping[str, str], NativeDagInstance]:
+    def _resolve_instance(self, *, env: Mapping[str, str] | None) -> tuple[Mapping[str, str], NativeWorkflowInstance]:
         source = env if env is not None else os.environ
         return source, resolve_native_instance(env=source)
 

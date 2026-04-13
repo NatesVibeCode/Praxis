@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from policy.workflow_lanes import bootstrap_workflow_lane_catalog_schema
-from runtime.instance import NativeDagInstance
+from runtime.instance import NativeWorkflowInstance
 from runtime.recurring_review_repair_flow import (
     RecurringReviewRepairFlowError,
     RecurringReviewRepairFlowRequest,
@@ -600,8 +600,8 @@ def _workflow_env() -> dict[str, str]:
     return {"WORKFLOW_DATABASE_URL": database_url}
 
 
-def _native_instance() -> NativeDagInstance:
-    return NativeDagInstance(
+def _native_instance() -> NativeWorkflowInstance:
+    return NativeWorkflowInstance(
         instance_name="praxis",
         runtime_profile_ref="praxis",
         repo_root=_REPO_ROOT,

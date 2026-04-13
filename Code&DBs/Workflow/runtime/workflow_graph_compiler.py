@@ -146,12 +146,49 @@ def _string_list(value: object) -> list[str]:
     ]
 
 
+def _dependency_specs(job: Mapping[str, Any]) -> list[dict[str, Any]]:
+    dependency_edges = job.get("dependency_edges")
+    if isinstance(dependency_edges, list):
+        specs: list[dict[str, Any]] = []
+        for item in dependency_edges:
+            if not isinstance(item, Mapping):
+                continue
+            label = _as_text(item.get("label"))
+            if not label:
+                continue
+            edge_type = _as_text(item.get("edge_type")) or "after_success"
+            release_condition = (
+                dict(item.get("release_condition"))
+                if _is_mapping(item.get("release_condition"))
+                else {"kind": "always"}
+            )
+            specs.append(
+                {
+                    "label": label,
+                    "edge_type": edge_type,
+                    "release_condition": release_condition,
+                }
+            )
+        if specs:
+            return specs
+    return [
+        {
+            "label": label,
+            "edge_type": "after_success",
+            "release_condition": {"kind": "always"},
+        }
+        for label in _string_list(job.get("depends_on"))
+    ]
+
+
 def _graph_control_marker(job: Mapping[str, Any]) -> bool:
     if _as_text(job.get("adapter_type")) == "control_operator":
         return True
     if _is_mapping(job.get("operator")):
         return True
     if isinstance(job.get("template_jobs"), list) or _is_mapping(job.get("branches")):
+        return True
+    if isinstance(job.get("dependency_edges"), list):
         return True
     return False
 
@@ -405,13 +442,20 @@ def _compile_nested_sequence(
     root_ids: list[str] = []
     terminal_ids = {actual_node_id for _, _, actual_node_id in ordered}
     for index, (nested_job, nested_label, actual_node_id) in enumerate(ordered):
-        depends_on = _string_list(nested_job.get("depends_on"))
-        if not depends_on and index > 0:
-            depends_on = [ordered[index - 1][1]]
-        if not depends_on:
+        dependency_specs = _dependency_specs(nested_job)
+        if not dependency_specs and index > 0:
+            dependency_specs = [
+                {
+                    "label": ordered[index - 1][1],
+                    "edge_type": "after_success",
+                    "release_condition": {"kind": "always"},
+                }
+            ]
+        if not dependency_specs:
             root_ids.append(actual_node_id)
             continue
-        for dependency_label in depends_on:
+        for dependency in dependency_specs:
+            dependency_label = str(dependency["label"])
             dependency_node_id = label_to_node_id.get(dependency_label)
             if dependency_node_id is None:
                 raise GraphWorkflowCompileError(
@@ -422,6 +466,12 @@ def _compile_nested_sequence(
             state.add_edge(
                 from_node_id=dependency_node_id,
                 to_node_id=actual_node_id,
+                edge_type=str(dependency.get("edge_type") or "after_success"),
+                release_condition=(
+                    dict(dependency.get("release_condition"))
+                    if _is_mapping(dependency.get("release_condition"))
+                    else {"kind": "always"}
+                ),
                 template_owner_node_id=template_owner_node_id,
             )
     if not root_ids:
@@ -604,10 +654,12 @@ def compile_graph_workflow_request(
 
     for top_job in top_level_jobs:
         label = _job_label(top_job, fallback="job")
-        depends_on = _string_list(top_job.get("depends_on"))
-        if not depends_on:
+        dependency_specs = _dependency_specs(top_job)
+        if not dependency_specs:
             continue
-        for dependency_label in depends_on:
+        depends_on = [str(dependency["label"]) for dependency in dependency_specs]
+        for dependency in dependency_specs:
+            dependency_label = str(dependency["label"])
             dependency_node_id = top_label_to_node_id.get(dependency_label)
             if dependency_node_id is None:
                 raise GraphWorkflowCompileError(
@@ -655,7 +707,16 @@ def compile_graph_workflow_request(
                 for branch_terminal_id in branch_terminals:
                     state.add_edge(from_node_id=branch_terminal_id, to_node_id=label)
                 continue
-            state.add_edge(from_node_id=dependency_node_id, to_node_id=label)
+            state.add_edge(
+                from_node_id=dependency_node_id,
+                to_node_id=label,
+                edge_type=str(dependency.get("edge_type") or "after_success"),
+                release_condition=(
+                    dict(dependency.get("release_condition"))
+                    if _is_mapping(dependency.get("release_condition"))
+                    else {"kind": "always"}
+                ),
+            )
 
     spec_fingerprint = hashlib.sha256(
         json.dumps(_clone_json(spec_dict), sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")

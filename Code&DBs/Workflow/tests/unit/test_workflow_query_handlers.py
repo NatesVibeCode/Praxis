@@ -922,6 +922,112 @@ def test_handle_workflow_build_post_persists_attachment_and_replans() -> None:
     assert persisted_definition["authority_attachments"][0]["authority_ref"] == "@gmail/search"
 
 
+def test_handle_workflow_build_post_wires_on_failure_edge_gate_into_compiled_spec() -> None:
+    workflow_row = {
+        "id": "wf_build_failure_gate",
+        "name": "Failure Gate",
+        "description": "Compile failure-path flow",
+        "definition": {
+            "type": "operating_model",
+            "source_prose": "Run a fallback when the primary step fails.",
+            "compiled_prose": "Run a fallback when the primary step fails.",
+            "narrative_blocks": [],
+            "references": [],
+            "capabilities": [],
+            "authority": "",
+            "sla": {},
+            "trigger_intent": [],
+            "draft_flow": [
+                {
+                    "id": "step-001",
+                    "title": "Primary step",
+                    "summary": "Run the primary step.",
+                    "source_block_ids": [],
+                    "reference_slugs": [],
+                    "capability_slugs": [],
+                    "depends_on": [],
+                    "order": 1,
+                },
+                {
+                    "id": "step-002",
+                    "title": "Fallback step",
+                    "summary": "Run when the primary step fails.",
+                    "source_block_ids": [],
+                    "reference_slugs": [],
+                    "capability_slugs": [],
+                    "depends_on": ["step-001"],
+                    "order": 2,
+                },
+            ],
+            "definition_revision": "def_build_failure_gate",
+        },
+        "compiled_spec": None,
+        "version": 1,
+        "updated_at": "2026-04-09T19:00:00Z",
+    }
+    pg = _MutableWorkflowPg(workflow_rows={"wf_build_failure_gate": workflow_row})
+    request = _RequestStub(
+        {
+            "nodes": [
+                {
+                    "node_id": "step-001",
+                    "kind": "step",
+                    "title": "Primary step",
+                    "route": "auto/build",
+                    "status": "ready",
+                    "summary": "Run the primary step.",
+                },
+                {
+                    "node_id": "step-002",
+                    "kind": "step",
+                    "title": "Fallback step",
+                    "route": "auto/build",
+                    "status": "ready",
+                    "summary": "Run when the primary step fails.",
+                },
+            ],
+            "edges": [
+                {
+                    "edge_id": "edge-step-001-step-002",
+                    "kind": "sequence",
+                    "from_node_id": "step-001",
+                    "to_node_id": "step-002",
+                    "gate": {
+                        "state": "configured",
+                        "label": "On Failure",
+                        "family": "after_failure",
+                    },
+                }
+            ],
+        },
+        subsystems=SimpleNamespace(get_pg_conn=lambda: pg),
+        path="/api/workflows/wf_build_failure_gate/build/build_graph",
+    )
+
+    workflow_query._handle_workflow_build_post(request, "/api/workflows/wf_build_failure_gate/build/build_graph")
+
+    assert request.sent is not None
+    status, payload = request.sent
+    assert status == 200
+    assert payload["compiled_spec"]["jobs"][1]["depends_on"] == ["primary-step"]
+    assert payload["compiled_spec"]["jobs"][1]["dependency_edges"] == [
+        {
+            "label": "primary-step",
+            "edge_type": "after_failure",
+        }
+    ]
+    persisted_definition = pg.workflow_rows["wf_build_failure_gate"]["definition"]
+    assert persisted_definition["execution_setup"]["edge_gates"] == [
+        {
+            "edge_id": "edge-step-001-step-002",
+            "from_node_id": "step-001",
+            "to_node_id": "step-002",
+            "family": "after_failure",
+            "label": "On Failure",
+        }
+    ]
+
+
 def test_handle_workflow_build_post_materializes_import_and_attachment() -> None:
     workflow_row = {
         "id": "wf_build_materialize",

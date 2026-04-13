@@ -1,6 +1,6 @@
-"""Repo-local native DAG instance resolution.
+"""Repo-local native workflow instance resolution.
 
-This module owns the repo-local instance contract for native DAG operations:
+This module owns the repo-local instance contract for native workflow operations:
 
 - one checked-in runtime profile config is the authority
 - receipts, topology, and workdir boundaries stay inside the repo
@@ -30,7 +30,7 @@ _SCHEMA_VERSION: Final[int] = 1
 
 
 class NativeInstanceResolutionError(RuntimeError):
-    """Raised when the native DAG instance cannot be resolved safely."""
+    """Raised when the native workflow instance cannot be resolved safely."""
 
     def __init__(
         self,
@@ -45,8 +45,8 @@ class NativeInstanceResolutionError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
-class NativeDagInstance:
-    """Resolved repo-local native DAG instance contract."""
+class NativeWorkflowInstance:
+    """Resolved repo-local native workflow instance contract."""
 
     instance_name: str
     runtime_profile_ref: str
@@ -356,8 +356,8 @@ def resolve_native_instance(
     *,
     env: Mapping[str, str] | None = None,
     config_path: str | Path | None = None,
-) -> NativeDagInstance:
-    """Resolve the checked-in repo-local native DAG instance contract."""
+) -> NativeWorkflowInstance:
+    """Resolve the checked-in repo-local native workflow instance contract."""
 
     source = env if env is not None else os.environ
     resolved_config_path = _resolve_config_path(config_path=config_path, env=source)
@@ -435,7 +435,7 @@ def resolve_native_instance(
         actual_path=topology_dir,
     )
 
-    return NativeDagInstance(
+    return NativeWorkflowInstance(
         instance_name=instance_name,
         runtime_profile_ref=runtime_profile_ref,
         repo_root=str(repo_root),
@@ -447,7 +447,7 @@ def resolve_native_instance(
 
 
 def native_instance_contract(env: Mapping[str, str] | None = None) -> dict[str, str]:
-    """Return the resolved repo-local native DAG instance contract."""
+    """Return the resolved repo-local native workflow instance contract."""
 
     return resolve_native_instance(env=env).to_contract()
 
@@ -458,7 +458,7 @@ __all__ = [
     "PRAXIS_RUNTIME_PROFILE_ENV",
     "PRAXIS_RUNTIME_PROFILES_CONFIG_ENV",
     "PRAXIS_TOPOLOGY_DIR_ENV",
-    "NativeDagInstance",
+    "NativeWorkflowInstance",
     "NativeInstanceResolutionError",
     "native_instance_contract",
     "resolve_native_instance",

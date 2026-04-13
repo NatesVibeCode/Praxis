@@ -89,24 +89,34 @@ def test_orient_advertises_catalog_backed_cli(monkeypatch) -> None:
 
     result = workflow_admin._handle_orient(_FakeSubsystems(), {})
 
+    architecture_scan = result["search_surfaces"]["architecture_scan"]
+    assert "workflow architecture scan" in architecture_scan
+    assert "raw SQL literals" in architecture_scan
+
     code_discovery = result["search_surfaces"]["code_discovery"]
     assert "workflow discover" in code_discovery
     assert "workflow tools describe praxis_discover" in code_discovery
     assert "praxis_discover" in code_discovery
+    assert "hybrid retrieval" in code_discovery
 
     knowledge_graph = result["search_surfaces"]["knowledge_graph"]
     assert "workflow recall" in knowledge_graph
     assert "workflow tools describe praxis_recall" in knowledge_graph
+    assert "graph traversal" in knowledge_graph
 
     cli_surface = result["cli_surface"]
     assert cli_surface["preferred"] is True
     assert cli_surface["tool_count"] == 42
-    assert cli_surface["discovery_commands"][0]["command"] == "workflow tools list"
-    assert "failure" in cli_surface["discovery_commands"][1]["examples"][0]
-    assert cli_surface["recommended_reads"][0]["command"] == "workflow query"
-    assert "what is failing right now?" in cli_surface["recommended_reads"][0]["examples"][0]
-    assert cli_surface["recommended_reads"][1]["command"] == "workflow health"
-    assert "retry logic with exponential backoff" in cli_surface["recommended_reads"][2]["examples"][0]
+    discovery_commands = {item["command"]: item for item in cli_surface["discovery_commands"]}
+    assert "workflow tools list" in discovery_commands
+    assert "failure" in discovery_commands["workflow tools search <text>"]["examples"][0]
+    assert "workflow architecture scan" in discovery_commands
+    assert "--scope surfaces --json" in discovery_commands["workflow architecture scan"]["examples"][1]
+    recommended_reads = {item["command"]: item for item in cli_surface["recommended_reads"]}
+    assert "workflow query" in recommended_reads
+    assert "what is failing right now?" in recommended_reads["workflow query"]["examples"][0]
+    assert "workflow health" in recommended_reads
+    assert "retry logic with exponential backoff" in recommended_reads["workflow discover"]["examples"][0]
 
     instructions = result["instructions"]
     assert "Prefer the catalog-backed `workflow` CLI" in instructions
@@ -116,6 +126,7 @@ def test_orient_advertises_catalog_backed_cli(monkeypatch) -> None:
     assert "workflow tools call <tool>" in instructions
     assert "write/dispatch flows require `--yes`" in instructions
     assert "workflow query" in instructions
+    assert "workflow architecture scan" in instructions
     assert "kickoff first" in instructions
 
 

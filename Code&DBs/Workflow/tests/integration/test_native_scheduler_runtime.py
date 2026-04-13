@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from runtime.instance import NativeDagInstance
+from runtime.instance import NativeWorkflowInstance
 from runtime.native_scheduler import NativeSchedulerError
 from surfaces.api import native_scheduler
 
@@ -32,8 +32,8 @@ class _FakeConnection:
         self.seen["closed_connections"] += 1
 
 
-def _native_instance() -> NativeDagInstance:
-    return NativeDagInstance(
+def _native_instance() -> NativeWorkflowInstance:
+    return NativeWorkflowInstance(
         instance_name="praxis",
         runtime_profile_ref="praxis",
         repo_root=_REPO_ROOT,

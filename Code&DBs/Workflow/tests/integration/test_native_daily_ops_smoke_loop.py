@@ -27,7 +27,7 @@ from registry.provider_routing import (
     ProviderRouteHealthWindowAuthorityRecord,
     RouteEligibilityStateAuthorityRecord,
 )
-from runtime.instance import NativeDagInstance
+from runtime.instance import NativeWorkflowInstance
 from runtime.work_item_workflow_bindings import WorkItemWorkflowBindingRecord
 from runtime.recurring_review_repair_flow import (
     RecurringReviewRepairFlowRequest,
@@ -49,8 +49,8 @@ def _repo_root() -> str:
     return _REPO_ROOT
 
 
-def _native_instance() -> NativeDagInstance:
-    return NativeDagInstance(
+def _native_instance() -> NativeWorkflowInstance:
+    return NativeWorkflowInstance(
         instance_name="praxis",
         runtime_profile_ref="praxis",
         repo_root=_repo_root(),
@@ -388,7 +388,7 @@ class _FakeEvidenceRow:
     record: object
 
 
-def _query_payload(*, as_of: datetime, native_instance: NativeDagInstance) -> dict[str, object]:
+def _query_payload(*, as_of: datetime, native_instance: NativeWorkflowInstance) -> dict[str, object]:
     return {
         "kind": "operator_query",
         "as_of": as_of.isoformat(),
@@ -434,7 +434,7 @@ def _query_payload(*, as_of: datetime, native_instance: NativeDagInstance) -> di
 def _status_payload(
     *,
     as_of: datetime,
-    native_instance: NativeDagInstance,
+    native_instance: NativeWorkflowInstance,
     run_id: str,
 ) -> dict[str, object]:
     return {

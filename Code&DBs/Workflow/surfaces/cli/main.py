@@ -59,6 +59,7 @@ from .commands.operate import (
     _supervisor_command,
 )
 from .commands.query import (
+    _architecture_command,
     _artifacts_command,
     _bugs_command,
     _costs_command,
@@ -176,6 +177,7 @@ _ARG_COMMANDS: dict[str, ArgsCommandHandler] = {
     "run": _run_command,
     "chain": _chain_command,
     "query": _query_command,
+    "architecture": _architecture_command,
     "bugs": _bugs_command,
     "recall": _recall_command,
     "discover": _discover_command,
@@ -236,7 +238,7 @@ _STDOUT_COMMANDS: dict[str, StdoutCommandHandler] = {
 
 
 def _usage() -> str:
-    return "usage: workflow <tools|query|bugs|recall|discover|artifacts|health|run|run-status|status|costs|receipts|leaderboard|trust|fitness|scope|risk|reviews|diagnose|inspect-job|heal|verify|debate|runs|manifest|triggers|retry|cancel|active|circuits|slots|inspect|replay|graph-topology|graph-lineage|...> <args>"
+    return "usage: workflow <tools|query|architecture|bugs|recall|discover|artifacts|health|run|run-status|status|costs|receipts|leaderboard|trust|fitness|scope|risk|reviews|diagnose|inspect-job|heal|verify|debate|runs|manifest|triggers|retry|cancel|active|circuits|slots|inspect|replay|graph-topology|graph-lineage|...> <args>"
 
 
 def _parse(

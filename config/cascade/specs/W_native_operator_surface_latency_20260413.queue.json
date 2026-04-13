@@ -1,0 +1,107 @@
+{
+  "name": "Native Operator Surface Latency",
+  "phase": "W",
+  "queue_id": "native_operator_surface_latency_20260413",
+  "outcome_goal": "The native operator read path stops rereading the same run context, shares request-scoped authority/session state across subreads, reduces connection churn, and preserves the exact query_native_operator_surface payload contract.",
+  "anti_requirements": [
+    "Do NOT change the public response shape of query_native_operator_surface or query_operator_surface",
+    "Do NOT introduce hosted dashboard truth or any new mutation path",
+    "Do NOT widen writes outside Code&DBs/Workflow/surfaces/api/ and the matching tests"
+  ],
+  "jobs": [
+    {
+      "label": "operator_surface_contract_plan",
+      "agent": "openai/gpt-5.4",
+      "task_type": "architecture",
+      "description": "Map duplicated reads, repeated run-context loads, and connection churn in the native operator surface",
+      "outcome_goal": "Downstream jobs have one explicit request-scoped contract covering run context, connection reuse, authority boundaries, and payload invariants",
+      "prompt": "Read the native operator read path before changing anything.\n\nFocus files:\n- `Code&DBs/Workflow/surfaces/api/native_operator_surface.py`\n- `Code&DBs/Workflow/surfaces/api/_operator_repository.py`\n- `Code&DBs/Workflow/surfaces/api/frontdoor.py`\n- `Code&DBs/Workflow/surfaces/api/operator_read.py`\n- `Code&DBs/Workflow/tests/integration/test_native_operator_surface_consolidation.py`\n- `Code&DBs/Workflow/tests/integration/test_native_operator_query_surface.py`\n\nProduce a concrete implementation plan in the job output with:\n1. Every place `workflow_runs` run context is reread within one request\n2. Every `connect_database()` / open-close cycle on the native operator path\n3. Which helpers can share one request-scoped connection or repository boundary safely\n4. Exact payload invariants that must not change\n5. The minimum regression tests needed to prove the refactor is safe\n\nDo not modify files in this job. Make the handoff explicit for the implementation jobs.",
+      "read": [
+        "Code&DBs/Workflow/surfaces/api/native_operator_surface.py",
+        "Code&DBs/Workflow/surfaces/api/_operator_repository.py",
+        "Code&DBs/Workflow/surfaces/api/frontdoor.py",
+        "Code&DBs/Workflow/surfaces/api/operator_read.py",
+        "Code&DBs/Workflow/tests/integration/test_native_operator_surface_consolidation.py",
+        "Code&DBs/Workflow/tests/integration/test_native_operator_query_surface.py"
+      ],
+      "write": [],
+      "verify_command": "true"
+    },
+    {
+      "label": "unify_operator_surface_context",
+      "agent": "openai/gpt-5.4",
+      "task_type": "refactor",
+      "depends_on": [
+        "operator_surface_contract_plan"
+      ],
+      "description": "Introduce request-scoped run-context and shared authority/session plumbing in native_operator_surface",
+      "outcome_goal": "native_operator_surface reads run context once per request and stops opening separate connections for persona, fork ownership, and cockpit authority loads",
+      "prompt": "Implement the request-scoped contract from `operator_surface_contract_plan` in `Code&DBs/Workflow/surfaces/api/native_operator_surface.py`.\n\nRequired outcome:\n- Read `workspace_ref` and `runtime_profile_ref` once per request and pass that canonical run context to persona activation, fork/worktree ownership selection, and any other helper that currently rereads `workflow_runs`\n- Replace repeated `connect_database(env)` open/close cycles with a request-scoped connection, repository, or session helper when the same request is traversing multiple native operator subreads\n- Keep the public `query_native_operator_surface()` payload stable\n- Preserve the existing authority split: no hosted truth, no mutation path, no silent fallback that weakens control-plane guarantees\n\nYou may add a small helper or dataclass in the same module if it makes the contract explicit.",
+      "read": [
+        "Code&DBs/Workflow/surfaces/api/native_operator_surface.py",
+        "Code&DBs/Workflow/surfaces/api/_operator_repository.py",
+        "Code&DBs/Workflow/surfaces/api/frontdoor.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/surfaces/api/native_operator_surface.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/integration/test_native_operator_surface_consolidation.py -k native_operator"
+    },
+    {
+      "label": "batch_operator_query_reads",
+      "agent": "openai/gpt-5.4",
+      "task_type": "refactor",
+      "depends_on": [
+        "operator_surface_contract_plan"
+      ],
+      "description": "Batch operator repository reads and remove quadratic Python-side filtering on the operator query path",
+      "outcome_goal": "_operator_repository uses batched fetches/set lookups for query assembly instead of serial read amplification and nested membership scans",
+      "prompt": "Refactor `Code&DBs/Workflow/surfaces/api/_operator_repository.py` to cut unnecessary read amplification on the operator query path.\n\nFocus areas called out by the current code:\n- `_query_operator_surface()` does several serial fetches on one request path\n- `_fetch_workflow_run_packet_inspections()` still builds per-run operator frame payloads with tuple concatenation and derives packet inspection in Python when materialized data is missing\n- `work_item_assessments` filtering currently uses repeated `any(...)` scans over bug and roadmap records\n\nGoals:\n1. Batch what can be batched on a single connection\n2. Replace repeated linear membership checks with set-based filtering\n3. Avoid tuple-concatenation growth patterns in packet/operator-frame assembly\n4. Preserve the existing response contract exactly\n\nKeep writes contained to `_operator_repository.py` unless a tiny helper extraction is strictly necessary.",
+      "read": [
+        "Code&DBs/Workflow/surfaces/api/_operator_repository.py",
+        "Code&DBs/Workflow/tests/integration/test_native_operator_query_surface.py",
+        "Code&DBs/Workflow/tests/integration/test_native_operator_surface_consolidation.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/surfaces/api/_operator_repository.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/integration/test_native_operator_query_surface.py -k operator_surface"
+    },
+    {
+      "label": "native_operator_surface_tests",
+      "agent": "openai/gpt-5.4-mini",
+      "task_type": "test",
+      "depends_on": [
+        "unify_operator_surface_context",
+        "batch_operator_query_reads"
+      ],
+      "description": "Add or tighten regression coverage for request-scoped context reuse and operator query invariants",
+      "outcome_goal": "The native operator refactor is protected by tests that would fail on duplicated run-context reads, payload drift, or query regressions",
+      "prompt": "Update the native operator tests to lock in the latency-oriented refactor without weakening contract coverage.\n\nPrimary targets:\n- `Code&DBs/Workflow/tests/integration/test_native_operator_surface_consolidation.py`\n- `Code&DBs/Workflow/tests/integration/test_native_operator_query_surface.py`\n- `Code&DBs/Workflow/tests/integration/test_native_observability_cockpit.py`\n\nAdd focused assertions for:\n1. Single canonical run-context resolution per request path\n2. Stable payload keys and structure from `query_native_operator_surface()`\n3. Correct operator query results after the batching/set-based refactor\n4. No regression in cockpit adoption or failover freshness views if those surfaces share the new helpers\n\nPrefer targeted tests over broad rewrites.",
+      "read": [
+        "Code&DBs/Workflow/tests/integration/test_native_operator_surface_consolidation.py",
+        "Code&DBs/Workflow/tests/integration/test_native_operator_query_surface.py",
+        "Code&DBs/Workflow/tests/integration/test_native_observability_cockpit.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/tests/integration/test_native_operator_surface_consolidation.py",
+        "Code&DBs/Workflow/tests/integration/test_native_operator_query_surface.py",
+        "Code&DBs/Workflow/tests/integration/test_native_observability_cockpit.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/integration/test_native_operator_surface_consolidation.py Code\\&DBs/Workflow/tests/integration/test_native_operator_query_surface.py"
+    },
+    {
+      "label": "native_operator_surface_review",
+      "agent": "openai/gpt-5.4",
+      "task_type": "review",
+      "depends_on": [
+        "unify_operator_surface_context",
+        "batch_operator_query_reads",
+        "native_operator_surface_tests"
+      ],
+      "description": "Review the native operator latency refactor for behavioral regressions and hidden authority drift",
+      "outcome_goal": "Any remaining contract, concurrency, or authority risks are called out before the wave lands",
+      "prompt": "Review the changes from this workflow as a code review, not a summary.\n\nPrioritize:\n- payload drift in `query_native_operator_surface()` and `query_operator_surface()`\n- hidden authority changes caused by request-scoped connection reuse\n- concurrency or lifecycle bugs from shared repository/session helpers\n- missing regression tests on operator frames, packet inspection, persona activation, or fork ownership\n\nReport concrete findings first with file/line references. If no findings remain, say that explicitly and mention any residual testing gaps."
+    }
+  ]
+}

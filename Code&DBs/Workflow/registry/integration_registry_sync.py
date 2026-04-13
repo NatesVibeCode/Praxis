@@ -18,14 +18,14 @@ logger = logging.getLogger(__name__)
 
 _STATIC_INTEGRATIONS: list[dict[str, Any]] = [
     {
-        "id": "dag-dispatch",
-        "name": "DAG Dispatch",
+        "id": "praxis-dispatch",
+        "name": "Praxis Dispatch",
         "description": "Submit workflow jobs, inspect status, and search receipts.",
-        "provider": "dag",
+        "provider": "praxis",
         "capabilities": [
             {
                 "action": "dispatch_job",
-                "description": "Submit a workflow job to the DAG dispatch runtime.",
+                "description": "Submit a workflow job to the Praxis Engine runtime",
             },
             {
                 "action": "check_status",
@@ -44,7 +44,7 @@ _STATIC_INTEGRATIONS: list[dict[str, Any]] = [
         "id": "notifications",
         "name": "Notifications",
         "description": "Send notification messages through the platform notification channel.",
-        "provider": "dag",
+        "provider": "praxis",
         "capabilities": [
             {"action": "send", "description": "Send a notification message."},
         ],

@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Protocol
 
-from runtime.instance import NativeDagInstance, resolve_native_instance
+from runtime.instance import NativeWorkflowInstance, resolve_native_instance
 from runtime.native_scheduler import (
     NativeSchedulerError,
     NativeSchedulerRepository,
@@ -61,7 +61,7 @@ class NativeSchedulerFrontdoor:
     def _default_repository_factory(conn: _Connection) -> NativeSchedulerRepository:
         return PostgresNativeSchedulerRepository(conn)  # type: ignore[arg-type]
 
-    def _resolve_instance(self, *, env: Mapping[str, str] | None) -> tuple[Mapping[str, str], NativeDagInstance]:
+    def _resolve_instance(self, *, env: Mapping[str, str] | None) -> tuple[Mapping[str, str], NativeWorkflowInstance]:
         source = env if env is not None else os.environ
         return source, resolve_native_instance(env=source)
 

@@ -1,0 +1,103 @@
+{
+  "name": "Execution Cancellation Signal",
+  "phase": "W",
+  "queue_id": "execution_cancellation_signal_20260413",
+  "outcome_goal": "Deterministic execution stops hammering workflow state with fixed-interval cancellation polling and instead uses a lower-chatter cancellation signal that preserves correctness for regular waves and control operators.",
+  "anti_requirements": [
+    "Do NOT weaken cancellation semantics or hide cancellation behind eventual best-effort behavior",
+    "Do NOT introduce an external hosted dependency just to propagate cancellation",
+    "Do NOT widen writes outside Code&DBs/Workflow/runtime/execution/ and the matching tests"
+  ],
+  "jobs": [
+    {
+      "label": "cancel_runtime_plan",
+      "agent": "openai/gpt-5.4",
+      "task_type": "architecture",
+      "description": "Define a lower-chatter cancellation design for deterministic execution",
+      "outcome_goal": "Implementation jobs have one explicit design for cancellation propagation, reader boundaries, and test proof",
+      "prompt": "Read the deterministic execution path and produce a concrete cancellation refactor plan.\n\nFocus files:\n- `Code&DBs/Workflow/runtime/execution/orchestrator.py`\n- `Code&DBs/Workflow/runtime/execution/control_operator.py`\n- `Code&DBs/Workflow/storage/postgres/evidence.py`\n- `Code&DBs/Workflow/runtime/persistent_evidence.py`\n- `Code&DBs/Workflow/tests/integration/test_control_operator_runtime.py`\n- `Code&DBs/Workflow/tests/integration/test_workflow_runner.py`\n\nExplain:\n1. Where cancellation is polled today and how often\n2. What lower-chatter signal should replace the fixed 100ms DB polling loop\n3. How regular waves and control operators should observe cancellation consistently\n4. What invariants must remain true for cancelled runs and nodes\n5. The minimum tests needed to prove the new mechanism is safe",
+      "read": [
+        "Code&DBs/Workflow/runtime/execution/orchestrator.py",
+        "Code&DBs/Workflow/runtime/execution/control_operator.py",
+        "Code&DBs/Workflow/storage/postgres/evidence.py",
+        "Code&DBs/Workflow/runtime/persistent_evidence.py",
+        "Code&DBs/Workflow/tests/integration/test_control_operator_runtime.py",
+        "Code&DBs/Workflow/tests/integration/test_workflow_runner.py"
+      ],
+      "write": [],
+      "verify_command": "true"
+    },
+    {
+      "label": "replace_fixed_cancel_polling",
+      "agent": "openai/gpt-5.4",
+      "task_type": "refactor",
+      "depends_on": [
+        "cancel_runtime_plan"
+      ],
+      "description": "Replace the fixed-interval cancellation polling loop in regular-wave execution",
+      "outcome_goal": "Regular-wave execution no longer checks persisted run state every 100ms while futures are pending",
+      "prompt": "Implement the cancellation design from `cancel_runtime_plan` in `Code&DBs/Workflow/runtime/execution/orchestrator.py`.\n\nThe current hot spot is `_execute_regular_wave()` and its fixed-interval polling of `_current_run_state(...)` while futures are still running. Replace that with a lower-chatter mechanism that still cancels pending work quickly and safely.\n\nConstraints:\n- Keep cancellation correctness explicit\n- Preserve existing node-result semantics for cancelled nodes and runs\n- Do not degrade normal successful execution throughput\n- Do not require a hosted broker or unrelated infrastructure\n\nIt is acceptable to introduce a shared cancel token, notification bridge, or smarter backoff if the implementation stays local and explicit.",
+      "read": [
+        "Code&DBs/Workflow/runtime/execution/orchestrator.py",
+        "Code&DBs/Workflow/runtime/execution/control_operator.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/runtime/execution/orchestrator.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/integration/test_workflow_runner.py -k cancel"
+    },
+    {
+      "label": "align_control_operator_cancellation",
+      "agent": "openai/gpt-5.4",
+      "task_type": "refactor",
+      "depends_on": [
+        "replace_fixed_cancel_polling"
+      ],
+      "description": "Make control-operator cancellation observe the same signal and lifecycle rules",
+      "outcome_goal": "Control operators and nested execution paths honor the same cancellation contract as regular waves",
+      "prompt": "Update `Code&DBs/Workflow/runtime/execution/control_operator.py` and any touched helpers so control-operator execution uses the same cancellation contract as the new regular-wave path.\n\nFocus on:\n- avoiding divergent cancellation reads between orchestrator and control operator helpers\n- preserving operator-frame cleanup semantics on cancellation\n- keeping child record emission and stop reasons stable\n\nDo not broaden the refactor beyond the cancellation path.",
+      "read": [
+        "Code&DBs/Workflow/runtime/execution/control_operator.py",
+        "Code&DBs/Workflow/runtime/execution/orchestrator.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/runtime/execution/control_operator.py",
+        "Code&DBs/Workflow/runtime/execution/orchestrator.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/integration/test_control_operator_runtime.py -k cancel"
+    },
+    {
+      "label": "execution_cancellation_tests",
+      "agent": "openai/gpt-5.4-mini",
+      "task_type": "test",
+      "depends_on": [
+        "align_control_operator_cancellation"
+      ],
+      "description": "Add regression tests for low-chatter cancellation in regular and control-operator execution",
+      "outcome_goal": "The new cancellation mechanism is covered by focused tests that would catch polling regressions or lifecycle drift",
+      "prompt": "Update the execution tests to prove the new cancellation path is correct.\n\nPrimary targets:\n- `Code&DBs/Workflow/tests/integration/test_control_operator_runtime.py`\n- `Code&DBs/Workflow/tests/integration/test_workflow_runner.py`\n- any narrow unit test that can assert the cancellation signal/reader contract directly\n\nAdd focused coverage for:\n1. cancelled regular-wave execution with pending futures\n2. cancelled control-operator execution with open operator frames\n3. stable stop reasons and node/run terminal states\n4. no behavioral regression for non-cancelled successful runs",
+      "read": [
+        "Code&DBs/Workflow/tests/integration/test_control_operator_runtime.py",
+        "Code&DBs/Workflow/tests/integration/test_workflow_runner.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/tests/integration/test_control_operator_runtime.py",
+        "Code&DBs/Workflow/tests/integration/test_workflow_runner.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/integration/test_control_operator_runtime.py Code\\&DBs/Workflow/tests/integration/test_workflow_runner.py -k cancel"
+    },
+    {
+      "label": "execution_cancellation_review",
+      "agent": "openai/gpt-5.4",
+      "task_type": "review",
+      "depends_on": [
+        "replace_fixed_cancel_polling",
+        "align_control_operator_cancellation",
+        "execution_cancellation_tests"
+      ],
+      "description": "Review the cancellation refactor for race conditions, lifecycle drift, and cleanup gaps",
+      "outcome_goal": "Remaining concurrency or lifecycle risks are surfaced before the wave lands",
+      "prompt": "Review the cancellation refactor with a code-review lens.\n\nPrioritize:\n- race conditions between cancellation signal propagation and future completion\n- operator-frame cleanup correctness\n- any stale-state dependence left behind in regular or control-operator execution\n- missing coverage for edge cases like partial completion, pending futures, or repeated cancellation requests\n\nFindings first with file/line references."
+    }
+  ]
+}

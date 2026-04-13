@@ -49,6 +49,18 @@ def _tool_surface_hint(
     return text
 
 
+def _cli_surface_hint(
+    command: str,
+    *,
+    description: str,
+    suffix: str | None = None,
+) -> str:
+    text = f"Use CLI `{command}`. {description}"
+    if suffix:
+        text += f" {suffix}"
+    return text
+
+
 def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
     """Return everything an agent needs to start operating."""
 
@@ -170,28 +182,37 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         "dependency_truth": dependency_truth,
         "recent_activity": recent_activity,
         "search_surfaces": {
+            "architecture_scan": _cli_surface_hint(
+                "workflow architecture scan",
+                description=(
+                    "Exact static architecture scan for raw SQL literals in front-door modules and "
+                    "front-door imports reaching into `runtime.*` or `storage.postgres.*`."
+                ),
+                suffix="Use this before fuzzy retrieval when you need proof of boundary drift, not semantic candidates.",
+            ),
             "code_discovery": _tool_surface_hint(
                 "praxis_discover",
                 http_hint="`/query` with `find <term>`",
                 suffix=(
-                    "Always search here before building new code. Reindex after code changes with "
+                    "This is hybrid retrieval, not vector-only: AST fingerprint vectors plus Postgres full-text "
+                    "search fused into one ranking. Always search here before building new code. Reindex after code changes with "
                     "`workflow discover reindex --yes` or `praxis_discover(action='reindex')`."
                 ),
             ),
             "knowledge_graph": _tool_surface_hint(
                 "praxis_recall",
                 http_hint="`/recall`",
-                suffix="Use it for decisions, patterns, and prior context, not code similarity.",
+                suffix="Use it for decisions, patterns, and prior context. Results may come from text match, graph traversal, or vector similarity, not code similarity.",
             ),
             "bugs": _tool_surface_hint(
                 "praxis_bugs",
                 http_hint="`/bugs` with `action=search`",
-                suffix="Prefer read/search before filing or resolving so duplicates stay down.",
+                suffix="Search is backed by Postgres FTS and may blend in vector ranking when the embedding lane is available. Prefer read/search before filing or resolving so duplicates stay down.",
             ),
             "receipts": _tool_surface_hint(
                 "praxis_receipts",
                 http_hint="`/receipts`",
-                suffix="Use it for canonical workflow evidence and token-burn analysis.",
+                suffix="Use it for canonical workflow evidence, exact-ish receipt search, and token-burn analysis.",
             ),
         },
         "cli_surface": {
@@ -217,6 +238,15 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
                     "examples": [
                         "workflow tools search failure",
                         "workflow tools search roadmap",
+                        "workflow tools search architecture",
+                    ],
+                },
+                {
+                    "command": "workflow architecture scan",
+                    "description": "Run an exact static architecture scan for raw SQL drift and front-door imports that reach into runtime or storage authority.",
+                    "examples": [
+                        "workflow architecture scan",
+                        "workflow architecture scan --scope surfaces --json",
                     ],
                 },
                 {
@@ -259,20 +289,22 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
                 {
                     "tool": discover_tool.name,
                     "command": discover_tool.cli_entrypoint,
-                    "description": "Search for existing code by behavior before adding new functions, modules, or patterns.",
+                    "description": "Search for existing code by behavior before adding new functions, modules, or patterns. Uses hybrid ranking, not vector-only similarity.",
                     "examples": [
                         "workflow discover 'retry logic with exponential backoff'",
                         "workflow discover 'Postgres connection pooling' --kind function",
+                        "workflow discover 'parse JSON from stdin' --kind function --limit 5",
                         "workflow discover stats",
                     ],
                 },
                 {
                     "tool": recall_tool.name,
                     "command": recall_tool.cli_entrypoint,
-                    "description": "Search the knowledge graph for decisions, patterns, and prior context instead of code similarity.",
+                    "description": "Search the knowledge graph for decisions, patterns, and prior context instead of code similarity. Ranking can come from text, graph, or vector retrieval.",
                     "examples": [
                         "workflow recall 'provider routing' --type decision",
                         "workflow recall 'dispatch run completion trigger retirement'",
+                        "workflow recall 'workflow_runs' --type table --limit 5",
                     ],
                 },
                 {
@@ -299,7 +331,8 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
             "`workflow tools search <text>`, and `workflow tools describe <tool>` when you need the current "
             "surface instead of memorizing a static list.\n"
             f"For common reads, go straight to `{query_tool.cli_entrypoint}`, `{health_tool.cli_entrypoint}`, "
-            f"`{discover_tool.cli_entrypoint}`, `{recall_tool.cli_entrypoint}`, and `{bugs_tool.cli_entrypoint}`.\n"
+            f"`{discover_tool.cli_entrypoint}`, `{recall_tool.cli_entrypoint}`, `{bugs_tool.cli_entrypoint}`, "
+            "and `workflow architecture scan` when you need exact boundary evidence.\n"
             "Use `workflow tools call <tool> --input-json '{...}'` as the generic fallback when no direct alias fits.\n"
             "CLI guardrails are intentional: write/dispatch flows require `--yes`, and session-only tools require a "
             "workflow token.\n"
@@ -308,7 +341,9 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
             "`find <term>` over HTTP to check if similar code already exists. The codebase is large — duplicating "
             "existing infrastructure wastes time and creates maintenance burden. Use "
             f"`{recall_tool.cli_entrypoint}` / `{recall_tool.name}` for architectural decisions and patterns.\n"
-            f"Use `{query_tool.cli_entrypoint}` or `/query` for natural-language questions.\n"
+            "When the question is about exact boundary drift — raw SQL in front doors, or front-door imports that "
+            "reach into runtime/storage — use `workflow architecture scan` instead of the router.\n"
+            f"Use `{query_tool.cli_entrypoint}` or `/query` for natural-language questions and first-pass routing.\n"
             "Use /workflow-runs to enqueue a workflow spec run. Treat it as fire-and-observe, never wait-for-completion.\n"
             "The launch call should stay short so the client can keep issuing new commands while execution happens elsewhere.\n"
             "For HTTP clients, POST /workflow-runs to get run_id, then use the dedicated channels "

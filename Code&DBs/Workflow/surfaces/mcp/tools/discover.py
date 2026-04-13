@@ -1,7 +1,8 @@
-"""Tools: praxis_discover — functional synonym detection via vector similarity.
+"""Tools: praxis_discover — hybrid code retrieval for behavioral reuse.
 
 Lets agents find existing infrastructure before building new code.
-Uses pgvector embeddings over AST-extracted behavioral fingerprints.
+Uses pgvector embeddings over AST-extracted behavioral fingerprints plus
+Postgres full-text search, fused into one ranked result set.
 """
 from __future__ import annotations
 
@@ -109,8 +110,9 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
         {
             "description": (
                 "Find existing code that already does what you need — BEFORE writing new code. "
-                "Uses vector embeddings over AST-extracted behavioral fingerprints to find "
-                "functionally similar modules, classes, and functions even when naming differs.\n\n"
+                "Uses hybrid retrieval: vector embeddings over AST-extracted behavioral fingerprints "
+                "plus Postgres full-text search, fused with reciprocal rank fusion so you get both "
+                "semantic and exact-ish matches even when naming differs.\n\n"
                 "SEARCH BEFORE YOU BUILD: Before implementing ANY new function, module, class, "
                 "utility, or pattern, call this tool first. The codebase is large and has extensive "
                 "existing infrastructure — duplicating what already exists wastes time and creates "
@@ -122,8 +124,10 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "or you need to find code that handles a specific concern.\n\n"
                 "EXAMPLES:\n"
                 "  praxis_discover(query='retry logic with exponential backoff')\n"
+                "  praxis_discover(query='rate limit backoff', kind='function')\n"
                 "  praxis_discover(query='Postgres connection pooling')\n"
                 "  praxis_discover(query='JSON-RPC transport', kind='class')\n"
+                "  praxis_discover(query='import-linter contract loader', kind='module')\n"
                 "  praxis_discover(action='reindex')  # after making code changes\n"
                 "  praxis_discover(action='stats')    # how many items are indexed\n\n"
                 "DO NOT USE: for searching knowledge/decisions/bugs (use praxis_recall), or for "
