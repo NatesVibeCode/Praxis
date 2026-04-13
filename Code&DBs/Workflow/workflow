@@ -1,0 +1,22 @@
+#!/usr/bin/env python3
+"""DAG Workflow CLI entrypoint.
+
+Usage:
+  workflow run -p "add a farewell function" --write greeting.py --workdir .
+  workflow run -p "review this code" --context src/main.py --provider google
+  workflow run spec.json
+  workflow status
+  workflow receipts
+"""
+
+import sys
+from pathlib import Path
+
+# Add workflow root to Python path
+_root = Path(__file__).resolve().parent
+if str(_root) not in sys.path:
+    sys.path.insert(0, str(_root))
+
+from surfaces.cli.main import main
+
+sys.exit(main())

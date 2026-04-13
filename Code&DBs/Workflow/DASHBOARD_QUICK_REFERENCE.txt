@@ -1,0 +1,60 @@
+================================================================================
+PRAXIS ENGINE DASHBOARD - QUICK REFERENCE
+================================================================================
+
+COMMAND:
+  workflow dashboard          Show text dashboard (default)
+  workflow dashboard --json   Show JSON dashboard
+
+WHAT'S INCLUDED:
+  - Workflow summary (total, succeeded, failed, pass rate)
+  - Cost summary (total cost, breakdown by provider)
+  - Circuit breaker states (CLOSED/OPEN/HALF_OPEN per provider)
+  - Route health (consecutive failures per provider)
+  - Top 5 agents by pass rate
+  - Recent 5 failures with timestamps and codes
+  - Overall system health assessment
+
+SYSTEM HEALTH LEVELS:
+  HEALTHY    → pass_rate > 80% AND no open circuits
+  DEGRADED   → pass_rate 50-80% OR circuits HALF_OPEN
+  UNHEALTHY  → pass_rate <= 50% OR open circuits
+
+REPLACES:
+  workflow status            (workflow summary)
+  workflow costs             (cost data)
+  workflow circuits          (circuit states)
+  workflow leaderboard       (agent rankings)
+
+SAMPLE OUTPUT:
+  === Praxis Engine Dashboard ===
+  System: HEALTHY | 42 runs | 95% pass rate | $3.21 total cost
+
+  Circuits: anthropic=CLOSED openai=CLOSED google=CLOSED
+
+  Top Agents:
+    openai/gpt-5.4-mini                     100%  $0.0500/run   3100ms avg
+    anthropic/sonnet                         92%  $0.0600/run   4200ms avg
+
+  Recent Failures:
+    [12:34] run:abc123 | google | rate_limit_exceeded
+
+FILES ADDED:
+  runtime/dashboard.py              - Core dashboard logic (209 lines)
+  surfaces/cli/main.py              - CLI handler (updated)
+  DASHBOARD.md                       - Full documentation
+  DASHBOARD_QUICK_REFERENCE.txt     - This file
+
+KEY FUNCTIONS (dashboard.py):
+  build_dashboard()         - Assemble all metrics
+  format_dashboard(data)    - Render text output
+  dashboard_as_json(data)   - Render JSON output
+
+INTEGRATION POINTS:
+  - workflow_status: get_workflow_history().summary()
+  - cost_tracker: get_cost_tracker().summary()
+  - circuit_breaker: get_circuit_breakers().all_states()
+  - leaderboard: build_leaderboard()
+  - route_outcomes: get_route_outcomes().consecutive_failures()
+
+================================================================================

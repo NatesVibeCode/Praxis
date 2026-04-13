@@ -1,0 +1,22 @@
+{
+  "name": "Multi-Provider Smoke Test",
+  "phase": "test",
+  "outcome_goal": "Verify agent routing across multiple providers",
+  "jobs": [
+    {
+      "label": "openai_check",
+      "agent": "openai/gpt-5.4-mini",
+      "prompt": "Reply with exactly: OPENAI_OK"
+    },
+    {
+      "label": "anthropic_check",
+      "agent": "anthropic/claude-sonnet-4-6",
+      "prompt": "Reply with exactly: ANTHROPIC_OK"
+    },
+    {
+      "label": "google_check",
+      "agent": "google/gemini-2.5-flash",
+      "prompt": "Reply with exactly: GOOGLE_OK"
+    }
+  ]
+}

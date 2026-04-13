@@ -1,0 +1,278 @@
+"""Durable workflow notification consumer.
+
+Reads undelivered notifications from workflow_notifications table,
+marks them delivered, and returns them. Session-independent: the
+notifications exist in Postgres regardless of which process reads them.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from storage.postgres.connection import SyncPostgresConnection
+
+
+@dataclass(frozen=True)
+class WorkflowNotification:
+    """A single workflow job completion notification."""
+    id: int
+    run_id: str
+    job_label: str
+    spec_name: str
+    agent_slug: str
+    status: str
+    failure_code: str
+    duration_seconds: float
+    created_at: datetime
+
+    def to_dict(self) -> dict:
+        return {
+            "job_label": self.job_label,
+            "spec_name": self.spec_name,
+            "agent_slug": self.agent_slug,
+            "status": self.status,
+            "failure_code": self.failure_code,
+            "duration_seconds": round(self.duration_seconds, 1),
+            "created_at": self.created_at.isoformat() if self.created_at else "",
+        }
+
+    def summary(self) -> str:
+        icon = "+" if self.status == "succeeded" else "x"
+        msg = f"[{icon}] {self.job_label} ({self.agent_slug}) — {self.status}"
+        if self.failure_code:
+            msg += f" [{self.failure_code}]"
+        if self.duration_seconds > 0:
+            msg += f" ({self.duration_seconds:.0f}s)"
+        return msg
+
+
+class WorkflowNotificationConsumer:
+    """Reads and acknowledges workflow notifications from Postgres via polling.
+
+    Session-independent: notifications persist in the DB until consumed.
+    Multiple consumers are safe — each poll() atomically marks rows delivered.
+    """
+
+    def __init__(self, conn: SyncPostgresConnection) -> None:
+        self._conn = conn
+
+    def poll(self, limit: int = 50) -> list[WorkflowNotification]:
+        """Read undelivered notifications and mark them delivered.
+
+        Returns newest-first. Safe to call from any session — uses
+        UPDATE ... RETURNING to atomically claim rows.
+        """
+        rows = self._conn.execute(
+            """UPDATE workflow_notifications
+               SET delivered = true
+               WHERE id IN (
+                   SELECT id FROM workflow_notifications
+                   WHERE delivered = false
+                   ORDER BY created_at ASC
+                   LIMIT $1
+               )
+               RETURNING id, run_id, job_label, spec_name, agent_slug,
+                         status, failure_code, duration_seconds, created_at""",
+            limit,
+        )
+
+        return [
+            WorkflowNotification(
+                id=r["id"],
+                run_id=r["run_id"],
+                job_label=r["job_label"] or "",
+                spec_name=r["spec_name"] or "",
+                agent_slug=r["agent_slug"] or "",
+                status=r["status"] or "",
+                failure_code=r["failure_code"] or "",
+                duration_seconds=float(r["duration_seconds"] or 0),
+                created_at=r["created_at"],
+            )
+            for r in rows
+        ]
+
+    def peek(self, limit: int = 50) -> list[WorkflowNotification]:
+        """Read undelivered notifications WITHOUT marking them delivered."""
+        rows = self._conn.execute(
+            """SELECT id, run_id, job_label, spec_name, agent_slug,
+                      status, failure_code, duration_seconds, created_at
+               FROM workflow_notifications
+               WHERE delivered = false
+               ORDER BY created_at ASC
+               LIMIT $1""",
+            limit,
+        )
+
+        return [
+            WorkflowNotification(
+                id=r["id"],
+                run_id=r["run_id"],
+                job_label=r["job_label"] or "",
+                spec_name=r["spec_name"] or "",
+                agent_slug=r["agent_slug"] or "",
+                status=r["status"] or "",
+                failure_code=r["failure_code"] or "",
+                duration_seconds=float(r["duration_seconds"] or 0),
+                created_at=r["created_at"],
+            )
+            for r in rows
+        ]
+
+    def pending_count(self) -> int:
+        """Count of undelivered notifications."""
+        rows = self._conn.execute(
+            "SELECT count(*) AS c FROM workflow_notifications WHERE delivered = false"
+        )
+        return rows[0]["c"] if rows else 0
+
+    def wait_for_run(
+        self,
+        run_id: str,
+        total_jobs: int,
+        timeout_seconds: float | None = 600,
+        poll_interval: float = 3.0,
+    ) -> list[WorkflowNotification]:
+        """Block until all jobs for a run_id are observed by polling.
+
+        If timeout_seconds is None, block indefinitely.
+
+        Reads workflow_notifications for the given run_id. Returns all
+        notifications once total_jobs are collected, or whatever we have
+        at timeout. This is the blocking primitive that replaces manual
+        wait loops.
+        """
+        import time
+        use_timeout = timeout_seconds is not None
+        deadline = time.monotonic() + timeout_seconds if use_timeout else None
+        collected: list[WorkflowNotification] = []
+        seen_ids: set[int] = set()
+
+        while not use_timeout or time.monotonic() < (deadline or 0):
+            rows = self._conn.execute(
+                """SELECT id, run_id, job_label, spec_name, agent_slug,
+                          status, failure_code, duration_seconds, created_at
+                   FROM workflow_notifications
+                   WHERE run_id = $1 AND id NOT IN (
+                       SELECT unnest($2::int[])
+                   )
+                   ORDER BY created_at ASC""",
+                run_id, list(seen_ids) if seen_ids else [0],
+            )
+
+            for r in rows:
+                nid = r["id"]
+                if nid not in seen_ids:
+                    seen_ids.add(nid)
+                    collected.append(WorkflowNotification(
+                        id=nid,
+                        run_id=r["run_id"] or "",
+                        job_label=r["job_label"] or "",
+                        spec_name=r["spec_name"] or "",
+                        agent_slug=r["agent_slug"] or "",
+                        status=r["status"] or "",
+                        failure_code=r["failure_code"] or "",
+                        duration_seconds=float(r["duration_seconds"] or 0),
+                        created_at=r["created_at"],
+                    ))
+
+            if len(collected) >= total_jobs:
+                break
+
+            time.sleep(poll_interval)
+
+        # Mark collected as delivered
+        if seen_ids:
+            self._conn.execute(
+                """UPDATE workflow_notifications SET delivered = true
+                   WHERE id = ANY($1::int[])""",
+                list(seen_ids),
+            )
+
+        return collected
+
+    def iter_run(
+        self,
+        run_id: str,
+        total_jobs: int,
+        timeout_seconds: float | None = 600,
+        poll_interval: float = 2.0,
+    ):
+        """Yield notifications for a run_id as they are found.
+
+        Like wait_for_run but yields each notification incrementally,
+        enabling callers to emit progress in real time. Marks all
+        yielded notifications as delivered when the generator exits.
+        If timeout_seconds is None, stream until all notifications are seen.
+        """
+        import time
+        use_timeout = timeout_seconds is not None
+        deadline = time.monotonic() + timeout_seconds if use_timeout else None
+        seen_ids: set[int] = set()
+        count = 0
+
+        try:
+            while count < total_jobs and (not use_timeout or time.monotonic() < (deadline or 0)):
+                rows = self._conn.execute(
+                    """SELECT id, run_id, job_label, spec_name, agent_slug,
+                              status, failure_code, duration_seconds, created_at
+                       FROM workflow_notifications
+                       WHERE run_id = $1 AND id NOT IN (
+                           SELECT unnest($2::int[])
+                       )
+                       ORDER BY created_at ASC""",
+                    run_id, list(seen_ids) if seen_ids else [0],
+                )
+
+                for r in rows:
+                    nid = r["id"]
+                    if nid not in seen_ids:
+                        seen_ids.add(nid)
+                        count += 1
+                        yield WorkflowNotification(
+                            id=nid,
+                            run_id=r["run_id"] or "",
+                            job_label=r["job_label"] or "",
+                            spec_name=r["spec_name"] or "",
+                            agent_slug=r["agent_slug"] or "",
+                            status=r["status"] or "",
+                            failure_code=r["failure_code"] or "",
+                            duration_seconds=float(r["duration_seconds"] or 0),
+                            created_at=r["created_at"],
+                        )
+
+                if count < total_jobs:
+                    time.sleep(poll_interval)
+        finally:
+            # Mark all yielded notifications as delivered
+            if seen_ids:
+                self._conn.execute(
+                    """UPDATE workflow_notifications SET delivered = true
+                       WHERE id = ANY($1::int[])""",
+                    list(seen_ids),
+                )
+
+    def format_batch(self, notifications: list[WorkflowNotification]) -> str:
+        """Format a batch of notifications as a concise status block."""
+        if not notifications:
+            return ""
+
+        # Group by spec
+        by_spec: dict[str, list[WorkflowNotification]] = {}
+        for n in notifications:
+            by_spec.setdefault(n.spec_name, []).append(n)
+
+        lines = []
+        for spec, notifs in by_spec.items():
+            passed = sum(1 for n in notifs if n.status == "succeeded")
+            failed = sum(1 for n in notifs if n.status in ("failed", "error"))
+            total = len(notifs)
+            header = f"[workflow] {spec}: {passed}/{total} passed"
+            if failed:
+                header += f", {failed} failed"
+            lines.append(header)
+            for n in notifs:
+                lines.append(f"  {n.summary()}")
+
+        return "\n".join(lines)

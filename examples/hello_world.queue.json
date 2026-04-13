@@ -1,0 +1,10 @@
+{
+  "name": "Hello World",
+  "jobs": [
+    {
+      "label": "greet",
+      "agent": "auto/wiring",
+      "prompt": "Say hello and describe what Praxis Engine is in one sentence."
+    }
+  ]
+}

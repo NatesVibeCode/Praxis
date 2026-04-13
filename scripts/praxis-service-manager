@@ -1,0 +1,1169 @@
+#!/usr/bin/env bash
+# Canonical Praxis Engine service manager implementation.
+# Public entrypoints:
+#   - praxis   (preferred)
+#   - praxis-ctl  (compatibility alias)
+# Usage: praxis {install|uninstall|start|stop|restart|setup|launch|doctor|repair-sync|status|logs}
+set -euo pipefail
+
+# ── Paths ────────────────────────────────────────────────────────────────
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+WORKFLOW_DIR="$REPO_ROOT/Code&DBs/Workflow"
+APP_DIR="$WORKFLOW_DIR/surfaces/app"
+APP_DIST_DIR="$APP_DIR/dist"
+APP_INDEX_HTML="$APP_DIST_DIR/index.html"
+PGDATA="$REPO_ROOT/Code&DBs/Databases/postgres-dev/data"
+PG_LOG="$REPO_ROOT/Code&DBs/Databases/postgres-dev/log/postgres.log"
+LAUNCH_AGENTS="$HOME/Library/LaunchAgents"
+PYTHON="$(command -v python3)"
+PG_CTL="$(command -v pg_ctl)"
+POSTGRES="$(command -v postgres)"
+SERVICE_PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+ALPHA_HELPER="$REPO_ROOT/scripts/praxis_ctl_local_alpha.py"
+ALPHA_STATE_DIR="$REPO_ROOT/.cache/praxis-ctl"
+ALPHA_STATE_FILE="$ALPHA_STATE_DIR/local_alpha_setup_state.json"
+LAUNCH_URL="http://127.0.0.1:8420/app"
+HELM_URL="http://127.0.0.1:8420/app/helm"
+DASHBOARD_URL="http://127.0.0.1:8420/app"
+API_DOCS_URL="http://127.0.0.1:8420/docs"
+ENGINE_NAME="${PRAXIS_ENGINE_NAME:-Praxis Engine}"
+COMMAND_NAME="${PRAXIS_COMMAND_NAME:-praxis}"
+SERVICE_MANAGER_PATH="${PRAXIS_SERVICE_MANAGER_PATH:-scripts/praxis}"
+COMPATIBILITY_ALIAS_PATH="${PRAXIS_COMPATIBILITY_ALIAS_PATH:-scripts/praxis-ctl}"
+SUPERVISOR_LABEL="com.praxis.engine"
+SUPERVISOR_PLIST="$LAUNCH_AGENTS/$SUPERVISOR_LABEL.plist"
+
+# Internal component names in dependency order
+SERVICES=(
+    postgres
+    api-server
+    workflow-worker
+    scheduler
+)
+
+LEGACY_LABELS=(
+    com.dag-project.postgres
+    com.dag.api-server
+    com.dag.workflow-api
+    com.dag.workflow-worker
+    com.dag.scheduler
+    com.dag.queue-worker
+    com.praxis.postgres
+    com.praxis.api-server
+    com.praxis.workflow-api
+    com.praxis.workflow-worker
+    com.praxis.scheduler
+)
+
+# ── Colors ───────────────────────────────────────────────────────────────
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+YELLOW='\033[0;33m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+# ── Helpers ──────────────────────────────────────────────────────────────
+uid=$(id -u)
+domain="gui/$uid"
+
+supervisor_python() {
+    PATH="$SERVICE_PATH:${PATH-}" \
+        PYTHONPATH="$WORKFLOW_DIR${PYTHONPATH:+:$PYTHONPATH}" \
+        "$PYTHON" -m runtime.praxis_supervisor --repo-root "$REPO_ROOT" "$@"
+}
+
+resolve_db_url() {
+    supervisor_python db-url 2>/dev/null || { echo "WORKFLOW_DATABASE_URL must be set" >&2; return 1; }
+}
+
+DB_URL="${WORKFLOW_DATABASE_URL:-$(resolve_db_url)}"
+
+supervisor_loaded() {
+    launchctl print "$domain/$SUPERVISOR_LABEL" &>/dev/null
+}
+
+supervisor_pid() {
+    launchctl print "$domain/$SUPERVISOR_LABEL" 2>/dev/null | grep -m1 'pid =' | awk '{print $3}' || true
+}
+
+supervisor_running() {
+    local pid
+    pid="$(supervisor_pid)"
+    [[ -n "$pid" && "$pid" != "0" ]]
+}
+
+supervisor_exit_code() {
+    local line
+    line=$(launchctl print "$domain/$SUPERVISOR_LABEL" 2>/dev/null | grep -m1 'last exit code' || true)
+    if [[ "$line" == *"never exited"* ]]; then
+        echo "-"
+    else
+        echo "$line" | awk '{print $NF}'
+    fi
+}
+
+is_loaded() {
+    supervisor_loaded
+}
+
+is_running() {
+    supervisor_running
+}
+
+get_pid() {
+    supervisor_pid
+}
+
+get_exit_code() {
+    supervisor_exit_code
+}
+
+pg_ready() {
+    local database_name
+    database_name="$(pg_database_name)"
+    pg_isready -h 127.0.0.1 -p 5432 -d "$database_name" -q 2>/dev/null
+}
+
+pg_database_name() {
+    local database_url="${WORKFLOW_DATABASE_URL:-$DB_URL}"
+    local authorityless="${database_url#*://}"
+    local path_part="${authorityless#*/}"
+    local database_name="${path_part%%\?*}"
+    database_name="${database_name%%#*}"
+    if [ -z "$database_name" ] || [ "$database_name" = "$authorityless" ]; then
+        echo "praxis"
+        return
+    fi
+    echo "$database_name"
+}
+
+wait_for_pg() {
+    local tries=0
+    while ! pg_ready; do
+        tries=$((tries + 1))
+        if [ $tries -ge 30 ]; then
+            echo -e "${RED}Postgres did not become ready after 30s${NC}" >&2
+            return 1
+        fi
+        sleep 1
+    done
+}
+
+log_file_for() {
+    case "$1" in
+        postgres)         echo "$PG_LOG" ;;
+        api|api-server)   echo "/tmp/dag-api-server.err" ;;
+        worker|workflow-worker) echo "/tmp/dag-workflow-worker.err" ;;
+        scheduler)        echo "/tmp/dag-scheduler.err" ;;
+    esac
+}
+
+short_name() {
+    case "$1" in
+        postgres)         echo "postgres" ;;
+        api|api-server)   echo "api-server" ;;
+        worker|workflow-worker) echo "workflow-worker" ;;
+        scheduler)        echo "scheduler" ;;
+        *)                echo "$1" ;;
+    esac
+}
+
+render_supervisor_plist() {
+    mkdir -p "$LAUNCH_AGENTS"
+    supervisor_python render-plist > "$SUPERVISOR_PLIST"
+}
+
+supervisor_control() {
+    local action="$1"
+    local target="${2:-all}"
+    supervisor_python control "$action" "$target" >/dev/null
+}
+
+run_local_alpha() {
+    PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH-}" \
+        PYTHONPATH="$WORKFLOW_DIR:${PYTHONPATH-}" \
+        WORKFLOW_DATABASE_URL="${WORKFLOW_DATABASE_URL:-$DB_URL}" \
+        "$PYTHON" "$ALPHA_HELPER" "$@"
+}
+
+doctor_payload() {
+    mkdir -p "$ALPHA_STATE_DIR"
+    local services_ready="false"
+    services_ready="$(alpha_services_ready && echo true || echo false)"
+    run_local_alpha doctor --services-ready "$services_ready" --state-file "$ALPHA_STATE_FILE"
+}
+
+json_query() {
+    local query="${1:-}"
+    "$PYTHON" -c '
+import json
+import sys
+
+query = sys.argv[1]
+raw = sys.stdin.read()
+data = json.loads(raw) if raw.strip() else None
+value = data
+for part in filter(None, query.split(".")):
+    if isinstance(value, dict):
+        value = value.get(part)
+    else:
+        value = None
+        break
+
+if isinstance(value, bool):
+    sys.stdout.write("true" if value else "false")
+elif value is None:
+    pass
+elif isinstance(value, (dict, list)):
+    sys.stdout.write(json.dumps(value))
+else:
+    sys.stdout.write(str(value))
+' "$query"
+}
+
+doctor_field() {
+    local payload="${1:-}"
+    local query="${2:-}"
+    printf '%s' "$payload" | json_query "$query"
+}
+
+doctor_field_is_true() {
+    local payload="${1:-}"
+    local query="${2:-}"
+    [ "$(doctor_field "$payload" "$query")" = "true" ]
+}
+
+doctor_ready() {
+    local payload="${1:-}"
+    doctor_field_is_true "$payload" "services_ready" \
+        && doctor_field_is_true "$payload" "database_reachable" \
+        && doctor_field_is_true "$payload" "schema_bootstrapped" \
+        && doctor_field_is_true "$payload" "api_server_ready" \
+        && doctor_field_is_true "$payload" "workflow_api_ready" \
+        && doctor_field_is_true "$payload" "mcp_bridge_ready" \
+        && doctor_field_is_true "$payload" "ui_ready"
+}
+
+run_captured() {
+    local __result_var="$1"
+    shift
+    local output=""
+    if output="$("$@" 2>&1)"; then
+        printf -v "$__result_var" '%s' "$output"
+        return 0
+    fi
+    printf -v "$__result_var" '%s' "$output"
+    return 1
+}
+
+print_captured_if_present() {
+    local output="${1:-}"
+    if [ -n "$output" ]; then
+        printf '%s\n' "$output"
+    fi
+}
+
+ensure_app_build() {
+    local marker="$APP_INDEX_HTML"
+    local build_required="false"
+
+    if [ ! -f "$marker" ]; then
+        build_required="true"
+    fi
+
+    if [ "$build_required" = "false" ]; then
+        local watched_paths=(
+            "$APP_DIR/src"
+            "$APP_DIR/index.html"
+            "$APP_DIR/package.json"
+            "$APP_DIR/package-lock.json"
+            "$APP_DIR/tsconfig.json"
+            "$APP_DIR/tsconfig.build.json"
+            "$APP_DIR/vite.config.ts"
+        )
+        local watched
+        for watched in "${watched_paths[@]}"; do
+            [ -e "$watched" ] || continue
+            if [ -d "$watched" ]; then
+                if find "$watched" -type f -newer "$marker" -print -quit | grep -q .; then
+                    build_required="true"
+                    break
+                fi
+            elif [ "$watched" -nt "$marker" ]; then
+                build_required="true"
+                break
+            fi
+        done
+    fi
+
+    if [ "$build_required" = "false" ]; then
+        return 0
+    fi
+
+    if ! command -v npm >/dev/null 2>&1; then
+        echo "npm is required to build $APP_DIR" >&2
+        return 1
+    fi
+
+    echo -e "${CYAN}Building launcher app...${NC}"
+    (
+        cd "$APP_DIR"
+        npm run build
+    )
+}
+
+bootstrap_schema() {
+    run_local_alpha db-bootstrap
+}
+
+launch_targeted_services() {
+    local payload="${1:-}"
+    local services=()
+    if ! doctor_field_is_true "$payload" "database_reachable"; then
+        services+=("postgres")
+    fi
+    if ! doctor_field_is_true "$payload" "api_server_ready" || ! doctor_field_is_true "$payload" "ui_ready"; then
+        services+=("api")
+    fi
+    # MCP bridge is now served by api-server (consolidated)
+    if ! doctor_field_is_true "$payload" "mcp_bridge_ready"; then
+        services+=("api")
+    fi
+    if [ "${#services[@]}" -eq 0 ] && ! doctor_field_is_true "$payload" "services_ready"; then
+        services+=("all")
+    fi
+    printf '%s\n' "${services[@]}" | awk 'NF && !seen[$0]++'
+}
+
+collect_service_rows() {
+    local loaded="false"
+    local pid=""
+    if supervisor_loaded; then
+        loaded="true"
+        pid="$(supervisor_pid)"
+    fi
+    if [ -n "$pid" ]; then
+        supervisor_python rows --launchd-loaded "$loaded" --supervisor-pid "$pid"
+    else
+        supervisor_python rows --launchd-loaded "$loaded"
+    fi
+}
+
+start_missing_services() {
+    if [ ! -f "$SUPERVISOR_PLIST" ]; then
+        echo -e "${RED}Not installed: $SUPERVISOR_LABEL (run: ${COMMAND_NAME} install)${NC}"
+        return 1
+    fi
+
+    supervisor_control start all
+
+    if ! supervisor_loaded; then
+        launchctl bootstrap "$domain" "$SUPERVISOR_PLIST"
+        echo -e "  ${GREEN}Started${NC} Praxis background supervisor"
+    elif ! supervisor_running; then
+        launchctl kickstart "$domain/$SUPERVISOR_LABEL" 2>/dev/null || true
+        echo -e "  ${GREEN}Started${NC} Praxis background supervisor"
+    else
+        echo "  services already running"
+    fi
+
+    echo -n "  Waiting for postgres..."
+    wait_for_pg && echo -e " ${GREEN}ready${NC}" || echo -e " ${RED}timeout${NC}"
+}
+
+status_json_payload() {
+    local doctor_json="${1:-}"
+    local service_rows=""
+    service_rows="$(collect_service_rows)"
+    SERVICE_ROWS="$service_rows" \
+    DOCTOR_JSON="$doctor_json" \
+    ENGINE_NAME="$ENGINE_NAME" \
+    SERVICE_MANAGER_PATH="$SERVICE_MANAGER_PATH" \
+    COMPATIBILITY_ALIAS_PATH="$COMPATIBILITY_ALIAS_PATH" \
+    COMMAND_NAME="$COMMAND_NAME" \
+    "$PYTHON" <<'PY'
+import json
+import os
+
+doctor = json.loads(os.environ["DOCTOR_JSON"])
+services = []
+
+def _parse_exit_code(raw: str):
+    if raw in {"", "-"}:
+        return None
+    if raw.lstrip("-").isdigit():
+        return int(raw)
+    return raw
+
+for raw in os.environ.get("SERVICE_ROWS", "").splitlines():
+    if not raw.strip():
+        continue
+    label, name, loaded, running, pid, exit_code, port, log_file, state = raw.split("\t")
+    services.append(
+        {
+            "label": label,
+            "name": name,
+            "loaded": loaded == "true",
+            "running": running == "true",
+            "pid": int(pid) if pid.isdigit() else None,
+            "exit_code": _parse_exit_code(exit_code),
+            "port": int(port) if port.isdigit() else None,
+            "log_file": log_file or None,
+            "state": state,
+        }
+    )
+
+payload = {
+    "ok": True,
+    "brand": os.environ.get("ENGINE_NAME", "Praxis Engine"),
+    "service_manager": os.environ.get("SERVICE_MANAGER_PATH", "scripts/praxis"),
+    "compatibility_alias": os.environ.get("COMPATIBILITY_ALIAS_PATH", "scripts/praxis-ctl"),
+    "preferred_command": os.environ.get("COMMAND_NAME", "praxis"),
+    "services": services,
+    "doctor": doctor,
+    "dependency_truth": doctor.get("dependency_truth"),
+    "database_reachable": doctor.get("database_reachable"),
+    "schema_bootstrapped": doctor.get("schema_bootstrapped"),
+    "api_server_ready": doctor.get("api_server_ready"),
+    "workflow_api_ready": doctor.get("workflow_api_ready"),
+    "mcp_bridge_ready": doctor.get("mcp_bridge_ready"),
+    "ui_ready": doctor.get("ui_ready"),
+    "launch_url": doctor.get("launch_url"),
+    "helm_url": doctor.get("helm_url"),
+    "dashboard_url": doctor.get("dashboard_url"),
+    "api_docs_url": doctor.get("api_docs_url"),
+}
+print(json.dumps(payload, indent=2, sort_keys=True))
+PY
+}
+
+open_in_browser() {
+    local target_url="${1:-}"
+    if [ -z "$target_url" ]; then
+        return 1
+    fi
+    if command -v open >/dev/null 2>&1; then
+        open "$target_url" >/dev/null 2>&1
+        return 0
+    fi
+    return 1
+}
+
+alpha_services_ready() {
+    local service_rows=""
+    service_rows="$(collect_service_rows)"
+    SERVICE_ROWS="$service_rows" "$PYTHON" <<'PY'
+import os
+import sys
+
+required = {"postgres", "api-server", "workflow-worker"}
+running = {}
+for raw in os.environ.get("SERVICE_ROWS", "").splitlines():
+    if not raw.strip():
+        continue
+    _, name, _, is_running, *_ = raw.split("\t")
+    running[name] = is_running == "true"
+
+sys.exit(0 if all(running.get(name, False) for name in required) else 1)
+PY
+}
+
+alpha_services_install_complete() {
+    [ -f "$SUPERVISOR_PLIST" ]
+}
+
+generate_plist() {
+    local label="${1:-$SUPERVISOR_LABEL}"
+    local dest="$LAUNCH_AGENTS/$label.plist"
+    render_supervisor_plist
+    if [ "$dest" != "$SUPERVISOR_PLIST" ]; then
+        cp "$SUPERVISOR_PLIST" "$dest"
+    fi
+}
+
+# ── Commands ─────────────────────────────────────────────────────────────
+
+cmd_install() {
+    echo -e "${BOLD}Installing ${ENGINE_NAME} services...${NC}"
+    mkdir -p "$LAUNCH_AGENTS"
+    mkdir -p "$(dirname "$PG_LOG")"
+
+    # Verify prerequisites
+    for bin in "$PYTHON" "$POSTGRES" "$PG_CTL"; do
+        if [ ! -x "$bin" ]; then
+            echo -e "${RED}Missing: $bin${NC}"
+            exit 1
+        fi
+    done
+
+    if [ ! -d "$PGDATA" ]; then
+        echo -e "${RED}PGDATA not found: $PGDATA${NC}"
+        exit 1
+    fi
+
+    # Stop any running pg_ctl-based postgres first (the old plist used pg_ctl start
+    # which forks — launchd can't manage that properly)
+    "$PG_CTL" -D "$PGDATA" stop 2>/dev/null || true
+
+    if supervisor_loaded; then
+        launchctl bootout "$domain/$SUPERVISOR_LABEL" 2>/dev/null || true
+    fi
+
+    local legacy=""
+    for legacy in "${LEGACY_LABELS[@]}"; do
+        if launchctl print "$domain/$legacy" &>/dev/null; then
+            echo "  Retiring $legacy..."
+            launchctl bootout "$domain/$legacy" 2>/dev/null || true
+        fi
+        rm -f "$LAUNCH_AGENTS/$legacy.plist"
+    done
+
+    supervisor_control reset all
+    render_supervisor_plist
+    echo -e "  ${GREEN}Generated${NC} $(basename "$SUPERVISOR_PLIST")"
+
+    launchctl bootstrap "$domain" "$SUPERVISOR_PLIST"
+    echo -e "  ${GREEN}Loaded${NC}     $SUPERVISOR_LABEL"
+
+    echo -n "  Waiting for postgres..."
+    if wait_for_pg; then
+        echo -e " ${GREEN}ready${NC}"
+    else
+        echo -e " ${RED}timeout${NC}"
+        echo "Check: $PG_LOG"
+        exit 1
+    fi
+
+    echo ""
+    echo -e "${GREEN}${BOLD}All services installed and running.${NC}"
+    echo "They will auto-start on login and auto-restart on failure."
+    echo ""
+    cmd_status
+}
+
+cmd_uninstall() {
+    echo -e "${BOLD}Uninstalling ${ENGINE_NAME} services...${NC}"
+    if supervisor_loaded; then
+        launchctl bootout "$domain/$SUPERVISOR_LABEL" 2>/dev/null || true
+        echo -e "  ${YELLOW}Unloaded${NC} $SUPERVISOR_LABEL"
+    fi
+    rm -f "$SUPERVISOR_PLIST"
+    echo -e "  ${YELLOW}Removed${NC}  $(basename "$SUPERVISOR_PLIST")"
+    local legacy=""
+    for legacy in "${LEGACY_LABELS[@]}"; do
+        if launchctl print "$domain/$legacy" &>/dev/null; then
+            launchctl bootout "$domain/$legacy" 2>/dev/null || true
+            echo -e "  ${YELLOW}Unloaded${NC} $legacy"
+        fi
+        rm -f "$LAUNCH_AGENTS/$legacy.plist"
+    done
+    echo -e "${GREEN}Done.${NC} Data and logs preserved."
+}
+
+cmd_start_foreground() {
+    echo -e "${CYAN}Starting Praxis Engine in foreground mode${NC}"
+    echo -e "  Press Ctrl+C to stop all services\n"
+
+    # Ensure database is ready
+    if [ -d "$PGDATA" ] && ! pg_ready; then
+        echo -e "  Starting postgres..."
+        "$PG_CTL" -D "$PGDATA" -l "$PG_LOG" start -w -t 10 || {
+            echo -e "  ${RED}Postgres failed to start${NC}"
+            return 1
+        }
+        echo -e "  ${GREEN}Postgres ready${NC}"
+    fi
+
+    # Run API server in foreground
+    trap 'echo -e "\n${YELLOW}Shutting down...${NC}"; kill 0; wait 2>/dev/null' INT TERM
+    echo -e "  Starting API server on port ${PRAXIS_API_PORT:-8420}..."
+    PYTHONPATH="$WORKFLOW_DIR${PYTHONPATH:+:$PYTHONPATH}" \
+    WORKFLOW_DATABASE_URL="${WORKFLOW_DATABASE_URL:-$DB_URL}" \
+        "$PYTHON" -m surfaces.api.server \
+            --host "${PRAXIS_API_HOST:-0.0.0.0}" \
+            --port "${PRAXIS_API_PORT:-8420}" &
+
+    echo -e "  Starting workflow worker..."
+    PYTHONPATH="$WORKFLOW_DIR${PYTHONPATH:+:$PYTHONPATH}" \
+    WORKFLOW_DATABASE_URL="${WORKFLOW_DATABASE_URL:-$DB_URL}" \
+        "$PYTHON" -m runtime.workflow_worker &
+
+    echo -e "\n  ${GREEN}Praxis Engine running${NC}"
+    echo -e "  Dashboard: http://127.0.0.1:${PRAXIS_API_PORT:-8420}/app"
+    echo -e "  API docs:  http://127.0.0.1:${PRAXIS_API_PORT:-8420}/docs\n"
+    wait
+}
+
+cmd_start() {
+    local target="${1:-all}"
+
+    if [ "$target" = "--foreground" ]; then
+        cmd_start_foreground
+        return
+    fi
+
+    if [ "$target" = "all" ]; then
+        if [ ! -f "$SUPERVISOR_PLIST" ]; then
+            echo -e "${RED}Not installed: $SUPERVISOR_LABEL (run: ${COMMAND_NAME} install)${NC}"
+            return 1
+        fi
+        supervisor_control start all
+        if ! supervisor_loaded; then
+            launchctl bootstrap "$domain" "$SUPERVISOR_PLIST"
+        elif ! supervisor_running; then
+            launchctl kickstart "$domain/$SUPERVISOR_LABEL" 2>/dev/null || true
+        fi
+        echo -e "  ${GREEN}Started${NC} Praxis background supervisor"
+        echo -n "  Waiting for postgres..."
+        wait_for_pg && echo -e " ${GREEN}ready${NC}" || echo -e " ${RED}timeout${NC}"
+    else
+        local label
+        label=$(resolve_label "$target")
+        if [ ! -f "$SUPERVISOR_PLIST" ]; then
+            echo -e "${RED}Not installed: $SUPERVISOR_LABEL${NC}"
+            return 1
+        fi
+        supervisor_control start "$label"
+        if ! supervisor_loaded; then
+            launchctl bootstrap "$domain" "$SUPERVISOR_PLIST"
+        elif ! supervisor_running; then
+            launchctl kickstart "$domain/$SUPERVISOR_LABEL" 2>/dev/null || true
+        fi
+        echo -e "${GREEN}Started${NC} $label"
+        if [ "$label" = "postgres" ]; then
+            echo -n "  Waiting for postgres..."
+            wait_for_pg && echo -e " ${GREEN}ready${NC}" || echo -e " ${RED}timeout${NC}"
+        fi
+    fi
+}
+
+cmd_stop() {
+    local target="${1:-all}"
+
+    if [ "$target" = "all" ]; then
+        if supervisor_loaded; then
+            launchctl bootout "$domain/$SUPERVISOR_LABEL" 2>/dev/null || true
+            echo -e "  ${YELLOW}Stopped${NC} Praxis background supervisor"
+        else
+            echo "  supervisor already stopped"
+        fi
+    else
+        local label
+        label=$(resolve_label "$target")
+        supervisor_control stop "$label"
+        echo -e "${YELLOW}Stopped${NC} $label"
+    fi
+}
+
+cmd_restart() {
+    local target="${1:-all}"
+    echo -e "${BOLD}Restarting${NC} $target..."
+
+    if [ "$target" = "all" ]; then
+        if [ ! -f "$SUPERVISOR_PLIST" ]; then
+            echo -e "${RED}Not installed: $SUPERVISOR_LABEL (run: ${COMMAND_NAME} install)${NC}"
+            return 1
+        fi
+        supervisor_control start all
+        if ! supervisor_loaded; then
+            launchctl bootstrap "$domain" "$SUPERVISOR_PLIST"
+        else
+            launchctl kickstart -k "$domain/$SUPERVISOR_LABEL" 2>/dev/null || true
+        fi
+        echo -e "  ${GREEN}Restarted${NC} Praxis background supervisor"
+        echo -n "  Waiting for postgres..."
+        wait_for_pg && echo -e " ${GREEN}ready${NC}" || echo -e " ${RED}timeout${NC}"
+        return
+    fi
+
+    local label
+    label=$(resolve_label "$target")
+    if [ ! -f "$SUPERVISOR_PLIST" ]; then
+        echo -e "${RED}Not installed: $SUPERVISOR_LABEL${NC}"
+        return 1
+    fi
+    if ! supervisor_loaded; then
+        launchctl bootstrap "$domain" "$SUPERVISOR_PLIST"
+    fi
+    supervisor_control restart "$label"
+    echo -e "${GREEN}Restarted${NC} $label"
+    if [ "$label" = "postgres" ]; then
+        echo -n "  Waiting for postgres..."
+        wait_for_pg && echo -e " ${GREEN}ready${NC}" || echo -e " ${RED}timeout${NC}"
+    fi
+}
+
+cmd_setup() {
+    local state_file="$ALPHA_STATE_FILE"
+    local output=""
+    local services_ready="false"
+    local return_code=0
+
+    mkdir -p "$ALPHA_STATE_DIR"
+
+    echo -e "${BOLD}Running local alpha setup...${NC}"
+
+    # Prereq checks
+    for binary in "$PYTHON" "$POSTGRES" "$PG_CTL" "$(command -v pg_isready)"; do
+        if [ ! -x "$binary" ]; then
+            echo -e "${RED}Missing prerequisite: $binary${NC}"
+            return 1
+        fi
+    done
+    echo -e "  ${GREEN}✔${NC} prerequisites"
+
+    # Install/start services, then wait for Postgres readiness.
+    if ! alpha_services_install_complete; then
+        echo -e "  ${CYAN}installing services${NC}"
+        if ! cmd_install; then
+            echo -e "${RED}Service installation failed${NC}"
+            return 1
+        fi
+    else
+        echo -e "  ${CYAN}starting existing services${NC}"
+        if ! cmd_start all; then
+            echo -e "${RED}Service start failed${NC}"
+            return 1
+        fi
+    fi
+
+    if ! wait_for_pg; then
+        echo -e "${RED}Postgres readiness check failed${NC}"
+        return 1
+    fi
+    services_ready="$(alpha_services_ready && echo true || echo false)"
+
+    echo -e "  ${GREEN}✔${NC} services ready (configured)"
+
+    # Bootstrap local schema with repo-local authority
+    if ! output="$(run_local_alpha db-bootstrap 2>&1)"; then
+        echo -e "${RED}Postgres bootstrap failed${NC}"
+        echo "$output"
+        echo "Recovery: verify local Postgres is running and reachable, then rerun: ${COMMAND_NAME} setup"
+        echo -e "${CYAN}Proof payload:${NC}"
+        if ! output="$(run_local_alpha doctor --services-ready "$services_ready" --state-file "$state_file" 2>&1)"; then
+            echo "$output"
+        else
+            echo "$output"
+        fi
+        return 1
+    fi
+    echo "$output"
+
+    # Run the native smoke proof path (smoke run -> persisted proof + optional run_id)
+    if ! output="$(run_local_alpha smoke --state-file "$state_file" 2>&1)"; then
+        return_code=1
+    fi
+    echo "$output"
+
+    if [ "$return_code" -ne 0 ]; then
+        echo -e "${RED}Native smoke proof failed${NC}"
+        echo "Recovery: ensure artifacts/workflow/PRAXIS_NATIVE_SELF_HOSTED_SMOKE.queue.json is present and healthy services are running"
+    fi
+
+    echo -e "${CYAN}Proof payload:${NC}"
+    if ! output="$(run_local_alpha doctor --services-ready "$services_ready" --state-file "$state_file" 2>&1)"; then
+        echo "$output"
+    else
+        echo "$output"
+    fi
+
+    return "$return_code"
+}
+
+cmd_doctor() {
+    local as_json="${1:-false}"
+    local state_file="$ALPHA_STATE_FILE"
+    mkdir -p "$ALPHA_STATE_DIR"
+
+    local services_ready="false"
+    services_ready="$(alpha_services_ready && echo true || echo false)"
+    if [ "$as_json" != "true" ]; then
+        echo "Usage: ${COMMAND_NAME} doctor --json"
+        return 1
+    fi
+    run_local_alpha doctor --services-ready "$services_ready" --state-file "$state_file"
+}
+
+cmd_launch() {
+    local as_json="false"
+    local no_open="false"
+    shift || true
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --json) as_json="true" ;;
+            --no-open) no_open="true" ;;
+            *)
+                echo "Usage: ${COMMAND_NAME} launch [--json] [--no-open]" >&2
+                return 1
+                ;;
+        esac
+        shift
+    done
+
+    mkdir -p "$ALPHA_STATE_DIR"
+
+    local attempted_targeted="false"
+    local targeted_services=""
+    local attempted_full_restart="false"
+    local opened="false"
+    local install_output=""
+    local start_output=""
+    local bootstrap_output=""
+    local bootstrap_retry_output=""
+    local build_output=""
+    local targeted_output=""
+    local full_restart_output=""
+    local doctor_json=""
+    local failure_reason=""
+    local goto_launch_finish="false"
+
+    if ! alpha_services_install_complete; then
+        if ! run_captured install_output cmd_install; then
+            failure_reason="service_install_failed"
+            if [ "$as_json" != "true" ]; then
+                print_captured_if_present "$install_output"
+            fi
+            doctor_json="$(doctor_payload || true)"
+            goto_launch_finish=true
+        fi
+        if [ "$as_json" != "true" ]; then
+            print_captured_if_present "$install_output"
+        fi
+    else
+        if ! run_captured start_output start_missing_services; then
+            failure_reason="service_start_failed"
+            if [ "$as_json" != "true" ]; then
+                print_captured_if_present "$start_output"
+            fi
+            doctor_json="$(doctor_payload || true)"
+            goto_launch_finish=true
+        fi
+        if [ "$as_json" != "true" ]; then
+            print_captured_if_present "$start_output"
+        fi
+    fi
+
+    if [ "${goto_launch_finish:-false}" != "true" ]; then
+        if ! run_captured bootstrap_output bootstrap_schema; then
+            if [ "$as_json" != "true" ]; then
+                print_captured_if_present "$bootstrap_output"
+            fi
+            if run_captured targeted_output cmd_restart postgres && run_captured bootstrap_retry_output bootstrap_schema; then
+                bootstrap_output="${bootstrap_output}
+${targeted_output}
+${bootstrap_retry_output}"
+            else
+                failure_reason="schema_bootstrap_failed"
+                if [ "$as_json" != "true" ]; then
+                    print_captured_if_present "$targeted_output"
+                    print_captured_if_present "$bootstrap_retry_output"
+                fi
+                doctor_json="$(doctor_payload || true)"
+                goto_launch_finish=true
+            fi
+        fi
+        if [ "$as_json" != "true" ]; then
+            print_captured_if_present "$bootstrap_output"
+        fi
+    fi
+
+    if [ "${goto_launch_finish:-false}" != "true" ]; then
+        if ! run_captured build_output ensure_app_build; then
+            failure_reason="app_build_failed"
+            if [ "$as_json" != "true" ]; then
+                print_captured_if_present "$build_output"
+            fi
+            doctor_json="$(doctor_payload || true)"
+            goto_launch_finish=true
+        fi
+        if [ "$as_json" != "true" ] && [ -n "$build_output" ]; then
+            print_captured_if_present "$build_output"
+        fi
+    fi
+
+    if [ "${goto_launch_finish:-false}" != "true" ]; then
+        doctor_json="$(doctor_payload)"
+        if ! doctor_ready "$doctor_json"; then
+            targeted_services="$(launch_targeted_services "$doctor_json" | paste -sd, -)"
+            if [ -n "$targeted_services" ]; then
+                attempted_targeted="true"
+                local svc=""
+                for svc in ${targeted_services//,/ }; do
+                    if ! run_captured targeted_output cmd_restart "$svc"; then
+                        failure_reason="targeted_restart_failed"
+                        break
+                    fi
+                    if [ "$as_json" != "true" ]; then
+                        print_captured_if_present "$targeted_output"
+                    fi
+                done
+                doctor_json="$(doctor_payload)"
+            fi
+        fi
+
+        if ! doctor_ready "$doctor_json"; then
+            attempted_full_restart="true"
+            if ! run_captured full_restart_output cmd_restart all; then
+                failure_reason="full_restart_failed"
+            fi
+            if [ "$as_json" != "true" ]; then
+                print_captured_if_present "$full_restart_output"
+            fi
+            doctor_json="$(doctor_payload)"
+        fi
+    fi
+
+    local ok="false"
+    if doctor_ready "$doctor_json"; then
+        ok="true"
+    elif [ -z "$failure_reason" ]; then
+        failure_reason="semantic_readiness_failed"
+    fi
+
+    if [ "$ok" = "true" ] && [ "$no_open" != "true" ] && open_in_browser "$LAUNCH_URL"; then
+        opened="true"
+    fi
+
+    if [ "$as_json" = "true" ]; then
+        DOCTOR_JSON="$doctor_json" \
+        LAUNCH_OK="$ok" \
+        LAUNCH_OPENED="$opened" \
+        LAUNCH_REASON="$failure_reason" \
+        TARGETED_SERVICES="$targeted_services" \
+        ATTEMPTED_TARGETED="$attempted_targeted" \
+        ATTEMPTED_FULL_RESTART="$attempted_full_restart" \
+        "$PYTHON" <<'PY'
+import json
+import os
+
+doctor = json.loads(os.environ["DOCTOR_JSON"]) if os.environ.get("DOCTOR_JSON") else {}
+payload = {
+    "ok": os.environ.get("LAUNCH_OK") == "true",
+    "brand": os.environ.get("ENGINE_NAME", "Praxis Engine"),
+    "command": f"{os.environ.get('COMMAND_NAME', 'praxis')} launch",
+    "opened": os.environ.get("LAUNCH_OPENED") == "true",
+    "failure_reason": os.environ.get("LAUNCH_REASON") or None,
+    "recovery": {
+        "attempted_targeted_restart": os.environ.get("ATTEMPTED_TARGETED") == "true",
+        "targeted_services": [item for item in os.environ.get("TARGETED_SERVICES", "").split(",") if item],
+        "attempted_full_restart": os.environ.get("ATTEMPTED_FULL_RESTART") == "true",
+    },
+    "doctor": doctor,
+    "launch_url": doctor.get("launch_url", "http://127.0.0.1:8420/app"),
+    "helm_url": doctor.get("helm_url", "http://127.0.0.1:8420/app/helm"),
+    "dashboard_url": doctor.get("dashboard_url", "http://127.0.0.1:8420/app"),
+    "api_docs_url": doctor.get("api_docs_url", "http://127.0.0.1:8420/docs"),
+}
+print(json.dumps(payload, indent=2, sort_keys=True))
+PY
+    else
+        if [ "$ok" = "true" ]; then
+            echo -e "${GREEN}${BOLD}${ENGINE_NAME} launcher ready.${NC}"
+            echo "  Launch:    $LAUNCH_URL"
+            echo "  Helm:      $HELM_URL"
+            echo "  Dashboard: $DASHBOARD_URL"
+            echo "  API docs:  $API_DOCS_URL"
+        else
+            echo -e "${RED}${BOLD}${ENGINE_NAME} launcher recovery failed.${NC}"
+            if [ -n "$failure_reason" ]; then
+                echo "  reason:    $failure_reason"
+            fi
+        fi
+    fi
+
+    [ "$ok" = "true" ]
+}
+
+cmd_repair_sync() {
+    local run_id="${1:-}"
+    if [ -n "$run_id" ]; then
+        run_local_alpha repair-sync --run-id "$run_id"
+        return
+    fi
+    run_local_alpha repair-sync
+}
+
+cmd_status() {
+    local as_json="${1:-false}"
+    local doctor_json=""
+    local service_rows=""
+    doctor_json="$(doctor_payload)"
+    service_rows="$(collect_service_rows)"
+
+    if [ "$as_json" = "true" ]; then
+        status_json_payload "$doctor_json"
+        return 0
+    fi
+
+    SERVICE_ROWS="$service_rows" \
+    DOCTOR_JSON="$doctor_json" \
+    ENGINE_NAME="$ENGINE_NAME" \
+    "$PYTHON" <<'PY'
+import json
+import os
+
+rows = []
+for raw in os.environ.get("SERVICE_ROWS", "").splitlines():
+    if not raw.strip():
+        continue
+    label, name, loaded, running, pid, exit_code, port, log_file, state = raw.split("\t")
+    rows.append(
+        {
+            "label": label,
+            "name": name,
+            "loaded": loaded == "true",
+            "running": running == "true",
+            "pid": pid or "-",
+            "exit_code": exit_code or "-",
+            "port": port or "-",
+            "log_file": log_file or "-",
+            "state": state or "unknown",
+        }
+    )
+
+doctor = json.loads(os.environ["DOCTOR_JSON"]) if os.environ.get("DOCTOR_JSON") else {}
+engine = os.environ.get("ENGINE_NAME", "Praxis Engine")
+
+print("SERVICE         STATE      PID      EXIT   PORT")
+print("──────────────  ─────────  ───────  ─────  ────")
+
+def color_state(state: str) -> str:
+    if state == "running":
+        return "running"
+    if state in {"idle", "stopped", "waiting_on_postgres"}:
+        return "waiting" if state == "waiting_on_postgres" else state
+    if state == "missing":
+        return "missing"
+    return state
+
+for row in rows:
+    state = color_state(row["state"])
+    print(f"{row['name']:<14}  {state:<9}  {row['pid']:<7}  {row['exit_code']:<5}  {row['port']}")
+
+print("")
+
+checks = [
+    ("postgres", "database_reachable", "ready", "not ready"),
+    ("schema", "schema_bootstrapped", "bootstrapped", "missing"),
+    ("api /api/health", "api_server_ready", "ready", "not ready"),
+    (f"{engine} /orient", "workflow_api_ready", "ready", "not ready"),
+    (f"{engine} /mcp", "mcp_bridge_ready", "ready", "not ready"),
+    (f"{engine} /app", "ui_ready", "ready", "not ready"),
+]
+
+for label, field, ok_text, bad_text in checks:
+    ok = bool(doctor.get(field))
+    text = ok_text if ok else bad_text
+    print(f"  {label:<18} {text}")
+
+print("")
+print(f"  Launch:    {doctor.get('launch_url', '')}")
+print(f"  Helm:      {doctor.get('helm_url', '')}")
+print(f"  Dashboard: {doctor.get('dashboard_url', '')}")
+print(f"  API docs:  {doctor.get('api_docs_url', '')}")
+PY
+}
+
+cmd_logs() {
+    local target="${1:-all}"
+
+    if [ "$target" = "all" ]; then
+        local files=()
+        for svc in "${SERVICES[@]}"; do
+            local f
+            f=$(log_file_for "$svc")
+            [ -f "$f" ] && files+=("$f")
+        done
+        if [ ${#files[@]} -gt 0 ]; then
+            tail -f "${files[@]}"
+        else
+            echo "No log files found."
+        fi
+    else
+        local label f
+        label=$(resolve_label "$target")
+        f=$(log_file_for "$label")
+        if [ -f "$f" ]; then
+            tail -f "$f"
+        else
+            echo "No log file: $f"
+        fi
+    fi
+}
+
+resolve_label() {
+    case "$1" in
+        postgres|pg)        echo "postgres" ;;
+        api|api-server|server|praxis-server|workflow-api) echo "api-server" ;;
+        worker|workflow-worker|queue-worker) echo "workflow-worker" ;;
+        scheduler)          echo "scheduler" ;;
+        *)                  echo "$1" ;;
+    esac
+}
+
+# ── Main ─────────────────────────────────────────────────────────────────
+
+# Zero-arg: ensure running and open the app
+cmd_open() {
+    local doctor_json=""
+    doctor_json="$(doctor_payload || true)"
+    if [ -z "$doctor_json" ] || ! doctor_field_is_true "$doctor_json" "api_server_ready"; then
+        echo "Starting Praxis..."
+        cmd_start "all" 2>/dev/null
+        sleep 3
+    fi
+    echo "Opening $LAUNCH_URL"
+    open "$LAUNCH_URL" 2>/dev/null || true
+}
+
+case "${1:-}" in
+    "")         cmd_open ;;
+    install)    cmd_install ;;
+    uninstall)  cmd_uninstall ;;
+    start)      cmd_start "${2:-all}" ;;
+    stop)       cmd_stop "${2:-all}" ;;
+    restart)    cmd_restart "${2:-all}" ;;
+    setup)      cmd_setup ;;
+    launch)     cmd_launch "${@:1}" ;;
+    doctor)
+        if [ "${2:-}" != "--json" ]; then
+            echo "Usage: ${COMMAND_NAME} doctor --json"
+            exit 1
+        fi
+        cmd_doctor true
+        ;;
+    repair-sync) cmd_repair_sync "${2:-}" ;;
+    status|st)
+        if [ "${2:-}" = "--json" ]; then
+            cmd_status true
+        else
+            cmd_status false
+        fi
+        ;;
+    logs)       cmd_logs "${2:-all}" ;;
+    help|--help|-h)
+        echo "Usage: ${COMMAND_NAME} <command> [service]"
+        echo ""
+        echo "Commands:"
+        echo "  install     Install the single Praxis background agent (auto-start on login)"
+        echo "  uninstall   Stop and remove the Praxis background agent (preserves data)"
+        echo "  setup       Run one-shot local alpha setup with schema bootstrap and smoke proof"
+        echo "  launch      Auto-heal services, ensure /app build exists, prove readiness, open launcher"
+        echo "  start       Start service(s)  — ${COMMAND_NAME} start [--foreground|postgres|api|workflow-api|worker|scheduler]"
+        echo "  stop        Stop service(s)   — ${COMMAND_NAME} stop [postgres|api|workflow-api|worker|scheduler]"
+        echo "  restart     Restart service(s)"
+        echo "  doctor      Read setup proof — ${COMMAND_NAME} doctor --json"
+        echo "  repair-sync Re-run graph sync for the latest degraded run or a specific run id"
+        echo "  status      Show all service states, PIDs, ports, and semantic readiness"
+        echo "  logs        Tail logs — ${COMMAND_NAME} logs [postgres|api|workflow-api|worker|scheduler]"
+        echo ""
+        echo "Services: postgres, api, worker, scheduler (or 'all', the default)"
+        ;;
+    *)
+        echo "Unknown command: $1 (try: ${COMMAND_NAME} help)"
+        exit 1
+        ;;
+esac

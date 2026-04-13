@@ -1,0 +1,101 @@
+<!-- Shared Navigation Component -->
+<nav class="nav-bar">
+  <div class="nav-container">
+    <div class="nav-logo">Praxis Engine</div>
+    <div class="nav-links">
+      <a href="dashboard.html" class="nav-link">Dashboard</a>
+      <a href="queue.html" class="nav-link">Queue</a>
+      <a href="pipeline.html" class="nav-link">Pipeline</a>
+      <a href="receipts.html" class="nav-link">Receipts</a>
+      <a href="leaderboard.html" class="nav-link">Leaderboard</a>
+      <a href="fitness.html" class="nav-link">Fitness</a>
+      <a href="costs.html" class="nav-link">Costs</a>
+    </div>
+  </div>
+</nav>
+
+<style>
+.nav-bar {
+  background-color: #1a1a1a;
+  border-bottom: 1px solid #333;
+  padding: 0;
+  margin: 0;
+  font-family: 'Courier New', monospace;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.nav-container {
+  display: flex;
+  align-items: center;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 20px;
+  height: 50px;
+}
+
+.nav-logo {
+  font-weight: bold;
+  font-size: 16px;
+  color: #00d4ff;
+  margin-right: 40px;
+  white-space: nowrap;
+}
+
+.nav-links {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.nav-link {
+  color: #aaa;
+  text-decoration: none;
+  font-size: 13px;
+  transition: color 0.2s;
+  white-space: nowrap;
+}
+
+.nav-link:hover {
+  color: #00d4ff;
+}
+
+.nav-link.active {
+  color: #00d4ff;
+  border-bottom: 2px solid #00d4ff;
+  padding-bottom: 14px;
+}
+
+@media (max-width: 768px) {
+  .nav-container {
+    flex-direction: column;
+    height: auto;
+    padding: 10px 20px;
+  }
+
+  .nav-logo {
+    margin-right: 0;
+    margin-bottom: 10px;
+  }
+
+  .nav-links {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+}
+</style>
+
+<script>
+// Auto-activate the current page's nav link
+document.addEventListener('DOMContentLoaded', function() {
+  const currentPage = window.location.pathname.split('/').pop() || 'dashboard.html';
+  const navLinks = document.querySelectorAll('.nav-link');
+  navLinks.forEach(link => {
+    if (link.getAttribute('href') === currentPage) {
+      link.classList.add('active');
+    }
+  });
+});
+</script>

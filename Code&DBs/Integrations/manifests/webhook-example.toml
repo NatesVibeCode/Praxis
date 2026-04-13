@@ -1,0 +1,19 @@
+# Example: a manifest-declared integration.
+# Drop a .toml file here to register an integration with zero Python.
+
+[integration]
+id = "webhook-example"
+name = "Webhook Example"
+description = "Example manifest-declared webhook integration."
+provider = "http"
+icon = "webhook"
+
+[auth]
+kind = "env_var"
+env_var = "WEBHOOK_EXAMPLE_TOKEN"
+
+[[capabilities]]
+action = "post"
+description = "POST a payload to the example endpoint."
+method = "POST"
+path = "https://httpbin.org/post"

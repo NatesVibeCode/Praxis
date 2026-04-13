@@ -1,0 +1,48 @@
+# macOS
+**/.DS_Store
+
+# Node
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Database files (keep migrations, ignore data)
+Code&DBs/Databases/postgres-dev/data/
+Code&DBs/Databases/postgres-dev/log/
+Code&DBs/Databases/dispatch-state/
+
+# Local config
+.mcp.json
+
+# Artifacts (generated)
+artifacts/sandboxes/
+artifacts/dispatch_outputs/
+artifacts/workflow_outputs/
+artifacts/workflow_results/
+artifacts/workflow_run_result.*.json
+artifacts/quality_log.jsonl
+
+# Screenshots
+*.png
+.env
+
+# Build artifacts
+Code&DBs/Workflow/surfaces/app/dist/
+
+# Logs
+*.log
+artifacts/dispatch_logs/*.log
+
+# Heartbeat telemetry
+artifacts/heartbeat/
+
+# Runtime state
+Code&DBs/Workflow/artifacts/circuit_breaker_state.json
+Code&DBs/Workflow/artifacts/notifications.jsonl
+
+# External tool leftovers
+$CODEX_HOME/

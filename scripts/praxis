@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+WORKFLOW_DIR="$REPO_ROOT/Code&DBs/Workflow"
+
+if [ "${1:-}" = "agent-run" ]; then
+    export PYTHONPATH="$WORKFLOW_DIR${PYTHONPATH:+:$PYTHONPATH}"
+    exec python3 -m runtime.praxis_supervisor --repo-root "$REPO_ROOT" run
+fi
+
+export PRAXIS_COMMAND_NAME="praxis"
+export PRAXIS_SERVICE_MANAGER_PATH="scripts/praxis"
+export PRAXIS_COMPATIBILITY_ALIAS_PATH="scripts/dag-ctl"
+
+exec "$SCRIPT_DIR/praxis-service-manager" "$@"

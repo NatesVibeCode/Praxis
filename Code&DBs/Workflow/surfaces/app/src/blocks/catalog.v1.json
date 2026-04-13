@@ -1,0 +1,163 @@
+[
+  {
+    "id": "metric",
+    "name": "Metric",
+    "type": "display",
+    "defaultSpan": "1x1",
+    "description": "Single KPI or status metric"
+  },
+  {
+    "id": "stat-row",
+    "name": "Stat Row",
+    "type": "display",
+    "defaultSpan": "2x1",
+    "description": "Horizontal list of compact stats"
+  },
+  {
+    "id": "chart",
+    "name": "Chart",
+    "type": "display",
+    "defaultSpan": "2x2",
+    "description": "Bar, line, or pie chart from endpoint data"
+  },
+  {
+    "id": "activity-feed",
+    "name": "Activity Feed",
+    "type": "display",
+    "defaultSpan": "2x2",
+    "description": "Timeline of activity or events"
+  },
+  {
+    "id": "status-grid",
+    "name": "Status Grid",
+    "type": "display",
+    "defaultSpan": "2x2",
+    "description": "Grid of status cards"
+  },
+  {
+    "id": "markdown",
+    "name": "Markdown",
+    "type": "display",
+    "defaultSpan": "2x2",
+    "description": "Formatted markdown content"
+  },
+  {
+    "id": "key-value",
+    "name": "Key Value",
+    "type": "display",
+    "defaultSpan": "2x1",
+    "description": "Definition list or metadata panel"
+  },
+  {
+    "id": "data-table",
+    "name": "Data Table",
+    "type": "display",
+    "defaultSpan": "2x2",
+    "description": "Tabular data browser"
+  },
+  {
+    "id": "text-input",
+    "name": "Text Input",
+    "type": "input",
+    "defaultSpan": "1x1",
+    "description": "Text input field"
+  },
+  {
+    "id": "intent-box",
+    "name": "Intent Box",
+    "type": "input",
+    "defaultSpan": "2x2",
+    "description": "Main entry point for app builder"
+  },
+  {
+    "id": "dropdown-select",
+    "name": "Dropdown Select",
+    "type": "input",
+    "defaultSpan": "1x1",
+    "description": "Dropdown selection menu"
+  },
+  {
+    "id": "button-row",
+    "name": "Button Row",
+    "type": "input",
+    "defaultSpan": "1x1",
+    "description": "Row of action buttons"
+  },
+  {
+    "id": "file-drop",
+    "name": "File Drop",
+    "type": "input",
+    "defaultSpan": "2x1",
+    "description": "Drag and drop file upload zone"
+  },
+  {
+    "id": "workflow-form",
+    "name": "Workflow Form",
+    "type": "tool",
+    "defaultSpan": "2x2",
+    "description": "Workflow editing form"
+  },
+  {
+    "id": "search-panel",
+    "name": "Search Panel",
+    "type": "tool",
+    "defaultSpan": "2x2",
+    "description": "Search and discovery panel"
+  },
+  {
+    "id": "workflow-builder",
+    "name": "Workflow Builder",
+    "type": "tool",
+    "defaultSpan": "2x2",
+    "description": "Interactive workflow construction surface"
+  },
+  {
+    "id": "object-type-browser",
+    "name": "Object Type Browser",
+    "type": "tool",
+    "defaultSpan": "2x2",
+    "description": "Browse and create object types"
+  },
+  {
+    "id": "schema-editor",
+    "name": "Schema Editor",
+    "type": "tool",
+    "defaultSpan": "2x2",
+    "description": "Edit object type schemas"
+  },
+  {
+    "id": "workflow-status",
+    "name": "Workflow Status",
+    "type": "composite",
+    "defaultSpan": "2x2",
+    "description": "Workflow state and run summary"
+  },
+  {
+    "id": "bug-card",
+    "name": "Bug Card",
+    "type": "composite",
+    "defaultSpan": "2x2",
+    "description": "Bug summary card"
+  },
+  {
+    "id": "model-card",
+    "name": "Model Card",
+    "type": "composite",
+    "defaultSpan": "2x2",
+    "description": "Model summary card"
+  },
+  {
+    "id": "registry-browser",
+    "name": "Registry Browser",
+    "type": "composite",
+    "defaultSpan": "2x2",
+    "description": "Registry exploration surface"
+  },
+  {
+    "id": "slot-layout",
+    "name": "Slot Layout",
+    "type": "composite",
+    "defaultSpan": "2x2",
+    "description": "Composite slot-based layout"
+  }
+]

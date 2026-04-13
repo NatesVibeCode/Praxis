@@ -1,0 +1,30 @@
+{
+  "name": "Research Pipeline",
+  "phase": "research",
+  "outcome_goal": "Research, analyze, synthesize, and review a technical topic",
+  "jobs": [
+    {
+      "label": "research",
+      "agent": "auto/research",
+      "prompt": "Research current best practices for Python async HTTP clients. Cover aiohttp, httpx, and urllib3 v2."
+    },
+    {
+      "label": "analyze",
+      "agent": "auto/architecture",
+      "prompt": "Analyze the research findings and identify the top 3 approaches with trade-offs.",
+      "depends_on": ["research"]
+    },
+    {
+      "label": "synthesize",
+      "agent": "auto/build",
+      "prompt": "Write a comparison document of the top approaches with code examples for each.",
+      "depends_on": ["analyze"]
+    },
+    {
+      "label": "review",
+      "agent": "auto/review",
+      "prompt": "Review the comparison for accuracy and completeness. Flag any missing considerations.",
+      "depends_on": ["synthesize"]
+    }
+  ]
+}

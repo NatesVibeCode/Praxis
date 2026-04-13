@@ -1,0 +1,706 @@
+"""Canonical workflow spec authority.
+
+This module owns both workflow-spec contracts used in the repo today:
+
+1. Queue specs submitted through workflow command surfaces.
+2. Single-run workflow specs consumed by the deterministic runtime.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from adapters.provider_registry import default_llm_adapter_type, default_provider_slug
+from runtime.workflow_graph_compiler import (
+    GraphWorkflowCompileError,
+    compile_graph_workflow_request,
+    spec_uses_graph_runtime,
+)
+
+if TYPE_CHECKING:
+    from .workflow import WorkflowSpec as RuntimeWorkflowSpec
+
+
+class WorkflowSpecError(ValueError):
+    """Raised when a workflow spec file is missing or invalid."""
+
+
+class WorkflowSpec:
+    """Parsed queue-spec representation used by workflow submit/validate surfaces."""
+
+    def __init__(
+        self,
+        *,
+        name: str,
+        workflow_id: str,
+        phase: str,
+        jobs: list[dict[str, Any]],
+        verify_refs: list[str] | None = None,
+        outcome_goal: str,
+        anti_requirements: list[str],
+        workspace_ref: str | None = None,
+        runtime_profile_ref: str | None = None,
+        raw: dict[str, Any] | None = None,
+    ) -> None:
+        self.name = name
+        self.workflow_id = workflow_id
+        self.phase = phase
+        self.jobs = jobs
+        self.verify_refs = verify_refs or []
+        self.outcome_goal = outcome_goal
+        self.anti_requirements = anti_requirements
+        self.workspace_ref = workspace_ref
+        self.runtime_profile_ref = runtime_profile_ref
+        self._raw = raw or {}
+
+    @classmethod
+    def load(cls, path: str) -> "WorkflowSpec":
+        """Read and validate a queue workflow spec JSON file."""
+
+        _validate_spec_path(path)
+        raw = load_raw(path)
+        if not isinstance(raw, dict):
+            raise WorkflowSpecError(f"Spec file must contain a JSON object: {path}")
+
+        normalized = dict(raw)
+        if "workflow_id" not in normalized and "name" in normalized:
+            normalized["workflow_id"] = _auto_workflow_id(normalized["name"])
+
+        if "phase" not in normalized:
+            normalized["phase"] = "execute"
+        missing = [field for field in ("name", "workflow_id", "jobs") if field not in normalized]
+        if missing:
+            raise WorkflowSpecError(f"Missing required fields: {', '.join(missing)}")
+
+        jobs = normalized["jobs"]
+        if not isinstance(jobs, list) or len(jobs) == 0:
+            raise WorkflowSpecError("'jobs' must be a non-empty list")
+
+        normalized_jobs: list[dict[str, Any]] = []
+        id_to_label: dict[str, str] = {}
+        for index, item in enumerate(jobs):
+            if not isinstance(item, dict):
+                raise WorkflowSpecError(f"Job '{index}' must be an object")
+
+            job = dict(item)
+            if "route_id" in job:
+                raise WorkflowSpecError(
+                    f"Job '{job.get('label', index)}' uses legacy 'route_id'; use 'agent' instead",
+                )
+            if "verify" in job:
+                raise WorkflowSpecError(
+                    f"Job '{job.get('label', index)}' uses legacy 'verify'; use 'verify_refs' instead",
+                )
+            if "label" not in job and "slug" in job:
+                job["label"] = job["slug"]
+            if "label" not in job:
+                sprint = job.get("sprint", index + 1)
+                job["label"] = f"sprint_{sprint}_job_{index}"
+            # Track id → label mapping for dependency translation
+            if "id" in job:
+                id_to_label[job["id"]] = job["label"]
+            agent = job.get("agent")
+            if not isinstance(agent, str) or not agent.strip():
+                job["agent"] = "auto/build"
+            else:
+                job["agent"] = agent.strip()
+            if _job_requires_prompt(job) and "prompt" not in job:
+                raise WorkflowSpecError(f"Job '{job.get('label', index)}' missing 'prompt'")
+            # Normalize depends → depends_on
+            if "depends" in job and "depends_on" not in job:
+                job["depends_on"] = job.pop("depends")
+            # Normalize write_scope / write → scope.write
+            if "scope" not in job:
+                ws = job.get("write_scope") or job.get("write")
+                if ws:
+                    job["scope"] = {"write": ws if isinstance(ws, list) else [ws]}
+
+            normalized_jobs.append(job)
+
+        # Translate dependency references from id → label
+        if id_to_label:
+            for job in normalized_jobs:
+                deps = job.get("depends_on")
+                if isinstance(deps, list):
+                    job["depends_on"] = [id_to_label.get(d, d) for d in deps]
+
+        # Expand replicate jobs (fan-out primitive)
+        normalized_jobs = _expand_replicate_jobs(normalized_jobs)
+
+        if any("sprint" in job for job in normalized_jobs):
+            normalized_jobs.sort(key=lambda job: job.get("sprint", 0))
+            # Auto-generate depends_on from sprint ordering:
+            # sprint N+1 jobs depend on all sprint N jobs
+            _generate_sprint_dependencies(normalized_jobs)
+
+        if "verify" in normalized:
+            raise WorkflowSpecError("Spec uses legacy 'verify'; use 'verify_refs' instead")
+
+        return cls(
+            name=str(normalized["name"]),
+            workflow_id=str(normalized["workflow_id"]),
+            phase=str(normalized["phase"]),
+            jobs=normalized_jobs,
+            verify_refs=_as_string_list(normalized.get("verify_refs")),
+            outcome_goal=_as_string(normalized.get("outcome_goal")),
+            anti_requirements=_as_string_list(normalized.get("anti_requirements")),
+            workspace_ref=_as_optional_string(normalized.get("workspace_ref")),
+            runtime_profile_ref=_as_optional_string(normalized.get("runtime_profile_ref")),
+            raw=normalized,
+        )
+
+    def summary(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "workflow_id": self.workflow_id,
+            "phase": self.phase,
+            "job_count": len(self.jobs),
+            "verify_count": len(self.verify_refs),
+            "verify_ref_count": len(self.verify_refs),
+            "outcome_goal": self.outcome_goal,
+            "anti_requirements": self.anti_requirements,
+            "workspace_ref": self.workspace_ref,
+            "runtime_profile_ref": self.runtime_profile_ref,
+            "job_labels": [job["label"] for job in self.jobs],
+        }
+
+
+def _generate_sprint_dependencies(jobs: list[dict[str, Any]]) -> None:
+    """Add depends_on edges from sprint ordering.
+
+    Sprint N+1 jobs auto-depend on all sprint N jobs, unless the job
+    already has explicit depends_on.  Mutates jobs in place.
+    """
+    by_sprint: dict[int, list[str]] = {}
+    for job in jobs:
+        sprint = job.get("sprint")
+        if sprint is None:
+            continue
+        label = str(job.get("label") or "")
+        if label:
+            by_sprint.setdefault(int(sprint), []).append(label)
+    if not by_sprint:
+        return
+    sprints_sorted = sorted(by_sprint)
+    for job in jobs:
+        sprint = job.get("sprint")
+        if sprint is None:
+            continue
+        if job.get("depends_on"):
+            continue  # explicit deps take precedence
+        idx = sprints_sorted.index(int(sprint))
+        if idx > 0:
+            prev_sprint = sprints_sorted[idx - 1]
+            job["depends_on"] = list(by_sprint[prev_sprint])
+
+
+def _expand_replicate_jobs(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Expand jobs with ``replicate`` or ``replicate_with`` into concrete copies.
+
+    **Count-based** (``replicate: N``)::
+
+        {"label": "workers", "replicate": 40, "prompt": "Worker {{WORKER_INDEX}} of {{WORKER_COUNT}}"}
+
+    becomes 40 jobs with ``{{WORKER_INDEX}}`` and ``{{WORKER_COUNT}}`` replaced.
+
+    **Item-based** (``replicate_with: [...]``)::
+
+        {"label": "searches", "replicate_with": ["AI agents", "LLM routing", "tool use"],
+         "prompt": "Research: {{ITEM}}"}
+
+    becomes 3 jobs with ``{{ITEM}}``, ``{{WORKER_INDEX}}``, and ``{{WORKER_COUNT}}`` replaced.
+    Items can be strings, dicts, or lists — dicts/lists are JSON-serialized.
+
+    Downstream ``depends_on`` references to the original label are rewritten
+    to depend on all expanded labels.
+    """
+    has_replicate = any(
+        isinstance(j.get("replicate"), int) or isinstance(j.get("replicate_with"), list)
+        for j in jobs
+    )
+    if not has_replicate:
+        return jobs
+
+    # First pass: expand replicate jobs, build label mapping
+    expanded: list[dict[str, Any]] = []
+    label_expansion: dict[str, list[str]] = {}  # original_label → [expanded_labels]
+
+    for job in jobs:
+        items = job.get("replicate_with")
+        count = job.get("replicate")
+
+        # replicate_with takes precedence — item-driven fan-out
+        if isinstance(items, list) and len(items) > 0:
+            count = len(items)
+        elif not isinstance(count, int) or count <= 1:
+            expanded.append(job)
+            continue
+        else:
+            items = None  # pure count-based
+
+        if count > 200:
+            raise WorkflowSpecError(
+                f"Job '{job.get('label')}' replicate/replicate_with count={count} exceeds maximum (200)"
+            )
+
+        original_label = job["label"]
+        width = len(str(count))
+        child_labels: list[str] = []
+
+        for i in range(1, count + 1):
+            child = dict(job)
+            child_label = f"{original_label}_{i:0{width}d}"
+            child["label"] = child_label
+            child.pop("replicate", None)
+            child.pop("replicate_with", None)
+
+            # Serialize item if present
+            item_str = ""
+            if items is not None:
+                item = items[i - 1]
+                if isinstance(item, (dict, list)):
+                    item_str = json.dumps(item, ensure_ascii=False)
+                else:
+                    item_str = str(item)
+
+            # Template substitution in prompt
+            prompt = child.get("prompt", "")
+            prompt = prompt.replace("{{WORKER_INDEX}}", str(i))
+            prompt = prompt.replace("{{WORKER_COUNT}}", str(count))
+            if item_str:
+                prompt = prompt.replace("{{ITEM}}", item_str)
+            child["prompt"] = prompt
+
+            # Same substitution in system_prompt if present
+            sys_prompt = child.get("system_prompt")
+            if isinstance(sys_prompt, str):
+                sys_prompt = sys_prompt.replace("{{WORKER_INDEX}}", str(i))
+                sys_prompt = sys_prompt.replace("{{WORKER_COUNT}}", str(count))
+                if item_str:
+                    sys_prompt = sys_prompt.replace("{{ITEM}}", item_str)
+                child["system_prompt"] = sys_prompt
+
+            child_labels.append(child_label)
+            expanded.append(child)
+
+        label_expansion[original_label] = child_labels
+
+    # Second pass: rewrite depends_on references to expanded labels
+    if label_expansion:
+        for job in expanded:
+            deps = job.get("depends_on")
+            if not isinstance(deps, list):
+                continue
+            new_deps: list[str] = []
+            for dep in deps:
+                if dep in label_expansion:
+                    new_deps.extend(label_expansion[dep])
+                else:
+                    new_deps.append(dep)
+            job["depends_on"] = new_deps
+
+    return expanded
+
+
+_PROMPTLESS_GRAPH_ADAPTER_TYPES = {
+    "api_task",
+    "deterministic_task",
+    "control_operator",
+    "mcp_task",
+    "context_compiler",
+    "output_parser",
+    "file_writer",
+    "verifier",
+}
+
+
+def _job_requires_prompt(job: dict[str, Any]) -> bool:
+    adapter_type = job.get("adapter_type")
+    if isinstance(adapter_type, str) and adapter_type.strip() in _PROMPTLESS_GRAPH_ADAPTER_TYPES:
+        return False
+    if isinstance(job.get("operator"), dict):
+        return False
+    if isinstance(job.get("template_jobs"), list) or isinstance(job.get("branches"), dict):
+        return False
+    if any(key in job for key in ("url", "endpoint", "method", "headers", "body", "body_template")):
+        return False
+    return True
+
+
+def _auto_workflow_id(name: object) -> str:
+    if not isinstance(name, str):
+        return ""
+    return name.lower().replace(" ", "_").replace(":", "")[:40]
+
+
+def _as_optional_string(value: object) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def _as_string(value: object) -> str:
+    return value if isinstance(value, str) else ""
+
+
+def _as_string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
+
+
+def _as_dict_list(value: object) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [dict(item) for item in value if isinstance(item, dict)]
+
+
+def _validate_spec_path(path: str) -> Path:
+    file_path = Path(path)
+    if not file_path.exists():
+        raise WorkflowSpecError(f"Spec file not found: {path}")
+    if not file_path.name.endswith(".json"):
+        raise WorkflowSpecError(f"Spec file must be .json: {path}")
+    return file_path
+
+
+_KNOWN_ADAPTER_TYPES = {"cli_llm", "llm_task", "deterministic_task"}
+_SPEC_FIELD_NAMES = {
+    "prompt",
+    "provider_slug",
+    "model_slug",
+    "tier",
+    "adapter_type",
+    "timeout",
+    "workdir",
+    "max_tokens",
+    "temperature",
+    "label",
+    "workspace_ref",
+    "runtime_profile_ref",
+    "system_prompt",
+    "context_sections",
+    "max_retries",
+    "scope_read",
+    "scope_write",
+    "allowed_tools",
+    "verify_refs",
+    "definition_revision",
+    "plan_revision",
+    "packet_provenance",
+    "output_schema",
+    "max_context_tokens",
+    "persist",
+    "capabilities",
+    "use_cache",
+    "task_type",
+    "submission_required",
+    "skip_auto_review",
+    "reviews_workflow_id",
+    "review_target_modules",
+}
+_ALLOWED_SPEC_KEYS = _SPEC_FIELD_NAMES | {"system_prompt", "context_sections"}
+
+def validate_workflow_spec(raw: dict[str, Any]) -> tuple[bool, list[str]]:
+    """Validate a raw dict as a single runtime workflow spec."""
+
+    errors: list[str] = []
+
+    if not isinstance(raw, dict):
+        return False, ["spec must be a JSON object"]
+
+    if spec_uses_graph_runtime(raw):
+        try:
+            compile_graph_workflow_request(raw)
+        except GraphWorkflowCompileError as exc:
+            return False, [str(exc)]
+        return True, []
+
+    if "prompt" not in raw:
+        errors.append("missing required field: prompt")
+    elif not isinstance(raw["prompt"], str) or not raw["prompt"].strip():
+        errors.append("prompt must be a non-empty string")
+
+    if "provider_slug" in raw:
+        if not isinstance(raw["provider_slug"], str):
+            errors.append("provider_slug must be a string")
+
+    if "model_slug" in raw and raw["model_slug"] is not None and not isinstance(raw["model_slug"], str):
+        errors.append("model_slug must be a string or null")
+
+    if "adapter_type" in raw:
+        if not isinstance(raw["adapter_type"], str):
+            errors.append("adapter_type must be a string")
+        elif raw["adapter_type"] not in _KNOWN_ADAPTER_TYPES:
+            errors.append(f"adapter_type must be one of {sorted(_KNOWN_ADAPTER_TYPES)}")
+
+    if "timeout" in raw:
+        if not isinstance(raw["timeout"], (int, float)):
+            errors.append("timeout must be a number")
+        elif raw["timeout"] <= 0:
+            errors.append("timeout must be positive")
+
+    if "max_tokens" in raw:
+        if not isinstance(raw["max_tokens"], int):
+            errors.append("max_tokens must be an integer")
+        elif raw["max_tokens"] <= 0:
+            errors.append("max_tokens must be positive")
+
+    if "temperature" in raw:
+        if not isinstance(raw["temperature"], (int, float)):
+            errors.append("temperature must be a number")
+        elif not (0.0 <= raw["temperature"] <= 2.0):
+            errors.append("temperature must be between 0.0 and 2.0")
+
+    if "label" in raw and raw["label"] is not None and not isinstance(raw["label"], str):
+        errors.append("label must be a string or null")
+
+    if "capabilities" in raw:
+        capabilities = raw["capabilities"]
+        if capabilities is not None:
+            if not isinstance(capabilities, list):
+                errors.append("capabilities must be a list of strings or null")
+            elif not all(isinstance(capability, str) for capability in capabilities):
+                errors.append("capabilities entries must all be strings")
+
+    if "workdir" in raw and raw["workdir"] is not None and not isinstance(raw["workdir"], str):
+        errors.append("workdir must be a string or null")
+
+    if "system_prompt" in raw and raw["system_prompt"] is not None and not isinstance(raw["system_prompt"], str):
+        errors.append("system_prompt must be a string or null")
+
+    if "context_sections" in raw:
+        context_sections = raw["context_sections"]
+        if not isinstance(context_sections, list):
+            errors.append("context_sections must be a list")
+        else:
+            for index, item in enumerate(context_sections):
+                if not isinstance(item, dict):
+                    errors.append(f"context_sections[{index}] must be an object")
+                elif "name" not in item or "content" not in item:
+                    errors.append(f"context_sections[{index}] must have 'name' and 'content' keys")
+
+    if "max_retries" in raw:
+        if not isinstance(raw["max_retries"], int):
+            errors.append("max_retries must be an integer")
+        elif raw["max_retries"] < 0:
+            errors.append("max_retries must be non-negative")
+
+    for scope_key in ("scope_read", "scope_write"):
+        if scope_key not in raw:
+            continue
+        scope_value = raw[scope_key]
+        if scope_value is None:
+            continue
+        if not isinstance(scope_value, list):
+            errors.append(f"{scope_key} must be a list of strings or null")
+        elif not all(isinstance(path, str) for path in scope_value):
+            errors.append(f"{scope_key} entries must all be strings")
+
+    if "allowed_tools" in raw:
+        allowed_tools = raw["allowed_tools"]
+        if allowed_tools is not None:
+            if not isinstance(allowed_tools, list):
+                errors.append("allowed_tools must be a list of strings or null")
+            elif not all(isinstance(tool, str) for tool in allowed_tools):
+                errors.append("allowed_tools entries must all be strings")
+
+    if "verify_refs" in raw:
+        verify_refs = raw["verify_refs"]
+        if verify_refs is not None:
+            if not isinstance(verify_refs, list):
+                errors.append("verify_refs must be a list of strings or null")
+            elif not all(isinstance(verify_ref, str) and verify_ref.strip() for verify_ref in verify_refs):
+                errors.append("verify_refs entries must all be non-empty strings")
+
+    if "definition_revision" in raw and raw["definition_revision"] is not None:
+        if not isinstance(raw["definition_revision"], str) or not raw["definition_revision"].strip():
+            errors.append("definition_revision must be a non-empty string or null")
+
+    if "plan_revision" in raw and raw["plan_revision"] is not None:
+        if not isinstance(raw["plan_revision"], str) or not raw["plan_revision"].strip():
+            errors.append("plan_revision must be a non-empty string or null")
+
+    if "packet_provenance" in raw and raw["packet_provenance"] is not None:
+        if not isinstance(raw["packet_provenance"], dict):
+            errors.append("packet_provenance must be an object or null")
+
+    if "output_schema" in raw:
+        output_schema = raw["output_schema"]
+        if output_schema is not None and not isinstance(output_schema, dict):
+            errors.append("output_schema must be a dict or null")
+
+    if "use_cache" in raw and not isinstance(raw["use_cache"], bool):
+        errors.append("use_cache must be a boolean")
+
+    if "task_type" in raw and raw["task_type"] is not None and not isinstance(raw["task_type"], str):
+        errors.append("task_type must be a string or null")
+
+    if "submission_required" in raw and raw["submission_required"] is not None and not isinstance(raw["submission_required"], bool):
+        errors.append("submission_required must be a boolean or null")
+
+    if "skip_auto_review" in raw and not isinstance(raw["skip_auto_review"], bool):
+        errors.append("skip_auto_review must be a boolean")
+
+    if "reviews_workflow_id" in raw and raw["reviews_workflow_id"] is not None:
+        if not isinstance(raw["reviews_workflow_id"], str):
+            errors.append("reviews_workflow_id must be a string or null")
+
+    if "review_target_modules" in raw:
+        review_target_modules = raw["review_target_modules"]
+        if review_target_modules is not None:
+            if not isinstance(review_target_modules, list):
+                errors.append("review_target_modules must be a list of strings or null")
+            elif not all(isinstance(module, str) for module in review_target_modules):
+                errors.append("review_target_modules entries must all be strings")
+
+    unknown = set(raw.keys()) - _ALLOWED_SPEC_KEYS
+    for key in sorted(unknown):
+        errors.append(f"unknown field: {key}")
+
+    return len(errors) == 0, errors
+
+
+def _validate_batch(raw: dict[str, Any]) -> tuple[bool, list[str]]:
+    """Validate a raw dict as a batch workflow spec."""
+
+    errors: list[str] = []
+    if not isinstance(raw, dict):
+        return False, ["batch spec must be a JSON object"]
+
+    if raw.get("kind") != "workflow_batch":
+        errors.append('batch spec must have "kind": "workflow_batch"')
+
+    if "jobs" not in raw:
+        errors.append("batch spec must have a 'jobs' array")
+    elif not isinstance(raw["jobs"], list):
+        errors.append("'jobs' must be an array")
+    elif len(raw["jobs"]) == 0:
+        errors.append("'jobs' array must not be empty")
+    else:
+        for index, job_raw in enumerate(raw["jobs"]):
+            _, job_errors = validate_workflow_spec(job_raw)
+            for err in job_errors:
+                errors.append(f"jobs[{index}]: {err}")
+
+    if "max_parallel" in raw:
+        max_parallel = raw["max_parallel"]
+        if not isinstance(max_parallel, int) or max_parallel < 1:
+            errors.append("max_parallel must be a positive integer")
+
+    return len(errors) == 0, errors
+
+
+def _raw_to_runtime_workflow_spec(raw: dict[str, Any]) -> "RuntimeWorkflowSpec":
+    from .workflow import WorkflowSpec as RuntimeWorkflowSpec
+
+    return RuntimeWorkflowSpec(
+        prompt=raw["prompt"],
+        provider_slug=raw.get("provider_slug", default_provider_slug()),
+        model_slug=raw.get("model_slug"),
+        tier=raw.get("tier"),
+        adapter_type=raw.get("adapter_type", default_llm_adapter_type()),
+        timeout=int(raw.get("timeout", 300)),
+        workdir=raw.get("workdir"),
+        max_tokens=int(raw.get("max_tokens", 4096)),
+        temperature=float(raw.get("temperature", 0.0)),
+        label=raw.get("label"),
+        workspace_ref=raw.get("workspace_ref"),
+        runtime_profile_ref=raw.get("runtime_profile_ref"),
+        system_prompt=raw.get("system_prompt"),
+        context_sections=raw.get("context_sections"),
+        max_retries=int(raw.get("max_retries", 0)),
+        scope_read=raw.get("scope_read"),
+        scope_write=raw.get("scope_write"),
+        allowed_tools=raw.get("allowed_tools"),
+        verify_refs=raw.get("verify_refs"),
+        definition_revision=raw.get("definition_revision"),
+        plan_revision=raw.get("plan_revision"),
+        packet_provenance=raw.get("packet_provenance"),
+        output_schema=raw.get("output_schema"),
+        persist=bool(raw.get("persist", False)),
+        use_cache=bool(raw.get("use_cache", False)),
+        capabilities=raw.get("capabilities"),
+        task_type=raw.get("task_type"),
+        submission_required=raw.get("submission_required"),
+        skip_auto_review=bool(raw.get("skip_auto_review", False)),
+        reviews_workflow_id=raw.get("reviews_workflow_id"),
+        review_target_modules=raw.get("review_target_modules"),
+    )
+
+
+def is_batch_spec(raw: dict[str, Any]) -> bool:
+    """Return True when the raw dict is a workflow batch spec."""
+
+    return isinstance(raw, dict) and raw.get("kind") == "workflow_batch"
+
+
+def load_workflow_spec(
+    path: str,
+    *,
+    variables: dict[str, Any] | None = None,
+) -> RuntimeWorkflowSpec:
+    """Load a single runtime workflow spec from disk."""
+
+    _validate_spec_path(path)
+    raw = load_raw(path)
+    if is_batch_spec(raw):
+        raise WorkflowSpecError(
+            f"{path} is a batch spec (kind=workflow_batch). Use load_workflow_batch() instead."
+        )
+
+    if variables:
+        from .template_engine import render_spec
+
+        raw = render_spec(raw, variables)
+
+    ok, errors = validate_workflow_spec(raw)
+    if not ok:
+        raise WorkflowSpecError(f"Invalid workflow spec in {path}:\n  " + "\n  ".join(errors))
+
+    return _raw_to_runtime_workflow_spec(raw)
+
+
+def load_workflow_batch(
+    path: str,
+    *,
+    variables: dict[str, Any] | None = None,
+) -> tuple[list[RuntimeWorkflowSpec], int]:
+    """Load a runtime workflow batch spec from disk."""
+
+    _validate_spec_path(path)
+    raw = load_raw(path)
+    if variables:
+        from .template_engine import render_spec
+
+        raw = render_spec(raw, variables)
+
+    ok, errors = _validate_batch(raw)
+    if not ok:
+        raise WorkflowSpecError(f"Invalid batch spec in {path}:\n  " + "\n  ".join(errors))
+
+    max_parallel = raw.get("max_parallel", 4)
+    specs = [_raw_to_runtime_workflow_spec(job) for job in raw["jobs"]]
+    return specs, max_parallel
+
+
+def load_raw(path: str) -> dict[str, Any]:
+    """Load raw JSON from a spec file without additional parsing."""
+
+    file_path = Path(path)
+    with file_path.open("r", encoding="utf-8") as handle:
+        loaded = json.load(handle)
+    if not isinstance(loaded, dict):
+        raise ValueError(f"Spec file must contain a JSON object: {path}")
+    return loaded
+
+
+__all__ = [
+    "WorkflowSpec",
+    "WorkflowSpecError",
+    "is_batch_spec",
+    "load_raw",
+    "load_workflow_batch",
+    "load_workflow_spec",
+    "validate_workflow_spec",
+]

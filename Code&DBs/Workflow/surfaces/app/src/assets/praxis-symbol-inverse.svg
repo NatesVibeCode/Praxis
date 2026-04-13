@@ -1,0 +1,20 @@
+<svg width="1000" height="1000" viewBox="0 0 500 500" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Praxis inverse symbol">
+  <g transform="translate(0 30)">
+    <g fill="none" stroke="#f5f1e8" stroke-linejoin="miter" stroke-linecap="square">
+      <path d="M 130 100 L 370 100 L 370 188 M 370 252 L 370 340 L 130 340 L 130 252 M 130 188 L 130 100" stroke-width="10" />
+      <line x1="130" y1="220" x2="370" y2="220" stroke-width="7" />
+    </g>
+
+    <g fill="#f5f1e8">
+      <circle cx="130" cy="220" r="16" />
+      <circle cx="306" cy="220" r="11" />
+      <circle cx="370" cy="220" r="23" />
+    </g>
+
+    <g transform="translate(228 220)">
+      <circle cx="0" cy="0" r="35" fill="none" stroke="#f5f1e8" stroke-width="6" />
+      <circle cx="0" cy="0" r="20" fill="none" stroke="#f5f1e8" stroke-width="6" />
+      <circle cx="0" cy="0" r="9" fill="#f5f1e8" />
+    </g>
+  </g>
+</svg>

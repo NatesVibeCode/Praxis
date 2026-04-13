@@ -1,0 +1,141 @@
+.manifest-editor {
+  display: flex;
+  height: calc(100vh - 60px);
+  overflow: hidden;
+}
+
+.manifest-editor-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: calc(100vh - 60px);
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+/* Left pane */
+.manifest-editor-left {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--editor-bg);
+  position: relative;
+}
+
+.manifest-editor-toolbar {
+  display: flex;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  background: var(--editor-toolbar-bg);
+}
+
+.manifest-editor-btn {
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.manifest-editor-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.manifest-editor-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.manifest-editor-btn-save {
+  background: var(--accent);
+  color: var(--text-inverse);
+  border-color: var(--accent);
+}
+
+.manifest-editor-btn-save:hover:not(:disabled) {
+  opacity: 0.9;
+  color: var(--text-inverse);
+}
+
+.manifest-editor-textarea {
+  flex: 1;
+  resize: none;
+  border: none;
+  outline: none;
+  padding: var(--space-md);
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  background: var(--editor-bg);
+  color: var(--editor-text);
+  white-space: pre;
+  overflow: auto;
+  tab-size: 2;
+}
+
+.manifest-editor-textarea::selection {
+  background: var(--selection-bg);
+}
+
+.manifest-editor-error {
+  padding: 8px var(--space-md);
+  background: var(--danger);
+  color: var(--text-inverse);
+  font-size: 12px;
+  font-family: monospace;
+  flex-shrink: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Resizable divider */
+.manifest-editor-divider {
+  width: 6px;
+  cursor: col-resize;
+  background: var(--border);
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+
+.manifest-editor-divider:hover {
+  background: var(--accent);
+}
+
+/* Right pane */
+.manifest-editor-right {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.manifest-editor-preview-label {
+  padding: var(--space-sm) var(--space-md);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.manifest-editor-preview-container {
+  flex: 1;
+  overflow: auto;
+  padding: var(--space-md);
+}
+
+.manifest-editor-preview-scale {
+  transform: scale(0.6);
+  transform-origin: top left;
+  width: 166.67%; /* 100% / 0.6 to fill the container */
+}

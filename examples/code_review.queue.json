@@ -1,0 +1,17 @@
+{
+  "name": "Code Review Pipeline",
+  "phase": "build",
+  "jobs": [
+    {
+      "label": "implement",
+      "agent": "auto/build",
+      "prompt": "Implement a Python function that calculates fibonacci numbers using memoization. Include type hints and a brief docstring."
+    },
+    {
+      "label": "review",
+      "agent": "auto/review",
+      "prompt": "Review the fibonacci implementation for correctness, edge cases, and performance. Flag any issues.",
+      "depends_on": ["implement"]
+    }
+  ]
+}

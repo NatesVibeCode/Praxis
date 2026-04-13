@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Model Leaderboard - Praxis Engine</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Courier New', monospace;
+      background-color: #0a0a0a;
+      color: #e0e0e0;
+      line-height: 1.6;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    .header {
+      margin-bottom: 30px;
+      border-bottom: 2px solid #333;
+      padding-bottom: 15px;
+    }
+
+    h1 {
+      font-size: 24px;
+      color: #00d4ff;
+      margin-bottom: 5px;
+    }
+
+    .subtitle {
+      font-size: 12px;
+      color: #888;
+      margin-bottom: 10px;
+    }
+
+    .controls {
+      display: flex;
+      gap: 15px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-top: 15px;
+    }
+
+    .search-box {
+      background-color: #1a1a1a;
+      border: 1px solid #333;
+      padding: 8px 12px;
+      color: #e0e0e0;
+      border-radius: 3px;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      flex: 0 1 250px;
+    }
+
+    .search-box::placeholder {
+      color: #666;
+    }
+
+    .sort-controls {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      font-size: 12px;
+    }
+
+    .sort-by {
+      background-color: #1a1a1a;
+      border: 1px solid #333;
+      padding: 6px 10px;
+      color: #e0e0e0;
+      border-radius: 3px;
+      font-family: 'Courier New', monospace;
+      cursor: pointer;
+    }
+
+    .refresh-btn {
+      background-color: #1a3a3a;
+      border: 1px solid #00d4ff;
+      color: #00d4ff;
+      padding: 8px 15px;
+      border-radius: 3px;
+      cursor: pointer;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      transition: background-color 0.2s;
+    }
+
+    .refresh-btn:hover {
+      background-color: #1a5a5a;
+    }
+
+    .refresh-btn.loading {
+      opacity: 0.6;
+      cursor: wait;
+    }
+
+    .table-wrapper {
+      overflow-x: auto;
+      border: 1px solid #333;
+      border-radius: 3px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+
+    thead {
+      background-color: #1a1a1a;
+      border-bottom: 2px solid #333;
+      position: sticky;
+      top: 0;
+    }
+
+    th {
+      text-align: left;
+      padding: 12px 15px;
+      color: #00d4ff;
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+      transition: background-color 0.2s;
+    }
+
+    th:hover {
+      background-color: #2a2a2a;
+    }
+
+    th.sortable::after {
+      content: ' ⇅';
+      opacity: 0.5;
+    }
+
+    th.sort-asc::after {
+      content: ' ↑';
+      opacity: 1;
+      color: #00d4ff;
+    }
+
+    th.sort-desc::after {
+      content: ' ↓';
+      opacity: 1;
+      color: #00d4ff;
+    }
+
+    td {
+      padding: 12px 15px;
+      border-bottom: 1px solid #1a1a1a;
+      white-space: nowrap;
+    }
+
+    tbody tr {
+      transition: background-color 0.1s;
+    }
+
+    tbody tr:hover {
+      background-color: #1a1a1a;
+    }
+
+    .rank {
+      color: #888;
+      font-weight: bold;
+      width: 40px;
+    }
+
+    .model-name {
+      color: #00d4ff;
+      font-weight: bold;
+    }
+
+    .provider {
+      color: #888;
+      font-size: 11px;
+    }
+
+    .pass-rate {
+      text-align: right;
+      min-width: 80px;
+    }
+
+    .pass-rate-bar {
+      display: inline-block;
+      height: 20px;
+      border-radius: 3px;
+      min-width: 60px;
+      text-align: center;
+      color: #fff;
+      font-weight: bold;
+      font-size: 11px;
+      line-height: 20px;
+    }
+
+    .pass-rate-high {
+      background-color: #2d5a2d;
+      border: 1px solid #4a8a4a;
+    }
+
+    .pass-rate-medium {
+      background-color: #5a5a2d;
+      border: 1px solid #8a8a4a;
+    }
+
+    .pass-rate-low {
+      background-color: #5a2d2d;
+      border: 1px solid #8a4a4a;
+    }
+
+    .elo-score {
+      text-align: right;
+      min-width: 70px;
+      color: #ffaa00;
+      font-weight: bold;
+    }
+
+    .dispatches {
+      text-align: right;
+      min-width: 70px;
+    }
+
+    .cost {
+      text-align: right;
+      min-width: 80px;
+      color: #88dd88;
+    }
+
+    .latency {
+      text-align: right;
+      min-width: 80px;
+      color: #dd88dd;
+    }
+
+    .status {
+      text-align: center;
+      min-width: 60px;
+    }
+
+    .status-healthy {
+      color: #4a8a4a;
+      font-weight: bold;
+    }
+
+    .status-warning {
+      color: #8a8a4a;
+      font-weight: bold;
+    }
+
+    .status-critical {
+      color: #8a4a4a;
+      font-weight: bold;
+    }
+
+    .loading {
+      text-align: center;
+      padding: 40px;
+      color: #666;
+    }
+
+    .error {
+      background-color: #3a2a2a;
+      border: 1px solid #8a4a4a;
+      color: #ff6666;
+      padding: 15px;
+      border-radius: 3px;
+      margin-bottom: 20px;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 15px;
+      margin-bottom: 20px;
+    }
+
+    .stat-card {
+      background-color: #1a1a1a;
+      border: 1px solid #333;
+      padding: 15px;
+      border-radius: 3px;
+    }
+
+    .stat-label {
+      font-size: 11px;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 5px;
+    }
+
+    .stat-value {
+      font-size: 18px;
+      font-weight: bold;
+      color: #00d4ff;
+    }
+
+    .stat-unit {
+      font-size: 11px;
+      color: #666;
+      margin-left: 5px;
+    }
+
+    .info-message {
+      background-color: #1a3a3a;
+      border: 1px solid #00d4ff;
+      color: #88ccff;
+      padding: 12px 15px;
+      border-radius: 3px;
+      margin-bottom: 20px;
+      font-size: 12px;
+    }
+
+    @media (max-width: 768px) {
+      .controls {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .search-box,
+      .sort-by,
+      .refresh-btn {
+        width: 100%;
+      }
+
+      table {
+        font-size: 11px;
+      }
+
+      th, td {
+        padding: 8px 10px;
+      }
+
+      .pass-rate-bar {
+        min-width: 50px;
+        font-size: 10px;
+        height: 18px;
+        line-height: 18px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="nav-container"></div>
+
+  <div class="container">
+    <div class="header">
+      <h1>Model Leaderboard</h1>
+      <p class="subtitle">Real-time performance rankings across 7 quality dimensions</p>
+    </div>
+
+    <div id="error-message" class="error" style="display: none;"></div>
+    <div id="info-message" class="info-message" style="display: none;"></div>
+
+    <div class="stats" id="stats-container" style="display: none;">
+      <div class="stat-card">
+        <div class="stat-label">Total Models</div>
+        <div class="stat-value"><span id="total-models">0</span></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Avg Pass Rate</div>
+        <div class="stat-value"><span id="avg-pass-rate">0</span>%</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Top ELO Score</div>
+        <div class="stat-value"><span id="top-elo">0</span></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Total Workflow Runs</div>
+        <div class="stat-value"><span id="total-dispatches">0</span></div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <input
+        type="text"
+        id="search-input"
+        class="search-box"
+        placeholder="Search by model name or provider..."
+        autocomplete="off"
+      >
+      <div class="sort-controls">
+        <label for="sort-by">Sort by:</label>
+        <select id="sort-by" class="sort-by">
+          <option value="rank">Rank</option>
+          <option value="pass-rate">Pass Rate</option>
+          <option value="elo">ELO Score</option>
+          <option value="dispatches">Workflow Runs</option>
+          <option value="cost">Avg Cost</option>
+          <option value="latency">Avg Latency</option>
+        </select>
+      </div>
+      <button id="refresh-btn" class="refresh-btn">Refresh Data</button>
+    </div>
+
+    <div class="table-wrapper">
+      <table id="leaderboard-table">
+        <thead>
+          <tr>
+            <th class="sortable" data-sort="rank">Rank</th>
+            <th class="sortable" data-sort="model">Model</th>
+            <th class="sortable" data-sort="provider">Provider</th>
+            <th class="sortable" data-sort="dispatches">Workflow Runs</th>
+            <th class="sortable" data-sort="pass-rate">Pass %</th>
+            <th class="sortable" data-sort="elo">ELO Score</th>
+            <th class="sortable" data-sort="cost">Avg Cost ($)</th>
+            <th class="sortable" data-sort="latency">Avg Latency (ms)</th>
+            <th class="sortable" data-sort="status">Status</th>
+          </tr>
+        </thead>
+        <tbody id="leaderboard-body">
+          <tr>
+            <td colspan="9" class="loading">Loading leaderboard data...</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    // State management
+    let allData = [];
+    let filteredData = [];
+    let currentSort = { field: 'rank', direction: 'asc' };
+
+    // Configuration
+    const API_BASE = '/api';
+    const REFRESH_INTERVAL = 30000; // 30 seconds
+
+    // Initialize
+    document.addEventListener('DOMContentLoaded', function() {
+      loadNavigation();
+      loadLeaderboardData();
+      attachEventListeners();
+      setInterval(loadLeaderboardData, REFRESH_INTERVAL);
+    });
+
+    // Load shared navigation
+    function loadNavigation() {
+      fetch('nav.html')
+        .then(r => r.text())
+        .then(html => {
+          document.getElementById('nav-container').innerHTML = html;
+          // Rerun nav's DOMContentLoaded script
+          const navScript = document.querySelector('#nav-container script');
+          if (navScript) navScript.parentNode.removeChild(navScript);
+          const currentPage = window.location.pathname.split('/').pop() || 'leaderboard.html';
+          const navLinks = document.querySelectorAll('.nav-link');
+          navLinks.forEach(link => {
+            if (link.getAttribute('href') === currentPage) {
+              link.classList.add('active');
+            }
+          });
+        })
+        .catch(e => console.log('Nav load skipped:', e.message));
+    }
+
+    // Fetch leaderboard data from API
+    function loadLeaderboardData() {
+      const btn = document.getElementById('refresh-btn');
+      btn.classList.add('loading');
+      btn.disabled = true;
+
+      Promise.all([
+        fetch(`${API_BASE}/leaderboard`).then(r => r.json()),
+        fetch(`${API_BASE}/trust`).then(r => r.json()).catch(() => [])
+      ])
+        .then(([leaderboard, trustData]) => {
+          // Merge trust scores into leaderboard
+          const trustMap = new Map();
+          if (Array.isArray(trustData)) {
+            trustData.forEach(item => {
+              const key = `${item.provider}/${item.model}`;
+              trustMap.set(key, item);
+            });
+          }
+
+          allData = (leaderboard || []).map((item, idx) => ({
+            rank: idx + 1,
+            model: item.model || 'Unknown',
+            provider: item.provider || 'Unknown',
+            dispatches: item.dispatches || 0,
+            passRate: Math.round((item.pass_rate || 0) * 100),
+            eloScore: item.elo_score || 1200,
+            avgCost: (item.avg_cost || 0).toFixed(4),
+            avgLatency: Math.round(item.avg_latency || 0),
+            status: item.status || 'healthy',
+            passRateRaw: item.pass_rate || 0
+          }));
+
+          // Apply trust scores
+          allData.forEach(item => {
+            const trustKey = `${item.provider}/${item.model}`;
+            const trust = trustMap.get(trustKey);
+            if (trust) {
+              item.eloScore = trust.elo_score || item.eloScore;
+              item.trustScore = trust.trust_score;
+            }
+          });
+
+          filteredData = [...allData];
+          updateStats();
+          renderTable();
+          showMessage('Data refreshed', 'info', 3000);
+          btn.classList.remove('loading');
+          btn.disabled = false;
+        })
+        .catch(err => {
+          showMessage(`Error loading data: ${err.message}`, 'error');
+          btn.classList.remove('loading');
+          btn.disabled = false;
+          renderEmptyTable();
+        });
+    }
+
+    // Update statistics cards
+    function updateStats() {
+      if (filteredData.length === 0) {
+        document.getElementById('stats-container').style.display = 'none';
+        return;
+      }
+
+      document.getElementById('stats-container').style.display = 'grid';
+      document.getElementById('total-models').textContent = filteredData.length;
+
+      const avgPassRate = Math.round(
+        filteredData.reduce((sum, item) => sum + item.passRate, 0) / filteredData.length
+      );
+      document.getElementById('avg-pass-rate').textContent = avgPassRate;
+
+      const topElo = Math.max(...filteredData.map(item => item.eloScore));
+      document.getElementById('top-elo').textContent = topElo.toFixed(0);
+
+      const totalDispatches = filteredData.reduce((sum, item) => sum + item.dispatches, 0);
+      document.getElementById('total-dispatches').textContent = totalDispatches;
+    }
+
+    // Render table
+    function renderTable() {
+      const tbody = document.getElementById('leaderboard-body');
+
+      if (filteredData.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="9" class="loading">No models found</td></tr>';
+        return;
+      }
+
+      // Apply sorting
+      const sorted = [...filteredData].sort((a, b) => {
+        let aVal, bVal;
+        switch (currentSort.field) {
+          case 'rank': aVal = a.rank; bVal = b.rank; break;
+          case 'model': aVal = a.model; bVal = b.model; break;
+          case 'provider': aVal = a.provider; bVal = b.provider; break;
+          case 'dispatches': aVal = a.dispatches; bVal = b.dispatches; break;
+          case 'pass-rate': aVal = a.passRate; bVal = b.passRate; break;
+          case 'elo': aVal = a.eloScore; bVal = b.eloScore; break;
+          case 'cost': aVal = parseFloat(a.avgCost); bVal = parseFloat(b.avgCost); break;
+          case 'latency': aVal = a.avgLatency; bVal = b.avgLatency; break;
+          case 'status': aVal = a.status; bVal = b.status; break;
+          default: aVal = a.rank; bVal = b.rank;
+        }
+
+        if (typeof aVal === 'string') {
+          aVal = aVal.toLowerCase();
+          bVal = bVal.toLowerCase();
+          return currentSort.direction === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+        }
+        return currentSort.direction === 'asc' ? aVal - bVal : bVal - aVal;
+      });
+
+      tbody.innerHTML = sorted.map(item => `
+        <tr>
+          <td class="rank">#${item.rank}</td>
+          <td class="model-name">${escapeHtml(item.model)}</td>
+          <td class="provider">${escapeHtml(item.provider)}</td>
+          <td class="dispatches">${item.dispatches.toLocaleString()}</td>
+          <td class="pass-rate">
+            <div class="pass-rate-bar ${getPassRateClass(item.passRate)}">
+              ${item.passRate}%
+            </div>
+          </td>
+          <td class="elo-score">${item.eloScore.toFixed(0)}</td>
+          <td class="cost">$${item.avgCost}</td>
+          <td class="latency">${item.avgLatency}ms</td>
+          <td class="status">
+            <span class="status-${getStatusClass(item.status)}">
+              ${item.status}
+            </span>
+          </td>
+        </tr>
+      `).join('');
+
+      updateSortIndicators();
+    }
+
+    // Render empty table
+    function renderEmptyTable() {
+      const tbody = document.getElementById('leaderboard-body');
+      tbody.innerHTML = '<tr><td colspan="9" class="loading">Unable to load data</td></tr>';
+    }
+
+    // Attach event listeners
+    function attachEventListeners() {
+      // Search
+      document.getElementById('search-input').addEventListener('input', function(e) {
+        const query = e.target.value.toLowerCase();
+        filteredData = allData.filter(item =>
+          item.model.toLowerCase().includes(query) ||
+          item.provider.toLowerCase().includes(query)
+        );
+        renderTable();
+        updateStats();
+      });
+
+      // Sort dropdown
+      document.getElementById('sort-by').addEventListener('change', function(e) {
+        currentSort.field = e.target.value;
+        currentSort.direction = 'desc'; // Default descending for most metrics
+        if (e.target.value === 'rank' || e.target.value === 'model' || e.target.value === 'provider') {
+          currentSort.direction = 'asc';
+        }
+        renderTable();
+      });
+
+      // Column headers (click to sort)
+      document.querySelectorAll('th.sortable').forEach(th => {
+        th.addEventListener('click', function() {
+          const field = this.dataset.sort;
+          if (currentSort.field === field) {
+            currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+          } else {
+            currentSort.field = field;
+            currentSort.direction = field === 'rank' || field === 'model' || field === 'provider' ? 'asc' : 'desc';
+          }
+          renderTable();
+        });
+      });
+
+      // Refresh button
+      document.getElementById('refresh-btn').addEventListener('click', loadLeaderboardData);
+    }
+
+    // Utilities
+    function getPassRateClass(passRate) {
+      if (passRate >= 90) return 'pass-rate-high';
+      if (passRate >= 70) return 'pass-rate-medium';
+      return 'pass-rate-low';
+    }
+
+    function getStatusClass(status) {
+      switch (status) {
+        case 'healthy': return 'healthy';
+        case 'warning': return 'warning';
+        case 'critical': return 'critical';
+        default: return 'healthy';
+      }
+    }
+
+    function updateSortIndicators() {
+      document.querySelectorAll('th.sortable').forEach(th => {
+        th.classList.remove('sort-asc', 'sort-desc');
+        if (th.dataset.sort === currentSort.field) {
+          th.classList.add(currentSort.direction === 'asc' ? 'sort-asc' : 'sort-desc');
+        }
+      });
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function showMessage(msg, type, duration) {
+      const el = document.getElementById(`${type}-message`);
+      el.textContent = msg;
+      el.style.display = 'block';
+      if (duration) {
+        setTimeout(() => {
+          el.style.display = 'none';
+        }, duration);
+      }
+    }
+  </script>
+</body>
+</html>

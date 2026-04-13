@@ -1,0 +1,131 @@
+.refinement-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md) var(--space-lg);
+  background: var(--bg-card);
+  border-top: 1px solid var(--border);
+  box-shadow: var(--shadow-sticky);
+}
+
+.refinement-bar__form,
+.refinement-bar__result {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  width: 100%;
+}
+
+.refinement-bar__input {
+  flex: 1;
+  min-width: 0;
+  padding: 12px 14px;
+  color: var(--text);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  outline: none;
+}
+
+.refinement-bar__input::placeholder {
+  color: var(--text-muted);
+}
+
+.refinement-bar__input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.refinement-bar__status {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.refinement-bar__label {
+  color: var(--text-muted);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.refinement-bar__changelog {
+  color: var(--text);
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.refinement-bar__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.refinement-bar__shortcut {
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.refinement-bar__button {
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s ease, transform 0.2s ease, background-color 0.2s ease;
+}
+
+.refinement-bar__button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.refinement-bar__button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.refinement-bar__button--accent {
+  color: var(--text-inverse);
+  background: var(--accent);
+}
+
+.refinement-bar__button--ghost {
+  color: var(--text);
+  background: transparent;
+  border-color: var(--border);
+}
+
+.refinement-bar__error {
+  color: var(--danger);
+  font-size: 12px;
+}
+
+@media (max-width: 900px) {
+  .refinement-bar__form,
+  .refinement-bar__result {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .refinement-bar__actions {
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+
+  .refinement-bar__shortcut {
+    margin-right: auto;
+  }
+
+  .refinement-bar__changelog {
+    white-space: normal;
+  }
+}
