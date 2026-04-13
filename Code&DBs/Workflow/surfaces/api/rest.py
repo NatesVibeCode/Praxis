@@ -23,8 +23,6 @@ import dataclasses
 import io
 import json
 import logging
-import os
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -1640,29 +1638,14 @@ def submit_queue_job(req: QueueSubmitRequest) -> dict[str, Any]:
 
     try:
         conn = _shared_pg_conn()
-        temp_dir = REPO_ROOT / "artifacts" / "workflow"
-        temp_dir.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            suffix=".queue.json",
-            dir=str(temp_dir),
-            delete=False,
-            prefix="queue_submit_",
-        ) as handle:
-            json.dump(spec, handle)
-            spec_path = handle.name
-
-        try:
-            result = _submit_workflow_via_service_bus(
-                SimpleNamespace(get_pg_conn=lambda: conn),
-                spec_path=os.path.relpath(spec_path, str(REPO_ROOT)),
-                spec_name=label,
-                total_jobs=len(spec["jobs"]),
-                requested_by_kind="http",
-                requested_by_ref="queue_submit",
-            )
-        finally:
-            os.unlink(spec_path)
+        result = _submit_workflow_via_service_bus(
+            SimpleNamespace(get_pg_conn=lambda: conn),
+            inline_spec=spec,
+            spec_name=label,
+            total_jobs=len(spec["jobs"]),
+            requested_by_kind="http",
+            requested_by_ref="queue_submit",
+        )
 
         if result.get("error"):
             raise RuntimeError(str(result["error"]))

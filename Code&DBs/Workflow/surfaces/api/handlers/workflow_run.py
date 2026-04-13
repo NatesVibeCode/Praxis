@@ -105,8 +105,6 @@ def _handle_workflow(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
     spec_mod = _workflow_spec_mod()
     spec = spec_mod.WorkflowSpec.load(spec_path)
 
-    from runtime.workflow_graph_compiler import spec_uses_graph_runtime
-
     if dry_run:
         from runtime.workflow.dry_run import dry_run_workflow
 
@@ -134,20 +132,6 @@ def _handle_workflow(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
             ],
         }
 
-    if spec_uses_graph_runtime(spec._raw):
-        from runtime.workflow.unified import submit_workflow_inline
-
-        result = submit_workflow_inline(subs.get_pg_conn(), spec._raw)
-        return {
-            "run_id": result["run_id"],
-            "status": result["status"],
-            "spec_name": result["spec_name"],
-            "total_jobs": result["total_jobs"],
-            "stream_url": f"/api/workflow-runs/{result['run_id']}/stream",
-            "status_url": f"/api/workflow-runs/{result['run_id']}/status",
-            "execution_mode": result.get("execution_mode"),
-        }
-
     result = _submit_workflow_via_service_bus(
         subs,
         spec_path=spec_path,
@@ -173,7 +157,8 @@ def _handle_workflow(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
 def _submit_workflow_via_service_bus(
     subs: Any,
     *,
-    spec_path: str,
+    spec_path: str | None = None,
+    inline_spec: dict[str, Any] | None = None,
     spec_name: str,
     total_jobs: int,
     requested_by_kind: str,
@@ -184,12 +169,19 @@ def _submit_workflow_via_service_bus(
         request_workflow_submit_command,
     )
 
+    command_kwargs: dict[str, Any] = {
+        "requested_by_kind": requested_by_kind,
+        "requested_by_ref": requested_by_ref,
+        "repo_root": str(REPO_ROOT),
+    }
+    if spec_path is not None:
+        command_kwargs["spec_path"] = spec_path
+    if inline_spec is not None:
+        command_kwargs["inline_spec"] = inline_spec
+
     command = request_workflow_submit_command(
         subs.get_pg_conn(),
-        requested_by_kind=requested_by_kind,
-        requested_by_ref=requested_by_ref,
-        spec_path=spec_path,
-        repo_root=str(REPO_ROOT),
+        **command_kwargs,
     )
     return render_workflow_submit_response(
         command,

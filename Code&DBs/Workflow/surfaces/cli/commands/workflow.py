@@ -1399,7 +1399,6 @@ def _queue_command(args: list[str], *, stdout: TextIO) -> int:
     """
 
     import json as _json
-    import os
 
     if not args or args[0] in {"-h", "--help"}:
         stdout.write(
@@ -1423,9 +1422,11 @@ def _queue_command(args: list[str], *, stdout: TextIO) -> int:
             )
             return 2
 
-        from storage.postgres.connection import SyncPostgresConnection
+        from runtime.control_commands import (
+            render_workflow_submit_response,
+            request_workflow_submit_command,
+        )
         from runtime.workflow_spec import WorkflowSpec
-        from runtime.workflow.unified import submit_workflow_inline
 
         spec_path = sub_args[0]
         priority = 100
@@ -1461,9 +1462,22 @@ def _queue_command(args: list[str], *, stdout: TextIO) -> int:
             for job in spec_dict.get("jobs", []):
                 job["max_attempts"] = max_attempts
             conn = _workflow_runtime_conn()
-            result = submit_workflow_inline(conn, spec_dict)
+            result = render_workflow_submit_response(
+                request_workflow_submit_command(
+                    conn,
+                    requested_by_kind="cli",
+                    requested_by_ref="workflow.queue.submit",
+                    inline_spec=spec_dict,
+                ),
+                spec_name=str(spec_dict.get("name") or getattr(spec, "name", "inline")),
+                total_jobs=len(spec_dict.get("jobs", [])),
+            )
         except Exception as exc:
             stdout.write(f"error: failed to submit workflow: {exc}\n")
+            return 1
+
+        if result.get("status") != "queued":
+            stdout.write(_json.dumps(result, indent=2) + "\n")
             return 1
 
         stdout.write(
@@ -1472,6 +1486,9 @@ def _queue_command(args: list[str], *, stdout: TextIO) -> int:
                     "run_id": result["run_id"],
                     "status": result["status"],
                     "total_jobs": result.get("total_jobs", 0),
+                    "command_id": result.get("command_id"),
+                    "command_status": result.get("command_status"),
+                    "result_ref": result.get("result_ref"),
                     "priority": priority,
                     "max_attempts": max_attempts,
                     "note": "priority is accepted for compatibility but scheduling is workflow-runtime driven",

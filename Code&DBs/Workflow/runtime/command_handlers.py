@@ -152,48 +152,80 @@ def _workflow_submit(conn: "SyncPostgresConnection", command: Any) -> str:
     from runtime.control_commands import _normalize_text, _normalize_bool  # noqa: F401
 
     # Normalise helpers are still in control_commands for now — import lazily.
-    from runtime.control_commands import _normalize_text as _nt
+    from runtime.control_commands import _normalize_payload as _np, _normalize_text as _nt
 
     run_id = command.payload.get("run_id")
     if run_id is not None:
         run_id = _nt(run_id, field_name="payload.run_id")
 
-    if any(key in command.payload for key in ("spec", "inline_spec", "jobs")):
+    inline_spec_field = None
+    inline_spec_payload = None
+    if "inline_spec" in command.payload:
+        inline_spec_field = "payload.inline_spec"
+        inline_spec_payload = command.payload.get("inline_spec")
+    elif "spec" in command.payload:
+        inline_spec_field = "payload.spec"
+        inline_spec_payload = command.payload.get("spec")
+
+    has_spec_path = "spec_path" in command.payload
+    has_inline_spec = inline_spec_payload is not None
+    if has_spec_path == has_inline_spec:
         raise ControlCommandExecutionError(
-            "control.command.workflow_submit_inline_unsupported",
-            "workflow.submit inline specs are not executed through the control-command bus; provide a saved spec_path",
+            "control.command.workflow_submit_invalid_payload",
+            "workflow.submit requires exactly one of payload.spec_path or payload.inline_spec/payload.spec",
             details={
                 "command_id": command.command_id,
                 "command_type": command.command_type,
+                "has_spec_path": has_spec_path,
+                "has_inline_spec": has_inline_spec,
             },
         )
 
-    spec_path = _nt(
-        _command_payload_value(command, "spec_path"),
-        field_name="payload.spec_path",
-    )
-    repo_root = _nt(
-        _command_payload_value(command, "repo_root"),
-        field_name="payload.repo_root",
-    )
-    try:
-        result = _resolve_unified_dispatch_attr("submit_workflow")(
-            conn,
-            spec_path,
-            repo_root,
-            run_id=run_id,
+    if has_inline_spec:
+        inline_spec = _np(inline_spec_payload, field_name=str(inline_spec_field))
+        try:
+            result = _resolve_unified_dispatch_attr("submit_workflow_inline")(
+                conn,
+                inline_spec,
+                run_id=run_id,
+            )
+        except Exception as exc:
+            raise ControlCommandExecutionError(
+                "control.command.workflow_submit_failed",
+                str(exc),
+                details={
+                    "command_id": command.command_id,
+                    "inline_spec_field": inline_spec_field,
+                    "run_id": run_id,
+                },
+            ) from exc
+    else:
+        spec_path = _nt(
+            _command_payload_value(command, "spec_path"),
+            field_name="payload.spec_path",
         )
-    except Exception as exc:
-        raise ControlCommandExecutionError(
-            "control.command.workflow_submit_failed",
-            str(exc),
-            details={
-                "command_id": command.command_id,
-                "spec_path": spec_path,
-                "repo_root": repo_root,
-                "run_id": run_id,
-            },
-        ) from exc
+        repo_root = _nt(
+            _command_payload_value(command, "repo_root"),
+            field_name="payload.repo_root",
+        )
+        try:
+            result = _resolve_unified_dispatch_attr("submit_workflow")(
+                conn,
+                spec_path,
+                repo_root,
+                run_id=run_id,
+            )
+        except Exception as exc:
+            raise ControlCommandExecutionError(
+                "control.command.workflow_submit_failed",
+                str(exc),
+                details={
+                    "command_id": command.command_id,
+                    "spec_path": spec_path,
+                    "repo_root": repo_root,
+                    "run_id": run_id,
+                },
+            ) from exc
     result_run_id = result.get("run_id")
     if not result_run_id:
         raise ControlCommandExecutionError(
@@ -436,6 +468,13 @@ def workflow_cancel_proof(
     }
 
 
+def _resolve_workflow_cancel_proof() -> Any:
+    """Honor the canonical control_commands proof seam when present."""
+    from runtime import control_commands as control_commands_mod
+
+    return getattr(control_commands_mod, "workflow_cancel_proof", workflow_cancel_proof)
+
+
 def render_control_command_response(
     conn: "SyncPostgresConnection | None",
     command: Any,
@@ -492,7 +531,7 @@ def render_control_command_response(
         payload["error_detail"] = error_detail
         payload["command"] = command_json
         if action in {"cancel", "kill_if_idle"} and conn is not None and effective_run_id:
-            proof = workflow_cancel_proof(conn, effective_run_id)
+            proof = _resolve_workflow_cancel_proof()(conn, effective_run_id)
             payload.update(proof)
             payload["proof"] = proof
         return cast(dict[str, Any], _json_compatible(payload))
@@ -522,7 +561,7 @@ def render_control_command_response(
             failure["command"] = command_json
             return cast(dict[str, Any], _json_compatible(failure))
 
-        proof = workflow_cancel_proof(conn, effective_run_id)
+        proof = _resolve_workflow_cancel_proof()(conn, effective_run_id)
         payload.update(proof)
         if proof["cancelled_jobs"] < 1 or proof["run_status"] != "cancelled":
             failure = _base_payload("failed")
@@ -596,8 +635,9 @@ def request_workflow_submit_command(
     *,
     requested_by_kind: str,
     requested_by_ref: str,
-    spec_path: str,
-    repo_root: str,
+    spec_path: str | None = None,
+    repo_root: str | None = None,
+    inline_spec: Mapping[str, Any] | None = None,
     run_id: str | None = None,
     idempotency_key: str | None = None,
     command_id: str | None = None,
@@ -606,20 +646,40 @@ def request_workflow_submit_command(
     """Create and auto-execute one durable workflow.submit command."""
     import uuid as _uuid
     from runtime.control_commands import (
+        ControlCommandError,
         ControlCommandType,
         ControlIntent,
+        _normalize_payload as _np,
         _normalize_text as _nt,
         request_control_command,
     )
 
     n_kind = _nt(requested_by_kind, field_name="requested_by_kind")
     n_ref = _nt(requested_by_ref, field_name="requested_by_ref")
-    n_spec = _nt(spec_path, field_name="spec_path")
-    n_root = _nt(repo_root, field_name="repo_root")
     n_run_id = None if run_id is None else _nt(run_id, field_name="run_id")
     n_ikey = None if idempotency_key is None else _nt(idempotency_key, field_name="idempotency_key")
+    has_spec_path = spec_path is not None
+    has_inline_spec = inline_spec is not None
 
-    _payload: dict[str, Any] = {"spec_path": n_spec, "repo_root": n_root}
+    if has_spec_path == has_inline_spec:
+        raise ControlCommandError(
+            "control.command.invalid_value",
+            "request_workflow_submit_command requires exactly one of spec_path or inline_spec",
+            details={
+                "spec_path_provided": has_spec_path,
+                "inline_spec_provided": has_inline_spec,
+            },
+        )
+
+    _payload: dict[str, Any]
+    if has_inline_spec:
+        _payload = {"inline_spec": _np(inline_spec, field_name="inline_spec")}
+        if repo_root is not None:
+            _payload["repo_root"] = _nt(repo_root, field_name="repo_root")
+    else:
+        n_spec = _nt(spec_path, field_name="spec_path")
+        n_root = _nt(repo_root, field_name="repo_root")
+        _payload = {"spec_path": n_spec, "repo_root": n_root}
     if n_run_id is not None:
         _payload["run_id"] = n_run_id
 

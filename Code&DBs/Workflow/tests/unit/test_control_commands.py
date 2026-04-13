@@ -436,6 +436,59 @@ def test_request_workflow_submit_command_preserves_explicit_idempotency_key(monk
     assert intent.idempotency_key == "workflow.chain.submit.workflow_chain_123.wave_a.001"
 
 
+def test_request_workflow_submit_command_shapes_inline_spec_intent(monkeypatch):
+    conn = _FakeConn()
+    captured: dict[str, object] = {}
+
+    def _request(control_conn, intent, **kwargs):
+        captured["conn"] = control_conn
+        captured["intent"] = intent
+        captured["kwargs"] = kwargs
+        return SimpleNamespace(
+            command_id="control.command.submit.102",
+            command_status="succeeded",
+            requested_by_kind=intent.requested_by_kind,
+            requested_by_ref=intent.requested_by_ref,
+            idempotency_key=intent.idempotency_key,
+            payload=dict(intent.payload),
+            result_ref="workflow_run:dispatch_inline",
+            error_code=None,
+            error_detail=None,
+            to_json=lambda: {
+                "command_id": "control.command.submit.102",
+                "command_status": "succeeded",
+                "result_ref": "workflow_run:dispatch_inline",
+            },
+        )
+
+    monkeypatch.setattr(control_commands, "bootstrap_control_commands_schema", lambda _conn: None)
+    monkeypatch.setattr(control_commands, "request_control_command", _request)
+
+    control_commands.request_workflow_submit_command(
+        conn,
+        requested_by_kind="http",
+        requested_by_ref="queue_submit",
+        inline_spec={
+            "name": "Queue Report",
+            "phase": "build",
+            "jobs": [{"label": "build_a", "agent": "auto/build", "prompt": "Build it."}],
+        },
+        run_id="dispatch_inline",
+    )
+
+    assert captured["conn"] is conn
+    intent = captured["intent"]
+    assert intent.payload == {
+        "inline_spec": {
+            "name": "Queue Report",
+            "phase": "build",
+            "jobs": [{"label": "build_a", "agent": "auto/build", "prompt": "Build it."}],
+        },
+        "run_id": "dispatch_inline",
+    }
+    assert captured["kwargs"] == {"command_id": None, "requested_at": None}
+
+
 def test_request_workflow_chain_submit_command_bootstraps_and_shapes_intent(monkeypatch):
     conn = _FakeConn()
     captured: dict[str, object] = {}
@@ -942,33 +995,37 @@ def test_bootstrap_control_commands_schema_applies_type_cutover(monkeypatch):
     assert "-- 042_workflow_control_command_types.sql end" in conn.script_calls[0]
 
 
-def test_control_command_submit_inline_spec_is_rejected_without_saved_spec_path(monkeypatch):
+def test_control_command_submit_inline_spec_routes_through_inline_submit_authority(monkeypatch):
     conn = _FakeConn()
     intent = _inline_submit_intent()
+    called: list[tuple[object, ...]] = []
 
-    def _fail_direct_submit(*_args, **_kwargs):
-        raise AssertionError("control-command bus should not fall back to inline submit")
+    def _fail_saved_spec_submit(*_args, **_kwargs):
+        raise AssertionError("inline workflow submit should not fall back to saved spec_path submission")
 
-    monkeypatch.setattr(control_commands.unified_dispatch, "submit_workflow", _fail_direct_submit)
-    monkeypatch.setattr(control_commands.unified_dispatch, "submit_workflow_inline", _fail_direct_submit)
+    def _submit_inline(_conn, spec, run_id=None):
+        called.append((spec, run_id))
+        return {"run_id": "run-inline-1", "status": "queued", "spec_name": spec["name"]}
 
-    failed = control_commands.create_control_command(
+    monkeypatch.setattr(control_commands.unified_dispatch, "submit_workflow", _fail_saved_spec_submit)
+    monkeypatch.setattr(control_commands.unified_dispatch, "submit_workflow_inline", _submit_inline)
+
+    final = control_commands.create_control_command(
         conn,
         intent,
         command_id="control.command.submit.inline.1",
         requested_at=_fixed_clock(),
     )
-    loaded = control_commands.load_control_command(conn, failed.command_id)
+    loaded = control_commands.load_control_command(conn, final.command_id)
 
-    assert failed.command_status == "failed"
-    assert failed.result_ref is None
-    assert failed.error_code == "control.command.workflow_submit_inline_unsupported"
-    assert "saved spec_path" in (failed.error_detail or "")
+    assert called == [(dict(intent.payload["spec"]), None)]
+    assert final.command_status == "succeeded"
+    assert final.result_ref == "workflow_run:run-inline-1"
+    assert final.error_code is None
     assert loaded is not None
-    assert loaded.command_status == "failed"
-    assert loaded.result_ref is None
-    assert loaded.error_code == "control.command.workflow_submit_inline_unsupported"
-    assert "saved spec_path" in (loaded.error_detail or "")
+    assert loaded.command_status == "succeeded"
+    assert loaded.result_ref == "workflow_run:run-inline-1"
+    assert loaded.error_code is None
 
 
 def test_control_command_sync_repair_auto_execute_persists_result_ref(monkeypatch):
@@ -980,7 +1037,9 @@ def test_control_command_sync_repair_auto_execute_persists_result_ref(monkeypatc
         called.append((run_id, repo_root))
         return SimpleNamespace(run_id="run-9", sync_status="succeeded", sync_cycle_id="cycle-9", sync_error_count=0)
 
-    monkeypatch.setattr(control_commands.post_workflow_sync, "repair_workflow_run_sync", _repair_dispatch)
+    import runtime.command_handlers as command_handlers
+
+    monkeypatch.setattr(command_handlers.post_workflow_sync, "repair_workflow_run_sync", _repair_dispatch)
 
     final = control_commands.create_control_command(
         conn,

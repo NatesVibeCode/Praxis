@@ -23,6 +23,9 @@ _MUTATION_SEAMS = {
     "runtime/chat_tools.py": {
         "required_calls": {"request_control_command", "request_workflow_submit_command"},
     },
+    "surfaces/cli/commands/workflow.py": {
+        "required_calls": {"request_workflow_submit_command", "render_workflow_submit_response"},
+    },
     "surfaces/cli/workflow_cli.py": {
         "required_calls": {"request_workflow_submit_command", "render_workflow_submit_response"},
     },
@@ -342,8 +345,23 @@ def test_submit_surfaces_converge_on_request_control_command_authority(tmp_path,
     assert recorder.request_calls[3]["requested_by_kind"] == "http"
     assert recorder.request_calls[3]["requested_by_ref"] == "queue_submit"
     assert recorder.request_calls[3]["payload"]["repo_root"] == str(tmp_path)
-    assert recorder.request_calls[3]["payload"]["spec_path"].startswith("artifacts/workflow/queue_submit_")
-    assert recorder.request_calls[3]["payload"]["spec_path"].endswith(".queue.json")
+    assert recorder.request_calls[3]["payload"]["inline_spec"] == {
+        "name": "Queue Report",
+        "workflow_id": "workflow.api.queue.report",
+        "phase": "build",
+        "workspace_ref": rest._DEFAULT_WORKSPACE_REF,
+        "runtime_profile_ref": rest._DEFAULT_RUNTIME_PROFILE_REF,
+        "jobs": [
+            {
+                "label": "Queue Report",
+                "agent": "auto/build",
+                "prompt": "Draft the support report",
+                "read_scope": [],
+                "write_scope": [],
+                "max_attempts": 2,
+            }
+        ],
+    }
     assert recorder.request_calls[4]["requested_by_kind"] == "cli"
     assert recorder.request_calls[4]["requested_by_ref"] == "workflow_cli.run"
     assert recorder.request_calls[4]["payload"] == {
@@ -364,6 +382,58 @@ def test_submit_surfaces_converge_on_request_control_command_authority(tmp_path,
         "result_ref": "workflow_run:dispatch_request_005",
         "job_id": "cli-job",
         "workflow_id": "cli_run_smoke",
+    }
+
+
+def test_legacy_queue_submit_frontdoor_routes_through_request_control_command_authority(tmp_path, monkeypatch) -> None:
+    recorder = _AuthorityRecorder()
+    spec_path = _write_queue_spec(tmp_path, name="legacy queue")
+    stdout = StringIO()
+
+    monkeypatch.setattr(control_commands, "bootstrap_control_commands_schema", lambda _conn: None)
+    monkeypatch.setattr(control_commands, "request_control_command", recorder.request)
+    monkeypatch.setattr(workflow_commands, "_workflow_runtime_conn", lambda: object())
+
+    exit_code = workflow_commands._queue_command(
+        ["submit", spec_path, "--priority", "7", "--max-attempts", "2"],
+        stdout=stdout,
+    )
+    payload = json.loads(stdout.getvalue())
+
+    assert exit_code == 0
+    assert recorder.request_calls == [
+        {
+            "command_type": "workflow.submit",
+            "requested_by_kind": "cli",
+            "requested_by_ref": "workflow.queue.submit",
+            "idempotency_key": recorder.request_calls[0]["idempotency_key"],
+            "payload": {
+                "inline_spec": {
+                    "name": "legacy queue",
+                    "workflow_id": "legacy_queue",
+                    "phase": "test",
+                    "jobs": [
+                        {
+                            "label": "job-a",
+                            "agent": "openai/gpt-5.4-mini",
+                            "prompt": "Run the queued workflow.",
+                            "max_attempts": 2,
+                        }
+                    ],
+                }
+            },
+        }
+    ]
+    assert payload == {
+        "run_id": "dispatch_request_001",
+        "status": "queued",
+        "total_jobs": 1,
+        "command_id": "control.command.request.1",
+        "command_status": "succeeded",
+        "result_ref": "workflow_run:dispatch_request_001",
+        "priority": 7,
+        "max_attempts": 2,
+        "note": "priority is accepted for compatibility but scheduling is workflow-runtime driven",
     }
 
 
