@@ -63,6 +63,7 @@ SET    status = 'ready', claimed_by = NULL, claimed_at = NULL,
        failure_category = '', failure_zone = '', is_transient = false
 WHERE  status IN ('claimed', 'running')
 AND    COALESCE(heartbeat_at, claimed_at) < now() - interval '5 minutes'
+AND    (next_retry_at IS NULL OR next_retry_at <= now())
 RETURNING id, label, run_id;
 """
 

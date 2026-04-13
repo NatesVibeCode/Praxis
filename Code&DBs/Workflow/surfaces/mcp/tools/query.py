@@ -391,7 +391,7 @@ def _test_command_resolver(question: str) -> dict:
 
     # Build pytest commands
     commands = [
-        f"PYTHONPATH='Code&DBs/Workflow' python3 "
+        f"PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 "
         f"-m pytest --noconftest -q {tf}"
         for tf in test_files
     ]
@@ -405,7 +405,7 @@ def _test_command_resolver(question: str) -> dict:
     if not test_files:
         result["hint"] = (
             f"No test_{stem}*.py found. "
-            f"Syntax check: PYTHONPATH='Code&DBs/Workflow' python3 -m py_compile '{file_path}'"
+            f"Syntax check: PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m py_compile '{file_path}'"
         )
     return result
 

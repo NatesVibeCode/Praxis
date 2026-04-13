@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 from ._shared import (
     STALE_REAPER_QUERY,
     _TERMINAL_JOB_STATUSES,
-    _circuit_breakers,
 )
 from ._routing import (
     _job_has_touch_conflict,
@@ -19,8 +18,7 @@ from ._workflow_state import (
     _recompute_workflow_run_state,
     _release_ready_children,
 )
-from ._context_building import _terminal_failure_classification
-from ._routing import _failure_zone_lookup
+from ._retry_manager import record_provider_outcome, resolve_failed_job
 from runtime.workflow.submission_capture import (
     list_latest_submission_summaries_for_run as _submission_list_latest_submission_summaries_for_run,
 )
@@ -125,103 +123,50 @@ def complete_job(
     if current_status in _TERMINAL_JOB_STATUSES:
         return
 
+    final_status = status
+    failure_category = ""
     failure_zone = ""
     is_transient = False
-    failure_category = ""
-    is_retryable: bool | None = None
-    pre_classified_failure = None
-    final_status = status
 
+    # Record provider health in circuit breaker (all completions)
+    record_provider_outcome(conn, job_id=job_id, succeeded=(status != "failed"), error_code=error_code)
+
+    # Failed jobs: classify -> retry orchestrator -> requeue or terminal
     if status == "failed":
-        _classification = _terminal_failure_classification(
-            error_code=error_code,
-            stderr=stdout_preview,
-            exit_code=exit_code,
+        outcome = resolve_failed_job(
+            conn, job_id=job_id, error_code=error_code,
+            stdout_preview=stdout_preview, exit_code=exit_code,
         )
-        if _classification is not None:
-            pre_classified_failure = _classification
-            failure_category = _classification.category.value
-            is_retryable = _classification.is_retryable
-            is_transient = _classification.is_transient
-        else:
-            failure_category = "unknown"
-        failure_zone = _failure_zone_lookup(conn).get(failure_category, "internal")
+        failure_category = outcome.failure_category
+        failure_zone = outcome.failure_zone
+        is_transient = outcome.is_transient
 
-    # Feed circuit breaker using canonical failure codes. The breaker itself
-    # decides whether a failure is retryable enough to count.
-    circuit_breakers = _circuit_breakers()
-    if circuit_breakers:
-        agent_row = conn.execute(
-            "SELECT resolved_agent, agent_slug FROM workflow_jobs WHERE id = $1", job_id,
-        )
-        if agent_row:
-            _agent = agent_row[0].get("resolved_agent") or agent_row[0].get("agent_slug") or ""
-            _provider = _agent.split("/")[0] if "/" in _agent else _agent
-            if _provider:
-                circuit_breakers.record_outcome(
-                    _provider,
-                    succeeded=(status != "failed"),
-                    failure_code=error_code if status == "failed" else None,
-                )
-
-        # Use retry orchestrator for intelligent retry/failover decisions
-        job = conn.execute(
-            "SELECT attempt, max_attempts, failover_chain, resolved_agent FROM workflow_jobs WHERE id = $1",
-            job_id,
-        )
-        if job:
-            row = job[0]
-            decision = None
-            if is_retryable is False:
-                # is_retryable is checked here: False = immediate fail, True/None = delegate to decide() (BUG-C487AEB4 verified)
-                final_status = "failed"
+        if outcome.requeue:
+            updated = conn.execute(
+                """UPDATE workflow_jobs
+                   SET status = 'ready', last_error_code = $2,
+                       failure_category = $3, failure_zone = $4, is_transient = $5,
+                       resolved_agent = COALESCE($6, resolved_agent),
+                       next_retry_at = now() + ($7 || ' seconds')::interval,
+                       finished_at = NULL, claimed_by = NULL, claimed_at = NULL,
+                       heartbeat_at = NULL
+                   WHERE id = $1
+                     AND status NOT IN ("""
+                + _TERMINAL_STATUS_SQL
+                + """)
+                   RETURNING id""",
+                job_id, error_code, failure_category, failure_zone, is_transient,
+                outcome.next_agent, str(outcome.backoff_seconds),
+            )
+            if updated:
+                conn.execute("SELECT pg_notify('job_ready', $1)", str(job_id))
+                logger.info("Job %d requeued: %s", job_id, outcome.reason)
             else:
-                from runtime.retry_orchestrator import decide
+                logger.info("Job %d requeue skipped (already terminal)", job_id)
+            return
 
-                decision = decide(
-                    error_code=error_code,
-                    stderr=stdout_preview,  # stdout_preview often contains stderr for failed jobs
-                    attempt=row["attempt"],
-                    max_attempts=row["max_attempts"],
-                    failover_chain=row["failover_chain"],
-                    resolved_agent=row["resolved_agent"],
-                    pre_classified=pre_classified_failure,
-                )
-
-            if decision and decision.should_requeue:
-                updated = conn.execute(
-                    """UPDATE workflow_jobs
-                       SET status = 'ready', last_error_code = $2,
-                           failure_category = $3,
-                           failure_zone = $4,
-                           is_transient = $5,
-                           resolved_agent = COALESCE($6, resolved_agent),
-                           next_retry_at = now() + ($7 || ' seconds')::interval,
-                           finished_at = NULL, claimed_by = NULL, claimed_at = NULL,
-                           heartbeat_at = NULL
-                       WHERE id = $1
-                         AND status NOT IN ("""
-                    + _TERMINAL_STATUS_SQL
-                    + """)
-                       RETURNING id""",
-                    job_id, error_code, failure_category, failure_zone, is_transient,
-                    decision.next_agent, str(decision.backoff_seconds),
-                )
-                if not updated:
-                    logger.info("Job %d requeue skipped because it was already terminal", job_id)
-                    return
-                logger.info("Job %d %s: %s",
-                            job_id, decision.action, decision.reason)
-                return
-
-            # Terminal failure — use orchestrator's decision for status
-            if decision:
-                final_status = "dead_letter" if decision.action == "dead_letter" else "failed"
-                logger.info("Job %d terminal: %s", job_id, decision.reason)
-        else:
-            final_status = "failed"
-    elif status == "failed":
-        final_status = "failed"
+        final_status = outcome.final_status
+        logger.info("Job %d terminal: %s", job_id, outcome.reason)
 
     if status == "cancelled":
         updated = conn.execute(

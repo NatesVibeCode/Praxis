@@ -41,19 +41,50 @@ export function MoonEdges({ edges, layout, selectedEdgeId, onEdgeClick }: MoonEd
           : 'var(--moon-muted, #484f58)';
         const width = isSelected ? 2.5 : edge.isOnDominantPath ? 2 : 1.5;
 
+        const mx = (x1 + x2) / 2;
+        const my = (y1 + y2) / 2;
+
         return (
-          <path
-            key={edge.id}
-            d={d}
-            stroke={color}
-            strokeWidth={width}
-            fill="none"
-            style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
-            onClick={(e) => {
-              e.stopPropagation();
-              onEdgeClick?.(edge.id);
-            }}
-          />
+          <g key={edge.id}>
+            <path
+              d={d}
+              stroke={color}
+              strokeWidth={width}
+              fill="none"
+              style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onEdgeClick?.(edge.id);
+              }}
+            />
+            {edge.gateLabel && (() => {
+              const textLen = edge.gateLabel!.length * 6.5 + 16;
+              return (
+                <>
+                  <rect
+                    x={mx - textLen / 2}
+                    y={my - 10}
+                    width={textLen}
+                    height={20}
+                    rx={4}
+                    fill="var(--moon-surface, #161b22)"
+                    stroke="var(--moon-border, #30363d)"
+                    strokeWidth={1}
+                  />
+                  <text
+                    x={mx}
+                    y={my + 4}
+                    textAnchor="middle"
+                    fontSize={11}
+                    fill="var(--moon-fg-dim, #8b949e)"
+                    style={{ pointerEvents: 'none' }}
+                  >
+                    {edge.gateLabel}
+                  </text>
+                </>
+              );
+            })()}
+          </g>
         );
       })}
     </svg>

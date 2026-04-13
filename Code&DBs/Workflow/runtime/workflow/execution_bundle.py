@@ -196,11 +196,15 @@ def _completion_contract(
     downstream_labels: Sequence[str] | None,
 ) -> dict[str, Any]:
     normalized_task_type = task_type.strip().lower()
-    normalized_submission_required = (
-        bool(submission_required)
-        if submission_required is not None
-        else _default_submission_required(normalized_task_type)
-    )
+    # For output-critical task types (debate, research, etc.), always require
+    # submission regardless of spec override — an explicit False causes
+    # permanent content loss (BUG-91630F20).
+    if normalized_task_type in _SUBMISSION_DEFAULT_REQUIRED_TASK_TYPES:
+        normalized_submission_required = True
+    elif submission_required is not None:
+        normalized_submission_required = bool(submission_required)
+    else:
+        normalized_submission_required = _default_submission_required(normalized_task_type)
     result_kind = _submission_result_kind(task_type=normalized_task_type, bucket=bucket)
     submit_tool_names = (
         [_SUBMISSION_RESULT_KIND_TO_TOOL[result_kind], _SUBMISSION_READ_TOOL]

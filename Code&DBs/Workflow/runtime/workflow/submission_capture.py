@@ -707,7 +707,15 @@ def _submit_submission(
     )
     submission_protocol = _submission_protocol_state(execution_context_shard)
     baseline = dict(submission_protocol.get("baseline") or {})
-    if not baseline:
+    normalized_result_kind = _normalize_text(result_kind, field_name="result_kind")
+
+    # Text-output tasks (research, debate, analysis) have no baseline or
+    # write_scope — they produce text, not file changes.  Seal directly
+    # instead of requiring the baseline-comparison pipeline.
+    _TEXT_ONLY_RESULT_KINDS = {"research_result", "artifact_bundle"}
+    needs_baseline = normalized_result_kind not in _TEXT_ONLY_RESULT_KINDS
+
+    if not baseline and needs_baseline:
         raise WorkflowSubmissionServiceError(
             "workflow_submission.baseline_missing",
             "submission baseline is missing for the current job attempt",
@@ -718,6 +726,64 @@ def _submit_submission(
             },
         )
 
+    if not baseline or not _normalize_scope_paths(
+        baseline.get("write_scope") or (execution_context_shard or {}).get("write_scope"),
+    ):
+        if not needs_baseline:
+            # Text-only submission — no workspace diff needed.
+            existing = repository.fetch_submission_by_run_job_attempt(
+                run_id=normalized_run_id,
+                job_label=normalized_job_label,
+                attempt_no=attempt_no,
+            )
+            try:
+                recorded = repository.record_submission(
+                    run_id=normalized_run_id,
+                    workflow_id=normalized_workflow_id,
+                    job_label=normalized_job_label,
+                    attempt_no=attempt_no,
+                    result_kind=normalized_result_kind,
+                    summary=normalized_summary,
+                    primary_paths=normalized_primary_paths,
+                    tests_ran=_normalize_text_list(tests_ran, field_name="tests_ran"),
+                    notes=notes,
+                    declared_operations=normalized_declared_operations,
+                    changed_paths=[],
+                    operation_set=[],
+                    comparison_status="text_only",
+                    comparison_report="",
+                    diff_artifact_ref=None,
+                    artifact_refs=[],
+                    verification_artifact_refs=[],
+                )
+            except WorkflowSubmissionRepositoryError as exc:
+                raise WorkflowSubmissionServiceError(
+                    exc.reason_code, str(exc),
+                    details=getattr(exc, "details", None),
+                ) from exc
+            if existing is None:
+                _emit_workflow_event(
+                    active_conn,
+                    run_id=normalized_run_id,
+                    workflow_id=normalized_workflow_id,
+                    job_label=normalized_job_label,
+                    event_type="workflow.job.submission.sealed",
+                    reason_code="workflow_submission.sealed",
+                    payload={
+                        "submission_id": recorded["submission_id"],
+                        "job_label": normalized_job_label,
+                        "attempt_no": attempt_no,
+                        "result_kind": normalized_result_kind,
+                        "comparison_status": "text_only",
+                    },
+                )
+            return recorded
+        raise WorkflowSubmissionServiceError(
+            "workflow_submission.write_scope_missing",
+            "submission baseline is missing write_scope authority",
+            details={"run_id": normalized_run_id, "job_label": normalized_job_label},
+        )
+
     workspace_root = _normalize_text(
         baseline.get("workspace_root"),
         field_name="baseline.workspace_root",
@@ -725,12 +791,6 @@ def _submit_submission(
     write_scope = _normalize_scope_paths(
         baseline.get("write_scope") or execution_context_shard.get("write_scope"),
     )
-    if not write_scope:
-        raise WorkflowSubmissionServiceError(
-            "workflow_submission.write_scope_missing",
-            "submission baseline is missing write_scope authority",
-            details={"run_id": normalized_run_id, "job_label": normalized_job_label},
-        )
 
     for path in normalized_primary_paths:
         if not _scope_allows_path(path, write_scope):

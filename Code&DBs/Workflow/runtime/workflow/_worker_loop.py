@@ -290,21 +290,33 @@ def run_worker_loop(
                     if not job:
                         break
 
-                    # Determine execution transport for concurrency management
+                    # Determine execution transport for concurrency management.
+                    # Failures here must fail the individual job, not crash
+                    # the worker loop — a missing agent config is a job-level
+                    # error, not a system-level error.
                     agent = job.get("resolved_agent") or job.get("agent_slug", "")
                     integration_id = job.get("integration_id")
-                    if integration_id:
-                        transport_lane = "remote"  # Integration jobs are fast, use unlimited pool
-                    else:
-                        registry = _get_cached_registry(conn)
-                        if registry is None:
-                            raise RuntimeError("agent registry unavailable during worker dispatch")
-                        config = registry.get(agent)
-                        if config is None:
-                            raise RuntimeError(f"agent config missing during worker dispatch: {agent}")
-                        transport_lane = resolve_execution_transport(config).execution_lane
-                    if transport_lane == "unknown":
-                        raise RuntimeError(f"unsupported execution transport for {agent}")
+                    transport_lane: str | None = None
+                    try:
+                        if integration_id:
+                            transport_lane = "remote"
+                        else:
+                            registry = _get_cached_registry(conn)
+                            if registry is None:
+                                raise RuntimeError("agent registry unavailable during worker dispatch")
+                            config = registry.get(agent)
+                            if config is None:
+                                raise RuntimeError(f"agent config missing during worker dispatch: {agent}")
+                            transport_lane = resolve_execution_transport(config).execution_lane
+                        if transport_lane == "unknown":
+                            raise RuntimeError(f"unsupported execution transport for {agent}")
+                    except RuntimeError as dispatch_err:
+                        logger.error("Dispatch setup failed for job %d (%s): %s",
+                                     job["id"], job.get("label"), dispatch_err)
+                        complete_job(conn, job["id"], status="failed",
+                                     error_code="agent_not_found",
+                                     stdout_preview=str(dispatch_err)[:2000])
+                        continue
 
                     job["_transport_lane"] = transport_lane
 

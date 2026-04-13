@@ -1,6 +1,32 @@
 from __future__ import annotations
 
+import runtime.task_type_router as _ttr_mod
 from runtime.task_type_router import TaskTypeRouter
+
+
+def _passthrough_economics(
+    *,
+    provider_slug: str,
+    adapter_type,
+    provider_policy_id,
+    raw_cost_per_m_tokens: float,
+    budget_windows,
+    default_adapter=None,
+) -> dict:
+    """Stand-in for _resolve_route_economics that surfaces raw cost as effective cost."""
+    return {
+        "adapter_type": adapter_type or "cli_llm",
+        "billing_mode": "metered_api",
+        "budget_bucket": "test",
+        "effective_marginal_cost": raw_cost_per_m_tokens,
+        "spend_pressure": "low",
+        "budget_status": "",
+        "prefer_prepaid": False,
+        "allow_payg_fallback": True,
+    }
+
+
+_ttr_mod._resolve_route_economics = _passthrough_economics
 
 
 class _FakeConn:
@@ -66,10 +92,10 @@ class _FakeConn:
                         "provider_slug": provider,
                         "model_slug": row["model_slug"],
                         "priority": index,
-                        "route_tier": "high" if provider == "openai" else "medium",
-                        "route_tier_rank": 1 if provider != "google" else 2,
-                        "latency_class": "reasoning" if provider == "openai" else "instant",
-                        "latency_rank": 2 if provider == "openai" else index,
+                        "route_tier": "medium",
+                        "route_tier_rank": 1,
+                        "latency_class": "instant",
+                        "latency_rank": 1,
                         "capability_tags": ["build", "coding", "analysis"],
                         "task_affinities": {"primary": ["build"], "secondary": ["analysis"], "specialized": [], "avoid": []},
                         "benchmark_profile": {},

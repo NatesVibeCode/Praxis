@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _WORKFLOW_ROOT = _REPO_ROOT / "Code&DBs" / "Workflow"
-_DEFAULT_REPO_LOCAL_DATABASE_URL = os.environ["WORKFLOW_DATABASE_URL"]
+_DEFAULT_REPO_LOCAL_DATABASE_URL = os.environ.get("WORKFLOW_DATABASE_URL", "postgresql://localhost:5432/praxis")
 
 # Default config paths — all subsystems use Postgres now
 _RECEIPTS_DIR = str(_REPO_ROOT / "artifacts" / "workflow_receipts")

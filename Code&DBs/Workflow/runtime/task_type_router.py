@@ -1122,6 +1122,21 @@ class TaskTypeRouter:
 
                 # For rotation-eligible types, dedup by provider then cycle
                 # so different jobs get different providers' best models.
+                # If the chain has only 1 entry, try to enrich it with
+                # cross-provider candidates so quota exhaustion on the
+                # primary doesn't kill the entire wave (BUG-45B10C25).
+                if task_type in _ROTATION_TASK_TYPES and len(chain) <= 1:
+                    try:
+                        broader = self._resolve_auto_chain(
+                            task_type, prefer_cost=False,
+                            runtime_profile_ref=job_runtime_profile_ref,
+                        )
+                        primary_provider = chain[0].provider_slug if chain else None
+                        for candidate in broader:
+                            if candidate.provider_slug != primary_provider:
+                                chain.append(candidate)
+                    except (ValueError, TaskRouteAuthorityError):
+                        pass
                 if task_type in _ROTATION_TASK_TYPES and len(chain) > 1:
                     primary, slugs = _rotate_chain(chain, task_type, rotation_counters)
                 else:

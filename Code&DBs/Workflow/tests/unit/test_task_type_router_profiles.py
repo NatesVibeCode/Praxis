@@ -322,8 +322,8 @@ class _ScopedProfileConn(_CatalogProfileConn):
             ]
         if "FROM route_eligibility_states" in sql:
             return [
-                {"candidate_ref": "candidate.gpt-5.4", "eligibility_status": "eligible"},
-                {"candidate_ref": "candidate.gpt-5.4-mini", "eligibility_status": "eligible"},
+                {"candidate_ref": "candidate.gpt-5.4", "eligibility_status": "eligible", "reason_code": "eligible"},
+                {"candidate_ref": "candidate.gpt-5.4-mini", "eligibility_status": "eligible", "reason_code": "eligible"},
             ]
         return super().execute(sql, *params)
 
@@ -504,9 +504,10 @@ class _ResearchOnlyGuardConn(_FakeConn):
 
 
 def test_research_only_candidate_does_not_leak_into_non_research_routes(monkeypatch) -> None:
-    monkeypatch.setattr(_mod, "supports_adapter", lambda _provider_slug, _adapter_type: True)
+    import runtime.routing_economics as _routing_economics
+    monkeypatch.setattr(_routing_economics, "supports_adapter", lambda _provider_slug, _adapter_type: True)
     monkeypatch.setattr(
-        _mod,
+        _routing_economics,
         "resolve_adapter_economics",
         lambda _provider_slug, adapter_type: {
             "billing_mode": "subscription_included" if adapter_type == "cli_llm" else "metered_api",

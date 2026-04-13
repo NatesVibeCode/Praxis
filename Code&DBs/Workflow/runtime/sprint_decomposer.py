@@ -248,9 +248,9 @@ class SprintDecomposer:
     def _verify_command(path: str) -> Optional[str]:
         ext = os.path.splitext(path)[1].lower()
         if ext == ".py":
-            return f"python3 -m pytest {path}"
+            return f"/opt/homebrew/bin/python3 -m pytest {path}"
         if ext == ".sql":
-            return f"python3 -c \"open('{path}').read()\""
+            return f"/opt/homebrew/bin/python3 -c \"open('{path}').read()\""
         if ext == ".json":
-            return f"python3 -m json.tool {path}"
+            return f"/opt/homebrew/bin/python3 -m json.tool {path}"
         return None

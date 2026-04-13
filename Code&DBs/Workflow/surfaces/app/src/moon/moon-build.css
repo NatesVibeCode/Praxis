@@ -1505,3 +1505,66 @@
 .moon-run__history-item:hover {
   background: var(--moon-surface-hover, rgba(255,255,255,0.04));
 }
+
+/* === DAG Canvas === */
+.moon-dag {
+  position: relative;
+  overflow: visible;
+}
+.moon-dag-node {
+  position: absolute;
+  width: var(--moon-node-size, 60px);
+  height: var(--moon-node-size, 60px);
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 180ms ease, box-shadow 180ms ease;
+}
+.moon-dag-node:hover {
+  transform: scale(1.08);
+  z-index: 2;
+}
+.moon-dag-node--selected {
+  outline: 3px solid var(--moon-accent, #6CB6FF);
+  outline-offset: 3px;
+  z-index: 3;
+}
+.moon-dag-node--drag-over {
+  outline: 2px dashed var(--moon-accent, #6CB6FF);
+  outline-offset: 4px;
+}
+.moon-dag-node__label {
+  position: absolute;
+  top: calc(var(--moon-node-size, 60px) + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--moon-fg-dim, #8b949e);
+  pointer-events: none;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.moon-dag-append {
+  position: absolute;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1.5px dashed var(--moon-muted, #484f58);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: border-color 180ms ease, transform 180ms ease;
+}
+.moon-dag-append:hover {
+  border-color: var(--moon-accent, #6CB6FF);
+  transform: scale(1.1);
+}
+.moon-dag-append--drag-over {
+  border-color: var(--moon-accent, #6CB6FF);
+  background: rgba(108, 182, 255, 0.08);
+}

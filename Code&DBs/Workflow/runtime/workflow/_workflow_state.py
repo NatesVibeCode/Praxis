@@ -338,6 +338,11 @@ def _recompute_workflow_run_state(conn: SyncPostgresConnection, run_id: str) -> 
 
 
 def _reset_blocked_descendants_for_retry(conn: SyncPostgresConnection, parent_job_id: int) -> None:
+    """Reset downstream jobs so they re-run when the retried parent succeeds.
+
+    Handles both 'blocked' (never started) and 'cancelled' (killed by
+    parent_failed propagation) — BUG-9A8B3651.
+    """
     child_rows = conn.execute(
         """SELECT child.id
            FROM workflow_job_edges edge
@@ -356,7 +361,7 @@ def _reset_blocked_descendants_for_retry(conn: SyncPostgresConnection, parent_jo
                    failure_category = '',
                    failure_zone = '',
                    is_transient = false
-               WHERE id = $1 AND status = 'blocked'
+               WHERE id = $1 AND status IN ('blocked', 'cancelled')
                RETURNING id""",
             child_id,
         )

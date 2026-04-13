@@ -257,8 +257,8 @@ def test_execute_api_routes_through_sandbox_runtime(monkeypatch, tmp_path) -> No
     )
 
     command = str(captured["command"])
-    assert "python3 -m runtime.api_transport_worker" in command
-    assert "--provider anthropic" in command
+    assert "/opt/homebrew/bin/python3 -m runtime.api_transport_worker" in command
+    assert "--api-protocol anthropic_messages" in command
     assert "--model claude-haiku-4-5-20251001" in command
     assert captured["stdin_text"] == "hello from api"
     assert captured["execution_transport"] == "api"

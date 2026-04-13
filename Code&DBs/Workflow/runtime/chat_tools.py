@@ -14,6 +14,7 @@ from typing import Any
 from runtime.control_commands import (
     ControlCommandType,
     ControlIntent,
+    bootstrap_control_commands_schema,
     request_control_command,
 )
 from runtime.idempotency import canonical_hash

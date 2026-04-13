@@ -619,15 +619,8 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
                     return (
                       <div
                         key={node.id}
-                        className={ringClass(node, isSelected)}
-                        style={{
-                          position: 'absolute',
-                          left: node.x + 120 - 30,
-                          top: node.y + 120 - 30,
-                          width: 60,
-                          height: 60,
-                          cursor: 'pointer',
-                        }}
+                        className={`moon-dag-node ${ringClass(node, isSelected)}${isSelected ? ' moon-dag-node--selected' : ''}${state.previewTarget === node.id ? ' moon-dag-node--drag-over' : ''}`}
+                        style={{ left: node.x + 120 - 30, top: node.y + 120 - 30 }}
                         onClick={() => handleNodeClick(node.id, isSelected)}
                         draggable
                         onDragStart={e => {
@@ -645,47 +638,14 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
                           <span className="moon-chain__step-index">{node.dominantPathIndex >= 0 ? node.dominantPathIndex + 1 : ''}</span>
                         )}
                         {node.needsBadge && <div className="moon-chain__badge" />}
-                        <span
-                          style={{
-                            position: 'absolute',
-                            top: 68,
-                            left: '50%',
-                            transform: 'translateX(-50%)',
-                            whiteSpace: 'nowrap',
-                            fontSize: 11,
-                            color: 'var(--moon-fg-dim, #8b949e)',
-                            pointerEvents: 'none',
-                          }}
-                        >
-                          {node.title}
-                        </span>
-                        {isSelected && state.popoutOpen && viewModel.selectedNode && (
-                          <MoonPopout
-                            node={viewModel.selectedNode}
-                            content={viewModel.dockContent}
-                            onClose={() => dispatch({ type: 'CLOSE_POPOUT' })}
-                            onSelect={handleNodeAction}
-                            catalog={catalog}
-                          />
-                        )}
+                        <span className="moon-dag-node__label">{node.title}</span>
                       </div>
                     );
                   })}
                   {/* Append socket */}
                   <div
-                    style={{
-                      position: 'absolute',
-                      left: 120 - 20,
-                      top: viewModel.layout.height + 120,
-                      width: 40,
-                      height: 40,
-                      borderRadius: '50%',
-                      border: '1.5px dashed var(--moon-muted, #484f58)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      cursor: 'pointer',
-                    }}
+                    className={`moon-dag-append${state.previewTarget === '__append__' ? ' moon-dag-append--drag-over' : ''}`}
+                    style={{ left: viewModel.layout.width + 120 + 30, top: 120 - 20 }}
                     onClick={() => appendNode()}
                     onDragOver={handleAppendDragOver}
                     onDragLeave={handleDragLeave}
@@ -694,6 +654,22 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
                     <span style={{ color: 'var(--moon-muted, #484f58)', fontSize: 18 }}>+</span>
                   </div>
                 </div>
+                {/* Popout — rendered at container level so it's not clipped */}
+                {state.selectedNodeId && state.popoutOpen && viewModel.selectedNode && (() => {
+                  const sel = viewModel.nodes.find(n => n.id === state.selectedNodeId);
+                  if (!sel) return null;
+                  return (
+                    <div style={{ position: 'absolute', left: sel.x + 120, top: sel.y + 120 - 80, zIndex: 10 }}>
+                      <MoonPopout
+                        node={viewModel.selectedNode}
+                        content={viewModel.dockContent}
+                        onClose={() => dispatch({ type: 'CLOSE_POPOUT' })}
+                        onSelect={handleNodeAction}
+                        catalog={catalog}
+                      />
+                    </div>
+                  );
+                })()}
               </div>
             )}
 

@@ -450,6 +450,8 @@ def test_retry_and_cancel_surfaces_converge_on_command_bus_authority(monkeypatch
     monkeypatch.setattr(control_commands, "bootstrap_control_commands_schema", lambda _conn: None)
     monkeypatch.setattr(control_commands, "execute_control_intent", recorder.execute)
     monkeypatch.setattr(control_commands, "workflow_cancel_proof", lambda _conn, _run_id: dict(cancel_proof))
+    import runtime.command_handlers as command_handlers
+    monkeypatch.setattr(command_handlers, "workflow_cancel_proof", lambda _conn, _run_id: dict(cancel_proof))
     monkeypatch.setattr(
         unified_dispatch,
         "retry_job",

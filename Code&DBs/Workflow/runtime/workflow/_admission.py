@@ -474,8 +474,11 @@ def _do_submit_workflow(
         dependency_threshold = job.get("dependency_threshold")
         if dependency_threshold is not None:
             dependency_threshold = int(dependency_threshold)
-        ledger_idempotency_key = f"{spec.name}:{label}:{prompt_hash}"
-        job_idempotency_key = f"{run_id}:{spec.name}:{label}:{prompt_hash}"
+        # Prefer queue_id for idempotency so changing it clears conflicts
+        # without needing to also rename the spec (BUG-0551295A).
+        _idem_ns = str(spec._raw.get("queue_id") or "").strip() or spec.name
+        ledger_idempotency_key = f"{_idem_ns}:{label}:{prompt_hash}"
+        job_idempotency_key = f"{run_id}:{_idem_ns}:{label}:{prompt_hash}"
         payload = {
             "spec_name": spec.name,
             "label": label,

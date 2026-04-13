@@ -542,48 +542,63 @@ def test_route_economics_prefers_prepaid_adapter_over_metered_default(monkeypatc
 
 
 def test_llm_task_uses_contract_retry_policy_and_failure_mapping(monkeypatch) -> None:
-    from adapters.provider_registry import resolve_adapter_contract
+    import adapters.provider_transport as provider_transport
+    import registry.provider_execution_registry as _reg
 
-    contract = resolve_adapter_contract("openai", "llm_task")
-    assert contract is not None
+    # Force built-in profiles so llm_task lane is admitted (DB may have it disabled).
+    original_registry = dict(_reg._REGISTRY)
+    original_loaded = _reg._DB_LOADED
+    builtin_registry = {p.provider_slug: p for p in provider_transport.BUILTIN_PROVIDER_PROFILES}
+    _reg._REGISTRY.clear()
+    _reg._REGISTRY.update(builtin_registry)
+    _reg._DB_LOADED = True
+    try:
+        from adapters.provider_registry import resolve_adapter_contract
 
-    captured: dict[str, object] = {}
+        contract = resolve_adapter_contract("openai", "llm_task")
+        assert contract is not None
 
-    def _boom(request: LLMRequest) -> LLMResponse:
-        captured["timeout_seconds"] = request.timeout_seconds
-        captured["retry_attempts"] = request.retry_attempts
-        captured["retry_backoff_seconds"] = request.retry_backoff_seconds
-        captured["retryable_status_codes"] = request.retryable_status_codes
-        captured["protocol_family"] = request.protocol_family
-        raise LLMClientError("llm_client.timeout", "request timed out")
+        captured: dict[str, object] = {}
 
-    import adapters.llm_task as llm_task_mod
+        def _boom(request: LLMRequest) -> LLMResponse:
+            captured["timeout_seconds"] = request.timeout_seconds
+            captured["retry_attempts"] = request.retry_attempts
+            captured["retry_backoff_seconds"] = request.retry_backoff_seconds
+            captured["retryable_status_codes"] = request.retryable_status_codes
+            captured["protocol_family"] = request.protocol_family
+            raise LLMClientError("llm_client.timeout", "request timed out")
 
-    monkeypatch.setattr(llm_task_mod, "call_llm", _boom)
+        import adapters.llm_task as llm_task_mod
 
-    adapter = LLMTaskAdapter(
-        default_provider="openai",
-        default_model="gpt-4.1",
-        credential_env={"OPENAI_API_KEY": "sk-test"},
-    )
-    request = DeterministicTaskRequest(
-        node_id="node_0",
-        task_name="contract_retry_policy",
-        input_payload={"prompt": "hello", "provider_slug": "openai"},
-        expected_outputs={},
-        dependency_inputs={},
-        execution_boundary_ref="workspace:test",
-    )
+        monkeypatch.setattr(llm_task_mod, "call_llm", _boom)
 
-    result = adapter.execute(request=request)
+        adapter = LLMTaskAdapter(
+            default_provider="openai",
+            default_model="gpt-4.1",
+            credential_env={"OPENAI_API_KEY": "sk-test"},
+        )
+        request = DeterministicTaskRequest(
+            node_id="node_0",
+            task_name="contract_retry_policy",
+            input_payload={"prompt": "hello", "provider_slug": "openai"},
+            expected_outputs={},
+            dependency_inputs={},
+            execution_boundary_ref="workspace:test",
+        )
 
-    assert result.status == "failed"
-    assert result.failure_code == "adapter.timeout"
-    assert captured["timeout_seconds"] == contract.timeout_seconds
-    assert captured["retry_attempts"] == contract.retry_policy["retry_attempts"]
-    assert captured["retry_backoff_seconds"] == tuple(contract.retry_policy["backoff_seconds"])
-    assert captured["retryable_status_codes"] == tuple(contract.retry_policy["retryable_status_codes"])
-    assert captured["protocol_family"] == contract.prompt_envelope["protocol_family"]
+        result = adapter.execute(request=request)
+
+        assert result.status == "failed"
+        assert result.failure_code == "adapter.timeout"
+        assert captured["timeout_seconds"] == contract.timeout_seconds
+        assert captured["retry_attempts"] == contract.retry_policy["retry_attempts"]
+        assert captured["retry_backoff_seconds"] == tuple(contract.retry_policy["backoff_seconds"])
+        assert captured["retryable_status_codes"] == tuple(contract.retry_policy["retryable_status_codes"])
+        assert captured["protocol_family"] == contract.prompt_envelope["protocol_family"]
+    finally:
+        _reg._REGISTRY.clear()
+        _reg._REGISTRY.update(original_registry)
+        _reg._DB_LOADED = original_loaded
 
 
 def test_llm_task_accepts_explicit_first_party_route_contract_without_registry_lookup(
