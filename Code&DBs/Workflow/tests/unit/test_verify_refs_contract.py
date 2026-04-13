@@ -451,5 +451,17 @@ def test_compile_prose_fails_closed_when_compile_index_snapshot_is_missing(monke
             )
         ),
     )
-    with pytest.raises(RuntimeError, match="compile_index.snapshot_missing"):
+    # snapshot_missing is refreshable — the compiler tries auto-refresh,
+    # which fails with surface_manifest_unavailable in test context.
+    monkeypatch.setattr(
+        compiler,
+        "refresh_compile_index",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            compile_index.CompileIndexAuthorityError(
+                "compile_index.surface_manifest_unavailable",
+                "compile index surface manifest could not be resolved",
+            )
+        ),
+    )
+    with pytest.raises(RuntimeError, match="compile_index.surface_manifest_unavailable"):
         compiler.compile_prose("research something")

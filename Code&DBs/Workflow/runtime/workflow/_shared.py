@@ -57,6 +57,10 @@ _DEFAULT_NATIVE_WORKSPACE_REF = default_native_workspace_ref()
 _CIRCUIT_BREAKERS_UNSET = object()
 _CIRCUIT_BREAKERS = _CIRCUIT_BREAKERS_UNSET
 
+# When True, outcomes are logged but do NOT mutate route health scores
+# or circuit breaker state.  Flip to False once routing data is trusted.
+ROUTING_METRICS_FROZEN = True
+
 STALE_REAPER_QUERY = """
 UPDATE workflow_jobs
 SET    status = 'ready', claimed_by = NULL, claimed_at = NULL,

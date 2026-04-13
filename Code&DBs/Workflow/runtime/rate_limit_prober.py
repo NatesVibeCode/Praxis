@@ -189,10 +189,10 @@ class RateLimitProbeModule:
             errors.append(str(exc))
 
         elapsed = (time.monotonic() - t0) * 1000
+        all_issues = list(findings) + list(errors)
         return HeartbeatModuleResult(
             module_name=self.name,
-            findings=tuple(findings),
-            actions_taken=len([r for r in results if r.status != "ok"]) if not errors else 0,
-            errors=tuple(errors),
+            ok=len(all_issues) == 0,
+            error="; ".join(all_issues) if all_issues else None,
             duration_ms=elapsed,
         )

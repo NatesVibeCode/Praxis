@@ -311,7 +311,7 @@ def _job_execution_context_shard(
                 normalized_repo_root, ""
             )
             test_commands.append(
-                f"PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q {rel}"
+                f"PYTHONPATH='Code&DBs/Workflow' python3 -m pytest --noconftest -q {rel}"
             )
         if test_commands:
             shard["test_commands"] = test_commands

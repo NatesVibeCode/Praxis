@@ -73,9 +73,8 @@ class RelationshipIntegrityScanner(HeartbeatModule):
         elapsed = (time.monotonic() - t0) * 1000
         return HeartbeatModuleResult(
             module_name=self.name,
-            findings=tuple(findings),
-            actions_taken=0,
-            errors=(),
+            ok=len(findings) == 0,
+            error="; ".join(findings) if findings else None,
             duration_ms=elapsed,
         )
 
@@ -121,9 +120,8 @@ class SchemaConsistencyScanner(HeartbeatModule):
         elapsed = (time.monotonic() - t0) * 1000
         return HeartbeatModuleResult(
             module_name=self.name,
-            findings=tuple(findings),
-            actions_taken=0,
-            errors=(),
+            ok=len(findings) == 0,
+            error="; ".join(findings) if findings else None,
             duration_ms=elapsed,
         )
 
@@ -198,8 +196,7 @@ class ContentQualityScanner(HeartbeatModule):
         elapsed = (time.monotonic() - t0) * 1000
         return HeartbeatModuleResult(
             module_name=self.name,
-            findings=tuple(findings),
-            actions_taken=0,
-            errors=(),
+            ok=len(findings) == 0,
+            error="; ".join(findings) if findings else None,
             duration_ms=elapsed,
         )

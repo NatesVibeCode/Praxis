@@ -181,6 +181,40 @@ def resolve_submission_for_job(
                 logger.warning(
                     "Auto-seal failed for %s/%s: %s", run_id, job_label, exc
                 )
+                # Fall back to direct text-only insert (same as WorkflowSubmissionServiceError path)
+                try:
+                    submission_state = _auto_seal_text_only(
+                        conn,
+                        run_id=run_id,
+                        workflow_id=workflow_id or run_id,
+                        job_label=job_label,
+                        attempt_no=attempt_no,
+                        summary=output_text,
+                        result_kind=result_kind,
+                    )
+                    logger.info(
+                        "Auto-sealed text-only submission (fallback) for %s/%s",
+                        run_id, job_label,
+                    )
+                except Exception as exc2:
+                    logger.warning(
+                        "Text-only fallback seal failed for %s/%s: %s",
+                        run_id, job_label, exc2,
+                    )
+
+    # ── Stage 2b: re-check for agent-sealed submission before enforcing ────
+    # The agent may have sealed a submission via MCP during execution that
+    # Stage 1 missed due to commit timing.  One more lookup before rejecting.
+    if final_status == "succeeded" and submission_required and submission_state is None:
+        try:
+            submission_state = get_submission_for_job_attempt(
+                conn,
+                run_id=run_id,
+                job_label=job_label,
+                attempt_no=attempt_no,
+            )
+        except Exception:
+            pass
 
     # ── Stage 3: enforce the contract ───────────────────────────────────────
     if final_status == "succeeded" and submission_required and submission_state is None:

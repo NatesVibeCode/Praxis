@@ -270,7 +270,6 @@ class AgentRegistry:
         )
         from registry.model_context_limits import context_window_for_model
         agents = []
-        context_window_errors: list[str] = []
         for r in rows:
             provider = r["provider_slug"]
             model = r["model_slug"]
@@ -288,13 +287,13 @@ class AgentRegistry:
 
             try:
                 context_window = context_window_for_model(provider, model)
-            except RuntimeError as exc:
-                # Skip rows that are not yet seeded with authoritative
-                # model-profile context windows. The workflow runner only
-                # needs resolvable agents for the requested spec, and
-                # individual missing rows should not block the whole catalog.
-                context_window_errors.append(str(exc))
-                continue
+            except RuntimeError:
+                # model_profiles missing context_window — fall back to
+                # default_parameters from the candidate row, then 128k.
+                _defaults = r.get("default_parameters") or {}
+                if isinstance(_defaults, str):
+                    _defaults = json.loads(_defaults)
+                context_window = int(_defaults.get("context_window") or 128_000)
 
             # Read CLI config from DB
             cli_cfg = r.get("cli_config") or {}
@@ -335,9 +334,6 @@ class AgentRegistry:
                 sandbox_provider=sandbox_provider,
                 sandbox_policy=SandboxPolicy(),
             ))
-
-        if not agents and context_window_errors:
-            raise RuntimeError(context_window_errors[0])
 
         agents_by_slug = {agent.slug: agent for agent in agents}
         try:

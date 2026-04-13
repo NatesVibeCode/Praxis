@@ -27,7 +27,7 @@ from typing import Any, Mapping
 LOG = logging.getLogger(__name__)
 
 DEFAULT_DB_URL = os.environ.get("WORKFLOW_DATABASE_URL", "postgresql://localhost:5432/praxis")
-SERVICE_PATH = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+SERVICE_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 SUPERVISOR_LABEL = "com.praxis.engine"
 SUPERVISOR_PROGRAM_NAME = "praxis"
 SUPERVISOR_STDOUT = Path("/tmp/praxis-engine.log")

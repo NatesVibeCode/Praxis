@@ -60,6 +60,15 @@ def _record_task_route_outcome(
     provider_slug, model_slug = normalized_agent.split("/", 1)
     if not provider_slug or not model_slug:
         return
+    from ._shared import ROUTING_METRICS_FROZEN
+
+    if ROUTING_METRICS_FROZEN:
+        logger.info(
+            "Route outcome captured (frozen): %s via %s/%s succeeded=%s code=%s",
+            normalized_task_type, provider_slug, model_slug, succeeded, failure_code,
+        )
+        return
+
     from runtime.task_type_router import TaskTypeRouter
 
     router = TaskTypeRouter(conn)

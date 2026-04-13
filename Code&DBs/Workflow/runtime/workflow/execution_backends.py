@@ -462,7 +462,7 @@ def execute_api(
         f"--reasoning-effort {shlex.quote(reasoning_effort)}" if reasoning_effort else ""
     )
     command = (
-        "/opt/homebrew/bin/python3 -m runtime.api_transport_worker "
+        "python3 -m runtime.api_transport_worker "
         f"--api-protocol {shlex.quote(_api_protocol)} "
         f"--api-endpoint {shlex.quote(_api_endpoint)} "
         f"--api-key-env {shlex.quote(_api_key_env)} "

@@ -268,7 +268,7 @@ class TestGetBySlug:
         assert instant is not None
         assert instant.provider == "openai"
 
-    def test_load_from_postgres_fails_closed_when_context_window_missing(
+    def test_load_from_postgres_falls_back_when_context_window_missing(
         self,
         monkeypatch,
     ) -> None:
@@ -282,8 +282,12 @@ class TestGetBySlug:
             ),
         )
 
-        with pytest.raises(RuntimeError, match="missing authoritative context window"):
-            AgentRegistry.load_from_postgres(_FakeConn())
+        reg = AgentRegistry.load_from_postgres(_FakeConn())
+        # All models should load with fallback context_window (128k default)
+        for agent in reg._by_slug.values():
+            if agent.slug.startswith("auto/"):
+                continue
+            assert agent.context_window == 128_000
 
 
 # ------------------------------------------------------------------
