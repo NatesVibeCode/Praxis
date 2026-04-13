@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TextIO
 
+from surfaces.cli.mcp_tools import print_json, render_health_payload, run_cli_tool
+
 
 def _circuits_command(*, stdout: TextIO) -> int:
     """Handle `workflow circuits` — print all circuit breaker states as JSON."""
@@ -931,9 +933,6 @@ def _health_command(args: list[str], *, stdout: TextIO) -> int:
     panel snapshot, lane recommendation, dependency truth, and content health.
     """
 
-    import json as _json
-    from pathlib import Path
-
     if args and args[0] in {"-h", "--help"}:
         stdout.write(
             "usage: workflow health [--json]\n"
@@ -944,103 +943,9 @@ def _health_command(args: list[str], *, stdout: TextIO) -> int:
         return 2
 
     as_json = "--json" in args if args else False
-
-    from adapters import provider_registry as provider_registry_mod
-    from runtime.dependency_contract import dependency_truth_report
-    from runtime.context_cache import get_context_cache
-    from storage.postgres.connection import resolve_workflow_database_url
-    import runtime.health as hs_mod
-
-    repo_root = Path(__file__).resolve().parents[5]
-    db_url = resolve_workflow_database_url()
-
-    probes = []
-    probes.append(hs_mod.PostgresProbe(db_url))
-    probes.append(hs_mod.PostgresConnectivityProbe(db_url))
-    probes.append(hs_mod.DiskSpaceProbe(str(repo_root)))
-
-    for provider_slug in provider_registry_mod.registered_providers():
-        for adapter_type in ("cli_llm", "llm_task"):
-            if not provider_registry_mod.supports_adapter(provider_slug, adapter_type):
-                continue
-            probes.append(hs_mod.ProviderTransportProbe(provider_slug, adapter_type))
-
-    runner = hs_mod.PreflightRunner(probes)
-    preflight = runner.run()
-
-    from runtime.operator_panel import OperatorPanel
-
-    panel = OperatorPanel()
-    snap = panel.snapshot()
-    lane = panel.recommend_lane()
-    cache_stats = get_context_cache().stats()
-    dep_truth = dependency_truth_report(scope="all")
-
-    def _ser(obj):
-        """Recursive serializer for dataclasses/enums/datetimes."""
-        if obj is None or isinstance(obj, (str, int, float, bool)):
-            return obj
-        if hasattr(obj, "isoformat"):
-            return obj.isoformat()
-        if hasattr(obj, "__dataclass_fields__"):
-            return {k: _ser(getattr(obj, k)) for k in obj.__dataclass_fields__}
-        if hasattr(obj, "value"):
-            return obj.value
-        if isinstance(obj, dict):
-            return {k: _ser(v) for k, v in obj.items()}
-        if isinstance(obj, (list, tuple)):
-            return [_ser(v) for v in obj]
-        return str(obj)
-
-    result = {
-        "preflight": _ser(preflight),
-        "operator_snapshot": _ser(snap),
-        "recommended_lane": _ser(lane),
-        "cache_stats": _ser(cache_stats),
-        "dependency_truth": _ser(dep_truth),
-    }
-
+    exit_code, payload = run_cli_tool("praxis_health", {})
     if as_json:
-        stdout.write(_json.dumps(result, indent=2, default=str) + "\n")
-        return 0
-
-    # Human-friendly output
-    pf = result["preflight"]
-    overall = pf.get("overall", "unknown") if isinstance(pf, dict) else "unknown"
-    stdout.write(f"=== System Health: {overall.upper()} ===\n\n")
-
-    # Preflight probes
-    checks = pf.get("checks", []) if isinstance(pf, dict) else []
-    if checks:
-        stdout.write("Probes\n")
-        stdout.write("-" * 50 + "\n")
-        for c in checks:
-            passed = c.get("passed", False)
-            name = c.get("name", "?")
-            msg = c.get("message", "")
-            marker = "OK" if passed else "FAIL"
-            stdout.write(f"  [{marker:>4}] {name}: {msg}\n")
-
-    # Operator snapshot
-    snap_data = result["operator_snapshot"]
-    if isinstance(snap_data, dict):
-        stdout.write("\nOperator\n")
-        stdout.write("-" * 50 + "\n")
-        for key in ("total_runs", "succeeded", "failed", "pass_rate",
-                     "adjusted_pass_rate", "avg_cost", "avg_tool_uses"):
-            if key in snap_data:
-                stdout.write(f"  {key}: {snap_data[key]}\n")
-
-    # Lane recommendation
-    lane_data = result["recommended_lane"]
-    if isinstance(lane_data, dict):
-        posture = lane_data.get("recommended_posture", "unknown")
-        reasons = lane_data.get("reasons", [])
-        stdout.write(f"\nLane: {posture}")
-        if reasons:
-            stdout.write(f" — {reasons[0]}")
-        stdout.write("\n")
-    elif lane_data:
-        stdout.write(f"\nLane: {lane_data}\n")
-
-    return 0
+        print_json(stdout, payload)
+        return exit_code
+    render_health_payload(payload, stdout=stdout)
+    return exit_code

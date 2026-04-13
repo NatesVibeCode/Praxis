@@ -290,6 +290,10 @@ class McpToolDefinition:
                 "description": description,
                 "inputs": inputs,
                 "requiredArgs": required_args,
+                "risk": self.risk_for_selector(action),
+                "surface": self.cli_surface,
+                "tier": self.cli_tier,
+                "recommendedAlias": self.cli_recommended_alias,
                 **(
                     {"selectorField": self.selector_field}
                     if self.selector_field and self.selector_field != "action"
@@ -309,6 +313,14 @@ class McpToolDefinition:
             "auth_status": "connected",
             "icon": "tool",
             "mcp_server_id": _MCP_SERVER_ID,
+            "manifest_source": "mcp_tool",
+            "cli": {
+                "surface": self.cli_surface,
+                "tier": self.cli_tier,
+                "recommended_alias": self.cli_recommended_alias,
+                "badges": list(self.cli_badges),
+                "risk_levels": list(self.risk_levels),
+            },
         }
 
 
