@@ -614,16 +614,21 @@ def handle_friction(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
 def handle_heal(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
     job_label = body.get("job_label", "")
     failure_code = body.get("failure_code", "")
-    if not job_label or not failure_code:
-        raise _ClientError("job_label and failure_code are required")
+    stderr = body.get("stderr", "")
+    if not job_label:
+        raise _ClientError("job_label is required")
+    if not failure_code and not stderr:
+        raise _ClientError("failure_code or stderr is required")
     healer = subs.get_self_healer()
-    rec = healer.diagnose(job_label, failure_code, body.get("stderr", ""))
+    resolved_failure_code = healer.resolve_failure_code(failure_code, stderr)
+    rec = healer.diagnose(job_label, failure_code, stderr)
     return {
         "action": rec.action.value,
         "reason": rec.reason,
         "confidence": round(rec.confidence, 3),
         "context_patches": list(rec.context_patches),
         "diagnostics_run": rec.diagnostics_run,
+        "resolved_failure_code": resolved_failure_code,
     }
 
 

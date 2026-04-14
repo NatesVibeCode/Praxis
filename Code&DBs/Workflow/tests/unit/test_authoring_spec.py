@@ -68,10 +68,11 @@ def test_load_new_format_single_job():
 
 def test_load_new_format_no_jobs_array():
     """Single-job shorthand: no jobs array, spec-level fields are the job."""
-    path = _write_spec(_minimal_spec(agent="google/gemini-2.5-flash"))
+    path = _write_spec(_minimal_spec(agent="google/gemini-2.5-flash", prefer_cost=True))
     spec = WorkflowSpec.load(path)
     assert len(spec.jobs) == 1
     assert spec.jobs[0]["agent"] == "google/gemini-2.5-flash"
+    assert spec.jobs[0]["prefer_cost"] is True
     os.unlink(path)
 
 
@@ -160,6 +161,17 @@ def test_contract_override_replaces():
     os.unlink(path)
 
 
+def test_job_level_prefer_cost_overrides_spec_default():
+    raw = _minimal_spec(
+        prefer_cost=True,
+        jobs=[{"prefer_cost": False}],
+    )
+    path = _write_spec(raw)
+    spec = WorkflowSpec.load(path)
+    assert spec.jobs[0]["prefer_cost"] is False
+    os.unlink(path)
+
+
 # ---------------------------------------------------------------------------
 # Replicate
 # ---------------------------------------------------------------------------
@@ -226,6 +238,13 @@ def test_validation_passes_with_jobs():
     ])
     ok, errors = validate_authoring_spec(raw)
     assert ok is True
+
+
+def test_validation_rejects_non_boolean_prefer_cost():
+    raw = _minimal_spec(prefer_cost="yes")
+    ok, errors = validate_authoring_spec(raw)
+    assert ok is False
+    assert "prefer_cost must be a boolean or null" in errors
 
 
 # ---------------------------------------------------------------------------

@@ -98,6 +98,17 @@ def _classify_job_failure(job: dict) -> dict[str, Any] | None:
             is_transient=bool(job.get("is_transient", False)),
             stdout_preview=str(job.get("stdout_preview") or ""),
         )
+    try:
+        from runtime.workflow.unified import _terminal_failure_classification
+    except Exception:
+        return None
+    classification = _terminal_failure_classification(
+        error_code=str(job.get("last_error_code") or "").strip(),
+        stderr=str(job.get("stdout_preview") or ""),
+        exit_code=job.get("exit_code"),
+    )
+    if classification is not None and hasattr(classification, "to_dict"):
+        return classification.to_dict()
     return None
 
 
@@ -832,6 +843,32 @@ def _submit_workflow_via_service_bus(pg, *, spec_path: str, spec_name: str, tota
     )
 
 
+def _submit_workflow_chain_via_service_bus(
+    pg,
+    *,
+    coordination_path: str,
+    adopt_active: bool = True,
+) -> dict[str, Any]:
+    from runtime.control_commands import (
+        render_workflow_chain_submit_response,
+        request_workflow_chain_submit_command,
+    )
+
+    command = request_workflow_chain_submit_command(
+        pg,
+        requested_by_kind="mcp",
+        requested_by_ref="praxis_workflow.chain",
+        coordination_path=coordination_path,
+        repo_root=str(REPO_ROOT),
+        adopt_active=adopt_active,
+    )
+    return render_workflow_chain_submit_response(
+        pg,
+        command,
+        coordination_path=coordination_path,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Workflow state — all in Postgres via the unified runtime
 # ---------------------------------------------------------------------------
@@ -871,6 +908,31 @@ def tool_praxis_workflow(params: dict, _progress_emitter=None) -> dict:
             )
         except Exception as exc:
             return _structured_runtime_error(exc, action="status")
+
+    # --- Submit a durable multi-wave workflow chain ---
+    if action == "chain":
+        coordination_path = params.get("coordination_path", "")
+        if not coordination_path:
+            return {"error": "coordination_path is required for action='chain'"}
+
+        adopt_active = params.get("adopt_active", True)
+        if not isinstance(adopt_active, bool):
+            if isinstance(adopt_active, str):
+                adopt_active = adopt_active.strip().lower() in {"1", "true", "yes", "y", "on"}
+            else:
+                return {"error": "adopt_active must be a boolean"}
+
+        pg, error = _load_pg_conn(action="chain")
+        if error is not None:
+            return error
+        try:
+            return _submit_workflow_chain_via_service_bus(
+                pg,
+                coordination_path=str(coordination_path),
+                adopt_active=bool(adopt_active),
+            )
+        except Exception as exc:
+            return _structured_runtime_error(exc, action="chain")
 
     # --- Deep job inspection ---
     if action == "inspect":
@@ -951,6 +1013,28 @@ def tool_praxis_workflow(params: dict, _progress_emitter=None) -> dict:
         except Exception as exc:
             return _structured_runtime_error(exc, action="retry")
 
+    # --- Repair a degraded workflow sync state ---
+    if action == "repair":
+        run_id = params.get("run_id", "")
+        if not run_id:
+            return {"error": "run_id is required for action='repair'"}
+
+        pg, error = _load_pg_conn(action="repair")
+        if error is not None:
+            return error
+        try:
+            from runtime.control_commands import ControlCommandType
+
+            return _execute_workflow_command(
+                pg,
+                action="repair",
+                command_type=ControlCommandType.SYNC_REPAIR,
+                payload={"run_id": run_id},
+                run_id=run_id,
+            )
+        except Exception as exc:
+            return _structured_runtime_error(exc, action="repair")
+
     if action == "list":
         pg, error = _load_pg_conn(action="list")
         if error is not None:
@@ -1010,7 +1094,7 @@ def tool_praxis_workflow(params: dict, _progress_emitter=None) -> dict:
         return {
             "error": (
                 f"Unsupported action='{action}'. Expected one of: "
-                "run, status, inspect, cancel, list, notifications, retry."
+                "run, status, inspect, cancel, list, notifications, retry, repair."
             )
         }
 
@@ -1131,7 +1215,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "Execute work by launching a workflow for LLM agents. This is the primary way to run tasks — "
                 "building code, running tests, writing reviews, refactoring, and debates.\n\n"
                 "USE WHEN: you need to run a workflow spec, check on a running workflow, retry a "
-                "failed job, or cancel a run.\n\n"
+                "failed job, cancel a run, or repair a degraded post-run sync state.\n\n"
                 "WORKFLOW CONTRACT:\n"
                 "  - action='run' is the kickoff call. Treat run_id as the authority and follow with "
                 "status or stream reads on separate channels.\n"
@@ -1153,6 +1237,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "  Check status:    praxis_workflow(action='status', run_id='workflow_abc123')\n"
                 "  Retry a failure: praxis_workflow(action='retry', run_id='workflow_abc123', label='build_step')\n"
                 "  Cancel a run:    praxis_workflow(action='cancel', run_id='workflow_abc123')\n"
+                "  Repair sync:     praxis_workflow(action='repair', run_id='workflow_abc123')\n"
                 "  List recent:     praxis_workflow(action='list')\n\n"
                 "DO NOT USE: for asking questions about the system (use praxis_query), checking health "
                 "(use praxis_health), or searching past results (use praxis_receipts)."
@@ -1176,18 +1261,29 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "action": {
                         "type": "string",
                         "description": (
-                            "Operation: 'run' (default — submits and returns run_id), "
+                "Operation: 'run' (default — submits and returns run_id), "
                             "'status' (poll a running/completed workflow with health heuristics), "
                             "'inspect' (deep job inspection of all fields), "
                             "'cancel' (cancel a workflow run), "
+                            "'repair' (repair the post-run sync state for a workflow run), "
+                            "'chain' (submit a durable workflow chain from coordination JSON), "
                             "'list' (show recent workflows), "
                             "'notifications' (drain pending completion events), "
                             "'retry' (re-queue a failed job)."
                         ),
-                        "enum": ["run", "status", "inspect", "cancel", "list", "notifications", "retry"],
+                        "enum": ["run", "status", "inspect", "cancel", "list", "notifications", "retry", "repair", "chain"],
                         "default": "run",
                     },
-                    "run_id": {"type": "string", "description": "Workflow run ID. Required for 'status', 'inspect', 'cancel', and 'retry'."},
+                    "coordination_path": {
+                        "type": "string",
+                        "description": "Path to a chain coordination JSON file. Required for action='chain'.",
+                    },
+                    "adopt_active": {
+                        "type": "boolean",
+                        "description": "Whether to adopt an existing active chain run where possible.",
+                        "default": True,
+                    },
+                    "run_id": {"type": "string", "description": "Workflow run ID. Required for 'status', 'inspect', 'cancel', 'retry', and 'repair'."},
                     "label": {"type": "string", "description": "Job label. Required for 'retry', optional for 'inspect'."},
                     "kill_if_idle": {
                         "type": "boolean",

@@ -38,8 +38,8 @@ from pydantic import BaseModel
 from adapters.provider_registry import default_llm_adapter_type, default_provider_slug
 from contracts.domain import validate_workflow_request
 from runtime.native_authority import default_native_authority_refs
-from runtime.integrations.display_names import display_name_for_integration
 from runtime.workflow_graph_compiler import compile_graph_workflow_request, spec_uses_graph_runtime
+from surfaces.api.catalog_authority import build_catalog_payload
 from .handlers._subsystems import _Subsystems
 from .handlers import (
     handle_delete_request,
@@ -168,6 +168,7 @@ class WorkflowRunRequest(BaseModel):
     capabilities: list[str] | None = None
     use_cache: bool = False
     task_type: str | None = None
+    prefer_cost: bool = False
     skip_auto_review: bool = False
     reviews_workflow_id: str | None = None
     review_target_modules: list[str] | None = None
@@ -259,6 +260,7 @@ def _spec_from_request(req: WorkflowRunRequest):
         capabilities=req.capabilities,
         use_cache=req.use_cache,
         task_type=req.task_type,
+        prefer_cost=req.prefer_cost,
         skip_auto_review=req.skip_auto_review,
         reviews_workflow_id=req.reviews_workflow_id,
         review_target_modules=req.review_target_modules,
@@ -2008,180 +2010,10 @@ def resolve_scope_endpoint(
     }
 
 
-# ---------------------------------------------------------------------------
-# Live catalog — aggregates platform registries into CatalogItem shapes
-# ---------------------------------------------------------------------------
-
-# Real engine primitives — each maps to an actual runtime capability
-_STATIC_CATALOG_ITEMS: list[dict[str, Any]] = [
-    # Triggers
-    {"id": "trigger-manual",    "label": "Manual",       "icon": "trigger", "family": "trigger", "status": "ready", "dropKind": "node", "actionValue": "trigger",          "description": "User-initiated run"},
-    {"id": "trigger-webhook",   "label": "Webhook",      "icon": "tool",    "family": "trigger", "status": "ready", "dropKind": "node", "actionValue": "trigger/webhook",  "description": "Inbound webhook with HMAC verification"},
-    {"id": "trigger-schedule",  "label": "Schedule",     "icon": "trigger", "family": "trigger", "status": "ready", "dropKind": "node", "actionValue": "trigger/schedule", "description": "Cron or interval trigger"},
-    # Gather
-    {"id": "gather-research",   "label": "Web Research", "icon": "research", "family": "gather", "status": "ready", "dropKind": "node", "actionValue": "auto/research",   "description": "Search and analyze web sources"},
-    {"id": "gather-docs",       "label": "Docs",         "icon": "research", "family": "gather", "status": "ready", "dropKind": "node", "actionValue": "auto/research",   "description": "Read and extract from documents"},
-    # Think
-    {"id": "think-classify",    "label": "Classify",     "icon": "classify", "family": "think",  "status": "ready", "dropKind": "node", "actionValue": "auto/classify",   "description": "Score, triage, or categorize"},
-    {"id": "think-draft",       "label": "Draft",        "icon": "draft",    "family": "think",  "status": "ready", "dropKind": "node", "actionValue": "auto/draft",      "description": "Generate or compose content"},
-    {"id": "think-fan-out",     "label": "Fan Out",      "icon": "classify", "family": "think",  "status": "ready", "dropKind": "node", "actionValue": "auto/fan-out",    "description": "Split into parallel sub-tasks and aggregate"},
-    # Act (real integration bindings)
-    {"id": "act-notify",        "label": "Notify",       "icon": "notify",  "family": "act",    "status": "ready", "dropKind": "node", "actionValue": "@notifications/send", "description": "Send notification (Slack, email, etc.)"},
-    {"id": "act-webhook-out",   "label": "HTTP Request", "icon": "tool",    "family": "act",    "status": "ready", "dropKind": "node", "actionValue": "@webhook/post",       "description": "Call an external webhook or API"},
-    {"id": "act-invoke",        "label": "Run Workflow",  "icon": "tool",    "family": "act",    "status": "ready", "dropKind": "node", "actionValue": "@workflow/invoke",    "description": "Invoke another workflow as a sub-workflow"},
-    # Control (edges — real engine edge types)
-    {"id": "ctrl-approval",     "label": "Approval",     "icon": "gate",    "family": "control", "status": "ready", "dropKind": "edge", "gateFamily": "approval",      "description": "Human approval gate"},
-    {"id": "ctrl-review",       "label": "Human Review", "icon": "review",  "family": "control", "status": "ready", "dropKind": "edge", "gateFamily": "human_review",  "description": "Manual review before proceeding"},
-    {"id": "ctrl-validation",   "label": "Validation",   "icon": "gate",    "family": "control", "status": "ready", "dropKind": "edge", "gateFamily": "validation",    "description": "Automated check gate"},
-    {"id": "ctrl-branch",       "label": "Branch",       "icon": "gate",    "family": "control", "status": "ready", "dropKind": "edge", "gateFamily": "conditional",   "description": "Conditional path (equals, in, not_equals, not_in)"},
-    {"id": "ctrl-retry",        "label": "Retry",        "icon": "gate",    "family": "control", "status": "ready", "dropKind": "edge", "gateFamily": "retry",         "description": "Retry with backoff + provider failover chain"},
-    {"id": "ctrl-on-failure",   "label": "On Failure",   "icon": "gate",    "family": "control", "status": "ready", "dropKind": "edge", "gateFamily": "after_failure", "description": "Run only if upstream step failed"},
-]
-
-# Map capability_kind to catalog family
-_KIND_TO_FAMILY: dict[str, str] = {
-    "task": "think",
-    "memory": "gather",
-    "fanout": "think",
-    "cli": "gather",
-    "integration": "act",
-}
-
-# Map capability_kind to glyph icon
-_KIND_TO_ICON: dict[str, str] = {
-    "task": "classify",
-    "memory": "research",
-    "fanout": "classify",
-    "cli": "research",
-    "integration": "tool",
-}
-
-
 @app.get("/api/catalog")
 def get_catalog() -> dict[str, Any]:
     """Return live catalog items from platform registries + static primitives."""
-    items: list[dict[str, Any]] = []
-    sources = {"static": 0, "capabilities": 0, "integrations": 0}
-
-    # 1. Static engine primitives (triggers, control flow, core actions)
-    items.extend(_STATIC_CATALOG_ITEMS)
-    sources["static"] = len(_STATIC_CATALOG_ITEMS)
-
-    # 2. Capability catalog (task types from Postgres)
-    try:
-        conn = _shared_pg_conn()
-        rows = conn.execute(
-            """SELECT capability_ref, capability_slug, capability_kind,
-                      title, summary, description, route
-                 FROM capability_catalog
-                WHERE enabled = TRUE
-                ORDER BY capability_kind, title"""
-        )
-        for row in rows or []:
-            kind = row.get("capability_kind") or "task"
-            family = _KIND_TO_FAMILY.get(kind, "think")
-            icon = _KIND_TO_ICON.get(kind, "classify")
-            slug = row.get("capability_slug") or ""
-            items.append({
-                "id": f"cap-{slug.replace('/', '-')}",
-                "label": row.get("title") or slug,
-                "icon": icon,
-                "family": family,
-                "status": "ready",
-                "dropKind": "node",
-                "actionValue": row.get("route") or f"auto/{slug}",
-                "description": row.get("summary") or row.get("description") or "",
-                "source": "capability",
-            })
-            sources["capabilities"] += 1
-    except Exception as exc:
-        logger.warning("catalog: capability_catalog query failed: %s", exc)
-
-    # 3. Integration registry (connected services from Postgres)
-    try:
-        conn = _shared_pg_conn()
-        rows = conn.execute(
-            "SELECT id, name, description, provider, capabilities, auth_status, icon FROM integration_registry ORDER BY name"
-        )
-        for row in rows or []:
-            integration_id = row.get("id") or ""
-            name = display_name_for_integration(row)
-            auth = row.get("auth_status") or "unknown"
-            caps = row.get("capabilities")
-            if isinstance(caps, str):
-                try:
-                    caps = json.loads(caps)
-                except (json.JSONDecodeError, TypeError):
-                    caps = []
-            caps = caps or []
-
-            if not caps:
-                # One item per integration with no granular capabilities
-                items.append({
-                    "id": f"int-{integration_id}",
-                    "label": name,
-                    "icon": row.get("icon") or "tool",
-                    "family": "act",
-                    "status": "ready" if auth == "connected" else "coming_soon",
-                    "dropKind": "node",
-                    "actionValue": f"@{integration_id}",
-                    "description": row.get("description") or f"Use {name}",
-                    "source": "integration",
-                    "connectionStatus": auth,
-                })
-                sources["integrations"] += 1
-            else:
-                # One item per capability action
-                for cap in caps:
-                    action = cap.get("action", "") if isinstance(cap, dict) else str(cap)
-                    cap_desc = cap.get("description", "") if isinstance(cap, dict) else ""
-                    items.append({
-                        "id": f"int-{integration_id}-{action}".replace(" ", "-").lower(),
-                        "label": f"{name}: {action}" if action else name,
-                        "icon": row.get("icon") or "tool",
-                        "family": "act",
-                        "status": "ready" if auth == "connected" else "coming_soon",
-                        "dropKind": "node",
-                        "actionValue": f"@{integration_id}/{action}" if action else f"@{integration_id}",
-                        "description": cap_desc or row.get("description") or f"Use {name}",
-                        "source": "integration",
-                        "connectionStatus": auth,
-                    })
-                    sources["integrations"] += 1
-    except Exception as exc:
-        logger.warning("catalog: integration_registry query failed: %s", exc)
-
-    # 4. Connector registry (versioned connectors with health)
-    try:
-        conn = _shared_pg_conn()
-        rows = conn.execute(
-            "SELECT slug, display_name, version, auth_type, base_url, status, health_status "
-            "FROM connector_registry WHERE status = 'active' ORDER BY display_name"
-        )
-        for row in rows or []:
-            slug = row.get("slug") or ""
-            health = row.get("health_status") or "unknown"
-            items.append({
-                "id": f"conn-{slug}",
-                "label": row.get("display_name") or slug,
-                "icon": "tool",
-                "family": "act",
-                "status": "ready" if health in ("healthy", "degraded") else "coming_soon",
-                "dropKind": "node",
-                "actionValue": f"@connector/{slug}",
-                "description": f"v{row.get('version', '?')} — {row.get('auth_type', '')} auth — {row.get('base_url', '')}",
-                "source": "connector",
-                "connectionStatus": health,
-            })
-            sources["connectors"] = sources.get("connectors", 0) + 1
-    except Exception:
-        pass  # connector_registry table may not exist yet
-
-    return {
-        "items": items,
-        "sources": sources,
-        "fetched_at": datetime.now(timezone.utc).isoformat(),
-    }
+    return build_catalog_payload(_shared_pg_conn())
 
 
 # No catch-all routes — every endpoint is explicitly registered above.

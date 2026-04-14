@@ -6,6 +6,18 @@
 
 BEGIN;
 
+-- Typed runtime config authority used by config_registry and adaptive params.
+CREATE TABLE IF NOT EXISTS platform_config (
+    config_key   TEXT PRIMARY KEY,
+    config_value TEXT NOT NULL,
+    value_type   TEXT NOT NULL,
+    category     TEXT NOT NULL DEFAULT 'general',
+    description  TEXT NOT NULL DEFAULT '',
+    min_value    DOUBLE PRECISION,
+    max_value    DOUBLE PRECISION,
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Generic key-value config table for adapter runtime parameters.
 -- config_value is JSONB so scalars (int, string), arrays, and objects all fit.
 CREATE TABLE IF NOT EXISTS adapter_config (
@@ -71,5 +83,29 @@ INSERT INTO adapter_failure_mappings (transport_kind, failure_code, mapped_code)
 ON CONFLICT (transport_kind, failure_code) DO UPDATE SET
     mapped_code = EXCLUDED.mapped_code,
     updated_at  = now();
+
+-- Core platform config defaults required by runtime config_registry users.
+INSERT INTO platform_config (
+    config_key,
+    config_value,
+    value_type,
+    category,
+    description,
+    min_value,
+    max_value
+) VALUES
+    ('context.budget_ratio', '0.6', 'float', 'context', 'Fraction of context window reserved for pipeline context.', 0.30, 0.85),
+    ('breaker.failure_threshold', '5', 'int', 'routing', 'Consecutive failures before opening the circuit breaker.', 2, 15),
+    ('breaker.recovery_timeout_s', '300', 'float', 'routing', 'Seconds to wait in OPEN state before probing recovery.', 30, 1800),
+    ('health.max_consecutive_failures', '3', 'int', 'routing', 'Consecutive route failures before marking unhealthy.', 1, 10),
+    ('context.preview_chars', '2000', 'int', 'context', 'Max chars kept in upstream context previews.', 500, 5000)
+ON CONFLICT (config_key) DO UPDATE SET
+    config_value = EXCLUDED.config_value,
+    value_type = EXCLUDED.value_type,
+    category = EXCLUDED.category,
+    description = EXCLUDED.description,
+    min_value = EXCLUDED.min_value,
+    max_value = EXCLUDED.max_value,
+    updated_at = now();
 
 COMMIT;

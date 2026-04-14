@@ -478,7 +478,10 @@ def mutate_workflow_build(
             if isinstance(node, dict) and _text(node.get("node_id") or node.get("id"))
         }
 
-        # Build dependency map from sequence edges (skip gate/state edges)
+        # Build dependency map from sequence edges (skip gate/state edges).
+        # Trigger nodes are valid dependency sources for graph authoring.
+        # We only reject edges that point *into* trigger nodes because those
+        # collapse the trigger authority model on rebuild.
         incoming: dict[str, list[str]] = {}
         for edge in edges:
             if not isinstance(edge, dict):
@@ -487,7 +490,7 @@ def mutate_workflow_build(
                 continue
             to_id = _text(edge.get("to_node_id"))
             from_id = _text(edge.get("from_node_id"))
-            if _is_trigger_route(node_routes.get(from_id, "")) or _is_trigger_route(node_routes.get(to_id, "")):
+            if _is_trigger_route(node_routes.get(to_id, "")):
                 continue
             if to_id and from_id:
                 incoming.setdefault(to_id, []).append(from_id)

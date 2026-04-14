@@ -209,6 +209,20 @@ def test_tool_praxis_workflow_cancel_returns_structured_runtime_error_when_pg_un
     }
 
 
+def test_tool_praxis_workflow_repair_returns_structured_runtime_error_when_pg_unavailable(monkeypatch) -> None:
+    class _StructuredError(Exception):
+        reason_code = "postgres.authority_unavailable"
+
+    monkeypatch.setattr(workflow_tools._subs, "get_pg_conn", lambda: (_ for _ in ()).throw(_StructuredError("repair db blocked")))
+
+    payload = workflow_tools.tool_praxis_workflow({"action": "repair", "run_id": "run-1"})
+
+    assert payload == {
+        "error": "repair db blocked",
+        "error_code": "postgres.authority_unavailable",
+    }
+
+
 def test_tool_praxis_workflow_inspect_returns_structured_runtime_error_when_pg_unavailable(monkeypatch) -> None:
     class _StructuredError(Exception):
         reason_code = "postgres.authority_unavailable"

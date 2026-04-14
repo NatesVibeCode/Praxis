@@ -94,6 +94,7 @@ const TRIGGER_MANUAL_ROUTE = 'trigger';
 const TRIGGER_SCHEDULE_ROUTE = 'trigger/schedule';
 const TRIGGER_WEBHOOK_ROUTE = 'trigger/webhook';
 const WEBHOOK_TRIGGER_EVENT = 'db.webhook_events.insert';
+type BranchSide = 'above' | 'below';
 const DEFAULT_BRANCH_CONDITION = {
   field: 'should_continue',
   op: 'equals',
@@ -152,6 +153,10 @@ function branchLabel(reason: string | null | undefined): string {
     .filter(Boolean)
     .map(part => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ');
+}
+
+function oppositeBranchSide(side: BranchSide): BranchSide {
+  return side === 'above' ? 'below' : 'above';
 }
 
 function nextGraphNodeId(nodes: BuildNode[], prefix: string): string {
@@ -299,97 +304,116 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
     }
   }, [payload, updateBuildGraph, catalog]);
 
-  const handleApplyGate = useCallback(async (edgeId: string, gateFamily: string) => {
+  const handleCreateBranch = useCallback(async (edgeId: string, branchSide: BranchSide) => {
     if (!payload?.build_graph) return;
 
     try {
-      const gateItem = catalog.find(c => c.gateFamily === gateFamily);
-      const gateLabel = gateItem?.label || gateFamily;
-
       const graph = payload.build_graph;
       const nodes = [...(graph.nodes || [])];
       const edges = [...(graph.edges || [])];
       const idx = edges.findIndex((e: any) => e.edge_id === edgeId);
-      if (idx >= 0) {
-        const edge = edges[idx];
-        if (gateFamily === 'conditional') {
-          const condition = cloneBranchCondition(edge.gate?.config?.condition);
-          const sourceNode = nodes.find(node => node.node_id === edge.from_node_id);
-          const targetNode = nodes.find(node => node.node_id === edge.to_node_id);
-          edges[idx] = {
-            ...edge,
-            kind: 'conditional',
-            branch_reason: 'then',
-            gate: {
-              ...(edge.gate || {}),
-              state: 'configured',
-              label: branchLabel('then'),
-              family: gateFamily,
-              config: {
-                ...(edge.gate?.config || {}),
-                condition,
-              },
+      if (idx < 0) return;
+
+      const edge = edges[idx];
+      const condition = cloneBranchCondition(edge.gate?.config?.condition);
+      const sourceNode = nodes.find(node => node.node_id === edge.from_node_id);
+      const targetNode = nodes.find(node => node.node_id === edge.to_node_id);
+      edges[idx] = {
+        ...edge,
+        kind: 'conditional',
+        branch_reason: 'then',
+        gate: {
+          ...(edge.gate || {}),
+          state: 'configured',
+          label: branchLabel('then'),
+          family: 'conditional',
+          config: {
+            ...(edge.gate?.config || {}),
+            condition,
+            branch_side: oppositeBranchSide(branchSide),
+          },
+        },
+      };
+
+      const hasSiblingBranch = edges.some(other =>
+        other.edge_id !== edge.edge_id &&
+        other.from_node_id === edge.from_node_id &&
+        other.gate?.family === 'conditional',
+      );
+
+      if (!hasSiblingBranch) {
+        const elseNodeId = nextGraphNodeId(nodes, 'branch');
+        const elseNode: BuildNode = {
+          node_id: elseNodeId,
+          kind: 'step',
+          title: 'Else path',
+          summary: `Runs when ${sourceNode?.title || 'the upstream step'} does not satisfy the branch condition.`,
+          route: '',
+          status: '',
+        };
+        nodes.push(elseNode);
+        edges.push({
+          edge_id: nextGraphEdgeId(edges, edge.from_node_id, elseNodeId),
+          kind: 'conditional',
+          from_node_id: edge.from_node_id,
+          to_node_id: elseNodeId,
+          branch_reason: 'else',
+          gate: {
+            state: 'configured',
+            label: branchLabel('else'),
+            family: 'conditional',
+            config: {
+              condition,
+              branch_side: branchSide,
             },
-          };
+          },
+        });
 
-          const hasSiblingBranch = edges.some(other =>
-            other.edge_id !== edge.edge_id &&
-            other.from_node_id === edge.from_node_id &&
-            other.gate?.family === 'conditional',
-          );
-
-          if (!hasSiblingBranch) {
-            const elseNodeId = nextGraphNodeId(nodes, 'branch');
-            const elseNode: BuildNode = {
-              node_id: elseNodeId,
-              kind: 'step',
-              title: 'Else path',
-              summary: `Runs when ${sourceNode?.title || 'the upstream step'} does not satisfy the branch condition.`,
-              route: '',
-              status: '',
+        if (targetNode && !targetNode.summary) {
+          const targetIndex = nodes.findIndex(node => node.node_id === targetNode.node_id);
+          if (targetIndex >= 0) {
+            nodes[targetIndex] = {
+              ...nodes[targetIndex],
+              summary: `Runs when ${sourceNode?.title || 'the upstream step'} satisfies the branch condition.`,
             };
-            nodes.push(elseNode);
-            edges.push({
-              edge_id: nextGraphEdgeId(edges, edge.from_node_id, elseNodeId),
-              kind: 'conditional',
-              from_node_id: edge.from_node_id,
-              to_node_id: elseNodeId,
-              branch_reason: 'else',
-              gate: {
-                state: 'configured',
-                label: branchLabel('else'),
-                family: gateFamily,
-                config: {
-                  condition,
-                },
-              },
-            });
-
-            if (targetNode && !targetNode.summary) {
-              const targetIndex = nodes.findIndex(node => node.node_id === targetNode.node_id);
-              if (targetIndex >= 0) {
-                nodes[targetIndex] = {
-                  ...nodes[targetIndex],
-                  summary: `Runs when ${sourceNode?.title || 'the upstream step'} satisfies the branch condition.`,
-                };
-              }
-            }
           }
-
-          await updateBuildGraph({ ...graph, nodes, edges });
-        } else {
-          edges[idx] = {
-            ...edge,
-            gate: { state: 'configured', label: gateLabel, family: gateFamily },
-          };
-          await updateBuildGraph({ ...graph, edges } as any);
         }
+      }
+
+      await updateBuildGraph({ ...graph, nodes, edges });
+      dispatch({ type: 'SELECT_EDGE', edgeId });
+      dispatch({ type: 'OPEN_DOCK', dock: 'context' });
+    } catch (err) {
+      setMutationError(err instanceof Error ? err.message : 'Mutation failed');
+    }
+  }, [payload, updateBuildGraph]);
+
+  const handleApplyGate = useCallback(async (edgeId: string, gateFamily: string) => {
+    if (!payload?.build_graph) return;
+
+    try {
+      if (gateFamily === 'conditional') {
+        await handleCreateBranch(edgeId, 'below');
+        return;
+      }
+
+      const gateItem = catalog.find(c => c.gateFamily === gateFamily);
+      const gateLabel = gateItem?.label || gateFamily;
+      const graph = payload.build_graph;
+      const edges = [...(graph.edges || [])];
+      const idx = edges.findIndex((e: any) => e.edge_id === edgeId);
+      if (idx >= 0) {
+        edges[idx] = {
+          ...edges[idx],
+          gate: { state: 'configured', label: gateLabel, family: gateFamily },
+        };
+        await updateBuildGraph({ ...graph, edges } as any);
       }
       dispatch({ type: 'CLOSE_POPOUT' });
     } catch (err) {
       setMutationError(err instanceof Error ? err.message : 'Mutation failed');
     }
-  }, [payload, updateBuildGraph, catalog]);
+  }, [payload, updateBuildGraph, catalog, handleCreateBranch]);
 
   const handleCompile = useCallback(async () => {
     if (!state.compileProse.trim()) return;
@@ -631,6 +655,23 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
     : null;
   const edgeFromNode = selectedEdge ? viewModel.nodes.find(n => n.id === selectedEdge.from) : null;
   const edgeToNode = selectedEdge ? viewModel.nodes.find(n => n.id === selectedEdge.to) : null;
+  const selectedEdgeBranchSockets = useMemo(() => {
+    if (!selectedEdge || selectedEdge.gateFamily) return null;
+    const from = viewModel.layout.nodes.get(selectedEdge.from);
+    const to = viewModel.layout.nodes.get(selectedEdge.to);
+    if (!from || !to) return null;
+    const pad = 120;
+    const radius = 30;
+    const x1 = from.x + pad + radius;
+    const y1 = from.y + pad;
+    const x2 = to.x + pad - radius;
+    const y2 = to.y + pad;
+    return {
+      edgeId: selectedEdge.id,
+      centerX: (x1 + x2) / 2,
+      centerY: (y1 + y2) / 2,
+    };
+  }, [selectedEdge, viewModel.layout]);
 
   return (
     <div className="moon-page">
@@ -656,6 +697,7 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
                 onReload={reload}
                 onClose={() => dispatch({ type: 'CLOSE_DOCK' })}
                 onStartCatalogDrag={startCatalogDrag}
+                onWorkflowCreated={onWorkflowCreated}
               />
             )}
           </div>
@@ -798,6 +840,36 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
                       </div>
                     );
                   })}
+                  {selectedEdgeBranchSockets && (
+                    <>
+                      <button
+                        type="button"
+                        className="moon-graph-branch-socket moon-graph-branch-socket--above"
+                        style={{
+                          left: selectedEdgeBranchSockets.centerX - 20,
+                          top: selectedEdgeBranchSockets.centerY - 66,
+                        }}
+                        onClick={() => void handleCreateBranch(selectedEdgeBranchSockets.edgeId, 'above')}
+                        aria-label="Create branch above this connection"
+                        title="Create branch above"
+                      >
+                        <span>+</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="moon-graph-branch-socket moon-graph-branch-socket--below"
+                        style={{
+                          left: selectedEdgeBranchSockets.centerX - 20,
+                          top: selectedEdgeBranchSockets.centerY + 26,
+                        }}
+                        onClick={() => void handleCreateBranch(selectedEdgeBranchSockets.edgeId, 'below')}
+                        aria-label="Create branch below this connection"
+                        title="Create branch below"
+                      >
+                        <span>+</span>
+                      </button>
+                    </>
+                  )}
                   {/* Append socket */}
                   <div
                     className={`moon-graph-append${previewTargetId === '__append__' ? ' moon-graph-append--drag-over' : ''}`}
@@ -846,7 +918,7 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
                   edgeFromLabel={edgeFromNode?.title}
                 edgeToLabel={edgeToNode?.title}
                 onApplyGate={handleApplyGate}
-                gateItems={catalog.filter(c => c.family === 'control' && c.status === 'ready')}
+                gateItems={catalog.filter(c => c.family === 'control' && c.status === 'ready' && c.gateFamily !== 'conditional')}
               />
             )}
           </div>

@@ -378,6 +378,60 @@ def test_summarize_run_health_projects_canonical_failure_category_over_legacy_er
     assert health["non_retryable_failed_jobs"] == ["job-a"]
 
 
+def test_summarize_run_recovery_surfaces_retry_for_orchestration_envelope_failure():
+    now = datetime(2026, 4, 8, 12, 0, tzinfo=timezone.utc)
+    run_data = {
+        "run_id": "dispatch_orchestration_retry",
+        "status": "failed",
+        "created_at": now - timedelta(minutes=5),
+        "total_jobs": 2,
+        "jobs": [
+            {
+                "label": "phase_001_workspace_boundary_contract",
+                "status": "failed",
+                "last_error_code": "execution_exception",
+                "failure_category": "",
+                "failure_zone": "",
+                "is_transient": False,
+                "stdout_preview": "TypeError: failure_code must be a non-empty string",
+                "created_at": now - timedelta(minutes=4),
+                "ready_at": now - timedelta(minutes=4),
+                "claimed_at": now - timedelta(minutes=3),
+                "started_at": now - timedelta(minutes=2),
+                "finished_at": now - timedelta(minutes=1),
+                "heartbeat_at": now - timedelta(minutes=1),
+            },
+            {
+                "label": "phase_001_010_synthesis",
+                "status": "cancelled",
+                "last_error_code": "dependency_blocked",
+                "failure_category": "",
+                "failure_zone": "",
+                "is_transient": False,
+                "stdout_preview": "",
+                "created_at": now - timedelta(minutes=4),
+                "ready_at": None,
+                "claimed_at": None,
+                "started_at": None,
+                "finished_at": now - timedelta(minutes=1),
+                "heartbeat_at": None,
+            },
+        ],
+    }
+
+    health = unified_dispatch.summarize_run_health(run_data, now)
+    recovery = unified_dispatch.summarize_run_recovery(run_data, health, now)
+
+    assert recovery["mode"] == "retry_failed_job"
+    assert recovery["heal_action"] == "fix_and_retry"
+    assert recovery["resolved_failure_code"] == "orchestration.failure_code_missing"
+    assert recovery["recommended_tool"]["arguments"] == {
+        "action": "retry",
+        "run_id": "dispatch_orchestration_retry",
+        "label": "phase_001_workspace_boundary_contract",
+    }
+
+
 def test_get_run_status_includes_shadow_packet_inspection_and_drift():
     run_row = {
         "run_id": "dispatch_shadow_abc",
@@ -1511,10 +1565,11 @@ def test_submit_workflow_insert_keeps_integration_action_and_args(monkeypatch):
         if "INSERT INTO workflow_jobs" in query
     )
     assert "$18::jsonb, $19::jsonb" in insert_query
-    assert len(insert_args) == 20
+    assert len(insert_args) == 21
     assert insert_args[15] == "integration.example"
     assert insert_args[16] == "run"
     assert insert_args[17] == '{"mode": "fast"}'
+    assert insert_args[20] == "moderate"
 
 
 def test_submit_workflow_persists_execution_bundle_and_control_prompt(monkeypatch):

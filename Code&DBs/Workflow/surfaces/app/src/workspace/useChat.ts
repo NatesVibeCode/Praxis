@@ -18,6 +18,88 @@ export interface Conversation {
   updated_at?: string;
 }
 
+const EVENT_STREAM_CONTENT_TYPE = 'text/event-stream';
+
+interface ParsedSseEvent {
+  event: string;
+  data: any;
+}
+
+function parseSseEventBlock(block: string): ParsedSseEvent | null {
+  const normalized = block.replace(/\r\n/g, '\n');
+  if (!normalized.trim()) {
+    return null;
+  }
+
+  let event = 'message';
+  const dataLines: string[] = [];
+
+  for (const line of normalized.split('\n')) {
+    if (!line || line.startsWith(':')) {
+      continue;
+    }
+    if (line.startsWith('event:')) {
+      event = line.slice('event:'.length).trim() || 'message';
+      continue;
+    }
+    if (line.startsWith('data:')) {
+      let value = line.slice('data:'.length);
+      if (value.startsWith(' ')) {
+        value = value.slice(1);
+      }
+      dataLines.push(value);
+    }
+  }
+
+  const rawData = dataLines.join('\n');
+  if (!rawData) {
+    return { event, data: null };
+  }
+
+  try {
+    return { event, data: JSON.parse(rawData) };
+  } catch {
+    return { event, data: rawData };
+  }
+}
+
+async function readSseEvents(
+  response: Response,
+  onEvent: (event: ParsedSseEvent) => void,
+): Promise<void> {
+  if (!response.body) {
+    throw new Error('Streaming response body unavailable');
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
+    const blocks = buffer.split('\n\n');
+    buffer = blocks.pop() ?? '';
+
+    for (const block of blocks) {
+      const parsed = parseSseEventBlock(block);
+      if (parsed) {
+        onEvent(parsed);
+      }
+    }
+  }
+
+  buffer += decoder.decode();
+  const finalBlock = parseSseEventBlock(buffer);
+  if (finalBlock) {
+    onEvent(finalBlock);
+  }
+}
+
 export function useChat() {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -70,6 +152,30 @@ export function useChat() {
     }
   }, []);
 
+  const appendChatResponse = useCallback((data: any) => {
+    const newMessages: ChatMessage[] = [];
+    for (const tr of data.tool_results ?? []) {
+      newMessages.push({
+        id: `tr-${Date.now()}-${Math.random().toString(36)}`,
+        role: 'tool_result',
+        content: tr.result?.summary ?? '',
+        tool_results: tr.result,
+      });
+    }
+
+    if (data.content) {
+      newMessages.push({
+        id: data.message_id ?? `msg-${Date.now()}`,
+        role: 'assistant',
+        content: data.content,
+        model_used: data.model_used,
+        latency_ms: data.latency_ms,
+      });
+    }
+
+    setMessages(prev => [...prev, ...newMessages]);
+  }, []);
+
   const sendMessage = useCallback(async (content: string, selectionContext?: any[]) => {
     if (!conversationId || !content.trim()) return;
 
@@ -94,7 +200,7 @@ export function useChat() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Accept': 'application/json',
+          'Accept': EVENT_STREAM_CONTENT_TYPE,
         },
         body: JSON.stringify({ content, selection_context: selectionContext }),
         signal: abortRef.current.signal,
@@ -105,42 +211,80 @@ export function useChat() {
         throw new Error(errData.error ?? `Request failed (${res.status})`);
       }
 
-      // JSON response (blocking — tool loop runs server-side)
-      const data = await res.json();
-
-      // Add tool results as separate messages BEFORE the assistant text
-      const newMessages: ChatMessage[] = [];
-      for (const tr of data.tool_results ?? []) {
-        newMessages.push({
-          id: `tr-${Date.now()}-${Math.random().toString(36)}`,
-          role: 'tool_result',
-          content: tr.result?.summary ?? '',
-          tool_results: tr.result,
-        });
+      const contentType = res.headers.get('content-type') ?? '';
+      if (!contentType.includes(EVENT_STREAM_CONTENT_TYPE) || !res.body) {
+        appendChatResponse(await res.json());
+        setStreamingText('');
+        return;
       }
 
-      // Add assistant response
-      if (data.content) {
-        newMessages.push({
-          id: data.message_id ?? `msg-${Date.now()}`,
-          role: 'assistant',
-          content: data.content,
-          model_used: data.model_used,
-          latency_ms: data.latency_ms,
-        });
+      let streamedText = '';
+      let assistantMessageId: string | null = null;
+      let modelUsed: string | undefined;
+      let streamError: string | null = null;
+
+      await readSseEvents(res, ({ event, data }) => {
+        if (event === 'text_delta') {
+          const chunk = typeof data?.text === 'string' ? data.text : '';
+          if (!chunk) {
+            return;
+          }
+          streamedText += chunk;
+          setStreamingText(prev => prev + chunk);
+          return;
+        }
+
+        if (event === 'tool_result') {
+          setMessages(prev => [
+            ...prev,
+            {
+              id: `tr-${Date.now()}-${Math.random().toString(36)}`,
+              role: 'tool_result',
+              content: data?.summary ?? '',
+              tool_results: data,
+            },
+          ]);
+          return;
+        }
+
+        if (event === 'done') {
+          assistantMessageId = typeof data?.message_id === 'string' ? data.message_id : null;
+          modelUsed = typeof data?.model_used === 'string' ? data.model_used : undefined;
+          return;
+        }
+
+        if (event === 'error') {
+          streamError = typeof data?.message === 'string' ? data.message : 'Streaming request failed';
+        }
+      });
+
+      if (streamError) {
+        throw new Error(streamError);
       }
 
-      setMessages(prev => [...prev, ...newMessages]);
-      setLoading(false);
+      if (streamedText || assistantMessageId || modelUsed) {
+        setMessages(prev => [
+          ...prev,
+          {
+            id: assistantMessageId ?? `msg-${Date.now()}`,
+            role: 'assistant',
+            content: streamedText,
+            model_used: modelUsed,
+          },
+        ]);
+      }
+
+      setStreamingText('');
       return;
     } catch (err: any) {
       if (err.name !== 'AbortError') {
         setError(err.message);
       }
     } finally {
+      setStreamingText('');
       setLoading(false);
     }
-  }, [conversationId]);
+  }, [appendChatResponse, conversationId]);
 
   return {
     conversationId,

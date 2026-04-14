@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 from dataclasses import dataclass, field, replace
 from io import StringIO
 
@@ -281,6 +282,8 @@ def _lineage_expected_lines(view) -> list[str]:
             ),
             f"current_state: {view.current_state}",
             f"terminal_reason: {view.terminal_reason}",
+            f"operator_frame_source: {view.operator_frame_source}",
+            f"operator_frames_count: {len(view.operator_frames)}",
         ]
     )
     return lines
@@ -348,3 +351,28 @@ def test_cli_renders_graph_topology_and_lineage_surfaces() -> None:
         incomplete_stdout.getvalue(),
         _topology_expected_lines(incomplete_view),
     )
+
+
+def test_cli_graph_frontdoor_self_wires_default_observability_service(monkeypatch) -> None:
+    run_id, canonical_evidence = _execute_successful_run()
+    service = _GraphSurfaceService(canonical_evidence=canonical_evidence)
+    stdout = StringIO()
+    helper_calls: list[dict[str, str]] = []
+    cli_main_module = importlib.import_module("surfaces.cli.main")
+
+    def _fake_builder(*, env):
+        helper_calls.append(dict(env or {}))
+        return service
+
+    monkeypatch.setattr(cli_main_module, "_build_default_observability_service", _fake_builder)
+
+    exit_code = main(
+        ["graph-topology", run_id],
+        env={"WORKFLOW_DATABASE_URL": "postgresql://example/praxis"},
+        stdout=stdout,
+    )
+
+    assert exit_code == 0
+    assert helper_calls == [{"WORKFLOW_DATABASE_URL": "postgresql://example/praxis"}]
+    assert service.topology_calls == [run_id]
+    assert "kind: graph_topology" in stdout.getvalue()

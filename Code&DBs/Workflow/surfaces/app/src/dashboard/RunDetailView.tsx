@@ -7,6 +7,7 @@ import {
   RunGraph as RunGraphData,
   useLiveRunSnapshot,
 } from './useLiveRunSnapshot';
+import { RunGraphView } from '../shared/RunGraphView';
 
 export interface RunDetailViewProps {
   runId: string;
@@ -73,81 +74,6 @@ interface JobDetail extends RunJob {
   output_json?: unknown;
   output_source?: string;
   receipt_id?: string | null;
-}
-
-// -- Run graph renderer --
-import type { RunGraphNode as GraphNode } from './useLiveRunSnapshot';
-
-function RunGraph({ graph, onSelectJob }: { graph: RunGraphData; onSelectJob?: (label: string) => void }) {
-  const depths: Record<string, number> = {};
-  const inDeg: Record<string, number> = {};
-  const outEdges: Record<string, string[]> = {};
-
-  for (const n of graph.nodes) {
-    depths[n.id] = 0;
-    inDeg[n.id] = 0;
-    outEdges[n.id] = [];
-  }
-  for (const e of graph.edges) {
-    inDeg[e.to] = (inDeg[e.to] || 0) + 1;
-    outEdges[e.from] = outEdges[e.from] || [];
-    outEdges[e.from].push(e.to);
-  }
-
-  const queue = graph.nodes.filter(n => (inDeg[n.id] || 0) === 0).map(n => n.id);
-  while (queue.length > 0) {
-    const cur = queue.shift()!;
-    for (const next of (outEdges[cur] || [])) {
-      depths[next] = Math.max(depths[next] || 0, (depths[cur] || 0) + 1);
-      inDeg[next]--;
-      if (inDeg[next] === 0) queue.push(next);
-    }
-  }
-
-  const maxDepth = Math.max(0, ...Object.values(depths));
-  const columns: GraphNode[][] = Array.from({ length: maxDepth + 1 }, () => []);
-  for (const n of graph.nodes) columns[depths[n.id] || 0].push(n);
-
-  return (
-    <div className="run-graph">
-      {columns.map((col, ci) => (
-        <React.Fragment key={ci}>
-          {ci > 0 && (
-            <div className="run-graph__edge">
-              <svg width="32" height="2" style={{ display: 'block' }}>
-                <line x1="0" y1="1" x2="32" y2="1" stroke="var(--border)" strokeWidth="1.5" />
-                <polygon points="28,0 32,1 28,2" fill="var(--text-muted)" opacity="0.5" />
-              </svg>
-            </div>
-          )}
-          <div className="run-graph__column">
-            {col.map(n => {
-              const variant = getJobStatusVariant(n.status as JobStatus);
-              const subtitle = n.fan_out
-                ? `${n.fan_out.succeeded}/${n.fan_out.count} done`
-                : (n.error_code
-                    ? n.error_code.replace(/^workflow_submission\./, '')
-                    : n.status);
-              return (
-                <button
-                  key={n.id}
-                  type="button"
-                  className={`run-graph__node run-graph__node--${variant}`}
-                  onClick={() => onSelectJob?.(n.label)}
-                >
-                  <span className="run-graph__node-title">{humanizeLabel(n.label)}</span>
-                  <span className="run-graph__node-sub">
-                    {subtitle}
-                    {n.duration_ms ? ` · ${(n.duration_ms / 1000).toFixed(1)}s` : ''}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </React.Fragment>
-      ))}
-    </div>
-  );
 }
 
 function parseStructuredOutput(job: RunJob, detail?: JobDetail): string {
@@ -297,7 +223,7 @@ export function RunDetailView({ runId, onBack }: RunDetailViewProps) {
 
       {/* Run graph visualization — shows dependency graph when available */}
       {run.graph && run.graph.nodes?.length > 0 && (
-        <RunGraph graph={run.graph} onSelectJob={(label) => {
+        <RunGraphView graph={run.graph} onSelectJob={(label) => {
           // Find the job by label and expand it
           const job = run.jobs.find(j => j.label === label);
           if (job) {

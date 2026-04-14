@@ -1,0 +1,3311 @@
+{
+  "program_id": "praxis_0_100",
+  "statement": "This phase implements genuine improvements that will not regress functionality or over-complicate the system.",
+  "current_focus": [
+    50,
+    51,
+    52
+  ],
+  "control_metrics": [
+    {
+      "id": "authority_coverage",
+      "target": "100 percent of persistent tables touched by runtime have declared owner creator consumer and readiness contract"
+    },
+    {
+      "id": "bootstrap_parity",
+      "target": "empty-db and partial-db bootstrap converge to identical readiness results"
+    },
+    {
+      "id": "direct_sql_violations",
+      "target": "zero runtime writes to authority-owned tables outside their declared authority surface"
+    },
+    {
+      "id": "fresh_clone_success_rate",
+      "target": "fresh clone bootstrap and startup pass on every release candidate"
+    },
+    {
+      "id": "phase_gate_integrity",
+      "target": "every active phase closes with review and healer evidence before next phase approval"
+    }
+  ],
+  "governance": {
+    "one_phase_one_thing": true,
+    "stop_at_phase_boundaries": true,
+    "human_approval_between_phases": true,
+    "mandatory_review_healer_between_phases": true
+  },
+  "phase_arcs": [
+    {
+      "range": "0-9",
+      "theme": "define the machine"
+    },
+    {
+      "range": "10-19",
+      "theme": "durable state and retrieval"
+    },
+    {
+      "range": "20-29",
+      "theme": "unify execution and product surfaces"
+    },
+    {
+      "range": "30-39",
+      "theme": "eventing references and reliability"
+    },
+    {
+      "range": "40-49",
+      "theme": "converge into one coherent workflow runtime"
+    },
+    {
+      "range": "50-59",
+      "theme": "build the builder"
+    },
+    {
+      "range": "60-69",
+      "theme": "enforce authority boundaries across runtime"
+    },
+    {
+      "range": "70-79",
+      "theme": "make execution deterministic and replayable"
+    },
+    {
+      "range": "80-89",
+      "theme": "make the operator and product surfaces trustworthy"
+    },
+    {
+      "range": "90-100",
+      "theme": "scale harden launch then self-host improvement"
+    }
+  ],
+  "phases": [
+    {
+      "phase": 0,
+      "title": "Problem Frame",
+      "arc": "0-9 define the machine",
+      "objective": "Advance the 0-9 define the machine program through the durable objective named Problem Frame.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 1,
+      "title": "Workspace Boundary Contract",
+      "arc": "0-9 define the machine",
+      "objective": "Advance the 0-9 define the machine program through the durable objective named Workspace Boundary Contract.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        0
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 2,
+      "title": "Control Plane Core",
+      "arc": "0-9 define the machine",
+      "objective": "Advance the 0-9 define the machine program through the durable objective named Control Plane Core.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        1
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 3,
+      "title": "Registry Authority",
+      "arc": "0-9 define the machine",
+      "objective": "Advance the 0-9 define the machine program through the durable objective named Registry Authority.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        2
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 4,
+      "title": "Gate and Promotion Policy",
+      "arc": "0-9 define the machine",
+      "objective": "Advance the 0-9 define the machine program through the durable objective named Gate and Promotion Policy.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        3
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 5,
+      "title": "Workflow Outbox",
+      "arc": "0-9 define the machine",
+      "objective": "Advance the 0-9 define the machine program through the durable objective named Workflow Outbox.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        4
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 6,
+      "title": "Platform Authority Schema",
+      "arc": "0-9 define the machine",
+      "objective": "Advance the 0-9 define the machine program through the durable objective named Platform Authority Schema.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        5
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 7,
+      "title": "Provider Route Health Budget",
+      "arc": "0-9 define the machine",
+      "objective": "Advance the 0-9 define the machine program through the durable objective named Provider Route Health Budget.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        6
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 8,
+      "title": "Workflow Class and Schedule Schema",
+      "arc": "0-9 define the machine",
+      "objective": "Advance the 0-9 define the machine program through the durable objective named Workflow Class and Schedule Schema.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        7
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 9,
+      "title": "Bug and Roadmap Authority",
+      "arc": "0-9 define the machine",
+      "objective": "Advance the 0-9 define the machine program through the durable objective named Bug and Roadmap Authority.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        8
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 10,
+      "title": "Operator Control Authority",
+      "arc": "10-19 durable state and retrieval",
+      "objective": "Advance the 10-19 durable state and retrieval program through the durable objective named Operator Control Authority.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        9
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 11,
+      "title": "Runtime Breadth Authority",
+      "arc": "10-19 durable state and retrieval",
+      "objective": "Advance the 10-19 durable state and retrieval program through the durable objective named Runtime Breadth Authority.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        10
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 12,
+      "title": "Execution Leases",
+      "arc": "10-19 durable state and retrieval",
+      "objective": "Advance the 10-19 durable state and retrieval program through the durable objective named Execution Leases.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        11
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 13,
+      "title": "Control Tables",
+      "arc": "10-19 durable state and retrieval",
+      "objective": "Advance the 10-19 durable state and retrieval program through the durable objective named Control Tables.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        12
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 14,
+      "title": "Search and Discovery Spine",
+      "arc": "10-19 durable state and retrieval",
+      "objective": "Advance the 10-19 durable state and retrieval program through the durable objective named Search and Discovery Spine.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        13
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 15,
+      "title": "Memory Graph",
+      "arc": "10-19 durable state and retrieval",
+      "objective": "Advance the 10-19 durable state and retrieval program through the durable objective named Memory Graph.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        14
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 16,
+      "title": "App Builder Registries",
+      "arc": "10-19 durable state and retrieval",
+      "objective": "Advance the 10-19 durable state and retrieval program through the durable objective named App Builder Registries.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        15
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 17,
+      "title": "Object System",
+      "arc": "10-19 durable state and retrieval",
+      "objective": "Advance the 10-19 durable state and retrieval program through the durable objective named Object System.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        16
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 18,
+      "title": "Module Embeddings",
+      "arc": "10-19 durable state and retrieval",
+      "objective": "Advance the 10-19 durable state and retrieval program through the durable objective named Module Embeddings.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        17
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 19,
+      "title": "Vector Expansion and Retrieval",
+      "arc": "10-19 durable state and retrieval",
+      "objective": "Advance the 10-19 durable state and retrieval program through the durable objective named Vector Expansion and Retrieval.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        18
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 20,
+      "title": "Integration Registry",
+      "arc": "20-29 unify execution and product surfaces",
+      "objective": "Advance the 20-29 unify execution and product surfaces program through the durable objective named Integration Registry.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        19
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 21,
+      "title": "Receipt Meta Telemetry",
+      "arc": "20-29 unify execution and product surfaces",
+      "objective": "Advance the 20-29 unify execution and product surfaces program through the durable objective named Receipt Meta Telemetry.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        20
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 22,
+      "title": "Sync Watermarks",
+      "arc": "20-29 unify execution and product surfaces",
+      "objective": "Advance the 20-29 unify execution and product surfaces program through the durable objective named Sync Watermarks.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        21
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 23,
+      "title": "Dispatch Notifications",
+      "arc": "20-29 unify execution and product surfaces",
+      "objective": "Advance the 20-29 unify execution and product surfaces program through the durable objective named Dispatch Notifications.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        22
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 24,
+      "title": "Authority Checkpoints",
+      "arc": "20-29 unify execution and product surfaces",
+      "objective": "Advance the 20-29 unify execution and product surfaces program through the durable objective named Authority Checkpoints.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        23
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 25,
+      "title": "Document Objects",
+      "arc": "20-29 unify execution and product surfaces",
+      "objective": "Advance the 20-29 unify execution and product surfaces program through the durable objective named Document Objects.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        24
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 26,
+      "title": "Model Execution",
+      "arc": "20-29 unify execution and product surfaces",
+      "objective": "Advance the 20-29 unify execution and product surfaces program through the durable objective named Model Execution.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        25
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 27,
+      "title": "Routing Failure Tracking",
+      "arc": "20-29 unify execution and product surfaces",
+      "objective": "Advance the 20-29 unify execution and product surfaces program through the durable objective named Routing Failure Tracking.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        26
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 28,
+      "title": "Conversations",
+      "arc": "20-29 unify execution and product surfaces",
+      "objective": "Advance the 20-29 unify execution and product surfaces program through the durable objective named Conversations.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        27
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 29,
+      "title": "Unified Workflow Jobs",
+      "arc": "20-29 unify execution and product surfaces",
+      "objective": "Advance the 20-29 unify execution and product surfaces program through the durable objective named Unified Workflow Jobs.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        28
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 30,
+      "title": "Invocation Contract",
+      "arc": "30-39 eventing references and reliability",
+      "objective": "Advance the 30-39 eventing references and reliability program through the durable objective named Invocation Contract.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        29
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 31,
+      "title": "Trigger and Event Substrate",
+      "arc": "30-39 eventing references and reliability",
+      "objective": "Advance the 30-39 eventing references and reliability program through the durable objective named Trigger and Event Substrate.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        30
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 32,
+      "title": "System Events Backbone",
+      "arc": "30-39 eventing references and reliability",
+      "objective": "Advance the 30-39 eventing references and reliability program through the durable objective named System Events Backbone.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        31
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 33,
+      "title": "File Storage Authority",
+      "arc": "30-39 eventing references and reliability",
+      "objective": "Advance the 30-39 eventing references and reliability program through the durable objective named File Storage Authority.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        32
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 34,
+      "title": "Reference Catalog",
+      "arc": "30-39 eventing references and reliability",
+      "objective": "Advance the 30-39 eventing references and reliability program through the durable objective named Reference Catalog.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        33
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 35,
+      "title": "Review and Capability Tables",
+      "arc": "30-39 eventing references and reliability",
+      "objective": "Advance the 30-39 eventing references and reliability program through the durable objective named Review and Capability Tables.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        34
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 36,
+      "title": "Event Emission Repair",
+      "arc": "30-39 eventing references and reliability",
+      "objective": "Advance the 30-39 eventing references and reliability program through the durable objective named Event Emission Repair.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        35
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 37,
+      "title": "Retention and Cleanup Foundation",
+      "arc": "30-39 eventing references and reliability",
+      "objective": "Advance the 30-39 eventing references and reliability program through the durable objective named Retention and Cleanup Foundation.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        36
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 38,
+      "title": "Idempotency Ledger",
+      "arc": "30-39 eventing references and reliability",
+      "objective": "Advance the 30-39 eventing references and reliability program through the durable objective named Idempotency Ledger.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        37
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 39,
+      "title": "Debate Metrics and Reflection",
+      "arc": "30-39 eventing references and reliability",
+      "objective": "Advance the 30-39 eventing references and reliability program through the durable objective named Debate Metrics and Reflection.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        38
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 40,
+      "title": "Control Commands",
+      "arc": "40-49 converge into one coherent workflow runtime",
+      "objective": "Advance the 40-49 converge into one coherent workflow runtime program through the durable objective named Control Commands.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        39
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 41,
+      "title": "Runtime Cutover",
+      "arc": "40-49 converge into one coherent workflow runtime",
+      "objective": "Advance the 40-49 converge into one coherent workflow runtime program through the durable objective named Runtime Cutover.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        40
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 42,
+      "title": "Workflow Control Types",
+      "arc": "40-49 converge into one coherent workflow runtime",
+      "objective": "Advance the 40-49 converge into one coherent workflow runtime program through the durable objective named Workflow Control Types.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        41
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 43,
+      "title": "Notification Sync Convergence",
+      "arc": "40-49 converge into one coherent workflow runtime",
+      "objective": "Advance the 40-49 converge into one coherent workflow runtime program through the durable objective named Notification Sync Convergence.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        42
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 44,
+      "title": "Route Profiles",
+      "arc": "40-49 converge into one coherent workflow runtime",
+      "objective": "Advance the 40-49 converge into one coherent workflow runtime program through the durable objective named Route Profiles.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        43
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 45,
+      "title": "Workflow Authority Rename",
+      "arc": "40-49 converge into one coherent workflow runtime",
+      "objective": "Advance the 40-49 converge into one coherent workflow runtime program through the durable objective named Workflow Authority Rename.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        44
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 46,
+      "title": "Provider Model Candidate Profiles",
+      "arc": "40-49 converge into one coherent workflow runtime",
+      "objective": "Advance the 40-49 converge into one coherent workflow runtime program through the durable objective named Provider Model Candidate Profiles.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        45
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 47,
+      "title": "Market Model Registry",
+      "arc": "40-49 converge into one coherent workflow runtime",
+      "objective": "Advance the 40-49 converge into one coherent workflow runtime program through the durable objective named Market Model Registry.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        46
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 48,
+      "title": "Task Route Health",
+      "arc": "40-49 converge into one coherent workflow runtime",
+      "objective": "Advance the 40-49 converge into one coherent workflow runtime program through the durable objective named Task Route Health.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        47
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 49,
+      "title": "Route Policy Registry",
+      "arc": "40-49 converge into one coherent workflow runtime",
+      "objective": "Advance the 40-49 converge into one coherent workflow runtime program through the durable objective named Route Policy Registry.",
+      "status": "historical_foundation",
+      "tier": "historical",
+      "predecessors": [
+        48
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "backlog_or_historical_mapping",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 50,
+      "title": "Authority Compiler Completion",
+      "arc": "50-59 build the builder",
+      "objective": "Finish the generated authority layer so manifest bootstrap readiness and drift enforcement come from one declared source.",
+      "status": "active_ready",
+      "tier": "tier2_phase_ready",
+      "predecessors": [
+        49
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "50.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 51,
+      "title": "Bootstrap Convergence",
+      "arc": "50-59 build the builder",
+      "objective": "Make empty-database bootstrap and partially bootstrapped repair converge through one canonical engine.",
+      "status": "phase_ready",
+      "tier": "tier2_phase_ready",
+      "predecessors": [
+        50
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "51.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 52,
+      "title": "Persistent Schema Owner Registry",
+      "arc": "50-59 build the builder",
+      "objective": "Declare a single named owner for each critical persistent table and eliminate ambiguous creation authority.",
+      "status": "phase_ready",
+      "tier": "tier2_phase_ready",
+      "predecessors": [
+        51
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "52.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 53,
+      "title": "Runtime Fail-Closed Schema Sweep",
+      "arc": "50-59 build the builder",
+      "objective": "Remove or block runtime DDL for persistent tables so runtime fails closed instead of self-healing schema.",
+      "status": "committed_queue",
+      "tier": "tier1_committed",
+      "predecessors": [
+        52
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "53.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 54,
+      "title": "Generated Contract Expansion",
+      "arc": "50-59 build the builder",
+      "objective": "Generate schema contract and readiness surfaces instead of hand-maintaining them across code and tests.",
+      "status": "committed_queue",
+      "tier": "tier1_committed",
+      "predecessors": [
+        53
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "54.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 55,
+      "title": "Migration Policy Closure",
+      "arc": "50-59 build the builder",
+      "objective": "Classify every numbered SQL file as canonical bootstrap_only deprecated or dead with no leftovers.",
+      "status": "committed_queue",
+      "tier": "tier1_committed",
+      "predecessors": [
+        54
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "55.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 56,
+      "title": "Fresh-Clone Proof Lane",
+      "arc": "50-59 build the builder",
+      "objective": "Prove a fresh clone can bootstrap and reach a usable system state from zero.",
+      "status": "committed_queue",
+      "tier": "tier1_committed",
+      "predecessors": [
+        55
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "56.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 57,
+      "title": "Upgrade-Path Proof Lane",
+      "arc": "50-59 build the builder",
+      "objective": "Prove older and partially bootstrapped developer states converge without manual recovery.",
+      "status": "committed_queue",
+      "tier": "tier1_committed",
+      "predecessors": [
+        56
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "57.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 58,
+      "title": "Builder Frontdoor Command",
+      "arc": "50-59 build the builder",
+      "objective": "Expose one builder frontdoor that regenerates authority validates drift and reports readiness.",
+      "status": "committed_queue",
+      "tier": "tier1_committed",
+      "predecessors": [
+        57
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "58.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 59,
+      "title": "Bootstrap Release Gate",
+      "arc": "50-59 build the builder",
+      "objective": "Make release promotion block on authority drift bootstrap proof and readiness proof.",
+      "status": "committed_queue",
+      "tier": "tier1_committed",
+      "predecessors": [
+        58
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "59.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 60,
+      "title": "Observability Authority Extraction",
+      "arc": "60-69 enforce authority boundaries across runtime",
+      "objective": "Route observability writes through owned authority surfaces instead of runtime direct SQL.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        59
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "60.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 61,
+      "title": "System Event Authority Extraction",
+      "arc": "60-69 enforce authority boundaries across runtime",
+      "objective": "Advance the 60-69 enforce authority boundaries across runtime program through the durable objective named System Event Authority Extraction.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        60
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "61.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 62,
+      "title": "Config Authority Hardening",
+      "arc": "60-69 enforce authority boundaries across runtime",
+      "objective": "Advance the 60-69 enforce authority boundaries across runtime program through the durable objective named Config Authority Hardening.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        61
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "62.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 63,
+      "title": "Capability Catalog Authority",
+      "arc": "60-69 enforce authority boundaries across runtime",
+      "objective": "Advance the 60-69 enforce authority boundaries across runtime program through the durable objective named Capability Catalog Authority.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        62
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "63.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 64,
+      "title": "Integration Registry Authority",
+      "arc": "60-69 enforce authority boundaries across runtime",
+      "objective": "Advance the 60-69 enforce authority boundaries across runtime program through the durable objective named Integration Registry Authority.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        63
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "64.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 65,
+      "title": "File Storage Authority Hardening",
+      "arc": "60-69 enforce authority boundaries across runtime",
+      "objective": "Advance the 60-69 enforce authority boundaries across runtime program through the durable objective named File Storage Authority Hardening.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        64
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "65.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 66,
+      "title": "Memory Graph Authority",
+      "arc": "60-69 enforce authority boundaries across runtime",
+      "objective": "Advance the 60-69 enforce authority boundaries across runtime program through the durable objective named Memory Graph Authority.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        65
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "66.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 67,
+      "title": "Debate and Friction Metrics Authority",
+      "arc": "60-69 enforce authority boundaries across runtime",
+      "objective": "Advance the 60-69 enforce authority boundaries across runtime program through the durable objective named Debate and Friction Metrics Authority.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        66
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "67.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 68,
+      "title": "Receipts and Artifacts Authority",
+      "arc": "60-69 enforce authority boundaries across runtime",
+      "objective": "Advance the 60-69 enforce authority boundaries across runtime program through the durable objective named Receipts and Artifacts Authority.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        67
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "68.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 69,
+      "title": "Authority Conformance Suite",
+      "arc": "60-69 enforce authority boundaries across runtime",
+      "objective": "Fail when runtime code bypasses declared table authorities.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        68
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "69.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 70,
+      "title": "Workflow Definition Compiler Freeze",
+      "arc": "70-79 make execution deterministic and replayable",
+      "objective": "Advance the 70-79 make execution deterministic and replayable program through the durable objective named Workflow Definition Compiler Freeze.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        69
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "70.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 71,
+      "title": "Chain Dependency Determinism",
+      "arc": "70-79 make execution deterministic and replayable",
+      "objective": "Advance the 70-79 make execution deterministic and replayable program through the durable objective named Chain Dependency Determinism.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        70
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "71.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 72,
+      "title": "Trigger and Subscription Determinism",
+      "arc": "70-79 make execution deterministic and replayable",
+      "objective": "Advance the 70-79 make execution deterministic and replayable program through the durable objective named Trigger and Subscription Determinism.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        71
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "72.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 73,
+      "title": "Idempotency Unification",
+      "arc": "70-79 make execution deterministic and replayable",
+      "objective": "Advance the 70-79 make execution deterministic and replayable program through the durable objective named Idempotency Unification.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        72
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "73.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 74,
+      "title": "Provenance and Evidence Spine",
+      "arc": "70-79 make execution deterministic and replayable",
+      "objective": "Advance the 70-79 make execution deterministic and replayable program through the durable objective named Provenance and Evidence Spine.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        73
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "74.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 75,
+      "title": "Replay and Rehydrate",
+      "arc": "70-79 make execution deterministic and replayable",
+      "objective": "Advance the 70-79 make execution deterministic and replayable program through the durable objective named Replay and Rehydrate.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        74
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "75.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 76,
+      "title": "Failure Classification Pipeline",
+      "arc": "70-79 make execution deterministic and replayable",
+      "objective": "Advance the 70-79 make execution deterministic and replayable program through the durable objective named Failure Classification Pipeline.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        75
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "76.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 77,
+      "title": "Retry and Circuit-Breaker Authority",
+      "arc": "70-79 make execution deterministic and replayable",
+      "objective": "Advance the 70-79 make execution deterministic and replayable program through the durable objective named Retry and Circuit-Breaker Authority.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        76
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "77.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 78,
+      "title": "Verification Orchestration Hardening",
+      "arc": "70-79 make execution deterministic and replayable",
+      "objective": "Advance the 70-79 make execution deterministic and replayable program through the durable objective named Verification Orchestration Hardening.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        77
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "78.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 79,
+      "title": "Run Recovery Integrity",
+      "arc": "70-79 make execution deterministic and replayable",
+      "objective": "Advance the 70-79 make execution deterministic and replayable program through the durable objective named Run Recovery Integrity.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        78
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "79.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 80,
+      "title": "Operator Read-Model Consolidation",
+      "arc": "80-89 make the operator and product surfaces trustworthy",
+      "objective": "Advance the 80-89 make the operator and product surfaces trustworthy program through the durable objective named Operator Read-Model Consolidation.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        79
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "80.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 81,
+      "title": "Dashboard Query Hardening",
+      "arc": "80-89 make the operator and product surfaces trustworthy",
+      "objective": "Advance the 80-89 make the operator and product surfaces trustworthy program through the durable objective named Dashboard Query Hardening.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        80
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "81.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 82,
+      "title": "Bug and Roadmap Evidence Loop",
+      "arc": "80-89 make the operator and product surfaces trustworthy",
+      "objective": "Advance the 80-89 make the operator and product surfaces trustworthy program through the durable objective named Bug and Roadmap Evidence Loop.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        81
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "82.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 83,
+      "title": "Operator Decision Provenance",
+      "arc": "80-89 make the operator and product surfaces trustworthy",
+      "objective": "Advance the 80-89 make the operator and product surfaces trustworthy program through the durable objective named Operator Decision Provenance.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        82
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "83.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 84,
+      "title": "Provider Onboarding Product Path",
+      "arc": "80-89 make the operator and product surfaces trustworthy",
+      "objective": "Advance the 80-89 make the operator and product surfaces trustworthy program through the durable objective named Provider Onboarding Product Path.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        83
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "84.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 85,
+      "title": "Model Catalog and Market Sync",
+      "arc": "80-89 make the operator and product surfaces trustworthy",
+      "objective": "Advance the 80-89 make the operator and product surfaces trustworthy program through the durable objective named Model Catalog and Market Sync.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        84
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "85.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 86,
+      "title": "Retrieval and Memory Product Surface",
+      "arc": "80-89 make the operator and product surfaces trustworthy",
+      "objective": "Advance the 80-89 make the operator and product surfaces trustworthy program through the durable objective named Retrieval and Memory Product Surface.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        85
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "86.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 87,
+      "title": "Conversation and Chat Authority",
+      "arc": "80-89 make the operator and product surfaces trustworthy",
+      "objective": "Advance the 80-89 make the operator and product surfaces trustworthy program through the durable objective named Conversation and Chat Authority.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        86
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "87.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 88,
+      "title": "Public Bootstrap UX and Docs",
+      "arc": "80-89 make the operator and product surfaces trustworthy",
+      "objective": "Advance the 80-89 make the operator and product surfaces trustworthy program through the durable objective named Public Bootstrap UX and Docs.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        87
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "88.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 89,
+      "title": "Release Candidate Hardening",
+      "arc": "80-89 make the operator and product surfaces trustworthy",
+      "objective": "Advance the 80-89 make the operator and product surfaces trustworthy program through the durable objective named Release Candidate Hardening.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        88
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "89.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 90,
+      "title": "Load Baseline and Performance Envelope",
+      "arc": "90-100 scale harden launch then self-host improvement",
+      "objective": "Advance the 90-100 scale harden launch then self-host improvement program through the durable objective named Load Baseline and Performance Envelope.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        89
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "90.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 91,
+      "title": "Concurrency and Lease Torture Testing",
+      "arc": "90-100 scale harden launch then self-host improvement",
+      "objective": "Advance the 90-100 scale harden launch then self-host improvement program through the durable objective named Concurrency and Lease Torture Testing.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        90
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "91.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 92,
+      "title": "Retention and Cleanup Governance",
+      "arc": "90-100 scale harden launch then self-host improvement",
+      "objective": "Advance the 90-100 scale harden launch then self-host improvement program through the durable objective named Retention and Cleanup Governance.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        91
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "92.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 93,
+      "title": "Backup, Restore, and Disaster Recovery",
+      "arc": "90-100 scale harden launch then self-host improvement",
+      "objective": "Advance the 90-100 scale harden launch then self-host improvement program through the durable objective named Backup, Restore, and Disaster Recovery.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        92
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "93.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 94,
+      "title": "Security and Credential Hardening",
+      "arc": "90-100 scale harden launch then self-host improvement",
+      "objective": "Advance the 90-100 scale harden launch then self-host improvement program through the durable objective named Security and Credential Hardening.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        93
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "94.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 95,
+      "title": "Multi-Instance Parity",
+      "arc": "90-100 scale harden launch then self-host improvement",
+      "objective": "Advance the 90-100 scale harden launch then self-host improvement program through the durable objective named Multi-Instance Parity.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        94
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "95.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 96,
+      "title": "Promotion Automation with Evidence",
+      "arc": "90-100 scale harden launch then self-host improvement",
+      "objective": "Advance the 90-100 scale harden launch then self-host improvement program through the durable objective named Promotion Automation with Evidence.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        95
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "96.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 97,
+      "title": "Public API and Contract Freeze",
+      "arc": "90-100 scale harden launch then self-host improvement",
+      "objective": "Advance the 90-100 scale harden launch then self-host improvement program through the durable objective named Public API and Contract Freeze.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        96
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "97.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 98,
+      "title": "External Contributor Workflow Hardening",
+      "arc": "90-100 scale harden launch then self-host improvement",
+      "objective": "Advance the 90-100 scale harden launch then self-host improvement program through the durable objective named External Contributor Workflow Hardening.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        97
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "98.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 99,
+      "title": "Launch Operations and Kill-Switches",
+      "arc": "90-100 scale harden launch then self-host improvement",
+      "objective": "Advance the 90-100 scale harden launch then self-host improvement program through the durable objective named Launch Operations and Kill-Switches.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        98
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "99.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    },
+    {
+      "phase": 100,
+      "title": "System-Builds-System v2",
+      "arc": "90-100 scale harden launch then self-host improvement",
+      "objective": "Make the system capable of planning generating validating and promoting bounded improvements with much less human orchestration.",
+      "status": "queued",
+      "tier": "tier1_committed",
+      "predecessors": [
+        99
+      ],
+      "inter_phase_protocol": {
+        "required_sequence": [
+          "review",
+          "healer",
+          "human_approval"
+        ],
+        "on_failure_route": "100.F",
+        "closeout_required": true
+      },
+      "phase_lifecycle": [
+        "P",
+        "0",
+        "1",
+        "2+",
+        "T",
+        "L",
+        "Y",
+        "F",
+        "I",
+        "Z"
+      ]
+    }
+  ]
+}

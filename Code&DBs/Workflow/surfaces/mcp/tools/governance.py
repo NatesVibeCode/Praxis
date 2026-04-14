@@ -52,10 +52,13 @@ def tool_praxis_heal(params: dict) -> dict:
     job_label = params.get("job_label", "")
     failure_code = params.get("failure_code", "")
     stderr = params.get("stderr", "")
-    if not job_label or not failure_code:
-        return {"error": "job_label and failure_code are required"}
+    if not job_label:
+        return {"error": "job_label is required"}
+    if not failure_code and not stderr:
+        return {"error": "failure_code or stderr is required"}
 
     healer = _subs.get_self_healer()
+    resolved_failure_code = healer.resolve_failure_code(failure_code, stderr)
     rec = healer.diagnose(job_label, failure_code, stderr)
     return {
         "action": rec.action.value,
@@ -63,6 +66,7 @@ def tool_praxis_heal(params: dict) -> dict:
         "confidence": round(rec.confidence, 3),
         "context_patches": list(rec.context_patches),
         "diagnostics_run": rec.diagnostics_run,
+        "resolved_failure_code": resolved_failure_code,
     }
 
 
@@ -112,19 +116,30 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "(transient error), escalate (needs human attention), skip (non-critical), or halt "
                 "(stop the pipeline).\n\n"
                 "USE WHEN: a workflow job failed and you need to decide what to do next. Pass the "
-                "job_label and failure_code from the receipt, plus stderr if available.\n\n"
+                "job_label plus failure_code from the receipt, stderr from the runner, or both.\n\n"
                 "EXAMPLE: praxis_heal(job_label='build_api', failure_code='EXEC_TIMEOUT', "
-                "stderr='Process killed after 120s')\n\n"
+                "stderr='Process killed after 120s')\n"
+                "EXAMPLE: praxis_heal(job_label='build_api', "
+                "stderr='failure_code must be a non-empty string')\n\n"
                 "DO NOT USE: for retrying a job (use praxis_workflow action='retry' after getting the recommendation)."
             ),
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "job_label": {"type": "string", "description": "The failed job label."},
-                    "failure_code": {"type": "string", "description": "Failure code from the receipt."},
-                    "stderr": {"type": "string", "description": "Stderr output from the failed job."},
+                    "failure_code": {
+                        "type": "string",
+                        "description": "Failure code from the receipt, if available.",
+                    },
+                    "stderr": {
+                        "type": "string",
+                        "description": (
+                            "Stderr output from the failed job; used to infer a stable failure code "
+                            "when the failure envelope is broken."
+                        ),
+                    },
                 },
-                "required": ["job_label", "failure_code"],
+                "required": ["job_label"],
             },
         },
     ),

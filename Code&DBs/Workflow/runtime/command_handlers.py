@@ -548,6 +548,8 @@ def render_control_command_response(
         status = "requeued"
     elif action in {"cancel", "kill_if_idle"}:
         status = "cancelled"
+    elif action == "repair":
+        status = "repaired"
     else:
         status = command_status
 

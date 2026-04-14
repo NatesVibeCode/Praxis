@@ -28,8 +28,10 @@ DiagnosticModule = _sh.DiagnosticModule
 EarlyTerminationDiagnostic = _sh.EarlyTerminationDiagnostic
 ScopeRecoveryDiagnostic = _sh.ScopeRecoveryDiagnostic
 DependencyDiagnostic = _sh.DependencyDiagnostic
+OrchestrationFailureDiagnostic = _sh.OrchestrationFailureDiagnostic
 HealingRecommendation = _sh.HealingRecommendation
 SelfHealingOrchestrator = _sh.SelfHealingOrchestrator
+normalize_failure_code = _sh.normalize_failure_code
 
 
 # ===================================================================
@@ -114,12 +116,36 @@ class TestDependencyDiagnostic:
         assert r.confidence <= 0.2
 
 
+class TestOrchestrationFailureDiagnostic:
+    def test_missing_failure_code_envelope_triggers_fix_and_retry(self):
+        diag = OrchestrationFailureDiagnostic()
+        r = diag.diagnose(
+            "phase_001",
+            "",
+            "TypeError: failure_code must be a non-empty string",
+        )
+        assert r.recommendation == RecoveryAction.FIX_AND_RETRY
+        assert r.confidence >= 0.9
+        assert r.context_patch is not None
+
+
+class TestFailureCodeNormalization:
+    def test_infers_failure_code_from_stderr(self):
+        assert (
+            normalize_failure_code(
+                "",
+                "TypeError: failure_code must be a non-empty string",
+            )
+            == "orchestration.failure_code_missing"
+        )
+
+
 class TestSelfHealingOrchestrator:
     def test_default_diagnostics(self):
         orch = SelfHealingOrchestrator()
         rec = orch.diagnose("j", "E", "something happened")
         assert isinstance(rec, HealingRecommendation)
-        assert rec.diagnostics_run == 3
+        assert rec.diagnostics_run == 4
 
     def test_picks_highest_confidence(self):
         orch = SelfHealingOrchestrator()
@@ -138,3 +164,13 @@ class TestSelfHealingOrchestrator:
         orch = SelfHealingOrchestrator()
         rec = orch.diagnose("j", "E", "scope path not found")
         assert len(rec.context_patches) >= 1
+
+    def test_resolves_failure_code_before_running_diagnostics(self):
+        orch = SelfHealingOrchestrator()
+        rec = orch.diagnose(
+            "phase_008",
+            "",
+            "TypeError: failure_code must be a non-empty string",
+        )
+        assert rec.action == RecoveryAction.FIX_AND_RETRY
+        assert "terminal failure envelope" in rec.reason.lower()

@@ -124,6 +124,18 @@ function branchLabel(reason: string | null | undefined): string | undefined {
     .join(' ');
 }
 
+function branchSideScore(edge: BuildEdge): number {
+  const raw = edge as any;
+  const side = typeof raw.gate?.config?.branch_side === 'string'
+    ? raw.gate.config.branch_side.trim().toLowerCase()
+    : '';
+  if (side === 'above') return -1;
+  if (side === 'below') return 1;
+  if (edge.branch_reason === 'then') return -1;
+  if (edge.branch_reason === 'else') return 1;
+  return 0;
+}
+
 // --- Helpers ---
 
 function nodeToGlyph(node: BuildNode): GlyphType {
@@ -249,6 +261,11 @@ export function extractLayout(payload: BuildPayload): GraphLayout {
     radj.get(e.to_node_id)?.push(e.from_node_id);
     inDeg.set(e.to_node_id, (inDeg.get(e.to_node_id) || 0) + 1);
   }
+  const branchBiasByNode = new Map<string, number>();
+  for (const edge of edges) {
+    const score = branchSideScore(edge);
+    if (score !== 0) branchBiasByNode.set(edge.to_node_id, score);
+  }
 
   // Assign rank = longest path from any root
   const rank = new Map<string, number>();
@@ -283,7 +300,11 @@ export function extractLayout(payload: BuildPayload): GraphLayout {
         const pb = radj.get(b) || [];
         const ax = pa.length ? pa.reduce((s, p) => s + (positions.get(p)?.x || 0), 0) / pa.length : 0;
         const bx = pb.length ? pb.reduce((s, p) => s + (positions.get(p)?.x || 0), 0) / pb.length : 0;
-        return ax - bx;
+        if (ax !== bx) return ax - bx;
+        const aBias = branchBiasByNode.get(a) || 0;
+        const bBias = branchBiasByNode.get(b) || 0;
+        if (aBias !== bBias) return aBias - bBias;
+        return a.localeCompare(b);
       });
     }
     const ox = -(ids.length - 1) * COLUMN_SPACING / 2;

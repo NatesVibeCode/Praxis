@@ -1188,7 +1188,18 @@ def load_agent_route_catalog(conn: Any | None) -> dict[str, dict[str, Any]]:
 
     registry = AgentRegistry.load_from_postgres(conn)
     catalog: dict[str, dict[str, Any]] = {}
-    for route_slug in ("auto/high", "auto/reasoning", "auto/research", "auto/build", "auto/review", "auto/instant"):
+    for route_slug in (
+        "auto/high",
+        "auto/reasoning",
+        "auto/research",
+        "auto/build",
+        "auto/review",
+        "auto/instant",
+        "auto/chat",
+        "auto/support",
+        "auto/draft",
+        "auto/classify",
+    ):
         agent = registry.get(route_slug)
         if agent is None:
             continue

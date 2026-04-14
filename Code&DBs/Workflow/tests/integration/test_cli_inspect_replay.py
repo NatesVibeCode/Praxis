@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 from dataclasses import dataclass, field
 from io import StringIO
 
@@ -83,3 +84,27 @@ def test_cli_replay_frontdoor_accepts_runtime_alias_for_service() -> None:
     assert "run_id: run.replay" in rendered
     assert "dependency_order: node_0, node_1" in rendered
     assert "terminal_reason: runtime.workflow_succeeded" in rendered
+
+
+def test_cli_inspect_frontdoor_self_wires_default_observability_service(monkeypatch) -> None:
+    service = _StubInspectReplayService()
+    stdout = StringIO()
+    helper_calls: list[dict[str, str]] = []
+    cli_main_module = importlib.import_module("surfaces.cli.main")
+
+    def _fake_builder(*, env):
+        helper_calls.append(dict(env or {}))
+        return service
+
+    monkeypatch.setattr(cli_main_module, "_build_default_observability_service", _fake_builder)
+
+    exit_code = main(
+        ["inspect", "run.default"],
+        env={"WORKFLOW_DATABASE_URL": "postgresql://example/praxis"},
+        stdout=stdout,
+    )
+
+    assert exit_code == 0
+    assert helper_calls == [{"WORKFLOW_DATABASE_URL": "postgresql://example/praxis"}]
+    assert service.inspect_calls == ["run.default"]
+    assert "kind: inspection" in stdout.getvalue()

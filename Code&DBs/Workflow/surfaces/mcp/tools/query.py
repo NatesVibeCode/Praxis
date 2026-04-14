@@ -156,7 +156,7 @@ def tool_praxis_query(params: dict) -> dict:
 
     if _matches(question, ["classify", "failure type", "retryab"]):
         return {"routed_to": "failure_classifier",
-                "message": "Use praxis_heal to classify a failure. Provide job_label + failure_code + stderr."}
+                "message": "Use praxis_heal to classify a failure. Provide job_label plus failure_code and/or stderr."}
 
     if _matches(question, ["calibrat", "tuned param", "auto-tune"]):
         try:

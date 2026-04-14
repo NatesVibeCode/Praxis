@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { useLiveRunSnapshot } from '../dashboard/useLiveRunSnapshot';
 import type { RunJob, RunStatus, RecentRun, RunDetail } from '../dashboard/useLiveRunSnapshot';
 import { triggerWorkflow } from '../shared/buildController';
+import { RunGraphView } from '../shared/RunGraphView';
 
 interface Props {
   runId: string;
@@ -68,7 +69,7 @@ export function MoonRunPanel({ runId, workflowId, onClose, onSwitchRun }: Props)
   // Load run history for this workflow
   useEffect(() => {
     if (!workflowId) return;
-    fetch(`/api/workflow/runs/recent?limit=10`)
+    fetch(`/api/runs/recent?limit=10`)
       .then(r => r.json())
       .then((runs: RecentRun[]) => {
         setHistory(runs.filter(r => r.run_id !== runId).slice(0, 5));
@@ -81,7 +82,7 @@ export function MoonRunPanel({ runId, workflowId, onClose, onSwitchRun }: Props)
       return undefined;
     }
 
-    const es = new EventSource(`/api/workflow/runs/${encodeURIComponent(runId)}/stream`);
+    const es = new EventSource(`/api/workflow-runs/${encodeURIComponent(runId)}/stream`);
     es.onmessage = (event) => {
       let data: RunStreamEvent;
       try {
@@ -150,13 +151,21 @@ export function MoonRunPanel({ runId, workflowId, onClose, onSwitchRun }: Props)
     setExpandedJob(job.id);
     setJobOutput(null);
     try {
-      const resp = await fetch(`/api/workflow/runs/${encodeURIComponent(runId)}/jobs/${job.id}`);
+      const resp = await fetch(`/api/runs/${encodeURIComponent(runId)}/jobs/${job.id}`);
       if (resp.ok) {
         const data = await resp.json();
         setJobOutput(data.output || data.stdout_preview || 'No output');
       }
     } catch { /* ignore */ }
   }, [runId, expandedJob]);
+
+  const handleGraphSelect = useCallback((label: string) => {
+    const job = liveRun?.jobs.find((candidate) => candidate.label === label);
+    if (!job) {
+      return;
+    }
+    void handleJobClick(job);
+  }, [handleJobClick, liveRun]);
 
   const statusColor = liveRun ? STATUS_DOT[liveRun.status] || '#484f58' : '#484f58';
 
@@ -187,6 +196,13 @@ export function MoonRunPanel({ runId, workflowId, onClose, onSwitchRun }: Props)
             {liveRun.total_cost > 0 && <span> &middot; ${liveRun.total_cost.toFixed(4)}</span>}
             {liveRun.finished_at && <span> &middot; done</span>}
           </div>
+
+          {liveRun.graph && liveRun.graph.nodes?.length > 0 && (
+            <div className="moon-run__graph">
+              <div className="moon-dock__section-label">Dependency graph</div>
+              <RunGraphView graph={liveRun.graph} onSelectJob={handleGraphSelect} />
+            </div>
+          )}
 
           <div className="moon-run__jobs">
             {liveRun.jobs.map((job: RunJob) => (

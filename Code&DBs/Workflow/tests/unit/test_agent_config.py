@@ -139,6 +139,32 @@ class _FakeConn:
                     "latency_rank": 2,
                     "updated_at": "2026-04-08T00:00:00Z",
                 },
+                {
+                    "task_type": "chat",
+                    "provider_slug": "openai",
+                    "model_slug": "gpt-5.4-mini",
+                    "rank": 1,
+                    "benchmark_score": 74.0,
+                    "cost_per_m_tokens": 4.5,
+                    "route_tier": "medium",
+                    "route_tier_rank": 1,
+                    "latency_class": "instant",
+                    "latency_rank": 1,
+                    "updated_at": "2026-04-08T00:00:00Z",
+                },
+                {
+                    "task_type": "support",
+                    "provider_slug": "anthropic",
+                    "model_slug": "claude-sonnet-4-6",
+                    "rank": 1,
+                    "benchmark_score": 80.0,
+                    "cost_per_m_tokens": 9.0,
+                    "route_tier": "medium",
+                    "route_tier_rank": 2,
+                    "latency_class": "reasoning",
+                    "latency_rank": 2,
+                    "updated_at": "2026-04-08T00:00:00Z",
+                },
             ]
         raise AssertionError(f"Unexpected SQL: {sql}")
 
@@ -252,6 +278,8 @@ class TestGetBySlug:
         medium = reg.get("auto/medium")
         reasoning = reg.get("auto/reasoning")
         instant = reg.get("auto/instant")
+        draft = reg.get("auto/draft")
+        classify = reg.get("auto/classify")
 
         assert build is not None
         assert build.wrapper_command is not None
@@ -267,6 +295,12 @@ class TestGetBySlug:
         assert reasoning.provider == "openai"
         assert instant is not None
         assert instant.provider == "openai"
+        assert draft is not None
+        assert draft.provider == "openai"
+        assert draft.model == "gpt-5.4-mini"
+        assert classify is not None
+        assert classify.provider == "anthropic"
+        assert classify.model == "claude-sonnet-4-6"
 
     def test_load_from_postgres_falls_back_when_context_window_missing(
         self,

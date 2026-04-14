@@ -32,6 +32,7 @@ from .commands.workflow import (
     _pipeline_command,
     _proof_command,
     _queue_command,
+    _repair_command,
     _retry_command,
     _run_status_command,
     _run_command,
@@ -156,6 +157,66 @@ class StdoutCommandHandler(Protocol):
         """Execute the command with stdout sink."""
 
 
+class _PostgresObservabilityService:
+    """Default repo-local observability composition for CLI frontdoor commands."""
+
+    def __init__(self, *, env: Mapping[str, str] | None) -> None:
+        self._env = env
+
+    def _evidence_reader(self):
+        from storage.postgres import PostgresEvidenceReader
+
+        return PostgresEvidenceReader(env=self._env)
+
+    def inspect_run(self, *, run_id: str) -> InspectionReadModel:
+        from runtime.execution.orchestrator import RuntimeOrchestrator
+
+        return RuntimeOrchestrator(
+            evidence_reader=self._evidence_reader(),
+        ).inspect_run(run_id=run_id)
+
+    def replay_run(self, *, run_id: str) -> ReplayReadModel:
+        from runtime.execution.orchestrator import RuntimeOrchestrator
+
+        return RuntimeOrchestrator(
+            evidence_reader=self._evidence_reader(),
+        ).replay_run(run_id=run_id)
+
+    def graph_topology_run(self, *, run_id: str) -> GraphTopologyReadModel:
+        from observability import graph_topology_run
+        from surfaces.api import frontdoor
+
+        frontdoor.status(run_id=run_id, env=self._env)
+        reader = self._evidence_reader()
+        return graph_topology_run(
+            run_id=run_id,
+            canonical_evidence=reader.evidence_timeline(run_id),
+        )
+
+    def graph_lineage_run(self, *, run_id: str) -> GraphLineageReadModel:
+        from observability import graph_lineage_run
+        from surfaces.api import frontdoor
+
+        frontdoor.status(run_id=run_id, env=self._env)
+        reader = self._evidence_reader()
+        inspection = self.inspect_run(run_id=run_id)
+        return graph_lineage_run(
+            run_id=run_id,
+            canonical_evidence=reader.evidence_timeline(run_id),
+            operator_frame_source=inspection.operator_frame_source,
+            operator_frames=inspection.operator_frames,
+        )
+
+
+def _build_default_observability_service(
+    *,
+    env: Mapping[str, str] | None,
+) -> _PostgresObservabilityService:
+    """Bind repo-local Postgres-backed read models for inspect/replay/graph commands."""
+
+    return _PostgresObservabilityService(env=env)
+
+
 def _delegate_legacy_workflow_cli(
     command_name: str,
     args: list[str],
@@ -226,6 +287,7 @@ _ARG_COMMANDS: dict[str, ArgsCommandHandler] = {
     "stream": lambda args, *, stdout: _delegate_legacy_workflow_cli("stream", args, stdout=stdout),
     "chain-status": lambda args, *, stdout: _delegate_legacy_workflow_cli("chain-status", args, stdout=stdout),
     "triggers": _triggers_command,
+    "repair": _repair_command,
 }
 
 _STDOUT_COMMANDS: dict[str, StdoutCommandHandler] = {
@@ -238,7 +300,7 @@ _STDOUT_COMMANDS: dict[str, StdoutCommandHandler] = {
 
 
 def _usage() -> str:
-    return "usage: workflow <tools|query|architecture|bugs|recall|discover|artifacts|health|run|run-status|status|costs|receipts|leaderboard|trust|fitness|scope|risk|reviews|diagnose|inspect-job|heal|verify|debate|runs|manifest|triggers|retry|cancel|active|circuits|slots|inspect|replay|graph-topology|graph-lineage|...> <args>"
+    return "usage: workflow <tools|query|architecture|bugs|recall|discover|artifacts|health|run|run-status|status|costs|receipts|leaderboard|trust|fitness|scope|risk|reviews|diagnose|inspect-job|heal|verify|debate|runs|manifest|triggers|retry|repair|cancel|active|circuits|slots|inspect|replay|graph-topology|graph-lineage|...> <args>"
 
 
 def _parse(
@@ -331,6 +393,8 @@ def main(
     service = inspect_replay_service or runtime_orchestrator
     if isinstance(command, (GraphTopologyCommand, GraphLineageCommand)):
         service = _resolve_graph_service(service, graph_service, observability_service)
+    if service is None:
+        service = _build_default_observability_service(env=env)
     if service is None:
         if isinstance(command, (GraphTopologyCommand, GraphLineageCommand)):
             raise RuntimeError("cli frontdoor requires a graph service")

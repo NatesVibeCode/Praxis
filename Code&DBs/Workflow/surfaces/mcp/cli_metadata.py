@@ -201,6 +201,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         risks={"default": "read"},
         examples=[
             _example("Classify a failure", {"job_label": "build", "failure_code": "sandbox.timeout", "stderr": "command timed out"}),
+            _example("Infer a missing failure code from stderr", {"job_label": "build", "stderr": "failure_code must be a non-empty string"}),
         ],
     ),
     "praxis_health": _tool(

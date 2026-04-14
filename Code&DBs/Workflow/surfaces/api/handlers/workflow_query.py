@@ -45,6 +45,7 @@ from runtime.integrations.display_names import (
     base_integration_name,
     display_name_for_integration,
 )
+from surfaces.api.catalog_authority import build_catalog_payload
 from . import workflow_query_core as _workflow_query_core
 from ._shared import (
     REPO_ROOT,
@@ -1846,100 +1847,11 @@ def _handle_integrations_get(request: Any, path: str) -> None:
         request._send_json(500, {"error": str(exc)})
 
 
-_KIND_TO_FAMILY = {"task": "think", "memory": "gather", "fanout": "think", "cli": "gather", "integration": "act"}
-_KIND_TO_ICON = {"task": "classify", "memory": "research", "fanout": "classify", "cli": "research", "integration": "tool"}
-
-_STATIC_TRIGGER_ITEMS = [
-    {"id": "trigger-manual", "label": "Manual", "icon": "trigger", "family": "trigger", "status": "ready", "dropKind": "node", "actionValue": "trigger", "description": "User-initiated"},
-    {"id": "trigger-webhook", "label": "Webhook", "icon": "tool", "family": "trigger", "status": "ready", "dropKind": "node", "actionValue": "trigger/webhook", "description": "HTTP callback"},
-    {"id": "trigger-schedule", "label": "Schedule", "icon": "trigger", "family": "trigger", "status": "ready", "dropKind": "node", "actionValue": "trigger/schedule", "description": "Cron or interval"},
-    {"id": "trigger-email", "label": "Email Trigger", "icon": "trigger", "family": "trigger", "status": "coming_soon", "dropKind": "node", "actionValue": "trigger/email", "description": "On email received"},
-]
-
-_STATIC_CONTROL_ITEMS = [
-    {"id": "ctrl-approval", "label": "Approval", "icon": "gate", "family": "control", "status": "ready", "dropKind": "edge", "gateFamily": "approval", "description": "Human approval"},
-    {"id": "ctrl-review", "label": "Human Review", "icon": "review", "family": "control", "status": "ready", "dropKind": "edge", "gateFamily": "human_review", "description": "Manual review"},
-    {"id": "ctrl-validation", "label": "Validation", "icon": "gate", "family": "control", "status": "ready", "dropKind": "edge", "gateFamily": "validation", "description": "Automated check"},
-    {"id": "ctrl-branch", "label": "Branch", "icon": "gate", "family": "control", "status": "coming_soon", "dropKind": "edge", "gateFamily": "branch", "description": "Conditional path"},
-]
-
-
 def _handle_catalog_get(request: Any, path: str) -> None:
     """Return live catalog items from platform registries + static primitives."""
-    _t = lambda v: str(v) if v is not None else ""
     try:
         pg = request.subsystems.get_pg_conn()
-        items: list[dict[str, Any]] = list(_STATIC_TRIGGER_ITEMS) + list(_STATIC_CONTROL_ITEMS)
-        sources = {"static": len(items), "capabilities": 0, "integrations": 0}
-
-        # Capabilities
-        try:
-            cap_rows = pg.execute(
-                "SELECT capability_ref, capability_slug, capability_kind, title, summary, description, route "
-                "FROM capability_catalog WHERE enabled = TRUE ORDER BY capability_kind, title"
-            )
-            for row in cap_rows or []:
-                kind = _t(row.get("capability_kind")) or "task"
-                slug = _t(row.get("capability_slug")) or ""
-                items.append({
-                    "id": f"cap-{slug.replace('/', '-')}",
-                    "label": _t(row.get("title")) or slug,
-                    "icon": _KIND_TO_ICON.get(kind, "classify"),
-                    "family": _KIND_TO_FAMILY.get(kind, "think"),
-                    "status": "ready",
-                    "dropKind": "node",
-                    "actionValue": _t(row.get("route")) or f"auto/{slug}",
-                    "description": _t(row.get("summary")) or "",
-                    "source": "capability",
-                })
-                sources["capabilities"] += 1
-        except Exception:
-            pass
-
-        # Integrations
-        try:
-            int_rows = pg.execute(
-                "SELECT id, name, description, provider, capabilities, auth_status, icon FROM integration_registry ORDER BY name"
-            )
-            for row in int_rows or []:
-                iid = _t(row.get("id")) or ""
-                name = display_name_for_integration(row)
-                auth = _t(row.get("auth_status")) or "unknown"
-                caps = row.get("capabilities")
-                if isinstance(caps, str):
-                    try:
-                        caps = json.loads(caps)
-                    except Exception:
-                        caps = []
-                caps = caps or []
-                if not caps:
-                    items.append({
-                        "id": f"int-{iid}", "label": name, "icon": _t(row.get("icon")) or "tool",
-                        "family": "act", "status": "ready" if auth == "connected" else "coming_soon",
-                        "dropKind": "node", "actionValue": f"@{iid}",
-                        "description": _t(row.get("description")) or f"Use {name}",
-                        "source": "integration", "connectionStatus": auth,
-                    })
-                    sources["integrations"] += 1
-                else:
-                    for cap in caps:
-                        action = _t(cap.get("action")) if isinstance(cap, dict) else _t(cap)
-                        cap_desc = _t(cap.get("description")) if isinstance(cap, dict) else ""
-                        items.append({
-                            "id": f"int-{iid}-{action}".replace(" ", "-").lower() if action else f"int-{iid}",
-                            "label": f"{name}: {action}" if action else name,
-                            "icon": _t(row.get("icon")) or "tool",
-                            "family": "act", "status": "ready" if auth == "connected" else "coming_soon",
-                            "dropKind": "node",
-                            "actionValue": f"@{iid}/{action}" if action else f"@{iid}",
-                            "description": cap_desc or _t(row.get("description")) or "",
-                            "source": "integration", "connectionStatus": auth,
-                        })
-                        sources["integrations"] += 1
-        except Exception:
-            pass
-
-        request._send_json(200, {"items": items, "sources": sources})
+        request._send_json(200, build_catalog_payload(pg))
     except Exception as exc:
         request._send_json(500, {"error": str(exc)})
 

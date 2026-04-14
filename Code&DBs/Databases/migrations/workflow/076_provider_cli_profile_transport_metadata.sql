@@ -1,5 +1,90 @@
 BEGIN;
 
+CREATE TABLE IF NOT EXISTS provider_cli_profiles (
+    provider_slug TEXT PRIMARY KEY,
+    binary_name TEXT NOT NULL,
+    base_flags JSONB NOT NULL DEFAULT '[]'::jsonb,
+    model_flag TEXT,
+    system_prompt_flag TEXT,
+    json_schema_flag TEXT,
+    output_format TEXT NOT NULL DEFAULT 'json',
+    output_envelope_key TEXT NOT NULL DEFAULT 'result',
+    forbidden_flags JSONB NOT NULL DEFAULT '[]'::jsonb,
+    default_timeout INT NOT NULL DEFAULT 300,
+    aliases JSONB NOT NULL DEFAULT '[]'::jsonb,
+    status TEXT NOT NULL DEFAULT 'active',
+    default_model TEXT,
+    api_endpoint TEXT,
+    api_protocol_family TEXT,
+    api_key_env_vars JSONB NOT NULL DEFAULT '[]'::jsonb,
+    adapter_economics JSONB NOT NULL DEFAULT '{}'::jsonb,
+    prompt_mode TEXT NOT NULL DEFAULT 'stdin',
+    mcp_config_style TEXT,
+    mcp_args_template JSONB,
+    sandbox_env_overrides JSONB NOT NULL DEFAULT '{}'::jsonb,
+    exclude_from_rotation BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+INSERT INTO provider_cli_profiles (
+    provider_slug,
+    binary_name,
+    base_flags,
+    model_flag,
+    system_prompt_flag,
+    json_schema_flag,
+    output_format,
+    output_envelope_key,
+    forbidden_flags,
+    default_timeout,
+    aliases,
+    status
+) VALUES
+(
+    'anthropic',
+    'claude',
+    '["-p","--output-format","json"]'::jsonb,
+    '--model',
+    '--system-prompt',
+    '--json-schema',
+    'json',
+    'result',
+    '["--dangerously-skip-permissions","--allow-dangerously-skip-permissions","--add-dir"]'::jsonb,
+    300,
+    '[]'::jsonb,
+    'active'
+),
+(
+    'openai',
+    'codex',
+    '["exec","-","--json"]'::jsonb,
+    '--model',
+    NULL,
+    NULL,
+    'ndjson',
+    'text',
+    '["--full-auto"]'::jsonb,
+    300,
+    '[]'::jsonb,
+    'active'
+),
+(
+    'google',
+    'gemini',
+    '["-p",".","-o","json"]'::jsonb,
+    '--model',
+    NULL,
+    NULL,
+    'json',
+    'response',
+    '["--approval-mode","--yolo","-y"]'::jsonb,
+    600,
+    '["gemini-cli"]'::jsonb,
+    'active'
+)
+ON CONFLICT (provider_slug) DO NOTHING;
+
 ALTER TABLE provider_cli_profiles
     ADD COLUMN IF NOT EXISTS default_model TEXT,
     ADD COLUMN IF NOT EXISTS api_endpoint TEXT,

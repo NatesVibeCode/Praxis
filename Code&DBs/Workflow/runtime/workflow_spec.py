@@ -41,11 +41,13 @@ _AUTHORING_OPTIONAL_SPEC = frozenset({
     "anti_requirements", "verify_refs",
     # Single-job shorthand fields (promote to spec level)
     "agent", "tier", "capabilities", "allowed_tools", "context_sections", "submission_required",
+    "prefer_cost",
 })
 _AUTHORING_JOB_FIELDS = frozenset({
     "task_type", "authoring_contract", "acceptance_contract", "sprint",
     "agent", "tier", "capabilities", "replicate", "replicate_with",
     "allowed_tools", "verify_refs", "context_sections", "submission_required",
+    "prefer_cost",
 })
 # Fields removed from authoring — rejected with clear messages
 _REMOVED_AUTHORING_FIELDS = frozenset({
@@ -146,7 +148,7 @@ class WorkflowSpec:
             jobs = [{}]
             # Promote single-job shorthand fields from spec level
             for field in ("agent", "tier", "capabilities", "allowed_tools",
-                          "context_sections", "submission_required"):
+                          "context_sections", "submission_required", "prefer_cost"):
                 if field in normalized:
                     jobs[0][field] = normalized[field]
 
@@ -199,6 +201,8 @@ class WorkflowSpec:
             # Defaults
             job["task_type"] = job_task_type
             job.setdefault("agent", normalized.get("agent", "auto/build"))
+            if "prefer_cost" not in job and "prefer_cost" in normalized:
+                job["prefer_cost"] = normalized["prefer_cost"]
             if "system_prompt" not in job and job_profile.system_prompt_hint:
                 job["system_prompt"] = job_profile.system_prompt_hint
 
@@ -404,11 +408,16 @@ def validate_authoring_spec(raw: dict[str, Any]) -> tuple[bool, list[str]]:
                     errors.append(f"jobs[{i}].{key}: removed from authoring schema (auto-derived at runtime)")
                 for key in sorted(unknown_job - removed_job):
                     errors.append(f"jobs[{i}]: unknown field '{key}'")
+                if "prefer_cost" in job and job["prefer_cost"] is not None and not isinstance(job["prefer_cost"], bool):
+                    errors.append(f"jobs[{i}].prefer_cost must be a boolean or null")
 
     # Reject removed fields at spec level
     removed_at_spec = set(raw.keys()) & _REMOVED_AUTHORING_FIELDS
     for key in sorted(removed_at_spec):
         errors.append(f"'{key}' is removed from the authoring schema (auto-derived at runtime)")
+
+    if "prefer_cost" in raw and raw["prefer_cost"] is not None and not isinstance(raw["prefer_cost"], bool):
+        errors.append("prefer_cost must be a boolean or null")
 
     return len(errors) == 0, errors
 
@@ -642,6 +651,7 @@ _SPEC_FIELD_NAMES = {
     "capabilities",
     "use_cache",
     "task_type",
+    "prefer_cost",
     "submission_required",
     "skip_auto_review",
     "reviews_workflow_id",
@@ -887,6 +897,9 @@ def validate_workflow_spec(raw: dict[str, Any]) -> tuple[bool, list[str]]:
     if "task_type" in raw and raw["task_type"] is not None and not isinstance(raw["task_type"], str):
         errors.append("task_type must be a string or null")
 
+    if "prefer_cost" in raw and raw["prefer_cost"] is not None and not isinstance(raw["prefer_cost"], bool):
+        errors.append("prefer_cost must be a boolean or null")
+
     if "submission_required" in raw and raw["submission_required"] is not None and not isinstance(raw["submission_required"], bool):
         errors.append("submission_required must be a boolean or null")
 
@@ -975,6 +988,7 @@ def _raw_to_runtime_workflow_spec(raw: dict[str, Any]) -> "RuntimeWorkflowSpec":
         use_cache=bool(raw.get("use_cache", False)),
         capabilities=raw.get("capabilities"),
         task_type=raw.get("task_type"),
+        prefer_cost=bool(raw.get("prefer_cost", False)),
         submission_required=raw.get("submission_required"),
         skip_auto_review=bool(raw.get("skip_auto_review", False)),
         reviews_workflow_id=raw.get("reviews_workflow_id"),

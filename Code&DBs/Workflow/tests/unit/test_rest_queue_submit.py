@@ -58,6 +58,7 @@ def test_spec_from_request_preserves_shadow_packet_fields() -> None:
         prompt="Draft the support report",
         label="Queue Report",
         task_type="build",
+        prefer_cost=True,
         verify_refs=["verify_ref.python.py_compile.test"],
         definition_revision="def_alpha",
         plan_revision="plan_alpha",
@@ -81,6 +82,7 @@ def test_spec_from_request_preserves_shadow_packet_fields() -> None:
         spec = rest._spec_from_request(req)
 
     assert spec.verify_refs == ["verify_ref.python.py_compile.test"]
+    assert spec.prefer_cost is True
     assert spec.definition_revision == "def_alpha"
     assert spec.plan_revision == "plan_alpha"
     assert spec.packet_provenance == {

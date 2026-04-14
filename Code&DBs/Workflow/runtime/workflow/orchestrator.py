@@ -110,6 +110,7 @@ class WorkflowSpec:
     capabilities: list[str] | None = None  # capability-based routing (overrides tier)
     use_cache: bool = False  # Enable result caching (content-addressed)
     task_type: str | None = None  # task type for profile-based tool/tier routing
+    prefer_cost: bool = False  # explicit routing hint to favor cheaper admitted models
     submission_required: bool | None = None  # explicit override for sealed submission enforcement
     skip_auto_review: bool = False  # If True, skip auto-review even if warranted (prevents review-of-review loops)
     reviews_workflow_id: str | None = None  # run_id of the workflow being reviewed

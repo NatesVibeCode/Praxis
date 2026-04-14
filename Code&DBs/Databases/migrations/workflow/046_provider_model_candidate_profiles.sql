@@ -1,4 +1,5 @@
 ALTER TABLE provider_model_candidates
+    ADD COLUMN IF NOT EXISTS cli_config jsonb NOT NULL DEFAULT '{}'::jsonb,
     ADD COLUMN IF NOT EXISTS route_tier text,
     ADD COLUMN IF NOT EXISTS route_tier_rank integer,
     ADD COLUMN IF NOT EXISTS latency_class text,
@@ -116,18 +117,91 @@ WITH profile_rows AS (
         ('openai', 'gpt-5.4-mini', 'medium', 1, 'instant', 2, '{"default":"medium","kind":"openai_reasoning_effort","supported_values":["low","medium","high","xhigh"]}'::jsonb, '{"avoid":[],"primary":["build","wiring","subagents","computer-use"],"secondary":["review","chat","analysis"],"specialized":[]}'::jsonb, '{"benchmark_notes":["Official release positions GPT-5.4-mini as the strongest mini in the family.","Treat as a high-competence instant model, not a low-effort equivalent of full GPT-5.4."],"evidence_level":"vendor_plus_secondary","positioning":"OpenAI''s strongest mini model for coding, computer use, and subagents.","source_refs":["openai_gpt54_mini_release","openai_all","aa_home","aa_api"]}'::jsonb, '["mid","instant","build","wiring","subagents","computer-use","review","chat","analysis"]'::jsonb)
     ) AS p(provider_slug, model_slug, route_tier, route_tier_rank, latency_class, latency_rank, reasoning_control, task_affinities, benchmark_profile, capability_tags)
 )
-UPDATE provider_model_candidates AS pmc
-SET route_tier = p.route_tier,
-    route_tier_rank = p.route_tier_rank,
-    latency_class = p.latency_class,
-    latency_rank = p.latency_rank,
-    reasoning_control = p.reasoning_control,
-    task_affinities = p.task_affinities,
-    benchmark_profile = p.benchmark_profile,
-    capability_tags = p.capability_tags
+INSERT INTO provider_model_candidates (
+    candidate_ref,
+    provider_ref,
+    provider_name,
+    provider_slug,
+    model_slug,
+    status,
+    priority,
+    balance_weight,
+    capability_tags,
+    default_parameters,
+    effective_from,
+    effective_to,
+    decision_ref,
+    created_at,
+    cli_config,
+    route_tier,
+    route_tier_rank,
+    latency_class,
+    latency_rank,
+    reasoning_control,
+    task_affinities,
+    benchmark_profile
+)
+SELECT
+    'candidate.' || p.provider_slug || '.' || p.model_slug AS candidate_ref,
+    'provider.' || p.provider_slug AS provider_ref,
+    p.provider_slug AS provider_name,
+    p.provider_slug,
+    p.model_slug,
+    'active' AS status,
+    CASE p.route_tier
+        WHEN 'high' THEN 500
+        WHEN 'medium' THEN 700
+        ELSE 900
+    END + p.route_tier_rank AS priority,
+    CASE p.route_tier
+        WHEN 'high' THEN 1
+        WHEN 'medium' THEN 2
+        ELSE 3
+    END AS balance_weight,
+    p.capability_tags,
+    jsonb_build_object(
+        'provider_slug', p.provider_slug,
+        'model_slug', p.model_slug,
+        'catalog_source', 'migration.046'
+    ) AS default_parameters,
+    now() AS effective_from,
+    NULL::timestamptz AS effective_to,
+    'migration.046.provider_model_candidate_profiles' AS decision_ref,
+    now() AS created_at,
+    CASE p.provider_slug
+        WHEN 'anthropic' THEN '{"prompt_mode":"stdin","cmd_template":["claude","-p","--output-format","json","--model","{model}"],"envelope_key":"result","output_format":"json"}'::jsonb
+        WHEN 'openai' THEN '{"prompt_mode":"stdin","cmd_template":["codex","exec","-","--json","--model","{model}"],"envelope_key":"text","output_format":"ndjson"}'::jsonb
+        WHEN 'google' THEN '{"prompt_mode":"stdin","cmd_template":["gemini","-p",".","-o","json","--model","{model}"],"envelope_key":"response","output_format":"json"}'::jsonb
+        ELSE '{}'::jsonb
+    END AS cli_config,
+    p.route_tier,
+    p.route_tier_rank,
+    p.latency_class,
+    p.latency_rank,
+    p.reasoning_control,
+    p.task_affinities,
+    p.benchmark_profile
 FROM profile_rows AS p
-WHERE pmc.provider_slug = p.provider_slug
-  AND pmc.model_slug = p.model_slug;
+ON CONFLICT (candidate_ref) DO UPDATE SET
+    provider_ref = EXCLUDED.provider_ref,
+    provider_name = EXCLUDED.provider_name,
+    provider_slug = EXCLUDED.provider_slug,
+    model_slug = EXCLUDED.model_slug,
+    status = EXCLUDED.status,
+    priority = EXCLUDED.priority,
+    balance_weight = EXCLUDED.balance_weight,
+    capability_tags = EXCLUDED.capability_tags,
+    default_parameters = EXCLUDED.default_parameters,
+    effective_to = EXCLUDED.effective_to,
+    decision_ref = EXCLUDED.decision_ref,
+    cli_config = EXCLUDED.cli_config,
+    route_tier = EXCLUDED.route_tier,
+    route_tier_rank = EXCLUDED.route_tier_rank,
+    latency_class = EXCLUDED.latency_class,
+    latency_rank = EXCLUDED.latency_rank,
+    reasoning_control = EXCLUDED.reasoning_control,
+    task_affinities = EXCLUDED.task_affinities,
+    benchmark_profile = EXCLUDED.benchmark_profile;
 
 DO $$
 BEGIN

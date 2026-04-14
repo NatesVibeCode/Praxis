@@ -1202,7 +1202,7 @@ class TestDagDispatchDryRun:
         assert result["status"] == "queued"
         assert result["command_id"] == "control.command.submit.2"
 
-    def test_retry_and_cancel_route_through_command_bus(self, monkeypatch):
+    def test_retry_cancel_and_repair_route_through_command_bus(self, monkeypatch):
         server._subs._pg_conn = _FakePGConn()
         captured: list[tuple[str, dict[str, object], str]] = []
         cancel_proof = {
@@ -1249,10 +1249,15 @@ class TestDagDispatchDryRun:
             "praxis_workflow",
             {"action": "cancel", "run_id": "dispatch_cancel"},
         )
+        repair_result = _call_tool(
+            "praxis_workflow",
+            {"action": "repair", "run_id": "dispatch_repair"},
+        )
 
         assert captured == [
             ("workflow.retry", {"run_id": "dispatch_retry", "label": "build_a"}, "mcp.praxis_workflow.retry"),
             ("workflow.cancel", {"run_id": "dispatch_cancel", "include_running": True}, "mcp.praxis_workflow.cancel"),
+            ("sync.repair", {"run_id": "dispatch_repair"}, "mcp.praxis_workflow.repair"),
         ]
         assert retry_result["status"] == "requeued"
         assert retry_result["command_id"] == "control.command.1"
@@ -1261,6 +1266,9 @@ class TestDagDispatchDryRun:
         assert cancel_result["status"] == "cancelled"
         assert cancel_result["command_id"] == "control.command.2"
         assert cancel_result["run_id"] == "dispatch_cancel"
+        assert repair_result["status"] == "repaired"
+        assert repair_result["command_id"] == "control.command.3"
+        assert repair_result["run_id"] == "dispatch_repair"
 
     def test_status_action_returns_rich_health_signals(self):
         server._subs._pg_conn = _FakePGConn(

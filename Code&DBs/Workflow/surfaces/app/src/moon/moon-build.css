@@ -1473,6 +1473,11 @@
   font-size: 12px;
   color: var(--moon-fg-dim);
 }
+.moon-run__graph {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
 .moon-run__jobs {
   display: flex;
   flex-direction: column;
@@ -1605,4 +1610,30 @@
 .moon-graph-append--drag-over {
   border-color: var(--moon-accent, #6CB6FF);
   background: rgba(108, 182, 255, 0.08);
+}
+.moon-graph-branch-socket {
+  position: absolute;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1.5px dashed var(--moon-muted, #484f58);
+  background: rgba(15, 18, 24, 0.94);
+  color: var(--moon-fg-dim, #8b949e);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 4;
+  transition: border-color 180ms ease, color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
+}
+.moon-graph-branch-socket:hover {
+  border-color: var(--moon-accent, #6CB6FF);
+  color: var(--moon-fg, #f4f6f8);
+  box-shadow: 0 0 16px rgba(108, 182, 255, 0.16);
+}
+.moon-graph-branch-socket--above:hover {
+  transform: translateY(-2px) scale(1.06);
+}
+.moon-graph-branch-socket--below:hover {
+  transform: translateY(2px) scale(1.06);
 }

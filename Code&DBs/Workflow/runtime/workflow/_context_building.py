@@ -1104,10 +1104,13 @@ def _terminal_failure_classification(
 
     if normalized_error_code:
         try:
-            return classify_failure(
+            classification = classify_failure(
                 normalized_error_code,
                 outputs={"stderr": normalized_stderr, "exit_code": exit_code},
             )
+            category = getattr(getattr(classification, "category", None), "value", "")
+            if category != "unknown" or not normalized_stderr:
+                return classification
         except Exception:
             pass
     if normalized_stderr:

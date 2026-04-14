@@ -28,7 +28,8 @@ _SCHEMA_BOOTSTRAP_LOCK_ID = 741001
 def test_runtime_breadth_authority_schema_is_the_canonical_tail_migration() -> None:
     filenames = [entry.filename for entry in workflow_migration_manifest()]
     assert "011_runtime_breadth_authority.sql" in filenames
-    assert filenames[-1] == "071_repo_snapshots_runtime_breadth_repair.sql"
+    assert "071_repo_snapshots_runtime_breadth_repair.sql" in filenames
+    assert filenames[-1] == "106_acceptance_status_index.sql"
 
 
 def test_runtime_breadth_authority_schema_expected_objects_are_declared() -> None:

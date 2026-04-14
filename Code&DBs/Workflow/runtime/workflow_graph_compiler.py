@@ -222,6 +222,10 @@ def _task_type_for_job(job: Mapping[str, Any]) -> str:
     if explicit:
         return explicit
     agent = str(job.get("agent") or "").lower()
+    if any(token in agent for token in ("classify", "triage", "categor")):
+        return "analysis"
+    if any(token in agent for token in ("draft", "compose")):
+        return "creative"
     if any(token in agent for token in ("review", "judge", "check")):
         return "review"
     if any(token in agent for token in ("architect", "design")):

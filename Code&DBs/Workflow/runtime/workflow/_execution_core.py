@@ -61,14 +61,23 @@ if TYPE_CHECKING:
 
 
 def _spec_snapshot_job_for_verify(
-    conn: "SyncPostgresConnection", run_id: str, label: str,
+    conn: "SyncPostgresConnection",
+    run_id: str,
+    label: str,
+    *,
+    run_row: dict | None = None,
 ) -> dict:
     """Read a job's spec snapshot entry to get verify_command/outcome_goal."""
-    envelope = _workflow_run_envelope(
-        dict((conn.execute(
-            "SELECT request_envelope FROM workflow_runs WHERE run_id = $1", run_id,
-        ) or [{}])[0])
-    )
+    source_row = run_row
+    if source_row is None:
+        source_row = dict((
+            conn.execute(
+                "SELECT request_envelope FROM workflow_runs WHERE run_id = $1",
+                run_id,
+            )
+            or [{}]
+        )[0])
+    envelope = _workflow_run_envelope(source_row)
     snapshot = _json_loads_maybe(envelope.get("spec_snapshot"), {}) or {}
     for job in (snapshot.get("jobs") or []):
         if isinstance(job, dict) and str(job.get("label") or job.get("slug") or "").strip() == label:
@@ -373,14 +382,15 @@ def execute_job(
         )
         acceptance_verify_refs = acceptance_contract.get("verify_refs")
         verify_cmd = str(job.get("verify_command") or "").strip()
+        spec_job: dict | None = None
         if not verify_cmd and not acceptance_verify_refs and not verification_artifact_refs:
             # Check spec snapshot for verify_command
-            spec_job = _spec_snapshot_job_for_verify(conn, run_id, label)
+            spec_job = _spec_snapshot_job_for_verify(conn, run_id, label, run_row=run_row)
             verify_cmd = str(spec_job.get("verify_command") or "").strip()
         if verify_cmd and not acceptance_verify_refs and not verification_artifact_refs:
             outcome_goal = str(
                 job.get("outcome_goal")
-                or _spec_snapshot_job_for_verify(conn, run_id, label).get("outcome_goal")
+                or (spec_job or _spec_snapshot_job_for_verify(conn, run_id, label, run_row=run_row)).get("outcome_goal")
                 or ""
             ).strip()
             try:
@@ -523,9 +533,10 @@ def _execute_api(agent_config, prompt: str, workdir: str, reasoning_effort: str 
 
 def _build_platform_context(repo_root: str) -> str:
     """Minimal platform context injected into prompts."""
+    database_url = os.environ.get("WORKFLOW_DATABASE_URL", "unavailable")
     return f"""--- PLATFORM CONTEXT ---
 Repository root: {repo_root}
-Database: {os.environ["WORKFLOW_DATABASE_URL"]}
+Database: {database_url}
 --- END PLATFORM CONTEXT ---"""
 
 

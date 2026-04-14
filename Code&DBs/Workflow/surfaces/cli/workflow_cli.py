@@ -9,6 +9,7 @@ Usage:
     python workflow_cli.py active
     python workflow_cli.py retry <run_id> <label>
     python workflow_cli.py cancel <run_id>
+    python workflow_cli.py repair <run_id>
 """
 
 from __future__ import annotations
@@ -473,6 +474,53 @@ def cmd_retry(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_repair(args: argparse.Namespace) -> int:
+    """Repair the post-workflow sync state for one workflow run."""
+    try:
+        pg_conn = _get_pg_conn()
+        from runtime.control_commands import (
+            ControlCommandType,
+            ControlIntent,
+            execute_control_intent,
+            render_control_command_response,
+        )
+
+        command = execute_control_intent(
+            pg_conn,
+            ControlIntent(
+                command_type=ControlCommandType.SYNC_REPAIR,
+                requested_by_kind="cli",
+                requested_by_ref="workflow_cli.repair",
+                idempotency_key=f"sync.repair.cli.{args.run_id}",
+                payload={"run_id": args.run_id},
+            ),
+            approved_by="cli.workflow.repair",
+        )
+        result = render_control_command_response(
+            pg_conn,
+            command,
+            action="repair",
+            run_id=args.run_id,
+        )
+        print(json.dumps(result, default=str, indent=2))
+        return 0 if result.get("status") == "repaired" else 1
+    except Exception as exc:
+        try:
+            from runtime.control_commands import render_control_command_failure
+
+            details = getattr(exc, "details", None)
+            failure = render_control_command_failure(
+                error_code=getattr(exc, "reason_code", "control.command.execution_failed"),
+                error_detail=str(exc),
+                run_id=args.run_id,
+                details=details if isinstance(details, dict) else None,
+            )
+            print(json.dumps(failure, default=str, indent=2))
+        except Exception:
+            print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+
 def cmd_chain(args: argparse.Namespace) -> int:
     """Submit one durable multi-wave workflow chain."""
     if _WORKFLOW_ROOT not in sys.path:
@@ -600,6 +648,9 @@ def main() -> int:
     cancel_parser = sub.add_parser("cancel", help="Cancel a workflow run")
     cancel_parser.add_argument("run_id", help="Workflow run id to cancel")
 
+    repair_parser = sub.add_parser("repair", help="Repair post-run sync state for a workflow run")
+    repair_parser.add_argument("run_id", help="Workflow run id to repair")
+
     chain_parser = sub.add_parser("chain", help="Submit a durable multi-wave workflow chain")
     chain_parser.add_argument("coordination", help="Path to a chain coordination JSON file")
     chain_parser.add_argument("--result-file", help="Write chain submit response to this JSON file")
@@ -627,6 +678,8 @@ def main() -> int:
         return cmd_retry(args)
     elif args.command == "cancel":
         return cmd_cancel(args)
+    elif args.command == "repair":
+        return cmd_repair(args)
     elif args.command == "chain":
         return cmd_chain(args)
     elif args.command == "chain-status":

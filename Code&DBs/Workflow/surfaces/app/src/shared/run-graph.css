@@ -1,0 +1,99 @@
+.shared-run-graph {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  overflow-x: auto;
+  padding: 12px 0 16px;
+}
+
+.shared-run-graph__column {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.shared-run-graph__edge {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding: 0 4px;
+}
+
+.shared-run-graph__node {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 14px;
+  min-width: 120px;
+  max-width: 220px;
+  border-radius: 8px;
+  border: 1px solid var(--border, rgba(255,255,255,0.12));
+  background: var(--bg-card, rgba(255,255,255,0.03));
+  cursor: pointer;
+  transition: all 150ms;
+  text-align: left;
+  color: inherit;
+}
+
+.shared-run-graph__node:hover {
+  border-color: var(--text-muted, rgba(255,255,255,0.45));
+  background: var(--bg-alt, rgba(255,255,255,0.05));
+}
+
+.shared-run-graph__node--succeeded {
+  border-color: var(--border-success-soft, rgba(63,185,80,0.28));
+  background: var(--surface-success-soft, rgba(63,185,80,0.08));
+}
+
+.shared-run-graph__node--succeeded:hover {
+  border-color: var(--success, #3fb950);
+}
+
+.shared-run-graph__node--running {
+  border-color: var(--border-accent-soft, rgba(88,166,255,0.28));
+  background: var(--surface-accent-soft, rgba(88,166,255,0.08));
+}
+
+.shared-run-graph__node--running:hover {
+  border-color: var(--accent, #58a6ff);
+}
+
+.shared-run-graph__node--failed {
+  border-color: var(--border-danger-soft, rgba(248,81,73,0.28));
+  background: var(--surface-danger-soft, rgba(248,81,73,0.08));
+}
+
+.shared-run-graph__node--failed:hover {
+  border-color: var(--danger, #f85149);
+}
+
+.shared-run-graph__node--pending {
+  border-color: var(--border, rgba(255,255,255,0.12));
+  background: var(--surface-muted, rgba(255,255,255,0.04));
+}
+
+.shared-run-graph__node-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text, #fff);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shared-run-graph__node-sub {
+  font-size: 10px;
+  color: var(--text-muted, rgba(255,255,255,0.6));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shared-run-graph__node--failed .shared-run-graph__node-sub {
+  color: var(--danger, #f85149);
+}
+
+.shared-run-graph__node--succeeded .shared-run-graph__node-sub {
+  color: var(--success, #3fb950);
+}

@@ -502,7 +502,7 @@ def test_run_submit_surfaces_share_the_same_queued_envelope(tmp_path, monkeypatc
     assert {key: cli_result[key] for key in expected} == expected
 
 
-def test_retry_and_cancel_surfaces_converge_on_command_bus_authority(monkeypatch) -> None:
+def test_retry_cancel_and_repair_surfaces_converge_on_command_bus_authority(monkeypatch) -> None:
     recorder = _AuthorityRecorder()
     cancel_proof = {
         "cancelled_jobs": 1,
@@ -557,6 +557,9 @@ def test_retry_and_cancel_surfaces_converge_on_command_bus_authority(monkeypatch
     mcp_cancel = mcp_workflow.tool_praxis_workflow(
         {"action": "cancel", "run_id": "dispatch_mcp_cancel"},
     )
+    mcp_repair = mcp_workflow.tool_praxis_workflow(
+        {"action": "repair", "run_id": "dispatch_mcp_repair"},
+    )
     api_cancel_response = rest.cancel_queue_job("42")
     monkeypatch.setattr(workflow_cli, "_get_pg_conn", lambda: object())
     cli_retry_stdout = StringIO()
@@ -569,6 +572,10 @@ def test_retry_and_cancel_surfaces_converge_on_command_bus_authority(monkeypatch
     with redirect_stdout(cli_stdout):
         cli_exit = workflow_cli.cmd_cancel(SimpleNamespace(run_id="dispatch_cli_cancel"))
     cli_cancel = json.loads(cli_stdout.getvalue())
+    cli_repair_stdout = StringIO()
+    with redirect_stdout(cli_repair_stdout):
+        cli_repair_exit = workflow_cli.cmd_repair(SimpleNamespace(run_id="dispatch_cli_repair"))
+    cli_repair = json.loads(cli_repair_stdout.getvalue())
     legacy_retry_stdout = StringIO()
     legacy_retry_exit = workflow_commands._retry_command(
         ["dispatch_legacy_retry", "build_d"],
@@ -578,6 +585,9 @@ def test_retry_and_cancel_surfaces_converge_on_command_bus_authority(monkeypatch
     legacy_stdout = StringIO()
     legacy_exit = workflow_commands._cancel_command(["dispatch_legacy_cancel"], stdout=legacy_stdout)
     legacy_cancel = json.loads(legacy_stdout.getvalue())
+    legacy_repair_stdout = StringIO()
+    legacy_repair_exit = workflow_commands._repair_command(["dispatch_legacy_repair"], stdout=legacy_repair_stdout)
+    legacy_repair = json.loads(legacy_repair_stdout.getvalue())
 
     assert chat_retry["data"]["status"] == "approval_required"
     assert chat_cancel["data"]["status"] == "approval_required"
@@ -597,6 +607,11 @@ def test_retry_and_cancel_surfaces_converge_on_command_bus_authority(monkeypatch
     assert mcp_cancel["labels"] == ["build_a"]
     assert mcp_cancel["run_status"] == "cancelled"
     assert mcp_cancel["terminal_reason"] == "workflow_cancelled"
+    assert mcp_repair["status"] == "repaired"
+    assert mcp_repair["approval_required"] is False
+    assert mcp_repair["command_id"] == "control.command.execute.3"
+    assert mcp_repair["run_id"] == "dispatch_mcp_repair"
+    assert mcp_repair["result_ref"] == "workflow_run:dispatch_mcp_repair"
     assert api_cancel_response.status_code == 200
     api_cancel = json.loads(api_cancel_response.body)
     assert cli_retry_exit == 0
@@ -605,7 +620,7 @@ def test_retry_and_cancel_surfaces_converge_on_command_bus_authority(monkeypatch
         "label": "build_c",
         "status": "requeued",
         "approval_required": False,
-        "command_id": "control.command.execute.4",
+        "command_id": "control.command.execute.5",
         "command_status": "succeeded",
         "result_ref": "workflow_run:dispatch_cli_retry",
         "stream_url": "/api/workflow-runs/dispatch_cli_retry/stream",
@@ -616,7 +631,7 @@ def test_retry_and_cancel_surfaces_converge_on_command_bus_authority(monkeypatch
         "run_id": "dispatch_http_cancel",
         "status": "cancelled",
         "approval_required": False,
-        "command_id": "control.command.execute.3",
+        "command_id": "control.command.execute.4",
         "command_status": "succeeded",
         "result_ref": "workflow_run:dispatch_http_cancel",
         "stream_url": "/api/workflow-runs/dispatch_http_cancel/stream",
@@ -631,7 +646,7 @@ def test_retry_and_cancel_surfaces_converge_on_command_bus_authority(monkeypatch
         "run_id": "dispatch_cli_cancel",
         "status": "cancelled",
         "approval_required": False,
-        "command_id": "control.command.execute.5",
+        "command_id": "control.command.execute.6",
         "command_status": "succeeded",
         "result_ref": "workflow_run:dispatch_cli_cancel",
         "stream_url": "/api/workflow-runs/dispatch_cli_cancel/stream",
@@ -641,13 +656,24 @@ def test_retry_and_cancel_surfaces_converge_on_command_bus_authority(monkeypatch
         "run_status": "cancelled",
         "terminal_reason": "workflow_cancelled",
     }
+    assert cli_repair_exit == 0
+    assert cli_repair == {
+        "run_id": "dispatch_cli_repair",
+        "status": "repaired",
+        "approval_required": False,
+        "command_id": "control.command.execute.7",
+        "command_status": "succeeded",
+        "result_ref": "workflow_run:dispatch_cli_repair",
+        "stream_url": "/api/workflow-runs/dispatch_cli_repair/stream",
+        "status_url": "/api/workflow-runs/dispatch_cli_repair/status",
+    }
     assert legacy_retry_exit == 0
     assert legacy_retry == {
         "run_id": "dispatch_legacy_retry",
         "label": "build_d",
         "status": "requeued",
         "approval_required": False,
-        "command_id": "control.command.execute.6",
+        "command_id": "control.command.execute.8",
         "command_status": "succeeded",
         "result_ref": "workflow_run:dispatch_legacy_retry",
         "stream_url": "/api/workflow-runs/dispatch_legacy_retry/stream",
@@ -658,7 +684,7 @@ def test_retry_and_cancel_surfaces_converge_on_command_bus_authority(monkeypatch
         "run_id": "dispatch_legacy_cancel",
         "status": "cancelled",
         "approval_required": False,
-        "command_id": "control.command.execute.7",
+        "command_id": "control.command.execute.9",
         "command_status": "succeeded",
         "result_ref": "workflow_run:dispatch_legacy_cancel",
         "stream_url": "/api/workflow-runs/dispatch_legacy_cancel/stream",
@@ -667,6 +693,17 @@ def test_retry_and_cancel_surfaces_converge_on_command_bus_authority(monkeypatch
         "labels": ["build_a"],
         "run_status": "cancelled",
         "terminal_reason": "workflow_cancelled",
+    }
+    assert legacy_repair_exit == 0
+    assert legacy_repair == {
+        "run_id": "dispatch_legacy_repair",
+        "status": "repaired",
+        "approval_required": False,
+        "command_id": "control.command.execute.10",
+        "command_status": "succeeded",
+        "result_ref": "workflow_run:dispatch_legacy_repair",
+        "stream_url": "/api/workflow-runs/dispatch_legacy_repair/stream",
+        "status_url": "/api/workflow-runs/dispatch_legacy_repair/status",
     }
 
     assert recorder.request_calls == [
@@ -704,6 +741,14 @@ def test_retry_and_cancel_surfaces_converge_on_command_bus_authority(monkeypatch
             "payload": {"run_id": "dispatch_mcp_cancel", "include_running": True},
         },
         {
+            "command_type": "sync.repair",
+            "requested_by_kind": "mcp",
+            "requested_by_ref": "praxis_workflow.repair",
+            "approved_by": "mcp.praxis_workflow.repair",
+            "idempotency_key": recorder.execute_calls[2]["idempotency_key"],
+            "payload": {"run_id": "dispatch_mcp_repair"},
+        },
+        {
             "command_type": "workflow.cancel",
             "requested_by_kind": "http",
             "requested_by_ref": "queue_cancel",
@@ -728,6 +773,14 @@ def test_retry_and_cancel_surfaces_converge_on_command_bus_authority(monkeypatch
             "payload": {"run_id": "dispatch_cli_cancel", "include_running": True},
         },
         {
+            "command_type": "sync.repair",
+            "requested_by_kind": "cli",
+            "requested_by_ref": "workflow_cli.repair",
+            "approved_by": "cli.workflow.repair",
+            "idempotency_key": "sync.repair.cli.dispatch_cli_repair",
+            "payload": {"run_id": "dispatch_cli_repair"},
+        },
+        {
             "command_type": "workflow.retry",
             "requested_by_kind": "cli",
             "requested_by_ref": "workflow_cli.retry",
@@ -742,6 +795,14 @@ def test_retry_and_cancel_surfaces_converge_on_command_bus_authority(monkeypatch
             "approved_by": "cli.workflow.cancel",
             "idempotency_key": "workflow.cancel.cli.dispatch_legacy_cancel",
             "payload": {"run_id": "dispatch_legacy_cancel", "include_running": True},
+        },
+        {
+            "command_type": "sync.repair",
+            "requested_by_kind": "cli",
+            "requested_by_ref": "workflow_cli.repair",
+            "approved_by": "cli.workflow.repair",
+            "idempotency_key": "sync.repair.cli.dispatch_legacy_repair",
+            "payload": {"run_id": "dispatch_legacy_repair"},
         },
     ]
 

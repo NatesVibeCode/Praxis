@@ -182,9 +182,7 @@ def _submission_result_kind(*, task_type: str, bucket: str) -> str:
     return "artifact_bundle"
 
 
-_SUBMISSION_DEFAULT_REQUIRED_TASK_TYPES = frozenset({
-    "debate", "research", "analysis", "architecture",
-})
+_SUBMISSION_DEFAULT_REQUIRED_TASK_TYPES = frozenset()
 
 _VERIFICATION_REQUIRED_TASK_TYPES = frozenset({
     "build", "implement", "code_generation", "code_edit",
@@ -193,9 +191,14 @@ _VERIFICATION_REQUIRED_TASK_TYPES = frozenset({
 
 
 def _default_submission_required(task_type: str) -> bool:
-    """Auto-require submission for output-oriented task types (debate, research,
-    analysis) so CLI agents always seal their output.  Other types remain
-    opt-in to avoid scope_violation failures when write_scope is omitted."""
+    """Submission is opt-in.
+
+    Auto-requiring submission for text/architecture packets created a second
+    terminalization path where useful work could exist, a submission could even
+    be sealed, and the job could still fail during post-execution bookkeeping.
+    That contract is too brittle for planning/research lanes; callers that
+    truly require submission must declare it explicitly in spec.
+    """
     return task_type.strip().lower() in _SUBMISSION_DEFAULT_REQUIRED_TASK_TYPES
 
 
@@ -208,12 +211,7 @@ def _completion_contract(
     verify_refs: Sequence[str] = (),
 ) -> dict[str, Any]:
     normalized_task_type = task_type.strip().lower()
-    # For output-critical task types (debate, research, etc.), always require
-    # submission regardless of spec override — an explicit False causes
-    # permanent content loss (BUG-91630F20).
-    if normalized_task_type in _SUBMISSION_DEFAULT_REQUIRED_TASK_TYPES:
-        normalized_submission_required = True
-    elif submission_required is not None:
+    if submission_required is not None:
         normalized_submission_required = bool(submission_required)
     else:
         normalized_submission_required = _default_submission_required(normalized_task_type)

@@ -1,0 +1,262 @@
+{
+  "name": "Phase 001-010 Foundation Wave",
+  "phase": "W",
+  "queue_id": "phase_001_010_foundation_wave_20260414",
+  "outcome_goal": "Phases 1-10 are turned into parallel, repo-grounded execution packets with a synthesis, review, and healer pass so the foundation arc can move from historical fog to bounded work.",
+  "anti_requirements": [
+    "Do NOT mutate the 0-100 registry phase statuses or advance beyond the current governance model without explicit human approval",
+    "Do NOT treat broad architecture phases as a license for unbounded code churn",
+    "Do NOT write outside planning/phase-program/foundation-wave and this workflow spec"
+  ],
+  "jobs": [
+    {
+      "label": "phase_001_workspace_boundary_contract",
+      "agent": "openai/gpt-5.4",
+      "task_type": "architecture",
+      "description": "Build a repo-grounded execution packet for Phase 1 Workspace Boundary Contract",
+      "outcome_goal": "Phase 1 has one bounded first sprint with explicit boundaries, risks, files, and verification",
+      "prompt": "Create `planning/phase-program/foundation-wave/phase_001_workspace_boundary_contract.md` as the execution packet for Phase 1 Workspace Boundary Contract.\n\nUse `planning/phase-program/praxis_0_100_registry.json` as the authority map. Ground the packet in the current repo state, not theory.\n\nRequired sections:\n1. Objective in repo terms\n2. Current evidence in the repo\n3. Gap or ambiguity still remaining\n4. One bounded first sprint only\n5. Exact file or subsystem scope\n6. Done criteria\n7. Verification commands\n8. Review -> healer -> human approval gate\n\nOptimize for future LLM execution, not prose elegance.",
+      "read": [
+        "planning/phase-program/praxis_0_100_registry.json"
+      ],
+      "write": [
+        "planning/phase-program/foundation-wave/phase_001_workspace_boundary_contract.md"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && grep -q 'Phase 1' planning/phase-program/foundation-wave/phase_001_workspace_boundary_contract.md"
+    },
+    {
+      "label": "phase_002_control_plane_core",
+      "agent": "openai/gpt-5.4",
+      "task_type": "architecture",
+      "description": "Build a repo-grounded execution packet for Phase 2 Control Plane Core",
+      "outcome_goal": "Phase 2 has one bounded first sprint with explicit boundaries, files, and verification",
+      "prompt": "Create `planning/phase-program/foundation-wave/phase_002_control_plane_core.md` as the execution packet for Phase 2 Control Plane Core.\n\nUse `planning/phase-program/praxis_0_100_registry.json` as the authority map. Ground the packet in the current repo state.\n\nRequired sections:\n1. Objective in repo terms\n2. Current evidence in the repo\n3. Gap or ambiguity still remaining\n4. One bounded first sprint only\n5. Exact file or subsystem scope\n6. Done criteria\n7. Verification commands\n8. Review -> healer -> human approval gate\n\nOptimize for future LLM execution.",
+      "read": [
+        "planning/phase-program/praxis_0_100_registry.json"
+      ],
+      "write": [
+        "planning/phase-program/foundation-wave/phase_002_control_plane_core.md"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && grep -q 'Phase 2' planning/phase-program/foundation-wave/phase_002_control_plane_core.md"
+    },
+    {
+      "label": "phase_003_registry_authority",
+      "agent": "openai/gpt-5.4",
+      "task_type": "architecture",
+      "description": "Build a repo-grounded execution packet for Phase 3 Registry Authority",
+      "outcome_goal": "Phase 3 has one bounded first sprint with explicit boundaries, files, and verification",
+      "prompt": "Create `planning/phase-program/foundation-wave/phase_003_registry_authority.md` as the execution packet for Phase 3 Registry Authority.\n\nUse `planning/phase-program/praxis_0_100_registry.json` as the authority map. Ground the packet in the current repo state.\n\nRequired sections:\n1. Objective in repo terms\n2. Current evidence in the repo\n3. Gap or ambiguity still remaining\n4. One bounded first sprint only\n5. Exact file or subsystem scope\n6. Done criteria\n7. Verification commands\n8. Review -> healer -> human approval gate\n\nOptimize for future LLM execution.",
+      "read": [
+        "planning/phase-program/praxis_0_100_registry.json"
+      ],
+      "write": [
+        "planning/phase-program/foundation-wave/phase_003_registry_authority.md"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && grep -q 'Phase 3' planning/phase-program/foundation-wave/phase_003_registry_authority.md"
+    },
+    {
+      "label": "phase_004_gate_and_promotion_policy",
+      "agent": "openai/gpt-5.4",
+      "task_type": "architecture",
+      "description": "Build a repo-grounded execution packet for Phase 4 Gate and Promotion Policy",
+      "outcome_goal": "Phase 4 has one bounded first sprint with explicit boundaries, files, and verification",
+      "prompt": "Create `planning/phase-program/foundation-wave/phase_004_gate_and_promotion_policy.md` as the execution packet for Phase 4 Gate and Promotion Policy.\n\nUse `planning/phase-program/praxis_0_100_registry.json` as the authority map. Ground the packet in the current repo state.\n\nRequired sections:\n1. Objective in repo terms\n2. Current evidence in the repo\n3. Gap or ambiguity still remaining\n4. One bounded first sprint only\n5. Exact file or subsystem scope\n6. Done criteria\n7. Verification commands\n8. Review -> healer -> human approval gate\n\nOptimize for future LLM execution.",
+      "read": [
+        "planning/phase-program/praxis_0_100_registry.json"
+      ],
+      "write": [
+        "planning/phase-program/foundation-wave/phase_004_gate_and_promotion_policy.md"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && grep -q 'Phase 4' planning/phase-program/foundation-wave/phase_004_gate_and_promotion_policy.md"
+    },
+    {
+      "label": "phase_005_workflow_outbox",
+      "agent": "openai/gpt-5.4",
+      "task_type": "architecture",
+      "description": "Build a repo-grounded execution packet for Phase 5 Workflow Outbox",
+      "outcome_goal": "Phase 5 has one bounded first sprint with explicit boundaries, files, and verification",
+      "prompt": "Create `planning/phase-program/foundation-wave/phase_005_workflow_outbox.md` as the execution packet for Phase 5 Workflow Outbox.\n\nUse `planning/phase-program/praxis_0_100_registry.json` as the authority map. Ground the packet in the current repo state.\n\nRequired sections:\n1. Objective in repo terms\n2. Current evidence in the repo\n3. Gap or ambiguity still remaining\n4. One bounded first sprint only\n5. Exact file or subsystem scope\n6. Done criteria\n7. Verification commands\n8. Review -> healer -> human approval gate\n\nOptimize for future LLM execution.",
+      "read": [
+        "planning/phase-program/praxis_0_100_registry.json"
+      ],
+      "write": [
+        "planning/phase-program/foundation-wave/phase_005_workflow_outbox.md"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && grep -q 'Phase 5' planning/phase-program/foundation-wave/phase_005_workflow_outbox.md"
+    },
+    {
+      "label": "phase_006_platform_authority_schema",
+      "agent": "openai/gpt-5.4",
+      "task_type": "architecture",
+      "description": "Build a repo-grounded execution packet for Phase 6 Platform Authority Schema",
+      "outcome_goal": "Phase 6 has one bounded first sprint with explicit boundaries, files, and verification",
+      "prompt": "Create `planning/phase-program/foundation-wave/phase_006_platform_authority_schema.md` as the execution packet for Phase 6 Platform Authority Schema.\n\nUse `planning/phase-program/praxis_0_100_registry.json` as the authority map. Ground the packet in the current repo state.\n\nRequired sections:\n1. Objective in repo terms\n2. Current evidence in the repo\n3. Gap or ambiguity still remaining\n4. One bounded first sprint only\n5. Exact file or subsystem scope\n6. Done criteria\n7. Verification commands\n8. Review -> healer -> human approval gate\n\nOptimize for future LLM execution.",
+      "read": [
+        "planning/phase-program/praxis_0_100_registry.json"
+      ],
+      "write": [
+        "planning/phase-program/foundation-wave/phase_006_platform_authority_schema.md"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && grep -q 'Phase 6' planning/phase-program/foundation-wave/phase_006_platform_authority_schema.md"
+    },
+    {
+      "label": "phase_007_provider_route_health_budget",
+      "agent": "openai/gpt-5.4",
+      "task_type": "architecture",
+      "description": "Build a repo-grounded execution packet for Phase 7 Provider Route Health Budget",
+      "outcome_goal": "Phase 7 has one bounded first sprint with explicit boundaries, files, and verification",
+      "prompt": "Create `planning/phase-program/foundation-wave/phase_007_provider_route_health_budget.md` as the execution packet for Phase 7 Provider Route Health Budget.\n\nUse `planning/phase-program/praxis_0_100_registry.json` as the authority map. Ground the packet in the current repo state.\n\nRequired sections:\n1. Objective in repo terms\n2. Current evidence in the repo\n3. Gap or ambiguity still remaining\n4. One bounded first sprint only\n5. Exact file or subsystem scope\n6. Done criteria\n7. Verification commands\n8. Review -> healer -> human approval gate\n\nOptimize for future LLM execution.",
+      "read": [
+        "planning/phase-program/praxis_0_100_registry.json"
+      ],
+      "write": [
+        "planning/phase-program/foundation-wave/phase_007_provider_route_health_budget.md"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && grep -q 'Phase 7' planning/phase-program/foundation-wave/phase_007_provider_route_health_budget.md"
+    },
+    {
+      "label": "phase_008_workflow_class_and_schedule_schema",
+      "agent": "openai/gpt-5.4",
+      "task_type": "architecture",
+      "description": "Build a repo-grounded execution packet for Phase 8 Workflow Class and Schedule Schema",
+      "outcome_goal": "Phase 8 has one bounded first sprint with explicit boundaries, files, and verification",
+      "prompt": "Create `planning/phase-program/foundation-wave/phase_008_workflow_class_and_schedule_schema.md` as the execution packet for Phase 8 Workflow Class and Schedule Schema.\n\nUse `planning/phase-program/praxis_0_100_registry.json` as the authority map. Ground the packet in the current repo state.\n\nRequired sections:\n1. Objective in repo terms\n2. Current evidence in the repo\n3. Gap or ambiguity still remaining\n4. One bounded first sprint only\n5. Exact file or subsystem scope\n6. Done criteria\n7. Verification commands\n8. Review -> healer -> human approval gate\n\nOptimize for future LLM execution.",
+      "read": [
+        "planning/phase-program/praxis_0_100_registry.json"
+      ],
+      "write": [
+        "planning/phase-program/foundation-wave/phase_008_workflow_class_and_schedule_schema.md"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && grep -q 'Phase 8' planning/phase-program/foundation-wave/phase_008_workflow_class_and_schedule_schema.md"
+    },
+    {
+      "label": "phase_009_bug_and_roadmap_authority",
+      "agent": "openai/gpt-5.4",
+      "task_type": "architecture",
+      "description": "Build a repo-grounded execution packet for Phase 9 Bug and Roadmap Authority",
+      "outcome_goal": "Phase 9 has one bounded first sprint with explicit boundaries, files, and verification",
+      "prompt": "Create `planning/phase-program/foundation-wave/phase_009_bug_and_roadmap_authority.md` as the execution packet for Phase 9 Bug and Roadmap Authority.\n\nUse `planning/phase-program/praxis_0_100_registry.json` as the authority map. Ground the packet in the current repo state.\n\nRequired sections:\n1. Objective in repo terms\n2. Current evidence in the repo\n3. Gap or ambiguity still remaining\n4. One bounded first sprint only\n5. Exact file or subsystem scope\n6. Done criteria\n7. Verification commands\n8. Review -> healer -> human approval gate\n\nOptimize for future LLM execution.",
+      "read": [
+        "planning/phase-program/praxis_0_100_registry.json"
+      ],
+      "write": [
+        "planning/phase-program/foundation-wave/phase_009_bug_and_roadmap_authority.md"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && grep -q 'Phase 9' planning/phase-program/foundation-wave/phase_009_bug_and_roadmap_authority.md"
+    },
+    {
+      "label": "phase_010_operator_control_authority",
+      "agent": "openai/gpt-5.4",
+      "task_type": "architecture",
+      "description": "Build a repo-grounded execution packet for Phase 10 Operator Control Authority",
+      "outcome_goal": "Phase 10 has one bounded first sprint with explicit boundaries, files, and verification",
+      "prompt": "Create `planning/phase-program/foundation-wave/phase_010_operator_control_authority.md` as the execution packet for Phase 10 Operator Control Authority.\n\nUse `planning/phase-program/praxis_0_100_registry.json` as the authority map. Ground the packet in the current repo state.\n\nRequired sections:\n1. Objective in repo terms\n2. Current evidence in the repo\n3. Gap or ambiguity still remaining\n4. One bounded first sprint only\n5. Exact file or subsystem scope\n6. Done criteria\n7. Verification commands\n8. Review -> healer -> human approval gate\n\nOptimize for future LLM execution.",
+      "read": [
+        "planning/phase-program/praxis_0_100_registry.json"
+      ],
+      "write": [
+        "planning/phase-program/foundation-wave/phase_010_operator_control_authority.md"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && grep -q 'Phase 10' planning/phase-program/foundation-wave/phase_010_operator_control_authority.md"
+    },
+    {
+      "label": "phase_001_010_synthesis",
+      "agent": "openai/gpt-5.4-mini",
+      "task_type": "architecture",
+      "depends_on": [
+        "phase_001_workspace_boundary_contract",
+        "phase_002_control_plane_core",
+        "phase_003_registry_authority",
+        "phase_004_gate_and_promotion_policy",
+        "phase_005_workflow_outbox",
+        "phase_006_platform_authority_schema",
+        "phase_007_provider_route_health_budget",
+        "phase_008_workflow_class_and_schedule_schema",
+        "phase_009_bug_and_roadmap_authority",
+        "phase_010_operator_control_authority"
+      ],
+      "description": "Synthesize the ten foundation packets into one execution map",
+      "outcome_goal": "A single synthesis file names dependency edges, collisions, and the most executable next wave",
+      "prompt": "Read the ten phase packet files under `planning/phase-program/foundation-wave/` and create `planning/phase-program/foundation-wave/phase_001_010_synthesis.md`.\n\nRequired sections:\n1. Dependency map\n2. Natural parallel groups\n3. Collision risks\n4. Which packets are ready to turn into real build workflows first\n5. Which packets are still too vague and why\n\nBe concrete and execution-oriented.",
+      "read": [
+        "planning/phase-program/foundation-wave/phase_001_workspace_boundary_contract.md",
+        "planning/phase-program/foundation-wave/phase_002_control_plane_core.md",
+        "planning/phase-program/foundation-wave/phase_003_registry_authority.md",
+        "planning/phase-program/foundation-wave/phase_004_gate_and_promotion_policy.md",
+        "planning/phase-program/foundation-wave/phase_005_workflow_outbox.md",
+        "planning/phase-program/foundation-wave/phase_006_platform_authority_schema.md",
+        "planning/phase-program/foundation-wave/phase_007_provider_route_health_budget.md",
+        "planning/phase-program/foundation-wave/phase_008_workflow_class_and_schedule_schema.md",
+        "planning/phase-program/foundation-wave/phase_009_bug_and_roadmap_authority.md",
+        "planning/phase-program/foundation-wave/phase_010_operator_control_authority.md"
+      ],
+      "write": [
+        "planning/phase-program/foundation-wave/phase_001_010_synthesis.md"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && grep -q 'Dependency map' planning/phase-program/foundation-wave/phase_001_010_synthesis.md"
+    },
+    {
+      "label": "phase_001_010_review",
+      "agent": "openai/gpt-5.4",
+      "task_type": "review",
+      "depends_on": [
+        "phase_001_010_synthesis"
+      ],
+      "description": "Review the phase 1-10 packet wave for architectural drift and fake precision",
+      "outcome_goal": "Concrete issues in the foundation packets and synthesis are called out before we trust them as execution inputs",
+      "prompt": "Review the Phase 1-10 foundation wave as a code-and-plan review.\n\nPrioritize findings on:\n- packets that are too generic to be executable\n- fake certainty where the repo evidence is too thin\n- collisions between packets that would cause write-scope chaos\n- missing verification commands or weak done criteria\n- packets that should not exist as separate first sprints because the boundary is wrong\n\nFindings first with file references. If no findings remain, say so explicitly and mention residual risk.",
+      "read": [
+        "planning/phase-program/foundation-wave/phase_001_workspace_boundary_contract.md",
+        "planning/phase-program/foundation-wave/phase_002_control_plane_core.md",
+        "planning/phase-program/foundation-wave/phase_003_registry_authority.md",
+        "planning/phase-program/foundation-wave/phase_004_gate_and_promotion_policy.md",
+        "planning/phase-program/foundation-wave/phase_005_workflow_outbox.md",
+        "planning/phase-program/foundation-wave/phase_006_platform_authority_schema.md",
+        "planning/phase-program/foundation-wave/phase_007_provider_route_health_budget.md",
+        "planning/phase-program/foundation-wave/phase_008_workflow_class_and_schedule_schema.md",
+        "planning/phase-program/foundation-wave/phase_009_bug_and_roadmap_authority.md",
+        "planning/phase-program/foundation-wave/phase_010_operator_control_authority.md",
+        "planning/phase-program/foundation-wave/phase_001_010_synthesis.md"
+      ],
+      "write": []
+    },
+    {
+      "label": "phase_001_010_healer",
+      "agent": "openai/gpt-5.4",
+      "task_type": "architecture",
+      "depends_on": [
+        "phase_001_010_review"
+      ],
+      "description": "Tighten the packet set after review without widening scope",
+      "outcome_goal": "The phase 1-10 packet set is sharper, less fake, and ready for human selection of the next real build wave",
+      "prompt": "Apply a narrow healing pass to the Phase 1-10 foundation wave outputs under `planning/phase-program/foundation-wave/`.\n\nRules:\n- stay inside the packet files and synthesis file\n- tighten vagueness, collisions, and weak verification where concrete fixes are obvious\n- do not invent repo evidence\n- do not mutate the 0-100 registry\n\nAfter edits, make sure the packet set still represents phases 1-10 cleanly and is ready for a human to choose the next executable wave.",
+      "read": [
+        "planning/phase-program/foundation-wave/phase_001_workspace_boundary_contract.md",
+        "planning/phase-program/foundation-wave/phase_002_control_plane_core.md",
+        "planning/phase-program/foundation-wave/phase_003_registry_authority.md",
+        "planning/phase-program/foundation-wave/phase_004_gate_and_promotion_policy.md",
+        "planning/phase-program/foundation-wave/phase_005_workflow_outbox.md",
+        "planning/phase-program/foundation-wave/phase_006_platform_authority_schema.md",
+        "planning/phase-program/foundation-wave/phase_007_provider_route_health_budget.md",
+        "planning/phase-program/foundation-wave/phase_008_workflow_class_and_schedule_schema.md",
+        "planning/phase-program/foundation-wave/phase_009_bug_and_roadmap_authority.md",
+        "planning/phase-program/foundation-wave/phase_010_operator_control_authority.md",
+        "planning/phase-program/foundation-wave/phase_001_010_synthesis.md"
+      ],
+      "write": [
+        "planning/phase-program/foundation-wave/phase_001_workspace_boundary_contract.md",
+        "planning/phase-program/foundation-wave/phase_002_control_plane_core.md",
+        "planning/phase-program/foundation-wave/phase_003_registry_authority.md",
+        "planning/phase-program/foundation-wave/phase_004_gate_and_promotion_policy.md",
+        "planning/phase-program/foundation-wave/phase_005_workflow_outbox.md",
+        "planning/phase-program/foundation-wave/phase_006_platform_authority_schema.md",
+        "planning/phase-program/foundation-wave/phase_007_provider_route_health_budget.md",
+        "planning/phase-program/foundation-wave/phase_008_workflow_class_and_schedule_schema.md",
+        "planning/phase-program/foundation-wave/phase_009_bug_and_roadmap_authority.md",
+        "planning/phase-program/foundation-wave/phase_010_operator_control_authority.md",
+        "planning/phase-program/foundation-wave/phase_001_010_synthesis.md"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && test -f planning/phase-program/foundation-wave/phase_001_010_synthesis.md && grep -q 'Phase 10' planning/phase-program/foundation-wave/phase_010_operator_control_authority.md"
+    }
+  ]
+}

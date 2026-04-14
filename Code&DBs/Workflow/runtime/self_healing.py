@@ -7,6 +7,66 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
+__all__ = [
+    "RecoveryAction",
+    "DiagnosticResult",
+    "DiagnosticModule",
+    "EarlyTerminationDiagnostic",
+    "ScopeRecoveryDiagnostic",
+    "DependencyDiagnostic",
+    "OrchestrationFailureDiagnostic",
+    "HealingRecommendation",
+    "SelfHealingOrchestrator",
+    "normalize_failure_code",
+]
+
+
+_NORMALIZED_FAILURE_CODE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(r"failure_code\b.*non-empty string", re.IGNORECASE),
+        "orchestration.failure_code_missing",
+    ),
+    (
+        re.compile(r"reason_code\b.*non-empty string", re.IGNORECASE),
+        "orchestration.reason_code_missing",
+    ),
+    (
+        re.compile(r"submission receipt sync failed", re.IGNORECASE),
+        "workflow_submission.service_error",
+    ),
+    (
+        re.compile(r"workflow_submission\.service_error", re.IGNORECASE),
+        "workflow_submission.service_error",
+    ),
+)
+
+_GENERIC_WRAPPER_FAILURE_CODES = frozenset({
+    "execution_exception",
+    "worker_exception",
+    "worker_future_exception",
+    "dispatch.execution_crash",
+    "dispatch.thread_error",
+    "unknown",
+})
+
+
+def normalize_failure_code(
+    failure_code: str | None,
+    stderr: str | None = None,
+) -> str:
+    """Return a usable failure code even when the upstream envelope is broken."""
+
+    normalized = str(failure_code or "").strip()
+    stderr_text = str(stderr or "")
+    for pattern, inferred_code in _NORMALIZED_FAILURE_CODE_PATTERNS:
+        if pattern.search(stderr_text) and (
+            not normalized or normalized in _GENERIC_WRAPPER_FAILURE_CODES
+        ):
+            return inferred_code
+    if normalized:
+        return normalized
+    return "unknown"
+
 
 # ---------------------------------------------------------------------------
 # Recovery actions
@@ -146,6 +206,80 @@ class DependencyDiagnostic(DiagnosticModule):
         )
 
 
+class OrchestrationFailureDiagnostic(DiagnosticModule):
+    """Detect runner/meta failures where useful work landed before orchestration died."""
+
+    _META_FAILURE_CODES = frozenset({
+        "orchestration.failure_code_missing",
+        "orchestration.reason_code_missing",
+        "workflow_submission.service_error",
+        "worker_exception",
+        "worker_future_exception",
+        "dispatch.execution_crash",
+        "dispatch.thread_error",
+    })
+    _META_PATTERNS = re.compile(
+        r"("
+        r"failure_code\b.*non-empty string|"
+        r"reason_code\b.*non-empty string|"
+        r"submission receipt sync failed|"
+        r"workflow_submission\.service_error|"
+        r"worker_future_exception|"
+        r"worker_exception"
+        r")",
+        re.IGNORECASE,
+    )
+
+    @property
+    def name(self) -> str:
+        return "orchestration_failure"
+
+    def diagnose(self, job_label: str, failure_code: str, stderr: str) -> DiagnosticResult:
+        resolved_code = normalize_failure_code(failure_code, stderr)
+        if resolved_code in {
+            "orchestration.failure_code_missing",
+            "orchestration.reason_code_missing",
+        }:
+            return DiagnosticResult(
+                module_name=self.name,
+                recommendation=RecoveryAction.FIX_AND_RETRY,
+                confidence=0.96,
+                reason=(
+                    "Runner failed while building the terminal failure envelope; "
+                    "preserve completed artifacts, synthesize a stable failure code, "
+                    "and retry the affected jobs."
+                ),
+                context_patch=(
+                    f"Treat {job_label} as an orchestration-envelope failure: keep any "
+                    "artifacts already written, assign a synthetic failure code, and "
+                    "retry only the failed frontier jobs before unblocking descendants."
+                ),
+            )
+
+        if resolved_code in self._META_FAILURE_CODES or self._META_PATTERNS.search(stderr):
+            return DiagnosticResult(
+                module_name=self.name,
+                recommendation=RecoveryAction.FIX_AND_RETRY,
+                confidence=0.82,
+                reason=(
+                    "Workflow orchestration failed after job execution crossed the finish line; "
+                    "repair the control-plane seam and retry from the failed boundary instead "
+                    "of discarding downstream progress."
+                ),
+                context_patch=(
+                    f"Preserve job outputs for {job_label}, repair the orchestration boundary, "
+                    "then retry the failed frontier jobs so cancelled descendants can resume."
+                ),
+            )
+
+        return DiagnosticResult(
+            module_name=self.name,
+            recommendation=RecoveryAction.RETRY_SAME,
+            confidence=0.05,
+            reason="No orchestration failure indicators found",
+        )
+
+
 # ---------------------------------------------------------------------------
 # Healing recommendation
 # ---------------------------------------------------------------------------
@@ -169,14 +303,20 @@ class SelfHealingOrchestrator:
     def __init__(self, diagnostics: Optional[List[DiagnosticModule]] = None) -> None:
         self._diagnostics: List[DiagnosticModule] = diagnostics if diagnostics is not None else [
             EarlyTerminationDiagnostic(),
+            OrchestrationFailureDiagnostic(),
             ScopeRecoveryDiagnostic(),
             DependencyDiagnostic(),
         ]
 
+    @staticmethod
+    def resolve_failure_code(failure_code: str | None, stderr: str | None = None) -> str:
+        return normalize_failure_code(failure_code, stderr)
+
     def diagnose(self, job_label: str, failure_code: str, stderr: str) -> HealingRecommendation:
+        normalized_failure_code = self.resolve_failure_code(failure_code, stderr)
         results: List[DiagnosticResult] = []
         for diag in self._diagnostics:
-            result = diag.diagnose(job_label, failure_code, stderr)
+            result = diag.diagnose(job_label, normalized_failure_code, stderr)
             results.append(result)
 
         if not results:

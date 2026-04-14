@@ -18,7 +18,9 @@ sys.modules.setdefault("runtime", _runtime_pkg)
 
 from surfaces._subsystems_base import _BaseSubsystems
 import registry.integration_registry_sync as integration_registry_sync_mod
+import registry.native_runtime_profile_sync as native_runtime_profile_sync_mod
 import registry.reference_catalog_sync as reference_catalog_mod
+import runtime.capability_catalog as capability_catalog_mod
 from registry.integration_registry_sync import sync_integration_registry
 from storage.postgres import PostgresConfigurationError
 from surfaces.mcp import subsystems as mcp_subsystems
@@ -183,6 +185,16 @@ def test_startup_wiring_syncs_registry_before_reference_catalog_and_starts_heart
         lambda conn: events.append("integration") or 1,
     )
     monkeypatch.setattr(
+        capability_catalog_mod,
+        "sync_capability_catalog",
+        lambda conn: events.append("capability") or 1,
+    )
+    monkeypatch.setattr(
+        native_runtime_profile_sync_mod,
+        "sync_native_runtime_profile_authority",
+        lambda conn: events.append("native_runtime_profile") or ("praxis",),
+    )
+    monkeypatch.setattr(
         reference_catalog_mod,
         "sync_reference_catalog",
         lambda conn: events.append("reference_catalog") or 1,
@@ -196,7 +208,12 @@ def test_startup_wiring_syncs_registry_before_reference_catalog_and_starts_heart
     subs._maybe_startup_wiring()
     subs._maybe_startup_wiring()
 
-    assert events == ["integration", "reference_catalog"]
+    assert events == [
+        "integration",
+        "capability",
+        "native_runtime_profile",
+        "reference_catalog",
+    ]
     assert subs._lifecycle.started is True
     assert subs._lifecycle._heartbeat_thread is not None
     assert len(_FakeThread.instances) == 1
@@ -218,6 +235,16 @@ def test_startup_wiring_can_skip_heartbeat_background(monkeypatch) -> None:
         lambda conn: events.append("integration") or 1,
     )
     monkeypatch.setattr(
+        capability_catalog_mod,
+        "sync_capability_catalog",
+        lambda conn: events.append("capability") or 1,
+    )
+    monkeypatch.setattr(
+        native_runtime_profile_sync_mod,
+        "sync_native_runtime_profile_authority",
+        lambda conn: events.append("native_runtime_profile") or ("praxis",),
+    )
+    monkeypatch.setattr(
         reference_catalog_mod,
         "sync_reference_catalog",
         lambda conn: events.append("reference_catalog") or 1,
@@ -230,7 +257,12 @@ def test_startup_wiring_can_skip_heartbeat_background(monkeypatch) -> None:
 
     subs._maybe_startup_wiring()
 
-    assert events == ["integration", "reference_catalog"]
+    assert events == [
+        "integration",
+        "capability",
+        "native_runtime_profile",
+        "reference_catalog",
+    ]
     assert subs._lifecycle.started is False
     assert subs._lifecycle._heartbeat_thread is None
     assert _FakeThread.instances == []

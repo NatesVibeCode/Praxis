@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import asyncio
 import json
+import os
 import uuid
 
 import pytest
@@ -31,6 +32,11 @@ def _json_value(value: object) -> object:
     if isinstance(value, str):
         return json.loads(value)
     return value
+
+
+def _require_workflow_database_url() -> None:
+    if not os.environ.get("WORKFLOW_DATABASE_URL"):
+        pytest.skip("WORKFLOW_DATABASE_URL is required for Postgres integration tests")
 
 
 def _submission(*, suffix: str) -> WorkflowAdmissionSubmission:
@@ -182,8 +188,12 @@ def test_workflow_migration_resolution_fails_closed_when_canonical_tree_is_incom
     finally:
         _clear_workflow_migration_caches()
 
-    assert exc_info.value.reason_code == "workflow.migration_manifest_incomplete"
-    assert exc_info.value.details["missing_filenames"] == ",".join(sorted(_missing))
+    assert exc_info.value.reason_code == "workflow.migration_policy_drift"
+    assert exc_info.value.details["unclassified_filenames"] == ""
+    missing_on_disk = set(
+        filter(None, exc_info.value.details["missing_on_disk_filenames"].split(","))
+    )
+    assert missing_on_disk.issuperset(_missing)
 
 
 def test_workflow_migration_resolution_fails_closed_when_canonical_root_is_missing(
@@ -221,6 +231,7 @@ def test_postgres_control_plane_path_rejects_malformed_child_rows() -> None:
 
 
 async def _exercise_postgres_control_plane_path() -> None:
+    _require_workflow_database_url()
     conn = await connect_workflow_database()
     try:
         await bootstrap_control_plane_schema(conn)
@@ -381,6 +392,7 @@ async def _exercise_postgres_control_plane_path() -> None:
 
 
 async def _exercise_conflicting_definition_rejection() -> None:
+    _require_workflow_database_url()
     conn = await connect_workflow_database()
     try:
         await bootstrap_control_plane_schema(conn)
@@ -436,6 +448,7 @@ async def _exercise_conflicting_definition_rejection() -> None:
 
 
 async def _exercise_malformed_child_rejection() -> None:
+    _require_workflow_database_url()
     conn = await connect_workflow_database()
     try:
         await bootstrap_control_plane_schema(conn)

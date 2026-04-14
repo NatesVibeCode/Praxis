@@ -448,6 +448,13 @@ def _build_graph(
     state_edges: set[tuple[str, str, str]] = set()
 
     first_step_id = _as_text(ordered_steps[0].get("id")) if ordered_steps else ""
+    explicit_trigger_targets_by_node_id: dict[str, list[str]] = {}
+    for step in ordered_steps:
+        step_id = _as_text(step.get("id"))
+        if not step_id:
+            continue
+        for dependency in _string_list(step.get("depends_on")):
+            explicit_trigger_targets_by_node_id.setdefault(dependency, []).append(step_id)
     for index, trigger in enumerate(ordered_triggers, start=1):
         node_id = _as_text(trigger.get("source_node_id")) or f"trigger-node-{index:03d}"
         route = _trigger_route_for_payload(trigger)
@@ -475,7 +482,8 @@ def _build_graph(
                 "issue_ids": [],
             }
         )
-        if first_step_id:
+        explicit_targets = explicit_trigger_targets_by_node_id.get(node_id, [])
+        if first_step_id and not explicit_targets:
             edges.append(
                 {
                     "edge_id": f"edge:{node_id}:{first_step_id}:trigger",

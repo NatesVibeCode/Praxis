@@ -59,6 +59,22 @@ def sync_registries(conn: Any) -> tuple[list[str], list[str]]:
         skipped.append("integration_registry")
 
     try:
+        from runtime.capability_catalog import sync_capability_catalog
+
+        sync_capability_catalog(conn)
+        succeeded.append("capability_catalog")
+    except Exception:
+        skipped.append("capability_catalog")
+
+    try:
+        from registry.native_runtime_profile_sync import sync_native_runtime_profile_authority
+
+        sync_native_runtime_profile_authority(conn)
+        succeeded.append("native_runtime_profile_authority")
+    except Exception:
+        skipped.append("native_runtime_profile_authority")
+
+    try:
         from registry.reference_catalog_sync import sync_reference_catalog
         sync_reference_catalog(conn)
         succeeded.append("reference_catalog")

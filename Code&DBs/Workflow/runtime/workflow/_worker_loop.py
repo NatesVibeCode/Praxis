@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from ._claiming import claim_one, complete_job, reap_stale_claims, reap_stale_runs
 from ._execution_core import execute_job
 from runtime.execution_transport import resolve_execution_transport
+from runtime.self_healing import normalize_failure_code
 
 if TYPE_CHECKING:
     from storage.postgres.connection import SyncPostgresConnection
@@ -24,6 +25,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = ["run_worker_loop"]
+
+
+def _worker_error_code(exc: BaseException, *, fallback: str) -> str:
+    for attr in ("failure_code", "reason_code", "error_code", "code"):
+        value = getattr(exc, attr, None)
+        if isinstance(value, str) and value.strip():
+            return normalize_failure_code(value.strip(), str(exc))
+    return normalize_failure_code(fallback, str(exc))
 
 
 class _WorkerNotificationListener:
@@ -198,11 +207,20 @@ def run_worker_loop(
             hb_conn = _PG(hb_pool)
             while not stop_heartbeat.wait(30):
                 try:
-                    rows = hb_conn.execute(
-                        "UPDATE workflow_jobs SET heartbeat_at = now() WHERE id = $1 RETURNING status",
-                        job_id,
-                    )
-                    if rows and str(rows[0].get("status", "")) == "cancelled":
+                    current_status = ""
+                    if hasattr(hb_conn, "fetchrow"):
+                        row = hb_conn.fetchrow(
+                            "UPDATE workflow_jobs SET heartbeat_at = now() WHERE id = $1 RETURNING status",
+                            job_id,
+                        )
+                        if row:
+                            current_status = str(row.get("status", ""))
+                    else:
+                        hb_conn.execute(
+                            "UPDATE workflow_jobs SET heartbeat_at = now() WHERE id = $1",
+                            job_id,
+                        )
+                    if current_status == "cancelled":
                         logger.info("Job %s cancelled externally, killing subprocesses", job.get("label"))
                         cancelled.set()
                         killed = _kill_child_processes(executor_pid)
@@ -222,9 +240,14 @@ def run_worker_loop(
                 logger.info("Job %s execution interrupted by cancellation", job.get("label"))
             else:
                 logger.error("Job execution failed for %s: %s", job.get("label"), exc, exc_info=True)
-                complete_job(thread_conn, job["id"], status="failed",
-                             error_code="worker_exception", duration_ms=0,
-                             stdout_preview=str(exc)[:2000])
+                complete_job(
+                    thread_conn,
+                    job["id"],
+                    status="failed",
+                    error_code=_worker_error_code(exc, fallback="worker_exception"),
+                    duration_ms=0,
+                    stdout_preview=str(exc)[:2000],
+                )
         finally:
             stop_heartbeat.set()
 
@@ -252,7 +275,7 @@ def run_worker_loop(
                                 conn,
                                 int(job["id"]),
                                 status="failed",
-                                error_code="worker_future_exception",
+                                error_code=_worker_error_code(exc, fallback="worker_future_exception"),
                                 duration_ms=0,
                                 stdout_preview=str(exc)[:2000],
                             )

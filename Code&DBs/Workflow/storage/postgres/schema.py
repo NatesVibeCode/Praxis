@@ -11,14 +11,18 @@ import time
 
 import asyncpg
 
+from storage._generated_workflow_migration_authority import (
+    WORKFLOW_FULL_BOOTSTRAP_SEQUENCE as _GENERATED_WORKFLOW_FULL_BOOTSTRAP_SEQUENCE,
+    WORKFLOW_SCHEMA_READINESS_SEQUENCE as _GENERATED_WORKFLOW_SCHEMA_READINESS_SEQUENCE,
+)
 from storage.migrations import (
     WorkflowMigrationError,
     WorkflowMigrationExpectedObject,
-    workflow_migration_manifest,
     workflow_migration_expected_objects,
     workflow_migrations_root,
     workflow_migration_path,
     workflow_migration_sql_text,
+    workflow_bootstrap_migration_statements,
     workflow_migration_statements,
 )
 from .validators import PostgresSchemaError
@@ -171,8 +175,35 @@ def _schema_bootstrap_monotonic() -> float:
 
 @lru_cache(maxsize=1)
 def _full_workflow_migration_filenames() -> tuple[str, ...]:
-    root = workflow_migrations_root()
-    return tuple(sorted(path.name for path in root.glob("*.sql")))
+    return _GENERATED_WORKFLOW_FULL_BOOTSTRAP_SEQUENCE
+
+
+@lru_cache(maxsize=1)
+def _workflow_schema_readiness_by_migration() -> tuple[
+    tuple[str, tuple[WorkflowMigrationExpectedObject, ...]],
+    ...,
+]:
+    workflow_migrations_root()
+    return tuple(
+        (
+            filename,
+            tuple(
+                WorkflowMigrationExpectedObject(
+                    object_type=object_type,
+                    object_name=object_name,
+                )
+                for object_type, object_name in objects
+            ),
+        )
+        for filename, objects in _GENERATED_WORKFLOW_SCHEMA_READINESS_SEQUENCE
+    )
+
+
+@lru_cache(maxsize=1)
+def _workflow_schema_manifest_filenames() -> tuple[str, ...]:
+    return tuple(filename for filename, _objects in _workflow_schema_readiness_by_migration())
+
+
 
 
 async def _schema_bootstrap_lock_holder_details(
@@ -259,7 +290,7 @@ async def _acquire_schema_bootstrap_lock(conn: asyncpg.Connection) -> float:
 
 
 async def _bootstrap_migration(conn: asyncpg.Connection, filename: str) -> None:
-    for statement in workflow_migration_statements(filename):
+    for statement in workflow_bootstrap_migration_statements(filename):
         if _is_transaction_wrapper_statement(statement):
             continue
         try:
@@ -313,11 +344,11 @@ async def bootstrap_workflow_schema(conn: asyncpg.Connection) -> None:
             for filename in _full_workflow_migration_filenames():
                 await _bootstrap_migration(conn, filename)
             return
-        for entry in workflow_migration_manifest():
-            missing_objects = readiness.missing_by_migration.get(entry.filename, ())
+        for filename in _workflow_schema_manifest_filenames():
+            missing_objects = readiness.missing_by_migration.get(filename, ())
             if not missing_objects:
                 continue
-            await _bootstrap_migration(conn, entry.filename)
+            await _bootstrap_migration(conn, filename)
 
 
 async def inspect_control_plane_schema(
@@ -400,31 +431,11 @@ async def inspect_workflow_schema(
 ) -> WorkflowSchemaReadiness:
     """Inspect whether every canonical manifest object exists."""
 
-    manifest = workflow_migration_manifest()
-    expected_by_migration: dict[str, tuple[WorkflowMigrationExpectedObject, ...]] = {}
-    for entry in manifest:
-        try:
-            expected_objects = workflow_migration_expected_objects(entry.filename)
-        except WorkflowMigrationError as exc:
-            if exc.reason_code in {
-                "workflow.migration_expected_objects_missing",
-                "workflow.migration_expected_objects_empty",
-            }:
-                continue
-            raise PostgresSchemaError(
-                "postgres.schema_missing",
-                "workflow schema expected-object contract could not be resolved",
-                details={
-                    "filename": entry.filename,
-                    **(exc.details or {}),
-                },
-            ) from exc
-        if expected_objects:
-            expected_by_migration[entry.filename] = expected_objects
+    expected_by_migration = dict(_workflow_schema_readiness_by_migration())
     expected_objects = tuple(
         obj
-        for entry in manifest
-        for obj in expected_by_migration.get(entry.filename, ())
+        for _filename, objects in _workflow_schema_readiness_by_migration()
+        for obj in objects
     )
     if not expected_objects:
         return WorkflowSchemaReadiness(

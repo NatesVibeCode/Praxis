@@ -262,6 +262,52 @@ def test_resolve_build_uses_catalog_profile_and_excludes_general_routing_special
     ]
 
 
+def test_resolve_spec_jobs_honors_explicit_prefer_cost_over_complexity() -> None:
+    router = TaskTypeRouter(_FakeConn())
+    calls: list[bool] = []
+    chain = [
+        types.SimpleNamespace(task_type="build", provider_slug="openai", model_slug="gpt-5.4-mini", rank=1, rationale="cheap"),
+        types.SimpleNamespace(task_type="build", provider_slug="anthropic", model_slug="claude-sonnet-4-6", rank=2, rationale="backup"),
+    ]
+
+    def _fake_resolve_failover_chain(slug: str, prefer_cost: bool = False, runtime_profile_ref: str | None = None):
+        calls.append(prefer_cost)
+        return list(chain)
+
+    router.resolve_failover_chain = _fake_resolve_failover_chain  # type: ignore[method-assign]
+
+    jobs = [{"agent": "auto/build", "complexity": "low", "prefer_cost": False}]
+    router.resolve_spec_jobs(jobs)
+
+    assert calls == [False]
+    assert jobs[0]["agent"] == "openai/gpt-5.4-mini"
+    assert list(jobs[0]["_route_plan"].chain) == [
+        "openai/gpt-5.4-mini",
+        "anthropic/claude-sonnet-4-6",
+    ]
+
+
+def test_resolve_spec_jobs_uses_explicit_prefer_cost_when_enabled() -> None:
+    router = TaskTypeRouter(_FakeConn())
+    calls: list[bool] = []
+
+    def _fake_resolve_failover_chain(slug: str, prefer_cost: bool = False, runtime_profile_ref: str | None = None):
+        calls.append(prefer_cost)
+        return [types.SimpleNamespace(task_type="build", provider_slug="openai", model_slug="gpt-5.4-mini", rank=1, rationale="cheap")]
+
+    def _fake_resolve_auto_chain(task_type: str, prefer_cost: bool = False, tier_override: str | None = None, runtime_profile_ref: str | None = None):
+        calls.append(prefer_cost)
+        return [types.SimpleNamespace(task_type="build", provider_slug="openai", model_slug="gpt-5.4-mini", rank=1, rationale="cheap")]
+
+    router.resolve_failover_chain = _fake_resolve_failover_chain  # type: ignore[method-assign]
+    router._resolve_auto_chain = _fake_resolve_auto_chain  # type: ignore[method-assign]
+
+    jobs = [{"agent": "auto/build", "complexity": "high", "prefer_cost": True}]
+    router.resolve_spec_jobs(jobs)
+
+    assert calls == [True, True]
+
+
 class _ScopedProfileConn(_CatalogProfileConn):
     def execute(self, sql: str, *params):
         if "FROM registry_runtime_profile_authority" in sql:
@@ -526,6 +572,108 @@ def test_research_only_candidate_does_not_leak_into_non_research_routes(monkeypa
     assert [entry.model_slug for entry in chat_chain] == ["gpt-5.4-mini"]
     assert [entry.provider_slug for entry in research_chain] == ["openai", "deepseek"]
     assert [entry.model_slug for entry in research_chain] == ["gpt-5.4-mini", "deepseek-r3"]
+
+
+class _SemanticAutoAliasConn(_FakeConn):
+    def execute(self, sql: str, *params):
+        if "INSERT INTO task_type_routing" in sql:
+            return []
+        if "FROM task_type_routing" in sql:
+            return []
+        if "FROM task_type_route_profiles" in sql:
+            return [
+                {
+                    "task_type": "chat",
+                    "affinity_labels": {
+                        "primary": ["chat", "creative"],
+                        "secondary": ["analysis", "support"],
+                        "specialized": [],
+                        "fallback": ["research"],
+                        "avoid": [],
+                    },
+                    "affinity_weights": {"primary": 1.0, "secondary": 0.7, "specialized": 0.4, "fallback": 0.2, "unclassified": 0.1, "avoid": 0.0},
+                    "task_rank_weights": {"affinity": 0.55, "route_tier": 0.20, "latency": 0.25},
+                    "benchmark_metric_weights": {},
+                    "route_tier_preferences": ["medium", "high", "low"],
+                    "latency_class_preferences": ["instant", "reasoning"],
+                    "allow_unclassified_candidates": True,
+                    "rationale": "chat profile",
+                },
+                {
+                    "task_type": "support",
+                    "affinity_labels": {
+                        "primary": ["support", "analysis", "triage"],
+                        "secondary": ["chat", "review"],
+                        "specialized": [],
+                        "fallback": ["research"],
+                        "avoid": [],
+                    },
+                    "affinity_weights": {"primary": 1.0, "secondary": 0.72, "specialized": 0.35, "fallback": 0.25, "unclassified": 0.2, "avoid": 0.0},
+                    "task_rank_weights": {"affinity": 0.45, "route_tier": 0.15, "latency": 0.40},
+                    "benchmark_metric_weights": {},
+                    "route_tier_preferences": ["medium", "low", "high"],
+                    "latency_class_preferences": ["instant", "reasoning"],
+                    "allow_unclassified_candidates": True,
+                    "rationale": "support profile",
+                },
+            ]
+        if "FROM provider_model_candidates" in sql:
+            return [
+                {
+                    "provider_slug": "openai",
+                    "model_slug": "gpt-5.4-mini",
+                    "priority": 1,
+                    "route_tier": "medium",
+                    "route_tier_rank": 1,
+                    "latency_class": "instant",
+                    "latency_rank": 1,
+                    "capability_tags": ["chat", "creative", "support"],
+                    "task_affinities": {"primary": ["chat", "support"], "secondary": ["analysis"], "specialized": [], "avoid": []},
+                    "benchmark_profile": {},
+                },
+                {
+                    "provider_slug": "anthropic",
+                    "model_slug": "claude-sonnet-4-6",
+                    "priority": 2,
+                    "route_tier": "medium",
+                    "route_tier_rank": 2,
+                    "latency_class": "reasoning",
+                    "latency_rank": 2,
+                    "capability_tags": ["support", "analysis"],
+                    "task_affinities": {"primary": ["support"], "secondary": ["chat", "analysis"], "specialized": [], "avoid": []},
+                    "benchmark_profile": {},
+                },
+            ]
+        return super().execute(sql, *params)
+
+
+def test_semantic_auto_routes_resolve_through_backing_profiles(monkeypatch) -> None:
+    import runtime.routing_economics as _routing_economics
+
+    monkeypatch.setattr(_routing_economics, "supports_adapter", lambda _provider_slug, _adapter_type: True)
+    monkeypatch.setattr(
+        _routing_economics,
+        "resolve_adapter_economics",
+        lambda _provider_slug, adapter_type: {
+            "billing_mode": "subscription_included" if adapter_type == "cli_llm" else "metered_api",
+            "budget_bucket": f"{adapter_type}.test",
+            "effective_marginal_cost": 0.0,
+            "prefer_prepaid": True,
+            "allow_payg_fallback": True,
+        },
+    )
+
+    router = TaskTypeRouter(_SemanticAutoAliasConn())
+
+    draft_chain = router.resolve_failover_chain("auto/draft")
+    chat_chain = router.resolve_failover_chain("auto/chat")
+    classify_chain = router.resolve_failover_chain("auto/classify")
+    support_chain = router.resolve_failover_chain("auto/support")
+
+    assert [entry.model_slug for entry in draft_chain] == [entry.model_slug for entry in chat_chain]
+    assert [entry.model_slug for entry in draft_chain] == ["gpt-5.4-mini", "claude-sonnet-4-6"]
+    assert [entry.model_slug for entry in classify_chain] == [entry.model_slug for entry in support_chain]
+    assert [entry.model_slug for entry in classify_chain] == ["gpt-5.4-mini", "claude-sonnet-4-6"]
 
 
 def test_unprofiled_task_type_fails_closed() -> None:

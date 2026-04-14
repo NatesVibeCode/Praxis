@@ -230,7 +230,7 @@ Example input:
 - When to use: Diagnose failures and propose healing actions with platform-specific guidance.
 - When not to use: Do not use it as a generic health command or workflow launcher.
 - Selector: none
-- Required args: `job_label`, `failure_code`
+- Required args: `job_label`
 
 Example input:
 
@@ -971,7 +971,7 @@ Example input:
 - CLI schema help: `workflow tools describe praxis_workflow`
 - When to use: Run, inspect, retry, cancel, or list workflows through the MCP workflow surface.
 - When not to use: Do not use it for natural-language questions or health checks.
-- Selector: `action`; default `run`; values `run`, `status`, `inspect`, `cancel`, `list`, `notifications`, `retry`
+- Selector: `action`; default `run`; values `run`, `status`, `inspect`, `cancel`, `list`, `notifications`, `retry`, `repair`
 - Required args: (none)
 
 Example input:

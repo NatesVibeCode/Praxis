@@ -17,6 +17,10 @@ from typing import Any
 
 _AUTO_ROUTE_TIERS = frozenset({"high", "medium", "low"})
 _AUTO_LATENCY_CLASSES = frozenset({"reasoning", "instant"})
+_SEMANTIC_AUTO_ROUTE_ALIASES = {
+    "draft": "chat",
+    "classify": "support",
+}
 class AgentConfigError(RuntimeError):
     """Raised when agent config loading or resolution fails."""
 
@@ -451,6 +455,13 @@ class AgentRegistry:
             if not targets:
                 continue
             _synthesize_alias(_auto_route_slug(task_type), targets, extend_stage=task_type)
+
+        for alias_task_type, backing_task_type in _SEMANTIC_AUTO_ROUTE_ALIASES.items():
+            target_map = task_type_targets.get(backing_task_type, {})
+            targets = [entry[1] for entry in sorted(target_map.values(), key=lambda item: item[0])]
+            if not targets:
+                continue
+            _synthesize_alias(_auto_route_slug(alias_task_type), targets, extend_stage=alias_task_type)
 
         for route_tier, target_map in tier_targets.items():
             targets = [entry[1] for entry in sorted(target_map.values(), key=lambda item: item[0])]

@@ -338,7 +338,52 @@ def _classify_run_job_failure(job: dict) -> dict | None:
             is_transient=bool(job.get("is_transient", False)),
             stdout_preview=str(job.get("stdout_preview") or ""),
         )
+    classification = _terminal_failure_classification(
+        error_code=str(job.get("last_error_code") or "").strip(),
+        stderr=str(job.get("stdout_preview") or ""),
+        exit_code=job.get("exit_code"),
+    )
+    if classification is not None and hasattr(classification, "to_dict"):
+        return classification.to_dict()
     return None
+
+
+def _healing_retry_candidates(run_data: dict[str, Any]) -> list[dict[str, Any]]:
+    from runtime.self_healing import RecoveryAction, SelfHealingOrchestrator
+
+    healer = SelfHealingOrchestrator()
+    allowed_actions = {
+        RecoveryAction.RETRY_SAME,
+        RecoveryAction.RETRY_ESCALATED,
+        RecoveryAction.FIX_AND_RETRY,
+    }
+    candidates: list[dict[str, Any]] = []
+    for job in run_data.get("jobs", []):
+        job_status = str(job.get("status") or "")
+        if job_status not in {"failed", "dead_letter"}:
+            continue
+        label = str(job.get("label") or "").strip()
+        if not label:
+            continue
+        stderr = str(job.get("stdout_preview") or "")
+        failure_code = (
+            str(job.get("last_error_code") or "").strip()
+            or str(job.get("failure_category") or "").strip()
+        )
+        recommendation = healer.diagnose(label, failure_code, stderr)
+        if recommendation.action not in allowed_actions or recommendation.confidence < 0.6:
+            continue
+        candidates.append(
+            {
+                "label": label,
+                "status": job_status,
+                "action": recommendation.action.value,
+                "reason": recommendation.reason,
+                "confidence": round(recommendation.confidence, 3),
+                "resolved_failure_code": healer.resolve_failure_code(failure_code, stderr),
+            }
+        )
+    return candidates
 
 
 def _scan_jobs_for_health(
@@ -702,6 +747,41 @@ def summarize_run_recovery(
         }
 
     if status in {"failed", "dead_letter", "cancelled"}:
+        retry_candidates = _healing_retry_candidates(run_data)
+        if retry_candidates and not health.get("non_retryable_failed_jobs"):
+            if len(retry_candidates) == 1:
+                candidate = retry_candidates[0]
+                return {
+                    "mode": "retry_failed_job",
+                    "reason": candidate["reason"],
+                    "heal_action": candidate["action"],
+                    "resolved_failure_code": candidate["resolved_failure_code"],
+                    "recommended_tool": {
+                        "name": "praxis_workflow",
+                        "arguments": {
+                            "action": "retry",
+                            "run_id": run_id,
+                            "label": candidate["label"],
+                        },
+                    },
+                }
+            return {
+                "mode": "repair_then_retry",
+                "reason": (
+                    "Run failed on healable frontier jobs. Repair the orchestration boundary "
+                    "if needed, then retry the failed frontier jobs so cancelled descendants "
+                    "can resume without discarding completed work."
+                ),
+                "retry_labels": [candidate["label"] for candidate in retry_candidates],
+                "retry_candidates": retry_candidates,
+                "recommended_tool": {
+                    "name": "praxis_workflow",
+                    "arguments": {
+                        "action": "inspect",
+                        "run_id": run_id,
+                    },
+                },
+            }
         return {
             "mode": "inspect",
             "reason": f"Run is terminal with status '{status}'. Inspect before retrying.",
@@ -852,9 +932,9 @@ def cancel_run(
     include_running: bool = False,
 ) -> dict:
     """Cancel all non-terminal jobs in a run and update run status."""
-    # Always include running jobs — leaving them alive wastes worker slots
-    # and causes stale subprocess leaks.
-    job_statuses = ("pending", "ready", "claimed", "running")
+    job_statuses = ("pending", "ready", "claimed")
+    if include_running:
+        job_statuses = (*job_statuses, "running")
     status_sql = ", ".join(f"'{status}'" for status in job_statuses)
 
     rows = conn.execute(

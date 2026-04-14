@@ -54,6 +54,15 @@ class PostgresReceiptRepository:
     def __init__(self, conn: Any) -> None:
         self._conn = conn
 
+    def _fetchrow_compat(self, query: str, *args: Any) -> Any:
+        """Support lightweight execute-only test doubles as well as real DB connections."""
+        if hasattr(self._conn, "fetchrow"):
+            return self._conn.fetchrow(query, *args)
+        rows = self._conn.execute(query, *args)
+        if not rows:
+            return None
+        return rows[0]
+
     def update_receipt_payloads(
         self,
         *,
@@ -319,7 +328,7 @@ class PostgresReceiptRepository:
         run_id: str,
         job_label: str,
     ) -> dict[str, Any] | None:
-        row = self._conn.fetchrow(
+        row = self._fetchrow_compat(
             """
             SELECT run_id, job_label, workflow_id, execution_context_shard, execution_bundle,
                    created_at, updated_at
@@ -337,7 +346,7 @@ class PostgresReceiptRepository:
         job_id: int,
         run_id: str,
     ) -> dict[str, Any] | None:
-        row = self._conn.fetchrow(
+        row = self._fetchrow_compat(
             """
             SELECT wr.workflow_id,
                    wr.request_id,

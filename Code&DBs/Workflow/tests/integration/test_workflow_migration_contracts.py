@@ -3,6 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from storage.migrations import (
+    workflow_bootstrap_migration_path,
+    workflow_bootstrap_migration_sql_text,
+    workflow_bootstrap_migration_statements,
     workflow_migration_expected_objects,
     workflow_migration_manifest,
     workflow_migration_path,
@@ -21,6 +24,7 @@ def test_workflow_migration_manifest_includes_provider_route_health_budget_migra
     assert "011_runtime_breadth_authority.sql" in filenames
     assert "040_control_commands.sql" in filenames
     assert "042_workflow_control_command_types.sql" in filenames
+    assert "046_provider_model_candidate_profiles.sql" in filenames
     assert "050_verification_registry.sql" in filenames
     assert "069_compile_index_snapshots.sql" in filenames
     assert "070_compile_artifact_reuse_keys.sql" in filenames
@@ -34,6 +38,7 @@ def test_workflow_migration_manifest_includes_provider_route_health_budget_migra
     assert "078_provider_transport_admission_receipts.sql" in filenames
     assert "079_workflow_job_runtime_context.sql" in filenames
     assert "080_workflow_job_submissions.sql" in filenames
+    assert "081_observability_lineage_and_metrics.sql" in filenames
     assert "087_workflow_chain_authority.sql" in filenames
     assert "088_workflow_chain_dependency_and_adoption_authority.sql" in filenames
     assert "089_control_operator_frames.sql" in filenames
@@ -41,7 +46,9 @@ def test_workflow_migration_manifest_includes_provider_route_health_budget_migra
     assert "091_control_operator_frame_uniqueness.sql" in filenames
     assert "095_model_profile_auto_seed_trigger.sql" in filenames
     assert "096_workflow_submission_acceptance.sql" in filenames
-    assert filenames[-1] == "096_workflow_submission_acceptance.sql"
+    assert "100_adapter_config_authority.sql" in filenames
+    assert "106_acceptance_status_index.sql" in filenames
+    assert filenames[-1] == "106_acceptance_status_index.sql"
 
 
 def test_every_manifest_migration_has_expected_object_contract() -> None:
@@ -310,6 +317,11 @@ def test_notify_and_provider_transport_migration_expected_objects_are_registered
     profile_names = {item.object_name for item in profile_objects}
     assert "provider_cli_profiles.default_model" in profile_names
     assert "provider_cli_profiles.provider_cli_profiles_api_key_env_vars_array_check" in profile_names
+    profile_sql = workflow_migration_sql_text("076_provider_cli_profile_transport_metadata.sql")
+    assert "CREATE TABLE IF NOT EXISTS provider_cli_profiles" in profile_sql
+    assert "'anthropic'" in profile_sql
+    assert "'openai'" in profile_sql
+    assert "'google'" in profile_sql
 
     prompt_objects = workflow_migration_expected_objects("077_provider_cli_profile_prompt_mode.sql")
     prompt_names = {item.object_name for item in prompt_objects}
@@ -324,10 +336,12 @@ def test_notify_and_provider_transport_migration_expected_objects_are_registered
 
 
 def test_stale_postgres_completion_prune_migration_is_resolvable_and_targeted() -> None:
-    path = workflow_migration_path("064_prune_stale_completion_functions.sql")
+    path = workflow_bootstrap_migration_path("064_prune_stale_completion_functions.sql")
     assert path.name == "064_prune_stale_completion_functions.sql"
 
-    statements = workflow_migration_statements("064_prune_stale_completion_functions.sql")
+    statements = workflow_bootstrap_migration_statements(
+        "064_prune_stale_completion_functions.sql"
+    )
     assert len(statements) == 3
     assert statements[0].strip().endswith("BEGIN")
     assert statements[-1].strip() == "COMMIT"
@@ -341,13 +355,13 @@ def test_stale_postgres_completion_prune_migration_is_resolvable_and_targeted() 
 
 
 def test_reference_catalog_migrations_alias_json_array_values_explicitly() -> None:
-    legacy_catalog_sql = workflow_migration_sql_text("034_reference_catalog.sql")
+    legacy_catalog_sql = workflow_bootstrap_migration_sql_text("034_reference_catalog.sql")
     assert "AS cap(value)" in legacy_catalog_sql
     assert "(cap.value->>'action')" in legacy_catalog_sql
     assert "AS prop(value)" in legacy_catalog_sql
     assert "(prop.value->>'name')" in legacy_catalog_sql
 
-    refreshed_catalog_sql = workflow_migration_sql_text("037_reference_catalog.sql")
+    refreshed_catalog_sql = workflow_bootstrap_migration_sql_text("037_reference_catalog.sql")
     assert "AS cap(value)" in refreshed_catalog_sql
     assert "(cap.value->>'action')" in refreshed_catalog_sql
     assert "ADD COLUMN IF NOT EXISTS schema_def" in refreshed_catalog_sql
@@ -365,9 +379,42 @@ def test_workflow_chain_dependency_migration_aliases_wave_definition_values_expl
 
 
 def test_workflow_runtime_cutover_migration_backfills_missing_dispatch_idempotency_column() -> None:
-    sql_text = workflow_migration_sql_text("041_workflow_runtime_cutover.sql")
+    sql_text = workflow_bootstrap_migration_sql_text("041_workflow_runtime_cutover.sql")
     assert "ALTER TABLE dispatch_runs" in sql_text
     assert "ADD COLUMN IF NOT EXISTS idempotency_key TEXT" in sql_text
+
+
+def test_provider_model_candidate_profiles_migration_seeds_cli_configured_candidates() -> None:
+    sql_text = workflow_migration_sql_text("046_provider_model_candidate_profiles.sql")
+    assert "ADD COLUMN IF NOT EXISTS cli_config jsonb" in sql_text
+    assert "INSERT INTO provider_model_candidates" in sql_text
+    assert "\"cmd_template\":[\"claude\"" in sql_text
+    assert "\"cmd_template\":[\"codex\"" in sql_text
+    assert "\"cmd_template\":[\"gemini\"" in sql_text
+
+
+def test_observability_lineage_migration_guards_optional_tables_before_indexing() -> None:
+    sql_text = workflow_migration_sql_text("081_observability_lineage_and_metrics.sql")
+    assert "ALTER TABLE IF EXISTS system_events" in sql_text
+    assert "CREATE TABLE IF NOT EXISTS workflow_metrics" in sql_text
+    assert "platform_events" not in sql_text
+    assert "system_events_parent_run_idx" in sql_text
+    assert "workflow_metrics_parent_idx" in sql_text
+
+
+def test_acceptance_status_index_migration_avoids_concurrent_builds_in_bootstrap() -> None:
+    sql_text = workflow_migration_sql_text("106_acceptance_status_index.sql")
+    assert "CREATE INDEX IF NOT EXISTS idx_wjs_acceptance_status" in sql_text
+    assert "CREATE INDEX CONCURRENTLY" not in sql_text
+
+
+def test_adapter_config_authority_migration_creates_platform_config_defaults() -> None:
+    sql_text = workflow_migration_sql_text("100_adapter_config_authority.sql")
+    assert "CREATE TABLE IF NOT EXISTS platform_config" in sql_text
+    assert "'breaker.failure_threshold'" in sql_text
+    assert "'breaker.recovery_timeout_s'" in sql_text
+    assert "'health.max_consecutive_failures'" in sql_text
+    assert "'context.preview_chars'" in sql_text
 
 
 def test_expected_index_names_match_postgres_identifier_limit() -> None:

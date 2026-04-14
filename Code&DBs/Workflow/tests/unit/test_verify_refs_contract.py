@@ -689,6 +689,32 @@ def test_compile_graph_workflow_request_honors_conditional_dependency_edges() ->
     assert dict(request.edges[0].release_condition) == condition
 
 
+def test_compile_graph_workflow_request_infers_semantic_task_types_from_agent_routes() -> None:
+    spec = {
+        "name": "Semantic Routes",
+        "workflow_id": "workflow.semantic_routes",
+        "phase": "build",
+        "jobs": [
+            {
+                "label": "draft_reply",
+                "agent": "auto/draft",
+                "prompt": "Draft the customer reply.",
+            },
+            {
+                "label": "classify_queue",
+                "agent": "auto/classify",
+                "prompt": "Classify and prioritize the incoming queue.",
+            },
+        ],
+    }
+
+    request = compile_graph_workflow_request(spec)
+
+    nodes = {node.node_id: node for node in request.nodes}
+    assert nodes["draft_reply"].inputs["task_type"] == "creative"
+    assert nodes["classify_queue"].inputs["task_type"] == "analysis"
+
+
 def test_compile_prose_fails_closed_when_compile_index_snapshot_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(compiler, "_get_connection", lambda: _VerifyRefsConn())
     monkeypatch.setattr(

@@ -62,6 +62,10 @@ logger = logging.getLogger(__name__)
 _UNDEFINED_TABLE_SQLSTATE = "42P01"
 _ROUTE_TIER_BUCKETS = frozenset({"high", "medium", "low"})
 _LATENCY_CLASS_BUCKETS = frozenset({"reasoning", "instant"})
+_SEMANTIC_AUTO_ROUTE_ALIASES = {
+    "draft": "chat",
+    "classify": "support",
+}
 _ROUTE_HEALTH_EXTERNAL_FAILURE_CATEGORIES = frozenset(
     {
         "timeout",
@@ -222,6 +226,11 @@ def _parse_auto_tier_override(value: str) -> str | None:
         if tier in _ROUTE_TIER_BUCKETS:
             return tier
     return None
+
+
+def _resolve_semantic_auto_route(task_type: str) -> str:
+    """Map product-facing semantic lanes onto backed route authority."""
+    return _SEMANTIC_AUTO_ROUTE_ALIASES.get(task_type, task_type)
 
 
 def _coerce_json_object(value: object, *, field_name: str) -> dict[str, Any]:
@@ -567,7 +576,7 @@ class TaskTypeRouter:
     ) -> TaskRouteDecision:
         if agent_slug.startswith("auto/"):
             return self._resolve_auto(
-                _normalize_auto_route_key(agent_slug),
+                _resolve_semantic_auto_route(_normalize_auto_route_key(agent_slug)),
                 prefer_cost,
                 runtime_profile_ref=runtime_profile_ref,
             )
@@ -622,6 +631,7 @@ class TaskTypeRouter:
         tier_override: str | None = None,
         runtime_profile_ref: str | None = None,
     ) -> list[TaskRouteDecision]:
+        task_type = _resolve_semantic_auto_route(task_type)
         if task_type in _ROUTE_TIER_BUCKETS:
             return self._resolve_profile_chain(profile_column="route_tier", profile_rank_column="route_tier_rank", profile_value=task_type, prefer_cost=prefer_cost, runtime_profile_ref=runtime_profile_ref)
         if task_type in _LATENCY_CLASS_BUCKETS:
@@ -1189,9 +1199,11 @@ class TaskTypeRouter:
             )
             if slug.startswith("auto/"):
                 job_complexity = str(job.get("complexity", "moderate")).strip().lower()
+                explicit_prefer_cost = job.get("prefer_cost")
+                prefer_cost = explicit_prefer_cost if isinstance(explicit_prefer_cost, bool) else (job_complexity == "low")
                 chain = self.resolve_failover_chain(
                     slug,
-                    prefer_cost=(job_complexity == "low"),
+                    prefer_cost=prefer_cost,
                     runtime_profile_ref=job_runtime_profile_ref,
                 )
                 task_type = chain[0].task_type
@@ -1205,7 +1217,7 @@ class TaskTypeRouter:
                 if task_type in _ROTATION_TASK_TYPES and len(chain) <= 1:
                     try:
                         broader = self._resolve_auto_chain(
-                            task_type, prefer_cost=(job_complexity == "low"),
+                            task_type, prefer_cost=prefer_cost,
                             tier_override=slug_tier,
                             runtime_profile_ref=job_runtime_profile_ref,
                         )

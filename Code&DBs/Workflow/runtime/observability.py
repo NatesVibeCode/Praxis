@@ -28,6 +28,39 @@ if TYPE_CHECKING:
 
 _WORKFLOW_METRICS_LOCK = threading.Lock()
 _WORKFLOW_METRICS_VIEW: WorkflowMetricsView | None = None
+_REQUIRED_WORKFLOW_METRICS_COLUMNS = frozenset(
+    {
+        "run_id",
+        "parent_run_id",
+        "reviews_workflow_id",
+        "review_target_modules",
+        "author_model",
+        "provider_slug",
+        "model_slug",
+        "status",
+        "failure_code",
+        "failure_category",
+        "failure_zone",
+        "is_retryable",
+        "is_transient",
+        "latency_ms",
+        "cost_usd",
+        "input_tokens",
+        "output_tokens",
+        "attempts",
+        "retry_count",
+        "tool_use_count",
+        "cache_read_tokens",
+        "cache_creation_tokens",
+        "duration_api_ms",
+        "task_type",
+        "workflow_label",
+        "capabilities",
+        "label",
+        "adapter_type",
+        "created_at",
+    }
+)
 
 
 def _utc_now() -> datetime:
@@ -205,82 +238,37 @@ class WorkflowMetricsView:
             self._conn = None
 
     async def _ensure_schema(self) -> None:
-        """Create the workflow_metrics table if it doesn't exist."""
+        """Verify the canonical workflow_metrics schema is present."""
         if self._schema_initialized:
             return
 
         conn = await self._get_connection()
-        await conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS workflow_metrics (
-                run_id TEXT PRIMARY KEY,
-                parent_run_id TEXT,
-                reviews_workflow_id TEXT,
-                review_target_modules TEXT,
-                author_model TEXT,
-                provider_slug TEXT NOT NULL,
-                model_slug TEXT,
-                status TEXT NOT NULL,
-                failure_code TEXT,
-                failure_category TEXT,
-                failure_zone TEXT,
-                is_retryable BOOLEAN,
-                is_transient BOOLEAN,
-                latency_ms INTEGER,
-                cost_usd REAL,
-                input_tokens INTEGER,
-                output_tokens INTEGER,
-                attempts INTEGER NOT NULL DEFAULT 1,
-                retry_count INTEGER NOT NULL DEFAULT 0,
-                tool_use_count INTEGER NOT NULL DEFAULT 0,
-                cache_read_tokens INTEGER NOT NULL DEFAULT 0,
-                cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
-                duration_api_ms INTEGER NOT NULL DEFAULT 0,
-                task_type TEXT,
-                workflow_label TEXT,
-                capabilities TEXT,
-                label TEXT,
-                adapter_type TEXT,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            );
-            """
+        table_exists = await conn.fetchval(
+            "SELECT to_regclass('public.workflow_metrics') IS NOT NULL"
         )
-        await conn.execute(
-            """
-            ALTER TABLE workflow_metrics
-                ADD COLUMN IF NOT EXISTS parent_run_id TEXT,
-                ADD COLUMN IF NOT EXISTS reviews_workflow_id TEXT,
-                ADD COLUMN IF NOT EXISTS review_target_modules TEXT,
-                ADD COLUMN IF NOT EXISTS failure_category TEXT,
-                ADD COLUMN IF NOT EXISTS failure_zone TEXT,
-                ADD COLUMN IF NOT EXISTS is_retryable BOOLEAN,
-                ADD COLUMN IF NOT EXISTS is_transient BOOLEAN,
-                ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 1,
-                ADD COLUMN IF NOT EXISTS retry_count INTEGER NOT NULL DEFAULT 0,
-                ADD COLUMN IF NOT EXISTS tool_use_count INTEGER NOT NULL DEFAULT 0,
-                ADD COLUMN IF NOT EXISTS cache_read_tokens INTEGER NOT NULL DEFAULT 0,
-                ADD COLUMN IF NOT EXISTS cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
-                ADD COLUMN IF NOT EXISTS duration_api_ms INTEGER NOT NULL DEFAULT 0,
-                ADD COLUMN IF NOT EXISTS workflow_label TEXT
-            """
-        )
+        if not table_exists:
+            raise RuntimeError(
+                "workflow_metrics table is missing; bootstrap workflow schema so "
+                "081_observability_lineage_and_metrics.sql can materialize it"
+            )
 
-        # Create indices
-        await conn.execute(
-            "CREATE INDEX IF NOT EXISTS workflow_metrics_author_idx ON workflow_metrics (author_model);"
+        rows = await conn.fetch(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'workflow_metrics'
+            """
         )
-        await conn.execute(
-            "CREATE INDEX IF NOT EXISTS workflow_metrics_status_idx ON workflow_metrics (status, created_at DESC);"
+        available_columns = {str(row["column_name"]) for row in rows}
+        missing_columns = sorted(
+            _REQUIRED_WORKFLOW_METRICS_COLUMNS.difference(available_columns)
         )
-        await conn.execute(
-            "CREATE INDEX IF NOT EXISTS workflow_metrics_provider_idx ON workflow_metrics (provider_slug, model_slug);"
-        )
-        await conn.execute(
-            "CREATE INDEX IF NOT EXISTS workflow_metrics_parent_idx ON workflow_metrics (parent_run_id);"
-        )
-        await conn.execute(
-            "CREATE INDEX IF NOT EXISTS workflow_metrics_failure_category_idx ON workflow_metrics (failure_category, created_at DESC);"
-        )
+        if missing_columns:
+            raise RuntimeError(
+                "workflow_metrics schema is incomplete; missing columns: "
+                + ", ".join(missing_columns)
+            )
 
         self._schema_initialized = True
 

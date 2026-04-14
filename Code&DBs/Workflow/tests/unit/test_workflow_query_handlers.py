@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from runtime import canonical_workflows
 from runtime.compile_index import CompileIndexAuthorityError
+from runtime.self_healing import SelfHealingOrchestrator
 from surfaces.api.handlers import workflow_query
 from surfaces.api.handlers import workflow_query_core
 
@@ -263,6 +264,21 @@ class _MutableWorkflowPg(_RecordingPg):
             )
             return []
         return super().execute(query, *params)
+
+
+def test_handle_heal_infers_failure_code_from_stderr() -> None:
+    subs = SimpleNamespace(get_self_healer=lambda: SelfHealingOrchestrator())
+
+    payload = workflow_query_core.handle_heal(
+        subs,
+        {
+            "job_label": "phase_010_operator_control_authority",
+            "stderr": "TypeError: failure_code must be a non-empty string",
+        },
+    )
+
+    assert payload["action"] == "fix_and_retry"
+    assert payload["resolved_failure_code"] == "orchestration.failure_code_missing"
 
 
 def test_handle_compile_post_returns_definition_only_and_preserves_nonfatal_error() -> None:
@@ -1304,6 +1320,152 @@ def test_handle_workflow_build_post_treats_trigger_nodes_as_trigger_intent() -> 
         }
     ]
     assert [step["id"] for step in persisted_definition["draft_flow"]] == ["step-001", "step-002"]
+
+
+def test_handle_workflow_build_post_preserves_explicit_trigger_branch_edges() -> None:
+    condition = {"field": "should_continue", "op": "equals", "value": True}
+    workflow_row = {
+        "id": "wf_build_trigger_branch",
+        "name": "Triggered Branch Flow",
+        "description": "Preserve explicit trigger-authored branch edges",
+        "definition": {
+            "type": "operating_model",
+            "source_prose": "Start manually and branch immediately.",
+            "compiled_prose": "Start manually and branch immediately.",
+            "narrative_blocks": [],
+            "references": [],
+            "capabilities": [],
+            "authority": "",
+            "sla": {},
+            "trigger_intent": [],
+            "draft_flow": [],
+            "definition_revision": "def_build_trigger_branch",
+        },
+        "compiled_spec": None,
+        "version": 1,
+        "updated_at": "2026-04-13T20:00:00Z",
+    }
+    pg = _MutableWorkflowPg(workflow_rows={"wf_build_trigger_branch": workflow_row})
+    request = _RequestStub(
+        {
+            "nodes": [
+                {
+                    "node_id": "node-trigger",
+                    "kind": "step",
+                    "title": "Manual",
+                    "route": "trigger",
+                    "status": "ready",
+                    "summary": "Run this workflow manually.",
+                },
+                {
+                    "node_id": "step-001",
+                    "kind": "step",
+                    "title": "Then path",
+                    "route": "auto/draft",
+                    "status": "ready",
+                    "summary": "Run when the condition passes.",
+                },
+                {
+                    "node_id": "step-002",
+                    "kind": "step",
+                    "title": "Else path",
+                    "route": "auto/review",
+                    "status": "ready",
+                    "summary": "Run when the condition fails.",
+                },
+            ],
+            "edges": [
+                {
+                    "edge_id": "edge-trigger-step-001",
+                    "kind": "conditional",
+                    "from_node_id": "node-trigger",
+                    "to_node_id": "step-001",
+                    "branch_reason": "then",
+                    "gate": {
+                        "state": "configured",
+                        "family": "conditional",
+                        "label": "Then",
+                        "config": {"condition": condition},
+                    },
+                },
+                {
+                    "edge_id": "edge-trigger-step-002",
+                    "kind": "conditional",
+                    "from_node_id": "node-trigger",
+                    "to_node_id": "step-002",
+                    "branch_reason": "else",
+                    "gate": {
+                        "state": "configured",
+                        "family": "conditional",
+                        "label": "Else",
+                        "config": {"condition": condition},
+                    },
+                },
+            ],
+        },
+        subsystems=SimpleNamespace(get_pg_conn=lambda: pg),
+        path="/api/workflows/wf_build_trigger_branch/build/build_graph",
+    )
+
+    workflow_query._handle_workflow_build_post(request, "/api/workflows/wf_build_trigger_branch/build/build_graph")
+
+    assert request.sent is not None
+    status, payload = request.sent
+    assert status == 200
+
+    trigger_edges = [
+        edge
+        for edge in payload["build_graph"]["edges"]
+        if edge["from_node_id"] == "node-trigger"
+    ]
+    assert {(edge["to_node_id"], edge.get("branch_reason")) for edge in trigger_edges} == {
+        ("step-001", "then"),
+        ("step-002", "else"),
+    }
+
+    persisted_definition = pg.workflow_rows["wf_build_trigger_branch"]["definition"]
+    assert persisted_definition["draft_flow"] == [
+        {
+            "id": "step-001",
+            "order": 1,
+            "title": "Then path",
+            "summary": "Run when the condition passes.",
+            "depends_on": ["node-trigger"],
+            "source_block_ids": [],
+        },
+        {
+            "id": "step-002",
+            "order": 2,
+            "title": "Else path",
+            "summary": "Run when the condition fails.",
+            "depends_on": ["node-trigger"],
+            "source_block_ids": [],
+        },
+    ]
+    assert persisted_definition["execution_setup"]["edge_gates"] == [
+        {
+            "edge_id": "edge-trigger-step-001",
+            "from_node_id": "node-trigger",
+            "to_node_id": "step-001",
+            "family": "conditional",
+            "label": "Then",
+            "branch_reason": "then",
+            "config": {
+                "condition": condition,
+            },
+        },
+        {
+            "edge_id": "edge-trigger-step-002",
+            "from_node_id": "node-trigger",
+            "to_node_id": "step-002",
+            "family": "conditional",
+            "label": "Else",
+            "branch_reason": "else",
+            "config": {
+                "condition": condition,
+            },
+        },
+    ]
 
 
 def test_handle_workflow_build_post_preserves_trigger_node_configuration() -> None:

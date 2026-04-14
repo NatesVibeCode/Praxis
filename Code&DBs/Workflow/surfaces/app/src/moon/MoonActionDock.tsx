@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { compileDefinition, refineDefinition, commitDefinition } from '../shared/buildController';
+import { compileDefinition, refineDefinition, commitDefinition, createWorkflow } from '../shared/buildController';
 import type { BuildPayload } from '../shared/types';
+import { buildGraphToDefinition } from '../shared/buildGraphDefinition';
 import { loadCatalog, getCatalog, FAMILY_LABELS } from './catalog';
 import type { CatalogItem, CatalogFamily } from './catalog';
 import { MoonGlyph } from './MoonGlyph';
@@ -11,11 +12,12 @@ interface Props {
   onReload: () => void;
   onClose: () => void;
   onStartCatalogDrag: (event: React.PointerEvent, item: CatalogItem) => void;
+  onWorkflowCreated?: (workflowId: string) => void;
 }
 
 const DOCK_FAMILIES: CatalogFamily[] = ['trigger', 'gather', 'think', 'act', 'control'];
 
-export function MoonActionDock({ workflowId, payload, onReload, onClose, onStartCatalogDrag }: Props) {
+export function MoonActionDock({ workflowId, payload, onReload, onClose, onStartCatalogDrag, onWorkflowCreated }: Props) {
   const [prose, setProse] = useState('');
   const [loading, setLoading] = useState(false);
   const [action, setAction] = useState<string | null>(null);
@@ -26,11 +28,13 @@ export function MoonActionDock({ workflowId, payload, onReload, onClose, onStart
 
   useEffect(() => { loadCatalog().then(setCatalog); }, []);
 
+  const visibleCatalog = catalog.filter(c => c.status === 'ready' && c.gateFamily !== 'conditional');
   const filteredCatalog = familyFilter
-    ? catalog.filter(c => c.family === familyFilter && c.status === 'ready')
-    : catalog.filter(c => c.status === 'ready');
+    ? visibleCatalog.filter(c => c.family === familyFilter)
+    : visibleCatalog;
 
   const hasDefinition = !!(payload?.definition && Object.keys(payload.definition).length > 0);
+  const hasGraphSteps = !!payload?.build_graph?.nodes?.some(node => (node.route || '').trim().length > 0);
   const buildState = payload?.build_state || 'draft';
 
   const handleRefine = useCallback(async () => {
@@ -70,17 +74,23 @@ export function MoonActionDock({ workflowId, payload, onReload, onClose, onStart
   }, [prose, onReload]);
 
   const handleCommit = useCallback(async () => {
-    if (!workflowId) return;
+    if (!hasDefinition && !hasGraphSteps) return;
     setLoading(true);
     setAction('commit');
     setError(null);
     setSuccess(null);
     try {
-      const title = payload?.workflow?.name || workflowId;
+      const title = payload?.workflow?.name || 'Moon draft';
       const definition = (payload?.definition && Object.keys(payload.definition).length > 0)
         ? payload.definition as Record<string, unknown>
-        : { draft_flow: [], execution_setup: { phases: [] } };
-      await commitDefinition(workflowId, { title, definition });
+        : buildGraphToDefinition(payload?.build_graph);
+      if (workflowId) {
+        await commitDefinition(workflowId, { title, definition });
+      } else {
+        const created = await createWorkflow(title, definition);
+        const createdWorkflowId = created.id || created.workflow_id;
+        if (createdWorkflowId && onWorkflowCreated) onWorkflowCreated(createdWorkflowId);
+      }
       setSuccess('Saved');
       onReload();
     } catch (e: any) {
@@ -88,7 +98,7 @@ export function MoonActionDock({ workflowId, payload, onReload, onClose, onStart
     } finally {
       setLoading(false);
     }
-  }, [workflowId, payload, onReload]);
+  }, [workflowId, payload, hasDefinition, hasGraphSteps, onReload, onWorkflowCreated]);
 
   return (
     <>
@@ -119,11 +129,11 @@ export function MoonActionDock({ workflowId, payload, onReload, onClose, onStart
         )}
       </div>
 
-      {hasDefinition && (
+      {(hasDefinition || hasGraphSteps) && (
         <div style={{ marginTop: 16 }}>
           <div className="moon-dock__section-label">Save</div>
           <div className="moon-dock__item-desc">State: {buildState}</div>
-          <button className="moon-dock-form__btn" onClick={handleCommit} disabled={loading || !workflowId}>
+          <button className="moon-dock-form__btn" onClick={handleCommit} disabled={loading || (!hasDefinition && !hasGraphSteps)}>
             {loading && action === 'commit' ? 'Saving...' : 'Save draft'}
           </button>
         </div>

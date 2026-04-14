@@ -87,12 +87,17 @@ def _fail(
             raise TypeError("finished_at must be a datetime when provided")
 
         reason_code = code or payload_details.pop("reason_code", None)
-        if not isinstance(reason_code, str) or not reason_code:
+        if not isinstance(reason_code, str):
+            raise TypeError("reason_code must be a non-empty string")
+        reason_code = reason_code.strip()
+        if not reason_code:
             raise TypeError("reason_code must be a non-empty string")
 
-        resolved_failure_code = failure_code if failure_code is not None else reason_code
-        if not isinstance(resolved_failure_code, str) or not resolved_failure_code:
-            raise TypeError("failure_code must be a non-empty string")
+        resolved_failure_code = failure_code if isinstance(failure_code, str) else None
+        if isinstance(resolved_failure_code, str):
+            resolved_failure_code = resolved_failure_code.strip()
+        if not resolved_failure_code:
+            resolved_failure_code = reason_code or "orchestration.failure_code_missing"
 
         return DeterministicTaskResult(
             node_id=request.node_id,

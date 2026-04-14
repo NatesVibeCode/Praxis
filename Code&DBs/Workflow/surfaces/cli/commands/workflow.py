@@ -1357,6 +1357,26 @@ def _cancel_command(args: list[str], *, stdout: TextIO) -> int:
     return exit_code
 
 
+def _repair_command(args: list[str], *, stdout: TextIO) -> int:
+    """Handle `workflow repair <run_id>` via the bus-backed legacy CLI."""
+    from contextlib import redirect_stdout
+    from io import StringIO
+    from types import SimpleNamespace
+
+    from surfaces.cli import workflow_cli
+
+    if not args or args[0] in {"-h", "--help"}:
+        stdout.write("usage: workflow repair <run_id>\n")
+        return 2
+
+    run_id = args[0]
+    buffer = StringIO()
+    with redirect_stdout(buffer):
+        exit_code = workflow_cli.cmd_repair(SimpleNamespace(run_id=run_id))
+    stdout.write(buffer.getvalue())
+    return exit_code
+
+
 def _active_command(*, stdout: TextIO) -> int:
     """Handle `workflow active` — list currently running workflows."""
 
