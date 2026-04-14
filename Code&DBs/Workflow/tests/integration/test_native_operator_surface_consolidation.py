@@ -27,6 +27,333 @@ async def _fake_load_persona_activation(self, *, env, run_id, as_of):
     }
 
 
+def test_native_operator_surface_scopes_run_context_and_database_handle_per_request(
+    monkeypatch,
+) -> None:
+    as_of = datetime(2026, 4, 3, 8, 0, tzinfo=timezone.utc)
+    env = {"PRAXIS_RUNTIME_PROFILE": "praxis"}
+    connect_calls: list[dict[str, object]] = []
+    close_calls: list[str] = []
+    workflow_run_context_reads: list[str] = []
+    binding_loader_conns: list[object] = []
+    persona_repository_conns: list[object] = []
+    persona_selectors: list[object] = []
+    fork_selectors: list[object] = []
+
+    class _FakeConnection:
+        async def fetchrow(self, query: str, *args: object):
+            if "FROM workflow_runs" in query:
+                workflow_run_context_reads.append(args[0])
+                return {
+                    "workspace_ref": "workspace.test",
+                    "runtime_profile_ref": "runtime_profile.test",
+                }
+            if "FROM workflow_claim_lease_proposal_runtime" in query:
+                return {
+                    "share_mode": "shared",
+                    "reuse_reason_code": "packet.authoritative_fork",
+                    "sandbox_session_id": "sandbox.alpha",
+                }
+            raise AssertionError(f"unexpected fetchrow query: {query}")
+
+        async def fetch(self, query: str, *args: object):
+            if "FROM fork_worktree_bindings" in query:
+                return [
+                    {
+                        "fork_worktree_binding_id": "binding.alpha",
+                        "binding_scope": "native_runtime",
+                        "workspace_ref": "workspace.test",
+                        "runtime_profile_ref": "runtime_profile.test",
+                        "fork_ref": "fork.alpha",
+                        "worktree_ref": "worktree.alpha",
+                    }
+                ]
+            raise AssertionError(f"unexpected fetch query: {query}")
+
+        async def close(self) -> None:
+            close_calls.append("closed")
+
+    fake_connection = _FakeConnection()
+
+    async def _fake_connect_database(source_env):
+        connect_calls.append({"env": dict(source_env or {})})
+        return fake_connection
+
+    async def _fake_load_run_scoped_work_bindings(conn, *, workflow_run_id):
+        binding_loader_conns.append(conn)
+        return (
+            WorkItemWorkflowBindingRecord(
+                work_item_workflow_binding_id="binding.1",
+                binding_kind="governed_by",
+                binding_status="active",
+                roadmap_item_id=None,
+                bug_id=None,
+                cutover_gate_id="gate.1",
+                workflow_class_id="dispatch.1",
+                schedule_definition_id=None,
+                workflow_run_id=workflow_run_id,
+                bound_by_decision_id="decision.1",
+                created_at=as_of,
+                updated_at=as_of,
+            ),
+        )
+
+    class _FakeAuthorityRepository:
+        def __init__(self, conn) -> None:
+            persona_repository_conns.append(conn)
+
+        async def load_persona_activation(self, *, selector):
+            persona_selectors.append(selector)
+            return (
+                {
+                    "persona_profile_id": "persona.alpha",
+                    "persona_name": "Operator",
+                    "persona_kind": "native_operator",
+                    "instruction_contract": {"kind": "instruction_contract"},
+                    "effective_from": as_of,
+                    "effective_to": None,
+                    "decision_ref": "decision.alpha",
+                    "created_at": as_of,
+                },
+                [],
+            )
+
+        async def load_fork_worktree_binding(self, *, selector):
+            fork_selectors.append(selector)
+            return {
+                "fork_worktree_binding_id": "binding.alpha",
+                "fork_profile_id": "fork_profile.alpha",
+                "sandbox_session_id": "sandbox.alpha",
+                "workflow_run_id": "run.1",
+                "binding_scope": "native_runtime",
+                "binding_status": "active",
+                "workspace_ref": "workspace.test",
+                "runtime_profile_ref": "runtime_profile.test",
+                "base_ref": "base.alpha",
+                "fork_ref": "fork.alpha",
+                "worktree_ref": "worktree.alpha",
+                "created_at": as_of,
+                "retired_at": None,
+                "decision_ref": "decision.alpha",
+            }
+
+    class _FakeInstance:
+        def to_contract(self) -> dict[str, object]:
+            return {"kind": "native_instance", "label": "shared"}
+
+    class _FakeCockpit:
+        def to_json(self) -> dict[str, object]:
+            return {"kind": "operator_cockpit", "status_state": "fresh"}
+
+    async def _fake_load_route_authority(self, *, env, as_of):
+        del self, env, as_of
+        return {"route_rows": 1}
+
+    async def _fake_load_dispatch_resolution(self, *, env, as_of, work_bindings):
+        del self, env, as_of, work_bindings
+        return {"dispatch_rows": 1}
+
+    async def _fake_load_cutover_status(self, *, env, run_id, as_of, work_bindings):
+        del self, env, run_id, as_of, work_bindings
+        return {"cutover_rows": 1}
+
+    async def _fake_load_smoke_freshness(self, *, env, as_of):
+        del self, env
+        return {
+            "kind": "native_smoke_freshness",
+            "state": "fresh",
+            "last_run_id": "run:workflow.native-self-hosted-smoke:latest",
+            "last_requested_at": as_of.isoformat(),
+            "age_seconds": 0.0,
+            "fail_streak": 0,
+            "latest_failure_category": "success",
+        }
+
+    async def _fake_load_canonical_evidence(self, *, env, run_id):
+        del self, env, run_id
+        return ()
+
+    def _fake_operator_cockpit_run(
+        *,
+        run_id,
+        as_of,
+        route_authority,
+        dispatch_resolution,
+        cutover_status,
+    ) -> _FakeCockpit:
+        del run_id, as_of, route_authority, dispatch_resolution, cutover_status
+        return _FakeCockpit()
+
+    def _fake_frontdoor_status(*, run_id: str, env=None) -> dict[str, object]:
+        del env
+        return {
+            "native_instance": {"kind": "native_instance", "label": "shared"},
+            "run": {
+                "run_id": run_id,
+                "workflow_id": "workflow.alpha",
+                "request_id": "request.alpha",
+                "request_digest": "digest.alpha",
+                "workflow_definition_id": "workflow_definition.alpha.v1",
+                "admitted_definition_hash": "sha256:alpha",
+                "current_state": "running",
+                "terminal_reason_code": None,
+                "run_idempotency_key": "idem.alpha",
+                "context_bundle_id": "context.alpha",
+                "authority_context_digest": "digest.alpha",
+                "admission_decision_id": "admission.alpha",
+                "requested_at": as_of.isoformat(),
+                "admitted_at": as_of.isoformat(),
+                "started_at": as_of.isoformat(),
+                "finished_at": None,
+                "last_event_id": "event.alpha.2",
+            },
+            "inspection": {"kind": "workflow_inspection", "last_evidence_seq": 0},
+            "observability": {
+                "kind": "frontdoor_observability",
+                "health_state": "healthy",
+                "run_identity": {"request_digest": "digest.alpha"},
+            },
+        }
+
+    def _fake_query_operator_surface(
+        *,
+        env=None,
+        as_of=None,
+        bug_ids=None,
+        roadmap_item_ids=None,
+        cutover_gate_ids=None,
+        work_item_workflow_binding_ids=None,
+        workflow_run_ids=None,
+    ) -> dict[str, object]:
+        del env, bug_ids, roadmap_item_ids, cutover_gate_ids
+        return {
+            "kind": "operator_query",
+            "as_of": as_of.isoformat(),
+            "query": {
+                "bug_ids": None,
+                "roadmap_item_ids": None,
+                "cutover_gate_ids": None,
+                "work_item_workflow_binding_ids": list(work_item_workflow_binding_ids or []),
+                "workflow_run_ids": list(workflow_run_ids or []),
+            },
+            "counts": {
+                "bugs": 0,
+                "roadmap_items": 0,
+                "cutover_gates": 0,
+                "work_item_workflow_bindings": 1,
+            },
+            "bugs": [],
+            "roadmap_items": [],
+            "cutover_gates": [],
+            "work_item_workflow_bindings": [
+                {
+                    "work_item_workflow_binding_id": "binding.1",
+                    "binding_kind": "governed_by",
+                    "binding_status": "active",
+                    "source": {"kind": "cutover_gate", "id": "gate.1", "cutover_gate_id": "gate.1"},
+                    "targets": {
+                        "workflow_class_id": "dispatch.1",
+                        "workflow_run_id": "run.1",
+                    },
+                    "bound_by_decision_id": "decision.1",
+                    "created_at": as_of.isoformat(),
+                    "updated_at": as_of.isoformat(),
+                }
+            ],
+            "workflow_run_observability": {
+                "kind": "workflow_run_observability",
+                "observability_digest": "1 runs | 100.0% packet coverage | dominant failure in_progress | 0 synthetic | 0 isolated",
+                "workflow_run_count": 1,
+                "packet_inspection_source_counts": {"materialized": 1},
+                "packet_inspection_coverage_rate": 1.0,
+                "failure_category_counts": {"in_progress": 1},
+                "dominant_failure_category": "in_progress",
+                "synthetic_run_count": 0,
+                "isolated_run_count": 0,
+                "missing_workflow_run_ids": [],
+                "contract_drift_refs": [],
+            },
+            "native_instance": {"kind": "native_instance", "label": "shared"},
+        }
+
+    monkeypatch.setattr(native_operator_surface, "query_operator_surface", _fake_query_operator_surface)
+    monkeypatch.setattr(
+        native_operator_surface,
+        "load_work_item_workflow_bindings_for_workflow_run",
+        _fake_load_run_scoped_work_bindings,
+    )
+    monkeypatch.setattr(
+        native_operator_surface,
+        "PostgresPersonaAndForkAuthorityRepository",
+        _FakeAuthorityRepository,
+    )
+    monkeypatch.setattr(
+        native_operator_surface.NativeOperatorSurfaceFrontdoor,
+        "_load_route_authority",
+        _fake_load_route_authority,
+    )
+    monkeypatch.setattr(
+        native_operator_surface.NativeOperatorSurfaceFrontdoor,
+        "_load_dispatch_resolution",
+        _fake_load_dispatch_resolution,
+    )
+    monkeypatch.setattr(
+        native_operator_surface.NativeOperatorSurfaceFrontdoor,
+        "_load_cutover_status",
+        _fake_load_cutover_status,
+    )
+    monkeypatch.setattr(
+        native_operator_surface.NativeOperatorSurfaceFrontdoor,
+        "_load_smoke_freshness",
+        _fake_load_smoke_freshness,
+    )
+    monkeypatch.setattr(
+        native_operator_surface.NativeOperatorSurfaceFrontdoor,
+        "_load_canonical_evidence",
+        _fake_load_canonical_evidence,
+    )
+    monkeypatch.setattr(native_operator_surface, "operator_cockpit_run", _fake_operator_cockpit_run)
+    monkeypatch.setattr(native_operator_surface, "frontdoor_status", _fake_frontdoor_status)
+    monkeypatch.setattr(
+        native_operator_surface,
+        "resolve_native_instance",
+        lambda env=None: _FakeInstance(),
+    )
+
+    frontdoor = native_operator_surface.NativeOperatorSurfaceFrontdoor(
+        connect_database=_fake_connect_database
+    )
+
+    payload = frontdoor.query_native_operator_surface(
+        run_id="run.1",
+        env=env,
+        as_of=as_of,
+    )
+
+    assert payload["persona"]["selector"]["workspace_ref"] == "workspace.test"
+    assert payload["persona"]["selector"]["runtime_profile_ref"] == "runtime_profile.test"
+    assert payload["fork_ownership"]["selector"] == {
+        "run_id": "run.1",
+        "workspace_ref": "workspace.test",
+        "runtime_profile_ref": "runtime_profile.test",
+        "fork_ref": "fork.alpha",
+        "worktree_ref": "worktree.alpha",
+    }
+    assert connect_calls == [{"env": env}]
+    assert close_calls == ["closed"]
+    assert workflow_run_context_reads == ["run.1"]
+    assert binding_loader_conns == [fake_connection]
+    assert persona_repository_conns == [fake_connection]
+    assert len(persona_selectors) == 1
+    assert persona_selectors[0].workspace_ref == "workspace.test"
+    assert persona_selectors[0].runtime_profile_ref == "runtime_profile.test"
+    assert len(fork_selectors) == 1
+    assert fork_selectors[0].workspace_ref == "workspace.test"
+    assert fork_selectors[0].runtime_profile_ref == "runtime_profile.test"
+    assert fork_selectors[0].fork_ref == "fork.alpha"
+    assert fork_selectors[0].worktree_ref == "worktree.alpha"
+
+
 def test_native_operator_surface_consolidates_query_and_cockpit_truth(monkeypatch) -> None:
     as_of = datetime(2026, 4, 2, 21, 0, tzinfo=timezone.utc)
     env = {"PRAXIS_RUNTIME_PROFILE": "praxis"}

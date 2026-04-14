@@ -13,6 +13,7 @@ import hashlib
 import json
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
+import threading
 from typing import Any
 
 import asyncpg
@@ -44,6 +45,9 @@ from storage.postgres import (
     connect_workflow_database,
     fetch_workflow_evidence_timeline,
 )
+from storage.postgres.connection import resolve_workflow_database_url
+
+RUN_CANCELLED_NOTIFY_CHANNEL = "workflow_run_cancelled"
 
 
 def _encode_jsonb(value: object) -> str:
@@ -87,6 +91,77 @@ class _SyncAsyncBridge:
         if self._loop is not None and not self._loop.is_closed():
             self._loop.close()
             self._loop = None
+
+
+class _PostgresRunCancellationSignal:
+    """Listen for run cancellation and fall back to bounded state refreshes."""
+
+    def __init__(
+        self,
+        *,
+        database_url: str,
+        run_id: str,
+        min_poll_seconds: float = 0.05,
+        max_poll_seconds: float = 0.5,
+    ) -> None:
+        self._database_url = database_url
+        self._run_id = run_id
+        self._min_poll_seconds = min_poll_seconds
+        self._max_poll_seconds = max_poll_seconds
+        self._cancel_event = threading.Event()
+        self._stop_event = threading.Event()
+        self._thread = threading.Thread(
+            target=self._run,
+            daemon=True,
+            name=f"workflow-run-cancel-{run_id}",
+        )
+        self._thread.start()
+
+    def cancel_requested(self) -> bool:
+        return self._cancel_event.is_set()
+
+    def wait_for_cancel(self, timeout: float | None = None) -> bool:
+        return self._cancel_event.wait(timeout=timeout)
+
+    def close(self) -> None:
+        self._stop_event.set()
+        self._thread.join(timeout=3)
+
+    def _on_notify(self, _conn, _pid, _channel: str, payload: str) -> None:
+        if payload == self._run_id:
+            self._cancel_event.set()
+
+    def _run(self) -> None:
+        async def _listen() -> None:
+            poll_interval = self._min_poll_seconds
+            while not self._stop_event.is_set() and not self._cancel_event.is_set():
+                conn = None
+                try:
+                    conn = await asyncpg.connect(self._database_url, timeout=5.0)
+                    await conn.add_listener(RUN_CANCELLED_NOTIFY_CHANNEL, self._on_notify)
+                    while not self._stop_event.is_set() and not self._cancel_event.is_set():
+                        state = await conn.fetchval(
+                            "SELECT current_state FROM workflow_runs WHERE run_id = $1",
+                            self._run_id,
+                        )
+                        if str(state or "").strip().lower() == "cancelled":
+                            self._cancel_event.set()
+                            break
+                        await asyncio.sleep(poll_interval)
+                        poll_interval = min(poll_interval * 2, self._max_poll_seconds)
+                except Exception:
+                    if self._stop_event.is_set():
+                        break
+                    await asyncio.sleep(min(poll_interval, self._max_poll_seconds))
+                    poll_interval = min(
+                        max(poll_interval, self._min_poll_seconds) * 2,
+                        self._max_poll_seconds,
+                    )
+                finally:
+                    if conn is not None:
+                        await conn.close()
+
+        asyncio.run(_listen())
 
 
 def _run_async(coro):
@@ -253,6 +328,16 @@ class PostgresEvidenceWriter:
     def current_state_for_run(self, run_id: str) -> str | None:
         """Return the canonical persisted workflow_runs state for one run."""
         return self._run(self._load_current_state(run_id=run_id))
+
+    def run_cancellation_signal(self, run_id: str) -> _PostgresRunCancellationSignal:
+        """Return a per-run cancellation signal backed by Postgres notification."""
+        env = None
+        if isinstance(self._database_url, str) and self._database_url.strip():
+            env = {"WORKFLOW_DATABASE_URL": self._database_url}
+        return _PostgresRunCancellationSignal(
+            database_url=resolve_workflow_database_url(env=env),
+            run_id=run_id,
+        )
 
     async def _ensure_conn(self) -> asyncpg.Connection:
         if self._conn is not None:
@@ -785,6 +870,12 @@ class PostgresEvidenceWriter:
         if result != "UPDATE 1":
             raise RuntimeBoundaryError(
                 f"persistent evidence missing workflow_runs row for {run_id}"
+            )
+        if new_state == "cancelled":
+            await conn.execute(
+                "SELECT pg_notify($1, $2)",
+                RUN_CANCELLED_NOTIFY_CHANNEL,
+                run_id,
             )
 
     def append_transition_proof(

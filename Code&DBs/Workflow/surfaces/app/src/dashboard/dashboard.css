@@ -84,23 +84,23 @@
 .run-detail__empty { padding: 16px; border-radius: 8px; background: var(--bg-card); border: 1px solid var(--border); color: var(--text-muted); }
 .run-detail__outcome { padding: 10px 14px; margin: 0 0 16px; border-radius: 6px; background: var(--bg-card); border: 1px solid var(--border); font-size: 13px; line-height: 1.5; color: var(--text-muted); white-space: pre-wrap; }
 
-/* DAG */
-.run-dag { display: flex; align-items: center; gap: 0; overflow-x: auto; padding: 16px 0 20px; }
-.run-dag__column { display: flex; flex-direction: column; gap: 8px; flex-shrink: 0; }
-.run-dag__edge { display: flex; align-items: center; flex-shrink: 0; padding: 0 4px; }
-.run-dag__node { display: flex; flex-direction: column; gap: 2px; padding: 10px 14px; min-width: 120px; max-width: 200px; flex: 1; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-card); cursor: pointer; transition: all 150ms; text-align: left; color: inherit; }
-.run-dag__node:hover { border-color: var(--text-muted); background: var(--bg-alt); }
-.run-dag__node--succeeded { border-color: var(--border-success-soft); background: var(--surface-success-soft); }
-.run-dag__node--succeeded:hover { border-color: var(--success); }
-.run-dag__node--running { border-color: var(--border-accent-soft); background: var(--surface-accent-soft); }
-.run-dag__node--running:hover { border-color: var(--accent); }
-.run-dag__node--failed { border-color: var(--border-danger-soft); background: var(--surface-danger-soft); }
-.run-dag__node--failed:hover { border-color: var(--danger); }
-.run-dag__node--pending { border-color: var(--border); background: var(--surface-muted); }
-.run-dag__node-title { font-size: 12px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.run-dag__node-sub { font-size: 10px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.run-dag__node--failed .run-dag__node-sub { color: var(--danger); }
-.run-dag__node--succeeded .run-dag__node-sub { color: var(--success); }
+/* Run graph */
+.run-graph { display: flex; align-items: center; gap: 0; overflow-x: auto; padding: 16px 0 20px; }
+.run-graph__column { display: flex; flex-direction: column; gap: 8px; flex-shrink: 0; }
+.run-graph__edge { display: flex; align-items: center; flex-shrink: 0; padding: 0 4px; }
+.run-graph__node { display: flex; flex-direction: column; gap: 2px; padding: 10px 14px; min-width: 120px; max-width: 200px; flex: 1; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-card); cursor: pointer; transition: all 150ms; text-align: left; color: inherit; }
+.run-graph__node:hover { border-color: var(--text-muted); background: var(--bg-alt); }
+.run-graph__node--succeeded { border-color: var(--border-success-soft); background: var(--surface-success-soft); }
+.run-graph__node--succeeded:hover { border-color: var(--success); }
+.run-graph__node--running { border-color: var(--border-accent-soft); background: var(--surface-accent-soft); }
+.run-graph__node--running:hover { border-color: var(--accent); }
+.run-graph__node--failed { border-color: var(--border-danger-soft); background: var(--surface-danger-soft); }
+.run-graph__node--failed:hover { border-color: var(--danger); }
+.run-graph__node--pending { border-color: var(--border); background: var(--surface-muted); }
+.run-graph__node-title { font-size: 12px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.run-graph__node-sub { font-size: 10px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.run-graph__node--failed .run-graph__node-sub { color: var(--danger); }
+.run-graph__node--succeeded .run-graph__node-sub { color: var(--success); }
 
 /* Step rows */
 .run-step { margin-bottom: 2px; }

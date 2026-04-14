@@ -1,0 +1,153 @@
+{
+  "name": "Boundary Refactor Wave B — Observability & Metrics",
+  "phase": "W",
+  "queue_id": "boundary_refactor_wave_b_observability_20260413",
+  "decision_ref": "bug_boundary_mining_2026_04_09",
+  "outcome_goal": "All observability tables (workflow_metrics, platform_events, event_log_cursors, quality_rollups, agent_profiles, failure_catalog, debate_round_metrics, debate_consensus, workflow_cost_ledger) are written only through storage/postgres/observability_repository.py; runtime/observability.py, runtime/event_log.py, runtime/quality_views.py, runtime/debate_metrics.py, and runtime/cost_tracker.py carry no SQL and no CREATE TABLE.",
+  "anti_requirements": [
+    "Do NOT change the public API of the five runtime modules — existing callers must keep working",
+    "Do NOT alter the observability table schemas. This is a move, not a redesign.",
+    "Do NOT widen writes outside storage/postgres/ and Code&DBs/Databases/migrations/workflow/",
+    "Do NOT consolidate the five modules into one — their domain boundaries stay intact",
+    "Do NOT change which tables exist or their primary keys"
+  ],
+  "linked_bugs": [
+    "BUG-B73E47948CC1",
+    "BUG-0C9449F404EB",
+    "BUG-789A0F27385F",
+    "BUG-011038E343EB",
+    "BUG-5EFC81856C2C"
+  ],
+  "jobs": [
+    {
+      "label": "observability_authority_plan",
+      "agent": "openai/gpt-5.4",
+      "task_type": "architecture",
+      "description": "Decide repository shape: one PostgresObservabilityRepository vs. per-domain classes",
+      "outcome_goal": "A plan naming every repository class/method and the migration files that will own any inline CREATE TABLE DDL currently in Python",
+      "prompt": "Read the five observability writers and plan the repository layout before touching code.\n\nFocus files:\n- Code&DBs/Workflow/runtime/observability.py (workflow_metrics — writes at line 369, DDL at 215)\n- Code&DBs/Workflow/runtime/event_log.py (platform_events + event_log_cursors — writes at lines 130, 240)\n- Code&DBs/Workflow/runtime/quality_views.py (quality_rollups, agent_profiles, failure_catalog — writes at lines 270, 279, 288)\n- Code&DBs/Workflow/runtime/debate_metrics.py (debate_round_metrics + debate_consensus — DDL at lines 20 and 39, writes at 176 and 225)\n- Code&DBs/Workflow/runtime/cost_tracker.py (workflow_cost_ledger — writes at line 131)\n- Code&DBs/Workflow/storage/postgres/memory_graph_repository.py (reference for idiom)\n- Code&DBs/Workflow/storage/postgres/validators.py\n- Code&DBs/Workflow/storage/postgres/__init__.py\n\nDecide:\n1. One PostgresObservabilityRepository or per-domain classes (PostgresMetricsRepository, PostgresEventLogRepository, PostgresQualityRepository, PostgresDebateMetricsRepository, PostgresCostRepository). Default to per-domain unless the classes would each have only 1–2 methods; in that case bundle related ones.\n2. Where does any inline Python CREATE TABLE move? Confirm via grep that every DDL in these five files has either (a) a migration counterpart already, or (b) needs a new migration file.\n3. List every SQL statement in each file and map it to a repository method signature.\n\nReturn the plan as a structured summary. Do not write code.",
+      "read_scope": [
+        "Code&DBs/Workflow/runtime/observability.py",
+        "Code&DBs/Workflow/runtime/event_log.py",
+        "Code&DBs/Workflow/runtime/quality_views.py",
+        "Code&DBs/Workflow/runtime/debate_metrics.py",
+        "Code&DBs/Workflow/runtime/cost_tracker.py",
+        "Code&DBs/Workflow/storage/postgres/memory_graph_repository.py",
+        "Code&DBs/Workflow/storage/postgres/validators.py",
+        "Code&DBs/Workflow/storage/postgres/__init__.py"
+      ],
+      "write_scope": [],
+      "verify_command": "true"
+    },
+    {
+      "label": "move_inline_ddl_to_migrations",
+      "agent": "openai/gpt-5.4",
+      "task_type": "build",
+      "depends_on": ["observability_authority_plan"],
+      "description": "Move any inline Python CREATE TABLE to migrations",
+      "outcome_goal": "No CREATE TABLE statement appears in runtime/observability.py, runtime/event_log.py, runtime/quality_views.py, runtime/debate_metrics.py, or runtime/cost_tracker.py — all tables are created by migrations",
+      "prompt": "For each of the five files, check whether the tables it writes have a matching migration in Code&DBs/Databases/migrations/workflow/. Audit the current state:\n\n- workflow_metrics (observability.py:215) — check for existing migration via grep\n- platform_events + event_log_cursors (event_log.py) — check\n- quality_rollups + agent_profiles + failure_catalog (quality_views.py) — check\n- debate_round_metrics + debate_consensus (debate_metrics.py:20 and 39) — likely need new migration\n- workflow_cost_ledger (cost_tracker.py:131) — check\n\nFor any table that has no migration, add one with the next available migration number. Match the column definitions and constraints exactly — this is a move, not a redesign.\n\nDo not edit the five runtime files yet — only add migration files. The next jobs will strip the DDL from Python.",
+      "read_scope": [
+        "Code&DBs/Workflow/runtime/observability.py",
+        "Code&DBs/Workflow/runtime/event_log.py",
+        "Code&DBs/Workflow/runtime/quality_views.py",
+        "Code&DBs/Workflow/runtime/debate_metrics.py",
+        "Code&DBs/Workflow/runtime/cost_tracker.py"
+      ],
+      "write_scope": [
+        "Code&DBs/Databases/migrations/workflow/"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -c 'from storage.postgres import ensure_postgres_available; ensure_postgres_available()'"
+    },
+    {
+      "label": "create_observability_repositories",
+      "agent": "openai/gpt-5.4",
+      "task_type": "refactor",
+      "depends_on": ["move_inline_ddl_to_migrations"],
+      "description": "Create the storage/postgres/ observability repositories named in the plan",
+      "outcome_goal": "Every SQL statement from the five runtime files exists as a typed repository method under storage/postgres/; classes are exported from the package __init__",
+      "prompt": "Create the repository module(s) named in the plan. Follow the idiom from storage/postgres/memory_graph_repository.py:\n- class name Postgres<Domain>Repository\n- __init__(self, conn)\n- explicit method names (record_metric, upsert_cost_ledger_entry, checkpoint_event_cursor, etc.)\n- input validation via storage.postgres.validators (_require_text, _encode_jsonb, PostgresWriteError)\n- raw SQL inside the method body — same shape as the original\n\nCover these statements (cite lines in each commit message for traceability):\n- observability.py:369 INSERT INTO workflow_metrics\n- event_log.py:130 INSERT INTO event_log\n- event_log.py:240 UPSERT event_log_cursors\n- quality_views.py:270 UPSERT quality_rollups\n- quality_views.py:279 UPSERT agent_profiles\n- quality_views.py:288 UPSERT failure_catalog\n- debate_metrics.py:176 UPSERT debate_round_metrics\n- debate_metrics.py:225 UPSERT debate_consensus\n- cost_tracker.py:131 UPSERT workflow_cost_ledger\n\nExport everything from Code&DBs/Workflow/storage/postgres/__init__.py.\n\nDo NOT edit the five runtime files yet — that happens in the next job.",
+      "read_scope": [
+        "Code&DBs/Workflow/runtime/observability.py",
+        "Code&DBs/Workflow/runtime/event_log.py",
+        "Code&DBs/Workflow/runtime/quality_views.py",
+        "Code&DBs/Workflow/runtime/debate_metrics.py",
+        "Code&DBs/Workflow/runtime/cost_tracker.py",
+        "Code&DBs/Workflow/storage/postgres/memory_graph_repository.py",
+        "Code&DBs/Workflow/storage/postgres/validators.py",
+        "Code&DBs/Workflow/storage/postgres/__init__.py"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/storage/postgres/",
+        "Code&DBs/Workflow/storage/postgres/__init__.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -c 'from storage.postgres import ensure_postgres_available; ensure_postgres_available()'"
+    },
+    {
+      "label": "thin_observability_runtime",
+      "agent": "openai/gpt-5.4",
+      "task_type": "refactor",
+      "depends_on": ["create_observability_repositories"],
+      "description": "Rewrite the five runtime observability modules to delegate to the new repositories",
+      "outcome_goal": "grep -E 'INSERT |UPDATE |DELETE FROM|CREATE TABLE' returns zero matches in all five files; their public APIs are unchanged",
+      "prompt": "Rewrite the five runtime modules to delegate every write to the repositories created in the previous job:\n- runtime/observability.py\n- runtime/event_log.py\n- runtime/quality_views.py\n- runtime/debate_metrics.py\n- runtime/cost_tracker.py\n\nRules:\n1. Keep every public function and class signature unchanged. Existing callers must not need edits.\n2. Every SQL string and CREATE TABLE statement must be gone from these files after this job.\n3. Import the repository at module-top and construct it inside each method using the existing conn argument.\n4. Preserve behavioural details: auto-prune, exception types, return shapes.\n5. If a file had inline DDL, remove it — it now lives in a migration.\n\nVerify for each file:\n\n```bash\n! grep -E 'INSERT |UPDATE |DELETE FROM|CREATE TABLE' <file>\npython3 -m py_compile <file>\n```\n\nAll five must pass.",
+      "read_scope": [
+        "Code&DBs/Workflow/runtime/observability.py",
+        "Code&DBs/Workflow/runtime/event_log.py",
+        "Code&DBs/Workflow/runtime/quality_views.py",
+        "Code&DBs/Workflow/runtime/debate_metrics.py",
+        "Code&DBs/Workflow/runtime/cost_tracker.py",
+        "Code&DBs/Workflow/storage/postgres/__init__.py"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/observability.py",
+        "Code&DBs/Workflow/runtime/event_log.py",
+        "Code&DBs/Workflow/runtime/quality_views.py",
+        "Code&DBs/Workflow/runtime/debate_metrics.py",
+        "Code&DBs/Workflow/runtime/cost_tracker.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && for f in 'Code&DBs/Workflow/runtime/observability.py' 'Code&DBs/Workflow/runtime/event_log.py' 'Code&DBs/Workflow/runtime/quality_views.py' 'Code&DBs/Workflow/runtime/debate_metrics.py' 'Code&DBs/Workflow/runtime/cost_tracker.py'; do PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m py_compile \"$f\" && ! grep -E 'INSERT |UPDATE |DELETE FROM|CREATE TABLE' \"$f\" || exit 1; done"
+    },
+    {
+      "label": "observability_authority_tests",
+      "agent": "openai/gpt-5.4",
+      "task_type": "test",
+      "depends_on": ["thin_observability_runtime"],
+      "description": "Prove the observability migration with tests",
+      "outcome_goal": "Targeted tests exercise each repository and fail if SQL returns to the five runtime files",
+      "prompt": "Add or extend tests for the observability rewrite.\n\nSteps:\n1. Find existing tests under Code&DBs/Workflow/tests/ that exercise the five runtime modules. Run them.\n2. For each new repository, add at least one round-trip test (write + read).\n3. Add a regression test file that opens each of the five runtime modules as text and asserts none contain 'INSERT ', 'UPDATE ', 'DELETE FROM', or 'CREATE TABLE'. Keep it to a single test file.\n4. Run the full observability-adjacent test suite.",
+      "read_scope": [
+        "Code&DBs/Workflow/runtime/observability.py",
+        "Code&DBs/Workflow/runtime/event_log.py",
+        "Code&DBs/Workflow/runtime/quality_views.py",
+        "Code&DBs/Workflow/runtime/debate_metrics.py",
+        "Code&DBs/Workflow/runtime/cost_tracker.py"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/tests/"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/' -k 'observability or metrics or quality or debate or cost'"
+    },
+    {
+      "label": "observability_authority_close_bugs",
+      "agent": "openai/gpt-5.4-mini",
+      "task_type": "build",
+      "depends_on": ["observability_authority_tests"],
+      "description": "Resolve all five linked observability bugs as FIXED",
+      "outcome_goal": "All five linked bugs are FIXED with resolutions citing this queue_id",
+      "prompt": "Mark each linked bug FIXED after verifying the regression assertions still pass.\n\n```bash\nexport WORKFLOW_DATABASE_URL=\"postgresql://localhost:5432/praxis\"\ncd /Users/nate/Praxis\nfor pair in \\\n  'BUG-B73E47948CC1|runtime/observability.py' \\\n  'BUG-0C9449F404EB|runtime/event_log.py' \\\n  'BUG-789A0F27385F|runtime/quality_views.py' \\\n  'BUG-011038E343EB|runtime/debate_metrics.py' \\\n  'BUG-5EFC81856C2C|runtime/cost_tracker.py'; do\n  bug_id=\"${pair%%|*}\"\n  source_file=\"${pair##*|}\"\n  \"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json \"{\n    \\\"command\\\": \\\"resolve\\\",\n    \\\"bug_id\\\": \\\"$bug_id\\\",\n    \\\"status\\\": \\\"FIXED\\\",\n    \\\"resolution\\\": \\\"Writes moved to storage/postgres/ repositories in boundary_refactor_wave_b_observability_20260413. Verified: no INSERT/UPDATE/DELETE/CREATE TABLE remains in Code&DBs/Workflow/$source_file.\\\"\n  }\" --yes\ndone\n```",
+      "read_scope": [],
+      "write_scope": [],
+      "verify_command": "true"
+    },
+    {
+      "label": "observability_authority_review",
+      "agent": "openai/gpt-5.4",
+      "task_type": "review",
+      "depends_on": ["observability_authority_close_bugs"],
+      "description": "Review the observability rewrite for semantic drift, stale DDL, and missed callsites",
+      "outcome_goal": "Any remaining leaks or regressions are called out in writing",
+      "prompt": "Review the observability rewrite.\n\nPrioritize findings on:\n- residual SQL strings in the five runtime files\n- any table DDL still being created from Python anywhere (grep the repo for CREATE TABLE and confirm only migrations + tests have them)\n- lost or silenced error paths in the new repositories\n- callsites that relied on exception types that changed\n- test coverage gaps around upsert semantics (ON CONFLICT behaviour)\n- whether the repository classes were exported from storage/postgres/__init__.py so downstream packages can import them\n\nFindings first. If no findings, say so explicitly."
+    }
+  ]
+}

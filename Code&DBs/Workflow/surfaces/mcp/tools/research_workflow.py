@@ -231,7 +231,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
         {
             "description": (
                 "Run a parallel multi-angle research workflow on any topic. "
-                "One call generates a DAG spec (seed decomposition, N parallel "
+                "One call generates a workflow spec (seed decomposition, N parallel "
                 "research workers via replicate, synthesis) and launches it through the service bus.\n\n"
                 "USE WHEN: you want deep, cited research on a topic from multiple angles. "
                 "The workflow fans out parallel workers (default 40 DeepSeek via OpenRouter) "

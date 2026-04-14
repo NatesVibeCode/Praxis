@@ -260,3 +260,43 @@ def test_tools_call_does_not_mutate_original_arguments_when_meta_embedded(monkey
     assert response is not None
     assert captured == [{"question": "status"}]
     assert arguments == {"question": "status", "_meta": {"progressToken": "tok-1"}}
+
+
+def test_tools_call_preserves_progress_token_on_emitter(monkeypatch):
+    captured: list[object] = []
+
+    def _invoke(_tool_name: str, _params: dict, **kwargs) -> dict[str, str]:
+        captured.append(kwargs.get("progress_emitter"))
+        return {"ok": "yes"}
+
+    monkeypatch.setattr(protocol, "invoke_tool", _invoke)
+
+    without_token = protocol.handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 14,
+            "method": "tools/call",
+            "params": {"name": "meta_tool", "arguments": {"question": "status"}},
+        },
+        transport="jsonl",
+    )
+    with_token = protocol.handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 15,
+            "method": "tools/call",
+            "params": {
+                "name": "meta_tool",
+                "arguments": {"question": "status"},
+                "_meta": {"progressToken": "tok-2"},
+            },
+        },
+        transport="jsonl",
+    )
+
+    assert without_token is not None
+    assert with_token is not None
+    assert captured[0] is not None
+    assert getattr(captured[0], "progress_token", None) is None
+    assert captured[1] is not None
+    assert getattr(captured[1], "progress_token", None) == "tok-2"

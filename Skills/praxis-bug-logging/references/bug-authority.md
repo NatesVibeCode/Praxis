@@ -110,7 +110,7 @@ Validation is strict:
 
 ## Resolution Contract
 
-`praxis_bugs(action="resolve", ...)` only allows terminal statuses:
+`workflow tools call praxis_bugs --input-json '{"action":"resolve",...}'` only allows terminal statuses:
 
 - `FIXED`
 - `WONT_FIX`

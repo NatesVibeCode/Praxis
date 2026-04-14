@@ -1,4 +1,4 @@
-"""CLI entry point for the Dag Project workflow runner.
+"""CLI entry point for the Praxis Engine workflow runner.
 
 Usage:
     python workflow_cli.py run <spec.json> [--dry-run]
@@ -594,7 +594,7 @@ def cmd_chain_status(args: argparse.Namespace) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="workflow_cli",
-        description="Dag Project workflow CLI (Postgres-backed)",
+        description="Praxis Engine workflow CLI (Postgres-backed)",
     )
     sub = parser.add_subparsers(dest="command")
 

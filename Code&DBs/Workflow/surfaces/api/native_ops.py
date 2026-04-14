@@ -1,4 +1,4 @@
-"""Tiny native ops wrappers for boring local DAG operations.
+"""Tiny native ops wrappers for boring local workflow operations.
 
 These wrappers are intentionally thin:
 
@@ -67,7 +67,7 @@ def db_restart(env: Mapping[str, str] | None = None) -> dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Repo-local native DAG ops wrappers")
+    parser = argparse.ArgumentParser(description="Repo-local native workflow ops wrappers")
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("db-health")
     subparsers.add_parser("db-bootstrap")

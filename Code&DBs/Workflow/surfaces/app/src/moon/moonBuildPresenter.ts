@@ -25,7 +25,7 @@ export type RingState =
 
 export type GateState = 'empty' | 'proposed' | 'configured' | 'blocked' | 'passed';
 
-// --- DAG layout ---
+// --- Graph layout ---
 
 export const RANK_SPACING = 160;   // horizontal: distance between steps
 export const COLUMN_SPACING = 120; // vertical: distance between parallel branches
@@ -38,7 +38,7 @@ export interface LayoutNode {
   y: number;
 }
 
-export interface DagLayout {
+export interface GraphLayout {
   nodes: Map<string, LayoutNode>;
   layers: { rank: number; nodeIds: string[] }[];
   width: number;
@@ -98,7 +98,7 @@ export interface MoonBuildViewModel {
   nodes: OrbitNode[];
   edges: OrbitEdge[];
   dominantPath: string[];
-  layout: DagLayout;
+  layout: GraphLayout;
   release: ReleaseStatus;
   dockContent: DockContent | null;
   selectedNode: OrbitNode | null;
@@ -145,19 +145,37 @@ function nodeNeedsBadge(node: BuildNode, payload: BuildPayload): boolean {
   return false;
 }
 
-function nodeToRingState(node: BuildNode, activeId: string | null): RingState {
+function nodeHasIssuesOrBlockers(node: BuildNode, payload: BuildPayload): boolean {
+  const nodeIssueIds = new Set(node.issue_ids || []);
+  if (nodeIssueIds.size > 0) return true;
+  if ((payload.build_issues || []).some(issue => issue.node_id === node.node_id || (issue.issue_id && nodeIssueIds.has(issue.issue_id)))) {
+    return true;
+  }
+  if ((payload.build_blockers || []).some(issue => issue.node_id === node.node_id || (issue.issue_id && nodeIssueIds.has(issue.issue_id)))) {
+    return true;
+  }
+  return false;
+}
+
+function nodeToRingState(node: BuildNode, payload: BuildPayload, activeId: string | null): RingState {
   const status = (node.status || '').toLowerCase();
   const decided = isNodeDecided(node);
-  // Only show blocked ring for nodes that have a route but are explicitly blocked/error
-  if ((status === 'blocked' || status === 'error') && decided) return 'blocked';
-  if (status === 'draft' || status === 'pending') {
-    if (!decided) return 'projected';
-  }
+  const blocked = status === 'blocked' || status === 'error' || nodeHasIssuesOrBlockers(node, payload);
+  if (blocked) return 'blocked';
+  if (!decided && (status === 'draft' || status === 'pending')) return 'projected';
   if (!decided) {
     return node.node_id === activeId ? 'active-unresolved' : 'unresolved';
   }
-  // Decided — grounded vs incomplete is handled via needsBadge separately
-  return 'decided-grounded';
+  return nodeNeedsBadge(node, payload) ? 'decided-incomplete' : 'decided-grounded';
+}
+
+function runStatusToRingState(status: string | undefined): RingState | null {
+  const jobStatus = (status || '').toLowerCase();
+  if (jobStatus === 'succeeded') return 'run-succeeded';
+  if (jobStatus === 'failed' || jobStatus === 'dead_letter') return 'run-failed';
+  if (jobStatus === 'running' || jobStatus === 'claimed') return 'run-active';
+  if (jobStatus === 'pending' || jobStatus === 'ready') return 'run-pending';
+  return null;
 }
 
 function extractDominantPath(payload: BuildPayload): string[] {
@@ -197,10 +215,10 @@ function extractDominantPath(payload: BuildPayload): string[] {
   return order;
 }
 
-export function extractLayout(payload: BuildPayload): DagLayout {
+export function extractLayout(payload: BuildPayload): GraphLayout {
   const nodes = payload.build_graph?.nodes || [];
   const edges = payload.build_graph?.edges || [];
-  const empty: DagLayout = { nodes: new Map(), layers: [], width: 0, height: 0 };
+  const empty: GraphLayout = { nodes: new Map(), layers: [], width: 0, height: 0 };
   if (!nodes.length) return empty;
 
   const adj = new Map<string, string[]>();
@@ -283,7 +301,7 @@ export function presentBuild(
   activeNodeId: string | null,
   runJobs?: RunJobStatus[],
 ): MoonBuildViewModel {
-  const emptyLayout: DagLayout = { nodes: new Map(), layers: [], width: 0, height: 0 };
+  const emptyLayout: GraphLayout = { nodes: new Map(), layers: [], width: 0, height: 0 };
   const empty: MoonBuildViewModel = {
     nodes: [], edges: [], dominantPath: [], layout: emptyLayout,
     release: { readiness: 'draft', blockers: [], projectedJobs: [], checklist: [] },
@@ -320,17 +338,10 @@ export function presentBuild(
 
   const nodes: OrbitNode[] = allOrdered.map((n) => {
     const badge = nodeNeedsBadge(n, payload);
-    let ring = nodeToRingState(n, activeNodeId);
-    if (badge && ring === 'decided-grounded') ring = 'decided-incomplete' as RingState;
+    let ring = nodeToRingState(n, payload, activeNodeId);
 
     // Override with run status when a run is active
-    const jobStatus = runStatusByTitle.get((n.title || n.node_id).toLowerCase());
-    if (jobStatus) {
-      if (jobStatus === 'succeeded') ring = 'run-succeeded';
-      else if (jobStatus === 'failed' || jobStatus === 'dead_letter') ring = 'run-failed';
-      else if (jobStatus === 'running' || jobStatus === 'claimed') ring = 'run-active';
-      else if (jobStatus === 'pending' || jobStatus === 'ready') ring = 'run-pending';
-    }
+    ring = runStatusToRingState(runStatusByTitle.get((n.title || n.node_id).toLowerCase())) || ring;
 
     return {
       id: n.node_id,

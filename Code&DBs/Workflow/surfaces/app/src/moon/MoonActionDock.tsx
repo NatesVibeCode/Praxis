@@ -10,11 +10,12 @@ interface Props {
   payload: BuildPayload | null;
   onReload: () => void;
   onClose: () => void;
+  onStartCatalogDrag: (event: React.PointerEvent, item: CatalogItem) => void;
 }
 
 const DOCK_FAMILIES: CatalogFamily[] = ['trigger', 'gather', 'think', 'act', 'control'];
 
-export function MoonActionDock({ workflowId, payload, onReload, onClose }: Props) {
+export function MoonActionDock({ workflowId, payload, onReload, onClose, onStartCatalogDrag }: Props) {
   const [prose, setProse] = useState('');
   const [loading, setLoading] = useState(false);
   const [action, setAction] = useState<string | null>(null);
@@ -148,12 +149,7 @@ export function MoonActionDock({ workflowId, payload, onReload, onClose }: Props
             <div
               key={item.id}
               className="moon-dock__catalog-item"
-              draggable
-              onDragStart={e => {
-                e.dataTransfer.setData('moon/catalog-id', item.id);
-                e.dataTransfer.setData('text/plain', item.label);
-                e.dataTransfer.effectAllowed = 'copyLink';
-              }}
+              onPointerDown={e => onStartCatalogDrag(e, item)}
               title={item.description}
             >
               <MoonGlyph type={item.icon} size={14} />

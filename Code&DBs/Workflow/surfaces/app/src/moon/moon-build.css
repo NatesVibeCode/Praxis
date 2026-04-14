@@ -55,6 +55,34 @@
   --moon-gate-red: #F85149;
 }
 
+.moon-error-toast {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(720px, calc(100vw - 32px));
+  padding: 12px 16px;
+  border: 1px solid var(--moon-gate-red);
+  border-radius: 14px;
+  background: rgba(24, 13, 13, 0.96);
+  color: var(--moon-fg);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+
+.moon-error-toast button {
+  flex-shrink: 0;
+  border: 0;
+  background: transparent;
+  color: var(--moon-fg);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
 /* Frame lines */
 .moon-frame-top, .moon-frame-bottom {
   height: 4px;
@@ -468,8 +496,15 @@
   transition: transform 200ms ease;
 }
 
-/* decided (both grounded and incomplete): blue fill */
-.moon-chain__ring--decided-grounded,
+/* decided-grounded: blue fill */
+.moon-chain__ring--decided-grounded {
+  border: none;
+  background: var(--moon-accent);
+  color: #fff;
+  box-shadow: 0 0 12px rgba(108, 182, 255, 0.3);
+}
+
+/* decided-incomplete: blue fill + amber badge */
 .moon-chain__ring--decided-incomplete {
   border: none;
   background: var(--moon-accent);
@@ -480,6 +515,8 @@
 /* blocked: amber/red rim */
 .moon-chain__ring--blocked {
   border: 2px solid var(--moon-error);
+  background: transparent;
+  box-shadow: 0 0 10px rgba(248, 81, 73, 0.2);
 }
 .moon-chain__ring--blocked.moon-chain__ring--has-route {
   background: var(--moon-accent);
@@ -492,6 +529,7 @@
   height: var(--moon-node-shadow);
   border: var(--moon-connector-weight) dashed var(--moon-border);
   background: transparent;
+  transform: scale(0.85);
 }
 
 /* Run states — overlaid during live execution */
@@ -500,8 +538,8 @@
   background: transparent;
 }
 .moon-chain__ring--run-active {
-  border: none;
-  background: var(--moon-accent);
+  border: 2px solid var(--moon-accent);
+  background: rgba(108, 182, 255, 0.16);
   color: #fff;
   animation: moon-ring-pulse 1.2s ease-in-out infinite;
 }
@@ -510,14 +548,14 @@
   50% { box-shadow: 0 0 20px rgba(108, 182, 255, 0.8); }
 }
 .moon-chain__ring--run-succeeded {
-  border: none;
-  background: #3fb950;
+  border: 2px solid #3fb950;
+  background: rgba(63, 185, 80, 0.16);
   color: #fff;
   box-shadow: 0 0 10px rgba(63, 185, 80, 0.3);
 }
 .moon-chain__ring--run-failed {
-  border: none;
-  background: #f85149;
+  border: 2px solid var(--moon-error, #f85149);
+  background: rgba(248, 81, 73, 0.16);
   color: #fff;
   box-shadow: 0 0 10px rgba(248, 81, 73, 0.3);
 }
@@ -1507,11 +1545,11 @@
 }
 
 /* === DAG Canvas === */
-.moon-dag {
+.moon-graph {
   position: relative;
   overflow: visible;
 }
-.moon-dag-node {
+.moon-graph-node {
   position: absolute;
   width: var(--moon-node-size, 60px);
   height: var(--moon-node-size, 60px);
@@ -1522,20 +1560,20 @@
   justify-content: center;
   transition: transform 180ms ease, box-shadow 180ms ease;
 }
-.moon-dag-node:hover {
+.moon-graph-node:hover {
   transform: scale(1.08);
   z-index: 2;
 }
-.moon-dag-node--selected {
+.moon-graph-node--selected {
   outline: 3px solid var(--moon-accent, #6CB6FF);
   outline-offset: 3px;
   z-index: 3;
 }
-.moon-dag-node--drag-over {
+.moon-graph-node--drag-over {
   outline: 2px dashed var(--moon-accent, #6CB6FF);
   outline-offset: 4px;
 }
-.moon-dag-node__label {
+.moon-graph-node__label {
   position: absolute;
   top: calc(var(--moon-node-size, 60px) + 8px);
   left: 50%;
@@ -1548,7 +1586,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.moon-dag-append {
+.moon-graph-append {
   position: absolute;
   width: 40px;
   height: 40px;
@@ -1560,11 +1598,11 @@
   cursor: pointer;
   transition: border-color 180ms ease, transform 180ms ease;
 }
-.moon-dag-append:hover {
+.moon-graph-append:hover {
   border-color: var(--moon-accent, #6CB6FF);
   transform: scale(1.1);
 }
-.moon-dag-append--drag-over {
+.moon-graph-append--drag-over {
   border-color: var(--moon-accent, #6CB6FF);
   background: rgba(108, 182, 255, 0.08);
 }

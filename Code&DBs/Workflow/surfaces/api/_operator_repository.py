@@ -78,6 +78,21 @@ def _optional_datetime(value: object, *, field_name: str) -> datetime | None:
     return _require_datetime(value, field_name=field_name)
 
 
+def _coerce_datetime_value(value: object, *, field_name: str) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError as exc:
+            raise NativeOperatorQueryError(
+                "operator_query.invalid_row",
+                f"{field_name} must be a datetime",
+                details={"field": field_name, "value_type": type(value).__name__},
+            ) from exc
+    return _require_datetime(value, field_name=field_name)
+
+
 def _normalize_string_sequence(value: object, *, field_name: str) -> tuple[str, ...]:
     if value is None:
         return ()
@@ -197,32 +212,54 @@ _WORKFLOW_RUN_PACKET_INSPECTIONS_QUERY = """
         wr.started_at,
         wr.finished_at,
         wr.last_event_id,
-        COALESCE(
-            json_agg(ep.payload ORDER BY ep.created_at, ep.execution_packet_id)
-            FILTER (WHERE ep.execution_packet_id IS NOT NULL),
-            '[]'::jsonb
-        ) AS packets
+        COALESCE(ep.packets, '[]'::jsonb) AS packets,
+        COALESCE(rof.operator_frames, '[]'::jsonb) AS operator_frames
     FROM workflow_runs wr
-    LEFT JOIN execution_packets ep
+    LEFT JOIN (
+        SELECT
+            run_id,
+            COALESCE(
+                json_agg(payload ORDER BY created_at, execution_packet_id),
+                '[]'::jsonb
+            ) AS packets
+        FROM execution_packets
+        WHERE run_id = ANY($1::text[])
+        GROUP BY run_id
+    ) ep
         ON ep.run_id = wr.run_id
+    LEFT JOIN (
+        SELECT
+            run_id,
+            COALESCE(
+                json_agg(
+                    json_build_object(
+                        'operator_frame_id', operator_frame_id,
+                        'node_id', node_id,
+                        'operator_kind', operator_kind,
+                        'frame_state', frame_state,
+                        'item_index', item_index,
+                        'iteration_index', iteration_index,
+                        'source_snapshot', COALESCE(source_snapshot, '{}'::jsonb),
+                        'aggregate_outputs', COALESCE(aggregate_outputs, '{}'::jsonb),
+                        'active_count', COALESCE(active_count, 0),
+                        'stop_reason', stop_reason,
+                        'started_at', to_json(started_at),
+                        'finished_at', to_json(finished_at)
+                    )
+                    ORDER BY
+                        node_id,
+                        COALESCE(item_index, -1),
+                        COALESCE(iteration_index, -1),
+                        operator_frame_id
+                ),
+                '[]'::jsonb
+            ) AS operator_frames
+        FROM run_operator_frames
+        WHERE run_id = ANY($1::text[])
+        GROUP BY run_id
+    ) rof
+        ON rof.run_id = wr.run_id
     WHERE wr.run_id = ANY($1::text[])
-    GROUP BY
-        wr.run_id,
-        wr.workflow_id,
-        wr.request_id,
-        wr.request_digest,
-        wr.workflow_definition_id,
-        wr.admitted_definition_hash,
-        wr.current_state,
-        wr.terminal_reason_code,
-        wr.run_idempotency_key,
-        wr.packet_inspection,
-        wr.request_envelope,
-        wr.requested_at,
-        wr.admitted_at,
-        wr.started_at,
-        wr.finished_at,
-        wr.last_event_id
     ORDER BY wr.requested_at DESC NULLS LAST, wr.run_id
 """
 
@@ -244,16 +281,60 @@ _LEGACY_WORKFLOW_RUN_PACKET_INSPECTIONS_QUERY = """
         wr.started_at,
         wr.finished_at,
         wr.last_event_id,
-        COALESCE(
-            json_agg(ep.payload ORDER BY ep.created_at, ep.execution_packet_id)
-            FILTER (WHERE ep.execution_packet_id IS NOT NULL),
-            '[]'::jsonb
-        ) AS packets
+        COALESCE(ep.packets, '[]'::jsonb) AS packets,
+        COALESCE(rof.operator_frames, '[]'::jsonb) AS operator_frames
     FROM workflow_runs wr
-    LEFT JOIN execution_packets ep
+    LEFT JOIN (
+        SELECT
+            run_id,
+            COALESCE(
+                json_agg(payload ORDER BY created_at, execution_packet_id),
+                '[]'::jsonb
+            ) AS packets
+        FROM execution_packets
+        WHERE run_id = ANY($1::text[])
+        GROUP BY run_id
+    ) ep
         ON ep.run_id = wr.run_id
+    LEFT JOIN (
+        SELECT
+            run_id,
+            COALESCE(
+                json_agg(
+                    json_build_object(
+                        'operator_frame_id', operator_frame_id,
+                        'node_id', node_id,
+                        'operator_kind', operator_kind,
+                        'frame_state', frame_state,
+                        'item_index', item_index,
+                        'iteration_index', iteration_index,
+                        'source_snapshot', COALESCE(source_snapshot, '{}'::jsonb),
+                        'aggregate_outputs', COALESCE(aggregate_outputs, '{}'::jsonb),
+                        'active_count', COALESCE(active_count, 0),
+                        'stop_reason', stop_reason,
+                        'started_at', to_json(started_at),
+                        'finished_at', to_json(finished_at)
+                    )
+                    ORDER BY
+                        node_id,
+                        COALESCE(item_index, -1),
+                        COALESCE(iteration_index, -1),
+                        operator_frame_id
+                ),
+                '[]'::jsonb
+            ) AS operator_frames
+        FROM run_operator_frames
+        WHERE run_id = ANY($1::text[])
+        GROUP BY run_id
+    ) rof
+        ON rof.run_id = wr.run_id
     WHERE wr.run_id = ANY($1::text[])
-    GROUP BY
+    ORDER BY wr.requested_at DESC NULLS LAST, wr.run_id
+"""
+
+
+_WORKFLOW_RUN_PACKET_INSPECTIONS_WITHOUT_OPERATOR_FRAMES_QUERY = """
+    SELECT
         wr.run_id,
         wr.workflow_id,
         wr.request_id,
@@ -263,39 +344,67 @@ _LEGACY_WORKFLOW_RUN_PACKET_INSPECTIONS_QUERY = """
         wr.current_state,
         wr.terminal_reason_code,
         wr.run_idempotency_key,
+        wr.packet_inspection,
         wr.request_envelope,
         wr.requested_at,
         wr.admitted_at,
         wr.started_at,
         wr.finished_at,
-        wr.last_event_id
+        wr.last_event_id,
+        COALESCE(ep.packets, '[]'::jsonb) AS packets,
+        '[]'::jsonb AS operator_frames
+    FROM workflow_runs wr
+    LEFT JOIN (
+        SELECT
+            run_id,
+            COALESCE(
+                json_agg(payload ORDER BY created_at, execution_packet_id),
+                '[]'::jsonb
+            ) AS packets
+        FROM execution_packets
+        WHERE run_id = ANY($1::text[])
+        GROUP BY run_id
+    ) ep
+        ON ep.run_id = wr.run_id
+    WHERE wr.run_id = ANY($1::text[])
     ORDER BY wr.requested_at DESC NULLS LAST, wr.run_id
 """
 
-
-_WORKFLOW_RUN_OPERATOR_FRAMES_QUERY = """
+_LEGACY_WORKFLOW_RUN_PACKET_INSPECTIONS_WITHOUT_OPERATOR_FRAMES_QUERY = """
     SELECT
-        run_id,
-        operator_frame_id,
-        node_id,
-        operator_kind,
-        frame_state,
-        item_index,
-        iteration_index,
-        source_snapshot,
-        aggregate_outputs,
-        active_count,
-        stop_reason,
-        started_at,
-        finished_at
-    FROM run_operator_frames
-    WHERE run_id = ANY($1::text[])
-    ORDER BY
-        run_id,
-        node_id,
-        COALESCE(item_index, -1),
-        COALESCE(iteration_index, -1),
-        operator_frame_id
+        wr.run_id,
+        wr.workflow_id,
+        wr.request_id,
+        wr.request_digest,
+        wr.workflow_definition_id,
+        wr.admitted_definition_hash,
+        wr.current_state,
+        wr.terminal_reason_code,
+        wr.run_idempotency_key,
+        NULL::jsonb AS packet_inspection,
+        wr.request_envelope,
+        wr.requested_at,
+        wr.admitted_at,
+        wr.started_at,
+        wr.finished_at,
+        wr.last_event_id,
+        COALESCE(ep.packets, '[]'::jsonb) AS packets,
+        '[]'::jsonb AS operator_frames
+    FROM workflow_runs wr
+    LEFT JOIN (
+        SELECT
+            run_id,
+            COALESCE(
+                json_agg(payload ORDER BY created_at, execution_packet_id),
+                '[]'::jsonb
+            ) AS packets
+        FROM execution_packets
+        WHERE run_id = ANY($1::text[])
+        GROUP BY run_id
+    ) ep
+        ON ep.run_id = wr.run_id
+    WHERE wr.run_id = ANY($1::text[])
+    ORDER BY wr.requested_at DESC NULLS LAST, wr.run_id
 """
 
 
@@ -1239,6 +1348,59 @@ def _operator_frame_payload_from_row(row: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _normalize_operator_frame_payloads(value: object) -> tuple[dict[str, Any], ...]:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (json.JSONDecodeError, ValueError, TypeError):
+            value = []
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        return ()
+    normalized: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            continue
+        started_at = _coerce_datetime_value(item.get("started_at"), field_name="started_at")
+        finished_at = item.get("finished_at")
+        normalized.append(
+            {
+                "operator_frame_id": _require_text(
+                    item.get("operator_frame_id"),
+                    field_name="operator_frame_id",
+                ),
+                "node_id": _require_text(item.get("node_id"), field_name="node_id"),
+                "operator_kind": _require_text(
+                    item.get("operator_kind"),
+                    field_name="operator_kind",
+                ),
+                "frame_state": _require_text(
+                    item.get("frame_state"),
+                    field_name="frame_state",
+                ),
+                "item_index": item.get("item_index"),
+                "iteration_index": item.get("iteration_index"),
+                "source_snapshot": dict(
+                    _coerce_mapping(item.get("source_snapshot"), field_name="source_snapshot")
+                ),
+                "aggregate_outputs": dict(
+                    _coerce_mapping(item.get("aggregate_outputs"), field_name="aggregate_outputs")
+                ),
+                "active_count": int(item.get("active_count") or 0),
+                "stop_reason": _optional_text(item.get("stop_reason"), field_name="stop_reason"),
+                "started_at": started_at.isoformat(),
+                "finished_at": (
+                    None
+                    if finished_at is None
+                    else _coerce_datetime_value(
+                        finished_at,
+                        field_name="finished_at",
+                    ).isoformat()
+                ),
+            }
+        )
+    return tuple(normalized)
+
+
 def _workflow_run_packet_inspection_record_from_row(
     row: Mapping[str, Any],
     packet_inspection: Mapping[str, Any] | None,
@@ -1706,36 +1868,43 @@ class NativeOperatorQueryFrontdoor:
         if workflow_run_ids is None:
             return (), None
         contract_drift_refs: tuple[str, ...] = ()
+        operator_frame_source = "canonical_operator_frames"
+        run_id_list = list(workflow_run_ids)
         try:
-            rows = await conn.fetch(_WORKFLOW_RUN_PACKET_INSPECTIONS_QUERY, list(workflow_run_ids))
+            rows = await conn.fetch(_WORKFLOW_RUN_PACKET_INSPECTIONS_QUERY, run_id_list)
         except Exception as exc:
-            if not _missing_packet_inspection_column_error(exc):
+            if _missing_packet_inspection_column_error(exc):
+                contract_drift_refs = ("workflow_runs.packet_inspection_column_missing",)
+                try:
+                    rows = await conn.fetch(
+                        _LEGACY_WORKFLOW_RUN_PACKET_INSPECTIONS_QUERY,
+                        run_id_list,
+                    )
+                except Exception as legacy_exc:
+                    if not _missing_run_operator_frames_table_error(legacy_exc):
+                        raise
+                    operator_frame_source = "missing"
+                    rows = await conn.fetch(
+                        _LEGACY_WORKFLOW_RUN_PACKET_INSPECTIONS_WITHOUT_OPERATOR_FRAMES_QUERY,
+                        run_id_list,
+                    )
+            elif _missing_run_operator_frames_table_error(exc):
+                operator_frame_source = "missing"
+                try:
+                    rows = await conn.fetch(
+                        _WORKFLOW_RUN_PACKET_INSPECTIONS_WITHOUT_OPERATOR_FRAMES_QUERY,
+                        run_id_list,
+                    )
+                except Exception as no_frames_exc:
+                    if not _missing_packet_inspection_column_error(no_frames_exc):
+                        raise
+                    contract_drift_refs = ("workflow_runs.packet_inspection_column_missing",)
+                    rows = await conn.fetch(
+                        _LEGACY_WORKFLOW_RUN_PACKET_INSPECTIONS_WITHOUT_OPERATOR_FRAMES_QUERY,
+                        run_id_list,
+                    )
+            else:
                 return (), None
-            rows = await conn.fetch(
-                _LEGACY_WORKFLOW_RUN_PACKET_INSPECTIONS_QUERY,
-                list(workflow_run_ids),
-            )
-            contract_drift_refs = ("workflow_runs.packet_inspection_column_missing",)
-
-        operator_frames_by_run: dict[str, tuple[dict[str, Any], ...]] = {}
-        operator_frame_source = "missing"
-        try:
-            operator_frame_rows = await conn.fetch(
-                _WORKFLOW_RUN_OPERATOR_FRAMES_QUERY,
-                list(workflow_run_ids),
-            )
-        except Exception as exc:
-            if not _missing_run_operator_frames_table_error(exc):
-                raise
-            operator_frame_rows = ()
-        else:
-            operator_frame_source = "canonical_operator_frames"
-            for row in operator_frame_rows:
-                run_id = _require_text(row.get("run_id"), field_name="run_id")
-                operator_frames_by_run.setdefault(run_id, tuple())
-                operator_frames_by_run[run_id] = operator_frames_by_run[run_id] + (
-                    _operator_frame_payload_from_row(row),
-                )
 
         try:
             from runtime.execution_packet_authority import (
@@ -1750,6 +1919,7 @@ class NativeOperatorQueryFrontdoor:
         for row in rows:
             packet_inspection_source = "missing"
             packet_inspection = None
+            operator_frames = _normalize_operator_frame_payloads(row.get("operator_frames"))
             if packet_inspection_from_row is not None:
                 packet_inspection = packet_inspection_from_row(row)
                 if packet_inspection is not None:
@@ -1779,7 +1949,7 @@ class NativeOperatorQueryFrontdoor:
                     packet_inspection,
                     packet_inspection_source=packet_inspection_source,
                     operator_frame_source=operator_frame_source,
-                    operator_frames=operator_frames_by_run.get(str(row.get("run_id")), ()),
+                    operator_frames=operator_frames,
                     contract_drift_refs=contract_drift_refs,
                 )
             )
@@ -1805,11 +1975,46 @@ class NativeOperatorQueryFrontdoor:
     ) -> NativeOperatorQuerySnapshot:
         conn = await self.connect_database(env)
         try:
-            bugs = await self._fetch_bug_records(conn=conn, bug_ids=bug_ids)
             roadmap_items = await self._fetch_roadmap_item_records(
                 conn=conn,
                 roadmap_item_ids=roadmap_item_ids,
             )
+            if bug_ids is None:
+                bugs = await self._fetch_bug_records(conn=conn, bug_ids=None)
+                assessment_bug_ids = tuple(
+                    dict.fromkeys(
+                        (
+                            *(record.bug_id for record in bugs),
+                            *(
+                                record.source_bug_id
+                                for record in roadmap_items
+                                if record.source_bug_id is not None
+                            ),
+                        )
+                    )
+                )
+                assessment_bugs = bugs
+            else:
+                assessment_bug_ids = tuple(
+                    dict.fromkeys(
+                        (
+                            *bug_ids,
+                            *(
+                                record.source_bug_id
+                                for record in roadmap_items
+                                if record.source_bug_id is not None
+                            ),
+                        )
+                    )
+                )
+                assessment_bugs = await self._fetch_bug_records(
+                    conn=conn,
+                    bug_ids=assessment_bug_ids,
+                )
+                requested_bug_ids = set(bug_ids)
+                bugs = tuple(
+                    record for record in assessment_bugs if record.bug_id in requested_bug_ids
+                )
             cutover_gates = await self._fetch_cutover_gate_records(
                 conn=conn,
                 cutover_gate_ids=cutover_gate_ids,
@@ -1827,27 +2032,6 @@ class NativeOperatorQueryFrontdoor:
                 conn=conn,
                 workflow_run_ids=workflow_run_ids,
             )
-            assessment_bug_ids = tuple(
-                dict.fromkeys(
-                    [
-                        *(record.bug_id for record in bugs),
-                        *(
-                            record.source_bug_id
-                            for record in roadmap_items
-                            if record.source_bug_id is not None
-                        ),
-                    ]
-                )
-            )
-            supplemental_bug_ids = tuple(
-                bug_id for bug_id in assessment_bug_ids if bug_id not in {record.bug_id for record in bugs}
-            )
-            assessment_bugs = bugs
-            if supplemental_bug_ids:
-                assessment_bugs = bugs + await self._fetch_bug_records(
-                    conn=conn,
-                    bug_ids=supplemental_bug_ids,
-                )
             bug_evidence_links = await self._fetch_bug_evidence_links(
                 conn=conn,
                 bug_ids=assessment_bug_ids,
@@ -1876,19 +2060,20 @@ class NativeOperatorQueryFrontdoor:
                 as_of=as_of,
                 repo_root=_repo_root(),
             )
+            bug_id_filter = {record.bug_id for record in bugs}
+            roadmap_item_id_filter = {
+                record.roadmap_item_id for record in roadmap_items
+            }
             work_item_assessments = tuple(
                 record
                 for record in work_item_assessments
                 if (
                     record.item_kind == "bug"
-                    and any(record.item_id == bug_record.bug_id for bug_record in bugs)
+                    and record.item_id in bug_id_filter
                 )
                 or (
                     record.item_kind == "roadmap_item"
-                    and any(
-                        record.item_id == roadmap_record.roadmap_item_id
-                        for roadmap_record in roadmap_items
-                    )
+                    and record.item_id in roadmap_item_id_filter
                 )
             )
             work_item_closeout_recommendations = _derive_closeout_recommendations(

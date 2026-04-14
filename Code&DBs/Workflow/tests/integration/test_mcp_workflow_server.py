@@ -524,7 +524,10 @@ class _FakePGConn:
             return self._receipt_rows
         if "SELECT * FROM workflow_runs" in sql:
             return self._workflow_run_rows
-        if "FROM workflow_jobs WHERE run_id = $1 ORDER BY created_at" in sql:
+        if (
+            "FROM workflow_jobs WHERE run_id = $1 ORDER BY created_at" in sql
+            or "FROM workflow_jobs wj" in sql
+        ):
             return self._dispatch_jobs_rows
         if "COALESCE(SUM(cost_usd)" in sql:
             return self._dispatch_totals_row
@@ -1151,6 +1154,15 @@ class TestDagDispatchDryRun:
         assert result["command_status"] == "succeeded"
         assert result["stream_url"] == "/api/workflow-runs/dispatch_001/stream"
         assert result["status_url"] == "/api/workflow-runs/dispatch_001/status"
+        assert "test-queue" in result["dashboard"]
+        assert result["delivery"] == {
+            "dashboard_in_payload": True,
+            "live_channel": "notifications.message",
+            "message_notifications": True,
+            "progress_notifications": False,
+            "wait_requested": True,
+            "inline_polling": False,
+        }
 
     def test_run_routes_submission_through_command_bus(self, spec_path, monkeypatch):
         server._subs._pg_conn = _FakePGConn()
@@ -1329,6 +1341,13 @@ class TestDagDispatchDryRun:
         assert result["health"]["resource_telemetry"]["tokens_total"] == 36
         assert result["health"]["resource_telemetry"]["avg_job_duration_ms"] == 2100.0
         assert result["health"]["resource_telemetry"]["heartbeat_freshness"] in ("fresh", "degraded")
+        assert "job-a" in result["dashboard"]
+        assert result["delivery"] == {
+            "dashboard_in_payload": True,
+            "live_channel": "notifications.message",
+            "message_notifications": True,
+            "progress_notifications": False,
+        }
 
     def test_status_action_can_auto_kill_idle_run(self, monkeypatch):
         kill_calls: list[tuple[str, dict[str, object], str]] = []

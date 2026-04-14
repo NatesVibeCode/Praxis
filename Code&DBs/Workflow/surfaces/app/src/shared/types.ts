@@ -26,7 +26,20 @@ export interface BuildEdge {
   from_node_id: string;
   to_node_id: string;
   branch_reason?: string | null;
-  gate?: { state: string; label: string; family: string } | null;
+  gate?: {
+    state: string;
+    label?: string;
+    family: string;
+    config?: {
+      verify_command?: string;
+      condition?: string;
+      max_attempts?: number;
+      fallback?: string;
+      [key: string]: unknown;
+    };
+    [key: string]: unknown;
+  } | null;
+  gateLabel?: string;
 }
 
 export interface BuildIssue {

@@ -49,6 +49,23 @@ def _current_run_state_value(
     return normalized or None
 
 
+def _cancel_requested(
+    *,
+    run_id: str,
+    run_state_reader: Any,
+    cancel_signal: Any,
+) -> bool:
+    if cancel_signal is not None and bool(cancel_signal.cancel_requested()):
+        return True
+    return (
+        _current_run_state_value(
+            run_id=run_id,
+            run_state_reader=run_state_reader,
+        )
+        == RunState.CANCELLED.value
+    )
+
+
 def _inbound_edges_map(
     edges: Sequence[WorkflowEdgeContract],
 ) -> dict[str, list[WorkflowEdgeContract]]:
@@ -201,6 +218,7 @@ def execute_control_operator(
     completed_nodes: Mapping[str, NodeExecutionRecord],
     execution_boundary_ref: str,
     max_parallel_nodes: int,
+    cancel_signal: Any = None,
     execute_graph_fn: _ExecuteGraphFn,
 ) -> tuple[list[NodeExecutionRecord], NodeExecutionRecord]:
     operator = dict(node.inputs.get("operator") or {})
@@ -312,12 +330,10 @@ def execute_control_operator(
             ordered_results: list[Any] = []
             capped_items = list(items[:max_items])
             for batch_start in range(0, len(capped_items), max_parallel):
-                if (
-                    _current_run_state_value(
-                        run_id=intake_outcome.run_id,
-                        run_state_reader=run_state_reader,
-                    )
-                    == RunState.CANCELLED.value
+                if _cancel_requested(
+                    run_id=intake_outcome.run_id,
+                    run_state_reader=run_state_reader,
+                    cancel_signal=cancel_signal,
                 ):
                     return _cancel_and_return(
                         result_key=result_key,
@@ -364,6 +380,7 @@ def execute_control_operator(
                     intake_outcome=intake_outcome,
                     operator_frame_repository=operator_frame_repository,
                     run_state_reader=run_state_reader,
+                    cancel_signal=cancel_signal,
                     writer=writer,
                     cursor=cursor,
                     pending_nodes=batch_pending_nodes,
@@ -447,12 +464,10 @@ def execute_control_operator(
                 for index in range(0, len(items), batch_size)
             ][:max_batches]
             for batch_start in range(0, len(batches), max_parallel):
-                if (
-                    _current_run_state_value(
-                        run_id=intake_outcome.run_id,
-                        run_state_reader=run_state_reader,
-                    )
-                    == RunState.CANCELLED.value
+                if _cancel_requested(
+                    run_id=intake_outcome.run_id,
+                    run_state_reader=run_state_reader,
+                    cancel_signal=cancel_signal,
                 ):
                     return _cancel_and_return(
                         result_key=result_key,
@@ -504,6 +519,7 @@ def execute_control_operator(
                     intake_outcome=intake_outcome,
                     operator_frame_repository=operator_frame_repository,
                     run_state_reader=run_state_reader,
+                    cancel_signal=cancel_signal,
                     writer=writer,
                     cursor=cursor,
                     pending_nodes=batch_pending_nodes,
@@ -572,12 +588,10 @@ def execute_control_operator(
         stop_reason = "max_iterations_exceeded"
         continue_while_matched = operator_kind == "while"
         for iteration_index in range(max_iterations):
-            if (
-                _current_run_state_value(
-                    run_id=intake_outcome.run_id,
-                    run_state_reader=run_state_reader,
-                )
-                == RunState.CANCELLED.value
+            if _cancel_requested(
+                run_id=intake_outcome.run_id,
+                run_state_reader=run_state_reader,
+                cancel_signal=cancel_signal,
             ):
                 return _cancel_and_return(
                     result_key=result_key,
@@ -618,6 +632,7 @@ def execute_control_operator(
                 intake_outcome=intake_outcome,
                 operator_frame_repository=operator_frame_repository,
                 run_state_reader=run_state_reader,
+                cancel_signal=cancel_signal,
                 writer=writer,
                 cursor=cursor,
                 pending_nodes=cloned_nodes,

@@ -52,9 +52,9 @@ __all__ = [
 # ---------------------------------------------------------------------------
 # Monkeypatch-aware helpers
 # ---------------------------------------------------------------------------
-# Tests monkeypatch these names on `runtime.provider_onboarding` (the facade).
-# The functions below resolve through the facade at call time so that
-# monkeypatching the facade also affects calls within this module.
+# Tests monkeypatch these names on `registry.provider_onboarding`.
+# The functions below resolve through the module at call time so that
+# monkeypatching the top-level names also affects calls within this module.
 
 def _find_binary(binary_name):
     mod = sys.modules.get("registry.provider_onboarding")

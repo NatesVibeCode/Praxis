@@ -46,6 +46,7 @@ def test_run_status_payload_includes_submission_summary(monkeypatch) -> None:
     )
     monkeypatch.setattr(unified, "summarize_run_health", lambda *_args, **_kwargs: {"state": "healthy"})
     monkeypatch.setattr(unified, "summarize_run_recovery", lambda *_args, **_kwargs: {"mode": "monitor"})
+    monkeypatch.setattr(workflow_tools, "_render_dashboard_panel", lambda *_args, **_kwargs: "status-dashboard")
 
     payload = workflow_tools._run_status_payload(object(), "run-1")
 
@@ -58,6 +59,7 @@ def test_run_status_payload_includes_submission_summary(monkeypatch) -> None:
         "integrity_status": "matched",
         "latest_review_decision": "approve",
     }
+    assert payload["dashboard"] == "status-dashboard"
 
 
 def test_tool_praxis_workflow_status_returns_structured_runtime_error(monkeypatch) -> None:
@@ -173,6 +175,7 @@ def test_tool_praxis_workflow_run_returns_async_payload_without_progress_emitter
 
     monkeypatch.setattr(workflow_tools, "_workflow_spec_mod", lambda: type("_SpecMod", (), {"WorkflowSpec": _Spec}))
     monkeypatch.setattr(workflow_tools._subs, "get_pg_conn", lambda: object())
+    monkeypatch.setattr(workflow_tools, "_render_dashboard_panel", lambda *_args, **_kwargs: "submit-dashboard")
     monkeypatch.setattr(
         workflow_tools,
         "_submit_workflow_via_service_bus",
@@ -196,4 +199,76 @@ def test_tool_praxis_workflow_run_returns_async_payload_without_progress_emitter
         "command_status": "succeeded",
         "stream_url": "/api/workflow-runs/dispatch_001/stream",
         "status_url": "/api/workflow-runs/dispatch_001/status",
+        "dashboard": "submit-dashboard",
+        "delivery": {
+            "dashboard_in_payload": True,
+            "live_channel": "none",
+            "message_notifications": False,
+            "progress_notifications": False,
+            "wait_requested": True,
+            "inline_polling": False,
+        },
+    }
+
+
+def test_tool_praxis_workflow_run_with_message_only_emitter_returns_async_payload(monkeypatch, tmp_path) -> None:
+    spec_path = tmp_path / "workflow.queue.json"
+    spec_path.write_text(
+        '{"name":"workflow","workflow_id":"workflow","phase":"test","jobs":[{"label":"job-a"}]}',
+        encoding="utf-8",
+    )
+
+    class _Spec:
+        def __init__(self) -> None:
+            self.name = "workflow"
+            self.jobs = [{"label": "job-a"}]
+
+        @classmethod
+        def load(cls, _path: str):
+            return cls()
+
+    class _MessageOnlyEmitter:
+        enabled = False
+        progress_token = None
+
+        def log(self, *_args, **_kwargs) -> None:
+            raise AssertionError("message-only emitter should not trigger inline polling")
+
+        def emit(self, *_args, **_kwargs) -> None:
+            raise AssertionError("message-only emitter should not trigger inline polling")
+
+    monkeypatch.setattr(workflow_tools, "_workflow_spec_mod", lambda: type("_SpecMod", (), {"WorkflowSpec": _Spec}))
+    monkeypatch.setattr(workflow_tools._subs, "get_pg_conn", lambda: object())
+    monkeypatch.setattr(workflow_tools, "_render_dashboard_panel", lambda *_args, **_kwargs: "submit-dashboard")
+    monkeypatch.setattr(
+        workflow_tools,
+        "_submit_workflow_via_service_bus",
+        lambda *_args, **_kwargs: {
+            "run_id": "dispatch_002",
+            "status": "queued",
+            "spec_name": "workflow",
+            "total_jobs": 1,
+            "command_id": "control.command.submit.2",
+        },
+    )
+    monkeypatch.setattr(
+        workflow_tools,
+        "_poll_run_to_completion",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("inline polling should not run without progress token")),
+    )
+
+    payload = workflow_tools.tool_praxis_workflow(
+        {"spec_path": str(spec_path)},
+        _progress_emitter=_MessageOnlyEmitter(),
+    )
+
+    assert payload["run_id"] == "dispatch_002"
+    assert payload["dashboard"] == "submit-dashboard"
+    assert payload["delivery"] == {
+        "dashboard_in_payload": True,
+        "live_channel": "notifications.message",
+        "message_notifications": True,
+        "progress_notifications": False,
+        "wait_requested": True,
+        "inline_polling": False,
     }

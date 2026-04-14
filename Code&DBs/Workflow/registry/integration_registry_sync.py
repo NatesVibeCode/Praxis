@@ -68,7 +68,7 @@ _STATIC_INTEGRATIONS: list[dict[str, Any]] = [
         "id": "workflow",
         "name": "Workflow",
         "description": "Invoke registered workflows from the runtime control plane.",
-        "provider": "dag",
+        "provider": "praxis",
         "capabilities": [
             {"action": "invoke", "description": "Invoke a registered workflow by workflow id."},
         ],

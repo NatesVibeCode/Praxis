@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { useLiveRunSnapshot } from '../dashboard/useLiveRunSnapshot';
-import type { RunJob, RunStatus, RecentRun } from '../dashboard/useLiveRunSnapshot';
+import type { RunJob, RunStatus, RecentRun, RunDetail } from '../dashboard/useLiveRunSnapshot';
 import { triggerWorkflow } from '../shared/buildController';
 
 interface Props {
@@ -22,6 +22,12 @@ const STATUS_DOT: Record<string, string> = {
 };
 
 const TERMINAL: Set<RunStatus> = new Set(['succeeded', 'failed', 'cancelled']);
+const TERMINAL_JOB_STATUSES = new Set<RunJob['status']>(['succeeded', 'failed', 'dead_letter', 'cancelled']);
+
+interface RunStreamEvent {
+  jobs?: RunJob[];
+  status?: RunStatus;
+}
 
 function JobRow({ job, onClick }: { job: RunJob; onClick?: () => void }) {
   const color = STATUS_DOT[job.status] || '#484f58';
@@ -50,19 +56,73 @@ export function MoonRunPanel({ runId, workflowId, onClose, onSwitchRun }: Props)
   const [history, setHistory] = useState<RecentRun[]>([]);
   const [expandedJob, setExpandedJob] = useState<number | null>(null);
   const [jobOutput, setJobOutput] = useState<string | null>(null);
+  const [liveRun, setLiveRun] = useState<RunDetail | null>(null);
 
-  const isTerminal = run ? TERMINAL.has(run.status) : false;
+  useEffect(() => {
+    setLiveRun(run);
+  }, [run]);
+
+  const runStatus = liveRun?.status ?? run?.status ?? null;
+  const isTerminal = runStatus ? TERMINAL.has(runStatus) : false;
 
   // Load run history for this workflow
   useEffect(() => {
     if (!workflowId) return;
-    fetch(`/api/runs/recent?limit=10`)
+    fetch(`/api/workflow/runs/recent?limit=10`)
       .then(r => r.json())
       .then((runs: RecentRun[]) => {
         setHistory(runs.filter(r => r.run_id !== runId).slice(0, 5));
       })
       .catch(() => {});
   }, [workflowId, runId]);
+
+  useEffect(() => {
+    if (!runId || !runStatus || TERMINAL.has(runStatus)) {
+      return undefined;
+    }
+
+    const es = new EventSource(`/api/workflow/runs/${encodeURIComponent(runId)}/stream`);
+    es.onmessage = (event) => {
+      let data: RunStreamEvent;
+      try {
+        data = JSON.parse(event.data) as RunStreamEvent;
+      } catch {
+        return;
+      }
+
+      if (!data.jobs && !data.status) {
+        return;
+      }
+
+      setLiveRun((current) => {
+        if (!current) {
+          return current;
+        }
+        const jobs = data.jobs ?? current.jobs;
+        const nextStatus = data.status ?? current.status;
+        const completedJobs = jobs.filter((job) => TERMINAL_JOB_STATUSES.has(job.status)).length;
+        const totalJobs = jobs.length || current.total_jobs;
+        const totalCost = jobs.reduce((sum, job) => sum + (job.cost_usd || 0), 0);
+
+        return {
+          ...current,
+          jobs,
+          status: nextStatus,
+          completed_jobs: completedJobs,
+          total_jobs: totalJobs,
+          total_cost: totalCost,
+          finished_at: TERMINAL.has(nextStatus) ? current.finished_at ?? new Date().toISOString() : current.finished_at,
+        };
+      });
+    };
+    es.onerror = () => {
+      es.close();
+    };
+
+    return () => {
+      es.close();
+    };
+  }, [runId, runStatus]);
 
   const handleRerun = useCallback(async () => {
     if (!workflowId) return;
@@ -90,7 +150,7 @@ export function MoonRunPanel({ runId, workflowId, onClose, onSwitchRun }: Props)
     setExpandedJob(job.id);
     setJobOutput(null);
     try {
-      const resp = await fetch(`/api/runs/${encodeURIComponent(runId)}/jobs/${job.id}`);
+      const resp = await fetch(`/api/workflow/runs/${encodeURIComponent(runId)}/jobs/${job.id}`);
       if (resp.ok) {
         const data = await resp.json();
         setJobOutput(data.output || data.stdout_preview || 'No output');
@@ -98,38 +158,38 @@ export function MoonRunPanel({ runId, workflowId, onClose, onSwitchRun }: Props)
     } catch { /* ignore */ }
   }, [runId, expandedJob]);
 
-  const statusColor = run ? STATUS_DOT[run.status] || '#484f58' : '#484f58';
+  const statusColor = liveRun ? STATUS_DOT[liveRun.status] || '#484f58' : '#484f58';
 
   return (
     <>
       <button className="moon-dock__close" onClick={onClose} aria-label="Close run panel">&times;</button>
       <div className="moon-dock__title">
         Run
-        {run && (
+        {liveRun && (
           <span className="moon-run__status-badge" style={{ background: statusColor, marginLeft: 8 }}>
-            {run.status}
+            {liveRun.status}
           </span>
         )}
       </div>
       <div className="moon-dock__sep" />
 
-      {loading && !run && (
+      {loading && !liveRun && (
         <div className="moon-dock__empty">Loading run...</div>
       )}
       {error && (
         <div className="moon-dock-form__error">{error}</div>
       )}
 
-      {run && (
+      {liveRun && (
         <div className="moon-run__content">
           <div className="moon-run__summary">
-            <span>{run.completed_jobs}/{run.total_jobs} jobs</span>
-            {run.total_cost > 0 && <span> &middot; ${run.total_cost.toFixed(4)}</span>}
-            {run.finished_at && <span> &middot; done</span>}
+            <span>{liveRun.completed_jobs}/{liveRun.total_jobs} jobs</span>
+            {liveRun.total_cost > 0 && <span> &middot; ${liveRun.total_cost.toFixed(4)}</span>}
+            {liveRun.finished_at && <span> &middot; done</span>}
           </div>
 
           <div className="moon-run__jobs">
-            {run.jobs.map((job: RunJob) => (
+            {liveRun.jobs.map((job: RunJob) => (
               <React.Fragment key={job.id}>
                 <JobRow job={job} onClick={() => handleJobClick(job)} />
                 {expandedJob === job.id && jobOutput && (

@@ -30,10 +30,11 @@ for implementation details.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import replace
 from datetime import datetime
+import threading
 from typing import Any, Protocol
 
 from adapters import (
@@ -161,6 +162,19 @@ class RunStateReader(Protocol):
         """Return the current persisted run state."""
 
 
+class RunCancellationSignal(Protocol):
+    """Provides explicit run-cancellation observation for one run."""
+
+    def cancel_requested(self) -> bool:
+        """Return True once the run has been cancelled."""
+
+    def wait_for_cancel(self, timeout: float | None = None) -> bool:
+        """Block until cancellation is observed or the timeout elapses."""
+
+    def close(self) -> None:
+        """Release any resources bound to the signal."""
+
+
 def _validate_execution_writer(
     evidence_writer: AtomicEvidenceWriter,
 ) -> TransitionProofWriter:
@@ -211,6 +225,21 @@ def _bound_run_state_reader(authority: object) -> RunStateReader | None:
     return authority  # type: ignore[return-value]
 
 
+def _bound_run_cancellation_signal(
+    authority: object,
+    *,
+    run_id: str,
+) -> RunCancellationSignal | None:
+    loader = getattr(authority, "run_cancellation_signal", None)
+    if not callable(loader):
+        return None
+    signal = loader(run_id)
+    required_methods = ("cancel_requested", "wait_for_cancel", "close")
+    if not all(callable(getattr(signal, method, None)) for method in required_methods):
+        return None
+    return signal  # type: ignore[return-value]
+
+
 def _current_run_state(
     *,
     run_id: str,
@@ -223,6 +252,136 @@ def _current_run_state(
         return None
     normalized = str(state).strip().lower()
     return normalized or None
+
+
+class _NullRunCancellationSignal:
+    def cancel_requested(self) -> bool:
+        return False
+
+    def wait_for_cancel(self, timeout: float | None = None) -> bool:
+        if timeout is not None and timeout > 0:
+            threading.Event().wait(timeout)
+        return False
+
+    def close(self) -> None:
+        return
+
+
+class _PollingRunCancellationSignal:
+    """Fallback signal that samples persisted state with bounded backoff."""
+
+    def __init__(
+        self,
+        *,
+        run_id: str,
+        run_state_reader: RunStateReader,
+        initial_state: str | None,
+        min_interval_seconds: float = 0.05,
+        max_interval_seconds: float = 0.5,
+    ) -> None:
+        self._run_id = run_id
+        self._run_state_reader = run_state_reader
+        self._min_interval_seconds = min_interval_seconds
+        self._max_interval_seconds = max_interval_seconds
+        self._cancel_event = threading.Event()
+        self._close_event = threading.Event()
+        if initial_state == RunState.CANCELLED.value:
+            self._cancel_event.set()
+
+    def cancel_requested(self) -> bool:
+        return self._cancel_event.is_set()
+
+    def wait_for_cancel(self, timeout: float | None = None) -> bool:
+        if self._cancel_event.is_set():
+            return True
+        remaining = timeout
+        next_interval = self._min_interval_seconds
+        while not self._close_event.is_set():
+            if self._refresh():
+                return True
+            wait_interval = next_interval
+            if remaining is not None:
+                if remaining <= 0:
+                    return self._cancel_event.is_set()
+                wait_interval = min(wait_interval, remaining)
+            if self._close_event.wait(timeout=wait_interval):
+                return self._cancel_event.is_set()
+            if remaining is not None:
+                remaining -= wait_interval
+            next_interval = min(next_interval * 2, self._max_interval_seconds)
+        return self._cancel_event.is_set()
+
+    def close(self) -> None:
+        self._close_event.set()
+
+    def _refresh(self) -> bool:
+        if self._cancel_event.is_set():
+            return True
+        state = _current_run_state(
+            run_id=self._run_id,
+            run_state_reader=self._run_state_reader,
+        )
+        if state == RunState.CANCELLED.value:
+            self._cancel_event.set()
+            return True
+        return False
+
+
+class _RegularWaveCancellationBridge:
+    """Requests in-flight node cancellation without polling in the wait loop."""
+
+    def __init__(
+        self,
+        *,
+        cancel_signal: RunCancellationSignal,
+        request_cancel: Callable[[], None],
+    ) -> None:
+        self._cancel_signal = cancel_signal
+        self._request_cancel = request_cancel
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        self._thread = threading.Thread(
+            target=self._run,
+            daemon=True,
+            name="deterministic-wave-cancellation",
+        )
+        self._thread.start()
+
+    def close(self) -> None:
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=3)
+
+    def _run(self) -> None:
+        while not self._stop_event.is_set():
+            if self._cancel_signal.wait_for_cancel(timeout=0.5):
+                self._request_cancel()
+                return
+
+
+def _run_cancellation_signal_for_execution(
+    *,
+    run_id: str,
+    evidence_writer: AtomicEvidenceWriter,
+    evidence_reader: CanonicalEvidenceReader | None,
+    run_state_reader: RunStateReader | None,
+) -> RunCancellationSignal:
+    for authority in (evidence_writer, evidence_reader):
+        if authority is None:
+            continue
+        signal = _bound_run_cancellation_signal(authority, run_id=run_id)
+        if signal is not None:
+            return signal
+    initial_state = _current_run_state(run_id=run_id, run_state_reader=run_state_reader)
+    if run_state_reader is None:
+        return _NullRunCancellationSignal()
+    return _PollingRunCancellationSignal(
+        run_id=run_id,
+        run_state_reader=run_state_reader,
+        initial_state=initial_state,
+    )
 
 
 def _terminal_reason_for_result(result: DeterministicTaskResult) -> str:
@@ -666,6 +825,7 @@ class RuntimeOrchestrator(RuntimeOrchestratorContract):
         completed_nodes: Mapping[str, NodeExecutionRecord],
         execution_boundary_ref: str,
         max_parallel_nodes: int,
+        cancel_signal: RunCancellationSignal,
     ) -> tuple[list[NodeExecutionRecord], NodeExecutionRecord]:
         return execute_control_operator(
             node=node,
@@ -679,6 +839,7 @@ class RuntimeOrchestrator(RuntimeOrchestratorContract):
             completed_nodes=completed_nodes,
             execution_boundary_ref=execution_boundary_ref,
             max_parallel_nodes=max_parallel_nodes,
+            cancel_signal=cancel_signal,
             execute_graph_fn=self._execute_graph,
         )
 
@@ -698,7 +859,8 @@ class RuntimeOrchestrator(RuntimeOrchestratorContract):
         execution_boundary_ref: str,
         max_parallel_nodes: int,
         context_accumulator: ContextAccumulator | None,
-        ) -> _FailureReason | None:
+        cancel_signal: RunCancellationSignal,
+    ) -> _FailureReason | None:
         wave_prepared: list[
             tuple[str, WorkflowNodeContract, Mapping[str, Any], Any, DeterministicTaskRequest]
         ] = []
@@ -742,7 +904,7 @@ class RuntimeOrchestrator(RuntimeOrchestratorContract):
             ],
         ] = {}
         adapter_results: dict[str, NodeExecutionRecord] = {}
-        cancel_requested = False
+        cancel_requested = cancel_signal.cancel_requested()
 
         with ThreadPoolExecutor(max_workers=effective_parallelism) as pool:
             for node_id, prepared_node, _dep_inputs, adapter, task_request in wave_prepared:
@@ -769,40 +931,50 @@ class RuntimeOrchestrator(RuntimeOrchestratorContract):
                 )
 
             pending_futures: set[Future[DeterministicTaskResult]] = set(future_to_node)
-            while pending_futures:
-                done_futures, pending_futures = wait(
-                    pending_futures,
-                    timeout=0.1,
-                    return_when=FIRST_COMPLETED,
-                )
-                for future in done_futures:
-                    (
-                        node_id,
-                        prepared_node,
-                        task_request,
-                        start_record,
-                        _execution_control,
-                    ) = future_to_node[future]
-                    adapter_result = future.result()
-                    adapter_results[node_id] = self._complete_regular_node_record(
-                        node=prepared_node,
-                        task_request=task_request,
-                        adapter_result=adapter_result,
-                        start_record=start_record,
-                        writer=writer,
-                        cursor=cursor,
-                        intake_outcome=intake_outcome,
-                    )
-                if not cancel_requested and (
-                    _current_run_state(
-                        run_id=intake_outcome.run_id,
-                        run_state_reader=run_state_reader,
-                    )
-                    == RunState.CANCELLED.value
-                ):
+            pending_lock = threading.Lock()
+
+            def _request_pending_cancellation() -> None:
+                nonlocal cancel_requested
+                with pending_lock:
                     cancel_requested = True
                     for future in pending_futures:
                         future_to_node[future][4].request_cancel()
+
+            cancellation_bridge = _RegularWaveCancellationBridge(
+                cancel_signal=cancel_signal,
+                request_cancel=_request_pending_cancellation,
+            )
+            cancellation_bridge.start()
+            try:
+                if cancel_requested:
+                    _request_pending_cancellation()
+                while pending_futures:
+                    done_futures, remaining_futures = wait(
+                        pending_futures,
+                        return_when=FIRST_COMPLETED,
+                    )
+                    with pending_lock:
+                        pending_futures = set(remaining_futures)
+                    for future in done_futures:
+                        (
+                            node_id,
+                            prepared_node,
+                            task_request,
+                            start_record,
+                            _execution_control,
+                        ) = future_to_node[future]
+                        adapter_result = future.result()
+                        adapter_results[node_id] = self._complete_regular_node_record(
+                            node=prepared_node,
+                            task_request=task_request,
+                            adapter_result=adapter_result,
+                            start_record=start_record,
+                            writer=writer,
+                            cursor=cursor,
+                            intake_outcome=intake_outcome,
+                        )
+            finally:
+                cancellation_bridge.close()
 
         for node_id, prepared_node, _dep_inputs, _adapter, _task_request_unused in wave_prepared:
             record = adapter_results[node_id]
@@ -851,11 +1023,16 @@ class RuntimeOrchestrator(RuntimeOrchestratorContract):
         execution_boundary_ref: str,
         max_parallel_nodes: int,
         context_accumulator: ContextAccumulator | None,
+        cancel_signal: RunCancellationSignal,
     ) -> _FailureReason | None:
         while pending_nodes:
-            current_run_state = _current_run_state(
-                run_id=intake_outcome.run_id,
-                run_state_reader=run_state_reader,
+            current_run_state = (
+                RunState.CANCELLED.value
+                if cancel_signal.cancel_requested()
+                else _current_run_state(
+                    run_id=intake_outcome.run_id,
+                    run_state_reader=run_state_reader,
+                )
             )
             if current_run_state == RunState.CANCELLED.value:
                 self._cancel_open_operator_frames(
@@ -952,6 +1129,7 @@ class RuntimeOrchestrator(RuntimeOrchestratorContract):
                         execution_boundary_ref=execution_boundary_ref,
                         max_parallel_nodes=max_parallel_nodes,
                         context_accumulator=context_accumulator,
+                        cancel_signal=cancel_signal,
                     )
 
                 for node_id, node, dep_inputs in wave_nodes:
@@ -984,6 +1162,7 @@ class RuntimeOrchestrator(RuntimeOrchestratorContract):
                         completed_nodes=completed_nodes,
                         execution_boundary_ref=execution_boundary_ref,
                         max_parallel_nodes=max_parallel_nodes,
+                        cancel_signal=cancel_signal,
                     )
                     for child_record in child_records:
                         execution_order.append(child_record.node_id)
@@ -1028,6 +1207,7 @@ class RuntimeOrchestrator(RuntimeOrchestratorContract):
                 execution_boundary_ref=execution_boundary_ref,
                 max_parallel_nodes=max_parallel_nodes,
                 context_accumulator=context_accumulator,
+                cancel_signal=cancel_signal,
             )
             if failure is not None:
                 return failure
@@ -1059,6 +1239,12 @@ class RuntimeOrchestrator(RuntimeOrchestratorContract):
             raise RuntimeLifecycleError(
                 f"runtime.execution_invalid_start:{intake_outcome.current_state.value}"
             )
+        cancel_signal = _run_cancellation_signal_for_execution(
+            run_id=intake_outcome.run_id,
+            evidence_writer=evidence_writer,
+            evidence_reader=self._evidence_reader,
+            run_state_reader=run_state_reader,
+        )
 
         request = intake_outcome.workflow_request
         cursor = _ExecutionCursor(route_identity=intake_outcome.route_identity)
@@ -1145,6 +1331,7 @@ class RuntimeOrchestrator(RuntimeOrchestratorContract):
         cursor.advance(result=admission_result, new_state=admission_state)
 
         if admission_state is RunState.CLAIM_REJECTED:
+            cancel_signal.close()
             return RunExecutionResult(
                 workflow_id=request.workflow_id,
                 run_id=intake_outcome.run_id,
@@ -1172,13 +1359,14 @@ class RuntimeOrchestrator(RuntimeOrchestratorContract):
             evidence_writer=evidence_writer,
         )
         cursor.advance(result=queue_result, new_state=RunState.QUEUED)
-        if (
+        if cancel_signal.cancel_requested() or (
             _current_run_state(
                 run_id=intake_outcome.run_id,
                 run_state_reader=run_state_reader,
             )
             == RunState.CANCELLED.value
         ):
+            cancel_signal.close()
             return self._cancel_run(
                 request=request,
                 intake_outcome=intake_outcome,
@@ -1257,9 +1445,11 @@ class RuntimeOrchestrator(RuntimeOrchestratorContract):
             execution_boundary_ref=execution_boundary_ref,
             max_parallel_nodes=max_parallel_nodes,
             context_accumulator=context_accumulator,
+            cancel_signal=cancel_signal,
         )
         if failure_reason is not None:
             if failure_reason.reason_code == "workflow_cancelled":
+                cancel_signal.close()
                 return self._cancel_run(
                     request=request,
                     intake_outcome=intake_outcome,
@@ -1268,6 +1458,7 @@ class RuntimeOrchestrator(RuntimeOrchestratorContract):
                     node_results=node_results,
                     cancel_reason=failure_reason,
                 )
+            cancel_signal.close()
             return self._fail_run(
                 request=request,
                 intake_outcome=intake_outcome,
@@ -1280,6 +1471,7 @@ class RuntimeOrchestrator(RuntimeOrchestratorContract):
         has_failure = any(nr.status == "failed" for nr in node_results)
         if has_failure:
             first_failure = next(nr for nr in node_results if nr.status == "failed")
+            cancel_signal.close()
             return self._fail_run(
                 request=request,
                 intake_outcome=intake_outcome,
@@ -1297,13 +1489,14 @@ class RuntimeOrchestrator(RuntimeOrchestratorContract):
                 ),
             )
 
-        if (
+        if cancel_signal.cancel_requested() or (
             _current_run_state(
                 run_id=intake_outcome.run_id,
                 run_state_reader=run_state_reader,
             )
             == RunState.CANCELLED.value
         ):
+            cancel_signal.close()
             return self._cancel_run(
                 request=request,
                 intake_outcome=intake_outcome,
@@ -1335,6 +1528,7 @@ class RuntimeOrchestrator(RuntimeOrchestratorContract):
             evidence_writer=evidence_writer,
         )
         cursor.advance(result=success_result, new_state=RunState.SUCCEEDED)
+        cancel_signal.close()
         return RunExecutionResult(
             workflow_id=request.workflow_id,
             run_id=intake_outcome.run_id,

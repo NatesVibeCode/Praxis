@@ -1,0 +1,12 @@
+{
+  "name": "MCP Workflow Live Proof",
+  "workflow_id": "mcp_workflow_live_proof_20260413",
+  "phase": "W",
+  "jobs": [
+    {
+      "label": "identity_check",
+      "agent": "openai/gpt-5.4-mini",
+      "prompt": "Reply with exactly: LIVE_PROOF_OK"
+    }
+  ]
+}

@@ -1,11 +1,11 @@
 import React from 'react';
-import type { OrbitEdge, DagLayout } from './moonBuildPresenter';
+import type { OrbitEdge, GraphLayout } from './moonBuildPresenter';
 
 const R = 30; // node radius = half of 60px node size
 
 interface MoonEdgesProps {
   edges: OrbitEdge[];
-  layout: DagLayout;
+  layout: GraphLayout;
   selectedEdgeId: string | null;
   onEdgeClick?: (id: string) => void;
 }

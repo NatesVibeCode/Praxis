@@ -157,15 +157,32 @@ class CancellableEvidenceWriter(AppendOnlyWorkflowEvidenceWriter):
     def __init__(self) -> None:
         super().__init__()
         self._states: dict[str, str] = {}
+        self._cancel_events: dict[str, threading.Event] = {}
         self._lock = threading.Lock()
 
     def request_cancel(self, run_id: str) -> None:
         with self._lock:
             self._states[run_id] = RunState.CANCELLED.value
+            self._cancel_events.setdefault(run_id, threading.Event()).set()
 
     def current_state_for_run(self, run_id: str) -> str | None:
         with self._lock:
             return self._states.get(run_id)
+
+    def run_cancellation_signal(self, run_id: str):
+        event = self._cancel_events.setdefault(run_id, threading.Event())
+
+        class _Signal:
+            def cancel_requested(self) -> bool:
+                return event.is_set()
+
+            def wait_for_cancel(self, timeout: float | None = None) -> bool:
+                return event.wait(timeout=timeout)
+
+            def close(self) -> None:
+                return
+
+        return _Signal()
 
 
 class CancelOnExecuteAdapter:
@@ -1100,6 +1117,66 @@ def test_running_regular_node_receives_inflight_cancel_signal() -> None:
     assert first_receipt.status == "cancelled"
     assert first_receipt.failure_code == "workflow_cancelled"
     assert all(receipt.node_id != "second" for receipt in writer.receipts(result.run_id))
+
+
+def test_regular_wave_uses_signal_without_hot_loop_state_reads() -> None:
+    class CountingWriter(CancellableEvidenceWriter):
+        def __init__(self) -> None:
+            super().__init__()
+            self.current_state_calls = 0
+
+        def current_state_for_run(self, run_id: str) -> str | None:
+            self.current_state_calls += 1
+            return super().current_state_for_run(run_id)
+
+    request = WorkflowRequest(
+        schema_version=SUPPORTED_SCHEMA_VERSION,
+        workflow_id="workflow.cancel.regular.signal",
+        request_id="request.cancel.regular.signal",
+        workflow_definition_id="workflow_definition.cancel.regular.signal.v1",
+        definition_hash="sha256:cancel-regular-signal",
+        workspace_ref="workspace.alpha",
+        runtime_profile_ref="runtime_profile.alpha",
+        nodes=(
+            _node(
+                node_id="first",
+                position_index=0,
+                display_name="first",
+                adapter_type="api_task",
+                inputs={"task_name": "first", "input_payload": {}},
+            ),
+        ),
+        edges=(),
+    )
+
+    planner = WorkflowIntakePlanner(registry=_resolver())
+    outcome = planner.plan(request=request)
+    writer = CountingWriter()
+    adapter = WaitForCancellationAdapter()
+    registry = AdapterRegistry()
+    registry.register("api_task", adapter)
+
+    result_box: dict[str, Any] = {}
+
+    thread = threading.Thread(
+        target=lambda: result_box.setdefault(
+            "result",
+            RuntimeOrchestrator(adapter_registry=registry).execute_deterministic_path(
+                intake_outcome=outcome,
+                evidence_writer=writer,
+            ),
+        ),
+        daemon=True,
+    )
+    thread.start()
+    assert adapter.entered.wait(timeout=2)
+    time.sleep(0.6)
+    writer.request_cancel(outcome.run_id)
+    thread.join(timeout=5)
+
+    assert not thread.is_alive()
+    assert result_box["result"].current_state is RunState.CANCELLED
+    assert writer.current_state_calls <= 4
 
 
 def test_foreach_cancellation_stops_before_next_batch_and_cancels_operator_node() -> None:

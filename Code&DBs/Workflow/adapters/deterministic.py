@@ -130,7 +130,7 @@ def _is_mapping(value: object) -> bool:
 
 
 class DeterministicTaskAdapter:
-    """Single boring deterministic adapter for the minimal DAG slice."""
+    """Single boring deterministic adapter for the minimal workflow slice."""
 
     executor_type = "adapter.deterministic_task"
 
@@ -247,7 +247,7 @@ class TaskAdapter(Protocol):
 
 
 class BaseNodeAdapter:
-    """Base class for DAG node adapters.
+    """Base class for workflow node adapters.
 
     Provides the common dependency_inputs merge that every adapter needs.
     Subclasses implement _execute(payload, request) instead of execute().

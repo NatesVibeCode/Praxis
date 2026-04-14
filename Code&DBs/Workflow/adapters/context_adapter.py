@@ -1,4 +1,4 @@
-"""Context compiler adapter — DAG node that reads files and compiles the prompt.
+"""Context compiler adapter — workflow node that reads files and compiles the prompt.
 
 This is the first node in a dispatch graph. It reads target files via
 scope_resolver, compiles context sections, and renders the full prompt

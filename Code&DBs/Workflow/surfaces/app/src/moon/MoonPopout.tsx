@@ -9,6 +9,7 @@ interface Props {
   onClose: () => void;
   onSelect: (nodeId: string, value: string) => void;
   catalog: CatalogItem[];
+  onStartCatalogDrag: (event: React.PointerEvent, item: CatalogItem) => void;
 }
 
 const NODE_FAMILIES: CatalogFamily[] = ['trigger', 'gather', 'think', 'act'];
@@ -21,7 +22,7 @@ function questionFor(node: OrbitNode): string {
 
 const MAX_VISIBLE = 8;
 
-export function MoonPopout({ node, content, onClose, onSelect, catalog }: Props) {
+export function MoonPopout({ node, content, onClose, onSelect, catalog, onStartCatalogDrag }: Props) {
   // Default to a sensible family based on node state
   const defaultFamily = useMemo((): CatalogFamily | null => {
     if (!node.route) return 'think'; // Unresolved nodes → show think/process actions first
@@ -118,12 +119,7 @@ export function MoonPopout({ node, content, onClose, onSelect, catalog }: Props)
               className={`moon-popout__catalog-item${node.route === item.actionValue ? ' moon-popout__catalog-item--active' : ''}`}
               onClick={(e) => { e.stopPropagation(); if (item.actionValue) onSelect(node.id, item.actionValue); }}
               title={item.description}
-              draggable
-              onDragStart={e => {
-                e.dataTransfer.setData('moon/catalog-id', item.id);
-                e.dataTransfer.setData('text/plain', item.label);
-                e.dataTransfer.effectAllowed = 'copyLink';
-              }}
+              onPointerDown={e => onStartCatalogDrag(e, item)}
             >
               <MoonGlyph type={item.icon} size={14} color={node.route === item.actionValue ? '#6CB6FF' : '#F4F6F8'} />
               <span>{item.label}</span>

@@ -25,6 +25,13 @@ from registry.runtime_profile_admission import (
     RuntimeProfileAdmittedCandidate,
     load_admitted_runtime_profile_candidates,
 )
+from .route_authority_snapshot import (
+    RouteAuthoritySnapshot,
+    get_route_authority_snapshot,
+    get_task_route_policy,
+    invalidate_all_route_authority_snapshots,
+    invalidate_route_authority_snapshot,
+)
 from .composite_scorer import CompositeScorer, ScaleFn
 from .routing_economics import (
     economic_rationale as _economic_rationale,
@@ -368,11 +375,14 @@ class TaskTypeRouter:
     ) -> None:
         self._conn = conn
         self._now_factory = now_factory or (lambda: datetime.now(timezone.utc))
-        self._policy = self._load_route_policy()
-        self._policy_cache: dict[str, TaskRoutePolicy] = {}
-        self._failure_zones = self._load_failure_zones()
-        self._task_profiles = self._load_task_route_profiles()
-        self._benchmark_metrics = self._load_benchmark_metric_registry()
+        authority = get_route_authority_snapshot(
+            self._conn,
+            load_snapshot=self._load_static_authority_snapshot,
+        )
+        self._policy = authority.route_policy
+        self._failure_zones = authority.failure_zones
+        self._task_profiles = authority.task_profiles
+        self._benchmark_metrics = authority.benchmark_metrics
         self._runtime_profile_candidate_cache: dict[str, tuple[dict[str, Any], ...]] = {}
         self._default_adapter_type = default_llm_adapter_type()
 
@@ -382,13 +392,35 @@ class TaskTypeRouter:
 
     def _policy_for(self, task_type: str) -> TaskRoutePolicy:
         """Get task-type-specific policy, falling back to default."""
-        if task_type not in self._policy_cache:
-            self._policy_cache[task_type] = self._load_route_policy(task_type)
-        return self._policy_cache[task_type]
+        return get_task_route_policy(
+            self._conn,
+            task_type=task_type,
+            load_policy=self._load_route_policy_for_task_type,
+        )
 
-    def _load_failure_zones(self) -> dict[str, str]:
+    @classmethod
+    def invalidate_authority_snapshot(cls, conn: SyncPostgresConnection) -> None:
+        """Invalidate cached static authority for one authority source."""
+        invalidate_route_authority_snapshot(conn)
+
+    @classmethod
+    def invalidate_all_authority_snapshots(cls) -> None:
+        """Invalidate all cached static authority snapshots in this process."""
+        invalidate_all_route_authority_snapshots()
+
+    @classmethod
+    def _load_static_authority_snapshot(cls, conn: SyncPostgresConnection) -> RouteAuthoritySnapshot:
+        return RouteAuthoritySnapshot(
+            route_policy=cls._load_route_policy_row(conn, task_type=None),
+            failure_zones=cls._load_failure_zones(conn),
+            task_profiles=cls._load_task_route_profiles(conn),
+            benchmark_metrics=cls._load_benchmark_metric_registry(conn),
+        )
+
+    @staticmethod
+    def _load_failure_zones(conn: SyncPostgresConnection) -> dict[str, str]:
         try:
-            rows = self._conn.execute("SELECT category, zone FROM failure_category_zones")
+            rows = conn.execute("SELECT category, zone FROM failure_category_zones")
         except Exception as exc:
             raise TaskRouteAuthorityError("failure_category_zones authority is required for task routing") from exc
         zone_map = {str(row["category"]): str(row["zone"]) for row in rows or [] if row.get("category")}
@@ -435,13 +467,25 @@ class TaskTypeRouter:
             | _ROUTE_HEALTH_CONFIG_FAILURE_CATEGORIES
         )
 
-    def _load_route_policy(self, task_type: str | None = None) -> TaskRoutePolicy:
+    @classmethod
+    def _load_route_policy_for_task_type(
+        cls,
+        conn: SyncPostgresConnection,
+        task_type: str,
+    ) -> TaskRoutePolicy:
+        return cls._load_route_policy_row(conn, task_type=task_type)
+
+    @staticmethod
+    def _load_route_policy_row(
+        conn: SyncPostgresConnection,
+        task_type: str | None = None,
+    ) -> TaskRoutePolicy:
         _sql = "SELECT * FROM route_policy_registry WHERE route_policy_key = $1 LIMIT 1"
         policy_key = f"task_type_router.{task_type}" if task_type else "task_type_router.default"
         try:
-            rows = self._conn.execute(_sql, policy_key)
+            rows = conn.execute(_sql, policy_key)
             if not rows and task_type:
-                rows = self._conn.execute(_sql, "task_type_router.default")
+                rows = conn.execute(_sql, "task_type_router.default")
         except Exception as exc:
             raise TaskRouteAuthorityError(
                 "route_policy_registry authority is required for task routing",
@@ -469,9 +513,10 @@ class TaskTypeRouter:
             review_severity_penalties=dict(review_severity_penalties),
         )
 
-    def _load_task_route_profiles(self) -> dict[str, TaskTypeRouteProfile]:
+    @staticmethod
+    def _load_task_route_profiles(conn: SyncPostgresConnection) -> dict[str, TaskTypeRouteProfile]:
         try:
-            rows = self._conn.execute(
+            rows = conn.execute(
                 "SELECT * FROM task_type_route_profiles",
             )
         except Exception as exc:
@@ -498,9 +543,10 @@ class TaskTypeRouter:
 
         return {_normalize_auto_route_key(str(row["task_type"])): _parse_profile(dict(row)) for row in rows or []}
 
-    def _load_benchmark_metric_registry(self) -> dict[str, BenchmarkMetricDefinition]:
+    @staticmethod
+    def _load_benchmark_metric_registry(conn: SyncPostgresConnection) -> dict[str, BenchmarkMetricDefinition]:
         try:
-            rows = self._conn.execute("SELECT metric_key, higher_is_better, enabled FROM market_benchmark_metric_registry WHERE enabled = true")
+            rows = conn.execute("SELECT metric_key, higher_is_better, enabled FROM market_benchmark_metric_registry WHERE enabled = true")
         except Exception as exc:
             raise TaskRouteAuthorityError("market_benchmark_metric_registry authority is required for task routing") from exc
         return {

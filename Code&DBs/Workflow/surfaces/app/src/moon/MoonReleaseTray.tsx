@@ -1,32 +1,113 @@
 import React, { useState, useCallback } from 'react';
 import type { ReleaseStatus } from './moonBuildPresenter';
-import type { BuildPayload } from '../shared/types';
+import type { BuildEdge, BuildPayload } from '../shared/types';
 import { planDefinition, commitDefinition, triggerWorkflow, createWorkflow } from '../shared/buildController';
+
+type DefinitionGate = {
+  type: string;
+  label?: string;
+  required_approvers?: number;
+  verify_command?: string;
+  condition?: string;
+  max_attempts?: number;
+  fallback_job?: string;
+};
+
+function buildDefinitionGate(edge: BuildEdge): DefinitionGate | null {
+  const gate = edge.gate;
+  if (!gate?.family) return null;
+
+  let definitionGate: DefinitionGate | null = null;
+  switch (gate.family) {
+    case 'approval':
+      definitionGate = { type: 'approval', required_approvers: 1 };
+      break;
+    case 'human_review':
+      definitionGate = { type: 'human_review' };
+      break;
+    case 'validation':
+      definitionGate = { type: 'validation', verify_command: gate.config?.verify_command };
+      break;
+    case 'conditional':
+      definitionGate = { type: 'conditional', condition: gate.config?.condition };
+      break;
+    case 'retry':
+      definitionGate = { type: 'retry', max_attempts: gate.config?.max_attempts || 3 };
+      break;
+    case 'after_failure':
+      definitionGate = { type: 'on_failure', fallback_job: gate.config?.fallback };
+      break;
+    default:
+      return null;
+  }
+
+  const label = edge.gateLabel || gate.label;
+  if (label) definitionGate.label = label;
+  return definitionGate;
+}
 
 function buildGraphToDefinition(buildGraph: BuildPayload['build_graph']): Record<string, unknown> {
   const nodes = buildGraph?.nodes || [];
   const edges = buildGraph?.edges || [];
   const incoming: Record<string, string[]> = {};
+  const gatesByTarget: Record<string, DefinitionGate[]> = {};
+  const edge_gates: Array<Record<string, unknown>> = [];
   for (const e of edges) {
     if (e.kind === 'authority_gate') continue;
     if (e.to_node_id && e.from_node_id) {
       incoming[e.to_node_id] = incoming[e.to_node_id] || [];
       incoming[e.to_node_id].push(e.from_node_id);
     }
+    const gate = buildDefinitionGate(e);
+    if (gate && e.to_node_id) {
+      gatesByTarget[e.to_node_id] = gatesByTarget[e.to_node_id] || [];
+      gatesByTarget[e.to_node_id].push(gate);
+      edge_gates.push({
+        edge_id: e.edge_id,
+        from_node_id: e.from_node_id,
+        to_node_id: e.to_node_id,
+        family: e.gate?.family,
+        label: gate.label || e.gate?.label || '',
+        gate,
+      });
+    }
   }
   const stepNodes = nodes.filter(n => !n.kind || n.kind === 'step');
-  const draft_flow = stepNodes.map((n, i) => ({
-    id: n.node_id,
-    order: i,
-    title: n.title || `Step ${i + 1}`,
-    summary: n.summary || n.title || '',
-    depends_on: incoming[n.node_id] || [],
-    source_block_ids: n.source_block_ids || [],
-  }));
+  const draft_flow = stepNodes.map((n, i) => {
+    const gates = gatesByTarget[n.node_id] || [];
+    return {
+      id: n.node_id,
+      order: i,
+      title: n.title || `Step ${i + 1}`,
+      summary: n.summary || n.title || '',
+      depends_on: incoming[n.node_id] || [],
+      source_block_ids: n.source_block_ids || [],
+      ...(gates.length > 0 ? { gates } : {}),
+    };
+  });
   const phases = stepNodes
     .filter(n => n.route)
     .map(n => ({ step_id: n.node_id, agent_route: n.route! }));
-  return { draft_flow, execution_setup: { phases } };
+  return {
+    draft_flow,
+    execution_setup: {
+      phases,
+      ...(edge_gates.length > 0 ? { edge_gates } : {}),
+    },
+  };
+}
+
+interface PlannedReleaseState {
+  compiled_spec?: {
+    jobs?: Array<{
+      label?: string;
+      agent?: string;
+      depends_on?: string[];
+      prompt?: string;
+    }>;
+  };
+  definition: Record<string, unknown>;
+  title: string;
 }
 
 interface Props {
@@ -54,24 +135,36 @@ export function MoonReleaseTray({ release, payload, workflowId, onClose, onSelec
   const [dispatchResult, setDispatchResult] = useState<string | null>(null);
   const [dispatchError, setDispatchError] = useState<string | null>(null);
   const [planning, setPlanning] = useState(false);
-  const [plannedSpec, setPlannedSpec] = useState<any>(null);
+  const [plannedRelease, setPlannedRelease] = useState<PlannedReleaseState | null>(null);
+  const [confirmingDispatch, setConfirmingDispatch] = useState(false);
 
   const projectedJobs = payload?.compiled_spec_projection?.compiled_spec?.jobs || [];
-  const plannedJobs = plannedSpec?.compiled_spec?.jobs || [];
-  const jobs = plannedJobs.length > 0 ? plannedJobs : projectedJobs;
+  const plannedJobs = plannedRelease?.compiled_spec?.jobs || [];
+  const jobs = plannedRelease ? plannedJobs : projectedJobs;
   const triggers = payload?.compiled_spec_projection?.compiled_spec?.triggers || [];
-  const hasFullPlan = plannedJobs.length > 0;
+  const hasFullPlan = plannedRelease !== null;
+  const agentSummary = plannedJobs.reduce<Record<string, number>>((acc, job) => {
+    const agent = job.agent || 'auto/build';
+    acc[agent] = (acc[agent] || 0) + 1;
+    return acc;
+  }, {});
 
   const handlePlan = useCallback(async () => {
     if (!payload) return;
     setPlanning(true);
     setDispatchError(null);
+    setConfirmingDispatch(false);
     try {
       const definition = (payload.definition && Object.keys(payload.definition).length > 0)
         ? payload.definition as Record<string, unknown>
         : buildGraphToDefinition(payload.build_graph);
-      const result = await planDefinition(definition, payload.workflow?.name);
-      setPlannedSpec(result);
+      const title = String(payload.workflow?.name || (definition as any)?.title || 'moon-workflow');
+      const result = await planDefinition(definition, title);
+      setPlannedRelease({
+        ...result,
+        definition,
+        title,
+      });
     } catch (e: any) {
       setDispatchError(e.message || 'Planning failed');
     } finally {
@@ -79,36 +172,34 @@ export function MoonReleaseTray({ release, payload, workflowId, onClose, onSelec
     }
   }, [payload]);
   const reason = disabledReason(release, payload, jobs.length);
-  const canDispatch = !reason;
+  const canPlan = !reason;
+  const canDispatch = !reason && hasFullPlan && plannedJobs.length > 0;
 
-  const handleDispatch = useCallback(async () => {
-    if (!payload) return;
+  const handleDispatch = useCallback(() => {
+    if (!canDispatch) return;
+    setDispatchError(null);
+    setConfirmingDispatch(true);
+  }, [canDispatch]);
+
+  const handleConfirmDispatch = useCallback(async () => {
+    if (!plannedRelease) return;
     setDispatching(true);
+    setConfirmingDispatch(false);
     setDispatchError(null);
     setDispatchResult(null);
     try {
-      // Resolve definition — fall back to synthesizing from build_graph for manually-built chains
-      const definition = (payload.definition && Object.keys(payload.definition).length > 0)
-        ? payload.definition as Record<string, unknown>
-        : buildGraphToDefinition(payload.build_graph);
-
-      // 0. Create workflow if needed
       let wfId = workflowId;
-      const title = String(payload.workflow?.name || (definition as any)?.title || 'moon-workflow');
+      const { definition, title, compiled_spec } = plannedRelease;
       if (!wfId) {
         const created = await createWorkflow(title, definition);
         wfId = created.id || (created as any).workflow_id;
         if (!wfId) throw new Error('Failed to create workflow');
       }
-      // 1. Plan: convert definition → full compiled spec
-      const planResult = await planDefinition(definition, title);
-      // 2. Commit: persist definition + compiled spec to DB
       await commitDefinition(wfId, {
         title,
         definition,
-        compiled_spec: planResult.compiled_spec,
+        compiled_spec,
       });
-      // 3. Trigger: dispatch via the correct endpoint
       const result = await triggerWorkflow(wfId);
       const runId = result.run_id;
       setDispatchResult(runId || 'submitted');
@@ -122,7 +213,7 @@ export function MoonReleaseTray({ release, payload, workflowId, onClose, onSelec
     } finally {
       setDispatching(false);
     }
-  }, [workflowId, payload, onViewRun, onDispatchSuccess]);
+  }, [workflowId, plannedRelease, onViewRun, onDispatchSuccess]);
 
   return (
     <>
@@ -236,7 +327,7 @@ export function MoonReleaseTray({ release, payload, workflowId, onClose, onSelec
             <button
               className="moon-release__dispatch-btn"
               onClick={handlePlan}
-              disabled={planning || !canDispatch}
+              disabled={planning || !canPlan}
               style={{ marginBottom: 8 }}
             >
               {planning ? 'Planning...' : 'Preview plan'}
@@ -263,6 +354,47 @@ export function MoonReleaseTray({ release, payload, workflowId, onClose, onSelec
               >
                 {dispatching ? 'Dispatching...' : 'Dispatch'}
               </button>
+              {!hasFullPlan && !dispatchResult && (
+                <div className="moon-release__blocked-reason">
+                  Plan the release to lock the final job list before dispatch.
+                </div>
+              )}
+              {confirmingDispatch && plannedRelease && (
+                <div
+                  style={{
+                    marginTop: 12,
+                    padding: 12,
+                    border: '1px solid rgba(124, 92, 255, 0.35)',
+                    borderRadius: 10,
+                    background: 'rgba(124, 92, 255, 0.08)',
+                  }}
+                >
+                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Confirm release</div>
+                  <div style={{ fontSize: 12, color: '#c9d1d9', marginBottom: 8 }}>
+                    {plannedJobs.length} job{plannedJobs.length === 1 ? '' : 's'} will be dispatched.
+                  </div>
+                  <div style={{ fontSize: 11, color: '#8b949e', marginBottom: 10 }}>
+                    Agents: {Object.entries(agentSummary).map(([agent, count]) => `${agent} (${count})`).join(', ')}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button
+                      className="moon-release__dispatch-btn moon-release__dispatch-btn--ready"
+                      onClick={handleConfirmDispatch}
+                      disabled={dispatching}
+                      style={{ flex: 1 }}
+                    >
+                      Confirm Release
+                    </button>
+                    <button
+                      className="moon-dock-form__btn"
+                      onClick={() => setConfirmingDispatch(false)}
+                      disabled={dispatching}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
               {reason && (
                 <div className="moon-release__blocked-reason">{reason}</div>
               )}

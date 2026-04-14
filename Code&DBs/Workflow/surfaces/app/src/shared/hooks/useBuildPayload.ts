@@ -40,6 +40,7 @@ export function useBuildPayload(workflowId: string | null) {
       setPayload(result);
     } catch (e: any) {
       setError(e.message || 'Mutation failed');
+      throw e;
     }
   }, [workflowId]);
 

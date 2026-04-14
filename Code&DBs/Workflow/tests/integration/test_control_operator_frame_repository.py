@@ -366,17 +366,34 @@ class TriggerablePostgresEvidenceWriter(PostgresEvidenceWriter):
     def __init__(self, *, database_url: str) -> None:
         super().__init__(database_url=database_url)
         self._cancelled_runs: set[str] = set()
+        self._cancel_events: dict[str, threading.Event] = {}
         self._lock = threading.Lock()
 
     def request_cancel(self, run_id: str) -> None:
         with self._lock:
             self._cancelled_runs.add(run_id)
+            self._cancel_events.setdefault(run_id, threading.Event()).set()
 
     def current_state_for_run(self, run_id: str) -> str | None:
         with self._lock:
             if run_id in self._cancelled_runs:
                 return "cancelled"
         return super().current_state_for_run(run_id)
+
+    def run_cancellation_signal(self, run_id: str):
+        event = self._cancel_events.setdefault(run_id, threading.Event())
+
+        class _Signal:
+            def cancel_requested(self) -> bool:
+                return event.is_set()
+
+            def wait_for_cancel(self, timeout: float | None = None) -> bool:
+                return event.wait(timeout=timeout)
+
+            def close(self) -> None:
+                return
+
+        return _Signal()
 
 
 class CancelAfterFirstItemAdapter:

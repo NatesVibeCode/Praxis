@@ -5,7 +5,6 @@ import { presentBuild } from './moonBuildPresenter';
 import type { OrbitNode, OrbitEdge, GateState, RunJobStatus } from './moonBuildPresenter';
 import { useLiveRunSnapshot } from '../dashboard/useLiveRunSnapshot';
 import { moonBuildReducer, initialMoonBuildState } from './moonBuildReducer';
-import type { DragDropKind } from './moonBuildReducer';
 import { MoonGlyph } from './MoonGlyph';
 import { MoonPopout } from './MoonPopout';
 import { MoonNodeDetail } from './MoonNodeDetail';
@@ -15,8 +14,7 @@ import { MoonRunPanel } from './MoonRunPanel';
 import { MoonDragGhost } from './MoonDragGhost';
 import { MoonEdges } from './MoonEdges';
 import { useMoonDrag } from './useMoonDrag';
-import type { DragPayload, DropTarget } from './useMoonDrag';
-import { CATALOG, loadCatalog, getCatalog, catalogByFamily } from './catalog';
+import { loadCatalog, getCatalog } from './catalog';
 import type { CatalogItem } from './catalog';
 import type { BuildNode, BuildEdge } from '../shared/types';
 import './moon-build.css';
@@ -100,9 +98,16 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
   });
   const centerRef = useRef<HTMLDivElement>(null);
   const [catalog, setCatalog] = useState<CatalogItem[]>(getCatalog());
+  const [mutationError, setMutationError] = useState<string | null>(null);
 
   // Load live catalog from backend on mount
   useEffect(() => { loadCatalog().then(setCatalog); }, []);
+
+  useEffect(() => {
+    if (!mutationError) return;
+    const t = setTimeout(() => setMutationError(null), 5000);
+    return () => clearTimeout(t);
+  }, [mutationError]);
 
   // Live run snapshot — active when a dispatch has produced a run
   const { run: activeRun } = useLiveRunSnapshot(state.activeRunId);
@@ -115,6 +120,15 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
     () => presentBuild(payload, state.selectedNodeId, state.activeNodeId, runJobs),
     [payload, state.selectedNodeId, state.activeNodeId, runJobs],
   );
+
+  const runMutation = useCallback(async (subpath: string, body: Record<string, unknown>) => {
+    try {
+      await mutate(subpath, body);
+    } catch (err) {
+      setMutationError(err instanceof Error ? err.message : 'Mutation failed');
+      throw err;
+    }
+  }, [mutate]);
 
   // Auto-advance active node:
   // - after compile (advanceQueued=true)
@@ -142,60 +156,68 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
   // Apply action to a node — local mutation for UI-built chains, API for compiled chains
   const handleNodeAction = useCallback(async (nodeId: string, actionValue: string) => {
     if (!payload?.build_graph) return;
-    const graph = payload.build_graph;
-    const nodes: BuildNode[] = [...(graph.nodes || [])];
-    const edges: BuildEdge[] = [...(graph.edges || [])];
-    const idx = nodes.findIndex(n => n.node_id === nodeId);
-    if (idx < 0) return;
+    try {
+      const graph = payload.build_graph;
+      const nodes: BuildNode[] = [...(graph.nodes || [])];
+      const edges: BuildEdge[] = [...(graph.edges || [])];
+      const idx = nodes.findIndex(n => n.node_id === nodeId);
+      if (idx < 0) return;
 
-    // Find the catalog item for the title
-    const catalogItem = catalog.find(c => c.actionValue === actionValue);
-    const title = catalogItem?.label || actionValue;
+      // Find the catalog item for the title
+      const catalogItem = catalog.find(c => c.actionValue === actionValue);
+      const title = catalogItem?.label || actionValue;
 
-    // Update the node locally
-    nodes[idx] = { ...nodes[idx], route: actionValue, status: 'ready', title };
+      // Update the node locally
+      nodes[idx] = { ...nodes[idx], route: actionValue, status: 'ready', title };
 
-    // If no unresolved nodes remain after this, add a new empty one
-    const hasUnresolved = nodes.some((n, i) => i !== idx && !(n.route || '').trim());
-    if (!hasUnresolved) {
-      const newId = `node-${nodes.length + 1}`;
-      nodes.push({ node_id: newId, kind: 'step', title: 'Next step', route: '', status: '', summary: '' });
-      edges.push({ edge_id: `edge-${nodeId}-${newId}`, kind: 'sequence', from_node_id: nodeId, to_node_id: newId });
+      // If no unresolved nodes remain after this, add a new empty one
+      const hasUnresolved = nodes.some((n, i) => i !== idx && !(n.route || '').trim());
+      if (!hasUnresolved) {
+        const newId = `node-${nodes.length + 1}`;
+        nodes.push({ node_id: newId, kind: 'step', title: 'Next step', route: '', status: '', summary: '' });
+        edges.push({ edge_id: `edge-${nodeId}-${newId}`, kind: 'sequence', from_node_id: nodeId, to_node_id: newId });
+      }
+
+      setPayload({ ...payload, build_graph: { ...graph, nodes, edges } });
+
+      // Persist to DB whenever there's an existing workflow
+      if (workflowId) {
+        await runMutation('build_graph', { nodes, edges });
+      }
+
+      // Close popout and advance to next unresolved node
+      dispatch({ type: 'CLOSE_POPOUT' });
+      dispatch({ type: 'ADVANCE_ACTIVE', nextUnresolvedId: null });
+    } catch (err) {
+      setMutationError(err instanceof Error ? err.message : 'Mutation failed');
     }
+  }, [payload, setPayload, runMutation, workflowId, catalog]);
 
-    setPayload({ ...payload, build_graph: { ...graph, nodes, edges } });
-
-    // Persist to DB whenever there's an existing workflow
-    if (workflowId) {
-      void mutate('build_graph', { nodes, edges });
-    }
-
-    // Close popout and advance to next unresolved node
-    dispatch({ type: 'CLOSE_POPOUT' });
-    dispatch({ type: 'ADVANCE_ACTIVE', nextUnresolvedId: null });
-  }, [payload, setPayload, mutate, workflowId, catalog]);
-
-  const handleApplyGate = useCallback((edgeId: string, gateFamily: string) => {
+  const handleApplyGate = useCallback(async (edgeId: string, gateFamily: string) => {
     if (!payload?.build_graph) return;
 
-    const gateItem = catalog.find(c => c.gateFamily === gateFamily);
-    const gateLabel = gateItem?.label || gateFamily;
+    try {
+      const gateItem = catalog.find(c => c.gateFamily === gateFamily);
+      const gateLabel = gateItem?.label || gateFamily;
 
-    const graph = payload.build_graph;
-    const edges = [...(graph.edges || [])];
-    const idx = edges.findIndex((e: any) => e.edge_id === edgeId);
-    if (idx >= 0) {
-      edges[idx] = {
-        ...edges[idx],
-        gate: { state: 'configured', label: gateLabel, family: gateFamily },
-      };
-      setPayload({ ...payload, build_graph: { ...graph, edges } } as any);
-      if (workflowId) {
-        void mutate('build_graph', { nodes: graph.nodes || [], edges });
+      const graph = payload.build_graph;
+      const edges = [...(graph.edges || [])];
+      const idx = edges.findIndex((e: any) => e.edge_id === edgeId);
+      if (idx >= 0) {
+        edges[idx] = {
+          ...edges[idx],
+          gate: { state: 'configured', label: gateLabel, family: gateFamily },
+        };
+        setPayload({ ...payload, build_graph: { ...graph, edges } } as any);
+        if (workflowId) {
+          await runMutation('build_graph', { nodes: graph.nodes || [], edges });
+        }
       }
+      dispatch({ type: 'CLOSE_POPOUT' });
+    } catch (err) {
+      setMutationError(err instanceof Error ? err.message : 'Mutation failed');
     }
-    dispatch({ type: 'CLOSE_POPOUT' });
-  }, [payload, setPayload, mutate, workflowId, catalog]);
+  }, [payload, setPayload, runMutation, workflowId, catalog]);
 
   const handleCompile = useCallback(async () => {
     if (!state.compileProse.trim()) return;
@@ -258,104 +280,22 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
     else dispatch({ type: 'OPEN_DOCK', dock: mapped });
   }, [state.openDock]);
 
-  // --- Drag handlers ---
-  const handleDragStart = useCallback((itemId: string, dropKind: DragDropKind) => {
-    dispatch({ type: 'DRAG_START', itemId, dropKind });
-  }, []);
-
-  const handleNodeDragOver = useCallback((e: React.DragEvent, nodeId: string) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'link';
-    dispatch({ type: 'DRAG_PREVIEW', targetId: nodeId });
-  }, []);
-
-  const handleEdgeDragOver = useCallback((e: React.DragEvent, edgeId: string) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'link';
-    dispatch({ type: 'DRAG_PREVIEW', targetId: edgeId });
-  }, []);
-
-  const handleAppendDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'link';
-    dispatch({ type: 'DRAG_PREVIEW', targetId: '__append__' });
-  }, []);
-
-  const handleDragLeave = useCallback(() => {
-    dispatch({ type: 'DRAG_PREVIEW', targetId: null });
-  }, []);
-
   const applyCatalogToNode = useCallback((catalogId: string, nodeId: string) => {
     const item = catalog.find(c => c.id === catalogId);
-    if (item?.actionValue) handleNodeAction(nodeId, item.actionValue);
+    if (item?.actionValue) void handleNodeAction(nodeId, item.actionValue);
   }, [handleNodeAction, catalog]);
 
-  const applyCatalogToEdge = useCallback((catalogId: string, edgeId: string) => {
-    const item = catalog.find(c => c.id === catalogId);
-    if (!item?.gateFamily || !payload?.definition) return;
-    const instruction = `Add a "${item.label}" gate (family: ${item.gateFamily}) on edge "${edgeId}"`;
-    refineDefinition(instruction, payload.definition).then(() => reload()).catch(() => {});
-  }, [payload, reload]);
-
-  const handleNodeDrop = useCallback((e: React.DragEvent, nodeId: string) => {
-    e.preventDefault();
-    const catalogId = e.dataTransfer.getData('moon/catalog-id');
-    const sourceNodeId = e.dataTransfer.getData('moon/node-id');
-    dispatch({ type: 'DRAG_END' });
-    dispatch({ type: 'SELECT_NODE', nodeId });
-
-    // Catalog item dropped on node
-    if (catalogId) {
-      applyCatalogToNode(catalogId, nodeId);
-      return;
+  const applyCatalogToEdge = useCallback(async (catalogId: string, edgeId: string) => {
+    try {
+      const item = catalog.find(c => c.id === catalogId);
+      if (!item?.gateFamily || !payload?.definition) return;
+      const instruction = `Add a "${item.label}" gate (family: ${item.gateFamily}) on edge "${edgeId}"`;
+      await refineDefinition(instruction, payload.definition);
+      await reload();
+    } catch (err) {
+      setMutationError(err instanceof Error ? err.message : 'Mutation failed');
     }
-
-    // Node reorder: move source node to target position
-    if (sourceNodeId && sourceNodeId !== nodeId && payload?.build_graph) {
-      const graph = payload.build_graph;
-      const nodes = [...(graph.nodes || [])];
-      const fromIdx = nodes.findIndex(n => n.node_id === sourceNodeId);
-      const toIdx = nodes.findIndex(n => n.node_id === nodeId);
-      if (fromIdx >= 0 && toIdx >= 0) {
-        const [moved] = nodes.splice(fromIdx, 1);
-        nodes.splice(toIdx, 0, moved);
-        // Rebuild edges as sequential chain
-        const edges = nodes.slice(1).map((n, i) => ({
-          edge_id: `edge-${nodes[i].node_id}-${n.node_id}`,
-          kind: 'sequence' as const,
-          from_node_id: nodes[i].node_id,
-          to_node_id: n.node_id,
-        }));
-        setPayload({ ...payload, build_graph: { ...graph, nodes, edges } });
-        if (workflowId) {
-          void mutate('build_graph', { nodes, edges });
-        }
-      }
-      return;
-    }
-
-    // DB object dropped on node — auto-attach as context
-    const objectTypeId = e.dataTransfer.getData('moon/object-type-id');
-    if (objectTypeId && payload?.build_graph) {
-      const objectLabel = e.dataTransfer.getData('moon/object-type-label') || objectTypeId;
-      mutate('attachments', {
-        node_id: nodeId,
-        authority_kind: 'object_type',
-        authority_ref: objectTypeId,
-        role: 'input',
-        label: objectLabel,
-        promote_to_state: false,
-      }).catch(() => {});
-      dispatch({ type: 'OPEN_DOCK', dock: 'context' });
-      return;
-    }
-
-    // Dock hint (attachment drag)
-    const dockHint = e.dataTransfer.getData('moon/dock');
-    if (dockHint === 'context' || dockHint === 'connect') {
-      dispatch({ type: 'OPEN_DOCK', dock: 'context' });
-    }
-  }, [applyCatalogToNode, payload, setPayload, mutate]);
+  }, [payload, reload, catalog]);
 
   // Click fallback: if a catalog item is staged, clicking a node applies it
   const handleNodeClick = useCallback((nodeId: string, isSelected: boolean) => {
@@ -373,53 +313,97 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
     }
   }, [state.pendingCatalogId, state.activeNodeId, applyCatalogToNode]);
 
-  const handleEdgeDrop = useCallback((e: React.DragEvent, edgeId: string) => {
-    e.preventDefault();
-    const catalogId = e.dataTransfer.getData('moon/catalog-id');
+  const appendNode = useCallback(async (label?: string) => {
+    if (!payload?.build_graph) return;
+    try {
+      const graph = payload.build_graph;
+      const stepNodes = (graph.nodes || []).filter(n => n.kind === 'step' || !n.kind);
+      const lastStep = stepNodes[stepNodes.length - 1] ?? null;
+      const newId = `node-${stepNodes.length + 1}`;
+      const newNode: BuildNode = {
+        node_id: newId,
+        kind: 'step',
+        title: label || 'Next step',
+        route: '',
+        status: '',
+        summary: '',
+      };
+      const newEdges: BuildEdge[] = [...(graph.edges || [])];
+      if (lastStep) {
+        newEdges.push({ edge_id: `edge-${lastStep.node_id}-${newId}`, kind: 'sequence', from_node_id: lastStep.node_id, to_node_id: newId });
+      }
+      const newNodes: BuildNode[] = [...(graph.nodes || []), newNode];
+      setPayload({ ...payload, build_graph: { ...graph, nodes: newNodes, edges: newEdges } });
+      if (workflowId) {
+        await runMutation('build_graph', { nodes: newNodes, edges: newEdges });
+      }
+    } catch (err) {
+      setMutationError(err instanceof Error ? err.message : 'Mutation failed');
+    }
+  }, [payload, setPayload, runMutation, workflowId]);
+
+  const reorderNode = useCallback(async (sourceNodeId: string, targetNodeId: string) => {
+    if (sourceNodeId === targetNodeId || !payload?.build_graph) return;
+    try {
+      const graph = payload.build_graph;
+      const nodes = [...(graph.nodes || [])];
+      const fromIdx = nodes.findIndex(n => n.node_id === sourceNodeId);
+      const toIdx = nodes.findIndex(n => n.node_id === targetNodeId);
+      if (fromIdx < 0 || toIdx < 0) return;
+
+      const [moved] = nodes.splice(fromIdx, 1);
+      nodes.splice(toIdx, 0, moved);
+      const edges = nodes.slice(1).map((n, i) => ({
+        edge_id: `edge-${nodes[i].node_id}-${n.node_id}`,
+        kind: 'sequence' as const,
+        from_node_id: nodes[i].node_id,
+        to_node_id: n.node_id,
+      }));
+      setPayload({ ...payload, build_graph: { ...graph, nodes, edges } });
+      if (workflowId) {
+        await runMutation('build_graph', { nodes, edges });
+      }
+    } catch (err) {
+      setMutationError(err instanceof Error ? err.message : 'Mutation failed');
+    }
+  }, [payload, setPayload, runMutation, workflowId]);
+
+  const drag = useMoonDrag((dragPayload, target) => {
     dispatch({ type: 'DRAG_END' });
-    if (catalogId) {
-      applyCatalogToEdge(catalogId, edgeId);
+
+    if (dragPayload.kind === 'catalog') {
+      if (target.zone === 'node') {
+        dispatch({ type: 'SELECT_NODE', nodeId: target.id });
+        void applyCatalogToNode(dragPayload.id, target.id);
+        return;
+      }
+      if (target.zone === 'append') {
+        const item = catalog.find(c => c.id === dragPayload.id);
+        void appendNode(item?.label);
+        return;
+      }
+      if (target.zone === 'edge') {
+        dispatch({ type: 'SELECT_EDGE', edgeId: target.id });
+        void applyCatalogToEdge(dragPayload.id, target.id);
+      }
       return;
     }
-    dispatch({ type: 'SELECT_EDGE', edgeId });
-  }, [applyCatalogToEdge]);
 
-  const appendNode = useCallback((label?: string) => {
-    if (!payload?.build_graph) return;
-    const graph = payload.build_graph;
-    const stepNodes = (graph.nodes || []).filter(n => n.kind === 'step' || !n.kind);
-    const lastStep = stepNodes[stepNodes.length - 1] ?? null;
-    const newId = `node-${stepNodes.length + 1}`;
-    const newNode: BuildNode = {
-      node_id: newId,
-      kind: 'step',
-      title: label || 'Next step',
-      route: '',
-      status: '',
-      summary: '',
-    };
-    const newEdges: BuildEdge[] = [...(graph.edges || [])];
-    if (lastStep) {
-      newEdges.push({ edge_id: `edge-${lastStep.node_id}-${newId}`, kind: 'sequence', from_node_id: lastStep.node_id, to_node_id: newId });
+    if (dragPayload.kind === 'node' && target.zone === 'node') {
+      dispatch({ type: 'SELECT_NODE', nodeId: target.id });
+      void reorderNode(dragPayload.id, target.id);
     }
-    const newNodes: BuildNode[] = [...(graph.nodes || []), newNode];
-    setPayload({ ...payload, build_graph: { ...graph, nodes: newNodes, edges: newEdges } });
-    if (workflowId) {
-      void mutate('build_graph', { nodes: newNodes, edges: newEdges });
-    }
-  }, [payload, setPayload, mutate, workflowId]);
+  });
 
-  const handleAppendDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    dispatch({ type: 'DRAG_END' });
-    const catalogId = e.dataTransfer.getData('moon/catalog-id');
-    const item = catalogId ? catalog.find(c => c.id === catalogId) : null;
-    appendNode(item?.label);
-  }, [appendNode]);
+  const startCatalogDrag = useCallback((event: React.PointerEvent, item: CatalogItem) => {
+    dispatch({ type: 'DRAG_START', itemId: item.id, dropKind: item.dropKind });
+    drag.startDrag(event, { kind: 'catalog', id: item.id, label: item.label });
+  }, [drag]);
 
-  const handleDragEnd = useCallback(() => {
-    dispatch({ type: 'DRAG_END' });
-  }, []);
+  const startNodeDrag = useCallback((event: React.PointerEvent, node: OrbitNode) => {
+    dispatch({ type: 'DRAG_START', itemId: node.id, dropKind: 'node' });
+    drag.startDrag(event, { kind: 'node', id: node.id, label: node.title });
+  }, [drag]);
 
   // --- Center-follow offset ---
   const spineNodes = viewModel.nodes.filter(n => n.isOnDominantPath);
@@ -457,8 +441,7 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
   const contextOpen = state.openDock === 'context';
   const releaseOpen = state.releaseOpen;
   const compiling = state.compilePhase === 'compiling';
-  const isDragging = state.dragItemId !== null;
-  const pendingItem = state.pendingCatalogId ? catalog.find(c => c.id === state.pendingCatalogId) : null;
+  const previewTargetId = drag.drag.hoveredTarget?.id ?? null;
 
   // Build edge lookup for gate rendering
   const edgeMap = useMemo(() => {
@@ -479,6 +462,14 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
 
   return (
     <div className="moon-page">
+      {mutationError && (
+        <div className="moon-error-toast" role="alert" aria-live="polite">
+          {mutationError}
+          <button type="button" onClick={() => setMutationError(null)} aria-label="Dismiss error">
+            &times;
+          </button>
+        </div>
+      )}
       <div className="moon-frame-top" />
 
       <div className="moon-body">
@@ -492,6 +483,7 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
                 payload={payload}
                 onReload={reload}
                 onClose={() => dispatch({ type: 'CLOSE_DOCK' })}
+                onStartCatalogDrag={startCatalogDrag}
               />
             )}
           </div>
@@ -594,7 +586,7 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
               </div>
             ) : (
               <div
-                className="moon-dag"
+                className="moon-graph"
                 style={{
                   position: 'relative',
                   width: viewModel.layout.width + 240,
@@ -602,7 +594,6 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
                   margin: '0 auto',
                   minHeight: 200,
                 }}
-                onDragEnd={handleDragEnd}
               >
                 <MoonEdges
                   edges={viewModel.edges}
@@ -619,18 +610,11 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
                     return (
                       <div
                         key={node.id}
-                        className={`moon-dag-node ${ringClass(node, isSelected)}${isSelected ? ' moon-dag-node--selected' : ''}${state.previewTarget === node.id ? ' moon-dag-node--drag-over' : ''}`}
+                        className={`moon-graph-node ${ringClass(node, isSelected)}${isSelected ? ' moon-graph-node--selected' : ''}${previewTargetId === node.id ? ' moon-graph-node--drag-over' : ''}`}
                         style={{ left: node.x + 120 - 30, top: node.y + 120 - 30 }}
+                        data-drop-node={node.id}
                         onClick={() => handleNodeClick(node.id, isSelected)}
-                        draggable
-                        onDragStart={e => {
-                          e.dataTransfer.setData('moon/node-id', node.id);
-                          e.dataTransfer.effectAllowed = 'move';
-                          dispatch({ type: 'DRAG_START', itemId: node.id, dropKind: 'node' });
-                        }}
-                        onDragOver={e => handleNodeDragOver(e, node.id)}
-                        onDragLeave={handleDragLeave}
-                        onDrop={e => handleNodeDrop(e, node.id)}
+                        onPointerDown={e => startNodeDrag(e, node)}
                       >
                         {showIcon(node) ? (
                           <MoonGlyph type={node.glyphType} size={22} color="#fff" />
@@ -638,22 +622,21 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
                           <span className="moon-chain__step-index">{node.dominantPathIndex >= 0 ? node.dominantPathIndex + 1 : ''}</span>
                         )}
                         {node.needsBadge && <div className="moon-chain__badge" />}
-                        <span className="moon-dag-node__label">{node.title}</span>
+                        <span className="moon-graph-node__label">{node.title}</span>
                       </div>
                     );
                   })}
                   {/* Append socket */}
                   <div
-                    className={`moon-dag-append${state.previewTarget === '__append__' ? ' moon-dag-append--drag-over' : ''}`}
+                    className={`moon-graph-append${previewTargetId === '__append__' ? ' moon-graph-append--drag-over' : ''}`}
                     style={{ left: viewModel.layout.width + 120 + 30, top: 120 - 20 }}
+                    data-drop-append="true"
                     onClick={() => appendNode()}
-                    onDragOver={handleAppendDragOver}
-                    onDragLeave={handleDragLeave}
-                    onDrop={handleAppendDrop}
                   >
                     <span style={{ color: 'var(--moon-muted, #484f58)', fontSize: 18 }}>+</span>
                   </div>
                 </div>
+                <MoonDragGhost drag={drag.drag} />
                 {/* Popout — rendered at container level so it's not clipped */}
                 {state.selectedNodeId && state.popoutOpen && viewModel.selectedNode && (() => {
                   const sel = viewModel.nodes.find(n => n.id === state.selectedNodeId);
@@ -666,6 +649,7 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
                         onClose={() => dispatch({ type: 'CLOSE_POPOUT' })}
                         onSelect={handleNodeAction}
                         catalog={catalog}
+                        onStartCatalogDrag={startCatalogDrag}
                       />
                     </div>
                   );
@@ -678,14 +662,14 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
           {/* Right dock: Detail */}
           <div className={`moon-dock-side${contextOpen ? ' moon-dock-side--open moon-dock-right--open' : ' moon-dock-side--closed'}`}>
             {contextOpen && (
-              <MoonNodeDetail
-                node={viewModel.selectedNode}
-                content={viewModel.dockContent}
-                workflowId={workflowId}
-                onMutate={mutate}
-                onClose={() => dispatch({ type: 'CLOSE_DOCK' })}
-                selectedEdge={selectedEdge}
-                edgeFromLabel={edgeFromNode?.title}
+                <MoonNodeDetail
+                  node={viewModel.selectedNode}
+                  content={viewModel.dockContent}
+                  workflowId={workflowId}
+                  onMutate={runMutation}
+                  onClose={() => dispatch({ type: 'CLOSE_DOCK' })}
+                  selectedEdge={selectedEdge}
+                  edgeFromLabel={edgeFromNode?.title}
                 edgeToLabel={edgeToNode?.title}
                 onApplyGate={handleApplyGate}
                 gateItems={catalog.filter(c => c.family === 'control' && c.status === 'ready')}

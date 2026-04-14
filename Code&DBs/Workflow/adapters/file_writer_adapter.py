@@ -1,4 +1,4 @@
-"""File writer adapter — DAG node that applies code blocks to the filesystem.
+"""File writer adapter — workflow node that applies code blocks to the filesystem.
 
 The graph owns all I/O. This node receives parsed code blocks from the
 output_parser node and writes them to disk with path validation and

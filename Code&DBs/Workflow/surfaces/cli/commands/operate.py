@@ -839,7 +839,7 @@ def _metrics_command(args: list[str], *, stdout: TextIO) -> int:
 def _api_command(args: list[str], *, stdout: TextIO) -> int:
     """Handle `workflow api [--host HOST] [--port PORT]`.
 
-    Starts the DAG REST API server after reading the declared runtime
+    Starts the Praxis REST API server after reading the declared runtime
     dependency contract from ``requirements.runtime.txt``.
 
     Options:
@@ -851,7 +851,7 @@ def _api_command(args: list[str], *, stdout: TextIO) -> int:
         stdout.write(
             "usage: workflow api [--host HOST] [--port PORT]\n"
             "\n"
-            "Start the DAG REST API server.\n"
+            "Start the Praxis REST API server.\n"
             "Reads the runtime dependency contract from requirements.runtime.txt\n"
             "\n"
             "  --host HOST   bind address (default: 0.0.0.0)\n"

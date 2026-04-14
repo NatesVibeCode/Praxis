@@ -1,0 +1,140 @@
+{
+  "name": "Boundary Refactor Wave A — Memory Authority",
+  "phase": "W",
+  "queue_id": "boundary_refactor_wave_a_memory_20260413",
+  "decision_ref": "bug_boundary_mining_2026_04_09",
+  "outcome_goal": "The memory/ layer becomes a thin adapter over storage/postgres/ repositories; no INSERT/UPDATE/DELETE and no CREATE TABLE statements remain in memory/crud.py or memory/retrieval_telemetry.py; the retrieval_metrics table is created by a migration, not at runtime.",
+  "anti_requirements": [
+    "Do NOT change the public API of memory/crud.py — existing callers keep working unchanged",
+    "Do NOT change the public API of memory/retrieval_telemetry.py (RetrievalMetric, TelemetrySummary, TelemetryStore) — existing callers keep working unchanged",
+    "Do NOT alter the table schemas (memory_entities, memory_edges, retrieval_metrics). This is a move, not a redesign.",
+    "Do NOT widen writes outside storage/postgres/ and Code&DBs/Databases/migrations/workflow/",
+    "Do NOT remove the auto-prune behaviour from TelemetryStore.record() — it must still trigger through the repository."
+  ],
+  "linked_bugs": [
+    "BUG-B981792C01F4",
+    "BUG-EB861DA883EF"
+  ],
+  "jobs": [
+    {
+      "label": "memory_authority_plan",
+      "agent": "openai/gpt-5.4",
+      "task_type": "architecture",
+      "description": "Decide whether each memory table gets its own repository or whether to extend PostgresMemoryGraphRepository",
+      "outcome_goal": "A written plan names every new/edited repository class, every method's signature, and the migration file number that will own retrieval_metrics DDL",
+      "prompt": "Read the memory authority surfaces and write a concrete plan before touching any code.\n\nFocus files:\n- Code&DBs/Workflow/memory/crud.py (current writer for memory_entities + memory_edges)\n- Code&DBs/Workflow/memory/retrieval_telemetry.py (current writer for retrieval_metrics, including DDL)\n- Code&DBs/Workflow/memory/repository.py (shared types like MemoryEdgeRef)\n- Code&DBs/Workflow/memory/types.py (Entity, Edge, EntityType, RelationType)\n- Code&DBs/Workflow/storage/postgres/memory_graph_repository.py (existing repo for maintenance ops)\n- Code&DBs/Workflow/storage/postgres/validators.py (validator helpers + exception classes)\n- Code&DBs/Workflow/storage/postgres/__init__.py (public exports)\n- Code&DBs/Databases/migrations/workflow/015_memory_graph.sql (canonical DDL for memory_entities + memory_edges)\n\nDecide:\n1. Do memory_entities + memory_edges CRUD ops go into PostgresMemoryGraphRepository (extend it) or a new PostgresMemoryCrudRepository? Pick whichever keeps the public surface smallest.\n2. Does retrieval_metrics get its own PostgresMemoryTelemetryRepository in a new file storage/postgres/memory_telemetry_repository.py? (Likely yes — different table family.)\n3. What is the next available migration number in Code&DBs/Databases/migrations/workflow/? Name the new migration file explicitly.\n4. List every function in memory/crud.py and memory/retrieval_telemetry.py that currently runs SQL, and map each to a repository method signature.\n\nReturn the plan as a structured summary that the next jobs can consume. Do not write code.",
+      "read_scope": [
+        "Code&DBs/Workflow/memory/crud.py",
+        "Code&DBs/Workflow/memory/retrieval_telemetry.py",
+        "Code&DBs/Workflow/memory/repository.py",
+        "Code&DBs/Workflow/memory/types.py",
+        "Code&DBs/Workflow/storage/postgres/memory_graph_repository.py",
+        "Code&DBs/Workflow/storage/postgres/validators.py",
+        "Code&DBs/Workflow/storage/postgres/__init__.py",
+        "Code&DBs/Databases/migrations/workflow/015_memory_graph.sql"
+      ],
+      "write_scope": [],
+      "verify_command": "true"
+    },
+    {
+      "label": "add_retrieval_metrics_migration",
+      "agent": "openai/gpt-5.4",
+      "task_type": "build",
+      "depends_on": ["memory_authority_plan"],
+      "description": "Move the retrieval_metrics CREATE TABLE DDL out of Python into a new migration",
+      "outcome_goal": "retrieval_metrics is created by the migration runner on bootstrap; no Python runtime code issues CREATE TABLE for this table",
+      "prompt": "Add a new migration under Code&DBs/Databases/migrations/workflow/ that owns the retrieval_metrics DDL currently embedded in memory/retrieval_telemetry.py.\n\nSteps:\n1. Identify the next available migration number (look at existing files in Code&DBs/Databases/migrations/workflow/ — highest numeric prefix + 1; if >100 range is in use, pick the next in that range consistent with recent files).\n2. Create the migration file with CREATE TABLE IF NOT EXISTS retrieval_metrics matching exactly the DDL at memory/retrieval_telemetry.py:40-52 (columns: id SERIAL PRIMARY KEY, query_fingerprint TEXT NOT NULL, pattern_name TEXT NOT NULL, result_count INTEGER NOT NULL, score_min/score_max/score_mean/score_stddev DOUBLE PRECISION NOT NULL, tie_break_count INTEGER NOT NULL, latency_ms DOUBLE PRECISION NOT NULL, timestamp TIMESTAMPTZ NOT NULL).\n3. Add any indexes the query paths imply: pattern_name lookups, timestamp range scans. Check the SELECT paths in retrieval_telemetry.py:113-151 — add indexes that support them.\n4. Do NOT edit memory/retrieval_telemetry.py yet — that happens in the next job. Only add the migration.\n\nVerify the migration parses by running the migration runner in dry-run against a dev DB, or at minimum open a psql connection and run the migration SQL manually to confirm no syntax errors.",
+      "read_scope": [
+        "Code&DBs/Workflow/memory/retrieval_telemetry.py",
+        "Code&DBs/Databases/migrations/workflow/015_memory_graph.sql"
+      ],
+      "write_scope": [
+        "Code&DBs/Databases/migrations/workflow/"
+      ],
+      "verify_command": "psql postgresql://localhost:5432/praxis -c '\\d retrieval_metrics' && cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -c 'from storage.postgres import ensure_postgres_available; ensure_postgres_available()'"
+    },
+    {
+      "label": "create_memory_telemetry_repository",
+      "agent": "openai/gpt-5.4",
+      "task_type": "refactor",
+      "depends_on": ["add_retrieval_metrics_migration"],
+      "description": "Move retrieval_metrics INSERT/SELECT/DELETE out of memory/retrieval_telemetry.py into a new repository",
+      "outcome_goal": "TelemetryStore becomes a thin adapter that delegates all SQL to PostgresMemoryTelemetryRepository; zero SQL strings remain in memory/retrieval_telemetry.py",
+      "prompt": "Create Code&DBs/Workflow/storage/postgres/memory_telemetry_repository.py that owns every SQL statement currently in memory/retrieval_telemetry.py.\n\nSteps:\n1. Mirror the idiom from Code&DBs/Workflow/storage/postgres/memory_graph_repository.py — class name PostgresMemoryTelemetryRepository, __init__(conn), explicit method names.\n2. Move these queries verbatim (but refactored into repository methods):\n   - INSERT INTO retrieval_metrics (record_metric at line 71-86)\n   - SELECT * FROM retrieval_metrics WHERE ... (query_metrics at line 113-151)\n   - Aggregate SELECT for summary (line 134-151)\n   - DISTINCT pattern_name query (line 148-151)\n   - COUNT(*) query (line 163-171)\n   - DELETE FROM retrieval_metrics (prune at line 172-176)\n3. Use _require_text / PostgresWriteError from storage.postgres.validators for input validation.\n4. Export PostgresMemoryTelemetryRepository via Code&DBs/Workflow/storage/postgres/__init__.py.\n5. Rewrite memory/retrieval_telemetry.py TelemetryStore so __init__ no longer runs DDL and every method delegates to the repository. Remove the _DDL constant entirely.\n6. Preserve every public identifier: RetrievalMetric, TelemetrySummary, TelemetryStore with the same method signatures.\n7. Preserve auto-prune behaviour — TelemetryStore.record() still calls prune() after insert, but both go through the repository.\n\nVerify:\n- grep 'INSERT\\|UPDATE\\|DELETE\\|CREATE TABLE' memory/retrieval_telemetry.py returns zero matches.\n- py_compile succeeds on both files.\n- The existing telemetry tests pass.",
+      "read_scope": [
+        "Code&DBs/Workflow/memory/retrieval_telemetry.py",
+        "Code&DBs/Workflow/storage/postgres/memory_graph_repository.py",
+        "Code&DBs/Workflow/storage/postgres/validators.py"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/storage/postgres/memory_telemetry_repository.py",
+        "Code&DBs/Workflow/storage/postgres/__init__.py",
+        "Code&DBs/Workflow/memory/retrieval_telemetry.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m py_compile 'Code&DBs/Workflow/memory/retrieval_telemetry.py' 'Code&DBs/Workflow/storage/postgres/memory_telemetry_repository.py' && ! grep -E 'INSERT |UPDATE |DELETE FROM|CREATE TABLE' 'Code&DBs/Workflow/memory/retrieval_telemetry.py'"
+    },
+    {
+      "label": "move_memory_crud_writes",
+      "agent": "openai/gpt-5.4",
+      "task_type": "refactor",
+      "depends_on": ["memory_authority_plan"],
+      "description": "Move memory/crud.py INSERT/UPDATE/DELETE statements into storage/postgres/memory_graph_repository.py (or a new crud repository)",
+      "outcome_goal": "memory/crud.py contains only data marshalling and repository delegation; all SQL lives in storage/postgres/",
+      "prompt": "Move the SQL in memory/crud.py into storage/postgres/. Follow the plan from memory_authority_plan.\n\nCurrent SQL writers in memory/crud.py:\n- insert_entity (line 57-70) — INSERT INTO memory_entities with ON CONFLICT DO UPDATE\n- update_entity (line 85-117) — dynamic UPDATE memory_entities\n- delete_entity (line 120-128) — UPDATE memory_entities SET archived=true\n- add_edge (line 170-183) — INSERT INTO memory_edges with ON CONFLICT DO UPDATE\n- remove_edge (line 186-196) — DELETE FROM memory_edges\n\nSteps:\n1. If the plan chose to extend PostgresMemoryGraphRepository, add methods: upsert_entity, update_entity_fields, archive_entity, upsert_edge, delete_edge.\n2. If the plan chose a new PostgresMemoryCrudRepository, create Code&DBs/Workflow/storage/postgres/memory_crud_repository.py following the idiom from memory_graph_repository.py.\n3. Keep the SELECT helpers (get_entity, list_entities, search_entities, get_edges) where they are for now — this wave is about writes. The read-side will be picked up in a later sweep if needed.\n4. Rewrite memory/crud.py so insert_entity, update_entity, delete_entity, add_edge, remove_edge delegate to the repository. Keep the same public signatures and return types — callers must not change.\n5. Use the existing _row_to_entity / _row_to_edge helpers where the repository returns rows.\n6. Update Code&DBs/Workflow/storage/postgres/__init__.py to export the new class/methods if a new class was created.\n\nVerify:\n- grep 'INSERT \\|UPDATE \\|DELETE FROM' memory/crud.py returns zero matches (reads only).\n- py_compile succeeds on all changed files.\n- The existing memory CRUD tests pass.",
+      "read_scope": [
+        "Code&DBs/Workflow/memory/crud.py",
+        "Code&DBs/Workflow/memory/types.py",
+        "Code&DBs/Workflow/memory/repository.py",
+        "Code&DBs/Workflow/storage/postgres/memory_graph_repository.py",
+        "Code&DBs/Workflow/storage/postgres/validators.py"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/storage/postgres/memory_graph_repository.py",
+        "Code&DBs/Workflow/storage/postgres/memory_crud_repository.py",
+        "Code&DBs/Workflow/storage/postgres/__init__.py",
+        "Code&DBs/Workflow/memory/crud.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m py_compile 'Code&DBs/Workflow/memory/crud.py' 'Code&DBs/Workflow/storage/postgres/memory_graph_repository.py' && ! grep -E 'INSERT |UPDATE |DELETE FROM' 'Code&DBs/Workflow/memory/crud.py'"
+    },
+    {
+      "label": "memory_authority_tests",
+      "agent": "openai/gpt-5.4",
+      "task_type": "test",
+      "depends_on": ["create_memory_telemetry_repository", "move_memory_crud_writes"],
+      "description": "Prove the memory authority migration with tests",
+      "outcome_goal": "Targeted tests cover the new repository methods and the thin adapters; the existing memory test suite passes unchanged",
+      "prompt": "Add or extend tests proving the memory authority migration did not regress.\n\nSteps:\n1. Find existing tests under Code&DBs/Workflow/tests/ that exercise memory/crud.py and memory/retrieval_telemetry.py. Run them.\n2. Add at least one test per new repository that round-trips a write and a read (insert + query).\n3. Add a regression test that fails if any SQL string reappears in memory/crud.py or memory/retrieval_telemetry.py. Keep it simple: open the file, read as text, assert 'INSERT ' not in text etc.\n4. Run the full memory test suite to confirm no semantic drift.\n\nDo NOT invent new tables or columns. The regression tests are negative assertions — they only need to catch future backsliding.",
+      "read_scope": [
+        "Code&DBs/Workflow/memory/crud.py",
+        "Code&DBs/Workflow/memory/retrieval_telemetry.py",
+        "Code&DBs/Workflow/storage/postgres/memory_graph_repository.py",
+        "Code&DBs/Workflow/storage/postgres/memory_telemetry_repository.py"
+      ],
+      "write_scope": [
+        "Code&DBs/Workflow/tests/"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/' -k memory"
+    },
+    {
+      "label": "memory_authority_close_bugs",
+      "agent": "openai/gpt-5.4-mini",
+      "task_type": "build",
+      "depends_on": ["memory_authority_tests"],
+      "description": "Resolve BUG-B981792C01F4 and BUG-EB861DA883EF as FIXED once tests are green",
+      "outcome_goal": "Both boundary bugs are marked FIXED with a resolution that cites this queue_id",
+      "prompt": "Mark the two linked bugs as FIXED after verifying the grep checks still pass.\n\nRun both of:\n\n```bash\nexport WORKFLOW_DATABASE_URL=\"postgresql://localhost:5432/praxis\"\ncd /Users/nate/Praxis\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-B981792C01F4\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Moved retrieval_metrics DDL to a migration and INSERT/DELETE/SELECT into storage/postgres/memory_telemetry_repository.py in boundary_refactor_wave_a_memory_20260413. Verified no SQL remains in memory/retrieval_telemetry.py.\"\n}' --yes\n\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-EB861DA883EF\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Moved memory_entities + memory_edges writes into storage/postgres/ in boundary_refactor_wave_a_memory_20260413. Verified no INSERT/UPDATE/DELETE remains in memory/crud.py.\"\n}' --yes\n```\n\nOnly run this if both grep-based regression tests from memory_authority_tests pass.",
+      "read_scope": [],
+      "write_scope": [],
+      "verify_command": "cd /Users/nate/Praxis && ! grep -rE 'INSERT |UPDATE |DELETE FROM|CREATE TABLE' 'Code&DBs/Workflow/memory/crud.py' 'Code&DBs/Workflow/memory/retrieval_telemetry.py'"
+    },
+    {
+      "label": "memory_authority_review",
+      "agent": "openai/gpt-5.4",
+      "task_type": "review",
+      "depends_on": ["memory_authority_close_bugs"],
+      "description": "Review the memory authority rewrite for semantic drift, missed callsites, and stale DDL",
+      "outcome_goal": "Any remaining leaks or regressions are called out in writing before the wave is declared done",
+      "prompt": "Review the memory authority rewrite as a code review.\n\nPrioritize findings on:\n- any residual SQL strings in memory/crud.py or memory/retrieval_telemetry.py\n- callsites of the moved functions that still expect the old behaviour (e.g. sync vs. async, exception types, return shapes)\n- lost auto-prune behaviour or silent swallowed exceptions in add_edge\n- any memory table DDL still being created at runtime anywhere in memory/ or runtime/\n- test coverage gaps for the new repository methods\n- whether memory/crud.py public API is unchanged for existing callers\n\nFindings first. If no findings remain, say so explicitly."
+    }
+  ]
+}

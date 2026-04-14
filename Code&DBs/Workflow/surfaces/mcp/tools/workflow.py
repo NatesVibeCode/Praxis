@@ -64,6 +64,29 @@ def _run_links(run_id: str) -> dict[str, str]:
     }
 
 
+def _delivery_metadata(*, emitter: Any | None = None, wait_requested: bool | None = None) -> dict[str, Any]:
+    """Describe how dashboard/progress updates are being delivered."""
+    progress_requested = bool(getattr(emitter, "enabled", False))
+    message_channel = emitter is not None
+    if progress_requested:
+        live_channel = "notifications.message+notifications.progress"
+    elif message_channel:
+        live_channel = "notifications.message"
+    else:
+        live_channel = "none"
+
+    payload: dict[str, Any] = {
+        "dashboard_in_payload": True,
+        "live_channel": live_channel,
+        "message_notifications": message_channel,
+        "progress_notifications": progress_requested,
+    }
+    if wait_requested is not None:
+        payload["wait_requested"] = wait_requested
+        payload["inline_polling"] = bool(wait_requested and progress_requested)
+    return payload
+
+
 def _classify_job_failure(job: dict) -> dict[str, Any] | None:
     """Classify a failed job and return machine-readable failure metadata."""
     failure_category = str(job.get("failure_category") or "").strip()
@@ -114,6 +137,8 @@ def _run_status_payload(
     *,
     kill_if_idle: bool = False,
     idle_threshold_seconds: int | None = None,
+    include_dashboard: bool = True,
+    delivery: dict[str, Any] | None = None,
 ) -> dict:
     """Build a status payload with richer health and failure diagnostics."""
     from runtime.workflow.unified import get_run_status, summarize_run_health, summarize_run_recovery
@@ -218,6 +243,16 @@ def _run_status_payload(
     if duration:
         payload["total_duration_ms"] = duration
     payload.update(_run_links(run_id))
+    if include_dashboard:
+        payload["dashboard"] = _render_dashboard_panel(
+            pg,
+            run_id,
+            payload["spec_name"],
+            payload["total_jobs"],
+            elapsed or 0.0,
+        )
+    if delivery is not None:
+        payload["delivery"] = delivery
     payload["health"] = summarize_run_health(status_data, now)
     payload["recovery"] = summarize_run_recovery(
         status_data,
@@ -264,7 +299,13 @@ def _run_status_payload(
     return payload
 
 
-def _run_submit_result_payload(result: dict[str, Any], include_warning: bool = False) -> dict:
+def _run_submit_result_payload(
+    result: dict[str, Any],
+    include_warning: bool = False,
+    *,
+    pg: Any | None = None,
+    delivery: dict[str, Any] | None = None,
+) -> dict:
     """Format the async submission payload for a workflow run."""
     payload = {
         "run_id": result["run_id"],
@@ -282,6 +323,16 @@ def _run_submit_result_payload(result: dict[str, Any], include_warning: bool = F
         payload["status_url"] = result["status_url"]
     else:
         payload.update(_run_links(result["run_id"]))
+    if pg is not None:
+        payload["dashboard"] = _render_dashboard_panel(
+            pg,
+            payload["run_id"],
+            payload["spec_name"],
+            payload["total_jobs"],
+            0.0,
+        )
+    if delivery is not None:
+        payload["delivery"] = delivery
     if include_warning:
         payload["message"] = (
             "MCP workflow launch is always async. Launch returns immediately, while live status stays on the "
@@ -509,6 +560,10 @@ def _render_dashboard_panel(
 
     lines.extend(done_lines)
     lines.extend(running_lines)
+    observed_jobs = completed + len(running_lines) + pending_count
+    if observed_jobs < total_jobs:
+        pending_count += total_jobs - observed_jobs
+
     if pending_count:
         lines.append(f"  · {pending_count} pending")
 
@@ -574,7 +629,12 @@ def _poll_run_to_completion(
 
     # Final dashboard + summary
     elapsed = _time.monotonic() - start_mono
-    payload = _run_status_payload(pg, run_id)
+    payload = _run_status_payload(
+        pg,
+        run_id,
+        include_dashboard=False,
+        delivery=_delivery_metadata(emitter=emitter, wait_requested=True),
+    )
     panel = _render_dashboard_panel(pg, run_id, spec_name, total_jobs, elapsed)
     payload["dashboard"] = panel
     if emitter is not None:
@@ -648,6 +708,7 @@ def tool_praxis_workflow(params: dict, _progress_emitter=None) -> dict:
                 run_id,
                 kill_if_idle=kill_if_idle,
                 idle_threshold_seconds=idle_threshold_seconds,
+                delivery=_delivery_metadata(emitter=_progress_emitter),
             )
         except Exception as exc:
             return _structured_runtime_error(exc, action="status")
@@ -827,7 +888,8 @@ def tool_praxis_workflow(params: dict, _progress_emitter=None) -> dict:
         }
 
     # Unified workflow runtime: submit to queue, poll for completion,
-    # stream per-job progress back through the MCP progress emitter.
+    # and keep the call open only when the caller explicitly requested
+    # progress-capable inline updates via _meta.progressToken.
     wait = params.get("wait", True)
     if isinstance(wait, str):
         wait = wait.lower() not in ("false", "0", "no")
@@ -851,8 +913,12 @@ def tool_praxis_workflow(params: dict, _progress_emitter=None) -> dict:
 
         run_id = result["run_id"]
 
-        if not wait or _progress_emitter is None:
-            return _run_submit_result_payload(result)
+        if not wait or not getattr(_progress_emitter, "enabled", False):
+            return _run_submit_result_payload(
+                result,
+                pg=pg,
+                delivery=_delivery_metadata(emitter=_progress_emitter, wait_requested=wait),
+            )
 
         # Stream results: poll until terminal, emitting progress per job.
         return _poll_run_to_completion(
@@ -910,12 +976,16 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "WORKFLOW CONTRACT:\n"
                 "  - action='run' is the kickoff call. Treat run_id as the authority and follow with "
                 "status or stream reads on separate channels.\n"
-                "  - Non-streaming callers already receive the short kickoff payload with run_id, "
-                "stream_url, and status_url.\n"
-                "  - Streaming MCP callers can still request inline progress polling with wait=true, "
-                "but that is legacy compatibility, not the preferred control flow.\n"
+                "  - Kickoff and status payloads now always include dashboard.\n"
+                "  - Direct callers without an MCP emitter receive kickoff-only payloads immediately.\n"
+                "  - MCP callers with wait=true only keep the call open for inline polling when they send "
+                "_meta.progressToken. In that mode they receive dashboard panels on notifications/message "
+                "and progress counters on notifications/progress.\n"
+                "  - Without _meta.progressToken, the kickoff payload returns immediately and the payload "
+                "delivery metadata makes that explicit instead of hiding it.\n"
                 "  - Use wait=false to force kickoff-only behavior even when a progress emitter exists.\n"
-                "  - Use action='status' for a snapshot of a running or completed workflow.\n"
+                "  - Use action='status' for a snapshot of a running or completed workflow, including "
+                "dashboard.\n"
                 "  - Read health.likely_failed, health.signals to detect stuck runs.\n"
                 "  - Use kill_if_idle=true on a status call if the run is clearly idle and unhealthy.\n\n"
                 "EXAMPLES:\n"
@@ -935,9 +1005,11 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "wait": {
                         "type": "boolean",
                         "description": (
-                            "If true and the MCP caller provides a progress emitter, the tool may keep "
-                            "polling inline and emit progress notifications. If false, always return the "
-                            "kickoff payload immediately with run_id, stream_url, and status_url."
+                            "If true and _meta.progressToken is present, the tool may keep polling inline "
+                            "and emit dashboard panels on notifications/message plus counters on "
+                            "notifications/progress. If false, or if no progress token is present, return "
+                            "the kickoff payload immediately with run_id, dashboard, stream_url, "
+                            "status_url, and delivery metadata."
                         ),
                         "default": True,
                     },

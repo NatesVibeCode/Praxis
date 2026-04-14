@@ -1,4 +1,4 @@
-"""Native DAG frontdoor over repo-local authority.
+"""Native Praxis frontdoor over repo-local authority.
 
 This surface is intentionally narrow:
 

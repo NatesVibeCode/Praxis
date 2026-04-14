@@ -1,4 +1,4 @@
-"""Verify adapter — DAG node that runs DB-backed post-dispatch verification.
+"""Verify adapter — workflow node that runs DB-backed post-dispatch verification.
 
 Resolves verification bindings through `verification_registry`, then executes
 typed argv commands in the workspace after the file_writer node has applied

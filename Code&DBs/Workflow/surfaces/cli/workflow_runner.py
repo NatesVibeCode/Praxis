@@ -86,7 +86,7 @@ class RunResult:
 # ---------------------------------------------------------------------------
 
 class WorkflowRunner:
-    """Executes workflow specs through the Dag Project workflow pipeline."""
+    """Executes workflow specs through the Praxis Engine workflow pipeline."""
 
     def __init__(
         self,
@@ -671,7 +671,7 @@ class WorkflowRunner:
 
         lines = [
             "--- PLATFORM CONTEXT ---",
-            "You are an agent in the DAG autonomous engineering control plane.",
+            "You are an agent in the Praxis autonomous engineering control plane.",
             f"Repository root: {self._config_root.rstrip('/config')}",
             "Generated artifact dirs such as artifacts/workflow_outputs/ are not authoritative repo inputs.",
             "Only inspect those dirs when the task is explicitly about artifact forensics, receipts, or transcript debugging.",

@@ -16,6 +16,7 @@ import asyncio
 import json
 import os
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -623,6 +624,108 @@ class NativeOperatorSurfaceReadModel:
             "cockpit": _json_compatible(self.cockpit),
             "observability": _json_compatible(self.observability),
         }
+
+
+@dataclass(frozen=True, slots=True)
+class _NativeOperatorRunContext:
+    """Canonical request-scoped workflow run context resolved from workflow_runs."""
+
+    run_id: str
+    workspace_ref: str
+    runtime_profile_ref: str
+
+
+@dataclass(slots=True)
+class _NativeOperatorRequestScope:
+    """Request-local cache for canonical run context and shared database access."""
+
+    env: Mapping[str, str] | None
+    connect_database: Callable[[Mapping[str, str] | None], Awaitable[asyncpg.Connection]]
+    _conn: asyncpg.Connection | None = None
+    _repository: PostgresPersonaAndForkAuthorityRepository | None = None
+    _run_context: _NativeOperatorRunContext | None = None
+
+    async def connection(self) -> asyncpg.Connection:
+        if self._conn is None:
+            self._conn = await self.connect_database(self.env)
+        return self._conn
+
+    async def authority_repository(self) -> PostgresPersonaAndForkAuthorityRepository:
+        if self._repository is None:
+            self._repository = PostgresPersonaAndForkAuthorityRepository(await self.connection())
+        return self._repository
+
+    async def load_run_context(self, *, run_id: str) -> _NativeOperatorRunContext:
+        if self._run_context is not None:
+            if self._run_context.run_id != run_id:
+                raise NativeOperatorSurfaceError(
+                    "native_operator_surface.run_context_conflict",
+                    "request-scoped native operator context was reused for a different run",
+                    details={
+                        "expected_run_id": self._run_context.run_id,
+                        "actual_run_id": run_id,
+                    },
+                )
+            return self._run_context
+
+        conn = await self.connection()
+        try:
+            run_row = await conn.fetchrow(
+                """
+                SELECT
+                    request_envelope->>'workspace_ref' AS workspace_ref,
+                    request_envelope->>'runtime_profile_ref' AS runtime_profile_ref
+                FROM workflow_runs
+                WHERE run_id = $1
+                """,
+                run_id,
+            )
+        except asyncpg.PostgresError as exc:
+            raise NativeOperatorSurfaceError(
+                "native_operator_surface.run_context_read_failed",
+                "failed to read the native operator workflow run context",
+                details={
+                    "run_id": run_id,
+                    "sqlstate": getattr(exc, "sqlstate", None),
+                    "table": "workflow_runs",
+                },
+            ) from exc
+
+        if run_row is None:
+            raise NativeOperatorSurfaceError(
+                "native_operator_surface.run_context_missing",
+                "workflow run was not found for the native operator request context",
+                details={"run_id": run_id},
+            )
+
+        self._run_context = _NativeOperatorRunContext(
+            run_id=run_id,
+            workspace_ref=_require_text(
+                run_row["workspace_ref"],
+                field_name="workflow_runs.request_envelope.workspace_ref",
+            ),
+            runtime_profile_ref=_require_text(
+                run_row["runtime_profile_ref"],
+                field_name="workflow_runs.request_envelope.runtime_profile_ref",
+            ),
+        )
+        return self._run_context
+
+    async def close(self) -> None:
+        if self._conn is None:
+            return
+        try:
+            await self._conn.close()
+        finally:
+            self._conn = None
+            self._repository = None
+            self._run_context = None
+
+
+_ACTIVE_NATIVE_OPERATOR_REQUEST_SCOPE: ContextVar[_NativeOperatorRequestScope | None] = ContextVar(
+    "native_operator_surface_request_scope",
+    default=None,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1330,17 +1433,51 @@ class NativeOperatorSurfaceFrontdoor:
         source = env if env is not None else os.environ
         return source, resolve_native_instance(env=source)
 
+    def _request_scope(self) -> _NativeOperatorRequestScope | None:
+        return _ACTIVE_NATIVE_OPERATOR_REQUEST_SCOPE.get()
+
+    async def _open_request_connection(
+        self,
+        *,
+        env: Mapping[str, str] | None,
+    ) -> tuple[asyncpg.Connection, bool]:
+        scope = self._request_scope()
+        if scope is not None:
+            return await scope.connection(), False
+        return await self.connect_database(env), True
+
+    async def _load_run_context(
+        self,
+        *,
+        env: Mapping[str, str] | None,
+        run_id: str,
+    ) -> _NativeOperatorRunContext:
+        scope = self._request_scope()
+        if scope is not None:
+            return await scope.load_run_context(run_id=run_id)
+
+        conn = await self.connect_database(env)
+        try:
+            return await _NativeOperatorRequestScope(
+                env=env,
+                connect_database=self.connect_database,
+                _conn=conn,
+            ).load_run_context(run_id=run_id)
+        finally:
+            await conn.close()
+
     async def _load_route_authority(
         self,
         *,
         env: Mapping[str, str] | None,
         as_of: datetime,
     ) -> ProviderRouteControlTower:
-        conn = await self.connect_database(env)
+        conn, should_close = await self._open_request_connection(env=env)
         try:
             return await load_provider_route_control_tower_snapshot(conn, as_of=as_of)
         finally:
-            await conn.close()
+            if should_close:
+                await conn.close()
 
     async def _load_operator_control(
         self,
@@ -1348,11 +1485,12 @@ class NativeOperatorSurfaceFrontdoor:
         env: Mapping[str, str] | None,
         as_of: datetime,
     ) -> OperatorControlAuthority:
-        conn = await self.connect_database(env)
+        conn, should_close = await self._open_request_connection(env=env)
         try:
             return await load_operator_control_authority(conn, as_of=as_of)
         finally:
-            await conn.close()
+            if should_close:
+                await conn.close()
 
     async def _load_canonical_evidence(
         self,
@@ -1377,14 +1515,15 @@ class NativeOperatorSurfaceFrontdoor:
         env: Mapping[str, str] | None,
         run_id: str,
     ) -> tuple[WorkItemWorkflowBindingRecord, ...]:
-        conn = await self.connect_database(env)
+        conn, should_close = await self._open_request_connection(env=env)
         try:
             return await load_work_item_workflow_bindings_for_workflow_run(
                 conn,
                 workflow_run_id=run_id,
             )
         finally:
-            await conn.close()
+            if should_close:
+                await conn.close()
 
     async def _load_persona_activation(
         self,
@@ -1393,54 +1532,22 @@ class NativeOperatorSurfaceFrontdoor:
         run_id: str,
         as_of: datetime,
     ) -> Mapping[str, Any]:
-        conn = await self.connect_database(env)
+        run_context = await self._load_run_context(env=env, run_id=run_id)
+        conn, should_close = await self._open_request_connection(env=env)
         try:
-            try:
-                run_row = await conn.fetchrow(
-                    """
-                    SELECT
-                        request_envelope->>'workspace_ref' AS workspace_ref,
-                        request_envelope->>'runtime_profile_ref' AS runtime_profile_ref
-                    FROM workflow_runs
-                    WHERE run_id = $1
-                    """,
-                    run_id,
-                )
-            except asyncpg.PostgresError as exc:
-                raise NativeOperatorSurfaceError(
-                    "native_operator_surface.persona_run_context_read_failed",
-                    "failed to read the native operator run context for persona activation",
-                    details={
-                        "run_id": run_id,
-                        "sqlstate": getattr(exc, "sqlstate", None),
-                        "table": "workflow_runs",
-                    },
-                ) from exc
-
-            if run_row is None:
-                raise NativeOperatorSurfaceError(
-                    "native_operator_surface.persona_run_context_missing",
-                    "workflow run was not found for persona activation",
-                    details={"run_id": run_id},
-                )
-
-            workspace_ref = _require_text(
-                run_row["workspace_ref"],
-                field_name="workflow_runs.request_envelope.workspace_ref",
+            scope = self._request_scope()
+            repository = (
+                await scope.authority_repository()
+                if scope is not None
+                else PostgresPersonaAndForkAuthorityRepository(conn)
             )
-            runtime_profile_ref = _require_text(
-                run_row["runtime_profile_ref"],
-                field_name="workflow_runs.request_envelope.runtime_profile_ref",
-            )
-
-            repository = PostgresPersonaAndForkAuthorityRepository(conn)
             try:
                 persona_profile, persona_context_bindings = await repository.load_persona_activation(
                     selector=PersonaActivationSelector(
                         binding_scope=_NATIVE_OPERATOR_PERSONA_BINDING_SCOPE,
                         as_of=as_of,
-                        workspace_ref=workspace_ref,
-                        runtime_profile_ref=runtime_profile_ref,
+                        workspace_ref=run_context.workspace_ref,
+                        runtime_profile_ref=run_context.runtime_profile_ref,
                         operator_path=_NATIVE_OPERATOR_PERSONA_OPERATOR_PATH,
                     ),
                 )
@@ -1450,8 +1557,8 @@ class NativeOperatorSurfaceFrontdoor:
                     "persona authority repository failed to resolve the selected native operator persona",
                     details={
                         "run_id": run_id,
-                        "workspace_ref": workspace_ref,
-                        "runtime_profile_ref": runtime_profile_ref,
+                        "workspace_ref": run_context.workspace_ref,
+                        "runtime_profile_ref": run_context.runtime_profile_ref,
                         "binding_scope": _NATIVE_OPERATOR_PERSONA_BINDING_SCOPE,
                         "operator_path": _NATIVE_OPERATOR_PERSONA_OPERATOR_PATH,
                         "repository_reason_code": exc.reason_code,
@@ -1462,59 +1569,23 @@ class NativeOperatorSurfaceFrontdoor:
             return _native_operator_persona_payload(
                 run_id=run_id,
                 as_of=as_of,
-                workspace_ref=workspace_ref,
-                runtime_profile_ref=runtime_profile_ref,
+                workspace_ref=run_context.workspace_ref,
+                runtime_profile_ref=run_context.runtime_profile_ref,
                 operator_path=_NATIVE_OPERATOR_PERSONA_OPERATOR_PATH,
                 persona_profile=persona_profile,
                 persona_context_bindings=persona_context_bindings,
             )
         finally:
-            await conn.close()
+            if should_close:
+                await conn.close()
 
     async def _load_fork_worktree_ownership_selector(
         self,
         *,
         conn: asyncpg.Connection,
         run_id: str,
+        run_context: _NativeOperatorRunContext,
     ) -> _BoundedForkOwnershipSelection:
-        try:
-            run_row = await conn.fetchrow(
-                """
-                SELECT
-                    request_envelope->>'workspace_ref' AS workspace_ref,
-                    request_envelope->>'runtime_profile_ref' AS runtime_profile_ref
-                FROM workflow_runs
-                WHERE run_id = $1
-                """,
-                run_id,
-            )
-        except asyncpg.PostgresError as exc:
-            raise NativeOperatorSurfaceError(
-                "native_operator_surface.fork_ownership_run_context_read_failed",
-                "failed to read the native operator run context for fork/worktree ownership",
-                details={
-                    "run_id": run_id,
-                    "sqlstate": getattr(exc, "sqlstate", None),
-                    "table": "workflow_runs",
-                },
-            ) from exc
-
-        if run_row is None:
-            raise NativeOperatorSurfaceError(
-                "native_operator_surface.fork_ownership_run_context_missing",
-                "workflow run was not found for fork/worktree ownership",
-                details={"run_id": run_id},
-            )
-
-        workspace_ref = _require_text(
-            run_row["workspace_ref"],
-            field_name="workflow_runs.request_envelope.workspace_ref",
-        )
-        runtime_profile_ref = _require_text(
-            run_row["runtime_profile_ref"],
-            field_name="workflow_runs.request_envelope.runtime_profile_ref",
-        )
-
         try:
             route_row = await conn.fetchrow(
                 """
@@ -1532,8 +1603,8 @@ class NativeOperatorSurfaceFrontdoor:
                 return _BoundedForkOwnershipSelection(
                     run_id=run_id,
                     selection_status="route_runtime_unavailable",
-                    workspace_ref=workspace_ref,
-                    runtime_profile_ref=runtime_profile_ref,
+                    workspace_ref=run_context.workspace_ref,
+                    runtime_profile_ref=run_context.runtime_profile_ref,
                 )
             raise NativeOperatorSurfaceError(
                 "native_operator_surface.fork_ownership_route_context_read_failed",
@@ -1549,8 +1620,8 @@ class NativeOperatorSurfaceFrontdoor:
             return _BoundedForkOwnershipSelection(
                 run_id=run_id,
                 selection_status="not_selected",
-                workspace_ref=workspace_ref,
-                runtime_profile_ref=runtime_profile_ref,
+                workspace_ref=run_context.workspace_ref,
+                runtime_profile_ref=run_context.runtime_profile_ref,
             )
 
         share_mode = _require_text(
@@ -1573,8 +1644,8 @@ class NativeOperatorSurfaceFrontdoor:
             return _BoundedForkOwnershipSelection(
                 run_id=run_id,
                 selection_status="not_selected",
-                workspace_ref=workspace_ref,
-                runtime_profile_ref=runtime_profile_ref,
+                workspace_ref=run_context.workspace_ref,
+                runtime_profile_ref=run_context.runtime_profile_ref,
                 share_mode=share_mode,
                 reuse_reason_code=reuse_reason_code,
                 sandbox_session_id=sandbox_session_id,
@@ -1586,8 +1657,8 @@ class NativeOperatorSurfaceFrontdoor:
                 "bounded fork ownership route must carry one sandbox_session_id before operator receipts can resolve ownership",
                 details={
                     "run_id": run_id,
-                    "workspace_ref": workspace_ref,
-                    "runtime_profile_ref": runtime_profile_ref,
+                    "workspace_ref": run_context.workspace_ref,
+                    "runtime_profile_ref": run_context.runtime_profile_ref,
                     "share_mode": share_mode,
                     "reuse_reason_code": reuse_reason_code,
                 },
@@ -1632,8 +1703,8 @@ class NativeOperatorSurfaceFrontdoor:
                 details={
                     "run_id": run_id,
                     "sandbox_session_id": sandbox_session_id,
-                    "workspace_ref": workspace_ref,
-                    "runtime_profile_ref": runtime_profile_ref,
+                    "workspace_ref": run_context.workspace_ref,
+                    "runtime_profile_ref": run_context.runtime_profile_ref,
                 },
             )
         if len(selector_rows) > 1:
@@ -1679,15 +1750,18 @@ class NativeOperatorSurfaceFrontdoor:
             field_name="fork_worktree_bindings.worktree_ref",
         )
 
-        if selector_workspace_ref != workspace_ref or selector_runtime_profile_ref != runtime_profile_ref:
+        if (
+            selector_workspace_ref != run_context.workspace_ref
+            or selector_runtime_profile_ref != run_context.runtime_profile_ref
+        ):
             raise NativeOperatorSurfaceError(
                 "native_operator_surface.fork_ownership_selector_run_context_mismatch",
                 "fork/worktree selector did not round-trip the workflow run context",
                 details={
                     "run_id": run_id,
                     "selector_binding_id": selector_binding_id,
-                    "expected_workspace_ref": workspace_ref,
-                    "expected_runtime_profile_ref": runtime_profile_ref,
+                    "expected_workspace_ref": run_context.workspace_ref,
+                    "expected_runtime_profile_ref": run_context.runtime_profile_ref,
                     "selector_workspace_ref": selector_workspace_ref,
                     "selector_runtime_profile_ref": selector_runtime_profile_ref,
                 },
@@ -1714,7 +1788,8 @@ class NativeOperatorSurfaceFrontdoor:
         run_id: str,
     ) -> Mapping[str, Any]:
         try:
-            conn = await self.connect_database(env)
+            run_context = await self._load_run_context(env=env, run_id=run_id)
+            conn, should_close = await self._open_request_connection(env=env)
         except PostgresConfigurationError:
             return _native_operator_fork_ownership_payload(
                 selection=_BoundedForkOwnershipSelection(
@@ -1729,6 +1804,7 @@ class NativeOperatorSurfaceFrontdoor:
             selection = await self._load_fork_worktree_ownership_selector(
                 conn=conn,
                 run_id=run_id,
+                run_context=run_context,
             )
             if selection.selection_status != "resolved":
                 return _native_operator_fork_ownership_payload(
@@ -1736,7 +1812,12 @@ class NativeOperatorSurfaceFrontdoor:
                     fork_worktree_binding=None,
                 )
 
-            repository = PostgresPersonaAndForkAuthorityRepository(conn)
+            scope = self._request_scope()
+            repository = (
+                await scope.authority_repository()
+                if scope is not None
+                else PostgresPersonaAndForkAuthorityRepository(conn)
+            )
             try:
                 fork_worktree_binding = await repository.load_fork_worktree_binding(
                     selector=selection.to_repository_selector(),
@@ -1763,7 +1844,8 @@ class NativeOperatorSurfaceFrontdoor:
                 fork_worktree_binding=fork_worktree_binding,
             )
         finally:
-            await conn.close()
+            if should_close:
+                await conn.close()
 
     async def _load_dispatch_resolution(
         self,
@@ -1792,11 +1874,12 @@ class NativeOperatorSurfaceFrontdoor:
                 details={"workflow_class_ids": workflow_class_ids},
             )
 
-        conn = await self.connect_database(env)
+        conn, should_close = await self._open_request_connection(env=env)
         try:
             runtime = await load_workflow_class_resolution_runtime(conn, as_of=as_of)
         finally:
-            await conn.close()
+            if should_close:
+                await conn.close()
 
         dispatch_resolution = runtime.workflow_class_catalog.resolve_by_id(
             workflow_class_id=workflow_class_ids[0],
@@ -1841,20 +1924,34 @@ class NativeOperatorSurfaceFrontdoor:
         as_of: datetime,
         authoritative_work_bindings: tuple[WorkItemWorkflowBindingRecord, ...],
     ) -> NativeOperatorCockpitReadModel:
-        route_authority, dispatch_resolution, cutover_status = await asyncio.gather(
-            self._load_route_authority(env=env, as_of=as_of),
-            self._load_dispatch_resolution(
+        if self._request_scope() is None:
+            route_authority, dispatch_resolution, cutover_status = await asyncio.gather(
+                self._load_route_authority(env=env, as_of=as_of),
+                self._load_dispatch_resolution(
+                    env=env,
+                    as_of=as_of,
+                    work_bindings=authoritative_work_bindings,
+                ),
+                self._load_cutover_status(
+                    env=env,
+                    run_id=run_id,
+                    as_of=as_of,
+                    work_bindings=authoritative_work_bindings,
+                ),
+            )
+        else:
+            route_authority = await self._load_route_authority(env=env, as_of=as_of)
+            dispatch_resolution = await self._load_dispatch_resolution(
                 env=env,
                 as_of=as_of,
                 work_bindings=authoritative_work_bindings,
-            ),
-            self._load_cutover_status(
+            )
+            cutover_status = await self._load_cutover_status(
                 env=env,
                 run_id=run_id,
                 as_of=as_of,
                 work_bindings=authoritative_work_bindings,
-            ),
-        )
+            )
         try:
             return operator_cockpit_run(
                 run_id=run_id,
@@ -1900,7 +1997,7 @@ class NativeOperatorSurfaceFrontdoor:
         env: Mapping[str, str] | None,
         as_of: datetime,
     ) -> Mapping[str, Any]:
-        conn = await self.connect_database(env)
+        conn, should_close = await self._open_request_connection(env=env)
         try:
             rows = await conn.fetch(
                 """
@@ -1933,7 +2030,8 @@ class NativeOperatorSurfaceFrontdoor:
                 "reason_code": getattr(exc, "sqlstate", None) or type(exc).__name__,
             }
         finally:
-            await conn.close()
+            if should_close:
+                await conn.close()
         return _smoke_freshness_payload(rows, as_of=as_of)
 
     async def _load_surface(
@@ -1953,17 +2051,36 @@ class NativeOperatorSurfaceFrontdoor:
             as_of=as_of,
             authoritative_work_bindings=authoritative_work_bindings,
         )
-        (
-            status_payload,
-            canonical_evidence,
-            fork_ownership_payload,
-            smoke_freshness,
-        ) = await asyncio.gather(
-            self._load_status(env=env, run_id=run_id),
-            self._load_canonical_evidence(env=env, run_id=run_id),
-            self._load_fork_worktree_ownership(env=env, run_id=run_id),
-            self._load_smoke_freshness(env=env, as_of=as_of),
-        )
+        if self._request_scope() is None:
+            (
+                status_payload,
+                canonical_evidence,
+                fork_ownership_payload,
+                smoke_freshness,
+            ) = await asyncio.gather(
+                self._load_status(env=env, run_id=run_id),
+                self._load_canonical_evidence(env=env, run_id=run_id),
+                self._load_fork_worktree_ownership(env=env, run_id=run_id),
+                self._load_smoke_freshness(env=env, as_of=as_of),
+            )
+        else:
+            status_task = asyncio.create_task(self._load_status(env=env, run_id=run_id))
+            evidence_task = asyncio.create_task(
+                self._load_canonical_evidence(env=env, run_id=run_id)
+            )
+            try:
+                fork_ownership_payload = await self._load_fork_worktree_ownership(
+                    env=env,
+                    run_id=run_id,
+                )
+                smoke_freshness = await self._load_smoke_freshness(env=env, as_of=as_of)
+                status_payload = await status_task
+                canonical_evidence = await evidence_task
+            except Exception:
+                status_task.cancel()
+                evidence_task.cancel()
+                await asyncio.gather(status_task, evidence_task, return_exceptions=True)
+                raise
         normalized_status = _normalize_status_payload(
             status_payload,
             expected_native_instance=instance.to_contract(),
@@ -1998,6 +2115,80 @@ class NativeOperatorSurfaceFrontdoor:
             provenance=NativeOperatorSurfaceProvenance(as_of=as_of),
         )
 
+    async def _query_native_operator_surface(
+        self,
+        *,
+        source: Mapping[str, str],
+        instance: NativeWorkflowInstance,
+        run_id: str,
+        as_of: datetime,
+        bug_ids: Sequence[str] | None,
+        roadmap_item_ids: Sequence[str] | None,
+        cutover_gate_ids: Sequence[str] | None,
+        work_item_workflow_binding_ids: Sequence[str] | None,
+    ) -> dict[str, Any]:
+        requested_binding_ids = _normalize_ids(
+            work_item_workflow_binding_ids,
+            field_name="work_item_workflow_binding_ids",
+        )
+        scope = _NativeOperatorRequestScope(
+            env=source,
+            connect_database=self.connect_database,
+        )
+        scope_token = _ACTIVE_NATIVE_OPERATOR_REQUEST_SCOPE.set(scope)
+        try:
+            run_scoped_bindings = await self._load_run_scoped_work_bindings(
+                env=source,
+                run_id=run_id,
+            )
+            await scope.load_run_context(run_id=run_id)
+            query_binding_ids = _resolve_query_binding_ids(
+                run_id=run_id,
+                run_scoped_bindings=run_scoped_bindings,
+                requested_binding_ids=requested_binding_ids,
+            )
+            authoritative_work_bindings = _select_authoritative_bindings(
+                run_scoped_bindings=run_scoped_bindings,
+                selected_binding_ids=query_binding_ids,
+            )
+            persona_payload = await self._load_persona_activation(
+                env=source,
+                run_id=run_id,
+                as_of=as_of,
+            )
+            raw_query_payload = query_operator_surface(
+                env=source,
+                as_of=as_of,
+                bug_ids=bug_ids,
+                roadmap_item_ids=roadmap_item_ids,
+                cutover_gate_ids=cutover_gate_ids,
+                work_item_workflow_binding_ids=query_binding_ids,
+                workflow_run_ids=[run_id],
+            )
+            query_payload = _normalize_query_payload(
+                raw_query_payload,
+                expected_native_instance=instance.to_contract(),
+                expected_as_of=as_of,
+            )
+            _validate_query_binding_echo(
+                run_id=run_id,
+                authoritative_bindings=authoritative_work_bindings,
+                query_payload=query_payload,
+            )
+            surface = await self._load_surface(
+                env=source,
+                instance=instance,
+                run_id=run_id,
+                as_of=as_of,
+                persona_payload=persona_payload,
+                query_payload=query_payload,
+                authoritative_work_bindings=authoritative_work_bindings,
+            )
+            return surface.to_json()
+        finally:
+            _ACTIVE_NATIVE_OPERATOR_REQUEST_SCOPE.reset(scope_token)
+            await scope.close()
+
     def query_native_operator_surface(
         self,
         *,
@@ -2014,63 +2205,18 @@ class NativeOperatorSurfaceFrontdoor:
         source, instance = self._resolve_instance(env=env)
         normalized_run_id = _require_text(run_id, field_name="run_id")
         resolved_as_of = _now() if as_of is None else _normalize_as_of(as_of)
-        requested_binding_ids = _normalize_ids(
-            work_item_workflow_binding_ids,
-            field_name="work_item_workflow_binding_ids",
-        )
-        run_scoped_bindings = _run_async(
-            self._load_run_scoped_work_bindings(
-                env=source,
-                run_id=normalized_run_id,
-            )
-        )
-        query_binding_ids = _resolve_query_binding_ids(
-            run_id=normalized_run_id,
-            run_scoped_bindings=run_scoped_bindings,
-            requested_binding_ids=requested_binding_ids,
-        )
-        authoritative_work_bindings = _select_authoritative_bindings(
-            run_scoped_bindings=run_scoped_bindings,
-            selected_binding_ids=query_binding_ids,
-        )
-        persona_payload = _run_async(
-            self._load_persona_activation(
-                env=source,
-                run_id=normalized_run_id,
-                as_of=resolved_as_of,
-            )
-        )
-        raw_query_payload = query_operator_surface(
-            env=source,
-            as_of=resolved_as_of,
-            bug_ids=bug_ids,
-            roadmap_item_ids=roadmap_item_ids,
-            cutover_gate_ids=cutover_gate_ids,
-            work_item_workflow_binding_ids=query_binding_ids,
-            workflow_run_ids=[normalized_run_id],
-        )
-        query_payload = _normalize_query_payload(
-            raw_query_payload,
-            expected_native_instance=instance.to_contract(),
-            expected_as_of=resolved_as_of,
-        )
-        _validate_query_binding_echo(
-            run_id=normalized_run_id,
-            authoritative_bindings=authoritative_work_bindings,
-            query_payload=query_payload,
-        )
-        surface = _run_async(
-            self._load_surface(
-                env=source,
+        return _run_async(
+            self._query_native_operator_surface(
+                source=source,
                 instance=instance,
                 run_id=normalized_run_id,
                 as_of=resolved_as_of,
-                persona_payload=persona_payload,
-                query_payload=query_payload,
-                authoritative_work_bindings=authoritative_work_bindings,
+                bug_ids=bug_ids,
+                roadmap_item_ids=roadmap_item_ids,
+                cutover_gate_ids=cutover_gate_ids,
+                work_item_workflow_binding_ids=work_item_workflow_binding_ids,
             )
         )
-        return surface.to_json()
 
 
 _DEFAULT_NATIVE_OPERATOR_SURFACE_FRONTDOOR = NativeOperatorSurfaceFrontdoor()

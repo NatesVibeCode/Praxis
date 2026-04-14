@@ -4,7 +4,7 @@ import {
   RunJob,
   RunStatus,
   JobStatus,
-  RunGraph,
+  RunGraph as RunGraphData,
   useLiveRunSnapshot,
 } from './useLiveRunSnapshot';
 
@@ -75,10 +75,10 @@ interface JobDetail extends RunJob {
   receipt_id?: string | null;
 }
 
-// -- Run DAG renderer --
+// -- Run graph renderer --
 import type { RunGraphNode as GraphNode } from './useLiveRunSnapshot';
 
-function RunDAG({ graph, onSelectJob }: { graph: RunGraph; onSelectJob?: (label: string) => void }) {
+function RunGraph({ graph, onSelectJob }: { graph: RunGraphData; onSelectJob?: (label: string) => void }) {
   const depths: Record<string, number> = {};
   const inDeg: Record<string, number> = {};
   const outEdges: Record<string, string[]> = {};
@@ -109,18 +109,18 @@ function RunDAG({ graph, onSelectJob }: { graph: RunGraph; onSelectJob?: (label:
   for (const n of graph.nodes) columns[depths[n.id] || 0].push(n);
 
   return (
-    <div className="run-dag">
+    <div className="run-graph">
       {columns.map((col, ci) => (
         <React.Fragment key={ci}>
           {ci > 0 && (
-            <div className="run-dag__edge">
+            <div className="run-graph__edge">
               <svg width="32" height="2" style={{ display: 'block' }}>
                 <line x1="0" y1="1" x2="32" y2="1" stroke="var(--border)" strokeWidth="1.5" />
                 <polygon points="28,0 32,1 28,2" fill="var(--text-muted)" opacity="0.5" />
               </svg>
             </div>
           )}
-          <div className="run-dag__column">
+          <div className="run-graph__column">
             {col.map(n => {
               const variant = getJobStatusVariant(n.status as JobStatus);
               const subtitle = n.fan_out
@@ -132,11 +132,11 @@ function RunDAG({ graph, onSelectJob }: { graph: RunGraph; onSelectJob?: (label:
                 <button
                   key={n.id}
                   type="button"
-                  className={`run-dag__node run-dag__node--${variant}`}
+                  className={`run-graph__node run-graph__node--${variant}`}
                   onClick={() => onSelectJob?.(n.label)}
                 >
-                  <span className="run-dag__node-title">{humanizeLabel(n.label)}</span>
-                  <span className="run-dag__node-sub">
+                  <span className="run-graph__node-title">{humanizeLabel(n.label)}</span>
+                  <span className="run-graph__node-sub">
                     {subtitle}
                     {n.duration_ms ? ` · ${(n.duration_ms / 1000).toFixed(1)}s` : ''}
                   </span>
@@ -295,9 +295,9 @@ export function RunDetailView({ runId, onBack }: RunDetailViewProps) {
         </div>
       )}
 
-      {/* DAG visualization — shows dependency graph when available */}
+      {/* Run graph visualization — shows dependency graph when available */}
       {run.graph && run.graph.nodes?.length > 0 && (
-        <RunDAG graph={run.graph} onSelectJob={(label) => {
+        <RunGraph graph={run.graph} onSelectJob={(label) => {
           // Find the job by label and expand it
           const job = run.jobs.find(j => j.label === label);
           if (job) {
