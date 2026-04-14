@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import type { ReleaseStatus } from './moonBuildPresenter';
-import type { BuildEdge, BuildPayload } from '../shared/types';
+import type { BuildEdge, BuildNode, BuildPayload } from '../shared/types';
 import { planDefinition, commitDefinition, triggerWorkflow, createWorkflow } from '../shared/buildController';
 
 type DefinitionGate = {
@@ -12,6 +12,51 @@ type DefinitionGate = {
   max_attempts?: number;
   fallback_job?: string;
 };
+
+const TRIGGER_MANUAL_ROUTE = 'trigger';
+const TRIGGER_SCHEDULE_ROUTE = 'trigger/schedule';
+const TRIGGER_WEBHOOK_ROUTE = 'trigger/webhook';
+const WEBHOOK_TRIGGER_EVENT = 'db.webhook_events.insert';
+
+function isTriggerRoute(route?: string): boolean {
+  return route === TRIGGER_MANUAL_ROUTE || route === TRIGGER_SCHEDULE_ROUTE || route === TRIGGER_WEBHOOK_ROUTE;
+}
+
+function triggerIntentFromNode(
+  node: BuildNode,
+  index: number,
+): Record<string, unknown> {
+  const route = node.route || TRIGGER_MANUAL_ROUTE;
+  const filter = node.trigger?.filter && typeof node.trigger.filter === 'object' && !Array.isArray(node.trigger.filter)
+    ? { ...node.trigger.filter }
+    : {};
+  const sourceRef = typeof node.trigger?.source_ref === 'string' ? node.trigger.source_ref.trim() : '';
+  const cronExpression = typeof node.trigger?.cron_expression === 'string' ? node.trigger.cron_expression.trim() : '';
+  const base: Record<string, unknown> = {
+    id: `trigger-${String(index + 1).padStart(3, '0')}`,
+    title: node.title || `Trigger ${index + 1}`,
+    summary: node.summary || node.title || route,
+    source_node_id: node.node_id,
+    source_block_ids: node.source_block_ids || [],
+    reference_slugs: [],
+    filter,
+  };
+  if (route === TRIGGER_SCHEDULE_ROUTE) {
+    return { ...base, event_type: 'schedule', cron_expression: cronExpression || '@daily' };
+  }
+  if (route === TRIGGER_WEBHOOK_ROUTE) {
+    return {
+      ...base,
+      event_type: (typeof node.trigger?.event_type === 'string' && node.trigger.event_type.trim()) || WEBHOOK_TRIGGER_EVENT,
+      ...(sourceRef ? { source_ref: sourceRef } : {}),
+    };
+  }
+  return {
+    ...base,
+    event_type: 'manual',
+    ...(sourceRef ? { source_ref: sourceRef } : {}),
+  };
+}
 
 function buildDefinitionGate(edge: BuildEdge): DefinitionGate | null {
   const gate = edge.gate;
@@ -49,11 +94,13 @@ function buildDefinitionGate(edge: BuildEdge): DefinitionGate | null {
 function buildGraphToDefinition(buildGraph: BuildPayload['build_graph']): Record<string, unknown> {
   const nodes = buildGraph?.nodes || [];
   const edges = buildGraph?.edges || [];
+  const routeByNode = Object.fromEntries(nodes.map(node => [node.node_id, node.route || '']));
   const incoming: Record<string, string[]> = {};
   const gatesByTarget: Record<string, DefinitionGate[]> = {};
   const edge_gates: Array<Record<string, unknown>> = [];
   for (const e of edges) {
     if (e.kind === 'authority_gate') continue;
+    if (isTriggerRoute(routeByNode[e.from_node_id]) || isTriggerRoute(routeByNode[e.to_node_id])) continue;
     if (e.to_node_id && e.from_node_id) {
       incoming[e.to_node_id] = incoming[e.to_node_id] || [];
       incoming[e.to_node_id].push(e.from_node_id);
@@ -72,7 +119,9 @@ function buildGraphToDefinition(buildGraph: BuildPayload['build_graph']): Record
       });
     }
   }
-  const stepNodes = nodes.filter(n => !n.kind || n.kind === 'step');
+  const triggerNodes = nodes.filter(n => (!n.kind || n.kind === 'step') && isTriggerRoute(n.route));
+  const stepNodes = nodes.filter(n => (!n.kind || n.kind === 'step') && !isTriggerRoute(n.route));
+  const trigger_intent = triggerNodes.map((node, index) => triggerIntentFromNode(node, index));
   const draft_flow = stepNodes.map((n, i) => {
     const gates = gatesByTarget[n.node_id] || [];
     return {
@@ -89,6 +138,7 @@ function buildGraphToDefinition(buildGraph: BuildPayload['build_graph']): Record
     .filter(n => n.route)
     .map(n => ({ step_id: n.node_id, agent_route: n.route! }));
   return {
+    trigger_intent,
     draft_flow,
     execution_setup: {
       phases,

@@ -187,6 +187,11 @@ def _plan_jobs(definition: dict[str, Any]) -> list[dict[str, Any]]:
         and _as_text(edge_gate.get("from_node_id"))
         and _as_text(edge_gate.get("to_node_id"))
     }
+    phase_by_step_id = {
+        _as_text(phase.get("step_id")): phase
+        for phase in execution_setup.get("phases", [])
+        if isinstance(phase, dict) and _as_text(phase.get("step_id"))
+    }
 
     label_by_step_id: dict[str, str] = {}
     used_labels: set[str] = set()
@@ -226,6 +231,7 @@ def _plan_jobs(definition: dict[str, Any]) -> list[dict[str, Any]]:
         source_block_ids = _string_list(step.get("source_block_ids"))
         agent_slug, agent_route = _agent_for_step(
             step,
+            explicit_phase=phase_by_step_id.get(step_id),
             reference_slugs=reference_slugs,
             source_block_ids=source_block_ids,
             references_by_slug=references_by_slug,
@@ -400,16 +406,25 @@ def _computed_plan_revision(compiled_spec: dict[str, Any]) -> str:
 def _agent_for_step(
     step: dict[str, Any],
     *,
+    explicit_phase: dict[str, Any] | None,
     reference_slugs: list[str],
     source_block_ids: list[str],
     references_by_slug: dict[str, dict[str, Any]],
     blocks_by_id: dict[str, dict[str, Any]],
 ) -> tuple[str, str]:
+    explicit_route = _as_text((explicit_phase or {}).get("agent_route"))
+    referenced_agent_slug = ""
     for slug in reference_slugs:
         reference = references_by_slug.get(slug)
         if isinstance(reference, dict) and reference.get("type") == "agent":
-            route = _as_text((reference.get("config") or {}).get("route")) or _infer_agent_route(slug, reference)
-            return slug, route
+            referenced_agent_slug = slug
+            if not explicit_route:
+                route = _as_text((reference.get("config") or {}).get("route")) or _infer_agent_route(slug, reference)
+                return slug, route
+            break
+
+    if explicit_route:
+        return referenced_agent_slug, explicit_route
 
     block_text = " ".join(
         _as_text(blocks_by_id[block_id].get("text"))

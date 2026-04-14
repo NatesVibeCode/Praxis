@@ -6,6 +6,8 @@ import json
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+from storage.postgres.memory_graph_repository import PostgresMemoryGraphRepository
+
 from memory.types import Edge, Entity, EntityType, RelationType
 
 if TYPE_CHECKING:
@@ -13,6 +15,10 @@ if TYPE_CHECKING:
 
 _TABLE = "memory_entities"
 _EDGES = "memory_edges"
+
+
+def _graph_repository(conn: "SyncPostgresConnection") -> PostgresMemoryGraphRepository:
+    return PostgresMemoryGraphRepository(conn)
 
 
 def _row_to_entity(row, entity_type: EntityType | None = None) -> Entity:
@@ -55,19 +61,7 @@ def _row_to_edge(row) -> Edge:
 
 
 def insert_entity(conn: "SyncPostgresConnection", entity: Entity) -> str:
-    conn.execute(
-        f"INSERT INTO {_TABLE} "
-        "(id, entity_type, name, content, metadata, source, confidence, archived, created_at, updated_at) "
-        "VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, false, $8, $9) "
-        "ON CONFLICT (id) DO UPDATE SET "
-        "name = EXCLUDED.name, content = EXCLUDED.content, metadata = EXCLUDED.metadata, "
-        "source = EXCLUDED.source, confidence = EXCLUDED.confidence, "
-        "archived = false, updated_at = EXCLUDED.updated_at",
-        entity.id, entity.entity_type.value, entity.name, entity.content,
-        json.dumps(entity.metadata), entity.source, entity.confidence,
-        entity.created_at, entity.updated_at,
-    )
-    return entity.id
+    return _graph_repository(conn).upsert_entity(entity=entity)
 
 
 def get_entity(
@@ -88,44 +82,20 @@ def update_entity(
     entity_type: EntityType,
     **fields,
 ) -> bool:
-    if not fields:
-        return False
-    allowed = {"name", "content", "metadata", "source", "confidence", "updated_at"}
-    parts = []
-    values = []
-    idx = 1
-    for k, v in fields.items():
-        if k not in allowed:
-            continue
-        if k == "metadata":
-            v = json.dumps(v)
-            parts.append(f"{k} = ${idx}::jsonb")
-        else:
-            parts.append(f"{k} = ${idx}")
-        values.append(v)
-        idx += 1
-    if not parts:
-        return False
-    values.append(entity_id)
-    values.append(entity_type.value)
-    rows = conn.execute(
-        f"UPDATE {_TABLE} SET {', '.join(parts)} "
-        f"WHERE id = ${idx} AND entity_type = ${idx + 1} AND NOT archived "
-        "RETURNING id",
-        *values,
+    return _graph_repository(conn).update_entity_fields(
+        entity_id=entity_id,
+        entity_type=entity_type,
+        fields=fields,
     )
-    return len(rows) > 0
 
 
 def delete_entity(
     conn: "SyncPostgresConnection", entity_id: str, entity_type: EntityType
 ) -> bool:
-    rows = conn.execute(
-        f"UPDATE {_TABLE} SET archived = true "
-        "WHERE id = $1 AND entity_type = $2 AND NOT archived RETURNING id",
-        entity_id, entity_type.value,
+    return _graph_repository(conn).archive_entity(
+        entity_id=entity_id,
+        entity_type=entity_type,
     )
-    return len(rows) > 0
 
 
 def list_entities(
@@ -168,19 +138,7 @@ def search_entities(
 
 
 def add_edge(conn: "SyncPostgresConnection", edge: Edge) -> bool:
-    try:
-        conn.execute(
-            f"INSERT INTO {_EDGES} "
-            "(source_id, target_id, relation_type, weight, metadata, created_at) "
-            "VALUES ($1, $2, $3, $4, $5::jsonb, $6) "
-            "ON CONFLICT (source_id, target_id, relation_type) DO UPDATE SET "
-            "weight = EXCLUDED.weight, metadata = EXCLUDED.metadata",
-            edge.source_id, edge.target_id, edge.relation_type.value,
-            edge.weight, json.dumps(edge.metadata), edge.created_at,
-        )
-        return True
-    except Exception:
-        return False
+    return _graph_repository(conn).upsert_edge(edge=edge)
 
 
 def remove_edge(
@@ -189,11 +147,11 @@ def remove_edge(
     target_id: str,
     relation_type: RelationType,
 ) -> bool:
-    rows = conn.execute(
-        f"DELETE FROM {_EDGES} WHERE source_id = $1 AND target_id = $2 AND relation_type = $3 RETURNING source_id",
-        source_id, target_id, relation_type.value,
+    return _graph_repository(conn).delete_edge(
+        source_id=source_id,
+        target_id=target_id,
+        relation_type=relation_type,
     )
-    return len(rows) > 0
 
 
 def get_edges(

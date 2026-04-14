@@ -1168,7 +1168,7 @@ class DatabaseMaintenanceProcessor:
         task_type = str(config.get("task_type") or "ops_repair").strip()
         max_attempts = int(config.get("start_max_attempts", config.get("dispatch_max_attempts")) or 2)
         prompt = (
-            "You are the automatic maintenance repair worker for the DAG control plane.\n\n"
+            "You are the automatic maintenance repair worker for the Praxis control plane.\n\n"
             "Use only the repo-local state below. Do not invent missing facts.\n"
             "Operate only inside this workspace.\n"
             "Prefer direct fixes to the maintenance path itself: policy/config issues, stuck deterministic"

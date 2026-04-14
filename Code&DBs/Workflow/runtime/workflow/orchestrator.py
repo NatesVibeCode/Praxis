@@ -288,7 +288,7 @@ def _attach_spec_metadata(result: WorkflowResult, spec: WorkflowSpec) -> Workflo
 
 
 def _run_workflow_core(spec: WorkflowSpec) -> WorkflowResult:
-    """Execute a single workflow through the DAG.
+    """Execute a single workflow through the graph.
 
     Each step is a node in the workflow graph. The orchestrator walks
     the graph, records evidence per node, and passes outputs between nodes.

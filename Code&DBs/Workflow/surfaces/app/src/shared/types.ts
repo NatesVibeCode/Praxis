@@ -7,6 +7,12 @@ export interface BuildNode {
   title?: string;
   summary?: string;
   route?: string;
+  trigger?: {
+    event_type?: string;
+    cron_expression?: string;
+    source_ref?: string;
+    filter?: Record<string, unknown>;
+  };
   prompt?: string;
   required_inputs?: string[];
   outputs?: string[];

@@ -1,4 +1,4 @@
-# Canonical runtime dependency contract for the DAG workflow package.
+# Canonical runtime dependency contract for the Praxis workflow package.
 # Packaging reads this file directly. Runtime surfaces read the same file and
 # project the declared scopes instead of stitching together a second list.
 #

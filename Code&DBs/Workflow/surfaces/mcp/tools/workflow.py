@@ -19,6 +19,8 @@ _STALE_PENDING_SECONDS = 900
 _NO_PROGRESS_SECONDS = 300
 _IDLE_PROGRESS_SECONDS = 900
 _RUN_ACTIVITY_LOOKBACK_SECONDS = 1800
+_POLL_INTERVAL_MIN_SECONDS = 1.0
+_POLL_INTERVAL_MAX_SECONDS = 12.0
 
 
 def _workflow_spec_mod():
@@ -135,6 +137,7 @@ def _run_status_payload(
     pg,
     run_id: str,
     *,
+    status_data: dict[str, Any] | None = None,
     kill_if_idle: bool = False,
     idle_threshold_seconds: int | None = None,
     include_dashboard: bool = True,
@@ -143,11 +146,13 @@ def _run_status_payload(
     """Build a status payload with richer health and failure diagnostics."""
     from runtime.workflow.unified import get_run_status, summarize_run_health, summarize_run_recovery
 
-    status_data = get_run_status(pg, run_id)
+    if status_data is None:
+        status_data = get_run_status(pg, run_id)
     if status_data is None:
         return {"run_id": run_id, "status": "not_found"}
 
     now = datetime.now(timezone.utc)
+    dashboard_view = _dashboard_view_from_status_data(status_data, now=now)
     jobs_summary = []
 
     for j in status_data.get("jobs", []):
@@ -244,12 +249,9 @@ def _run_status_payload(
         payload["total_duration_ms"] = duration
     payload.update(_run_links(run_id))
     if include_dashboard:
-        payload["dashboard"] = _render_dashboard_panel(
-            pg,
-            run_id,
-            payload["spec_name"],
-            payload["total_jobs"],
-            elapsed or 0.0,
+        payload["dashboard"] = _render_dashboard_panel_from_view(
+            dashboard_view,
+            run_id=run_id,
         )
     if delivery is not None:
         payload["delivery"] = delivery
@@ -304,6 +306,7 @@ def _run_submit_result_payload(
     include_warning: bool = False,
     *,
     pg: Any | None = None,
+    status_data: dict[str, Any] | None = None,
     delivery: dict[str, Any] | None = None,
 ) -> dict:
     """Format the async submission payload for a workflow run."""
@@ -323,14 +326,28 @@ def _run_submit_result_payload(
         payload["status_url"] = result["status_url"]
     else:
         payload.update(_run_links(result["run_id"]))
-    if pg is not None:
-        payload["dashboard"] = _render_dashboard_panel(
-            pg,
-            payload["run_id"],
-            payload["spec_name"],
-            payload["total_jobs"],
-            0.0,
-        )
+    if status_data is None and pg is not None:
+        from runtime.workflow.unified import get_run_status
+
+        try:
+            status_data = get_run_status(pg, payload["run_id"])
+        except Exception:
+            status_data = None
+    payload["dashboard"] = _render_dashboard_panel_from_view(
+        _dashboard_view_from_status_data(
+            status_data
+            or {
+                "spec_name": payload["spec_name"],
+                "total_jobs": payload["total_jobs"],
+                "completed_jobs": 0,
+                "jobs": [],
+            },
+            spec_name=payload["spec_name"],
+            total_jobs=payload["total_jobs"],
+            elapsed_seconds=0.0,
+        ),
+        run_id=payload["run_id"],
+    )
     if delivery is not None:
         payload["delivery"] = delivery
     if include_warning:
@@ -456,6 +473,186 @@ def _fmt_tokens(n: int | None) -> str:
     return str(n)
 
 
+def _run_elapsed_seconds(status_data: dict[str, Any], *, now: datetime | None = None) -> float:
+    current = now or datetime.now(timezone.utc)
+    created_at = status_data.get("created_at") or status_data.get("requested_at")
+    if not isinstance(created_at, datetime):
+        return 0.0
+    end = status_data.get("finished_at")
+    if not isinstance(end, datetime):
+        end = current
+    return max((end - created_at).total_seconds(), 0.0)
+
+
+def _job_running_elapsed_seconds(job: dict[str, Any], *, now: datetime | None = None) -> float | None:
+    started_at = job.get("started_at")
+    if not isinstance(started_at, datetime):
+        return None
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=timezone.utc)
+    current = now or datetime.now(timezone.utc)
+    return max((current - started_at).total_seconds(), 0.0)
+
+
+def _dashboard_view_from_status_data(
+    status_data: dict[str, Any] | None,
+    *,
+    spec_name: str | None = None,
+    total_jobs: int | None = None,
+    elapsed_seconds: float | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any] | None:
+    if status_data is None:
+        return None
+
+    current = now or datetime.now(timezone.utc)
+    jobs = status_data.get("jobs")
+    if not isinstance(jobs, list):
+        jobs = []
+
+    resolved_spec_name = spec_name if spec_name is not None else str(status_data.get("spec_name") or "")
+    resolved_total_jobs = int(total_jobs or status_data.get("total_jobs") or len(jobs) or 0)
+    resolved_elapsed = elapsed_seconds if elapsed_seconds is not None else _run_elapsed_seconds(
+        status_data,
+        now=current,
+    )
+
+    completed_count = 0
+    pending_count = 0
+    running_count = 0
+    total_cost = 0.0
+    total_tok_in = 0
+    total_tok_out = 0
+    job_views: list[dict[str, Any]] = []
+
+    for raw_job in jobs:
+        if not isinstance(raw_job, dict):
+            continue
+        job = dict(raw_job)
+        status = str(job.get("status") or "pending")
+        label = str(job.get("label") or "?")
+        total_cost += float(job.get("cost_usd") or 0.0)
+        total_tok_in += int(job.get("token_input") or 0)
+        total_tok_out += int(job.get("token_output") or 0)
+
+        if status in _TERMINAL_STATUSES:
+            completed_count += 1
+            job_views.append(
+                {
+                    "kind": "terminal",
+                    "status": status,
+                    "label": label,
+                    "duration_seconds": (int(job.get("duration_ms") or 0)) / 1000.0,
+                    "cost_usd": float(job.get("cost_usd") or 0.0),
+                    "token_input": int(job.get("token_input") or 0),
+                    "token_output": int(job.get("token_output") or 0),
+                    "error_code": str(job.get("failure_category") or job.get("last_error_code") or ""),
+                    "cpu_percent": job.get("cpu_percent"),
+                    "mem_bytes": job.get("mem_bytes"),
+                }
+            )
+            continue
+
+        if status in ("running", "executing", "claimed"):
+            running_count += 1
+            job_views.append(
+                {
+                    "kind": "running",
+                    "status": status,
+                    "label": label,
+                    "elapsed_seconds": _job_running_elapsed_seconds(job, now=current),
+                }
+            )
+            continue
+
+        pending_count += 1
+
+    if not jobs:
+        total_cost = float(status_data.get("total_cost_usd") or 0.0)
+        total_tok_in = int(status_data.get("total_tokens_in") or 0)
+        total_tok_out = int(status_data.get("total_tokens_out") or 0)
+
+    observed_jobs = completed_count + running_count + pending_count
+    if observed_jobs < resolved_total_jobs:
+        pending_count += resolved_total_jobs - observed_jobs
+
+    return {
+        "spec_name": resolved_spec_name,
+        "total_jobs": resolved_total_jobs,
+        "completed_jobs": completed_count,
+        "elapsed_seconds": max(float(resolved_elapsed or 0.0), 0.0),
+        "total_cost_usd": total_cost,
+        "total_tokens_in": total_tok_in,
+        "total_tokens_out": total_tok_out,
+        "pending_count": pending_count,
+        "jobs": job_views,
+    }
+
+
+def _render_dashboard_panel_from_view(view: dict[str, Any] | None, *, run_id: str) -> str:
+    if view is None:
+        return f"[dashboard unavailable for {run_id}]"
+
+    done_lines: list[str] = []
+    running_lines: list[str] = []
+    for job in view.get("jobs", []):
+        kind = job.get("kind")
+        if kind == "terminal":
+            status = str(job.get("status") or "unknown")
+            icon = "✓" if status == "succeeded" else "✗"
+            parts = [
+                f"{icon} {str(job.get('label') or '?'):<20}",
+                f"{float(job.get('duration_seconds') or 0.0):>5.1f}s",
+            ]
+            cpu = job.get("cpu_percent")
+            mem = job.get("mem_bytes")
+            if cpu is not None:
+                parts.append(f"{float(cpu):>5.1f}%cpu")
+            if mem:
+                parts.append(f"{_fmt_bytes(int(mem)):>6}")
+            tok_in = int(job.get("token_input") or 0)
+            tok_out = int(job.get("token_output") or 0)
+            tok_str = f"{_fmt_tokens(tok_in)}→{_fmt_tokens(tok_out)}"
+            if tok_str != "→":
+                parts.append(f"{tok_str:>12}")
+            cost = float(job.get("cost_usd") or 0.0)
+            if cost:
+                parts.append(f"${cost:.4f}")
+            err = str(job.get("error_code") or "")
+            if err and status != "succeeded":
+                parts.append(f"[{err}]")
+            done_lines.append("  " + "  ".join(parts))
+            continue
+
+        if kind == "running":
+            elapsed = job.get("elapsed_seconds")
+            elapsed_str = "?" if elapsed is None else f"{float(elapsed):.0f}s"
+            running_lines.append(
+                f"  ~ {str(job.get('label') or '?'):<20} {elapsed_str:>5}  (running)"
+            )
+
+    cost_total = float(view.get("total_cost_usd") or 0.0)
+    cost_str = f"${cost_total:.4f}" if cost_total else "$0"
+    lines = [
+        f"━━━ {str(view.get('spec_name') or '')} | "
+        f"{int(view.get('completed_jobs') or 0)}/{int(view.get('total_jobs') or 0)} | "
+        f"{cost_str} | {float(view.get('elapsed_seconds') or 0.0):.0f}s ━━━"
+    ]
+    lines.extend(done_lines)
+    lines.extend(running_lines)
+    pending_count = int(view.get("pending_count") or 0)
+    if pending_count:
+        lines.append(f"  · {pending_count} pending")
+
+    tok_summary = ""
+    total_tok_in = int(view.get("total_tokens_in") or 0)
+    total_tok_out = int(view.get("total_tokens_out") or 0)
+    if total_tok_in or total_tok_out:
+        tok_summary = f"  {_fmt_tokens(total_tok_in)} in / {_fmt_tokens(total_tok_out)} out"
+    lines.append(f"  ─ {cost_str}{tok_summary}")
+    return "\n".join(lines)
+
+
 def _render_dashboard_panel(
     pg,
     run_id: str,
@@ -464,116 +661,46 @@ def _render_dashboard_panel(
     elapsed_seconds: float,
 ) -> str:
     """Build a compact ASCII dashboard panel for emitter.log()."""
+    from runtime.workflow.unified import get_run_status
+
     try:
-        rows = pg.execute(
-            """
-            SELECT
-                wj.label,
-                wj.status,
-                wj.duration_ms,
-                wj.cost_usd,
-                wj.token_input,
-                wj.token_output,
-                wj.resolved_agent,
-                wj.failure_category,
-                wj.last_error_code,
-                wn.cpu_percent,
-                wn.mem_bytes,
-                wj.started_at
-            FROM workflow_jobs wj
-            LEFT JOIN workflow_notifications wn
-                ON wn.run_id = wj.run_id AND wn.job_label = wj.label
-            WHERE wj.run_id = $1
-            ORDER BY wj.created_at ASC
-            """,
-            run_id,
-        )
+        status_data = get_run_status(pg, run_id)
     except Exception:
         return f"[dashboard unavailable for {run_id}]"
+    view = _dashboard_view_from_status_data(
+        status_data,
+        spec_name=spec_name,
+        total_jobs=total_jobs,
+        elapsed_seconds=elapsed_seconds,
+    )
+    return _render_dashboard_panel_from_view(view, run_id=run_id)
 
-    completed = 0
-    total_cost = 0.0
-    total_tok_in = 0
-    total_tok_out = 0
-    running_lines: list[str] = []
-    done_lines: list[str] = []
-    pending_count = 0
 
-    import time as _time
+def _poll_progress_signature(status_data: dict[str, Any] | None) -> tuple[Any, ...]:
+    if status_data is None:
+        return ("missing",)
+    jobs = status_data.get("jobs")
+    if not isinstance(jobs, list):
+        jobs = []
+    running_count = sum(
+        1
+        for job in jobs
+        if isinstance(job, dict) and str(job.get("status") or "") in {"claimed", "running", "executing"}
+    )
+    return (
+        str(status_data.get("status") or ""),
+        int(status_data.get("completed_jobs") or 0),
+        running_count,
+    )
 
-    for r in rows:
-        status = r.get("status") or "pending"
-        label = r.get("label") or "?"
 
-        if status in _TERMINAL_STATUSES:
-            completed += 1
-            cost = r.get("cost_usd") or 0.0
-            total_cost += cost
-            tok_in = r.get("token_input") or 0
-            tok_out = r.get("token_output") or 0
-            total_tok_in += tok_in
-            total_tok_out += tok_out
-            dur = (r.get("duration_ms") or 0) / 1000.0
-            icon = "✓" if status == "succeeded" else "✗"
-            parts = [f"{icon} {label:<20}", f"{dur:>5.1f}s"]
-            cpu = r.get("cpu_percent")
-            mem = r.get("mem_bytes")
-            if cpu is not None:
-                parts.append(f"{cpu:>5.1f}%cpu")
-            if mem:
-                parts.append(f"{_fmt_bytes(mem):>6}")
-            tok_str = f"{_fmt_tokens(tok_in)}→{_fmt_tokens(tok_out)}"
-            if tok_str != "→":
-                parts.append(f"{tok_str:>12}")
-            if cost:
-                parts.append(f"${cost:.4f}")
-            err = r.get("failure_category") or r.get("last_error_code") or ""
-            if err and status != "succeeded":
-                parts.append(f"[{err}]")
-            done_lines.append("  " + "  ".join(parts))
-
-        elif status in ("running", "executing"):
-            started_at = r.get("started_at")
-            if started_at:
-                try:
-                    from datetime import timezone as _tz
-                    now_ts = datetime.now(_tz.utc)
-                    if hasattr(started_at, "tzinfo") and started_at.tzinfo is None:
-                        from datetime import timezone as _tz2
-                        started_at = started_at.replace(tzinfo=_tz2.utc)
-                    job_elapsed = (now_ts - started_at).total_seconds()
-                    elapsed_str = f"{job_elapsed:.0f}s"
-                except Exception:
-                    elapsed_str = "?"
-            else:
-                elapsed_str = "?"
-            running_lines.append(f"  ~ {label:<20} {elapsed_str:>5}  (running)")
-
-        else:
-            pending_count += 1
-
-    lines: list[str] = []
-    # Header
-    cost_str = f"${total_cost:.4f}" if total_cost else "$0"
-    header = f"━━━ {spec_name} | {completed}/{total_jobs} | {cost_str} | {elapsed_seconds:.0f}s ━━━"
-    lines.append(header)
-
-    lines.extend(done_lines)
-    lines.extend(running_lines)
-    observed_jobs = completed + len(running_lines) + pending_count
-    if observed_jobs < total_jobs:
-        pending_count += total_jobs - observed_jobs
-
-    if pending_count:
-        lines.append(f"  · {pending_count} pending")
-
-    # Footer totals
-    tok_summary = ""
-    if total_tok_in or total_tok_out:
-        tok_summary = f"  {_fmt_tokens(total_tok_in)} in / {_fmt_tokens(total_tok_out)} out"
-    lines.append(f"  ─ {cost_str}{tok_summary}")
-
-    return "\n".join(lines)
+def _next_poll_interval(current_interval: float, *, progress_changed: bool) -> float:
+    if progress_changed:
+        return _POLL_INTERVAL_MIN_SECONDS
+    return min(
+        _POLL_INTERVAL_MAX_SECONDS,
+        max(_POLL_INTERVAL_MIN_SECONDS, current_interval * 1.7),
+    )
 
 
 def _poll_run_to_completion(
@@ -583,7 +710,7 @@ def _poll_run_to_completion(
     spec_name: str,
     total_jobs: int,
     emitter: Any | None = None,
-    poll_interval: float = 3.0,
+    poll_interval: float = _POLL_INTERVAL_MIN_SECONDS,
     max_poll_seconds: float = 3600.0,
 ) -> dict[str, Any]:
     """Poll a workflow run until terminal, emitting a live dashboard panel after each job batch."""
@@ -597,13 +724,18 @@ def _poll_run_to_completion(
         emitter.emit(progress=0, total=total_jobs, message=f"Submitted {spec_name}")
 
     seen_terminal: set[str] = set()
+    current_interval = max(_POLL_INTERVAL_MIN_SECONDS, float(poll_interval))
+    last_signature: tuple[Any, ...] | None = None
+    latest_status_data: dict[str, Any] | None = None
     deadline = start_mono + max_poll_seconds
 
     while _time.monotonic() < deadline:
-        _time.sleep(poll_interval)
+        _time.sleep(current_interval)
         status_data = get_run_status(pg, run_id)
         if status_data is None:
+            current_interval = _next_poll_interval(current_interval, progress_changed=False)
             continue
+        latest_status_data = status_data
 
         new_terminal: list[str] = []
         for j in status_data.get("jobs", []):
@@ -613,9 +745,21 @@ def _poll_run_to_completion(
                 seen_terminal.add(jlabel)
                 new_terminal.append(jlabel)
 
+        signature = _poll_progress_signature(status_data)
+        progress_changed = signature != last_signature or bool(new_terminal)
+        last_signature = signature
+
         if new_terminal and emitter is not None:
             elapsed = _time.monotonic() - start_mono
-            panel = _render_dashboard_panel(pg, run_id, spec_name, total_jobs, elapsed)
+            panel = _render_dashboard_panel_from_view(
+                _dashboard_view_from_status_data(
+                    status_data,
+                    spec_name=spec_name,
+                    total_jobs=total_jobs,
+                    elapsed_seconds=elapsed,
+                ),
+                run_id=run_id,
+            )
             emitter.log(panel)
             emitter.emit(
                 progress=len(seen_terminal),
@@ -626,16 +770,31 @@ def _poll_run_to_completion(
         run_status = status_data.get("status", "")
         if run_status in _TERMINAL_STATUSES:
             break
+        current_interval = _next_poll_interval(
+            current_interval,
+            progress_changed=progress_changed,
+        )
 
     # Final dashboard + summary
     elapsed = _time.monotonic() - start_mono
+    if latest_status_data is None:
+        latest_status_data = get_run_status(pg, run_id)
     payload = _run_status_payload(
         pg,
         run_id,
+        status_data=latest_status_data,
         include_dashboard=False,
         delivery=_delivery_metadata(emitter=emitter, wait_requested=True),
     )
-    panel = _render_dashboard_panel(pg, run_id, spec_name, total_jobs, elapsed)
+    panel = _render_dashboard_panel_from_view(
+        _dashboard_view_from_status_data(
+            latest_status_data,
+            spec_name=spec_name,
+            total_jobs=total_jobs,
+            elapsed_seconds=elapsed,
+        ),
+        run_id=run_id,
+    )
     payload["dashboard"] = panel
     if emitter is not None:
         emitter.log(panel)

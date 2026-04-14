@@ -1,0 +1,137 @@
+{
+  "name": "Boundary Refactor Wave P \u2014 MCP Surface Policy Split",
+  "phase": "W",
+  "queue_id": "boundary_refactor_wave_p_mcp_surfaces_20260413",
+  "decision_ref": "bug_boundary_mining_2026_04_09",
+  "outcome_goal": "Policy, assembly, and SQL currently in surfaces/mcp/tools/operator.py are moved to authority/ modules and storage/postgres/*_repository.py; the surface carries only request parsing and delegation.",
+  "anti_requirements": [
+    "Do NOT change the HTTP contracts \u2014 request/response shapes stay identical",
+    "Do NOT alter table schemas or add new DB tables without a migration",
+    "Do NOT widen writes outside authority/, runtime/, storage/postgres/, and migrations/"
+  ],
+  "linked_bugs": [
+    "BUG-75A9C871941E"
+  ],
+  "jobs": [
+    {
+      "label": "wave_p_plan",
+      "agent": "openai/gpt-5.4",
+      "task_type": "architecture",
+      "description": "Plan Wave P migration targets",
+      "outcome_goal": "A written plan names every repository/authority method, every migration, and every callsite",
+      "prompt": "You are planning Wave P \u2014 MCP Surface Policy Split. Do not write code yet.\n\nLinked bugs:\n- BUG-75A9C871941E \u2014 surfaces/mcp/tools/operator.py:11-145: reset_metrics hides destructive writes in observability tool\n\nSources with leaked authority:\n- Code&DBs/Workflow/surfaces/mcp/tools/operator.py\n\nTarget destinations:\n- split destructive ops into a separate maintenance MCP tool\n- observability tool becomes read-only\n\nRead each source file fully and produce a written plan naming:\n1. Every method signature for every new/extended repository or authority module\n2. Which tables already have migrations and which need a new migration file (name the number)\n3. Every callsite that will need follow-up changes\n4. The exact grep-based regression check each downstream job must pass\n\nReference idiom: storage/postgres/memory_graph_repository.py, storage/postgres/workflow_runtime_repository.py, storage/postgres/validators.py.",
+      "read": [
+        "Code&DBs/Workflow/surfaces/mcp/tools/operator.py",
+        "Code&DBs/Workflow/storage/postgres/memory_graph_repository.py",
+        "Code&DBs/Workflow/storage/postgres/workflow_runtime_repository.py",
+        "Code&DBs/Workflow/storage/postgres/validators.py",
+        "Code&DBs/Workflow/storage/postgres/__init__.py"
+      ],
+      "write": [],
+      "verify_command": "true"
+    },
+    {
+      "label": "wave_p_migrations",
+      "agent": "openai/gpt-5.4",
+      "task_type": "build",
+      "depends_on": [
+        "wave_p_plan"
+      ],
+      "description": "Move inline DDL to migrations",
+      "outcome_goal": "No CREATE TABLE remains in source files; any missing table has a migration",
+      "prompt": "For Wave P, audit every source file for inline CREATE TABLE or CREATE INDEX statements. For each one, either confirm it has a matching migration under Code&DBs/Databases/migrations/workflow/ or add a new migration with the next available number. Match columns and constraints exactly \u2014 this is a move, not a redesign. Do NOT edit the source files yet.\n\nSources:\n- Code&DBs/Workflow/surfaces/mcp/tools/operator.py\n",
+      "read": [
+        "Code&DBs/Workflow/surfaces/mcp/tools/operator.py"
+      ],
+      "write": [
+        "Code&DBs/Databases/migrations/workflow/"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -c 'from storage.postgres import ensure_postgres_available; ensure_postgres_available()'"
+    },
+    {
+      "label": "wave_p_create_repositories",
+      "agent": "openai/gpt-5.4",
+      "task_type": "refactor",
+      "depends_on": [
+        "wave_p_migrations"
+      ],
+      "description": "Create destination repositories/authority modules",
+      "outcome_goal": "Every needed repository/authority class exists with typed methods and package exports",
+      "prompt": "Create the repository/authority modules named in the Wave P plan. Mirror the idiom from storage/postgres/memory_graph_repository.py: class Postgres<Domain>Repository, __init__(conn), explicit method names, input validation via storage.postgres.validators.\n\nCover every INSERT/UPDATE/DELETE currently in these source files:\n- Code&DBs/Workflow/surfaces/mcp/tools/operator.py\n\nTarget files to create:\n- split destructive ops into a separate maintenance MCP tool\n- observability tool becomes read-only\n\nExport new classes from Code&DBs/Workflow/storage/postgres/__init__.py so downstream packages can import them. Do NOT edit the source files yet \u2014 the thinning step happens next.",
+      "read": [
+        "Code&DBs/Workflow/surfaces/mcp/tools/operator.py",
+        "Code&DBs/Workflow/storage/postgres/memory_graph_repository.py",
+        "Code&DBs/Workflow/storage/postgres/validators.py",
+        "Code&DBs/Workflow/storage/postgres/__init__.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/storage/postgres/",
+        "Code&DBs/Workflow/storage/postgres/__init__.py",
+        "Code&DBs/Workflow/authority/"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -c 'from storage.postgres import ensure_postgres_available; ensure_postgres_available()'"
+    },
+    {
+      "label": "wave_p_thin_sources",
+      "agent": "openai/gpt-5.4",
+      "task_type": "refactor",
+      "depends_on": [
+        "wave_p_create_repositories"
+      ],
+      "description": "Thin the source files to delegate through repositories",
+      "outcome_goal": "No SQL or CREATE TABLE remains in any source file; public APIs unchanged",
+      "prompt": "Rewrite each source file to delegate every write to the repositories/authority modules created in the previous job. Keep public function and class signatures unchanged. Remove every SQL string and every CREATE TABLE.\n\nSources to thin:\n- Code&DBs/Workflow/surfaces/mcp/tools/operator.py\n\nFor each source file, verify with:\n```\n! grep -E 'INSERT |UPDATE |DELETE FROM|CREATE TABLE' <file>\npython3 -m py_compile <file>\n```",
+      "read": [
+        "Code&DBs/Workflow/surfaces/mcp/tools/operator.py",
+        "Code&DBs/Workflow/storage/postgres/__init__.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/surfaces/mcp/tools/operator.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m py_compile 'Code&DBs/Workflow/surfaces/mcp/tools/operator.py' && ! grep -rE 'INSERT |UPDATE |DELETE FROM|CREATE TABLE' 'Code&DBs/Workflow/surfaces/mcp/tools/operator.py'"
+    },
+    {
+      "label": "wave_p_tests",
+      "agent": "openai/gpt-5.4",
+      "task_type": "test",
+      "depends_on": [
+        "wave_p_thin_sources"
+      ],
+      "description": "Prove the migration with tests and regression assertions",
+      "outcome_goal": "Round-trip tests + grep regression tests pass; existing suites stay green",
+      "prompt": "Add or extend tests for Wave P.\n\nSteps:\n1. Run existing tests under Code&DBs/Workflow/tests/ that exercise the source files.\n2. For each new repository or authority module, add at least one round-trip test.\n3. Add a single regression test file that opens each source file as text and asserts it contains no 'INSERT ', 'UPDATE ', 'DELETE FROM', or 'CREATE TABLE' substrings.\n4. Run the relevant test subset.",
+      "read": [
+        "Code&DBs/Workflow/surfaces/mcp/tools/operator.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/tests/"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/' -k 'mcp' || true"
+    },
+    {
+      "label": "wave_p_close_bugs",
+      "agent": "openai/gpt-5.4-mini",
+      "task_type": "build",
+      "depends_on": [
+        "wave_p_tests"
+      ],
+      "description": "Resolve the wave's linked bugs as FIXED",
+      "outcome_goal": "Every linked bug is FIXED with a resolution citing this queue_id",
+      "prompt": "Resolve the Wave P linked bugs as FIXED after regression tests pass.\n\n```bash\nexport WORKFLOW_DATABASE_URL=\"postgresql://localhost:5432/praxis\"\ncd /Users/nate/Praxis\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-75A9C871941E\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Writes moved out of surfaces/mcp/tools/operator.py:11-145 in boundary_refactor_wave_p_mcp_surfaces_20260413. Verified no SQL/CREATE TABLE remains.\"\n}' --yes\n```",
+      "read": [],
+      "write": [],
+      "verify_command": "true"
+    },
+    {
+      "label": "wave_p_review",
+      "agent": "openai/gpt-5.4",
+      "task_type": "review",
+      "depends_on": [
+        "wave_p_close_bugs"
+      ],
+      "description": "Independent review of the wave rewrite",
+      "outcome_goal": "Any remaining leaks, stale DDL, or missed callsites are called out in writing",
+      "prompt": "Review the Wave P rewrite as a code review.\n\nPrioritize findings on:\n- any residual SQL strings or CREATE TABLE in the source files\n- callsites that relied on exception types/return shapes that changed\n- lost observability or silenced errors in the new repositories/authority modules\n- missed or weak tests around upsert semantics and error paths\n- whether new classes are exported from storage/postgres/__init__.py\n\nFindings first. If no findings remain, say so explicitly."
+    }
+  ]
+}

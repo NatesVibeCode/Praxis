@@ -20,6 +20,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from surfaces.cli.mcp_tools import run_cli_tool
+
 
 # ---------------------------------------------------------------------------
 # Project root — all relative paths resolve from here
@@ -340,28 +342,34 @@ def run_scheduler_tick(
                 last_run_at=last_run,
             )
 
-        # Dispatch
+        # Dispatch through the authorized workflow frontdoor.
         try:
             raw = load_raw(spec_path)
             if is_batch_spec(raw):
-                batch_results = run_workflow_batch_from_file(spec_path)
-                succeeded = sum(1 for r in batch_results if r.status == "succeeded")
-                failed = len(batch_results) - succeeded
                 results.append({
                     "job_name": job.name,
-                    "status": "succeeded" if failed == 0 else "partial",
-                    "batch_total": len(batch_results),
-                    "batch_succeeded": succeeded,
-                    "batch_failed": failed,
+                    "status": "failed",
+                    "error": "scheduler no longer launches batch specs directly; use workflow chain or API/MCP frontdoor",
                     "skipped": False,
                 })
             else:
-                result = run_workflow_from_spec_file(spec_path)
+                exit_code, payload = run_cli_tool(
+                    "praxis_workflow",
+                    {
+                        "action": "run",
+                        "spec_path": spec_path,
+                        "wait": False,
+                    },
+                )
+                if exit_code != 0:
+                    raise RuntimeError(str(payload.get("error") or payload))
                 results.append({
                     "job_name": job.name,
-                    "status": result.status,
-                    "run_id": result.run_id,
-                    "latency_ms": result.latency_ms,
+                    "status": payload.get("status", "queued"),
+                    "run_id": payload.get("run_id"),
+                    "command_id": payload.get("command_id"),
+                    "command_status": payload.get("command_status"),
+                    "result_ref": payload.get("result_ref"),
                     "skipped": False,
                 })
         except Exception as exc:
@@ -388,7 +396,7 @@ def force_run_job(
     state: SchedulerState | None = None,
 ) -> dict[str, Any]:
     """Force-dispatch a specific scheduled job regardless of cron timing."""
-    from .workflow import run_workflow_from_spec_file, run_workflow_batch_from_file
+    from surfaces.cli.mcp_tools import run_cli_tool
     from .workflow_spec import load_raw, is_batch_spec
 
     if state is None:
@@ -420,23 +428,29 @@ def force_run_job(
     try:
         raw = load_raw(spec_path)
         if is_batch_spec(raw):
-            batch_results = run_workflow_batch_from_file(spec_path)
-            succeeded = sum(1 for r in batch_results if r.status == "succeeded")
-            failed = len(batch_results) - succeeded
             result_dict = {
                 "job_name": job.name,
-                "status": "succeeded" if failed == 0 else "partial",
-                "batch_total": len(batch_results),
-                "batch_succeeded": succeeded,
-                "batch_failed": failed,
+                "status": "failed",
+                "error": "scheduler no longer launches batch specs directly; use workflow chain or API/MCP frontdoor",
             }
         else:
-            result = run_workflow_from_spec_file(spec_path)
+            exit_code, payload = run_cli_tool(
+                "praxis_workflow",
+                {
+                    "action": "run",
+                    "spec_path": spec_path,
+                    "wait": False,
+                },
+            )
+            if exit_code != 0:
+                raise RuntimeError(str(payload.get("error") or payload))
             result_dict = {
                 "job_name": job.name,
-                "status": result.status,
-                "run_id": result.run_id,
-                "latency_ms": result.latency_ms,
+                "status": payload.get("status", "queued"),
+                "run_id": payload.get("run_id"),
+                "command_id": payload.get("command_id"),
+                "command_status": payload.get("command_status"),
+                "result_ref": payload.get("result_ref"),
             }
     except Exception as exc:
         result_dict = {

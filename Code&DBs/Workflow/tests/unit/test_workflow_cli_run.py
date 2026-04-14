@@ -34,27 +34,24 @@ def test_cmd_run_writes_async_result_file(
     spec_path = _write_spec(tmp_path)
     result_path = tmp_path / "workflow-result.json"
 
-    monkeypatch.setattr(workflow_cli, "_get_pg_conn", lambda: object())
-    monkeypatch.setattr(workflow_cli, "_repo_root", lambda: "/repo")
     monkeypatch.setattr(
-        __import__("runtime.control_commands", fromlist=["*"]),
-        "request_workflow_submit_command",
-        lambda conn, **kwargs: type(
-            "_Command",
-            (),
+        workflow_cli,
+        "run_cli_tool",
+        lambda tool_name, params: (
+            0,
             {
+                "run_id": "workflow_test123",
+                "status": "queued",
+                "spec_name": "cli run smoke",
+                "total_jobs": 1,
                 "command_id": "control.command.submit.321",
                 "command_status": "succeeded",
+                "approval_required": False,
                 "result_ref": "workflow_run:workflow_test123",
-                "to_json": staticmethod(
-                    lambda: {
-                        "command_id": "control.command.submit.321",
-                        "command_status": "succeeded",
-                        "result_ref": "workflow_run:workflow_test123",
-                    }
-                ),
+                "stream_url": "/api/workflow-runs/workflow_test123/stream",
+                "status_url": "/api/workflow-runs/workflow_test123/status",
             },
-        )(),
+        ),
     )
 
     result = workflow_cli.cmd_run(

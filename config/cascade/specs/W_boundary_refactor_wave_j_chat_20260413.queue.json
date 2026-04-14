@@ -1,0 +1,137 @@
+{
+  "name": "Boundary Refactor Wave J \u2014 Chat Persistence",
+  "phase": "W",
+  "queue_id": "boundary_refactor_wave_j_chat_20260413",
+  "decision_ref": "bug_boundary_mining_2026_04_09",
+  "outcome_goal": "All writes currently in runtime/chat_orchestrator.py are moved into storage/postgres/*_repository.py modules; no INSERT/UPDATE/DELETE and no CREATE TABLE remain in those files; any inline DDL is in a migration.",
+  "anti_requirements": [
+    "Do NOT change the public API of the runtime modules \u2014 existing callers keep working",
+    "Do NOT alter table schemas. This is a move, not a redesign.",
+    "Do NOT widen writes outside storage/postgres/ and Code&DBs/Databases/migrations/workflow/"
+  ],
+  "linked_bugs": [
+    "BUG-AD0DB73979AC"
+  ],
+  "jobs": [
+    {
+      "label": "wave_j_plan",
+      "agent": "openai/gpt-5.4",
+      "task_type": "architecture",
+      "description": "Plan Wave J migration targets",
+      "outcome_goal": "A written plan names every repository/authority method, every migration, and every callsite",
+      "prompt": "You are planning Wave J \u2014 Chat Persistence. Do not write code yet.\n\nLinked bugs:\n- BUG-AD0DB73979AC \u2014 runtime/chat_orchestrator.py: conversations + conversation_messages + tool_result_traces\n\nSources with leaked authority:\n- Code&DBs/Workflow/runtime/chat_orchestrator.py\n\nTarget destinations:\n- storage/postgres/chat_repository.py\n\nRead each source file fully and produce a written plan naming:\n1. Every method signature for every new/extended repository or authority module\n2. Which tables already have migrations and which need a new migration file (name the number)\n3. Every callsite that will need follow-up changes\n4. The exact grep-based regression check each downstream job must pass\n\nReference idiom: storage/postgres/memory_graph_repository.py, storage/postgres/workflow_runtime_repository.py, storage/postgres/validators.py.",
+      "read": [
+        "Code&DBs/Workflow/runtime/chat_orchestrator.py",
+        "Code&DBs/Workflow/storage/postgres/memory_graph_repository.py",
+        "Code&DBs/Workflow/storage/postgres/workflow_runtime_repository.py",
+        "Code&DBs/Workflow/storage/postgres/validators.py",
+        "Code&DBs/Workflow/storage/postgres/__init__.py"
+      ],
+      "write": [],
+      "verify_command": "true"
+    },
+    {
+      "label": "wave_j_migrations",
+      "agent": "openai/gpt-5.4",
+      "task_type": "build",
+      "depends_on": [
+        "wave_j_plan"
+      ],
+      "description": "Move inline DDL to migrations",
+      "outcome_goal": "No CREATE TABLE remains in source files; any missing table has a migration",
+      "prompt": "For Wave J, audit every source file for inline CREATE TABLE or CREATE INDEX statements. For each one, either confirm it has a matching migration under Code&DBs/Databases/migrations/workflow/ or add a new migration with the next available number. Match columns and constraints exactly \u2014 this is a move, not a redesign. Do NOT edit the source files yet.\n\nSources:\n- Code&DBs/Workflow/runtime/chat_orchestrator.py\n",
+      "read": [
+        "Code&DBs/Workflow/runtime/chat_orchestrator.py"
+      ],
+      "write": [
+        "Code&DBs/Databases/migrations/workflow/"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -c 'from storage.postgres import ensure_postgres_available; ensure_postgres_available()'"
+    },
+    {
+      "label": "wave_j_create_repositories",
+      "agent": "openai/gpt-5.4",
+      "task_type": "refactor",
+      "depends_on": [
+        "wave_j_migrations"
+      ],
+      "description": "Create destination repositories/authority modules",
+      "outcome_goal": "Every needed repository/authority class exists with typed methods and package exports",
+      "prompt": "Create the repository/authority modules named in the Wave J plan. Mirror the idiom from storage/postgres/memory_graph_repository.py: class Postgres<Domain>Repository, __init__(conn), explicit method names, input validation via storage.postgres.validators.\n\nCover every INSERT/UPDATE/DELETE currently in these source files:\n- Code&DBs/Workflow/runtime/chat_orchestrator.py\n\nTarget files to create:\n- storage/postgres/chat_repository.py\n\nExport new classes from Code&DBs/Workflow/storage/postgres/__init__.py so downstream packages can import them. Do NOT edit the source files yet \u2014 the thinning step happens next.",
+      "read": [
+        "Code&DBs/Workflow/runtime/chat_orchestrator.py",
+        "Code&DBs/Workflow/storage/postgres/memory_graph_repository.py",
+        "Code&DBs/Workflow/storage/postgres/validators.py",
+        "Code&DBs/Workflow/storage/postgres/__init__.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/storage/postgres/",
+        "Code&DBs/Workflow/storage/postgres/__init__.py",
+        "Code&DBs/Workflow/authority/"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -c 'from storage.postgres import ensure_postgres_available; ensure_postgres_available()'"
+    },
+    {
+      "label": "wave_j_thin_sources",
+      "agent": "openai/gpt-5.4",
+      "task_type": "refactor",
+      "depends_on": [
+        "wave_j_create_repositories"
+      ],
+      "description": "Thin the source files to delegate through repositories",
+      "outcome_goal": "No SQL or CREATE TABLE remains in any source file; public APIs unchanged",
+      "prompt": "Rewrite each source file to delegate every write to the repositories/authority modules created in the previous job. Keep public function and class signatures unchanged. Remove every SQL string and every CREATE TABLE.\n\nSources to thin:\n- Code&DBs/Workflow/runtime/chat_orchestrator.py\n\nFor each source file, verify with:\n```\n! grep -E 'INSERT |UPDATE |DELETE FROM|CREATE TABLE' <file>\npython3 -m py_compile <file>\n```",
+      "read": [
+        "Code&DBs/Workflow/runtime/chat_orchestrator.py",
+        "Code&DBs/Workflow/storage/postgres/__init__.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/runtime/chat_orchestrator.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m py_compile 'Code&DBs/Workflow/runtime/chat_orchestrator.py' && ! grep -rE 'INSERT |UPDATE |DELETE FROM|CREATE TABLE' 'Code&DBs/Workflow/runtime/chat_orchestrator.py'"
+    },
+    {
+      "label": "wave_j_tests",
+      "agent": "openai/gpt-5.4",
+      "task_type": "test",
+      "depends_on": [
+        "wave_j_thin_sources"
+      ],
+      "description": "Prove the migration with tests and regression assertions",
+      "outcome_goal": "Round-trip tests + grep regression tests pass; existing suites stay green",
+      "prompt": "Add or extend tests for Wave J.\n\nSteps:\n1. Run existing tests under Code&DBs/Workflow/tests/ that exercise the source files.\n2. For each new repository or authority module, add at least one round-trip test.\n3. Add a single regression test file that opens each source file as text and asserts it contains no 'INSERT ', 'UPDATE ', 'DELETE FROM', or 'CREATE TABLE' substrings.\n4. Run the relevant test subset.",
+      "read": [
+        "Code&DBs/Workflow/runtime/chat_orchestrator.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/tests/"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/' -k 'chat' || true"
+    },
+    {
+      "label": "wave_j_close_bugs",
+      "agent": "openai/gpt-5.4-mini",
+      "task_type": "build",
+      "depends_on": [
+        "wave_j_tests"
+      ],
+      "description": "Resolve the wave's linked bugs as FIXED",
+      "outcome_goal": "Every linked bug is FIXED with a resolution citing this queue_id",
+      "prompt": "Resolve the Wave J linked bugs as FIXED after regression tests pass.\n\n```bash\nexport WORKFLOW_DATABASE_URL=\"postgresql://localhost:5432/praxis\"\ncd /Users/nate/Praxis\n\"Code&DBs/Workflow/workflow\" tools call praxis_bugs --input-json '{\n  \"command\": \"resolve\",\n  \"bug_id\": \"BUG-AD0DB73979AC\",\n  \"status\": \"FIXED\",\n  \"resolution\": \"Writes moved out of runtime/chat_orchestrator.py in boundary_refactor_wave_j_chat_20260413. Verified no SQL/CREATE TABLE remains.\"\n}' --yes\n```",
+      "read": [],
+      "write": [],
+      "verify_command": "true"
+    },
+    {
+      "label": "wave_j_review",
+      "agent": "openai/gpt-5.4",
+      "task_type": "review",
+      "depends_on": [
+        "wave_j_close_bugs"
+      ],
+      "description": "Independent review of the wave rewrite",
+      "outcome_goal": "Any remaining leaks, stale DDL, or missed callsites are called out in writing",
+      "prompt": "Review the Wave J rewrite as a code review.\n\nPrioritize findings on:\n- any residual SQL strings or CREATE TABLE in the source files\n- callsites that relied on exception types/return shapes that changed\n- lost observability or silenced errors in the new repositories/authority modules\n- missed or weak tests around upsert semantics and error paths\n- whether new classes are exported from storage/postgres/__init__.py\n\nFindings first. If no findings remain, say so explicitly."
+    }
+  ]
+}

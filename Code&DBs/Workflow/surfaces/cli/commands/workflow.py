@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import json
+import tempfile
 from typing import TextIO
 
 from surfaces.cli.mcp_tools import load_json_file, print_json
+from surfaces.cli import workflow_cli
 
 
 def _workflow_tool(params: dict[str, object]) -> dict[str, object]:
@@ -78,23 +81,36 @@ def _workflow_runtime_conn():
     return SyncPostgresConnection(get_workflow_pool())
 
 
+def _render_templated_spec_to_temp_file(spec_path: str, variables: dict[str, str]) -> str:
+    from runtime.workflow_spec import load_raw
+    from runtime.template_engine import render_spec
+
+    raw = load_raw(spec_path)
+    rendered = render_spec(raw, variables)
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as handle:
+        json.dump(rendered, handle, indent=2)
+        handle.write("\n")
+        return handle.name
+
+
+def _write_temp_json(payload: dict[str, object]) -> str:
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2)
+        handle.write("\n")
+        return handle.name
+
+
 def _run_command(args: list[str], *, stdout: TextIO) -> int:
     """Handle `workflow run <spec.json>` or `workflow run -p <prompt>`.
 
-    Automatically detects batch specs (kind=workflow_batch) and runs
-    all jobs in parallel, printing each result as a JSON line followed by a
-    summary object.
+    The launch now goes through `workflow_cli.cmd_run`, which in turn goes
+    through the MCP `praxis_workflow` tool. That keeps the launch authority on
+    one frontdoor instead of jumping straight into runtime helpers.
     """
 
     import json as _json
-    import time as _time
+    from types import SimpleNamespace
 
-    from runtime.workflow import (
-        WorkflowSpec,
-        run_workflow,
-        run_workflow_batch_from_file,
-        run_workflow_from_spec_file,
-    )
     from runtime.workflow_spec import is_batch_spec, load_raw
 
     if not args or args[0] in {"-h", "--help"}:
@@ -156,6 +172,7 @@ def _run_command(args: list[str], *, stdout: TextIO) -> int:
                 "  --dry-run            Parse and show the spec without executing\n"
             )
             return 2
+
         provider = "anthropic"
         model = None
         tier = None
@@ -167,7 +184,7 @@ def _run_command(args: list[str], *, stdout: TextIO) -> int:
         task_type = None
         system_prompt = None
         dry_run = False
-        clean_args = []
+        clean_args: list[str] = []
         i = 1
         while i < len(args):
             if args[i] == "--provider" and i + 1 < len(args):
@@ -209,18 +226,14 @@ def _run_command(args: list[str], *, stdout: TextIO) -> int:
         prompt = " ".join(clean_args)
 
         if scope_write and not workdir:
-            import os as _os
-
-            workdir = _os.getcwd()
+            workdir = os.getcwd()
 
         context_sections = None
         if context_files or scope_write:
             context_sections = []
             all_paths = list(context_files or []) + list(scope_write or [])
             for fpath in all_paths:
-                import os as _os
-
-                abs_path = _os.path.join(workdir or ".", fpath)
+                abs_path = os.path.join(workdir or ".", fpath)
                 try:
                     with open(abs_path) as fh:
                         content = fh.read()
@@ -244,46 +257,42 @@ def _run_command(args: list[str], *, stdout: TextIO) -> int:
             if not system_prompt:
                 system_prompt = "You are a code editor. Return ONLY valid JSON structured output."
 
-        spec = WorkflowSpec(
-            prompt=prompt,
-            provider_slug=provider,
-            model_slug=model,
-            tier=tier,
-            adapter_type=adapter,
-            timeout=timeout,
-            workdir=workdir,
-            scope_write=scope_write,
-            context_sections=context_sections,
-            system_prompt=system_prompt,
-            task_type=task_type,
-            persist=True,
-        )
-
-        if dry_run:
-            stdout.write(
-                _json.dumps(
-                    {
-                        "kind": "workflow_spec_preview",
-                        "provider_slug": spec.provider_slug,
-                        "model_slug": spec.model_slug,
-                        "tier": spec.tier,
-                        "adapter_type": spec.adapter_type,
-                        "timeout": spec.timeout,
-                        "workdir": spec.workdir,
-                        "scope_write": spec.scope_write,
-                        "context_sections_count": len(spec.context_sections) if spec.context_sections else 0,
-                        "prompt_preview": spec.prompt[:200],
-                        "system_prompt_preview": (spec.system_prompt or "")[:200],
-                    },
-                    indent=2,
+        prompt_spec = {
+            "name": prompt[:80] or "workflow cli prompt",
+            "workflow_id": "workflow_cli_prompt",
+            "phase": "execute",
+            "jobs": [
+                {
+                    "label": "run",
+                    "agent": f"{provider}/{model}" if model else provider,
+                    "prompt": prompt,
+                    "adapter_type": adapter,
+                    "tier": tier,
+                    "timeout": timeout,
+                    "workdir": workdir,
+                    "context_sections": context_sections or [],
+                    "system_prompt": system_prompt,
+                    "task_type": task_type,
+                }
+            ],
+        }
+        rendered_prompt_path = _write_temp_json(prompt_spec)
+        try:
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stdout):
+                return workflow_cli.cmd_run(
+                    SimpleNamespace(
+                        spec=rendered_prompt_path,
+                        dry_run=dry_run,
+                        job_id=None,
+                        run_id=None,
+                        result_file=None,
+                    )
                 )
-                + "\n"
-            )
-            return 0
-
-        result = run_workflow(spec)
-        stdout.write(_json.dumps(result.to_json(), indent=2) + "\n")
-        return 0 if result.status == "succeeded" else 1
+        finally:
+            try:
+                os.unlink(rendered_prompt_path)
+            except OSError:
+                pass
 
     spec_path = args[0]
 
@@ -294,38 +303,32 @@ def _run_command(args: list[str], *, stdout: TextIO) -> int:
         return 2
 
     if is_batch_spec(raw):
-        wall_start = _time.monotonic_ns()
-        try:
-            results = run_workflow_batch_from_file(spec_path, variables=variables)
-        except ValueError as exc:
-            stdout.write(f"error: {exc}\n")
-            return 2
-        wall_ms = (_time.monotonic_ns() - wall_start) // 1_000_000
-
-        succeeded = sum(1 for r in results if r.status == "succeeded")
-        failed = len(results) - succeeded
-
-        for result in results:
-            stdout.write(_json.dumps(result.to_json()) + "\n")
-
-        summary = {
-            "kind": "batch_summary",
-            "total": len(results),
-            "succeeded": succeeded,
-            "failed": failed,
-            "wall_clock_ms": wall_ms,
-        }
-        stdout.write(_json.dumps(summary) + "\n")
-        return 0 if failed == 0 else 1
-
-    try:
-        result = run_workflow_from_spec_file(spec_path, variables=variables)
-    except ValueError as exc:
-        stdout.write(f"error: {exc}\n")
+        stdout.write(
+            "error: workflow run no longer launches batch specs directly; "
+            "use workflow chain or the API/MCP frontdoor\n"
+        )
         return 2
 
-    stdout.write(_json.dumps(result.to_json(), indent=2) + "\n")
-    return 0 if result.status == "succeeded" else 1
+    rendered_path = spec_path
+    if variables:
+        rendered_path = _render_templated_spec_to_temp_file(spec_path, variables)
+    try:
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stdout):
+            return workflow_cli.cmd_run(
+                SimpleNamespace(
+                    spec=rendered_path,
+                    dry_run=False,
+                    job_id=None,
+                    run_id=None,
+                    result_file=None,
+                )
+            )
+    finally:
+        if rendered_path != spec_path:
+            try:
+                os.unlink(rendered_path)
+            except OSError:
+                pass
 
 
 def _chain_command(args: list[str], *, stdout: TextIO) -> int:

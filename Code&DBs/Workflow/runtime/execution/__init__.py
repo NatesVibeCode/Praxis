@@ -1,4 +1,4 @@
-"""Runtime execution engine — DAG orchestration with deterministic paths."""
+"""Runtime execution engine — workflow graph orchestration with deterministic paths."""
 
 from .context import extract_file_refs, inject_accumulated_context
 from .dependency import _DependencyResolution, _ExecutionCursor

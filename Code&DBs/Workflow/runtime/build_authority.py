@@ -11,6 +11,10 @@ from typing import Any
 from runtime.definition_compile_kernel import definition_revision, materialize_definition
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
+_TRIGGER_MANUAL_ROUTE = "trigger"
+_TRIGGER_SCHEDULE_ROUTE = "trigger/schedule"
+_TRIGGER_WEBHOOK_ROUTE = "trigger/webhook"
+_WEBHOOK_TRIGGER_EVENT_TYPE = "db.webhook_events.insert"
 
 
 def _json_clone(value: Any) -> Any:
@@ -45,6 +49,15 @@ def _iso_now() -> str:
 def _stable_digest(prefix: str, payload: Any) -> str:
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     return f"{prefix}_{hashlib.sha256(encoded.encode('utf-8')).hexdigest()[:16]}"
+
+
+def _trigger_route_for_payload(trigger: dict[str, Any]) -> str:
+    event_type = _as_text(trigger.get("event_type"))
+    if event_type == "schedule":
+        return _TRIGGER_SCHEDULE_ROUTE
+    if event_type == _WEBHOOK_TRIGGER_EVENT_TYPE:
+        return _TRIGGER_WEBHOOK_ROUTE
+    return _TRIGGER_MANUAL_ROUTE
 
 
 def _normalize_existing_binding(value: Any) -> dict[str, Any] | None:
@@ -411,6 +424,11 @@ def _build_graph(
         [step for step in definition.get("draft_flow", []) if isinstance(step, dict)],
         key=lambda step: int(step.get("order") or 0),
     )
+    ordered_triggers = [
+        trigger
+        for trigger in definition.get("trigger_intent", [])
+        if isinstance(trigger, dict)
+    ]
     bindings_by_node: dict[str, list[str]] = {}
     for binding in binding_ledger:
         for node_id in _string_list(binding.get("source_node_ids")):
@@ -428,6 +446,46 @@ def _build_graph(
     edges: list[dict[str, Any]] = []
     state_nodes: dict[str, dict[str, Any]] = {}
     state_edges: set[tuple[str, str, str]] = set()
+
+    first_step_id = _as_text(ordered_steps[0].get("id")) if ordered_steps else ""
+    for index, trigger in enumerate(ordered_triggers, start=1):
+        node_id = _as_text(trigger.get("source_node_id")) or f"trigger-node-{index:03d}"
+        route = _trigger_route_for_payload(trigger)
+        nodes.append(
+            {
+                "node_id": node_id,
+                "kind": "step",
+                "title": _as_text(trigger.get("title")) or f"Trigger {index}",
+                "summary": _as_text(trigger.get("summary")) or _as_text(trigger.get("event_type")) or "Trigger",
+                "route": route,
+                "trigger": {
+                    "event_type": _as_text(trigger.get("event_type")),
+                    "cron_expression": _as_text(trigger.get("cron_expression")),
+                    "source_ref": _as_text(trigger.get("source_ref")),
+                    "filter": _json_clone(trigger.get("filter")) if isinstance(trigger.get("filter"), dict) else {},
+                },
+                "prompt": "",
+                "required_inputs": [],
+                "outputs": [],
+                "persistence_targets": [],
+                "handoff_target": None,
+                "source_block_ids": _string_list(trigger.get("source_block_ids")),
+                "binding_ids": [],
+                "status": "ready",
+                "issue_ids": [],
+            }
+        )
+        if first_step_id:
+            edges.append(
+                {
+                    "edge_id": f"edge:{node_id}:{first_step_id}:trigger",
+                    "kind": "sequence",
+                    "from_node_id": node_id,
+                    "to_node_id": first_step_id,
+                    "branch_reason": "trigger",
+                    "position_index": len(edges),
+                }
+            )
 
     for step in ordered_steps:
         step_id = _as_text(step.get("id"))

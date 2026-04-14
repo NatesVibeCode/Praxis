@@ -24,10 +24,10 @@ _MUTATION_SEAMS = {
         "required_calls": {"request_control_command", "request_workflow_submit_command"},
     },
     "surfaces/cli/commands/workflow.py": {
-        "required_calls": {"request_workflow_submit_command", "render_workflow_submit_response"},
+        "required_calls": {"cmd_run"},
     },
     "surfaces/cli/workflow_cli.py": {
-        "required_calls": {"request_workflow_submit_command", "render_workflow_submit_response"},
+        "required_calls": {"run_cli_tool"},
     },
     "surfaces/mcp/tools/workflow.py": {
         "required_calls": {
@@ -48,6 +48,9 @@ _FORBIDDEN_MUTATION_LEAF_NAMES = {
     "submit_workflow_inline",
     "retry_job",
     "cancel_run",
+    "run_workflow",
+    "run_workflow_from_spec_file",
+    "run_workflow_batch_from_file",
 }
 
 
@@ -362,27 +365,20 @@ def test_submit_surfaces_converge_on_request_control_command_authority(tmp_path,
             }
         ],
     }
-    assert recorder.request_calls[4]["requested_by_kind"] == "cli"
-    assert recorder.request_calls[4]["requested_by_ref"] == "workflow_cli.run"
+    assert recorder.request_calls[4]["requested_by_kind"] == "mcp"
+    assert recorder.request_calls[4]["requested_by_ref"] == "praxis_workflow.run"
     assert recorder.request_calls[4]["payload"] == {
         "spec_path": cli_spec_path,
         "repo_root": str(tmp_path),
-        "run_id": "dispatch_cli_submit",
     }
-    assert cli_result == {
-        "run_id": "dispatch_request_005",
-        "status": "queued",
-        "spec_name": "cli run smoke",
-        "total_jobs": 1,
-        "command_id": "control.command.request.5",
-        "command_status": "succeeded",
-        "approval_required": False,
-        "stream_url": "/api/workflow-runs/dispatch_request_005/stream",
-        "status_url": "/api/workflow-runs/dispatch_request_005/status",
-        "result_ref": "workflow_run:dispatch_request_005",
-        "job_id": "cli-job",
-        "workflow_id": "cli_run_smoke",
-    }
+    assert cli_result["run_id"] == "dispatch_request_005"
+    assert cli_result["status"] == "queued"
+    assert cli_result["command_id"] == "control.command.request.5"
+    assert cli_result["command_status"] == "succeeded"
+    assert cli_result["approval_required"] is False
+    assert cli_result["result_ref"] == "workflow_run:dispatch_request_005"
+    assert cli_result["job_id"] == "cli-job"
+    assert cli_result["workflow_id"] == "cli_run_smoke"
 
 
 def test_legacy_queue_submit_frontdoor_routes_through_request_control_command_authority(tmp_path, monkeypatch) -> None:

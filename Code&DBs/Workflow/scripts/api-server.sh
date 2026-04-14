@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Launch the DAG Workflow REST API server with port rollover, reload, and auto-heal.
+# Launch the Praxis Workflow REST API server with port rollover, reload, and auto-heal.
 
 set -euo pipefail
 
@@ -78,7 +78,7 @@ while true; do
     reload_label="enabled"
   fi
 
-  echo "Starting DAG Workflow API"
+  echo "Starting Praxis Workflow API"
   echo "  Host: ${HOST}"
   echo "  Port: ${active_port}"
   echo "  Reload: ${reload_label}"

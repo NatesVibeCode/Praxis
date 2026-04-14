@@ -1,4 +1,4 @@
-"""Consolidated operator dashboard for DAG platform."""
+"""Consolidated operator dashboard for Praxis platform."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Populate the knowledge graph from the Dag Project codebase."""
+"""Populate the knowledge graph from the Praxis codebase."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ def populate_from_codebase(
     kg: KnowledgeGraph,
     repo_root: str,
 ) -> dict:
-    """Scan the Dag Project repo and ingest modules, documents, and edges.
+    """Scan the Praxis repo and ingest modules, documents, and edges.
 
     Returns stats: {entities_created, edges_created, errors}.
     """

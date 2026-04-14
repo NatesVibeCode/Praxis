@@ -440,6 +440,56 @@ def test_plan_definition_materializes_legacy_projections_from_definition_graph()
     assert result["compiled_spec"]["triggers"][0]["event_type"] == definition["trigger_intent"][0]["event_type"]
 
 
+def test_plan_definition_honors_explicit_phase_route_from_builder() -> None:
+    result = plan_definition(
+        {
+            "source_prose": "Draft a summary and then invoke the downstream workflow.",
+            "compiled_prose": "Draft a summary and then invoke the downstream workflow.",
+            "definition_revision": "def_explicit_phase_route",
+            "references": [],
+            "narrative_blocks": [],
+            "draft_flow": [
+                {
+                    "id": "step-001",
+                    "title": "Draft summary",
+                    "summary": "Produce the summary.",
+                    "depends_on": [],
+                    "order": 1,
+                },
+                {
+                    "id": "step-002",
+                    "title": "Invoke workflow",
+                    "summary": "Call the downstream workflow.",
+                    "depends_on": ["step-001"],
+                    "order": 2,
+                },
+            ],
+            "execution_setup": {
+                "phases": [
+                    {
+                        "step_id": "step-001",
+                        "agent_route": "auto/draft",
+                    },
+                    {
+                        "step_id": "step-002",
+                        "agent_route": "@workflow/invoke",
+                    },
+                ]
+            },
+            "trigger_intent": [
+                {
+                    "id": "trigger-001",
+                    "event_type": "manual",
+                }
+            ],
+        }
+    )
+
+    jobs = result["compiled_spec"]["jobs"]
+    assert jobs[0]["agent"] == "auto/draft"
+    assert jobs[1]["agent"] == "@workflow/invoke"
+
+
 def test_plan_definition_emits_after_failure_dependency_edges_from_moon_edge_gates() -> None:
     result = plan_definition(
         {

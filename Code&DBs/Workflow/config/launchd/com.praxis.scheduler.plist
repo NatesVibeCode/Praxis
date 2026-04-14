@@ -3,14 +3,15 @@
 <plist version="1.0">
 <dict>
 	<key>Label</key>
-	<string>com.dag.workflow-worker</string>
+	<string>com.praxis.scheduler</string>
 	<key>Program</key>
 	<string>python3</string>
 	<key>ProgramArguments</key>
 	<array>
 		<string>python3</string>
 		<string>-m</string>
-		<string>runtime.workflow_worker</string>
+		<string>runtime.scheduler</string>
+		<string>tick</string>
 	</array>
 	<key>WorkingDirectory</key>
 	<string>/Users/nate/Praxis/Code&DBs/Workflow</string>
@@ -20,15 +21,13 @@
 		<string>/Users/nate/Praxis/Code&DBs/Workflow</string>
 		<key>WORKFLOW_DATABASE_URL</key>
 		<string>postgresql://localhost:5432/praxis</string>
-		<key>PATH</key>
-		<string>/usr/local/bin:/usr/bin:/bin</string>
 	</dict>
-	<key>KeepAlive</key>
-	<true/>
+	<key>StartInterval</key>
+	<integer>60</integer>
 	<key>StandardOutPath</key>
-	<string>/tmp/dag-workflow-worker.log</string>
+	<string>/tmp/praxis-scheduler.log</string>
 	<key>StandardErrorPath</key>
-	<string>/tmp/dag-workflow-worker.err</string>
+	<string>/tmp/praxis-scheduler.err</string>
 	<key>RunAtLoad</key>
 	<true/>
 	<key>ProcessType</key>

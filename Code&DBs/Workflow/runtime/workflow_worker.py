@@ -30,7 +30,7 @@ if __name__ == "__main__":
     pool = get_workflow_pool()
     conn = SyncPostgresConnection(pool)
     # __file__ = .../Code&DBs/Workflow/runtime/workflow_worker.py
-    # repo root = .../Dag Project (3 levels up from runtime/)
+    # repo root = .../Praxis (3 levels up from runtime/)
     _here = os.path.abspath(__file__)
     repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(_here))))
 

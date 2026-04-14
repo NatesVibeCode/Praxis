@@ -16,7 +16,7 @@ import { MoonEdges } from './MoonEdges';
 import { useMoonDrag } from './useMoonDrag';
 import { loadCatalog, getCatalog } from './catalog';
 import type { CatalogItem } from './catalog';
-import type { BuildNode, BuildEdge } from '../shared/types';
+import type { BuildNode, BuildEdge, BuildPayload } from '../shared/types';
 import './moon-build.css';
 
 const EXAMPLE_PROMPTS = [
@@ -90,6 +90,46 @@ function showIcon(node: OrbitNode): boolean {
     (node.ringState === 'blocked' && !!node.route);
 }
 
+const TRIGGER_MANUAL_ROUTE = 'trigger';
+const TRIGGER_SCHEDULE_ROUTE = 'trigger/schedule';
+const TRIGGER_WEBHOOK_ROUTE = 'trigger/webhook';
+const WEBHOOK_TRIGGER_EVENT = 'db.webhook_events.insert';
+
+function isTriggerRoute(route?: string): boolean {
+  return route === TRIGGER_MANUAL_ROUTE || route === TRIGGER_SCHEDULE_ROUTE || route === TRIGGER_WEBHOOK_ROUTE;
+}
+
+function normalizeTriggerFilter(filter: unknown): Record<string, unknown> {
+  return filter && typeof filter === 'object' && !Array.isArray(filter)
+    ? { ...filter as Record<string, unknown> }
+    : {};
+}
+
+function buildTriggerConfig(route?: string, existing?: BuildNode['trigger']): BuildNode['trigger'] | undefined {
+  if (!isTriggerRoute(route)) return undefined;
+  const filter = normalizeTriggerFilter(existing?.filter);
+  const sourceRef = typeof existing?.source_ref === 'string' ? existing.source_ref : undefined;
+  if (route === TRIGGER_SCHEDULE_ROUTE) {
+    return {
+      event_type: 'schedule',
+      cron_expression: (typeof existing?.cron_expression === 'string' && existing.cron_expression.trim()) || '@daily',
+      filter,
+    };
+  }
+  if (route === TRIGGER_WEBHOOK_ROUTE) {
+    return {
+      event_type: WEBHOOK_TRIGGER_EVENT,
+      source_ref: sourceRef,
+      filter,
+    };
+  }
+  return {
+    event_type: 'manual',
+    source_ref: sourceRef,
+    filter,
+  };
+}
+
 export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun, initialMode }: Props) {
   const { payload, loading, error, mutate, reload, setPayload } = useBuildPayload(workflowId);
   const [state, dispatch] = useReducer(moonBuildReducer, {
@@ -130,6 +170,17 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
     }
   }, [mutate]);
 
+  const updateBuildGraph = useCallback(async (graph: NonNullable<BuildPayload['build_graph']>) => {
+    if (!payload) return;
+    setPayload({ ...payload, build_graph: graph });
+    if (workflowId) {
+      await runMutation('build_graph', {
+        nodes: graph.nodes || [],
+        edges: graph.edges || [],
+      });
+    }
+  }, [payload, runMutation, setPayload, workflowId]);
+
   // Auto-advance active node:
   // - after compile (advanceQueued=true)
   // - after node action changes firstUnresolvedId
@@ -168,7 +219,13 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
       const title = catalogItem?.label || actionValue;
 
       // Update the node locally
-      nodes[idx] = { ...nodes[idx], route: actionValue, status: 'ready', title };
+      nodes[idx] = {
+        ...nodes[idx],
+        route: actionValue,
+        status: 'ready',
+        title,
+        trigger: buildTriggerConfig(actionValue, nodes[idx].trigger),
+      };
 
       // If no unresolved nodes remain after this, add a new empty one
       const hasUnresolved = nodes.some((n, i) => i !== idx && !(n.route || '').trim());
@@ -178,12 +235,7 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
         edges.push({ edge_id: `edge-${nodeId}-${newId}`, kind: 'sequence', from_node_id: nodeId, to_node_id: newId });
       }
 
-      setPayload({ ...payload, build_graph: { ...graph, nodes, edges } });
-
-      // Persist to DB whenever there's an existing workflow
-      if (workflowId) {
-        await runMutation('build_graph', { nodes, edges });
-      }
+      await updateBuildGraph({ ...graph, nodes, edges });
 
       // Close popout and advance to next unresolved node
       dispatch({ type: 'CLOSE_POPOUT' });
@@ -191,7 +243,7 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
     } catch (err) {
       setMutationError(err instanceof Error ? err.message : 'Mutation failed');
     }
-  }, [payload, setPayload, runMutation, workflowId, catalog]);
+  }, [payload, updateBuildGraph, catalog]);
 
   const handleApplyGate = useCallback(async (edgeId: string, gateFamily: string) => {
     if (!payload?.build_graph) return;
@@ -208,16 +260,13 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
           ...edges[idx],
           gate: { state: 'configured', label: gateLabel, family: gateFamily },
         };
-        setPayload({ ...payload, build_graph: { ...graph, edges } } as any);
-        if (workflowId) {
-          await runMutation('build_graph', { nodes: graph.nodes || [], edges });
-        }
+        await updateBuildGraph({ ...graph, edges } as any);
       }
       dispatch({ type: 'CLOSE_POPOUT' });
     } catch (err) {
       setMutationError(err instanceof Error ? err.message : 'Mutation failed');
     }
-  }, [payload, setPayload, runMutation, workflowId, catalog]);
+  }, [payload, updateBuildGraph, catalog]);
 
   const handleCompile = useCallback(async () => {
     if (!state.compileProse.trim()) return;
@@ -231,8 +280,12 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
       if (state.selectedTrigger) {
         const graph = (result as any)?.build_graph;
         if (graph?.nodes?.length) {
-          graph.nodes[0].route = state.selectedTrigger.actionValue;
-          graph.nodes[0].status = 'ready';
+          graph.nodes[0] = {
+            ...graph.nodes[0],
+            route: state.selectedTrigger.actionValue,
+            status: 'ready',
+            trigger: buildTriggerConfig(state.selectedTrigger.actionValue, graph.nodes[0].trigger),
+          };
         }
       }
       const wfId = (result as any)?.definition?.workflow_id || (result as any)?.workflow?.id;
@@ -256,7 +309,7 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
     setPayload({
       build_graph: {
         nodes: [
-          { node_id: 'node-1', kind: 'step', title: item.label, route: item.actionValue, status: 'ready', summary: `${item.label} trigger` },
+          { node_id: 'node-1', kind: 'step', title: item.label, route: item.actionValue, trigger: buildTriggerConfig(item.actionValue), status: 'ready', summary: `${item.label} trigger` },
           { node_id: 'node-2', kind: 'step', title: 'Next step', route: '', status: '', summary: '' },
         ],
         edges: [
@@ -333,14 +386,11 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
         newEdges.push({ edge_id: `edge-${lastStep.node_id}-${newId}`, kind: 'sequence', from_node_id: lastStep.node_id, to_node_id: newId });
       }
       const newNodes: BuildNode[] = [...(graph.nodes || []), newNode];
-      setPayload({ ...payload, build_graph: { ...graph, nodes: newNodes, edges: newEdges } });
-      if (workflowId) {
-        await runMutation('build_graph', { nodes: newNodes, edges: newEdges });
-      }
+      await updateBuildGraph({ ...graph, nodes: newNodes, edges: newEdges });
     } catch (err) {
       setMutationError(err instanceof Error ? err.message : 'Mutation failed');
     }
-  }, [payload, setPayload, runMutation, workflowId]);
+  }, [payload, updateBuildGraph]);
 
   const reorderNode = useCallback(async (sourceNodeId: string, targetNodeId: string) => {
     if (sourceNodeId === targetNodeId || !payload?.build_graph) return;
@@ -359,14 +409,11 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
         from_node_id: nodes[i].node_id,
         to_node_id: n.node_id,
       }));
-      setPayload({ ...payload, build_graph: { ...graph, nodes, edges } });
-      if (workflowId) {
-        await runMutation('build_graph', { nodes, edges });
-      }
+      await updateBuildGraph({ ...graph, nodes, edges });
     } catch (err) {
       setMutationError(err instanceof Error ? err.message : 'Mutation failed');
     }
-  }, [payload, setPayload, runMutation, workflowId]);
+  }, [payload, updateBuildGraph]);
 
   const drag = useMoonDrag((dragPayload, target) => {
     dispatch({ type: 'DRAG_END' });
@@ -667,6 +714,8 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
                   content={viewModel.dockContent}
                   workflowId={workflowId}
                   onMutate={runMutation}
+                  buildGraph={payload?.build_graph}
+                  onUpdateBuildGraph={updateBuildGraph}
                   onClose={() => dispatch({ type: 'CLOSE_DOCK' })}
                   selectedEdge={selectedEdge}
                   edgeFromLabel={edgeFromNode?.title}

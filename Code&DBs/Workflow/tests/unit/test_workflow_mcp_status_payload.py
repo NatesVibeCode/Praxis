@@ -46,7 +46,6 @@ def test_run_status_payload_includes_submission_summary(monkeypatch) -> None:
     )
     monkeypatch.setattr(unified, "summarize_run_health", lambda *_args, **_kwargs: {"state": "healthy"})
     monkeypatch.setattr(unified, "summarize_run_recovery", lambda *_args, **_kwargs: {"mode": "monitor"})
-    monkeypatch.setattr(workflow_tools, "_render_dashboard_panel", lambda *_args, **_kwargs: "status-dashboard")
 
     payload = workflow_tools._run_status_payload(object(), "run-1")
 
@@ -59,7 +58,74 @@ def test_run_status_payload_includes_submission_summary(monkeypatch) -> None:
         "integrity_status": "matched",
         "latest_review_decision": "approve",
     }
-    assert payload["dashboard"] == "status-dashboard"
+    assert "submission-spec" in payload["dashboard"]
+    assert "build.codegen" in payload["dashboard"]
+
+
+def test_dashboard_view_counts_missing_jobs_as_pending() -> None:
+    now = datetime(2026, 4, 9, 12, 0, tzinfo=timezone.utc)
+
+    view = workflow_tools._dashboard_view_from_status_data(
+        {
+            "run_id": "run-pending",
+            "status": "queued",
+            "spec_name": "pending-spec",
+            "total_jobs": 3,
+            "completed_jobs": 0,
+            "created_at": now,
+            "jobs": [
+                {
+                    "label": "job-a",
+                    "status": "running",
+                    "started_at": now,
+                }
+            ],
+        },
+        now=now,
+    )
+
+    assert view is not None
+    assert view["pending_count"] == 2
+    assert view["completed_jobs"] == 0
+    assert view["total_jobs"] == 3
+
+
+def test_run_submit_result_payload_uses_supplied_status_data_without_extra_query(monkeypatch) -> None:
+    status_data = {
+        "run_id": "dispatch_123",
+        "status": "queued",
+        "spec_name": "submit-spec",
+        "total_jobs": 2,
+        "completed_jobs": 0,
+        "created_at": datetime(2026, 4, 9, 12, 0, tzinfo=timezone.utc),
+        "jobs": [],
+    }
+
+    class _Pg:
+        pass
+
+    payload = workflow_tools._run_submit_result_payload(
+        {
+            "run_id": "dispatch_123",
+            "status": "queued",
+            "spec_name": "submit-spec",
+            "total_jobs": 2,
+        },
+        pg=_Pg(),
+        status_data=status_data,
+        delivery={"dashboard_in_payload": True},
+    )
+
+    assert payload["run_id"] == "dispatch_123"
+    assert "submit-spec" in payload["dashboard"]
+    assert "2 pending" in payload["dashboard"]
+    assert payload["delivery"] == {"dashboard_in_payload": True}
+
+
+def test_next_poll_interval_resets_on_progress_and_backs_off_when_idle() -> None:
+    assert workflow_tools._next_poll_interval(5.0, progress_changed=True) == 1.0
+    assert workflow_tools._next_poll_interval(1.0, progress_changed=False) == 1.7
+    assert workflow_tools._next_poll_interval(10.0, progress_changed=False) == 12.0
 
 
 def test_tool_praxis_workflow_status_returns_structured_runtime_error(monkeypatch) -> None:
@@ -175,7 +241,6 @@ def test_tool_praxis_workflow_run_returns_async_payload_without_progress_emitter
 
     monkeypatch.setattr(workflow_tools, "_workflow_spec_mod", lambda: type("_SpecMod", (), {"WorkflowSpec": _Spec}))
     monkeypatch.setattr(workflow_tools._subs, "get_pg_conn", lambda: object())
-    monkeypatch.setattr(workflow_tools, "_render_dashboard_panel", lambda *_args, **_kwargs: "submit-dashboard")
     monkeypatch.setattr(
         workflow_tools,
         "_submit_workflow_via_service_bus",
@@ -199,7 +264,7 @@ def test_tool_praxis_workflow_run_returns_async_payload_without_progress_emitter
         "command_status": "succeeded",
         "stream_url": "/api/workflow-runs/dispatch_001/stream",
         "status_url": "/api/workflow-runs/dispatch_001/status",
-        "dashboard": "submit-dashboard",
+        "dashboard": "━━━ workflow | 0/1 | $0 | 0s ━━━\n  · 1 pending\n  ─ $0",
         "delivery": {
             "dashboard_in_payload": True,
             "live_channel": "none",
@@ -239,7 +304,6 @@ def test_tool_praxis_workflow_run_with_message_only_emitter_returns_async_payloa
 
     monkeypatch.setattr(workflow_tools, "_workflow_spec_mod", lambda: type("_SpecMod", (), {"WorkflowSpec": _Spec}))
     monkeypatch.setattr(workflow_tools._subs, "get_pg_conn", lambda: object())
-    monkeypatch.setattr(workflow_tools, "_render_dashboard_panel", lambda *_args, **_kwargs: "submit-dashboard")
     monkeypatch.setattr(
         workflow_tools,
         "_submit_workflow_via_service_bus",
@@ -263,7 +327,7 @@ def test_tool_praxis_workflow_run_with_message_only_emitter_returns_async_payloa
     )
 
     assert payload["run_id"] == "dispatch_002"
-    assert payload["dashboard"] == "submit-dashboard"
+    assert payload["dashboard"] == "━━━ workflow | 0/1 | $0 | 0s ━━━\n  · 1 pending\n  ─ $0"
     assert payload["delivery"] == {
         "dashboard_in_payload": True,
         "live_channel": "notifications.message",

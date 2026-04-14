@@ -37,10 +37,30 @@ class RouteAuthoritySnapshotStore:
         self._lock = threading.Lock()
         self._snapshots: weakref.WeakKeyDictionary[object, RouteAuthoritySnapshot] = weakref.WeakKeyDictionary()
         self._task_policies: weakref.WeakKeyDictionary[object, dict[str, Any]] = weakref.WeakKeyDictionary()
+        self._strong_snapshots: dict[str, RouteAuthoritySnapshot] = {}
+        self._strong_task_policies: dict[str, dict[str, Any]] = {}
 
     @staticmethod
     def authority_scope(conn: object) -> object:
-        return getattr(conn, "_pool", conn)
+        return getattr(conn, "_authority_scope", getattr(conn, "_pool", conn))
+
+    @staticmethod
+    def authority_cache_key(conn: object) -> str | None:
+        explicit = getattr(conn, "_authority_cache_key", None)
+        if explicit is not None:
+            return str(explicit)
+        scope = RouteAuthoritySnapshotStore.authority_scope(conn)
+        if RouteAuthoritySnapshotStore._supports_weakref(scope):
+            return None
+        return f"{type(scope).__module__}.{type(scope).__qualname__}:{id(scope)}"
+
+    @staticmethod
+    def _supports_weakref(scope: object) -> bool:
+        try:
+            weakref.ref(scope)
+        except TypeError:
+            return False
+        return True
 
     def get_snapshot(
         self,
@@ -49,6 +69,20 @@ class RouteAuthoritySnapshotStore:
         load_snapshot: Callable[[object], RouteAuthoritySnapshot],
     ) -> RouteAuthoritySnapshot:
         scope = self.authority_scope(conn)
+        cache_key = self.authority_cache_key(conn)
+        if cache_key is not None:
+            with self._lock:
+                cached = self._strong_snapshots.get(cache_key)
+                if cached is not None:
+                    return cached
+            snapshot = load_snapshot(conn)
+            with self._lock:
+                cached = self._strong_snapshots.get(cache_key)
+                if cached is not None:
+                    return cached
+                self._strong_snapshots[cache_key] = snapshot
+                self._strong_task_policies.setdefault(cache_key, {})
+                return snapshot
         with self._lock:
             cached = self._snapshots.get(scope)
             if cached is not None:
@@ -70,6 +104,21 @@ class RouteAuthoritySnapshotStore:
         load_policy: Callable[[object, str], Any],
     ) -> Any:
         scope = self.authority_scope(conn)
+        cache_key = self.authority_cache_key(conn)
+        if cache_key is not None:
+            with self._lock:
+                cache = self._strong_task_policies.setdefault(cache_key, {})
+                cached = cache.get(task_type)
+                if cached is not None:
+                    return cached
+            policy = load_policy(conn, task_type)
+            with self._lock:
+                cache = self._strong_task_policies.setdefault(cache_key, {})
+                cached = cache.get(task_type)
+                if cached is not None:
+                    return cached
+                cache[task_type] = policy
+                return policy
         with self._lock:
             cache = self._task_policies.setdefault(scope, {})
             cached = cache.get(task_type)
@@ -87,15 +136,22 @@ class RouteAuthoritySnapshotStore:
     def invalidate(self, conn: object) -> None:
         """Drop cached static authority for one authority source."""
         scope = self.authority_scope(conn)
+        cache_key = self.authority_cache_key(conn)
         with self._lock:
-            self._snapshots.pop(scope, None)
-            self._task_policies.pop(scope, None)
+            if cache_key is None:
+                self._snapshots.pop(scope, None)
+                self._task_policies.pop(scope, None)
+            else:
+                self._strong_snapshots.pop(cache_key, None)
+                self._strong_task_policies.pop(cache_key, None)
 
     def invalidate_all(self) -> None:
         """Drop all cached static authority in this process."""
         with self._lock:
             self._snapshots = weakref.WeakKeyDictionary()
             self._task_policies = weakref.WeakKeyDictionary()
+            self._strong_snapshots = {}
+            self._strong_task_policies = {}
 
 
 _store = RouteAuthoritySnapshotStore()

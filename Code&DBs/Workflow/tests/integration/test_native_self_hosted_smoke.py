@@ -131,7 +131,7 @@ def test_native_self_hosted_smoke_proves_repo_local_authority_and_durable_graph_
         "queue_contract": "artifacts/workflow/PRAXIS_NATIVE_SELF_HOSTED_SMOKE.queue.json",
         "instance_resolver": "runtime.instance.resolve_native_instance",
         "registry_authority": "registry.repository.load_registry_resolver",
-        "frontdoor": "surfaces.api.frontdoor.NativeDagFrontdoor",
+        "frontdoor": "surfaces.api.frontdoor.NativeWorkflowFrontdoor",
         "durable_run_authority": "workflow_runs",
         "durable_outcome_authority": [
             "workflow_events",
@@ -179,7 +179,7 @@ def test_native_self_hosted_smoke_proves_repo_local_authority_and_durable_graph_
             )
         )
 
-        api = frontdoor.NativeDagFrontdoor(registry=resolver)
+        api = frontdoor.NativeWorkflowFrontdoor(registry=resolver)
         monkeypatch.setattr(
             frontdoor,
             "_now",

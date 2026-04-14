@@ -80,6 +80,7 @@ from .operator_control_repository import (
     bootstrap_operator_control_repository_schema,
 )
 from .operator_frame_repository import PostgresOperatorFrameRepository
+from .memory_graph_repository import PostgresMemoryGraphRepository
 from .roadmap_authoring_repository import PostgresRoadmapAuthoringRepository
 from .task_route_eligibility_repository import (
     PostgresTaskRouteEligibilityRepository,
@@ -99,6 +100,7 @@ __all__ = [
     "ControlPlaneSchemaReadiness",
     "PostgresEvidenceReader",
     "PostgresConfigurationError",
+    "PostgresMemoryGraphRepository",
     "PostgresOperatorControlRepository",
     "PostgresOperatorFrameRepository",
     "PostgresRoadmapAuthoringRepository",

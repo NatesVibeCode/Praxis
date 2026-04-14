@@ -1,4 +1,4 @@
-"""Output parser adapter — DAG node that extracts structured output from model response.
+"""Output parser adapter — workflow node that extracts structured output from model response.
 
 Sits between the LLM node and the file_writer node. Parses the model's
 stdout (which may be JSON, NDJSON, or fenced code blocks) into a canonical

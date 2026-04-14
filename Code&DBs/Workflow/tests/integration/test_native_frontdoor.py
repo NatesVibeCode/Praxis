@@ -279,7 +279,7 @@ def test_native_frontdoor_status_serializes_operator_frame_summaries(
     monkeypatch.setattr(frontdoor, "resolve_native_instance", _resolve_instance)
     monkeypatch.setattr(frontdoor, "RuntimeOrchestrator", _FakeRuntimeOrchestrator)
 
-    api = frontdoor.NativeDagFrontdoor(
+    api = frontdoor.NativeWorkflowFrontdoor(
         registry=_registry(),
         connect_database=_connect_database,
         evidence_reader_factory=lambda env_arg: {"env": env_arg},
@@ -399,7 +399,7 @@ def test_native_frontdoor_stays_repo_local_and_fails_closed_without_native_insta
 
     monkeypatch.setattr(frontdoor, "resolve_native_instance", _resolve_instance)
 
-    api = frontdoor.NativeDagFrontdoor(
+    api = frontdoor.NativeWorkflowFrontdoor(
         registry=_registry(),
         postgres_health_service=_postgres_health,
         connect_database=_connect_database,
@@ -592,7 +592,7 @@ def test_native_frontdoor_surfaces_shadow_packet_inspection(
 
     monkeypatch.setattr(frontdoor, "resolve_native_instance", _resolve_instance)
 
-    api = frontdoor.NativeDagFrontdoor(
+    api = frontdoor.NativeWorkflowFrontdoor(
         registry=_registry(),
         postgres_health_service=_postgres_health,
         connect_database=_connect_database,
@@ -758,7 +758,7 @@ def test_native_frontdoor_status_tolerates_legacy_schema_without_packet_inspecti
 
     monkeypatch.setattr(frontdoor, "resolve_native_instance", _resolve_instance)
 
-    api = frontdoor.NativeDagFrontdoor(
+    api = frontdoor.NativeWorkflowFrontdoor(
         registry=_registry(),
         postgres_health_service=_postgres_health,
         connect_database=_connect_database,
@@ -842,7 +842,7 @@ def test_native_frontdoor_fails_closed_before_downstream_services_when_native_in
         seen["persist_calls"] += 1
         raise AssertionError("native instance resolution should fail before persistence")
 
-    api = frontdoor.NativeDagFrontdoor(
+    api = frontdoor.NativeWorkflowFrontdoor(
         registry=_registry(),
         postgres_health_service=_postgres_health,
         connect_database=_connect_database,

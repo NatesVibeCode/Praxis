@@ -10,6 +10,7 @@ from pathlib import Path
 import memory.graph_hygiene as graph_hygiene_module
 from memory.graph_hygiene import GraphHygienist
 from memory.repository import MemoryEdgeRef
+from memory.types import Edge, Entity, EntityType, RelationType
 from runtime.database_maintenance import DatabaseMaintenanceProcessor, MaintenanceIntent
 from runtime.embedding_service import EmbeddingRuntimeAuthority
 from storage.postgres.memory_graph_repository import PostgresMemoryGraphRepository
@@ -131,6 +132,215 @@ class _FakeEmbedder:
     authority = EmbeddingRuntimeAuthority()
     model_name = authority.model_name
     dimensions = authority.dimensions
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _entity(*, entity_id: str) -> Entity:
+    now = _utc_now()
+    return Entity(
+        id=entity_id,
+        entity_type=EntityType.fact,
+        name="Entity Name",
+        content="Entity Content",
+        metadata={"topic": "memory"},
+        created_at=now,
+        updated_at=now,
+        source="test",
+        confidence=0.9,
+    )
+
+
+def _edge(*, source_id: str, target_id: str) -> Edge:
+    return Edge(
+        source_id=source_id,
+        target_id=target_id,
+        relation_type=RelationType.related_to,
+        weight=0.7,
+        metadata={"kind": "test"},
+        created_at=_utc_now(),
+    )
+
+
+def test_postgres_memory_graph_repository_upserts_entities_through_owned_insert():
+    query = _normalize_sql(
+        """
+        INSERT INTO memory_entities
+        (
+            id,
+            entity_type,
+            name,
+            content,
+            metadata,
+            source,
+            confidence,
+            archived,
+            created_at,
+            updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, false, $8, $9)
+        ON CONFLICT (id) DO UPDATE SET
+            name = EXCLUDED.name,
+            content = EXCLUDED.content,
+            metadata = EXCLUDED.metadata,
+            source = EXCLUDED.source,
+            confidence = EXCLUDED.confidence,
+            archived = false,
+            updated_at = EXCLUDED.updated_at
+        """
+    )
+    conn = _FakeConn()
+    repository = PostgresMemoryGraphRepository(conn)
+    entity = _entity(entity_id="entity-1")
+
+    entity_id = repository.upsert_entity(entity=entity)
+
+    assert entity_id == "entity-1"
+    assert conn.execute_calls == [
+        (
+            query,
+            (
+                "entity-1",
+                "fact",
+                "Entity Name",
+                "Entity Content",
+                '{"topic":"memory"}',
+                "test",
+                0.9,
+                entity.created_at,
+                entity.updated_at,
+            ),
+        )
+    ]
+
+
+def test_postgres_memory_graph_repository_updates_entity_fields_through_owned_update():
+    query = _normalize_sql(
+        """
+        UPDATE memory_entities
+        SET name = $1, metadata = $2::jsonb, updated_at = $3
+        WHERE id = $4
+          AND entity_type = $5
+          AND NOT archived
+        RETURNING id
+        """
+    )
+    updated_at = _utc_now()
+    conn = _FakeConn(execute_results={query: [{"id": "entity-1"}]})
+    repository = PostgresMemoryGraphRepository(conn)
+
+    updated = repository.update_entity_fields(
+        entity_id="entity-1",
+        entity_type=EntityType.fact,
+        fields={
+            "name": "Updated Name",
+            "metadata": {"state": "fresh"},
+            "updated_at": updated_at,
+            "ignored": "skip",
+        },
+    )
+
+    assert updated is True
+    assert conn.execute_calls == [
+        (
+            query,
+            (
+                "Updated Name",
+                '{"state":"fresh"}',
+                updated_at,
+                "entity-1",
+                "fact",
+            ),
+        )
+    ]
+
+
+def test_postgres_memory_graph_repository_archives_entity_through_owned_update():
+    query = _normalize_sql(
+        """
+        UPDATE memory_entities
+        SET archived = true
+        WHERE id = $1
+          AND entity_type = $2
+          AND NOT archived
+        RETURNING id
+        """
+    )
+    conn = _FakeConn(execute_results={query: [{"id": "entity-1"}]})
+    repository = PostgresMemoryGraphRepository(conn)
+
+    updated = repository.archive_entity(
+        entity_id="entity-1",
+        entity_type=EntityType.fact,
+    )
+
+    assert updated is True
+    assert conn.execute_calls == [(query, ("entity-1", "fact"))]
+
+
+def test_postgres_memory_graph_repository_upserts_edges_through_owned_insert():
+    query = _normalize_sql(
+        """
+        INSERT INTO memory_edges
+        (
+            source_id,
+            target_id,
+            relation_type,
+            weight,
+            metadata,
+            created_at
+        )
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+        ON CONFLICT (source_id, target_id, relation_type) DO UPDATE SET
+            weight = EXCLUDED.weight,
+            metadata = EXCLUDED.metadata
+        """
+    )
+    conn = _FakeConn()
+    repository = PostgresMemoryGraphRepository(conn)
+    edge = _edge(source_id="entity-1", target_id="entity-2")
+
+    created = repository.upsert_edge(edge=edge)
+
+    assert created is True
+    assert conn.execute_calls == [
+        (
+            query,
+            (
+                "entity-1",
+                "entity-2",
+                "related_to",
+                0.7,
+                '{"kind":"test"}',
+                edge.created_at,
+            ),
+        )
+    ]
+
+
+def test_postgres_memory_graph_repository_deletes_single_edge_through_owned_delete():
+    query = _normalize_sql(
+        """
+        DELETE FROM memory_edges
+        WHERE source_id = $1
+          AND target_id = $2
+          AND relation_type = $3
+        RETURNING source_id
+        """
+    )
+    conn = _FakeConn(execute_results={query: [{"source_id": "entity-1"}]})
+    repository = PostgresMemoryGraphRepository(conn)
+
+    deleted = repository.delete_edge(
+        source_id="entity-1",
+        target_id="entity-2",
+        relation_type=RelationType.related_to,
+    )
+
+    assert deleted is True
+    assert conn.execute_calls == [(query, ("entity-1", "entity-2", "related_to"))]
 
 
 def test_postgres_memory_graph_repository_archives_entities_through_owned_update():

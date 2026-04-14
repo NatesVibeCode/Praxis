@@ -48,11 +48,11 @@ def test_native_instance_rejects_legacy_runtime_profile_grammar(tmp_path: Path) 
         tmp_path,
         {
             "schema_version": 1,
-            "default_profile": "dag-project",
+            "default_profile": "praxis-project",
             "profiles": [
                 {
-                    "profile": "dag-project",
-                    **_runtime_profile(instance_name="dag-project"),
+                    "profile": "praxis-project",
+                    **_runtime_profile(instance_name="praxis-project"),
                 }
             ],
         },

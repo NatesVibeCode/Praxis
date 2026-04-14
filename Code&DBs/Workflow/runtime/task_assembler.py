@@ -80,12 +80,12 @@ def _validate_and_fix_model(model: dict) -> dict:
         # Ensure action/step cards have executors
         if card.get("kind") in ("action", "step"):
             if "executor" not in card:
-                card["executor"] = {"name": "DAG Workflow", "kind": "agent"}
+                card["executor"] = {"name": "Praxis Workflow", "kind": "agent"}
             executor = card["executor"]
             if "kind" not in executor:
                 executor["kind"] = "agent"
             if "name" not in executor:
-                executor["name"] = "DAG Workflow"
+                executor["name"] = "Praxis Workflow"
             # Normalize executor kinds
             kind = executor["kind"].lower()
             if kind in ("user", "human"):

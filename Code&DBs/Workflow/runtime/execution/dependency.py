@@ -1,4 +1,4 @@
-"""Dependency resolution engine for DAG execution."""
+"""Dependency resolution engine for workflow graph execution."""
 
 from __future__ import annotations
 

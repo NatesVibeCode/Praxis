@@ -52,19 +52,20 @@ def test_run_scheduler_tick_emits_schedule_fired_event(tmp_path, monkeypatch):
     now = datetime(2026, 4, 9, 12, 0, tzinfo=timezone.utc)
     event_conn = _Conn()
 
-    def _run_workflow_from_spec_file(path: str):
-        assert path == str(spec_path)
-        return types.SimpleNamespace(status="succeeded", run_id="run-1", latency_ms=17)
-
-    def _run_workflow_batch_from_file(path: str):
-        raise AssertionError(f"unexpected batch dispatch for {path}")
-
-    workflow_pkg = types.ModuleType("runtime.workflow")
-    workflow_pkg.run_workflow_from_spec_file = _run_workflow_from_spec_file
-    workflow_pkg.run_workflow_batch_from_file = _run_workflow_batch_from_file
-    monkeypatch.setitem(sys.modules, "runtime.workflow", workflow_pkg)
-    runtime_pkg = importlib.import_module("runtime")
-    monkeypatch.setattr(runtime_pkg, "workflow", workflow_pkg, raising=False)
+    monkeypatch.setattr(
+        scheduler,
+        "run_cli_tool",
+        lambda tool_name, params: (
+            0,
+            {
+                "run_id": "run-1",
+                "status": "queued",
+                "command_id": "control.command.request.1",
+                "command_status": "succeeded",
+                "result_ref": "workflow_run:run-1",
+            },
+        ),
+    )
 
     results = scheduler.run_scheduler_tick(
         config,
@@ -75,8 +76,10 @@ def test_run_scheduler_tick_emits_schedule_fired_event(tmp_path, monkeypatch):
 
     assert len(results) == 1
     assert results[0]["job_name"] == "daily-report"
-    assert results[0]["status"] == "succeeded"
+    assert results[0]["status"] == "queued"
     assert results[0]["run_id"] == "run-1"
+    assert results[0]["command_id"] == "control.command.request.1"
+    assert results[0]["command_status"] == "succeeded"
 
     insert_calls = [
         args

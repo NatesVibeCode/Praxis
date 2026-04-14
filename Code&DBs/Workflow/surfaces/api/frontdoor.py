@@ -607,7 +607,7 @@ def _default_evidence_reader_factory(env: Mapping[str, str] | None) -> PostgresE
 
 
 @dataclass(slots=True)
-class NativeDagFrontdoor:
+class NativeWorkflowFrontdoor:
     """Thin repo-local frontdoor for submit, status, and health."""
 
     registry: RegistryResolver | None = None
@@ -879,18 +879,18 @@ def submit(
 ) -> dict[str, Any]:
     """Submit one workflow request through repo-local native authority."""
 
-    return NativeDagFrontdoor(registry=registry).submit(
+    return NativeWorkflowFrontdoor(registry=registry).submit(
         request_payload=request_payload,
         env=env,
     )
 
 
-_DEFAULT_NATIVE_DAG_FRONTDOOR = NativeDagFrontdoor()
+_DEFAULT_NATIVE_WORKFLOW_FRONTDOOR = NativeWorkflowFrontdoor()
 
 # Publish the repo-local control-plane methods directly so callers and tests
 # hit the actual authority path instead of a compatibility wrapper.
-status = _DEFAULT_NATIVE_DAG_FRONTDOOR.status
-health = _DEFAULT_NATIVE_DAG_FRONTDOOR.health
+status = _DEFAULT_NATIVE_WORKFLOW_FRONTDOOR.status
+health = _DEFAULT_NATIVE_WORKFLOW_FRONTDOOR.health
 
 
 def _emit(payload: Mapping[str, Any]) -> int:
@@ -899,7 +899,7 @@ def _emit(payload: Mapping[str, Any]) -> int:
 
 
 __all__ = [
-    "NativeDagFrontdoor",
+    "NativeWorkflowFrontdoor",
     "NativeFrontdoorError",
     "health",
     "status",

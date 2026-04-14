@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import type { OrbitNode, OrbitEdge, DockContent } from './moonBuildPresenter';
-import type { BindingLedgerEntry } from '../shared/types';
+import type { BindingLedgerEntry, BuildPayload } from '../shared/types';
 import type { CatalogItem } from './catalog';
 import { MoonGlyph } from './MoonGlyph';
 import { useObjectTypes } from '../shared/hooks/useObjectTypes';
@@ -17,9 +17,44 @@ interface Props {
   edgeToLabel?: string;
   onApplyGate?: (edgeId: string, gateFamily: string) => void;
   gateItems?: CatalogItem[];
+  buildGraph?: BuildPayload['build_graph'] | null;
+  onUpdateBuildGraph?: (graph: NonNullable<BuildPayload['build_graph']>) => Promise<void>;
 }
 
-export function MoonNodeDetail({ node, content, workflowId, onMutate, onClose, selectedEdge, edgeFromLabel, edgeToLabel, onApplyGate, gateItems = [] }: Props) {
+const TRIGGER_MANUAL_ROUTE = 'trigger';
+const TRIGGER_SCHEDULE_ROUTE = 'trigger/schedule';
+const TRIGGER_WEBHOOK_ROUTE = 'trigger/webhook';
+const WEBHOOK_TRIGGER_EVENT = 'db.webhook_events.insert';
+
+function isTriggerRoute(route?: string): boolean {
+  return route === TRIGGER_MANUAL_ROUTE || route === TRIGGER_SCHEDULE_ROUTE || route === TRIGGER_WEBHOOK_ROUTE;
+}
+
+function normalizeTriggerFilter(filter: unknown): Record<string, unknown> {
+  return filter && typeof filter === 'object' && !Array.isArray(filter)
+    ? { ...(filter as Record<string, unknown>) }
+    : {};
+}
+
+function formatTriggerFilter(filter: unknown): string {
+  return JSON.stringify(normalizeTriggerFilter(filter), null, 2);
+}
+
+function parseTriggerFilter(text: string): Record<string, unknown> {
+  if (!text.trim()) return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error('Trigger filter must be valid JSON.');
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Trigger filter must be a JSON object.');
+  }
+  return parsed as Record<string, unknown>;
+}
+
+export function MoonNodeDetail({ node, content, workflowId, onMutate, onClose, selectedEdge, edgeFromLabel, edgeToLabel, onApplyGate, gateItems = [], buildGraph, onUpdateBuildGraph }: Props) {
   const { objectTypes, loading: objectTypesLoading } = useObjectTypes();
   const [objectSearch, setObjectSearch] = useState('');
   const [attachKind, setAttachKind] = useState('reference');
@@ -34,6 +69,35 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onClose, s
   const [importLabel, setImportLabel] = useState('');
   const [importLoading, setImportLoading] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
+  const [triggerCronExpression, setTriggerCronExpression] = useState('@daily');
+  const [triggerSourceRef, setTriggerSourceRef] = useState('');
+  const [triggerFilterText, setTriggerFilterText] = useState('{}');
+  const [triggerLoading, setTriggerLoading] = useState(false);
+  const [triggerError, setTriggerError] = useState<string | null>(null);
+
+  const buildNode = node
+    ? (buildGraph?.nodes || []).find(graphNode => graphNode.node_id === node.id) || null
+    : null;
+  const triggerRoute = buildNode?.route || node?.route || '';
+  const triggerConfig = buildNode?.trigger;
+  const triggerFilterJson = formatTriggerFilter(triggerConfig?.filter);
+  const isTriggerNode = Boolean(node && isTriggerRoute(triggerRoute));
+
+  useEffect(() => {
+    if (!isTriggerNode) return;
+    setTriggerCronExpression(
+      (typeof triggerConfig?.cron_expression === 'string' && triggerConfig.cron_expression.trim()) || '@daily',
+    );
+    setTriggerSourceRef(typeof triggerConfig?.source_ref === 'string' ? triggerConfig.source_ref : '');
+    setTriggerFilterText(triggerFilterJson);
+    setTriggerError(null);
+  }, [
+    isTriggerNode,
+    node?.id,
+    triggerConfig?.cron_expression,
+    triggerConfig?.source_ref,
+    triggerFilterJson,
+  ]);
 
   const handleAttach = useCallback(async () => {
     if (!node || !attachRef.trim()) return;
@@ -131,6 +195,55 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onClose, s
     }
   }, [node, importLocator, importLabel, attachKind, attachRole, attachPromote, onMutate]);
 
+  const handleSaveTrigger = useCallback(async () => {
+    if (!node || !buildGraph || !onUpdateBuildGraph || !isTriggerRoute(triggerRoute)) return;
+    setTriggerLoading(true);
+    setTriggerError(null);
+    try {
+      const filter = parseTriggerFilter(triggerFilterText);
+      const nodes = [...(buildGraph.nodes || [])];
+      const idx = nodes.findIndex(graphNode => graphNode.node_id === node.id);
+      if (idx < 0) return;
+
+      const nextTrigger =
+        triggerRoute === TRIGGER_SCHEDULE_ROUTE
+          ? {
+              event_type: 'schedule',
+              cron_expression: triggerCronExpression.trim() || '@daily',
+              filter,
+            }
+          : triggerRoute === TRIGGER_WEBHOOK_ROUTE
+            ? {
+                event_type: WEBHOOK_TRIGGER_EVENT,
+                source_ref: triggerSourceRef.trim() || undefined,
+                filter,
+              }
+            : {
+                event_type: 'manual',
+                source_ref: triggerSourceRef.trim() || undefined,
+                filter,
+              };
+
+      nodes[idx] = {
+        ...nodes[idx],
+        trigger: nextTrigger,
+      };
+      await onUpdateBuildGraph({ ...buildGraph, nodes });
+    } catch (e: any) {
+      setTriggerError(e.message || 'Failed to save trigger');
+    } finally {
+      setTriggerLoading(false);
+    }
+  }, [
+    buildGraph,
+    node,
+    onUpdateBuildGraph,
+    triggerRoute,
+    triggerCronExpression,
+    triggerSourceRef,
+    triggerFilterText,
+  ]);
+
   // Sort: unresolved first, then accepted, then rejected
   const bindings = [...(content?.connectBindings || [])].sort((a, b) => {
     const order: Record<string, number> = { unresolved: 0, accepted: 1, rejected: 2 };
@@ -179,6 +292,53 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onClose, s
         <div className="moon-dock__empty">Select a node or gate.</div>
       ) : node ? (
         <>
+          {isTriggerNode && (
+            <>
+              <div className="moon-dock__sep" />
+              <div className="moon-dock__section-label">Trigger config</div>
+              <div className="moon-dock__item-desc" style={{ marginBottom: 8 }}>
+                {triggerRoute === TRIGGER_SCHEDULE_ROUTE
+                  ? 'Schedule trigger'
+                  : triggerRoute === TRIGGER_WEBHOOK_ROUTE
+                    ? 'Webhook trigger'
+                    : 'Manual trigger'}
+              </div>
+              {triggerRoute === TRIGGER_SCHEDULE_ROUTE ? (
+                <input
+                  className="moon-dock-form__input"
+                  type="text"
+                  value={triggerCronExpression}
+                  onChange={e => setTriggerCronExpression(e.target.value)}
+                  placeholder="Cron expression"
+                />
+              ) : (
+                <input
+                  className="moon-dock-form__input"
+                  type="text"
+                  value={triggerSourceRef}
+                  onChange={e => setTriggerSourceRef(e.target.value)}
+                  placeholder="Source ref (optional)"
+                />
+              )}
+              <textarea
+                className="moon-dock-form__input"
+                value={triggerFilterText}
+                onChange={e => setTriggerFilterText(e.target.value)}
+                placeholder="Trigger filter JSON"
+                rows={6}
+                style={{ minHeight: 110, resize: 'vertical' }}
+              />
+              <button
+                className="moon-dock-form__btn"
+                onClick={handleSaveTrigger}
+                disabled={triggerLoading || !buildGraph || !onUpdateBuildGraph}
+              >
+                {triggerLoading ? <><span className="moon-spinner" /> Saving...</> : 'Save trigger'}
+              </button>
+              {triggerError && <div className="moon-dock-form__error">{triggerError}</div>}
+            </>
+          )}
+
           {/* Attached */}
           <div className="moon-dock__sep" />
           <div className="moon-dock__section-label">

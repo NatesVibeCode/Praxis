@@ -290,7 +290,7 @@ def _resolve_repo_path(
     except ValueError as exc:
         raise _fail(
             "native_instance.boundary_violation",
-            f"{field_name} must stay inside the DAG repo boundary",
+            f"{field_name} must stay inside the workflow repo boundary",
             details={
                 "field": field_name,
                 "path": str(resolved_path),
@@ -387,7 +387,7 @@ def resolve_native_instance(
     if repo_root != config_repo_root:
         raise _fail(
             "native_instance.boundary_violation",
-            "repo-local runtime profile must resolve back to this DAG repo root",
+            "repo-local runtime profile must resolve back to this workflow repo root",
             details={
                 "runtime_profile_ref": runtime_profile_ref,
                 "repo_root": str(repo_root),

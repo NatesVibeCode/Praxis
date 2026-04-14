@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Sequence
+from collections.abc import Mapping, Sequence
+from typing import Any
+
+from memory.types import Edge, Entity, EntityType, RelationType
 
 from memory.repository import MemoryEdgeRef
 
-from .validators import _require_text
+from .validators import _encode_jsonb, _require_mapping, _require_text, _require_utc
 
 
 def _normalize_entity_ids(entity_ids: Sequence[str]) -> tuple[str, ...]:
@@ -46,11 +49,114 @@ def _normalize_edges(edges: Sequence[MemoryEdgeRef]) -> tuple[MemoryEdgeRef, ...
     return tuple(normalized)
 
 
+def _normalize_entity_field_updates(fields: Mapping[str, object]) -> tuple[tuple[str, object], ...]:
+    normalized_fields = _require_mapping(fields, field_name="fields")
+    allowed = {"name", "content", "metadata", "source", "confidence", "updated_at"}
+    updates: list[tuple[str, object]] = []
+    for key, value in normalized_fields.items():
+        if key not in allowed:
+            continue
+        if key == "metadata":
+            value = _encode_jsonb(value, field_name="fields.metadata")
+        elif key == "updated_at":
+            value = _require_utc(value, field_name="fields.updated_at")
+        updates.append((key, value))
+    return tuple(updates)
+
+
 class PostgresMemoryGraphRepository:
     """Owns canonical memory-graph mutations for maintenance flows."""
 
     def __init__(self, conn: Any) -> None:
         self._conn = conn
+
+    def upsert_entity(self, *, entity: Entity) -> str:
+        normalized_id = _require_text(entity.id, field_name="entity.id")
+        self._conn.execute(
+            """
+            INSERT INTO memory_entities
+            (
+                id,
+                entity_type,
+                name,
+                content,
+                metadata,
+                source,
+                confidence,
+                archived,
+                created_at,
+                updated_at
+            )
+            VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, false, $8, $9)
+            ON CONFLICT (id) DO UPDATE SET
+                name = EXCLUDED.name,
+                content = EXCLUDED.content,
+                metadata = EXCLUDED.metadata,
+                source = EXCLUDED.source,
+                confidence = EXCLUDED.confidence,
+                archived = false,
+                updated_at = EXCLUDED.updated_at
+            """,
+            normalized_id,
+            entity.entity_type.value,
+            entity.name,
+            entity.content,
+            _encode_jsonb(entity.metadata, field_name="entity.metadata"),
+            entity.source,
+            entity.confidence,
+            _require_utc(entity.created_at, field_name="entity.created_at"),
+            _require_utc(entity.updated_at, field_name="entity.updated_at"),
+        )
+        return normalized_id
+
+    def update_entity_fields(
+        self,
+        *,
+        entity_id: str,
+        entity_type: EntityType,
+        fields: Mapping[str, object],
+    ) -> bool:
+        normalized_entity_id = _require_text(entity_id, field_name="entity_id")
+        assignments = _normalize_entity_field_updates(fields)
+        if not assignments:
+            return False
+        parts: list[str] = []
+        values: list[object] = []
+        for index, (column, value) in enumerate(assignments, start=1):
+            if column == "metadata":
+                parts.append(f"{column} = ${index}::jsonb")
+            else:
+                parts.append(f"{column} = ${index}")
+            values.append(value)
+        values.extend((normalized_entity_id, entity_type.value))
+        rows = self._conn.execute(
+            f"""
+            UPDATE memory_entities
+            SET {', '.join(parts)}
+            WHERE id = ${len(values) - 1}
+              AND entity_type = ${len(values)}
+              AND NOT archived
+            RETURNING id
+            """,
+            *values,
+        )
+        return bool(rows)
+
+    def archive_entity(self, *, entity_id: str, entity_type: EntityType) -> bool:
+        normalized_entity_id = _require_text(entity_id, field_name="entity_id")
+        rows = self._conn.execute(
+            """
+            UPDATE memory_entities
+            SET archived = true
+            WHERE id = $1
+              AND entity_type = $2
+              AND NOT archived
+            RETURNING id
+            """,
+            normalized_entity_id,
+            entity_type.value,
+        )
+        return bool(rows)
 
     def archive_entities(self, *, entity_ids: Sequence[str]) -> tuple[str, ...]:
         normalized_ids = _normalize_entity_ids(entity_ids)
@@ -171,6 +277,56 @@ class PostgresMemoryGraphRepository:
             if isinstance(parsed, dict):
                 return dict(parsed)
         return {}
+
+    def upsert_edge(self, *, edge: Edge) -> bool:
+        try:
+            self._conn.execute(
+                """
+                INSERT INTO memory_edges
+                (
+                    source_id,
+                    target_id,
+                    relation_type,
+                    weight,
+                    metadata,
+                    created_at
+                )
+                VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+                ON CONFLICT (source_id, target_id, relation_type) DO UPDATE SET
+                    weight = EXCLUDED.weight,
+                    metadata = EXCLUDED.metadata
+                """,
+                _require_text(edge.source_id, field_name="edge.source_id"),
+                _require_text(edge.target_id, field_name="edge.target_id"),
+                edge.relation_type.value,
+                edge.weight,
+                _encode_jsonb(edge.metadata, field_name="edge.metadata"),
+                _require_utc(edge.created_at, field_name="edge.created_at"),
+            )
+        except Exception:
+            return False
+        return True
+
+    def delete_edge(
+        self,
+        *,
+        source_id: str,
+        target_id: str,
+        relation_type: RelationType,
+    ) -> bool:
+        rows = self._conn.execute(
+            """
+            DELETE FROM memory_edges
+            WHERE source_id = $1
+              AND target_id = $2
+              AND relation_type = $3
+            RETURNING source_id
+            """,
+            _require_text(source_id, field_name="source_id"),
+            _require_text(target_id, field_name="target_id"),
+            relation_type.value,
+        )
+        return bool(rows)
 
     def delete_edges(self, *, edges: Sequence[MemoryEdgeRef]) -> tuple[MemoryEdgeRef, ...]:
         normalized_edges = _normalize_edges(edges)

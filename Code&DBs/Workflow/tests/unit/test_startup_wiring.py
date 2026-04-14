@@ -139,7 +139,7 @@ def test_sync_integration_registry_projects_static_and_mcp_rows() -> None:
     _, rows = conn.batch_calls[0]
     assert inserted == len(rows)
     by_id = {row[0]: row for row in rows}
-    assert {"dag-dispatch", "notifications", "webhook", "workflow"} <= set(by_id)
+    assert {"praxis-dispatch", "notifications", "webhook", "workflow"} <= set(by_id)
     assert {"praxis_query", "praxis_status", "praxis_maintenance", "praxis_operator_view", "praxis_workflow"} <= set(by_id)
 
     praxis_query = by_id["praxis_query"]

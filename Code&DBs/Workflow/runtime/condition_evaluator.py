@@ -1,7 +1,7 @@
 """Shared condition evaluator and path extraction.
 
 Used by:
-- Workflow DAG conditional edges (dependency.py)
+- Workflow graph conditional edges (dependency.py)
 - Webhook trigger filters (trigger_filter.py)
 - Trigger payload matching (triggers.py)
 - Data mapping field extraction (data_mapper.py)

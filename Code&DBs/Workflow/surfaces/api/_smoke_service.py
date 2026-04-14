@@ -431,7 +431,7 @@ def run_local_operator_flow(
                 "operator_flow.registry_missing",
                 "operator flow submit requires explicit registry authority",
             )
-        service = frontdoor.NativeDagFrontdoor(registry=registry)
+        service = frontdoor.NativeWorkflowFrontdoor(registry=registry)
 
     submit_payload = _require_frontdoor_mapping(
         service.submit(request_payload=request_payload, env=source),

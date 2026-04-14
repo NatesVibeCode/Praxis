@@ -16,8 +16,18 @@ _POSTGRES_SCHEMES = ("postgresql://", "postgres://")
 
 _workflow_pool: asyncpg.Pool | None = None
 _workflow_pool_dsn: str | None = None
+_workflow_authority_scope: "_WorkflowAuthorityScope | None" = None
 _bg_loop: asyncio.AbstractEventLoop | None = None
 _bg_thread: _threading.Thread | None = None
+
+
+class _WorkflowAuthorityScope:
+    """Weakref-safe identity object for process-local workflow authority caches."""
+
+    __slots__ = ("cache_key", "__weakref__")
+
+    def __init__(self, cache_key: str) -> None:
+        self.cache_key = cache_key
 
 
 def _normalize_authority_error(
@@ -135,24 +145,28 @@ async def create_workflow_pool(
 
 def get_workflow_pool(env: Mapping[str, str] | None = None) -> asyncpg.Pool:
     """Get or create the singleton workflow connection pool."""
-    global _workflow_pool, _workflow_pool_dsn
+    global _workflow_pool, _workflow_pool_dsn, _workflow_authority_scope
     database_url = resolve_workflow_database_url(env=env)
     if _workflow_pool is not None and _workflow_pool_dsn != database_url:
         shutdown_workflow_pool()
     if _workflow_pool is None:
         _workflow_pool = _run_sync(create_workflow_pool(env=env))
         _workflow_pool_dsn = database_url
+        _workflow_authority_scope = _WorkflowAuthorityScope(
+            cache_key=f"workflow_pool:{database_url}",
+        )
     return _workflow_pool
 
 
 def shutdown_workflow_pool() -> None:
     """Close the shared pool and stop the bridge loop."""
-    global _workflow_pool, _workflow_pool_dsn, _bg_loop, _bg_thread
+    global _workflow_pool, _workflow_pool_dsn, _workflow_authority_scope, _bg_loop, _bg_thread
     pool = _workflow_pool
     loop = _bg_loop
     thread = _bg_thread
     _workflow_pool = None
     _workflow_pool_dsn = None
+    _workflow_authority_scope = None
     _bg_loop = None
     _bg_thread = None
 
@@ -180,6 +194,10 @@ class SyncPostgresConnection:
 
     def __init__(self, pool: asyncpg.Pool) -> None:
         self._pool = pool
+        self._authority_scope = _workflow_authority_scope or _WorkflowAuthorityScope(
+            cache_key=f"workflow_pool:{id(pool)}",
+        )
+        self._authority_cache_key = self._authority_scope.cache_key
 
     def execute(self, query: str, *args) -> list:
         async def _do():

@@ -1544,7 +1544,7 @@
   background: var(--moon-surface-hover, rgba(255,255,255,0.04));
 }
 
-/* === DAG Canvas === */
+/* === Graph Canvas === */
 .moon-graph {
   position: relative;
   overflow: visible;

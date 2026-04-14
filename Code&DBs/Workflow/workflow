@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""DAG Workflow CLI entrypoint.
+"""Praxis Workflow CLI entrypoint.
 
 Usage:
   workflow run -p "add a farewell function" --write greeting.py --workdir .

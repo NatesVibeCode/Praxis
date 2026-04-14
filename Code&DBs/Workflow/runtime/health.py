@@ -1,4 +1,4 @@
-"""Unified health subsystem for DAG runtime probes and platform checks."""
+"""Unified health subsystem for workflow runtime probes and platform checks."""
 
 from __future__ import annotations
 

@@ -49,6 +49,80 @@ def _json_clone(value: Any) -> Any:
 
 
 _UNSET = object()
+_TRIGGER_MANUAL_ROUTE = "trigger"
+_TRIGGER_SCHEDULE_ROUTE = "trigger/schedule"
+_TRIGGER_WEBHOOK_ROUTE = "trigger/webhook"
+_WEBHOOK_TRIGGER_EVENT_TYPE = "db.webhook_events.insert"
+
+
+def _is_trigger_route(route: str) -> bool:
+    normalized = _text(route)
+    return normalized in {
+        _TRIGGER_MANUAL_ROUTE,
+        _TRIGGER_SCHEDULE_ROUTE,
+        _TRIGGER_WEBHOOK_ROUTE,
+    }
+
+
+def _build_graph_trigger_intent(
+    node: dict[str, Any],
+    *,
+    index: int,
+    existing_trigger: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    route = _text(node.get("route"))
+    node_id = _text(node.get("node_id") or node.get("id"))
+    trigger_config = node.get("trigger") if isinstance(node.get("trigger"), dict) else {}
+    payload = dict(existing_trigger or {})
+    payload["id"] = _text(payload.get("id")) or f"trigger-{index:03d}"
+    payload["title"] = _text(node.get("title")) or _text(payload.get("title")) or f"Trigger {index}"
+    payload["summary"] = (
+        _text(node.get("summary"))
+        or _text(payload.get("summary"))
+        or _text(node.get("title"))
+        or payload["id"]
+    )
+    payload["source_node_id"] = node_id
+    payload["source_block_ids"] = [
+        source_id
+        for source_id in (node.get("source_block_ids") or [])
+        if isinstance(source_id, str)
+    ]
+    payload["reference_slugs"] = [
+        slug
+        for slug in (payload.get("reference_slugs") or [])
+        if isinstance(slug, str) and slug.strip()
+    ]
+    if isinstance(trigger_config.get("filter"), dict):
+        payload["filter"] = dict(trigger_config.get("filter") or {})
+    else:
+        payload["filter"] = dict(payload.get("filter") or {}) if isinstance(payload.get("filter"), dict) else {}
+
+    if route == _TRIGGER_SCHEDULE_ROUTE:
+        payload["event_type"] = "schedule"
+        cron_expression = _text(trigger_config.get("cron_expression")) or _text(payload.get("cron_expression")) or "@daily"
+        if cron_expression:
+            payload["cron_expression"] = cron_expression
+        else:
+            payload.pop("cron_expression", None)
+    elif route == _TRIGGER_WEBHOOK_ROUTE:
+        payload["event_type"] = _WEBHOOK_TRIGGER_EVENT_TYPE
+        payload.pop("cron_expression", None)
+        source_ref = _text(trigger_config.get("source_ref")) or _text(payload.get("source_ref"))
+        if source_ref:
+            payload["source_ref"] = source_ref
+        else:
+            payload.pop("source_ref", None)
+    else:
+        payload["event_type"] = "manual"
+        payload.pop("cron_expression", None)
+        source_ref = _text(trigger_config.get("source_ref")) or _text(payload.get("source_ref"))
+        if source_ref:
+            payload["source_ref"] = source_ref
+        else:
+            payload.pop("source_ref", None)
+
+    return payload
 
 
 def commit_workflow(
@@ -398,6 +472,11 @@ def mutate_workflow_build(
     elif subpath == "build_graph":
         nodes = body.get("nodes") if isinstance(body.get("nodes"), list) else []
         edges = body.get("edges") if isinstance(body.get("edges"), list) else []
+        node_routes = {
+            _text(node.get("node_id") or node.get("id")): _text(node.get("route"))
+            for node in nodes
+            if isinstance(node, dict) and _text(node.get("node_id") or node.get("id"))
+        }
 
         # Build dependency map from sequence edges (skip gate/state edges)
         incoming: dict[str, list[str]] = {}
@@ -408,6 +487,8 @@ def mutate_workflow_build(
                 continue
             to_id = _text(edge.get("to_node_id"))
             from_id = _text(edge.get("from_node_id"))
+            if _is_trigger_route(node_routes.get(from_id, "")) or _is_trigger_route(node_routes.get(to_id, "")):
+                continue
             if to_id and from_id:
                 incoming.setdefault(to_id, []).append(from_id)
 
@@ -417,9 +498,17 @@ def mutate_workflow_build(
         for phase in (existing_setup.get("phases") or []):
             if isinstance(phase, dict) and _text(phase.get("step_id")):
                 existing_phases[_text(phase.get("step_id"))] = dict(phase)
+        existing_triggers: dict[str, dict[str, Any]] = {}
+        for trigger in definition.get("trigger_intent", []) if isinstance(definition.get("trigger_intent"), list) else []:
+            if not isinstance(trigger, dict):
+                continue
+            source_node_id = _text(trigger.get("source_node_id"))
+            if source_node_id:
+                existing_triggers[source_node_id] = dict(trigger)
 
         draft_flow: list[dict[str, Any]] = []
         new_phases: list[dict[str, Any]] = []
+        new_triggers: list[dict[str, Any]] = []
         for i, node in enumerate(nodes):
             if not isinstance(node, dict):
                 continue
@@ -428,6 +517,16 @@ def mutate_workflow_build(
                 continue
             if _text(node.get("kind") or "step") not in ("step", ""):
                 continue  # skip gate and state nodes
+            route = _text(node.get("route"))
+            if _is_trigger_route(route):
+                new_triggers.append(
+                    _build_graph_trigger_intent(
+                        node,
+                        index=len(new_triggers) + 1,
+                        existing_trigger=existing_triggers.get(node_id),
+                    )
+                )
+                continue
             draft_flow.append({
                 "id": node_id,
                 "order": i,
@@ -436,7 +535,6 @@ def mutate_workflow_build(
                 "depends_on": incoming.get(node_id, []),
                 "source_block_ids": [s for s in (node.get("source_block_ids") or []) if isinstance(s, str)],
             })
-            route = _text(node.get("route"))
             phase = dict(existing_phases.get(node_id, {}))
             phase["step_id"] = node_id
             if route:
@@ -445,6 +543,7 @@ def mutate_workflow_build(
                 new_phases.append(phase)
 
         definition["draft_flow"] = draft_flow
+        definition["trigger_intent"] = new_triggers
         if not isinstance(definition.get("execution_setup"), dict):
             definition["execution_setup"] = {}
         definition["execution_setup"]["phases"] = new_phases

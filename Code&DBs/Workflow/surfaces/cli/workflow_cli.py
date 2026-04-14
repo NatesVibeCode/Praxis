@@ -22,6 +22,7 @@ from pathlib import Path
 
 import surfaces.mcp.subsystems
 from runtime.canonical_manifests import generate_manifest, load_app_manifest_record, ManifestRuntimeBoundaryError
+from surfaces.cli.mcp_tools import run_cli_tool
 
 _WORKFLOW_ROOT = str(Path(__file__).resolve().parent.parent.parent)
 subsystems = surfaces.mcp.subsystems._subs
@@ -120,14 +121,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     if _WORKFLOW_ROOT not in sys.path:
         sys.path.insert(0, _WORKFLOW_ROOT)
 
-    from runtime.control_commands import (
-        render_workflow_submit_response,
-        request_workflow_submit_command,
-    )
     from runtime.workflow_spec import WorkflowSpec, WorkflowSpecError
-    from runtime.workflow.dry_run import dry_run_workflow
-
-    pg_conn = _get_pg_conn()
 
     try:
         spec = WorkflowSpec.load(args.spec)
@@ -140,88 +134,62 @@ def cmd_run(args: argparse.Namespace) -> int:
     print(f"Phase: {spec.phase}  |  Jobs: {len(spec.jobs)}  |  Workflow ID: {spec.workflow_id}")
     print()
 
-    if not args.dry_run:
-        result = render_workflow_submit_response(
-            request_workflow_submit_command(
-                pg_conn,
-                requested_by_kind="cli",
-                requested_by_ref="workflow_cli.run",
-                spec_path=args.spec,
-                repo_root=_repo_root(),
-                run_id=getattr(args, "run_id", None),
-            ),
-            spec_name=spec.name,
-            total_jobs=len(spec.jobs),
-        )
-        if result.get("status") != "queued":
-            print(json.dumps(result, indent=2), file=sys.stderr)
-            return 1
-        print(f"Submitted workflow: {result['run_id']}")
-        print(f"Workflow ID: {spec.workflow_id}")
-        print(f"Submission status: {result.get('status', 'queued')}")
-        if args.result_file:
-            result_payload = dict(result)
-            result_payload.update(
-                {
-                    "job_id": args.job_id or "cli",
-                    "workflow_id": spec.workflow_id,
-                }
+    action_payload: dict[str, object] = {
+        "action": "run",
+        "spec_path": args.spec,
+    }
+    if args.dry_run:
+        action_payload["dry_run"] = True
+    else:
+        action_payload["wait"] = False
+
+    exit_code, result = run_cli_tool("praxis_workflow", action_payload)
+    if exit_code != 0:
+        print(json.dumps(result, indent=2), file=sys.stderr)
+        return 1
+
+    if args.dry_run:
+        for jr in result.get("job_results", []):
+            if not isinstance(jr, dict):
+                continue
+            status_icon = {"succeeded": "+", "failed": "X", "blocked": "!", "skipped": "-"}.get(str(jr.get("status") or ""), "?")
+            verify_passed = jr.get("verify_passed")
+            verify_str = f"  verify={'PASS' if verify_passed else 'FAIL'}" if verify_passed is not None else ""
+            print(
+                f"  [{status_icon}] {str(jr.get('job_label') or ''):<50} "
+                f"{str(jr.get('status') or ''):<10} {float(jr.get('duration_seconds') or 0.0):>6.1f}s{verify_str}"
             )
-            _write_result_file(
-                args.result_file,
-                result_payload,
-            )
-            print(f"Result written to: {args.result_file}")
-        print("Observe via:")
-        print(f"  ./scripts/workflow.sh stream {result['run_id']}")
-        print(f"  GET {result['stream_url']}")
-        print(f"  GET {result['status_url']}")
-        return 0
 
-    result = dry_run_workflow(spec)
+        print()
+        print("--- Summary ---")
+        print(f"Total: {result.get('total_jobs', 0)}  |  OK: {result.get('succeeded', 0)}  |  "
+              f"Failed: {result.get('failed', 0)}  |  Blocked: {result.get('blocked', 0)}  |  "
+              f"Skipped: {result.get('skipped', 0)}")
+        print(f"Duration: {float(result.get('duration_seconds') or 0.0):.2f}s")
+        print(f"Receipts: {len(result.get('receipts_written') or [])} written")
+        return 0 if result.get("failed", 0) == 0 and result.get("blocked", 0) == 0 else 1
 
-    for jr in result.job_results:
-        status_icon = {"succeeded": "+", "failed": "X", "blocked": "!", "skipped": "-"}.get(jr.status, "?")
-        verify_str = f"  verify={'PASS' if jr.verify_passed else 'FAIL'}" if jr.verify_passed is not None else ""
-        print(f"  [{status_icon}] {jr.job_label:<50} {jr.status:<10} {jr.duration_seconds:>6.1f}s{verify_str}")
-
-    print()
-    print(f"--- Summary ---")
-    print(f"Total: {result.total_jobs}  |  OK: {result.succeeded}  |  "
-          f"Failed: {result.failed}  |  Blocked: {result.blocked}  |  "
-          f"Skipped: {result.skipped}")
-    print(f"Duration: {result.duration_seconds:.2f}s")
-    print(f"Receipts: {len(result.receipts_written)} written")
-
-    # Write structured result file if requested (used by detached workflow launch)
+    print(f"Submitted workflow: {result['run_id']}")
+    print(f"Workflow ID: {spec.workflow_id}")
+    print(f"Submission status: {result.get('status', 'queued')}")
     if args.result_file:
-        result_dict = {
-            "job_id": args.job_id or "cli",
-            "spec_name": result.spec_name,
-            "total_jobs": result.total_jobs,
-            "succeeded": result.succeeded,
-            "failed": result.failed,
-            "skipped": result.skipped,
-            "blocked": result.blocked,
-            "duration_seconds": result.duration_seconds,
-            "receipts_written": list(result.receipts_written),
-            "job_results": [
-                {
-                    "job_label": jr.job_label,
-                    "agent_slug": jr.agent_slug,
-                    "status": jr.status,
-                    "exit_code": jr.exit_code,
-                    "duration_seconds": jr.duration_seconds,
-                    "verify_passed": jr.verify_passed,
-                    "retry_count": jr.retry_count,
-                }
-                for jr in result.job_results
-            ],
-        }
-        _write_result_file(args.result_file, result_dict)
-        print(f"\nResult written to: {args.result_file}")
-
-    return 0 if result.failed == 0 and result.blocked == 0 else 1
+        result_payload = dict(result)
+        result_payload.update(
+            {
+                "job_id": args.job_id or "cli",
+                "workflow_id": spec.workflow_id,
+            }
+        )
+        _write_result_file(
+            args.result_file,
+            result_payload,
+        )
+        print(f"Result written to: {args.result_file}")
+    print("Observe via:")
+    print(f"  ./scripts/workflow.sh stream {result['run_id']}")
+    print(f"  GET {result['stream_url']}")
+    print(f"  GET {result['status_url']}")
+    return 0
 
 
 def cmd_validate(args: argparse.Namespace) -> int:

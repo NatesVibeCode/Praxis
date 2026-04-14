@@ -842,7 +842,7 @@ def _build_run_graph_from_graph_spec(
 
 
 def _build_run_graph(conn: Any, run_id: str, jobs: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """Build a DAG from the spec_snapshot and runtime job status.
+    """Build a run graph from the spec_snapshot and runtime job status.
 
     Reads the original spec's jobs + depends_on from request_envelope.spec_snapshot,
     then annotates each node with runtime status from workflow_jobs.

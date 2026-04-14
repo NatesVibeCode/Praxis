@@ -39,13 +39,13 @@ def _called_function_names(path: Path) -> set[str]:
     return names
 
 
-def _literal_dag_project_constants(path: Path) -> list[str]:
+def _literal_praxis_project_constants(path: Path) -> list[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     violations: list[str] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Constant):
             continue
-        if node.value != "dag-project":
+        if node.value != "praxis-project":
             continue
         violations.append(f"{path}:{node.lineno}:{node.col_offset + 1}")
     return violations
@@ -76,11 +76,11 @@ def test_default_native_authority_refs_fail_closed_when_registry_resolution_brea
         native_authority.default_native_authority_refs()
 
 
-def test_setup_and_factory_modules_use_shared_native_authority_without_dag_project_fallbacks() -> None:
+def test_setup_and_factory_modules_use_shared_native_authority_without_praxis_project_fallbacks() -> None:
     for relative_path, expected_call in _AUTHORITY_SEAMS.items():
         path = _WORKFLOW_ROOT / relative_path
         call_names = _called_function_names(path)
-        violations = _literal_dag_project_constants(path)
+        violations = _literal_praxis_project_constants(path)
 
         assert expected_call in call_names, f"{relative_path} is not using the shared native authority helper"
-        assert violations == [], f"{relative_path} still fabricates dag-project fallback defaults: {violations}"
+        assert violations == [], f"{relative_path} still fabricates praxis-project fallback defaults: {violations}"

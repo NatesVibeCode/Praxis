@@ -1,6 +1,6 @@
 """Integration test: full dispatch graph with mock adapter.
 
-Proves the DAG foundation works without spending API credits:
+Proves the workflow graph foundation works without spending API credits:
 - Graph builds correctly from WorkflowSpec
 - All nodes execute in order via RuntimeOrchestrator
 - Outputs flow between nodes via edge payload_mapping

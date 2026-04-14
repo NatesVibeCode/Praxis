@@ -831,6 +831,15 @@ def test_handle_workflow_build_get_surfaces_trigger_projection() -> None:
     status, payload = request.sent
     assert status == 200
     assert payload["build_state"] == "ready"
+    trigger_nodes = [node for node in payload["build_graph"]["nodes"] if node.get("route") == "trigger"]
+    assert trigger_nodes
+    assert trigger_nodes[0]["summary"] == "Start when a new support email arrives."
+    assert trigger_nodes[0]["trigger"] == {
+        "event_type": "email.received",
+        "cron_expression": "",
+        "source_ref": "@gmail/search",
+        "filter": {"mailbox": "support"},
+    }
     assert payload["compiled_spec_projection"]["graph_id"] == payload["build_graph"]["graph_id"]
     assert payload["compiled_spec_projection"]["compiled_spec"]["triggers"] == [
         {
@@ -1026,6 +1035,235 @@ def test_handle_workflow_build_post_wires_on_failure_edge_gate_into_compiled_spe
             "label": "On Failure",
         }
     ]
+
+
+def test_handle_workflow_build_post_treats_trigger_nodes_as_trigger_intent() -> None:
+    workflow_row = {
+        "id": "wf_build_trigger_nodes",
+        "name": "Triggered Flow",
+        "description": "Compile graph-authored trigger flow",
+        "definition": {
+            "type": "operating_model",
+            "source_prose": "Start manually, draft a summary, then invoke the downstream workflow.",
+            "compiled_prose": "Start manually, draft a summary, then invoke the downstream workflow.",
+            "narrative_blocks": [],
+            "references": [],
+            "capabilities": [],
+            "authority": "",
+            "sla": {},
+            "trigger_intent": [],
+            "draft_flow": [],
+            "definition_revision": "def_build_trigger_nodes",
+        },
+        "compiled_spec": None,
+        "version": 1,
+        "updated_at": "2026-04-09T19:00:00Z",
+    }
+    pg = _MutableWorkflowPg(workflow_rows={"wf_build_trigger_nodes": workflow_row})
+    request = _RequestStub(
+        {
+            "nodes": [
+                {
+                    "node_id": "node-trigger",
+                    "kind": "step",
+                    "title": "Manual",
+                    "route": "trigger",
+                    "status": "ready",
+                    "summary": "Run this workflow manually.",
+                },
+                {
+                    "node_id": "step-001",
+                    "kind": "step",
+                    "title": "Draft summary",
+                    "route": "auto/draft",
+                    "status": "ready",
+                    "summary": "Draft the summary.",
+                },
+                {
+                    "node_id": "step-002",
+                    "kind": "step",
+                    "title": "Invoke workflow",
+                    "route": "@workflow/invoke",
+                    "status": "ready",
+                    "summary": "Invoke the downstream workflow.",
+                },
+            ],
+            "edges": [
+                {
+                    "edge_id": "edge-trigger-step-001",
+                    "kind": "sequence",
+                    "from_node_id": "node-trigger",
+                    "to_node_id": "step-001",
+                },
+                {
+                    "edge_id": "edge-step-001-step-002",
+                    "kind": "sequence",
+                    "from_node_id": "step-001",
+                    "to_node_id": "step-002",
+                },
+            ],
+        },
+        subsystems=SimpleNamespace(get_pg_conn=lambda: pg),
+        path="/api/workflows/wf_build_trigger_nodes/build/build_graph",
+    )
+
+    workflow_query._handle_workflow_build_post(request, "/api/workflows/wf_build_trigger_nodes/build/build_graph")
+
+    assert request.sent is not None
+    status, payload = request.sent
+    assert status == 200
+    assert payload["compiled_spec"]["triggers"] == [
+        {
+            "event_type": "manual",
+            "filter": {},
+            "source_trigger_id": "trigger-001",
+        }
+    ]
+    assert [job["agent"] for job in payload["compiled_spec"]["jobs"]] == [
+        "auto/draft",
+        "@workflow/invoke",
+    ]
+    persisted_definition = pg.workflow_rows["wf_build_trigger_nodes"]["definition"]
+    assert persisted_definition["trigger_intent"] == [
+        {
+            "id": "trigger-001",
+            "title": "Manual",
+            "summary": "Run this workflow manually.",
+            "event_type": "manual",
+            "filter": {},
+            "source_node_id": "node-trigger",
+            "source_block_ids": [],
+            "reference_slugs": [],
+        }
+    ]
+    assert [step["id"] for step in persisted_definition["draft_flow"]] == ["step-001", "step-002"]
+
+
+def test_handle_workflow_build_post_preserves_trigger_node_configuration() -> None:
+    workflow_row = {
+        "id": "wf_build_trigger_config",
+        "name": "Configured Trigger Flow",
+        "description": "Compile graph-authored configured triggers",
+        "definition": {
+            "type": "operating_model",
+            "source_prose": "Run on a schedule or webhook, then draft a summary.",
+            "compiled_prose": "Run on a schedule or webhook, then draft a summary.",
+            "narrative_blocks": [],
+            "references": [],
+            "capabilities": [],
+            "authority": "",
+            "sla": {},
+            "trigger_intent": [],
+            "draft_flow": [],
+            "definition_revision": "def_build_trigger_config",
+        },
+        "compiled_spec": None,
+        "version": 1,
+        "updated_at": "2026-04-09T19:00:00Z",
+    }
+    pg = _MutableWorkflowPg(workflow_rows={"wf_build_trigger_config": workflow_row})
+    request = _RequestStub(
+        {
+            "nodes": [
+                {
+                    "node_id": "node-schedule",
+                    "kind": "step",
+                    "title": "Weekday schedule",
+                    "route": "trigger/schedule",
+                    "status": "ready",
+                    "summary": "Run each weekday morning.",
+                    "trigger": {
+                        "event_type": "schedule",
+                        "cron_expression": "0 9 * * 1-5",
+                        "filter": {"timezone": "America/Los_Angeles"},
+                    },
+                },
+                {
+                    "node_id": "node-webhook",
+                    "kind": "step",
+                    "title": "Lead webhook",
+                    "route": "trigger/webhook",
+                    "status": "ready",
+                    "summary": "Run when a lead webhook lands.",
+                    "trigger": {
+                        "event_type": "db.webhook_events.insert",
+                        "source_ref": "@db/webhook-events",
+                        "filter": {"table": "crm_leads"},
+                    },
+                },
+                {
+                    "node_id": "step-001",
+                    "kind": "step",
+                    "title": "Draft summary",
+                    "route": "auto/draft",
+                    "status": "ready",
+                    "summary": "Draft the summary.",
+                },
+            ],
+            "edges": [
+                {
+                    "edge_id": "edge-schedule-step-001",
+                    "kind": "sequence",
+                    "from_node_id": "node-schedule",
+                    "to_node_id": "step-001",
+                },
+                {
+                    "edge_id": "edge-webhook-step-001",
+                    "kind": "sequence",
+                    "from_node_id": "node-webhook",
+                    "to_node_id": "step-001",
+                },
+            ],
+        },
+        subsystems=SimpleNamespace(get_pg_conn=lambda: pg),
+        path="/api/workflows/wf_build_trigger_config/build/build_graph",
+    )
+
+    workflow_query._handle_workflow_build_post(request, "/api/workflows/wf_build_trigger_config/build/build_graph")
+
+    assert request.sent is not None
+    status, payload = request.sent
+    assert status == 200
+    assert payload["compiled_spec"]["triggers"] == [
+        {
+            "event_type": "schedule",
+            "filter": {"timezone": "America/Los_Angeles"},
+            "source_trigger_id": "trigger-001",
+            "cron_expression": "0 9 * * 1-5",
+        },
+        {
+            "event_type": "db.webhook_events.insert",
+            "filter": {"table": "crm_leads"},
+            "source_trigger_id": "trigger-002",
+            "source_ref": "@db/webhook-events",
+        },
+    ]
+    persisted_definition = pg.workflow_rows["wf_build_trigger_config"]["definition"]
+    assert persisted_definition["trigger_intent"] == [
+        {
+            "id": "trigger-001",
+            "title": "Weekday schedule",
+            "summary": "Run each weekday morning.",
+            "event_type": "schedule",
+            "filter": {"timezone": "America/Los_Angeles"},
+            "cron_expression": "0 9 * * 1-5",
+            "source_node_id": "node-schedule",
+            "source_block_ids": [],
+            "reference_slugs": [],
+        },
+        {
+            "id": "trigger-002",
+            "title": "Lead webhook",
+            "summary": "Run when a lead webhook lands.",
+            "event_type": "db.webhook_events.insert",
+            "filter": {"table": "crm_leads"},
+            "source_ref": "@db/webhook-events",
+            "source_node_id": "node-webhook",
+            "source_block_ids": [],
+            "reference_slugs": [],
+        },
+    ]
+    assert [step["id"] for step in persisted_definition["draft_flow"]] == ["step-001"]
 
 
 def test_handle_workflow_build_post_materializes_import_and_attachment() -> None:

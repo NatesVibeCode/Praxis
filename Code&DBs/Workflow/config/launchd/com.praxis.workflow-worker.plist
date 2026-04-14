@@ -3,18 +3,14 @@
 <plist version="1.0">
 <dict>
 	<key>Label</key>
-	<string>com.dag.api-server</string>
+	<string>com.praxis.workflow-worker</string>
 	<key>Program</key>
 	<string>python3</string>
 	<key>ProgramArguments</key>
 	<array>
 		<string>python3</string>
 		<string>-m</string>
-		<string>surfaces.api.server</string>
-		<string>--host</string>
-		<string>127.0.0.1</string>
-		<string>--port</string>
-		<string>8420</string>
+		<string>runtime.workflow_worker</string>
 	</array>
 	<key>WorkingDirectory</key>
 	<string>/Users/nate/Praxis/Code&DBs/Workflow</string>
@@ -24,13 +20,15 @@
 		<string>/Users/nate/Praxis/Code&DBs/Workflow</string>
 		<key>WORKFLOW_DATABASE_URL</key>
 		<string>postgresql://localhost:5432/praxis</string>
+		<key>PATH</key>
+		<string>/usr/local/bin:/usr/bin:/bin</string>
 	</dict>
 	<key>KeepAlive</key>
 	<true/>
 	<key>StandardOutPath</key>
-	<string>/tmp/dag-api-server.log</string>
+	<string>/tmp/praxis-workflow-worker.log</string>
 	<key>StandardErrorPath</key>
-	<string>/tmp/dag-api-server.err</string>
+	<string>/tmp/praxis-workflow-worker.err</string>
 	<key>RunAtLoad</key>
 	<true/>
 	<key>ProcessType</key>

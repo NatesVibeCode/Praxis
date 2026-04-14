@@ -1,4 +1,4 @@
-"""Thin bridge from DAG runtime authority into workflow-facing consumers.
+"""Thin bridge from workflow runtime authority into workflow-facing consumers.
 
 The bridge reads route truth from runtime and worker-consumable facts from the
 outbox subscription seam. It does not compile queues, mutate lifecycle state,
