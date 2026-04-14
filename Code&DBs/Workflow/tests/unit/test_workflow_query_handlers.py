@@ -1037,6 +1037,173 @@ def test_handle_workflow_build_post_wires_on_failure_edge_gate_into_compiled_spe
     ]
 
 
+def test_handle_workflow_build_post_wires_conditional_edge_gates_into_compiled_spec() -> None:
+    condition = {"field": "should_continue", "op": "equals", "value": True}
+    workflow_row = {
+        "id": "wf_build_conditional_gate",
+        "name": "Conditional Gate",
+        "description": "Compile branch flow",
+        "definition": {
+            "type": "operating_model",
+            "source_prose": "Route work based on whether the upstream says to continue.",
+            "compiled_prose": "Route work based on whether the upstream says to continue.",
+            "narrative_blocks": [],
+            "references": [],
+            "capabilities": [],
+            "authority": "",
+            "sla": {},
+            "trigger_intent": [],
+            "draft_flow": [
+                {
+                    "id": "step-001",
+                    "title": "Route step",
+                    "summary": "Decide whether the workflow should continue.",
+                    "source_block_ids": [],
+                    "reference_slugs": [],
+                    "capability_slugs": [],
+                    "depends_on": [],
+                    "order": 1,
+                },
+                {
+                    "id": "step-002",
+                    "title": "Then path",
+                    "summary": "Run when the branch condition passes.",
+                    "source_block_ids": [],
+                    "reference_slugs": [],
+                    "capability_slugs": [],
+                    "depends_on": ["step-001"],
+                    "order": 2,
+                },
+                {
+                    "id": "step-003",
+                    "title": "Else path",
+                    "summary": "Run when the branch condition fails.",
+                    "source_block_ids": [],
+                    "reference_slugs": [],
+                    "capability_slugs": [],
+                    "depends_on": ["step-001"],
+                    "order": 3,
+                },
+            ],
+            "definition_revision": "def_build_conditional_gate",
+        },
+        "compiled_spec": None,
+        "version": 1,
+        "updated_at": "2026-04-09T19:00:00Z",
+    }
+    pg = _MutableWorkflowPg(workflow_rows={"wf_build_conditional_gate": workflow_row})
+    request = _RequestStub(
+        {
+            "nodes": [
+                {
+                    "node_id": "step-001",
+                    "kind": "step",
+                    "title": "Route step",
+                    "route": "auto/build",
+                    "status": "ready",
+                    "summary": "Decide whether the workflow should continue.",
+                },
+                {
+                    "node_id": "step-002",
+                    "kind": "step",
+                    "title": "Then path",
+                    "route": "auto/build",
+                    "status": "ready",
+                    "summary": "Run when the branch condition passes.",
+                },
+                {
+                    "node_id": "step-003",
+                    "kind": "step",
+                    "title": "Else path",
+                    "route": "auto/build",
+                    "status": "ready",
+                    "summary": "Run when the branch condition fails.",
+                },
+            ],
+            "edges": [
+                {
+                    "edge_id": "edge-step-001-step-002",
+                    "kind": "conditional",
+                    "from_node_id": "step-001",
+                    "to_node_id": "step-002",
+                    "branch_reason": "then",
+                    "gate": {
+                        "state": "configured",
+                        "label": "Then",
+                        "family": "conditional",
+                        "config": {
+                            "condition": condition,
+                        },
+                    },
+                },
+                {
+                    "edge_id": "edge-step-001-step-003",
+                    "kind": "conditional",
+                    "from_node_id": "step-001",
+                    "to_node_id": "step-003",
+                    "branch_reason": "else",
+                    "gate": {
+                        "state": "configured",
+                        "label": "Else",
+                        "family": "conditional",
+                        "config": {
+                            "condition": condition,
+                        },
+                    },
+                },
+            ],
+        },
+        subsystems=SimpleNamespace(get_pg_conn=lambda: pg),
+        path="/api/workflows/wf_build_conditional_gate/build/build_graph",
+    )
+
+    workflow_query._handle_workflow_build_post(request, "/api/workflows/wf_build_conditional_gate/build/build_graph")
+
+    assert request.sent is not None
+    status, payload = request.sent
+    assert status == 200
+    jobs = {job["source_step_id"]: job for job in payload["compiled_spec"]["jobs"]}
+    assert jobs["step-002"]["dependency_edges"] == [
+        {
+            "label": "route-step",
+            "edge_type": "conditional",
+            "release_condition": condition,
+        }
+    ]
+    assert jobs["step-003"]["dependency_edges"] == [
+        {
+            "label": "route-step",
+            "edge_type": "conditional",
+            "release_condition": {"op": "not", "conditions": [condition]},
+        }
+    ]
+    persisted_definition = pg.workflow_rows["wf_build_conditional_gate"]["definition"]
+    assert persisted_definition["execution_setup"]["edge_gates"] == [
+        {
+            "edge_id": "edge-step-001-step-002",
+            "from_node_id": "step-001",
+            "to_node_id": "step-002",
+            "family": "conditional",
+            "label": "Then",
+            "branch_reason": "then",
+            "config": {
+                "condition": condition,
+            },
+        },
+        {
+            "edge_id": "edge-step-001-step-003",
+            "from_node_id": "step-001",
+            "to_node_id": "step-003",
+            "family": "conditional",
+            "label": "Else",
+            "branch_reason": "else",
+            "config": {
+                "condition": condition,
+            },
+        },
+    ]
+
+
 def test_handle_workflow_build_post_treats_trigger_nodes_as_trigger_intent() -> None:
     workflow_row = {
         "id": "wf_build_trigger_nodes",
@@ -2703,16 +2870,63 @@ def test_handle_constraints_empty_response_is_machine_first() -> None:
     assert result["constraints"] == []
 
 
-def test_handle_operator_view_returns_structured_cli_contract() -> None:
-    result = workflow_query_core.handle_operator_view(None, {"view": "status"})
+def test_handle_operator_view_requires_run_id_for_run_scoped_views() -> None:
+    try:
+        workflow_query_core.handle_operator_view(None, {"view": "status"})
+    except workflow_query_core._ClientError as exc:
+        assert str(exc) == "run_id is required for operator view 'status'"
+    else:  # pragma: no cover - defensive
+        raise AssertionError("expected run_id validation error")
+
+
+def test_handle_operator_view_status_returns_direct_payload(monkeypatch) -> None:
+    class _Reader:
+        def evidence_timeline(self, run_id: str):
+            assert run_id == "run_123"
+            return ("evidence",)
+
+    class _Orchestrator:
+        def __init__(self, *, evidence_reader: Any):
+            self._reader = evidence_reader
+
+        def inspect_run(self, *, run_id: str):
+            assert run_id == "run_123"
+            return SimpleNamespace(operator_frame_source="db", operator_frames=[{"frame": 1}])
+
+    monkeypatch.setattr("storage.postgres.PostgresEvidenceReader", _Reader)
+    monkeypatch.setattr("runtime.execution.RuntimeOrchestrator", _Orchestrator)
+    monkeypatch.setattr(
+        "surfaces.api._operator_helpers._run_async",
+        lambda awaitable, **_kwargs: {"outbox_depth": 2},
+    )
+    monkeypatch.setattr(
+        "observability.load_native_operator_support",
+        lambda *, run_id: {"run_id": run_id},
+    )
+    monkeypatch.setattr(
+        "observability.operator_status_run",
+        lambda **kwargs: {"kind": "status", "run_id": kwargs["run_id"], "support": kwargs["support"]},
+    )
+    monkeypatch.setattr(
+        "observability.render_operator_status",
+        lambda view: f"status:{view['run_id']}",
+    )
+
+    result = workflow_query_core.handle_operator_view(None, {"view": "status", "run_id": "run_123"})
 
     assert result == {
         "view": "status",
+        "run_id": "run_123",
         "requires": {
-            "runtime": "async_postgres",
-            "driver": "asyncpg",
+            "runtime": "sync_postgres",
+            "driver": "postgres",
         },
-        "cli_command": "workflow native-operator inspect",
+        "payload": {
+            "kind": "status",
+            "run_id": "run_123",
+            "support": {"outbox_depth": 2},
+        },
+        "rendered": "status:run_123",
     }
 
 

@@ -1,6 +1,6 @@
 import React, { useReducer, useMemo, useCallback, useEffect, useRef, useState } from 'react';
 import { useBuildPayload } from '../shared/hooks/useBuildPayload';
-import { compileDefinition, refineDefinition } from '../shared/buildController';
+import { compileDefinition } from '../shared/buildController';
 import { presentBuild } from './moonBuildPresenter';
 import type { OrbitNode, OrbitEdge, GateState, RunJobStatus } from './moonBuildPresenter';
 import { useLiveRunSnapshot } from '../dashboard/useLiveRunSnapshot';
@@ -94,6 +94,11 @@ const TRIGGER_MANUAL_ROUTE = 'trigger';
 const TRIGGER_SCHEDULE_ROUTE = 'trigger/schedule';
 const TRIGGER_WEBHOOK_ROUTE = 'trigger/webhook';
 const WEBHOOK_TRIGGER_EVENT = 'db.webhook_events.insert';
+const DEFAULT_BRANCH_CONDITION = {
+  field: 'should_continue',
+  op: 'equals',
+  value: true,
+} as const;
 
 function isTriggerRoute(route?: string): boolean {
   return route === TRIGGER_MANUAL_ROUTE || route === TRIGGER_SCHEDULE_ROUTE || route === TRIGGER_WEBHOOK_ROUTE;
@@ -128,6 +133,55 @@ function buildTriggerConfig(route?: string, existing?: BuildNode['trigger']): Bu
     source_ref: sourceRef,
     filter,
   };
+}
+
+function cloneBranchCondition(condition: unknown): Record<string, unknown> {
+  if (condition && typeof condition === 'object' && !Array.isArray(condition)) {
+    return JSON.parse(JSON.stringify(condition)) as Record<string, unknown>;
+  }
+  return { ...DEFAULT_BRANCH_CONDITION };
+}
+
+function branchLabel(reason: string | null | undefined): string {
+  const normalized = (reason || '').trim();
+  if (!normalized) return 'Branch';
+  if (normalized === 'then') return 'Then';
+  if (normalized === 'else') return 'Else';
+  return normalized
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function nextGraphNodeId(nodes: BuildNode[], prefix: string): string {
+  const existingIds = new Set(nodes.map(node => node.node_id));
+  for (let index = 1; index < 10_000; index += 1) {
+    const candidate = `${prefix}-${String(index).padStart(3, '0')}`;
+    if (!existingIds.has(candidate)) return candidate;
+  }
+  return `${prefix}-${Date.now()}`;
+}
+
+function nextGraphEdgeId(edges: BuildEdge[], fromNodeId: string, toNodeId: string): string {
+  const existingIds = new Set(edges.map(edge => edge.edge_id));
+  const base = `edge-${fromNodeId}-${toNodeId}`;
+  if (!existingIds.has(base)) return base;
+  for (let index = 1; index < 10_000; index += 1) {
+    const candidate = `${base}-${index}`;
+    if (!existingIds.has(candidate)) return candidate;
+  }
+  return `${base}-${Date.now()}`;
+}
+
+function graphHasBranches(graph: NonNullable<BuildPayload['build_graph']>): boolean {
+  const inboundCounts = new Map<string, number>();
+  const outboundCounts = new Map<string, number>();
+  for (const edge of graph.edges || []) {
+    outboundCounts.set(edge.from_node_id, (outboundCounts.get(edge.from_node_id) || 0) + 1);
+    inboundCounts.set(edge.to_node_id, (inboundCounts.get(edge.to_node_id) || 0) + 1);
+  }
+  return [...outboundCounts.values(), ...inboundCounts.values()].some(count => count > 1);
 }
 
 export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun, initialMode }: Props) {
@@ -253,14 +307,83 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
       const gateLabel = gateItem?.label || gateFamily;
 
       const graph = payload.build_graph;
+      const nodes = [...(graph.nodes || [])];
       const edges = [...(graph.edges || [])];
       const idx = edges.findIndex((e: any) => e.edge_id === edgeId);
       if (idx >= 0) {
-        edges[idx] = {
-          ...edges[idx],
-          gate: { state: 'configured', label: gateLabel, family: gateFamily },
-        };
-        await updateBuildGraph({ ...graph, edges } as any);
+        const edge = edges[idx];
+        if (gateFamily === 'conditional') {
+          const condition = cloneBranchCondition(edge.gate?.config?.condition);
+          const sourceNode = nodes.find(node => node.node_id === edge.from_node_id);
+          const targetNode = nodes.find(node => node.node_id === edge.to_node_id);
+          edges[idx] = {
+            ...edge,
+            kind: 'conditional',
+            branch_reason: 'then',
+            gate: {
+              ...(edge.gate || {}),
+              state: 'configured',
+              label: branchLabel('then'),
+              family: gateFamily,
+              config: {
+                ...(edge.gate?.config || {}),
+                condition,
+              },
+            },
+          };
+
+          const hasSiblingBranch = edges.some(other =>
+            other.edge_id !== edge.edge_id &&
+            other.from_node_id === edge.from_node_id &&
+            other.gate?.family === 'conditional',
+          );
+
+          if (!hasSiblingBranch) {
+            const elseNodeId = nextGraphNodeId(nodes, 'branch');
+            const elseNode: BuildNode = {
+              node_id: elseNodeId,
+              kind: 'step',
+              title: 'Else path',
+              summary: `Runs when ${sourceNode?.title || 'the upstream step'} does not satisfy the branch condition.`,
+              route: '',
+              status: '',
+            };
+            nodes.push(elseNode);
+            edges.push({
+              edge_id: nextGraphEdgeId(edges, edge.from_node_id, elseNodeId),
+              kind: 'conditional',
+              from_node_id: edge.from_node_id,
+              to_node_id: elseNodeId,
+              branch_reason: 'else',
+              gate: {
+                state: 'configured',
+                label: branchLabel('else'),
+                family: gateFamily,
+                config: {
+                  condition,
+                },
+              },
+            });
+
+            if (targetNode && !targetNode.summary) {
+              const targetIndex = nodes.findIndex(node => node.node_id === targetNode.node_id);
+              if (targetIndex >= 0) {
+                nodes[targetIndex] = {
+                  ...nodes[targetIndex],
+                  summary: `Runs when ${sourceNode?.title || 'the upstream step'} satisfies the branch condition.`,
+                };
+              }
+            }
+          }
+
+          await updateBuildGraph({ ...graph, nodes, edges });
+        } else {
+          edges[idx] = {
+            ...edge,
+            gate: { state: 'configured', label: gateLabel, family: gateFamily },
+          };
+          await updateBuildGraph({ ...graph, edges } as any);
+        }
       }
       dispatch({ type: 'CLOSE_POPOUT' });
     } catch (err) {
@@ -341,14 +464,12 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
   const applyCatalogToEdge = useCallback(async (catalogId: string, edgeId: string) => {
     try {
       const item = catalog.find(c => c.id === catalogId);
-      if (!item?.gateFamily || !payload?.definition) return;
-      const instruction = `Add a "${item.label}" gate (family: ${item.gateFamily}) on edge "${edgeId}"`;
-      await refineDefinition(instruction, payload.definition);
-      await reload();
+      if (!item?.gateFamily) return;
+      await handleApplyGate(edgeId, item.gateFamily);
     } catch (err) {
       setMutationError(err instanceof Error ? err.message : 'Mutation failed');
     }
-  }, [payload, reload, catalog]);
+  }, [catalog, handleApplyGate]);
 
   // Click fallback: if a catalog item is staged, clicking a node applies it
   const handleNodeClick = useCallback((nodeId: string, isSelected: boolean) => {
@@ -396,6 +517,10 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
     if (sourceNodeId === targetNodeId || !payload?.build_graph) return;
     try {
       const graph = payload.build_graph;
+      if (graphHasBranches(graph)) {
+        setMutationError('Reordering is disabled once the graph branches. Move the branch by rewiring edges instead.');
+        return;
+      }
       const nodes = [...(graph.nodes || [])];
       const fromIdx = nodes.findIndex(n => n.node_id === sourceNodeId);
       const toIdx = nodes.findIndex(n => n.node_id === targetNodeId);

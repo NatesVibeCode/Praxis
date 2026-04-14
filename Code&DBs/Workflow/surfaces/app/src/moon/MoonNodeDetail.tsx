@@ -54,6 +54,39 @@ function parseTriggerFilter(text: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
+function formatJsonObject(value: unknown): string {
+  return JSON.stringify(
+    value && typeof value === 'object' && !Array.isArray(value) ? value : {},
+    null,
+    2,
+  );
+}
+
+function parseJsonObject(text: string, emptyMessage: string): Record<string, unknown> {
+  if (!text.trim()) throw new Error(emptyMessage);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error('Condition must be valid JSON.');
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Condition must be a JSON object.');
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function branchLabel(reason: string | undefined): string {
+  if (!reason) return 'Branch';
+  if (reason === 'then') return 'Then';
+  if (reason === 'else') return 'Else';
+  return reason
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
 export function MoonNodeDetail({ node, content, workflowId, onMutate, onClose, selectedEdge, edgeFromLabel, edgeToLabel, onApplyGate, gateItems = [], buildGraph, onUpdateBuildGraph }: Props) {
   const { objectTypes, loading: objectTypesLoading } = useObjectTypes();
   const [objectSearch, setObjectSearch] = useState('');
@@ -74,14 +107,22 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onClose, s
   const [triggerFilterText, setTriggerFilterText] = useState('{}');
   const [triggerLoading, setTriggerLoading] = useState(false);
   const [triggerError, setTriggerError] = useState<string | null>(null);
+  const [edgeConditionText, setEdgeConditionText] = useState('{}');
+  const [edgeConditionLoading, setEdgeConditionLoading] = useState(false);
+  const [edgeConditionError, setEdgeConditionError] = useState<string | null>(null);
 
   const buildNode = node
     ? (buildGraph?.nodes || []).find(graphNode => graphNode.node_id === node.id) || null
+    : null;
+  const buildEdge = selectedEdge
+    ? (buildGraph?.edges || []).find(graphEdge => graphEdge.edge_id === selectedEdge.id) || null
     : null;
   const triggerRoute = buildNode?.route || node?.route || '';
   const triggerConfig = buildNode?.trigger;
   const triggerFilterJson = formatTriggerFilter(triggerConfig?.filter);
   const isTriggerNode = Boolean(node && isTriggerRoute(triggerRoute));
+  const isConditionalEdge = Boolean(selectedEdge && buildEdge?.gate?.family === 'conditional');
+  const conditionalBranchLabel = branchLabel(buildEdge?.branch_reason || selectedEdge?.branchReason);
 
   useEffect(() => {
     if (!isTriggerNode) return;
@@ -97,6 +138,16 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onClose, s
     triggerConfig?.cron_expression,
     triggerConfig?.source_ref,
     triggerFilterJson,
+  ]);
+
+  useEffect(() => {
+    if (!isConditionalEdge) return;
+    setEdgeConditionText(formatJsonObject(buildEdge?.gate?.config?.condition));
+    setEdgeConditionError(null);
+  }, [
+    isConditionalEdge,
+    buildEdge?.edge_id,
+    buildEdge?.gate?.config?.condition,
   ]);
 
   const handleAttach = useCallback(async () => {
@@ -244,6 +295,39 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onClose, s
     triggerFilterText,
   ]);
 
+  const handleSaveConditionalEdge = useCallback(async () => {
+    if (!selectedEdge || !buildGraph || !onUpdateBuildGraph || !buildEdge) return;
+    setEdgeConditionLoading(true);
+    setEdgeConditionError(null);
+    try {
+      const condition = parseJsonObject(edgeConditionText, 'Condition JSON is required.');
+      const edges = [...(buildGraph.edges || [])];
+      const sourceNodeId = buildEdge.from_node_id;
+      for (let index = 0; index < edges.length; index += 1) {
+        const edge = edges[index];
+        if (edge.from_node_id !== sourceNodeId || edge.gate?.family !== 'conditional') continue;
+        edges[index] = {
+          ...edge,
+          gate: {
+            ...(edge.gate || {}),
+            state: 'configured',
+            label: edge.gate?.label || branchLabel(edge.branch_reason || undefined),
+            family: 'conditional',
+            config: {
+              ...(edge.gate?.config || {}),
+              condition,
+            },
+          },
+        };
+      }
+      await onUpdateBuildGraph({ ...buildGraph, edges });
+    } catch (e: any) {
+      setEdgeConditionError(e.message || 'Failed to save branch condition');
+    } finally {
+      setEdgeConditionLoading(false);
+    }
+  }, [buildEdge, buildGraph, edgeConditionText, onUpdateBuildGraph, selectedEdge]);
+
   // Sort: unresolved first, then accepted, then rejected
   const bindings = [...(content?.connectBindings || [])].sort((a, b) => {
     const order: Record<string, number> = { unresolved: 0, accepted: 1, rejected: 2 };
@@ -281,6 +365,31 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onClose, s
               </button>
             ))}
           </div>
+          {isConditionalEdge && (
+            <>
+              <div className="moon-dock__section-label">Condition</div>
+              <div className="moon-dock__item-desc" style={{ marginBottom: 8 }}>
+                {conditionalBranchLabel} branch from this source.
+                {buildEdge?.branch_reason === 'else' ? ' The else branch automatically inverts the same condition.' : ' The else branch, if present, will invert the same condition.'}
+              </div>
+              <textarea
+                className="moon-dock-form__input"
+                value={edgeConditionText}
+                onChange={e => setEdgeConditionText(e.target.value)}
+                placeholder="Branch condition JSON"
+                rows={8}
+                style={{ minHeight: 132, resize: 'vertical' }}
+              />
+              <button
+                className="moon-dock-form__btn"
+                onClick={handleSaveConditionalEdge}
+                disabled={edgeConditionLoading || !buildGraph || !onUpdateBuildGraph}
+              >
+                {edgeConditionLoading ? <><span className="moon-spinner" /> Saving...</> : 'Save branch condition'}
+              </button>
+              {edgeConditionError && <div className="moon-dock-form__error">{edgeConditionError}</div>}
+            </>
+          )}
         </>
       ) : (
         <>

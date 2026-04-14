@@ -36,9 +36,12 @@ export function MoonEdges({ edges, layout, selectedEdgeId, onEdgeClick }: MoonEd
         const d = `M${x1} ${y1}C${x1 + dx * 0.4} ${y1},${x2 - dx * 0.4} ${y2},${x2} ${y2}`;
 
         const isSelected = edge.id === selectedEdgeId;
-        const color = isSelected || edge.isOnDominantPath
-          ? 'var(--moon-accent, #6CB6FF)'
-          : 'var(--moon-muted, #484f58)';
+        const isConditional = edge.gateFamily === 'conditional';
+        const color = isConditional
+          ? 'var(--moon-branch, #D29922)'
+          : isSelected || edge.isOnDominantPath
+            ? 'var(--moon-accent, #6CB6FF)'
+            : 'var(--moon-muted, #484f58)';
         const width = isSelected ? 2.5 : edge.isOnDominantPath ? 2 : 1.5;
 
         const mx = (x1 + x2) / 2;
@@ -48,14 +51,23 @@ export function MoonEdges({ edges, layout, selectedEdgeId, onEdgeClick }: MoonEd
           <g key={edge.id}>
             <path
               d={d}
-              stroke={color}
-              strokeWidth={width}
+              stroke="transparent"
+              strokeWidth={18}
               fill="none"
+              data-drop-edge={edge.id}
               style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
               onClick={(e) => {
                 e.stopPropagation();
                 onEdgeClick?.(edge.id);
               }}
+            />
+            <path
+              d={d}
+              stroke={color}
+              strokeWidth={width}
+              fill="none"
+              strokeDasharray={isConditional ? '7 5' : undefined}
+              style={{ pointerEvents: 'none' }}
             />
             {edge.gateLabel && (() => {
               const textLen = edge.gateLabel!.length * 6.5 + 16;

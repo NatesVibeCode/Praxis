@@ -539,6 +539,81 @@ def test_plan_definition_emits_after_failure_dependency_edges_from_moon_edge_gat
     ]
 
 
+def test_plan_definition_emits_conditional_dependency_edges_from_moon_edge_gates() -> None:
+    condition = {"field": "should_continue", "op": "equals", "value": True}
+    result = plan_definition(
+        {
+            "source_prose": "Route work depending on whether the upstream says to continue.",
+            "compiled_prose": "Route work depending on whether the upstream says to continue.",
+            "definition_revision": "def_conditional_gate",
+            "references": [],
+            "narrative_blocks": [],
+            "draft_flow": [
+                {
+                    "id": "step-001",
+                    "title": "Route step",
+                    "summary": "Decide whether the workflow should continue.",
+                    "depends_on": [],
+                    "order": 1,
+                },
+                {
+                    "id": "step-002",
+                    "title": "Then path",
+                    "summary": "Run when the branch condition passes.",
+                    "depends_on": ["step-001"],
+                    "order": 2,
+                },
+                {
+                    "id": "step-003",
+                    "title": "Else path",
+                    "summary": "Run when the branch condition fails.",
+                    "depends_on": ["step-001"],
+                    "order": 3,
+                },
+            ],
+            "execution_setup": {
+                "edge_gates": [
+                    {
+                        "edge_id": "edge-step-001-step-002",
+                        "from_node_id": "step-001",
+                        "to_node_id": "step-002",
+                        "family": "conditional",
+                        "label": "Then",
+                        "branch_reason": "then",
+                        "config": {"condition": condition},
+                    },
+                    {
+                        "edge_id": "edge-step-001-step-003",
+                        "from_node_id": "step-001",
+                        "to_node_id": "step-003",
+                        "family": "conditional",
+                        "label": "Else",
+                        "branch_reason": "else",
+                        "config": {"condition": condition},
+                    },
+                ]
+            },
+            "trigger_intent": [],
+        }
+    )
+
+    jobs = {job["source_step_id"]: job for job in result["compiled_spec"]["jobs"]}
+    assert jobs["step-002"]["dependency_edges"] == [
+        {
+            "label": "route-step",
+            "edge_type": "conditional",
+            "release_condition": condition,
+        }
+    ]
+    assert jobs["step-003"]["dependency_edges"] == [
+        {
+            "label": "route-step",
+            "edge_type": "conditional",
+            "release_condition": {"op": "not", "conditions": [condition]},
+        }
+    ]
+
+
 def test_compile_graph_workflow_request_honors_after_failure_dependency_edges() -> None:
     spec = {
         "name": "Failure Path",
@@ -573,6 +648,45 @@ def test_compile_graph_workflow_request_honors_after_failure_dependency_edges() 
     assert request.edges[0].from_node_id == "primary"
     assert request.edges[0].to_node_id == "fallback"
     assert request.edges[0].edge_type == "after_failure"
+
+
+def test_compile_graph_workflow_request_honors_conditional_dependency_edges() -> None:
+    condition = {"field": "should_continue", "op": "equals", "value": True}
+    spec = {
+        "name": "Conditional Path",
+        "workflow_id": "workflow.conditional_path",
+        "phase": "build",
+        "jobs": [
+            {
+                "label": "route",
+                "agent": "auto/build",
+                "prompt": "Decide whether the workflow should continue.",
+            },
+            {
+                "label": "then_path",
+                "agent": "auto/build",
+                "prompt": "Run when the branch condition passes.",
+                "depends_on": ["route"],
+                "dependency_edges": [
+                    {
+                        "label": "route",
+                        "edge_type": "conditional",
+                        "release_condition": condition,
+                    }
+                ],
+            },
+        ],
+    }
+
+    assert spec_uses_graph_runtime(spec) is True
+
+    request = compile_graph_workflow_request(spec)
+
+    assert len(request.edges) == 1
+    assert request.edges[0].from_node_id == "route"
+    assert request.edges[0].to_node_id == "then_path"
+    assert request.edges[0].edge_type == "conditional"
+    assert dict(request.edges[0].release_condition) == condition
 
 
 def test_compile_prose_fails_closed_when_compile_index_snapshot_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:

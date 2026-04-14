@@ -559,13 +559,19 @@ def mutate_workflow_build(
             from_id = _text(edge.get("from_node_id"))
             to_id = _text(edge.get("to_node_id"))
             if from_id and to_id:
-                edge_gates.append({
+                gate_entry = {
                     "edge_id": _text(edge.get("edge_id")) or f"edge-{from_id}-{to_id}",
                     "from_node_id": from_id,
                     "to_node_id": to_id,
                     "family": _text(gate.get("family")),
                     "label": _text(gate.get("label")) or "",
-                })
+                }
+                branch_reason = _text(edge.get("branch_reason"))
+                if branch_reason:
+                    gate_entry["branch_reason"] = branch_reason
+                if isinstance(gate.get("config"), dict):
+                    gate_entry["config"] = _json_clone(gate.get("config"))
+                edge_gates.append(gate_entry)
         definition["execution_setup"]["edge_gates"] = edge_gates
     else:
         raise WorkflowRuntimeBoundaryError(

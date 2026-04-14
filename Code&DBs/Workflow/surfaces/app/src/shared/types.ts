@@ -38,7 +38,7 @@ export interface BuildEdge {
     family: string;
     config?: {
       verify_command?: string;
-      condition?: string;
+      condition?: Record<string, unknown> | string;
       max_attempts?: number;
       fallback?: string;
       [key: string]: unknown;

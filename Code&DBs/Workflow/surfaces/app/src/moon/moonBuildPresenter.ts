@@ -66,10 +66,13 @@ export interface OrbitEdge {
   id: string;
   from: string;
   to: string;
+  kind: string;
   isOnDominantPath: boolean;
   gateState: GateState;
   gateLabel?: string;
   gateFamily?: string;
+  branchReason?: string;
+  gateConfig?: Record<string, unknown>;
 }
 
 export interface DockContent {
@@ -107,6 +110,18 @@ export interface MoonBuildViewModel {
   totalNodes: number;
   resolvedNodes: number;
   blockedNodes: number;
+}
+
+function branchLabel(reason: string | null | undefined): string | undefined {
+  const normalized = (reason || '').trim();
+  if (!normalized) return undefined;
+  if (normalized === 'then') return 'Then';
+  if (normalized === 'else') return 'Else';
+  return normalized
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
 }
 
 // --- Helpers ---
@@ -376,10 +391,15 @@ export function presentBuild(
       id: e.edge_id,
       from: e.from_node_id,
       to: e.to_node_id,
+      kind: e.kind,
       isOnDominantPath: pathSet.has(e.from_node_id) && pathSet.has(e.to_node_id),
       gateState,
-      gateLabel: raw.gate?.label,
+      gateLabel: raw.gate?.label || branchLabel(e.branch_reason),
       gateFamily: raw.gate?.family,
+      branchReason: typeof e.branch_reason === 'string' ? e.branch_reason : undefined,
+      gateConfig: raw.gate?.config && typeof raw.gate.config === 'object' && !Array.isArray(raw.gate.config)
+        ? { ...raw.gate.config as Record<string, unknown> }
+        : undefined,
     };
   });
 

@@ -592,6 +592,10 @@ def _build_graph(
                         "family": _as_text(eg.get("family")),
                         "label": _as_text(eg.get("label")) or _as_text(eg.get("family")),
                     }
+                    if isinstance(eg.get("config"), dict):
+                        edge_entry["gate"]["config"] = _json_clone(eg.get("config"))
+                    if _as_text(eg.get("branch_reason")):
+                        edge_entry["branch_reason"] = _as_text(eg.get("branch_reason"))
                 edges.append(edge_entry)
 
     for edge_id, from_node_id, to_node_id in sorted(state_edges):

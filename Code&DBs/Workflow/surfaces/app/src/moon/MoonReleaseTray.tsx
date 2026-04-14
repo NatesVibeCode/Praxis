@@ -8,7 +8,7 @@ type DefinitionGate = {
   label?: string;
   required_approvers?: number;
   verify_command?: string;
-  condition?: string;
+  condition?: Record<string, unknown>;
   max_attempts?: number;
   fallback_job?: string;
 };
@@ -74,7 +74,12 @@ function buildDefinitionGate(edge: BuildEdge): DefinitionGate | null {
       definitionGate = { type: 'validation', verify_command: gate.config?.verify_command };
       break;
     case 'conditional':
-      definitionGate = { type: 'conditional', condition: gate.config?.condition };
+      definitionGate = {
+        type: 'conditional',
+        condition: gate.config?.condition && typeof gate.config.condition === 'object' && !Array.isArray(gate.config.condition)
+          ? { ...gate.config.condition as Record<string, unknown> }
+          : undefined,
+      };
       break;
     case 'retry':
       definitionGate = { type: 'retry', max_attempts: gate.config?.max_attempts || 3 };
@@ -115,6 +120,10 @@ function buildGraphToDefinition(buildGraph: BuildPayload['build_graph']): Record
         to_node_id: e.to_node_id,
         family: e.gate?.family,
         label: gate.label || e.gate?.label || '',
+        branch_reason: e.branch_reason || undefined,
+        ...(e.gate?.config && typeof e.gate.config === 'object' && !Array.isArray(e.gate.config)
+          ? { config: { ...e.gate.config } }
+          : {}),
         gate,
       });
     }

@@ -35,6 +35,20 @@ def missing_execution_plan_message(workflow_name: str | None = None) -> str:
     return "Workflow has no current execution plan. Generate plan first."
 
 
+def _conditional_release_condition(edge_gate: dict[str, Any]) -> dict[str, Any] | None:
+    config = edge_gate.get("config")
+    if not isinstance(config, dict):
+        return None
+    condition = config.get("condition")
+    if not isinstance(condition, dict) or not condition:
+        return None
+    normalized = json.loads(json.dumps(condition))
+    branch_reason = _as_text(edge_gate.get("branch_reason")).strip().lower()
+    if branch_reason == "else":
+        return {"op": "not", "conditions": [normalized]}
+    return normalized
+
+
 def current_compiled_spec(definition: Any, compiled_spec: Any) -> dict[str, Any] | None:
     definition_dict = materialize_definition(_json_dict(definition))
     compiled_spec_dict = _json_dict(compiled_spec)
@@ -281,15 +295,23 @@ def _plan_jobs(definition: dict[str, Any]) -> list[dict[str, Any]]:
                 continue
             depends_on.append(dependency_label)
             edge_type = "after_success"
+            release_condition: dict[str, Any] | None = None
             edge_gate = edge_gate_by_pair.get((dependency_step_id, step_id))
-            if isinstance(edge_gate, dict) and _as_text(edge_gate.get("family")) == "after_failure":
-                edge_type = "after_failure"
-            dependency_edges.append(
-                {
-                    "label": dependency_label,
-                    "edge_type": edge_type,
-                }
-            )
+            if isinstance(edge_gate, dict):
+                gate_family = _as_text(edge_gate.get("family"))
+                if gate_family == "after_failure":
+                    edge_type = "after_failure"
+                elif gate_family == "conditional":
+                    release_condition = _conditional_release_condition(edge_gate)
+                    if release_condition:
+                        edge_type = "conditional"
+            edge_spec = {
+                "label": dependency_label,
+                "edge_type": edge_type,
+            }
+            if release_condition is not None:
+                edge_spec["release_condition"] = release_condition
+            dependency_edges.append(edge_spec)
         if depends_on:
             job["depends_on"] = depends_on
         if any(edge.get("edge_type") != "after_success" for edge in dependency_edges):
