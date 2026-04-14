@@ -443,7 +443,7 @@ def write_job_receipt(
         spec_name="",
         agent_slug=agent_slug,
         status=status,
-        failure_code=result.get("error_code", ""),
+        failure_code=error_code or None,
         duration_seconds=duration_ms / 1000.0,
         cpu_percent=result.get("container_cpu_percent"),
         mem_bytes=result.get("container_mem_bytes"),

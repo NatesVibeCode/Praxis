@@ -178,6 +178,27 @@ def tool_praxis_operator_write(params: dict) -> dict:
     )
 
 
+def tool_praxis_operator_native_primary_cutover_gate(params: dict) -> dict:
+    """Admit one native primary cutover gate through operator-control persistence."""
+
+    return operator_write.admit_native_primary_cutover_gate(
+        decided_by=params.get("decided_by", ""),
+        decision_source=params.get("decision_source", ""),
+        rationale=params.get("rationale", ""),
+        roadmap_item_id=params.get("roadmap_item_id"),
+        workflow_class_id=params.get("workflow_class_id"),
+        schedule_definition_id=params.get("schedule_definition_id"),
+        title=params.get("title"),
+        gate_name=params.get("gate_name"),
+        gate_policy=params.get("gate_policy"),
+        required_evidence=params.get("required_evidence"),
+        decided_at=params.get("decided_at"),
+        opened_at=params.get("opened_at"),
+        created_at=params.get("created_at"),
+        updated_at=params.get("updated_at"),
+    )
+
+
 def tool_praxis_operator_closeout(params: dict) -> dict:
     """Preview or commit proof-backed bug and roadmap closeout through the shared gate."""
 
@@ -389,6 +410,59 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "outcome_gate": {"type": "string"},
                 },
                 "required": ["title", "intent_brief"],
+            },
+        },
+    ),
+    "praxis_operator_native_primary_cutover_gate": (
+        tool_praxis_operator_native_primary_cutover_gate,
+        {
+            "description": (
+                "Admit a native primary cutover gate into operator-control decision and gate authority tables.\n\n"
+                "USE WHEN: you need a tracked cutover decision for one target (roadmap item, workflow class, or "
+                "schedule definition) with optional policy/evidence payloads.\n\n"
+                "EXAMPLE: praxis_operator_native_primary_cutover_gate(\n"
+                "  decided_by='operator-auto',\n"
+                "  decision_source='runbook',\n"
+                "  rationale='manual rollout hold ended',\n"
+                "  roadmap_item_id='roadmap_item.platform.deploy',\n"
+                "  gate_policy={'rollout_window':'canary'},\n"
+                "  required_evidence={'checks':['operator-readiness']}\n"
+                ")"
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "decided_by": {
+                        "type": "string",
+                        "description": "Operator principal or service taking action.",
+                    },
+                    "decision_source": {
+                        "type": "string",
+                        "description": "Source system or artifact for this cutover decision.",
+                    },
+                    "rationale": {
+                        "type": "string",
+                        "description": "Human-readable justification for opening the gate.",
+                    },
+                    "roadmap_item_id": {"type": "string"},
+                    "workflow_class_id": {"type": "string"},
+                    "schedule_definition_id": {"type": "string"},
+                    "title": {"type": "string"},
+                    "gate_name": {"type": "string"},
+                    "gate_policy": {
+                        "type": "object",
+                        "description": "Optional policy envelope attached to the gate.",
+                    },
+                    "required_evidence": {
+                        "type": "object",
+                        "description": "Optional evidence envelope attached to the gate.",
+                    },
+                    "decided_at": {"type": "string", "description": "ISO-8601 datetime string"},
+                    "opened_at": {"type": "string", "description": "ISO-8601 datetime string"},
+                    "created_at": {"type": "string", "description": "ISO-8601 datetime string"},
+                    "updated_at": {"type": "string", "description": "ISO-8601 datetime string"},
+                },
+                "required": ["decided_by", "decision_source", "rationale"],
             },
         },
     ),

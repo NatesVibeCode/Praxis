@@ -360,6 +360,25 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             _example("Preview a roadmap item", {"action": "preview", "title": "Consolidate CLI frontdoors", "intent_brief": "one authority for operator CLI"}),
         ],
     ),
+    "praxis_operator_native_primary_cutover_gate": _tool(
+        surface="operator",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Admit a native-primary cutover gate with required decision metadata into operator-control.",
+        when_not_to_use="Do not use it for read-only operator status views.",
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "Admit roadmap-based cutover gate",
+                {
+                    "decided_by": "operator-auto",
+                    "decision_source": "runbook",
+                    "rationale": "manual rollout hold ended",
+                    "roadmap_item_id": "roadmap_item.platform.deploy",
+                },
+            ),
+        ],
+    ),
     "praxis_provider_onboard": _tool(
         surface="integration",
         tier="advanced",

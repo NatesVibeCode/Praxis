@@ -253,6 +253,7 @@ class PostgresReceiptRepository:
         mem_bytes: int | float | None = None,
         created_at: datetime | None = None,
     ) -> None:
+        normalized_failure_code = str(failure_code or "").strip() or None
         self._conn.execute(
             """
             INSERT INTO workflow_notifications
@@ -266,7 +267,7 @@ class PostgresReceiptRepository:
             str(spec_name or ""),
             _require_text(agent_slug, field_name="agent_slug"),
             _require_text(status, field_name="status"),
-            _optional_text(failure_code, field_name="failure_code"),
+            _optional_text(normalized_failure_code, field_name="failure_code"),
             _normalize_duration_seconds(duration_seconds, field_name="duration_seconds"),
             _normalize_optional_number(cpu_percent, field_name="cpu_percent"),
             _normalize_optional_number(mem_bytes, field_name="mem_bytes"),

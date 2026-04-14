@@ -27,6 +27,12 @@ IntegrationHandler = Callable[[dict, Any], IntegrationResult]
 def _build_bindings() -> dict[tuple[str, str], IntegrationHandler]:
     bindings: dict[tuple[str, str], IntegrationHandler] = {}
     try:
+        from .platform import execute_notification, execute_workflow_invoke
+        bindings[("notifications", "send")] = execute_notification
+        bindings[("workflow", "invoke")] = execute_workflow_invoke
+    except Exception as exc:  # pragma: no cover
+        logger.warning("platform integration handlers unavailable: %s", exc)
+    try:
         from .webhook import execute_webhook
         bindings[("webhook", "post")] = execute_webhook
     except Exception as exc:  # pragma: no cover

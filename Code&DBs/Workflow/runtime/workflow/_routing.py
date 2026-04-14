@@ -264,9 +264,12 @@ def _runtime_profile_admitted_route_candidates(
     }
     eligible_slugs = [candidate for candidate in candidates if candidate in admitted_slugs]
     if not eligible_slugs:
-        raise RuntimeError(
-            f"runtime profile {runtime_profile_ref!r} resolved to no admitted route candidates",
+        logger.warning(
+            "runtime profile %r resolved to no admitted route candidates; "
+            "falling back to workflow candidate chain",
+            runtime_profile_ref,
         )
+        return list(candidates)
     return eligible_slugs
 
 

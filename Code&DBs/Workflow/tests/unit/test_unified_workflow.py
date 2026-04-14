@@ -2560,6 +2560,26 @@ def test_select_claim_route_prefers_healthy_task_type_candidate() -> None:
     assert selected == "anthropic/claude-sonnet-4-6"
 
 
+def test_runtime_profile_admitted_route_candidates_fall_back_to_chain_when_empty(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "registry.runtime_profile_admission.load_admitted_runtime_profile_candidates",
+        lambda _conn, runtime_profile_ref: [],
+    )
+
+    candidates = [
+        "openai/gpt-5.4",
+        "anthropic/claude-sonnet-4-6",
+    ]
+
+    selected = unified_dispatch._runtime_profile_admitted_route_candidates(
+        object(),
+        runtime_profile_ref="praxis",
+        candidates=candidates,
+    )
+
+    assert selected == candidates
+
+
 def test_cancel_run_default_does_not_cancel_running_jobs():
     class _CancelConn:
         def __init__(self) -> None:

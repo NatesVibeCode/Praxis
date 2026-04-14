@@ -152,12 +152,32 @@ class ProviderOnboardingCommand:
     dry_run: bool
 
 
+@dataclass(frozen=True, slots=True)
+class NativePrimaryCutoverGateCommand:
+    """Admit a native-primary cutover gate through operator control."""
+
+    decided_by: str
+    decision_source: str
+    rationale: str
+    roadmap_item_id: str | None
+    workflow_class_id: str | None
+    schedule_definition_id: str | None
+    title: str | None
+    gate_name: str | None
+    gate_policy: Mapping[str, object] | None
+    required_evidence: Mapping[str, object] | None
+    decided_at: datetime | None
+    opened_at: datetime | None
+    created_at: datetime | None
+    updated_at: datetime | None
+
+
 def _usage() -> str:
     return (
         "usage: workflow native-operator "
         "<instance|health|db-health|bootstrap|db-bootstrap|smoke|inspect|"
         "status|graph-topology|graph-lineage|cockpit|route-disable|roadmap-write|"
-        "work-item-closeout|roadmap-view|provider-onboard> [args]"
+        "work-item-closeout|roadmap-view|provider-onboard|native-primary-cutover-gate> [args]"
     )
 
 
@@ -367,6 +387,110 @@ def _parse_provider_onboard(args: list[str]) -> ProviderOnboardingCommand:
     return ProviderOnboardingCommand(spec_path=spec_path, dry_run=dry_run)
 
 
+def _parse_mapping(value: str, *, field_name: str) -> Mapping[str, object]:
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{field_name} must be valid JSON: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError(f"{field_name} must be a JSON object")
+    return parsed
+
+
+def _parse_native_primary_cutover_gate(args: list[str]) -> NativePrimaryCutoverGateCommand:
+    if len(args) < 4:
+        raise ValueError(
+            "usage: workflow native-operator native-primary-cutover-gate "
+            "--decided-by <name> --decision-source <source> --rationale <text> "
+            "(--roadmap-item-id <id> | --workflow-class-id <id> | --schedule-definition-id <id>) "
+            "[--title <text>] [--gate-name <name>] [--gate-policy <json>] [--required-evidence <json>] "
+            "[--decided-at <iso>] [--opened-at <iso>] [--created-at <iso>] [--updated-at <iso>]"
+        )
+
+    decided_by: str | None = None
+    decision_source: str | None = None
+    rationale: str | None = None
+    roadmap_item_id: str | None = None
+    workflow_class_id: str | None = None
+    schedule_definition_id: str | None = None
+    title: str | None = None
+    gate_name: str | None = None
+    gate_policy: Mapping[str, object] | None = None
+    required_evidence: Mapping[str, object] | None = None
+    decided_at: datetime | None = None
+    opened_at: datetime | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    index = 1
+    while index < len(args):
+        flag = args[index]
+        if index + 1 >= len(args):
+            raise ValueError(f"missing value for {flag}")
+        value = args[index + 1]
+        if flag == "--decided-by":
+            decided_by = value
+        elif flag == "--decision-source":
+            decision_source = value
+        elif flag == "--rationale":
+            rationale = value
+        elif flag == "--roadmap-item-id":
+            roadmap_item_id = value
+        elif flag == "--workflow-class-id":
+            workflow_class_id = value
+        elif flag == "--schedule-definition-id":
+            schedule_definition_id = value
+        elif flag == "--title":
+            title = value
+        elif flag == "--gate-name":
+            gate_name = value
+        elif flag == "--gate-policy":
+            gate_policy = _parse_mapping(value, field_name="--gate-policy")
+        elif flag == "--required-evidence":
+            required_evidence = _parse_mapping(value, field_name="--required-evidence")
+        elif flag == "--decided-at":
+            decided_at = _parse_datetime(value, field_name="decided_at")
+        elif flag == "--opened-at":
+            opened_at = _parse_datetime(value, field_name="opened_at")
+        elif flag == "--created-at":
+            created_at = _parse_datetime(value, field_name="created_at")
+        elif flag == "--updated-at":
+            updated_at = _parse_datetime(value, field_name="updated_at")
+        else:
+            raise ValueError(_usage())
+        index += 2
+
+    if decided_by is None or not decided_by.strip():
+        raise ValueError("missing required field --decided-by")
+    if decision_source is None or not decision_source.strip():
+        raise ValueError("missing required field --decision-source")
+    if rationale is None or not rationale.strip():
+        raise ValueError("missing required field --rationale")
+
+    targets = (roadmap_item_id, workflow_class_id, schedule_definition_id)
+    if sum(1 for value in targets if value is not None) != 1:
+        raise ValueError(
+            "usage: workflow native-operator native-primary-cutover-gate "
+            "requires exactly one target: --roadmap-item-id, --workflow-class-id, or --schedule-definition-id"
+        )
+
+    return NativePrimaryCutoverGateCommand(
+        decided_by=decided_by.strip(),
+        decision_source=decision_source.strip(),
+        rationale=rationale.strip(),
+        roadmap_item_id=roadmap_item_id,
+        workflow_class_id=workflow_class_id,
+        schedule_definition_id=schedule_definition_id,
+        title=title,
+        gate_name=gate_name,
+        gate_policy=gate_policy,
+        required_evidence=required_evidence,
+        decided_at=decided_at,
+        opened_at=opened_at,
+        created_at=created_at,
+        updated_at=updated_at,
+    )
+
+
 def _parse_work_item_closeout(args: list[str]) -> WorkItemCloseoutCommand:
     action = "preview"
     bug_ids: list[str] = []
@@ -410,6 +534,7 @@ def _parse(argv: Sequence[str]) -> (
     | WorkItemCloseoutCommand
     | RoadmapViewCommand
     | ProviderOnboardingCommand
+    | NativePrimaryCutoverGateCommand
 ):
     args = list(argv)
     if not args:
@@ -446,6 +571,8 @@ def _parse(argv: Sequence[str]) -> (
         return _parse_roadmap_view(args)
     if command_name == "provider-onboard":
         return _parse_provider_onboard(args)
+    if command_name == "native-primary-cutover-gate":
+        return _parse_native_primary_cutover_gate(args)
     raise ValueError(_usage())
 
 
@@ -570,6 +697,28 @@ def main(
         except Exception as exc:
             stdout.write(f"ERROR: {exc}\n")
             return 1
+    if isinstance(command, NativePrimaryCutoverGateCommand):
+        _emit_json(
+            stdout,
+            operator_write.admit_native_primary_cutover_gate(
+                decided_by=command.decided_by,
+                decision_source=command.decision_source,
+                rationale=command.rationale,
+                roadmap_item_id=command.roadmap_item_id,
+                workflow_class_id=command.workflow_class_id,
+                schedule_definition_id=command.schedule_definition_id,
+                title=command.title,
+                gate_name=command.gate_name,
+                gate_policy=command.gate_policy,
+                required_evidence=command.required_evidence,
+                decided_at=command.decided_at,
+                opened_at=command.opened_at,
+                created_at=command.created_at,
+                updated_at=command.updated_at,
+                env=source,
+            ),
+        )
+        return 0
     if isinstance(command, InspectCommand):
         _emit_text(
             stdout,

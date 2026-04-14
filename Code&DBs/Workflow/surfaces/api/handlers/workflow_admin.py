@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Mapping
 
 from runtime.dependency_contract import dependency_truth_report
 from storage.postgres.connection import resolve_workflow_database_url
@@ -90,6 +90,7 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         "/operator_view": "Observability views (operator status/scoreboard/graph)",
         "/api/operator/task-route-eligibility": "Write a timed provider/model route eligibility window",
         "/api/operator/transport-support": "Read provider/model transport support before run time",
+        "/api/operator/native-primary-cutover-gate": "Admit a native-primary cutover gate through operator control",
         "/api/operator/roadmap-write": "Preview, validate, or commit roadmap rows through one shared validation gate",
         "/api/operator/work-item-closeout": "Preview or commit proof-backed bug and roadmap closeout through one shared reconciliation gate",
         "/api/operator/roadmap-view": "Read one roadmap subtree and its dependency edges from DB-backed authority",
@@ -441,6 +442,91 @@ def _handle_task_route_eligibility_post(subs: Any, body: dict[str, Any]) -> dict
             field_name="effective_from",
         ),
         decision_ref=decision_ref,
+        env=env,
+    )
+
+
+def _parse_optional_mapping(value: object, *, field_name: str) -> Mapping[str, Any] | None:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise _ClientError(f"{field_name} must be an object")
+    return value
+
+
+def _parse_optional_text(value: object, *, field_name: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise _ClientError(f"{field_name} must be a non-empty string when provided")
+    return value.strip()
+
+
+def _handle_native_primary_cutover_gate_post(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
+    del subs
+    decided_by = body.get("decided_by")
+    if not isinstance(decided_by, str) or not decided_by.strip():
+        raise _ClientError("decided_by is required")
+
+    decision_source = body.get("decision_source")
+    if not isinstance(decision_source, str) or not decision_source.strip():
+        raise _ClientError("decision_source is required")
+
+    rationale = body.get("rationale")
+    if not isinstance(rationale, str) or not rationale.strip():
+        raise _ClientError("rationale is required")
+
+    roadmap_item_id = _parse_optional_text(
+        body.get("roadmap_item_id"),
+        field_name="roadmap_item_id",
+    )
+    workflow_class_id = _parse_optional_text(
+        body.get("workflow_class_id"),
+        field_name="workflow_class_id",
+    )
+    schedule_definition_id = _parse_optional_text(
+        body.get("schedule_definition_id"),
+        field_name="schedule_definition_id",
+    )
+    if sum(1 for value in (roadmap_item_id, workflow_class_id, schedule_definition_id) if value) != 1:
+        raise _ClientError("exactly one of roadmap_item_id, workflow_class_id, or schedule_definition_id is required")
+
+    title = _parse_optional_text(body.get("title"), field_name="title")
+    gate_name = _parse_optional_text(body.get("gate_name"), field_name="gate_name")
+    gate_policy = _parse_optional_mapping(body.get("gate_policy"), field_name="gate_policy")
+    required_evidence = _parse_optional_mapping(
+        body.get("required_evidence"),
+        field_name="required_evidence",
+    )
+
+    env = {"WORKFLOW_DATABASE_URL": resolve_workflow_database_url()}
+    return operator_write.admit_native_primary_cutover_gate(
+        decided_by=decided_by.strip(),
+        decision_source=decision_source.strip(),
+        rationale=rationale.strip(),
+        roadmap_item_id=roadmap_item_id,
+        workflow_class_id=workflow_class_id,
+        schedule_definition_id=schedule_definition_id,
+        title=title,
+        gate_name=gate_name,
+        gate_policy=gate_policy,
+        required_evidence=required_evidence,
+        decided_at=_parse_optional_iso_datetime(
+            body.get("decided_at"),
+            field_name="decided_at",
+        ),
+        opened_at=_parse_optional_iso_datetime(
+            body.get("opened_at"),
+            field_name="opened_at",
+        ),
+        created_at=_parse_optional_iso_datetime(
+            body.get("created_at"),
+            field_name="created_at",
+        ),
+        updated_at=_parse_optional_iso_datetime(
+            body.get("updated_at"),
+            field_name="updated_at",
+        ),
         env=env,
     )
 
@@ -871,6 +957,7 @@ ADMIN_ROUTES: dict[str, object] = {
     "/health": _handle_health,
     "/governance": _handle_governance,
     "/api/operator/task-route-eligibility": _handle_task_route_eligibility_post,
+    "/api/operator/native-primary-cutover-gate": _handle_native_primary_cutover_gate_post,
     "/api/operator/transport-support": _handle_transport_support,
     "/api/operator/roadmap-write": _handle_roadmap_write_post,
     "/api/operator/work-item-closeout": _handle_work_item_closeout_post,

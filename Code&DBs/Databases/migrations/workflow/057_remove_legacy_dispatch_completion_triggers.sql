@@ -7,12 +7,16 @@
 DO $$
 DECLARE
     legacy_trigger constant text := 'trg_' || 'check_' || 'run_completion';
+    legacy_finalize_trigger constant text := 'trg_' || 'finalize_' || 'dispatch_' || 'run_' || 'if_' || 'terminal';
     legacy_event_fn constant text := 'check_' || 'run_completion' || '_with_events';
     legacy_base_fn constant text := 'check_' || 'run_completion';
+    legacy_finalize_fn constant text := 'finalize_' || 'dispatch_' || 'run_' || '_if_' || 'terminal';
 BEGIN
     EXECUTE format('DROP TRIGGER IF EXISTS %I ON workflow_jobs', legacy_trigger);
+    EXECUTE format('DROP TRIGGER IF EXISTS %I ON workflow_jobs', legacy_finalize_trigger);
     EXECUTE format('DROP FUNCTION IF EXISTS public.%I()', legacy_event_fn);
     EXECUTE format('DROP FUNCTION IF EXISTS public.%I()', legacy_base_fn);
+    EXECUTE format('DROP FUNCTION IF EXISTS public.%I()', legacy_finalize_fn);
 END;
 $$;
 

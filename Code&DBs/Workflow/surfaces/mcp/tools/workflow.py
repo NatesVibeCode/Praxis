@@ -1094,7 +1094,7 @@ def tool_praxis_workflow(params: dict, _progress_emitter=None) -> dict:
         return {
             "error": (
                 f"Unsupported action='{action}'. Expected one of: "
-                "run, status, inspect, cancel, list, notifications, retry, repair."
+                "run, status, inspect, cancel, list, notifications, retry, repair, chain."
             )
         }
 

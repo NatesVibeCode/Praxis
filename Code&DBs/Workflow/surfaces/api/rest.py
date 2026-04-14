@@ -1339,6 +1339,10 @@ async def workflow_templates_get(request: Request) -> Response:
 async def operator_task_route_post(request: Request) -> Response:
     return await _dispatch_standard_route(request)
 
+@app.post("/api/operator/native-primary-cutover-gate")
+async def operator_native_primary_cutover_gate_post(request: Request) -> Response:
+    return await _dispatch_standard_route(request)
+
 @app.post("/api/operator/transport-support")
 async def operator_transport_post(request: Request) -> Response:
     return await _dispatch_standard_route(request)

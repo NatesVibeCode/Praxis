@@ -1270,6 +1270,70 @@ class TestDagDispatchDryRun:
         assert repair_result["command_id"] == "control.command.3"
         assert repair_result["run_id"] == "dispatch_repair"
 
+    def test_chain_routes_submission_through_command_bus(self, monkeypatch):
+        server._subs._pg_conn = _FakePGConn()
+        captured: list[tuple[str, str, str, bool]] = []
+
+        def _fake_chain_request(
+            _pg,
+            *,
+            requested_by_kind: str,
+            requested_by_ref: str,
+            coordination_path: str,
+            repo_root: str,
+            adopt_active: bool,
+            **_kwargs,
+        ):
+            captured.append((requested_by_kind, requested_by_ref, coordination_path, adopt_active))
+            return _fake_command(
+                command_id="control.command.chain.1",
+                command_status="succeeded",
+                command_type="workflow.chain.submit",
+                payload={
+                    "coordination_path": coordination_path,
+                    "repo_root": repo_root,
+                    "adopt_active": adopt_active,
+                },
+                result_ref="workflow_chain:test-chain-001",
+            )
+
+        monkeypatch.setattr(
+            "runtime.control_commands.request_workflow_chain_submit_command",
+            _fake_chain_request,
+        )
+        monkeypatch.setattr(
+            "runtime.workflow_chain.get_workflow_chain_status",
+            lambda _conn, chain_id: {
+                "status": "queued",
+                "waves": [{
+                    "status": "queued",
+                    "jobs": [{"label": "build_a", "status": "ready"}],
+                }],
+                "program": {"name": "chain-program", "total_waves": 1},
+                "current_wave": 0,
+            } if chain_id == "test-chain-001" else None,
+        )
+
+        result = _call_tool(
+            "praxis_workflow",
+            {
+                "action": "chain",
+                "coordination_path": "/tmp/workflow_chain_coordination.json",
+                "adopt_active": "true",
+            },
+        )
+        assert captured == [(
+            "mcp",
+            "praxis_workflow.chain",
+            "/tmp/workflow_chain_coordination.json",
+            True,
+        )]
+        assert result["status"] == "queued"
+        assert result["command_status"] == "succeeded"
+        assert result["command_id"] == "control.command.chain.1"
+        assert result["chain_id"] == "test-chain-001"
+        assert result["coordination_path"] == "/tmp/workflow_chain_coordination.json"
+
     def test_status_action_returns_rich_health_signals(self):
         server._subs._pg_conn = _FakePGConn(
             workflow_run_rows=[{

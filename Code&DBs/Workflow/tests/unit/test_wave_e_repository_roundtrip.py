@@ -583,6 +583,18 @@ def test_receipt_repository_round_trip_updates_payloads_and_runtime_context() ->
         mem_bytes=1024,
         created_at=now,
     )
+    repository.insert_workflow_notification_if_absent(
+        run_id="run.wave_e",
+        job_label="wave_e_blank_failure",
+        spec_name="wave_e",
+        agent_slug="gpt-5.4",
+        status="succeeded",
+        failure_code="",
+        duration_seconds=1.0,
+        cpu_percent=None,
+        mem_bytes=None,
+        created_at=now,
+    )
     repository.notify_job_completed(run_id="run.wave_e")
     context_key = repository.upsert_workflow_job_runtime_context(
         run_id="run.wave_e",
@@ -601,7 +613,13 @@ def test_receipt_repository_round_trip_updates_payloads_and_runtime_context() ->
             "job_label": "wave_e_tests",
             "status": "succeeded",
             "duration_seconds": 3.5,
-        }
+        },
+        {
+            "run_id": "run.wave_e",
+            "job_label": "wave_e_blank_failure",
+            "status": "succeeded",
+            "duration_seconds": 1.0,
+        },
     ]
     assert conn.job_completed == ["run.wave_e"]
     assert context_key == "wave_e_tests"

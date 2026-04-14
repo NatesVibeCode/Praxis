@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 __all__ = [
     "NotificationChannel",
     "NotificationConfig",
+    "dispatch_notification_payload",
     "notify_workflow_complete",
     "notify_batch_complete",
     "load_config",
@@ -155,6 +156,30 @@ def _notify_webhook(channel: NotificationChannel, payload: dict[str, Any]) -> No
         resp.read()
 
 
+def dispatch_notification_payload(
+    payload: dict[str, Any],
+    *,
+    config: NotificationConfig | None = None,
+) -> int:
+    """Fan out one arbitrary notification payload through the configured channels."""
+    if config is None:
+        config = load_config()
+
+    if config is None:
+        return 0
+
+    delivered = 0
+    for channel in config.channels:
+        if channel.kind == "file":
+            _notify_file(channel, payload)
+        elif channel.kind == "stderr":
+            _notify_stderr(channel, payload)
+        elif channel.kind == "webhook":
+            _notify_webhook(channel, payload)
+        delivered += 1
+    return delivered
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -184,14 +209,7 @@ def notify_workflow_complete(
         return
 
     payload = result.to_json()
-
-    for channel in config.channels:
-        if channel.kind == "file":
-            _notify_file(channel, payload)
-        elif channel.kind == "stderr":
-            _notify_stderr(channel, payload)
-        elif channel.kind == "webhook":
-            _notify_webhook(channel, payload)
+    dispatch_notification_payload(payload, config=config)
 
 
 def notify_batch_complete(
@@ -239,13 +257,11 @@ def notify_batch_complete(
     }
 
     for channel in config.channels:
-        if channel.kind == "file":
-            _notify_file(channel, payload)
-        elif channel.kind == "stderr":
-            # For batch, just print the summary line
+        if channel.kind == "stderr":
+            # Preserve the concise batch summary line on stderr.
             print(
                 f"[dispatch] batch summary: {len(results)} total, {succeeded} succeeded, {failed} failed ({wall_clock_ms}ms)",
                 file=sys.stderr,
             )
-        elif channel.kind == "webhook":
-            _notify_webhook(channel, payload)
+            continue
+        dispatch_notification_payload(payload, config=NotificationConfig(channels=[channel], notify_on=config.notify_on, quiet_success=config.quiet_success))

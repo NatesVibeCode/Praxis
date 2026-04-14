@@ -2,148 +2,152 @@
 
 Status: execution_ready
 
-Registry authority: `planning/phase-program/praxis_0_100_registry.json` phase `1` (`Workspace Boundary Contract`)
+Authority map:
+- [planning/phase-program/praxis_0_100_registry.json](/workspace/planning/phase-program/praxis_0_100_registry.json) phase `1` title = `Workspace Boundary Contract`
+- [planning/phase-program/praxis_0_100_registry.json](/workspace/planning/phase-program/praxis_0_100_registry.json) governance requires `one_phase_one_thing = true`
+- [planning/phase-program/praxis_0_100_registry.json](/workspace/planning/phase-program/praxis_0_100_registry.json) governance requires `mandatory_review_healer_between_phases = true`
+- [planning/phase-program/praxis_0_100_registry.json](/workspace/planning/phase-program/praxis_0_100_registry.json) governance requires `human_approval_between_phases = true`
+- [config/cascade/specs/W_phase_001_010_foundation_wave_20260414.queue.json](/workspace/config/cascade/specs/W_phase_001_010_foundation_wave_20260414.queue.json) job `phase_001_workspace_boundary_contract` requires one bounded first sprint with explicit boundaries, files, and verification
+
+Grounding note:
+- Repo evidence in this packet was read from the mounted checkout at `/workspace`
+- Execution commands below target the declared platform repo root `/Users/nate/Praxis`
+- The packet is grounded in current files and current defects in this repo, not in a generic workspace model
 
 ## 1. Objective in repo terms
 
-Make the checked-in native runtime profile the single executable authority for repo-local workspace boundary fields in the workflow runtime path:
-
-- `workspace_ref`
-- `repo_root`
-- `workdir`
-- `receipts_dir`
-- `topology_dir`
-
-For this sprint, the concrete repo objective is narrower: stop the runtime from collapsing `repo_root` into `workdir` when it materializes in-memory `WorkspaceAuthorityRecord` values from the native runtime profile.
+- Preserve the native runtime-profile boundary where `repo_root` and `workdir` are separate fields and may resolve to different repo-local paths.
+- In current repo terms, the Phase 1 seam is:
+- [config/runtime_profiles.json](/workspace/config/runtime_profiles.json)
+- [Code&DBs/Workflow/registry/native_runtime_profile_sync.py](/workspace/Code&DBs/Workflow/registry/native_runtime_profile_sync.py)
+- [Code&DBs/Workflow/runtime/workflow/_admission.py](/workspace/Code&DBs/Workflow/runtime/workflow/_admission.py)
+- [Code&DBs/Workflow/runtime/workflow/runtime_setup.py](/workspace/Code&DBs/Workflow/runtime/workflow/runtime_setup.py)
+- First-sprint target: prove that workflow runtime registry builders preserve the resolved native `repo_root` instead of collapsing it to `workdir` when a profile declares a nested repo-local working directory.
+- This phase is one boundary only: native workspace contract -> `WorkspaceAuthorityRecord` creation in workflow builders.
 
 ## 2. Current evidence in the repo
 
-- `planning/phase-program/praxis_0_100_registry.json` declares Phase `1` as `Workspace Boundary Contract` and requires the closeout gate `review -> healer -> human_approval`.
-- `config/runtime_profiles.json` is the checked-in authority source for the native `praxis` profile and already declares all five boundary inputs:
+- Phase `1` is declared in the registry as `Workspace Boundary Contract` in [planning/phase-program/praxis_0_100_registry.json](/workspace/planning/phase-program/praxis_0_100_registry.json), with required closeout sequence `review -> healer -> human_approval`.
+- [config/cascade/specs/W_phase_001_010_foundation_wave_20260414.queue.json](/workspace/config/cascade/specs/W_phase_001_010_foundation_wave_20260414.queue.json) says this job must produce one bounded execution packet for Phase 1.
+- [config/runtime_profiles.json](/workspace/config/runtime_profiles.json) defines the native runtime-profile contract fields:
 - `workspace_ref`
 - `repo_root`
 - `workdir`
 - `receipts_dir`
 - `topology_dir`
-- `Code&DBs/Workflow/registry/native_runtime_profile_sync.py` resolves `repo_root` and `workdir` independently against the repo root and exposes `WorkspaceAuthorityRecord(repo_root=..., workdir=...)`.
-- `Code&DBs/Workflow/runtime/instance.py` already enforces the hard repo boundary contract:
-- config must be `config/runtime_profiles.json`
-- `repo_root` must resolve back to the owning repo
+- The checked-in default profile currently sets `"repo_root": "."` and `"workdir": "."`, so the default config does not expose a `repo_root != workdir` regression by itself.
+- [Code&DBs/Workflow/registry/native_runtime_profile_sync.py](/workspace/Code&DBs/Workflow/registry/native_runtime_profile_sync.py) resolves profile paths relative to the repo root and emits `WorkspaceAuthorityRecord(repo_root=self.repo_root, workdir=self.workdir)` through `NativeRuntimeProfileConfig.workspace_record()`.
+- [Code&DBs/Workflow/runtime/instance.py](/workspace/Code&DBs/Workflow/runtime/instance.py) enforces the repo-local native contract:
+- canonical config path must be `config/runtime_profiles.json`
+- `repo_root` is the repo owning that config
 - `workdir`, `receipts_dir`, and `topology_dir` must stay inside that repo
-- env vars may assert the contract but may not override it
-- `Code&DBs/Workflow/runtime/native_authority.py` fails closed if the checked-in default `workspace_ref` or runtime profile ref is empty.
-- `Code&DBs/Workflow/registry/repository.py` and `Code&DBs/Workflow/tests/integration/test_registry_authority_path.py` already prove that once a correct `WorkspaceAuthorityRecord` exists, admission and bundle payloads preserve distinct `repo_root` and `workdir` values.
-- The live defect is upstream of that durable registry path:
-- `Code&DBs/Workflow/runtime/workflow/_admission.py` in `_graph_registry_for_request(...)` builds `WorkspaceAuthorityRecord(repo_root=workdir, workdir=workdir)`.
-- `Code&DBs/Workflow/runtime/workflow/runtime_setup.py` in `_build_registry(...)` does the same `repo_root = workdir` collapse before creating `WorkspaceAuthorityRecord(...)`.
-- Existing native proofs are partial, not sufficient:
-- `Code&DBs/Workflow/tests/integration/test_native_instance_isolation.py` proves fail-closed config/env behavior and already uses a nested `workdir="artifacts"` fixture shape.
-- `Code&DBs/Workflow/tests/integration/test_bounded_native_primary_proof.py` proves wrapper and CLI surfaces expose the checked-in native contract.
-- `Code&DBs/Workflow/tests/integration/test_native_self_hosted_smoke.py` proves repo-local native instance values flow into an end-to-end path, but today it uses `native_instance.repo_root` and `native_instance.workdir` from the same checked-in `"."` profile, so it does not detect collapse.
+- [Code&DBs/Workflow/runtime/workflow/_admission.py](/workspace/Code&DBs/Workflow/runtime/workflow/_admission.py) currently constructs `WorkspaceAuthorityRecord(..., repo_root=workdir, workdir=workdir)` in `_graph_registry_for_request(...)`.
+- [Code&DBs/Workflow/runtime/workflow/runtime_setup.py](/workspace/Code&DBs/Workflow/runtime/workflow/runtime_setup.py) currently sets `repo_root = workdir` in `_build_registry(...)`.
+- Existing tests already cover adjacent authority surfaces:
+- [Code&DBs/Workflow/tests/integration/test_native_instance_isolation.py](/workspace/Code&DBs/Workflow/tests/integration/test_native_instance_isolation.py) proves native instance resolution accepts a nested `workdir` and rejects boundary drift.
+- [Code&DBs/Workflow/tests/integration/test_bounded_native_primary_proof.py](/workspace/Code&DBs/Workflow/tests/integration/test_bounded_native_primary_proof.py) proves wrapper and CLI surfaces expose the repo-local native contract.
+- [Code&DBs/Workflow/tests/integration/test_registry_authority_path.py](/workspace/Code&DBs/Workflow/tests/integration/test_registry_authority_path.py) proves intake preserves distinct `repo_root` and `workdir` once a correct `WorkspaceAuthorityRecord` already exists.
 
 ## 3. Gap or ambiguity still remaining
 
-- The checked-in `praxis` profile currently sets both `repo_root` and `workdir` to `"."`, so the default repo state does not prove those are preserved as distinct contract fields.
-- Two live runtime builders currently erase the distinction even though the authority model supports it:
-- `runtime/workflow/_admission.py::_graph_registry_for_request`
-- `runtime/workflow/runtime_setup.py::_build_registry`
-- There is no focused contract test that starts from a native runtime profile where `repo_root != workdir` and proves those exact values survive the in-memory registry materialization seam.
-- Phase 1 still must not widen into workspace product semantics, fork/worktree ownership policy, operator selectors, UI seeds, or multi-tenant workspace design.
+- There is no focused integration proof for the exact builder seam where native runtime-profile data becomes a `WorkspaceAuthorityRecord` inside workflow runtime code.
+- Because the default runtime profile uses `"repo_root": "."` and `"workdir": "."`, the current collapse bug can survive normal default-path testing.
+- The active ambiguity is not “what is a workspace” in general. The active ambiguity is narrower:
+- should workflow builder code preserve `config.repo_root`
+- or is it allowed to derive `repo_root` from `workdir`
+- Current repo evidence says the native contract keeps those fields distinct, but two workflow builder seams do not.
+- Phase drift risk is high because `workspace` appears across operator, product, and runtime surfaces. This sprint must stay pinned to the two builder seams above and not expand into broader workspace architecture.
 
 ## 4. One bounded first sprint only
 
-Implement one focused workspace-boundary contract sprint around the native profile to in-memory registry seam.
-
-Sprint contents:
-
-- Add one focused integration test that uses a repo-local runtime profile with:
-- `repo_root = "."`
-- `workdir = "artifacts"` or another nested existing directory under the repo root
-- Exercise the native-derived registry builders that currently materialize `WorkspaceAuthorityRecord` values.
-- Make the minimal code fix so both builders preserve:
-- canonical `repo_root`
-- canonical nested `workdir`
-- Stop there.
-
-Do not change:
-
-- database schema
-- registry table shape
-- workspace naming or ownership policy
-- operator/UI workspace behavior
-- broader runtime path cleanup outside these two builders
+- Sprint label: preserve native `repo_root` / `workdir` separation through workflow runtime builders.
+- Build one new integration proof that creates a repo-local runtime profile with nested `workdir` and exercises both builder seams:
+- `_graph_registry_for_request(...)` in [Code&DBs/Workflow/runtime/workflow/_admission.py](/workspace/Code&DBs/Workflow/runtime/workflow/_admission.py)
+- `_build_registry(...)` in [Code&DBs/Workflow/runtime/workflow/runtime_setup.py](/workspace/Code&DBs/Workflow/runtime/workflow/runtime_setup.py)
+- The new proof should assert that both builders preserve:
+- `workspace_ref`
+- canonical resolved `repo_root`
+- canonical resolved nested `workdir`
+- If the proof fails, fix only the two builder seams needed to make it pass.
+- Stop after the new proof passes and the existing adjacent native-boundary tests still pass.
+- Explicitly not in this sprint:
+- changing the checked-in default profile values in [config/runtime_profiles.json](/workspace/config/runtime_profiles.json)
+- redesigning workspace abstractions
+- adding database schema or migration work
+- changing registry repository shape
+- changing CLI, wrapper, operator, or control-plane surfaces
 
 ## 5. Exact file or subsystem scope
 
-Primary implementation scope:
-
-- `Code&DBs/Workflow/runtime/workflow/_admission.py`
-- `Code&DBs/Workflow/runtime/workflow/runtime_setup.py`
-
-Primary test scope:
-
-- add `Code&DBs/Workflow/tests/integration/test_workspace_boundary_contract.py`
-
-Read-only authority references:
-
-- `config/runtime_profiles.json`
-- `Code&DBs/Workflow/registry/native_runtime_profile_sync.py`
-- `Code&DBs/Workflow/runtime/instance.py`
-- `Code&DBs/Workflow/runtime/native_authority.py`
-- `Code&DBs/Workflow/registry/repository.py`
-- `Code&DBs/Workflow/tests/integration/test_registry_authority_path.py`
-
-Explicitly out of scope:
-
-- `Code&DBs/Workflow/surfaces/api/`
-- fork ownership and worktree binding flows
-- `config/helm_human_layer/seeds/`
+- Files to read:
+- [planning/phase-program/praxis_0_100_registry.json](/workspace/planning/phase-program/praxis_0_100_registry.json)
+- [config/cascade/specs/W_phase_001_010_foundation_wave_20260414.queue.json](/workspace/config/cascade/specs/W_phase_001_010_foundation_wave_20260414.queue.json)
+- [config/runtime_profiles.json](/workspace/config/runtime_profiles.json)
+- [Code&DBs/Workflow/registry/native_runtime_profile_sync.py](/workspace/Code&DBs/Workflow/registry/native_runtime_profile_sync.py)
+- [Code&DBs/Workflow/runtime/instance.py](/workspace/Code&DBs/Workflow/runtime/instance.py)
+- [Code&DBs/Workflow/runtime/workflow/_admission.py](/workspace/Code&DBs/Workflow/runtime/workflow/_admission.py)
+- [Code&DBs/Workflow/runtime/workflow/runtime_setup.py](/workspace/Code&DBs/Workflow/runtime/workflow/runtime_setup.py)
+- [Code&DBs/Workflow/tests/integration/test_native_instance_isolation.py](/workspace/Code&DBs/Workflow/tests/integration/test_native_instance_isolation.py)
+- [Code&DBs/Workflow/tests/integration/test_bounded_native_primary_proof.py](/workspace/Code&DBs/Workflow/tests/integration/test_bounded_native_primary_proof.py)
+- [Code&DBs/Workflow/tests/integration/test_registry_authority_path.py](/workspace/Code&DBs/Workflow/tests/integration/test_registry_authority_path.py)
+- Files to modify:
+- [Code&DBs/Workflow/runtime/workflow/_admission.py](/workspace/Code&DBs/Workflow/runtime/workflow/_admission.py)
+- [Code&DBs/Workflow/runtime/workflow/runtime_setup.py](/workspace/Code&DBs/Workflow/runtime/workflow/runtime_setup.py)
+- [Code&DBs/Workflow/tests/integration/test_workspace_boundary_contract.py](/workspace/Code&DBs/Workflow/tests/integration/test_workspace_boundary_contract.py)
+- Subsystem boundary:
+- native runtime-profile resolution feeding workflow runtime registry builders
+- `WorkspaceAuthorityRecord` construction inside workflow admission/setup only
+- Out of scope:
+- `Code&DBs/Workflow/surfaces/api/**`
+- `config/helm_human_layer/seeds/**`
 - database migrations
-- new workspace tables or new workspace abstraction
-- any Phase 2 `Control Plane Core` expansion
+- registry repository contracts
+- workspace product UX
+- fork/worktree policy
+- any cleanup outside the two named builder functions
 
 ## 6. Done criteria
 
-- A focused automated proof exists for a native runtime profile where `repo_root` and `workdir` are different repo-local paths.
-- That proof fails against the old `repo_root = workdir` behavior.
-- `_graph_registry_for_request(...)` preserves distinct `repo_root` and `workdir` values from the native runtime profile.
-- `runtime_setup._build_registry(...)` preserves the same distinction.
-- Existing fail-closed native boundary tests still pass.
-- No schema changes, no new workspace model, and no scope expansion beyond these registry-builder seams.
+- A focused integration test exists for a native runtime profile where resolved `repo_root` and resolved `workdir` are different.
+- The test covers both workflow builder seams and would fail against the current `repo_root <- workdir` collapse behavior.
+- `_graph_registry_for_request(...)` preserves `config.repo_root` instead of substituting `workdir`.
+- `_build_registry(...)` preserves the resolved native `repo_root` instead of assigning `repo_root = workdir`.
+- Existing adjacent boundary proofs still pass:
+- [Code&DBs/Workflow/tests/integration/test_native_instance_isolation.py](/workspace/Code&DBs/Workflow/tests/integration/test_native_instance_isolation.py)
+- [Code&DBs/Workflow/tests/integration/test_bounded_native_primary_proof.py](/workspace/Code&DBs/Workflow/tests/integration/test_bounded_native_primary_proof.py)
+- No new schema, config shape, or workspace abstraction is introduced.
 
 ## 7. Verification commands
 
-Run from repo root:
+- `export WORKFLOW_DATABASE_URL='postgresql://nate@127.0.0.1:5432/praxis'`
+- `export PYTHONPATH='/Users/nate/Praxis/Code&DBs/Workflow'`
+- `cd /Users/nate/Praxis`
+- `python -m pytest Code\&DBs/Workflow/tests/integration/test_workspace_boundary_contract.py -q`
+- `python -m pytest Code\&DBs/Workflow/tests/integration/test_native_instance_isolation.py -q`
+- `python -m pytest Code\&DBs/Workflow/tests/integration/test_bounded_native_primary_proof.py -q`
+- `python -m pytest Code\&DBs/Workflow/tests/integration/test_registry_authority_path.py -q`
+- `rg -n 'repo_root=workdir|repo_root = workdir' Code\&DBs/Workflow/runtime/workflow/_admission.py Code\&DBs/Workflow/runtime/workflow/runtime_setup.py`
 
-```bash
-PYTHONPATH=Code\&DBs/Workflow pytest Code\&DBs/Workflow/tests/integration/test_workspace_boundary_contract.py -q
-PYTHONPATH=Code\&DBs/Workflow pytest Code\&DBs/Workflow/tests/integration/test_native_instance_isolation.py -q
-PYTHONPATH=Code\&DBs/Workflow pytest Code\&DBs/Workflow/tests/integration/test_bounded_native_primary_proof.py -q
-rg -n "repo_root=workdir|repo_root = workdir" Code\&DBs/Workflow/runtime/workflow/_admission.py Code\&DBs/Workflow/runtime/workflow/runtime_setup.py
-```
+Expected verification outcome:
 
-Expected post-sprint intent:
-
-- the new contract test passes
-- the two runtime builders no longer collapse `repo_root` into `workdir`
-- existing native fail-closed proofs still pass
+- the new integration proof demonstrates that workflow builders keep `repo_root` and `workdir` distinct when the runtime profile makes them distinct
+- adjacent native-boundary proofs still pass
+- the direct collapse assignment is absent from both known builder seams
 
 ## 8. Review -> healer -> human approval gate
 
-Review:
-
-- confirm the sprint only repairs native profile to in-memory registry boundary preservation
-- confirm both builder paths preserve distinct `repo_root` and `workdir`
-- confirm no workspace-product or operator-policy scope was added
-
-Healer:
-
-- if review finds ambiguity or regression, repair only:
-- the two builder files
-- the new contract test
-- rerun the verification commands
-
-Human approval gate:
-
+- Review:
+- confirm the packet stays inside Phase 1 workspace-boundary preservation and does not drift into general workspace architecture
+- confirm the sprint is one bounded builder-seam sprint, not a roadmap for multi-workspace design
+- confirm both runtime builder entrypoints are covered by the new proof
+- confirm the proof would have caught the current `repo_root <- workdir` collapse
+- Healer:
+- if review finds drift or undercoverage, repair only:
+- [Code&DBs/Workflow/runtime/workflow/_admission.py](/workspace/Code&DBs/Workflow/runtime/workflow/_admission.py)
+- [Code&DBs/Workflow/runtime/workflow/runtime_setup.py](/workspace/Code&DBs/Workflow/runtime/workflow/runtime_setup.py)
+- [Code&DBs/Workflow/tests/integration/test_workspace_boundary_contract.py](/workspace/Code&DBs/Workflow/tests/integration/test_workspace_boundary_contract.py)
+- rerun all verification commands
+- Human approval gate:
 - require explicit human approval after review and any healer pass
-- do not open Phase 2 work or any broader workspace refactor until that approval is recorded
+- do not start Phase 2 `Control Plane Core` before approval is recorded
+- do not widen Phase 1 into broader workspace architecture before approval is recorded

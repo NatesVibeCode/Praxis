@@ -236,8 +236,320 @@ class PostgresOperatorControlRepository:
                     "operator_decision_id": operator_decision.operator_decision_id,
                     "decision_key": operator_decision.decision_key,
                 },
-            )
+        )
         return _decision_record_from_row(row)
+
+    async def record_cutover_gate(
+        self,
+        *,
+        operator_decision: OperatorDecisionAuthorityRecord,
+        cutover_gate: CutoverGateAuthorityRecord,
+    ) -> tuple[OperatorDecisionAuthorityRecord, CutoverGateAuthorityRecord]:
+        normalized_operator_decision = OperatorDecisionAuthorityRecord(
+            operator_decision_id=_require_text(
+                operator_decision.operator_decision_id,
+                field_name="operator_decision.operator_decision_id",
+            ),
+            decision_key=_require_text(
+                operator_decision.decision_key,
+                field_name="operator_decision.decision_key",
+            ),
+            decision_kind=_require_text(
+                operator_decision.decision_kind,
+                field_name="operator_decision.decision_kind",
+            ),
+            decision_status=_require_text(
+                operator_decision.decision_status,
+                field_name="operator_decision.decision_status",
+            ),
+            title=_require_text(
+                operator_decision.title,
+                field_name="operator_decision.title",
+            ),
+            rationale=_require_text(
+                operator_decision.rationale,
+                field_name="operator_decision.rationale",
+            ),
+            decided_by=_require_text(
+                operator_decision.decided_by,
+                field_name="operator_decision.decided_by",
+            ),
+            decision_source=_require_text(
+                operator_decision.decision_source,
+                field_name="operator_decision.decision_source",
+            ),
+            effective_from=_require_datetime(
+                operator_decision.effective_from,
+                field_name="operator_decision.effective_from",
+            ),
+            effective_to=_require_datetime(
+                operator_decision.effective_to,
+                field_name="operator_decision.effective_to",
+            )
+            if operator_decision.effective_to is not None
+            else None,
+            decided_at=_require_datetime(
+                operator_decision.decided_at,
+                field_name="operator_decision.decided_at",
+            ),
+            created_at=_require_datetime(
+                operator_decision.created_at,
+                field_name="operator_decision.created_at",
+            ),
+            updated_at=_require_datetime(
+                operator_decision.updated_at,
+                field_name="operator_decision.updated_at",
+            ),
+        )
+        normalized_cutover_gate = CutoverGateAuthorityRecord(
+            cutover_gate_id=_require_text(
+                cutover_gate.cutover_gate_id,
+                field_name="cutover_gate.cutover_gate_id",
+            ),
+            gate_key=_require_text(cutover_gate.gate_key, field_name="cutover_gate.gate_key"),
+            gate_name=_require_text(
+                cutover_gate.gate_name,
+                field_name="cutover_gate.gate_name",
+            ),
+            gate_kind=_require_text(
+                cutover_gate.gate_kind,
+                field_name="cutover_gate.gate_kind",
+            ),
+            gate_status=_require_text(
+                cutover_gate.gate_status,
+                field_name="cutover_gate.gate_status",
+            ),
+            target_kind=_require_text(
+                cutover_gate.target_kind,
+                field_name="cutover_gate.target_kind",
+            ),
+            target_ref=_require_text(
+                cutover_gate.target_ref,
+                field_name="cutover_gate.target_ref",
+            ),
+            gate_policy=_require_mapping(
+                cutover_gate.gate_policy,
+                field_name="cutover_gate.gate_policy",
+            ),
+            required_evidence=_require_mapping(
+                cutover_gate.required_evidence,
+                field_name="cutover_gate.required_evidence",
+            ),
+            opened_by_decision_id=_require_text(
+                cutover_gate.opened_by_decision_id,
+                field_name="cutover_gate.opened_by_decision_id",
+            ),
+            closed_by_decision_id=(
+                _require_text(
+                    cutover_gate.closed_by_decision_id,
+                    field_name="cutover_gate.closed_by_decision_id",
+                )
+                if cutover_gate.closed_by_decision_id is not None
+                else None
+            ),
+            opened_at=_require_datetime(
+                cutover_gate.opened_at,
+                field_name="cutover_gate.opened_at",
+            ),
+            closed_at=_require_datetime(
+                cutover_gate.closed_at,
+                field_name="cutover_gate.closed_at",
+            )
+            if cutover_gate.closed_at is not None
+            else None,
+            created_at=_require_datetime(
+                cutover_gate.created_at,
+                field_name="cutover_gate.created_at",
+            ),
+            updated_at=_require_datetime(
+                cutover_gate.updated_at,
+                field_name="cutover_gate.updated_at",
+            ),
+        )
+
+        if normalized_cutover_gate.target_kind == "roadmap_item":
+            roadmap_item_id = normalized_cutover_gate.target_ref
+            workflow_class_id = None
+            schedule_definition_id = None
+        elif normalized_cutover_gate.target_kind == "workflow_class":
+            roadmap_item_id = None
+            workflow_class_id = normalized_cutover_gate.target_ref
+            schedule_definition_id = None
+        elif normalized_cutover_gate.target_kind == "schedule_definition":
+            roadmap_item_id = None
+            workflow_class_id = None
+            schedule_definition_id = normalized_cutover_gate.target_ref
+        else:
+            raise OperatorControlRepositoryError(
+                "operator_control.invalid_row",
+                f"unsupported cutover target_kind {normalized_cutover_gate.target_kind!r}",
+                details={
+                    "cutover_gate_id": normalized_cutover_gate.cutover_gate_id,
+                    "target_kind": normalized_cutover_gate.target_kind,
+                },
+            )
+
+        try:
+            async with self._conn.transaction():
+                decision_row = await self._conn.fetchrow(
+                    """
+                    INSERT INTO operator_decisions (
+                        operator_decision_id,
+                        decision_key,
+                        decision_kind,
+                        decision_status,
+                        title,
+                        rationale,
+                        decided_by,
+                        decision_source,
+                        effective_from,
+                        effective_to,
+                        decided_at,
+                        created_at,
+                        updated_at
+                    ) VALUES (
+                        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+                    )
+                    ON CONFLICT (operator_decision_id) DO UPDATE SET
+                        decision_key = EXCLUDED.decision_key,
+                        decision_kind = EXCLUDED.decision_kind,
+                        decision_status = EXCLUDED.decision_status,
+                        title = EXCLUDED.title,
+                        rationale = EXCLUDED.rationale,
+                        decided_by = EXCLUDED.decided_by,
+                        decision_source = EXCLUDED.decision_source,
+                        effective_from = EXCLUDED.effective_from,
+                        effective_to = EXCLUDED.effective_to,
+                        decided_at = EXCLUDED.decided_at,
+                        updated_at = EXCLUDED.updated_at
+                    RETURNING
+                        operator_decision_id,
+                        decision_key,
+                        decision_kind,
+                        decision_status,
+                        title,
+                        rationale,
+                        decided_by,
+                        decision_source,
+                        effective_from,
+                        effective_to,
+                        decided_at,
+                        created_at,
+                        updated_at
+                    """,
+                    normalized_operator_decision.operator_decision_id,
+                    normalized_operator_decision.decision_key,
+                    normalized_operator_decision.decision_kind,
+                    normalized_operator_decision.decision_status,
+                    normalized_operator_decision.title,
+                    normalized_operator_decision.rationale,
+                    normalized_operator_decision.decided_by,
+                    normalized_operator_decision.decision_source,
+                    normalized_operator_decision.effective_from,
+                    normalized_operator_decision.effective_to,
+                    normalized_operator_decision.decided_at,
+                    normalized_operator_decision.created_at,
+                    normalized_operator_decision.updated_at,
+                )
+                gate_row = await self._conn.fetchrow(
+                    """
+                    INSERT INTO cutover_gates (
+                        cutover_gate_id,
+                        gate_key,
+                        gate_name,
+                        gate_kind,
+                        gate_status,
+                        roadmap_item_id,
+                        workflow_class_id,
+                        schedule_definition_id,
+                        gate_policy,
+                        required_evidence,
+                        opened_by_decision_id,
+                        closed_by_decision_id,
+                        opened_at,
+                        closed_at,
+                        created_at,
+                        updated_at
+                    ) VALUES (
+                        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
+                    )
+                    ON CONFLICT (cutover_gate_id) DO UPDATE SET
+                        gate_key = EXCLUDED.gate_key,
+                        gate_name = EXCLUDED.gate_name,
+                        gate_kind = EXCLUDED.gate_kind,
+                        gate_status = EXCLUDED.gate_status,
+                        roadmap_item_id = EXCLUDED.roadmap_item_id,
+                        workflow_class_id = EXCLUDED.workflow_class_id,
+                        schedule_definition_id = EXCLUDED.schedule_definition_id,
+                        gate_policy = EXCLUDED.gate_policy,
+                        required_evidence = EXCLUDED.required_evidence,
+                        opened_by_decision_id = EXCLUDED.opened_by_decision_id,
+                        closed_by_decision_id = EXCLUDED.closed_by_decision_id,
+                        opened_at = EXCLUDED.opened_at,
+                        closed_at = EXCLUDED.closed_at,
+                        created_at = EXCLUDED.created_at,
+                        updated_at = EXCLUDED.updated_at
+                    RETURNING
+                        cutover_gate_id,
+                        gate_key,
+                        gate_name,
+                        gate_kind,
+                        gate_status,
+                        roadmap_item_id,
+                        workflow_class_id,
+                        schedule_definition_id,
+                        gate_policy,
+                        required_evidence,
+                        opened_by_decision_id,
+                        closed_by_decision_id,
+                        opened_at,
+                        closed_at,
+                        created_at,
+                        updated_at
+                    """,
+                    normalized_cutover_gate.cutover_gate_id,
+                    normalized_cutover_gate.gate_key,
+                    normalized_cutover_gate.gate_name,
+                    normalized_cutover_gate.gate_kind,
+                    normalized_cutover_gate.gate_status,
+                    roadmap_item_id,
+                    workflow_class_id,
+                    schedule_definition_id,
+                    normalized_cutover_gate.gate_policy,
+                    normalized_cutover_gate.required_evidence,
+                    normalized_cutover_gate.opened_by_decision_id,
+                    normalized_cutover_gate.closed_by_decision_id,
+                    normalized_cutover_gate.opened_at,
+                    normalized_cutover_gate.closed_at,
+                    normalized_cutover_gate.created_at,
+                    normalized_cutover_gate.updated_at,
+                )
+        except asyncpg.PostgresError as exc:
+            raise OperatorControlRepositoryError(
+                "operator_control.write_failed",
+                "failed to record cutover gate rows",
+                details={
+                    "operator_decision_id": normalized_operator_decision.operator_decision_id,
+                    "cutover_gate_id": normalized_cutover_gate.cutover_gate_id,
+                    "sqlstate": getattr(exc, "sqlstate", None),
+                },
+            ) from exc
+        if decision_row is None:
+            raise OperatorControlRepositoryError(
+                "operator_control.write_failed",
+                "recording operator decision row returned no row",
+                details={"operator_decision_id": normalized_operator_decision.operator_decision_id},
+            )
+        if gate_row is None:
+            raise OperatorControlRepositoryError(
+                "operator_control.write_failed",
+                "recording cutover gate row returned no row",
+                details={"cutover_gate_id": normalized_cutover_gate.cutover_gate_id},
+            )
+        return (
+            _decision_record_from_row(decision_row),
+            _gate_record_from_row(gate_row),
+        )
 
     async def fetch_operator_decision_records(
         self,
