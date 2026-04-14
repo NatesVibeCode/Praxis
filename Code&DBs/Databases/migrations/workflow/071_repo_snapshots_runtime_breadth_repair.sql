@@ -64,7 +64,7 @@ BEGIN
         SELECT 1
         FROM pg_constraint
         WHERE conname = 'persona_profiles_pkey'
-          AND conrelid = 'public.persona_profiles_legacy_20260409'::regclass
+          AND conrelid = to_regclass('public.persona_profiles_legacy_20260409')
     ) THEN
         ALTER TABLE persona_profiles_legacy_20260409
             RENAME CONSTRAINT persona_profiles_pkey

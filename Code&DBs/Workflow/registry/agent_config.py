@@ -46,6 +46,7 @@ class SandboxProvider(enum.Enum):
     """Which sandbox substrate isolates execution."""
 
     docker_local = "docker_local"
+    host_local = "host_local"
     cloudflare_remote = "cloudflare_remote"
 
 

@@ -29,6 +29,7 @@ from runtime.workflow._shared import (
     _workflow_run_envelope,
 )
 from runtime.workflow._routing import _job_touch_entries
+from storage.postgres.receipt_repository import PostgresReceiptRepository
 
 if TYPE_CHECKING:
     from storage.postgres.connection import SyncPostgresConnection
@@ -235,24 +236,10 @@ def write_job_receipt(
 ) -> str:
     """Write the canonical workflow job receipt row."""
     now = datetime.now(timezone.utc)
+    repository = PostgresReceiptRepository(conn)
     status = final_status or result.get("status", "failed")
     error_code = final_error_code if final_error_code is not None else result.get("error_code", "")
-    run_rows = conn.execute(
-        """SELECT wr.workflow_id,
-                  wr.request_id,
-                  wr.request_envelope,
-                  j.attempt,
-                  j.started_at,
-                  j.finished_at,
-                  j.touch_keys
-           FROM workflow_jobs j
-           JOIN workflow_runs wr ON wr.run_id = j.run_id
-           WHERE j.id = $1 AND j.run_id = $2
-           LIMIT 1""",
-        job_id,
-        run_id,
-    )
-    workflow_row = run_rows[0] if run_rows else {}
+    workflow_row = repository.load_workflow_job_receipt_context(job_id=job_id, run_id=run_id) or {}
     attempt_no = max(1, int(workflow_row.get("attempt") or 1))
     evidence_seq = (int(job_id) * 100) + attempt_no
     transition_seq = evidence_seq
@@ -433,57 +420,36 @@ def write_job_receipt(
                 verification_artifact_refs
             )
 
-    conn.execute(
-        """INSERT INTO receipts (
-               receipt_id, receipt_type, schema_version,
-               workflow_id, run_id, request_id,
-               causation_id, node_id, attempt_no, supersedes_receipt_id,
-               started_at, finished_at, evidence_seq,
-               executor_type, status, inputs, outputs, artifacts,
-               failure_code, decision_refs
-           ) VALUES (
-               $1, 'workflow_job', 1,
-               $2, $3, $4,
-               NULL, $5, $6, NULL,
-               $7, $8, $9,
-               'workflow_unified', $10, $11::jsonb, $12::jsonb, $13::jsonb,
-               $14, $15::jsonb
-           )
-           ON CONFLICT (receipt_id) DO NOTHING""",
-        receipt_id,
-        workflow_id,
-        run_id,
-        request_id,
-        label,
-        attempt_no,
-        started_at,
-        finished_at,
-        evidence_seq,
-        status,
-        json.dumps(receipt_inputs),
-        json.dumps(receipt_outputs),
-        json.dumps(receipt_artifacts),
-        error_code or None,
-        json.dumps([]),
+    repository.insert_receipt_if_absent(
+        receipt_id=receipt_id,
+        workflow_id=workflow_id,
+        run_id=run_id,
+        request_id=request_id,
+        node_id=label,
+        attempt_no=attempt_no,
+        started_at=started_at,
+        finished_at=finished_at,
+        evidence_seq=evidence_seq,
+        status=status,
+        inputs=_json_safe(receipt_inputs),
+        outputs=_json_safe(receipt_outputs),
+        artifacts=_json_safe(receipt_artifacts),
+        failure_code=error_code or None,
     )
 
-    conn.execute(
-        """INSERT INTO workflow_notifications
-               (run_id, job_label, spec_name, agent_slug, status, failure_code,
-                duration_seconds, cpu_percent, mem_bytes, created_at)
-           VALUES ($1, $2, '', $3, $4, $5, $6, $7, $8, $9)
-           ON CONFLICT DO NOTHING""",
-        run_id,
-        label,
-        agent_slug,
-        status,
-        result.get("error_code", ""),
-        duration_ms / 1000.0,
-        result.get("container_cpu_percent"),
-        result.get("container_mem_bytes"),
-        finished_at,
+    repository.insert_workflow_notification_if_absent(
+        run_id=run_id,
+        job_label=label,
+        spec_name="",
+        agent_slug=agent_slug,
+        status=status,
+        failure_code=result.get("error_code", ""),
+        duration_seconds=duration_ms / 1000.0,
+        cpu_percent=result.get("container_cpu_percent"),
+        mem_bytes=result.get("container_mem_bytes"),
+        created_at=finished_at,
     )
-    conn.execute("SELECT pg_notify('job_completed', $1)", run_id)
+    repository.notify_job_completed(run_id=run_id)
 
     # Mine constraints from failures — fire-and-forget so it never blocks receipts
     if status == "failed" and error_code:

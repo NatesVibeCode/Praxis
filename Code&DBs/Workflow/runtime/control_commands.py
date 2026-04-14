@@ -46,6 +46,7 @@ from runtime.command_handlers import (
     request_workflow_submit_command,
     workflow_cancel_proof,
 )
+from storage.postgres import PostgresCommandRepository
 from storage.migrations import WorkflowMigrationError, workflow_migration_statements
 
 if TYPE_CHECKING:
@@ -712,53 +713,27 @@ def _insert_control_command_row(
     intent: ControlIntent,
     requested_at: datetime,
 ) -> ControlCommandRecord | None:
-    payload_json = _json_dumps(intent.payload)
-    rows = conn.execute(
-        """INSERT INTO control_commands (
-               command_id,
-               command_type,
-               command_status,
-               requested_by_kind,
-               requested_by_ref,
-               requested_at,
-               approved_at,
-               approved_by,
-               idempotency_key,
-               risk_level,
-               payload,
-               result_ref,
-               error_code,
-               error_detail,
-               created_at,
-               updated_at
-           )
-           VALUES (
-               $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13, $14, $15, $16
-           )
-           ON CONFLICT (idempotency_key) DO NOTHING
-           RETURNING command_id, command_type, command_status, requested_by_kind, requested_by_ref,
-                     requested_at, approved_at, approved_by, idempotency_key, risk_level,
-                     payload, result_ref, error_code, error_detail, created_at, updated_at""",
-        command_id,
-        intent.command_type,
-        ControlCommandStatus.REQUESTED.value,
-        intent.requested_by_kind,
-        intent.requested_by_ref,
-        requested_at,
-        None,
-        None,
-        intent.idempotency_key,
-        intent.risk_level,
-        payload_json,
-        None,
-        None,
-        None,
-        requested_at,
-        requested_at,
+    row = PostgresCommandRepository(conn).insert_control_command(
+        command_id=command_id,
+        command_type=intent.command_type,
+        command_status=ControlCommandStatus.REQUESTED.value,
+        requested_by_kind=intent.requested_by_kind,
+        requested_by_ref=intent.requested_by_ref,
+        requested_at=requested_at,
+        approved_at=None,
+        approved_by=None,
+        idempotency_key=intent.idempotency_key,
+        risk_level=intent.risk_level,
+        payload=intent.payload,
+        result_ref=None,
+        error_code=None,
+        error_detail=None,
+        created_at=requested_at,
+        updated_at=requested_at,
     )
-    if not rows:
+    if row is None:
         return None
-    return _row_to_record(cast(Mapping[str, Any], rows[0]))
+    return _row_to_record(cast(Mapping[str, Any], row))
 
 
 def create_control_command(
@@ -882,37 +857,25 @@ def update_control_command(
             details={"command_id": command_id, "status": next_status},
         )
 
-    rows = conn.execute(
-        """UPDATE control_commands
-           SET command_status = $2,
-               approved_at = $3,
-               approved_by = $4,
-               payload = $5::jsonb,
-               result_ref = $6,
-               error_code = $7,
-               error_detail = $8,
-               updated_at = now()
-           WHERE command_id = $1
-           RETURNING command_id, command_type, command_status, requested_by_kind, requested_by_ref,
-                     requested_at, approved_at, approved_by, idempotency_key, risk_level,
-                     payload, result_ref, error_code, error_detail, created_at, updated_at""",
-        command_id,
-        next_status,
-        next_approved_at,
-        next_approved_by,
-        _json_dumps(next_payload),
-        next_result_ref,
-        next_error_code,
-        next_error_detail,
-    )
-    if not rows:
+    try:
+        row = PostgresCommandRepository(conn).update_control_command(
+            command_id=command_id,
+            command_status=next_status,
+            approved_at=next_approved_at,
+            approved_by=next_approved_by,
+            payload=next_payload,
+            result_ref=next_result_ref,
+            error_code=next_error_code,
+            error_detail=next_error_detail,
+        )
+    except RuntimeError as exc:
         raise ControlCommandError(
             "control.command.update_failed",
             f"control command could not be updated: {command_id}",
-            details={"command_id": command_id},
-        )
+            details={"command_id": command_id, "cause_type": type(exc).__name__},
+        ) from exc
 
-    updated = _row_to_record(cast(Mapping[str, Any], rows[0]))
+    updated = _row_to_record(cast(Mapping[str, Any], row))
     if updated.command_status != current.command_status:
         _emit_system_event(
             conn,

@@ -9,6 +9,7 @@ TransportKind = Literal["cli", "api", "mcp", "unknown"]
 ExecutionLane = Literal["local", "remote", "unknown"]
 SandboxProviderKind = Literal[
     "docker_local",
+    "host_local",
     "cloudflare_remote",
     "unknown",
 ]

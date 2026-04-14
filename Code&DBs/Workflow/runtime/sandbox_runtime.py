@@ -489,6 +489,95 @@ class DockerLocalSandboxProvider:
         )
 
 
+class HostLocalSandboxProvider:
+    """Host-backed provider for machines that do not have Docker available."""
+
+    provider_name = "host_local"
+    execution_lane = "local"
+    requires_artifact_sync = False
+
+    def create_session(self, spec: SandboxSessionSpec) -> SandboxSession:
+        session_root = os.path.realpath(tempfile.mkdtemp(prefix="praxis-host-sandbox-"))
+        workspace_root = os.path.join(session_root, "workspace")
+        os.makedirs(workspace_root, exist_ok=True)
+        return SandboxSession(
+            sandbox_session_id=spec.sandbox_session_id,
+            sandbox_group_id=spec.sandbox_group_id,
+            provider=self.provider_name,
+            provider_session_id=Path(session_root).name,
+            workspace_root=workspace_root,
+            network_policy=spec.network_policy,
+            workspace_materialization=spec.workspace_materialization,
+            metadata=dict(spec.metadata),
+        )
+
+    def hydrate_workspace(
+        self,
+        session: SandboxSession,
+        snapshot: WorkspaceSnapshot,
+    ) -> HydrationReceipt:
+        copied = _hydrate_copy(snapshot.source_root, session.workspace_root)
+        return HydrationReceipt(
+            sandbox_session_id=session.sandbox_session_id,
+            workspace_root=session.workspace_root,
+            hydrated_files=copied,
+            workspace_materialization=snapshot.materialization,
+        )
+
+    def exec(self, session: SandboxSession, request: SandboxExecRequest) -> SandboxExecutionResult:
+        from adapters.docker_runner import run_on_host
+
+        start = _utc_now()
+        result = run_on_host(
+            command=request.command,
+            stdin_text=request.stdin_text,
+            timeout=request.timeout_seconds,
+            env_overrides=request.env,
+            workdir=session.workspace_root,
+        )
+        end = _utc_now()
+        return SandboxExecutionResult(
+            sandbox_session_id=session.sandbox_session_id,
+            sandbox_group_id=session.sandbox_group_id,
+            sandbox_provider=self.provider_name,
+            execution_transport=request.execution_transport,
+            exit_code=result.exit_code,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            timed_out=result.timed_out,
+            artifact_refs=(),
+            started_at=start.isoformat(),
+            finished_at=end.isoformat(),
+            network_policy=session.network_policy,
+            provider_latency_ms=result.latency_ms,
+            execution_mode=self.provider_name,
+            workspace_root=session.workspace_root,
+        )
+
+    def collect_artifacts(
+        self,
+        session: SandboxSession,
+        before_manifest: dict[str, tuple[int, int]],
+    ) -> ArtifactReceipt:
+        after_manifest = _workspace_manifest(session.workspace_root)
+        changed = sorted(
+            path for path, metadata in after_manifest.items() if before_manifest.get(path) != metadata
+        )
+        return ArtifactReceipt(
+            sandbox_session_id=session.sandbox_session_id,
+            artifact_refs=tuple(changed),
+            artifact_count=len(changed),
+        )
+
+    def destroy_session(self, session: SandboxSession, disposition: str) -> TeardownReceipt:
+        shutil.rmtree(Path(session.workspace_root).parent, ignore_errors=True)
+        return TeardownReceipt(
+            sandbox_session_id=session.sandbox_session_id,
+            provider=self.provider_name,
+            disposition=disposition,
+        )
+
+
 class CloudflareRemoteSandboxProvider:
     """Remote provider backed by a Cloudflare-hosted sandbox bridge."""
 
@@ -664,6 +753,7 @@ class SandboxRuntime:
     def __init__(self) -> None:
         self._providers: dict[str, SandboxProviderAdapter] = {
             "docker_local": DockerLocalSandboxProvider(),
+            "host_local": HostLocalSandboxProvider(),
             "cloudflare_remote": CloudflareRemoteSandboxProvider(),
         }
 
@@ -691,17 +781,23 @@ class SandboxRuntime:
         metadata: dict[str, Any] | None = None,
         artifact_store: Any | None = None,
     ) -> SandboxExecutionResult:
-        provider = self._provider(provider_name)
+        effective_provider_name = provider_name
+        if provider_name == "docker_local" and not _docker_available():
+            effective_provider_name = "host_local"
+        provider = self._provider(effective_provider_name)
+        provider_metadata = dict(metadata or {})
+        if effective_provider_name != provider_name:
+            provider_metadata.setdefault("requested_provider", provider_name)
         session = provider.create_session(
             SandboxSessionSpec(
                 sandbox_session_id=sandbox_session_id,
                 sandbox_group_id=sandbox_group_id,
-                provider=provider_name,
+                provider=effective_provider_name,
                 workdir=workdir,
                 network_policy=network_policy,
                 workspace_materialization=workspace_materialization,
                 timeout_seconds=timeout_seconds,
-                metadata=dict(metadata or {}),
+                metadata=provider_metadata,
             )
         )
         disposition = "completed"
@@ -744,7 +840,7 @@ class SandboxRuntime:
                     persisted_refs.append(record.artifact_id)
                 if getattr(provider, "requires_artifact_sync", False) and missing_artifacts:
                     raise RuntimeError(
-                        f"{provider_name} returned artifact refs without synced content: "
+                        f"{provider.provider_name} returned artifact refs without synced content: "
                         + ", ".join(sorted(missing_artifacts))
                     )
                 artifact_refs = tuple(persisted_refs or artifact_refs)

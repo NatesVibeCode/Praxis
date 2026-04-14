@@ -81,10 +81,25 @@ from .operator_control_repository import (
 )
 from .operator_frame_repository import PostgresOperatorFrameRepository
 from .memory_graph_repository import PostgresMemoryGraphRepository
+from .receipt_repository import PostgresReceiptRepository
+from .evidence_repository import PostgresEvidenceRepository
+from .compile_artifact_repository import PostgresCompileArtifactRepository
+from .command_repository import PostgresCommandRepository
+from .friction_repository import PostgresFrictionRepository
 from .roadmap_authoring_repository import PostgresRoadmapAuthoringRepository
+from .observability_maintenance_repository import (
+    PostgresObservabilityMaintenanceRepository,
+)
+from .bug_evidence_repository import PostgresBugEvidenceRepository
+from .subscription_repository import PostgresSubscriptionRepository
 from .task_route_eligibility_repository import (
     PostgresTaskRouteEligibilityRepository,
 )
+from .transport_eligibility_repository import (
+    PostgresTransportEligibilityRepository,
+)
+from .verification_repository import PostgresVerificationRepository
+from .work_item_closeout_repository import PostgresWorkItemCloseoutRepository
 from .workflow_runtime_repository import (
     create_app_manifest,
     create_authority_checkpoint,
@@ -99,14 +114,24 @@ from .workflow_schedule_repository import PostgresWorkflowScheduleRepository
 __all__ = [
     "ControlPlaneSchemaReadiness",
     "PostgresEvidenceReader",
+    "PostgresEvidenceRepository",
+    "PostgresBugEvidenceRepository",
     "PostgresConfigurationError",
+    "PostgresCommandRepository",
+    "PostgresFrictionRepository",
     "PostgresMemoryGraphRepository",
+    "PostgresObservabilityMaintenanceRepository",
     "PostgresOperatorControlRepository",
     "PostgresOperatorFrameRepository",
+    "PostgresReceiptRepository",
     "PostgresRoadmapAuthoringRepository",
     "PostgresSchemaError",
     "PostgresStorageError",
+    "PostgresSubscriptionRepository",
     "PostgresTaskRouteEligibilityRepository",
+    "PostgresTransportEligibilityRepository",
+    "PostgresVerificationRepository",
+    "PostgresWorkItemCloseoutRepository",
     "PostgresWorkflowScheduleRepository",
     "PreparedVectorQuery",
     "PostgresWriteError",
@@ -116,6 +141,7 @@ __all__ = [
     "CompileArtifactError",
     "CompileArtifactRecord",
     "CompileArtifactStore",
+    "PostgresCompileArtifactRepository",
     "WorkflowAdmissionDecisionWrite",
     "WorkflowAdmissionSubmission",
     "WorkflowAdmissionWriteResult",

@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from .workflow import WorkflowResult
     from storage.postgres.connection import SyncPostgresConnection
+    from storage.postgres.verification_repository import PostgresVerificationRepository
 
 _log = logging.getLogger(__name__)
 
@@ -289,6 +290,12 @@ def _get_conn() -> SyncPostgresConnection:
     return SyncPostgresConnection(get_workflow_pool())
 
 
+def _get_repository(conn: "SyncPostgresConnection | None" = None) -> "PostgresVerificationRepository":
+    from storage.postgres.verification_repository import PostgresVerificationRepository
+
+    return PostgresVerificationRepository(conn or _get_conn())
+
+
 # ---------------------------------------------------------------------------
 # CapabilityTracker — Postgres-backed
 # ---------------------------------------------------------------------------
@@ -334,15 +341,14 @@ class CapabilityTracker:
             recorded_at=recorded_at,
         )
 
-        conn = _get_conn()
-        conn.execute(
-            """INSERT INTO capability_outcomes
-               (run_id, provider_slug, model_slug, inferred_capabilities,
-                succeeded, output_quality_signals, recorded_at)
-               VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)""",
-            outcome.run_id, outcome.provider_slug, outcome.model_slug,
-            list(outcome.inferred_capabilities), outcome.succeeded,
-            json.dumps(outcome.output_quality_signals), recorded_at,
+        _get_repository().record_capability_outcome(
+            run_id=outcome.run_id,
+            provider_slug=outcome.provider_slug,
+            model_slug=outcome.model_slug,
+            inferred_capabilities=outcome.inferred_capabilities,
+            succeeded=outcome.succeeded,
+            output_quality_signals=outcome.output_quality_signals,
+            recorded_at=recorded_at,
         )
 
         return outcome
@@ -353,12 +359,7 @@ class CapabilityTracker:
 
     def _load_all(self) -> list[CapabilityOutcome]:
         """Load all outcomes from Postgres."""
-        conn = _get_conn()
-        rows = conn.execute(
-            """SELECT run_id, provider_slug, model_slug, inferred_capabilities,
-                      succeeded, output_quality_signals, recorded_at
-               FROM capability_outcomes ORDER BY recorded_at DESC"""
-        )
+        rows = _get_repository().list_capability_outcomes()
         return [CapabilityOutcome.from_row(dict(r)) for r in rows]
 
     def capability_accuracy(self, capability: str) -> dict[str, Any]:

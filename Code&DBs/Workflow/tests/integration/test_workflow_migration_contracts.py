@@ -6,6 +6,7 @@ from storage.migrations import (
     workflow_migration_expected_objects,
     workflow_migration_manifest,
     workflow_migration_path,
+    workflow_migration_sql_text,
     workflow_migration_statements,
 )
 
@@ -39,7 +40,33 @@ def test_workflow_migration_manifest_includes_provider_route_health_budget_migra
     assert "090_workflow_chain_cancellation_and_alignment.sql" in filenames
     assert "091_control_operator_frame_uniqueness.sql" in filenames
     assert "095_model_profile_auto_seed_trigger.sql" in filenames
-    assert filenames[-1] == "095_model_profile_auto_seed_trigger.sql"
+    assert "096_workflow_submission_acceptance.sql" in filenames
+    assert filenames[-1] == "096_workflow_submission_acceptance.sql"
+
+
+def test_every_manifest_migration_has_expected_object_contract() -> None:
+    missing_contracts: list[str] = []
+    for entry in workflow_migration_manifest():
+        try:
+            objects = workflow_migration_expected_objects(entry.filename)
+        except Exception:
+            missing_contracts.append(entry.filename)
+            continue
+        if not objects:
+            missing_contracts.append(entry.filename)
+
+    assert missing_contracts == []
+
+
+def test_claim_lease_proposal_runtime_expected_objects_are_registered() -> None:
+    objects = workflow_migration_expected_objects("004_claim_lease_proposal_runtime.sql")
+    names = {item.object_name for item in objects}
+    assert "workflow_claim_lease_proposal_runtime" in names
+    assert "sandbox_sessions" in names
+    assert "sandbox_bindings" in names
+    assert "workflow_claim_lease_proposal_runtime_sandbox_session_idx" in names
+    assert "sandbox_sessions.sandbox_sessions_owner_route_ref_fkey" in names
+    assert "workflow_claim_lease_proposal_runtime.workflow_claim_lease_proposal_runtime_sandbox_session_id_fkey" in names
 
 
 def test_platform_authority_migration_expected_objects_are_registered() -> None:
@@ -274,6 +301,28 @@ def test_workflow_chain_cancellation_and_alignment_expected_objects_are_register
     assert "workflow_chain_waves.workflow_chain_waves_status_v2_check" in names
 
 
+def test_notify_and_provider_transport_migration_expected_objects_are_registered() -> None:
+    notify_objects = workflow_migration_expected_objects("075_notify_system_events.sql")
+    notify_names = {item.object_name for item in notify_objects}
+    assert "notify_system_event_ready" in notify_names
+
+    profile_objects = workflow_migration_expected_objects("076_provider_cli_profile_transport_metadata.sql")
+    profile_names = {item.object_name for item in profile_objects}
+    assert "provider_cli_profiles.default_model" in profile_names
+    assert "provider_cli_profiles.provider_cli_profiles_api_key_env_vars_array_check" in profile_names
+
+    prompt_objects = workflow_migration_expected_objects("077_provider_cli_profile_prompt_mode.sql")
+    prompt_names = {item.object_name for item in prompt_objects}
+    assert "provider_cli_profiles.prompt_mode" in prompt_names
+    assert "provider_cli_profiles.provider_cli_profiles_prompt_mode_check" in prompt_names
+
+    transport_objects = workflow_migration_expected_objects("078_provider_transport_admission_receipts.sql")
+    transport_names = {item.object_name for item in transport_objects}
+    assert "provider_transport_admissions" in transport_names
+    assert "provider_transport_probe_receipts" in transport_names
+    assert "provider_transport_probe_receipts_decision_idx" in transport_names
+
+
 def test_stale_postgres_completion_prune_migration_is_resolvable_and_targeted() -> None:
     path = workflow_migration_path("064_prune_stale_completion_functions.sql")
     assert path.name == "064_prune_stale_completion_functions.sql"
@@ -289,6 +338,36 @@ def test_stale_postgres_completion_prune_migration_is_resolvable_and_targeted() 
     assert "legacy_event_fn constant text := 'check_' || 'run_completion' || '_with_events';" in body
     assert "legacy_base_fn constant text := 'check_' || 'run_completion';" in body
     assert "DROP FUNCTION IF EXISTS public.%I()" in body
+
+
+def test_reference_catalog_migrations_alias_json_array_values_explicitly() -> None:
+    legacy_catalog_sql = workflow_migration_sql_text("034_reference_catalog.sql")
+    assert "AS cap(value)" in legacy_catalog_sql
+    assert "(cap.value->>'action')" in legacy_catalog_sql
+    assert "AS prop(value)" in legacy_catalog_sql
+    assert "(prop.value->>'name')" in legacy_catalog_sql
+
+    refreshed_catalog_sql = workflow_migration_sql_text("037_reference_catalog.sql")
+    assert "AS cap(value)" in refreshed_catalog_sql
+    assert "(cap.value->>'action')" in refreshed_catalog_sql
+    assert "ADD COLUMN IF NOT EXISTS schema_def" in refreshed_catalog_sql
+    assert "ADD COLUMN IF NOT EXISTS examples" in refreshed_catalog_sql
+    assert "ADD COLUMN IF NOT EXISTS updated_at" in refreshed_catalog_sql
+
+
+def test_workflow_chain_dependency_migration_aliases_wave_definition_values_explicitly() -> None:
+    sql_text = workflow_migration_sql_text(
+        "088_workflow_chain_dependency_and_adoption_authority.sql"
+    )
+    assert "AS wave_definition(value)" in sql_text
+    assert "wave_definition.value->'depends_on'" in sql_text
+    assert "wave_definition.value->>'wave_id'" in sql_text
+
+
+def test_workflow_runtime_cutover_migration_backfills_missing_dispatch_idempotency_column() -> None:
+    sql_text = workflow_migration_sql_text("041_workflow_runtime_cutover.sql")
+    assert "ALTER TABLE dispatch_runs" in sql_text
+    assert "ADD COLUMN IF NOT EXISTS idempotency_key TEXT" in sql_text
 
 
 def test_expected_index_names_match_postgres_identifier_limit() -> None:

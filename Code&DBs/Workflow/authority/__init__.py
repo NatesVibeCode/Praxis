@@ -27,6 +27,15 @@ from .workflow_schedule import (
     ScheduleRepositoryError,
     load_workflow_schedule_catalog,
 )
+from .transport_eligibility import (
+    AdapterTransportSupportAuthorityRecord,
+    ModelTransportEligibilityAuthorityRecord,
+    ProviderTransportEligibilityAuthorityRecord,
+    RoutePreflightJobAuthorityRecord,
+    TransportEligibilityAuthority,
+    TransportEligibilityAuthorityError,
+    load_transport_eligibility_authority,
+)
 
 __all__ = [
     "CutoverGateAuthorityRecord",
@@ -40,10 +49,17 @@ __all__ = [
     "RecurringRunWindowAuthorityRecord",
     "ScheduleDefinitionAuthorityRecord",
     "ScheduleRepositoryError",
+    "AdapterTransportSupportAuthorityRecord",
+    "ModelTransportEligibilityAuthorityRecord",
+    "ProviderTransportEligibilityAuthorityRecord",
+    "RoutePreflightJobAuthorityRecord",
+    "TransportEligibilityAuthority",
+    "TransportEligibilityAuthorityError",
     "WorkflowClassResolutionDecision",
     "WorkflowClassResolutionError",
     "WorkflowClassResolutionRuntime",
     "load_operator_control_authority",
+    "load_transport_eligibility_authority",
     "load_workflow_class_resolution_runtime",
     "load_workflow_schedule_catalog",
 ]

@@ -341,8 +341,10 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         recommended_alias=None,
         when_to_use="Discover native operator status, scoreboard, topology, or replay-ready bug views.",
         when_not_to_use="Do not use it to mutate operator state.",
-        risks={"default": "read", "views": {"status": "read", "scoreboard": "read", "graph": "read", "replay_ready_bugs": "read"}},
+        risks={"default": "read", "views": {"status": "read", "scoreboard": "read", "graph": "read", "lineage": "read", "replay_ready_bugs": "read"}},
         examples=[
+            _example("Read graph topology", {"view": "graph", "run_id": "run_123"}),
+            _example("Read graph lineage", {"view": "lineage", "run_id": "run_123"}),
             _example("Read replay-ready bugs", {"view": "replay_ready_bugs", "limit": 25}),
         ],
     ),

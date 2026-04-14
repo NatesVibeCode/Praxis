@@ -200,6 +200,18 @@ def tool_praxis_query(params: dict) -> dict:
         from .operator import tool_praxis_operator_view
         return tool_praxis_operator_view({"view": "scoreboard"})
 
+    if _matches(question, ["operator graph", "graph topology", "workflow topology"]):
+        return {
+            "routed_to": "operator_view",
+            "message": "Use praxis_operator_view(view='graph', run_id='...') to inspect one run graph.",
+        }
+
+    if _matches(question, ["graph lineage", "operator lineage", "workflow lineage"]):
+        return {
+            "routed_to": "operator_view",
+            "message": "Use praxis_operator_view(view='lineage', run_id='...') to inspect one run lineage.",
+        }
+
     if _matches(question, ["session", "carry forward", "carry-forward"]):
         from .session import tool_praxis_session
         return tool_praxis_session({"action": "latest"})

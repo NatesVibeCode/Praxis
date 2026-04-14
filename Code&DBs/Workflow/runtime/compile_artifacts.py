@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from runtime.execution_packet_authority import rebuild_workflow_run_packet_inspection
+from storage.postgres.compile_artifact_repository import PostgresCompileArtifactRepository
 
 
 class CompileArtifactError(RuntimeError):
@@ -57,6 +58,11 @@ class CompileArtifactStore:
 
     def __init__(self, conn: Any) -> None:
         self._conn = conn
+
+    def _repository(self) -> PostgresCompileArtifactRepository:
+        if self._conn is None:
+            raise CompileArtifactError("compile artifact persistence requires Postgres authority")
+        return PostgresCompileArtifactRepository(self._conn)
 
     def record_definition(
         self,
@@ -133,26 +139,9 @@ class CompileArtifactStore:
             input_fingerprint,
             field_name="input_fingerprint",
         )
-        rows = self._conn.execute(
-            """
-            SELECT
-                compile_artifact_id,
-                artifact_kind,
-                artifact_ref,
-                revision_ref,
-                parent_artifact_ref,
-                input_fingerprint,
-                content_hash,
-                authority_refs,
-                payload,
-                decision_ref
-            FROM compile_artifacts
-            WHERE artifact_kind = $1
-              AND input_fingerprint = $2
-            ORDER BY created_at ASC, compile_artifact_id ASC
-            """,
-            artifact_kind,
-            normalized_input_fingerprint,
+        rows = self._repository().load_compile_artifacts_for_input(
+            artifact_kind=artifact_kind,
+            input_fingerprint=normalized_input_fingerprint,
         )
         if not rows:
             return None
@@ -213,9 +202,6 @@ class CompileArtifactStore:
         payload: dict[str, Any],
         decision_ref: str,
     ) -> CompileArtifactRecord:
-        if self._conn is None:
-            raise CompileArtifactError("compile artifact persistence requires Postgres authority")
-
         normalized_payload = _freeze_jsonish(payload)
         if not isinstance(normalized_payload, dict):
             raise CompileArtifactError("compile artifact payload must be mapping-shaped")
@@ -223,44 +209,17 @@ class CompileArtifactStore:
         payload_json = json.dumps(normalized_payload, sort_keys=True, separators=(",", ":"), default=str)
         content_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
         compile_artifact_id = f"compile_artifact.{artifact_kind}.{content_hash[:16]}"
-        authority_refs_json = json.dumps(list(authority_refs))
-
-        self._conn.execute(
-            """
-            INSERT INTO compile_artifacts (
-                compile_artifact_id,
-                artifact_kind,
-                artifact_ref,
-                revision_ref,
-                parent_artifact_ref,
-                input_fingerprint,
-                content_hash,
-                authority_refs,
-                payload,
-                decision_ref
-            ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10
-            )
-            ON CONFLICT (artifact_kind, revision_ref) DO UPDATE SET
-                artifact_ref = EXCLUDED.artifact_ref,
-                parent_artifact_ref = EXCLUDED.parent_artifact_ref,
-                input_fingerprint = EXCLUDED.input_fingerprint,
-                content_hash = EXCLUDED.content_hash,
-                authority_refs = EXCLUDED.authority_refs,
-                payload = EXCLUDED.payload,
-                decision_ref = EXCLUDED.decision_ref,
-                updated_at = now()
-            """,
-            compile_artifact_id,
-            artifact_kind,
-            artifact_ref,
-            revision_ref,
-            parent_artifact_ref,
-            input_fingerprint,
-            content_hash,
-            authority_refs_json,
-            payload_json,
-            decision_ref,
+        self._repository().upsert_compile_artifact(
+            compile_artifact_id=compile_artifact_id,
+            artifact_kind=artifact_kind,
+            artifact_ref=artifact_ref,
+            revision_ref=revision_ref,
+            parent_artifact_ref=parent_artifact_ref,
+            input_fingerprint=input_fingerprint,
+            content_hash=content_hash,
+            authority_refs=tuple(str(ref) for ref in authority_refs),
+            payload=normalized_payload,
+            decision_ref=decision_ref,
         )
 
         return CompileArtifactRecord(
@@ -288,17 +247,12 @@ class CompileArtifactStore:
         authority_refs: list[str] | tuple[str, ...],
         decision_ref: str,
     ) -> ExecutionPacketRecord:
-        if self._conn is None:
-            raise CompileArtifactError("execution packet persistence requires Postgres authority")
-
         normalized_payload = _freeze_jsonish(packet)
         if not isinstance(normalized_payload, dict):
             raise CompileArtifactError("execution packet payload must be mapping-shaped")
 
-        payload_json = json.dumps(normalized_payload, sort_keys=True, separators=(",", ":"), default=str)
         packet_hash = _require_text(packet.get("packet_hash"), field_name="packet_hash")
         execution_packet_id = f"execution_packet.{_require_text(normalized_payload.get('run_id'), field_name='run_id')}.{packet_revision}"
-        authority_refs_json = json.dumps(list(authority_refs))
         model_messages = normalized_payload.get("model_messages", [])
         reference_bindings = normalized_payload.get("reference_bindings", [])
         capability_bindings = normalized_payload.get("capability_bindings", [])
@@ -306,73 +260,27 @@ class CompileArtifactStore:
         authority_inputs = normalized_payload.get("authority_inputs", {})
         file_inputs = normalized_payload.get("file_inputs", {})
 
-        self._conn.execute(
-            """
-            INSERT INTO execution_packets (
-                execution_packet_id,
-                definition_revision,
-                plan_revision,
-                packet_revision,
-                parent_artifact_ref,
-                packet_version,
-                packet_hash,
-                workflow_id,
-                run_id,
-                spec_name,
-                source_kind,
-                authority_refs,
-                model_messages,
-                reference_bindings,
-                capability_bindings,
-                verify_refs,
-                authority_inputs,
-                file_inputs,
-                payload,
-                decision_ref
-            ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-                $12::jsonb, $13::jsonb, $14::jsonb, $15::jsonb, $16::jsonb,
-                $17::jsonb, $18::jsonb, $19::jsonb, $20
-            )
-            ON CONFLICT (definition_revision, plan_revision, packet_revision) DO UPDATE SET
-                parent_artifact_ref = EXCLUDED.parent_artifact_ref,
-                packet_version = EXCLUDED.packet_version,
-                packet_hash = EXCLUDED.packet_hash,
-                workflow_id = EXCLUDED.workflow_id,
-                run_id = EXCLUDED.run_id,
-                spec_name = EXCLUDED.spec_name,
-                source_kind = EXCLUDED.source_kind,
-                authority_refs = EXCLUDED.authority_refs,
-                model_messages = EXCLUDED.model_messages,
-                reference_bindings = EXCLUDED.reference_bindings,
-                capability_bindings = EXCLUDED.capability_bindings,
-                verify_refs = EXCLUDED.verify_refs,
-                authority_inputs = EXCLUDED.authority_inputs,
-                file_inputs = EXCLUDED.file_inputs,
-                payload = EXCLUDED.payload,
-                decision_ref = EXCLUDED.decision_ref,
-                updated_at = now()
-            """,
-            execution_packet_id,
-            definition_revision,
-            plan_revision,
-            packet_revision,
-            parent_artifact_ref,
-            packet_version,
-            packet_hash,
-            _require_text(normalized_payload.get("workflow_id"), field_name="workflow_id"),
-            _require_text(normalized_payload.get("run_id"), field_name="run_id"),
-            _require_text(normalized_payload.get("spec_name"), field_name="spec_name"),
-            _require_text(normalized_payload.get("source_kind"), field_name="source_kind"),
-            authority_refs_json,
-            json.dumps(model_messages, default=str),
-            json.dumps(reference_bindings, default=str),
-            json.dumps(capability_bindings, default=str),
-            json.dumps(verify_refs, default=str),
-            json.dumps(authority_inputs, default=str),
-            json.dumps(file_inputs, default=str),
-            payload_json,
-            decision_ref,
+        self._repository().upsert_execution_packet(
+            execution_packet_id=execution_packet_id,
+            definition_revision=definition_revision,
+            plan_revision=plan_revision,
+            packet_revision=packet_revision,
+            parent_artifact_ref=parent_artifact_ref,
+            packet_version=packet_version,
+            packet_hash=packet_hash,
+            workflow_id=_require_text(normalized_payload.get("workflow_id"), field_name="workflow_id"),
+            run_id=_require_text(normalized_payload.get("run_id"), field_name="run_id"),
+            spec_name=_require_text(normalized_payload.get("spec_name"), field_name="spec_name"),
+            source_kind=_require_text(normalized_payload.get("source_kind"), field_name="source_kind"),
+            authority_refs=tuple(str(ref) for ref in authority_refs),
+            model_messages=tuple(dict(item) for item in model_messages if isinstance(item, dict)),
+            reference_bindings=tuple(dict(item) for item in reference_bindings if isinstance(item, dict)),
+            capability_bindings=tuple(dict(item) for item in capability_bindings if isinstance(item, dict)),
+            verify_refs=tuple(str(ref) for ref in verify_refs if isinstance(ref, str)),
+            authority_inputs=dict(authority_inputs) if isinstance(authority_inputs, dict) else {},
+            file_inputs=dict(file_inputs) if isinstance(file_inputs, dict) else {},
+            payload=normalized_payload,
+            decision_ref=decision_ref,
         )
 
         rebuild_workflow_run_packet_inspection(
@@ -411,35 +319,7 @@ class CompileArtifactStore:
         if self._conn is None:
             raise CompileArtifactError("execution packet reads require Postgres authority")
 
-        rows = self._conn.execute(
-            """
-            SELECT
-                execution_packet_id,
-                definition_revision,
-                plan_revision,
-                packet_revision,
-                parent_artifact_ref,
-                packet_version,
-                packet_hash,
-                workflow_id,
-                run_id,
-                spec_name,
-                source_kind,
-                authority_refs,
-                model_messages,
-                reference_bindings,
-                capability_bindings,
-                verify_refs,
-                authority_inputs,
-                file_inputs,
-                payload,
-                decision_ref
-            FROM execution_packets
-            WHERE run_id = $1
-            ORDER BY created_at ASC, execution_packet_id ASC
-            """,
-            run_id,
-        )
+        rows = self._repository().load_execution_packets_for_run(run_id=run_id)
         return tuple(_execution_packet_record_from_row(row) for row in (rows or []))
 
     def load_execution_packet(
@@ -454,34 +334,8 @@ class CompileArtifactStore:
             packet_revision,
             field_name="packet_revision",
         )
-        rows = self._conn.execute(
-            """
-            SELECT
-                execution_packet_id,
-                definition_revision,
-                plan_revision,
-                packet_revision,
-                parent_artifact_ref,
-                packet_version,
-                packet_hash,
-                workflow_id,
-                run_id,
-                spec_name,
-                source_kind,
-                authority_refs,
-                model_messages,
-                reference_bindings,
-                capability_bindings,
-                verify_refs,
-                authority_inputs,
-                file_inputs,
-                payload,
-                decision_ref
-            FROM execution_packets
-            WHERE packet_revision = $1
-            ORDER BY created_at DESC, execution_packet_id DESC
-            """,
-            normalized_packet_revision,
+        rows = self._repository().load_execution_packets_for_revision(
+            packet_revision=normalized_packet_revision,
         )
         if not rows:
             return None

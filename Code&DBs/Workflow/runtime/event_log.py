@@ -1,8 +1,9 @@
 """Praxis service bus — durable event log in Postgres.
 
 Append-only event log with cursor-based consumption and LISTEN/NOTIFY
-for instant push. No polling fallbacks, no graceful degradation — if
-the database is down, the system is down.
+for instant push. Cursor reads stay authoritative; LISTEN/NOTIFY is
+the wakeup path that keeps stream consumers responsive without relying
+on blind sleep intervals.
 
 Write path:
     emit(conn, channel, event_type, entity_id, ...) -> event_id
@@ -24,6 +25,9 @@ Tables: event_log, event_log_cursors (migration 082).
 from __future__ import annotations
 
 import json
+import logging
+import os
+import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -31,6 +35,8 @@ from typing import TYPE_CHECKING, Any, Generator
 
 if TYPE_CHECKING:
     from storage.postgres.connection import SyncPostgresConnection
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +202,97 @@ def read_all_since(
     return [_row_to_event(r) for r in rows]
 
 
+class _ChannelWakeupListener:
+    """Background LISTEN/NOTIFY consumer that wakes stream readers."""
+
+    def __init__(
+        self,
+        *,
+        database_url: str,
+        channel: str,
+        wakeup_event: threading.Event,
+        reconnect_delay: float = 2.0,
+    ) -> None:
+        self._database_url = database_url
+        self._channel = channel
+        self._wakeup_event = wakeup_event
+        self._reconnect_delay = reconnect_delay
+        self._stop_event = threading.Event()
+        self._thread = threading.Thread(
+            target=self._run,
+            daemon=True,
+            name=f"event-log-listen-{channel}",
+        )
+
+    def start(self) -> None:
+        import asyncpg  # noqa: F401
+
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        self._wakeup_event.set()
+        self._thread.join(timeout=3)
+
+    def _on_notify(self, _connection, _pid, channel: str, payload: str) -> None:
+        logger.debug("Event log notification received on %s: %s", channel, payload)
+        self._wakeup_event.set()
+
+    def _run(self) -> None:
+        import asyncio
+        import asyncpg
+
+        async def _listen() -> None:
+            while not self._stop_event.is_set():
+                conn = None
+                try:
+                    conn = await asyncpg.connect(self._database_url, timeout=5.0)
+                    await conn.add_listener(self._channel, self._on_notify)
+                    while not self._stop_event.is_set():
+                        await asyncio.sleep(1.0)
+                except Exception as exc:
+                    if not self._stop_event.is_set():
+                        logger.warning(
+                            "Event log LISTEN loop error for %s, reconnecting: %s",
+                            self._channel,
+                            exc,
+                        )
+                        await asyncio.sleep(self._reconnect_delay)
+                finally:
+                    if conn is not None:
+                        await conn.close()
+
+        asyncio.run(_listen())
+
+
+def _start_channel_wakeup_listener(
+    *,
+    channel: str,
+    wakeup_event: threading.Event,
+) -> _ChannelWakeupListener | None:
+    """Start a LISTEN wakeup helper for the requested channel when possible."""
+
+    database_url = os.environ.get("WORKFLOW_DATABASE_URL", "").strip()
+    if not database_url:
+        return None
+
+    try:
+        listener = _ChannelWakeupListener(
+            database_url=database_url,
+            channel=channel,
+            wakeup_event=wakeup_event,
+        )
+        listener.start()
+        return listener
+    except Exception as exc:
+        logger.debug(
+            "Event log LISTEN wakeup unavailable for %s: %s",
+            channel,
+            exc,
+        )
+        return None
+
+
 def iter_channel(
     conn: Any,
     *,
@@ -207,18 +304,31 @@ def iter_channel(
 ) -> Generator[Event, None, None]:
     """Yield events as they arrive on a channel.
 
-    Uses cursor-based reads with a sleep interval between checks.
-    LISTEN/NOTIFY wakes the caller; the cursor guarantees no events
-    are missed regardless of timing.
+    Cursor reads remain the source of truth. When the workflow database
+    authority is configured, a background LISTEN connection wakes the
+    loop early so streams do not sit on fixed polling delays.
     """
     deadline = time.monotonic() + timeout_seconds if timeout_seconds else None
-    while deadline is None or time.monotonic() < deadline:
-        events = read_since(conn, channel=channel, cursor=cursor, entity_id=entity_id, limit=50)
-        for event in events:
-            cursor = event.id
-            yield event
-        if not events:
-            time.sleep(poll_interval)
+    wakeup_event = threading.Event()
+    listener = _start_channel_wakeup_listener(
+        channel=channel,
+        wakeup_event=wakeup_event,
+    )
+    try:
+        while deadline is None or time.monotonic() < deadline:
+            events = read_since(conn, channel=channel, cursor=cursor, entity_id=entity_id, limit=50)
+            for event in events:
+                cursor = event.id
+                yield event
+            if not events:
+                if listener is not None:
+                    wakeup_event.wait(timeout=poll_interval)
+                    wakeup_event.clear()
+                else:
+                    time.sleep(poll_interval)
+    finally:
+        if listener is not None:
+            listener.stop()
 
 
 # ---------------------------------------------------------------------------

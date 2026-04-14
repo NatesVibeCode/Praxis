@@ -15,6 +15,30 @@ CREATE TABLE IF NOT EXISTS reference_catalog (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+ALTER TABLE reference_catalog
+    ADD COLUMN IF NOT EXISTS schema_def JSONB DEFAULT '{}'::jsonb;
+
+ALTER TABLE reference_catalog
+    ADD COLUMN IF NOT EXISTS examples TEXT[] DEFAULT '{}'::text[];
+
+ALTER TABLE reference_catalog
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'reference_catalog'
+          AND column_name = 'schema'
+    ) THEN
+        UPDATE reference_catalog
+        SET schema_def = COALESCE(schema_def, schema)
+        WHERE schema IS NOT NULL;
+    END IF;
+END $$;
+
 CREATE INDEX IF NOT EXISTS idx_reference_catalog_type
     ON reference_catalog (ref_type);
 
@@ -32,15 +56,15 @@ WITH integration_rows AS (
         resolved_id
     )
     SELECT
-        '@' || ir.id || '/' || cap->>'action' AS slug,
+        '@' || ir.id || '/' || (cap.value->>'action') AS slug,
         'integration' AS ref_type,
-        ir.name || ': ' || cap->>'action' AS display_name,
-        cap->>'description' AS description,
+        ir.name || ': ' || (cap.value->>'action') AS display_name,
+        cap.value->>'description' AS description,
         'integration_registry' AS resolved_table,
         ir.id AS resolved_id
     FROM integration_registry ir
-    CROSS JOIN LATERAL jsonb_array_elements(ir.capabilities) AS cap
-    WHERE cap->>'action' IS NOT NULL
+    CROSS JOIN LATERAL jsonb_array_elements(ir.capabilities) AS cap(value)
+    WHERE cap.value->>'action' IS NOT NULL
     ON CONFLICT (slug) DO UPDATE SET
         ref_type = EXCLUDED.ref_type,
         display_name = EXCLUDED.display_name,

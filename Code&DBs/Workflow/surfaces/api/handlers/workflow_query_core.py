@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict, is_dataclass
 from typing import Any
 
 from ._shared import _ClientError, _bug_to_dict, _matches, _serialize
@@ -28,6 +29,16 @@ def _empty_result(
     if payload:
         response.update(payload)
     return response
+
+
+def _operator_view_payload(view: object) -> dict[str, Any]:
+    if is_dataclass(view):
+        payload = asdict(view)
+    elif isinstance(view, dict):
+        payload = dict(view)
+    else:
+        payload = {"value": view}
+    return _serialize(payload)
 
 
 def _annotate_bug_dicts_with_replay_state(
@@ -824,20 +835,99 @@ def handle_operator_view(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
             "limit": limit,
             "refresh_backfill": refresh_backfill,
         }
-    cli_commands = {
-        "status": "workflow native-operator inspect",
-        "scoreboard": "workflow native-operator scoreboard",
-        "graph": "workflow native-operator graph-topology",
-        "lineage": "workflow native-operator graph-lineage",
-    }
-    cmd = cli_commands.get(view)
-    if not cmd:
-        raise _ClientError(f"Unknown view: {view}. Options: {', '.join(cli_commands)}")
+    run_id = _optional_text(body.get("run_id"))
+    view_options = ("status", "scoreboard", "graph", "lineage", "replay_ready_bugs")
+    if view not in {"status", "scoreboard", "graph", "lineage"}:
+        raise _ClientError(f"Unknown view: {view}. Options: {', '.join(view_options)}")
+    if run_id is None:
+        raise _ClientError(f"run_id is required for operator view '{view}'")
+
+    from observability import (
+        cutover_scoreboard_run,
+        graph_lineage_run,
+        graph_topology_run,
+        load_native_operator_support,
+        operator_status_run,
+        render_cutover_scoreboard,
+        render_operator_status,
+    )
+    from runtime.execution import RuntimeOrchestrator
+    from surfaces.cli.render import render_graph_lineage, render_graph_topology
+    from surfaces.api._operator_helpers import _run_async
+    from storage.postgres import PostgresEvidenceReader
+
+    evidence_reader = PostgresEvidenceReader()
+    canonical_evidence = evidence_reader.evidence_timeline(run_id)
+    inspection = RuntimeOrchestrator(evidence_reader=evidence_reader).inspect_run(run_id=run_id)
+    support = _run_async(load_native_operator_support(run_id=run_id))
+
+    if view == "status":
+        read_model = operator_status_run(
+            run_id=run_id,
+            canonical_evidence=canonical_evidence,
+            support=support,
+        )
+        return {
+            "view": view,
+            "run_id": run_id,
+            "requires": {
+                "runtime": "sync_postgres",
+                "driver": "postgres",
+            },
+            "payload": _operator_view_payload(read_model),
+            "rendered": render_operator_status(read_model),
+        }
+
+    if view == "graph":
+        read_model = graph_topology_run(
+            run_id=run_id,
+            canonical_evidence=canonical_evidence,
+        )
+        return {
+            "view": view,
+            "run_id": run_id,
+            "requires": {
+                "runtime": "sync_postgres",
+                "driver": "postgres",
+            },
+            "payload": _operator_view_payload(read_model),
+            "rendered": render_graph_topology(read_model),
+        }
+
+    if view == "lineage":
+        read_model = graph_lineage_run(
+            run_id=run_id,
+            canonical_evidence=canonical_evidence,
+            operator_frame_source=inspection.operator_frame_source,
+            operator_frames=inspection.operator_frames,
+        )
+        return {
+            "view": view,
+            "run_id": run_id,
+            "requires": {
+                "runtime": "sync_postgres",
+                "driver": "postgres",
+            },
+            "payload": _operator_view_payload(read_model),
+            "rendered": render_graph_lineage(read_model),
+        }
+
+    from surfaces.api import frontdoor
+
+    status_payload = frontdoor.status(run_id=run_id)
+    read_model = cutover_scoreboard_run(
+        run_id=run_id,
+        canonical_evidence=canonical_evidence,
+        status_snapshot=status_payload.get("run"),
+        support=support,
+    )
     return {
         "view": view,
+        "run_id": run_id,
         "requires": {
-            "runtime": "async_postgres",
-            "driver": "asyncpg",
+            "runtime": "sync_postgres",
+            "driver": "postgres",
         },
-        "cli_command": cmd,
+        "payload": _operator_view_payload(read_model),
+        "rendered": render_cutover_scoreboard(read_model),
     }

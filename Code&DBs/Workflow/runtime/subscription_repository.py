@@ -18,6 +18,10 @@ import asyncpg
 
 from storage.migrations import WorkflowMigrationError, workflow_migration_statements
 from storage.postgres import resolve_workflow_database_url
+from storage.postgres.subscription_repository import (
+    upsert_event_subscription_record,
+    upsert_subscription_checkpoint_record,
+)
 
 _SCHEMA_FILENAME = "006_platform_authority_schema.sql"
 _DUPLICATE_SQLSTATES = {"42P07", "42710"}
@@ -332,71 +336,20 @@ async def persist_event_subscription_definition(
             field_name="definition.created_at",
         ),
     )
-    row = await conn.fetchrow(
-        """
-        INSERT INTO event_subscriptions (
-            subscription_id,
-            subscription_name,
-            consumer_kind,
-            envelope_kind,
-            workflow_id,
-            run_id,
-            cursor_scope,
-            status,
-            delivery_policy,
-            filter_policy,
-            created_at
-        ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11
-        )
-        ON CONFLICT (subscription_id) DO UPDATE SET
-            subscription_name = EXCLUDED.subscription_name,
-            consumer_kind = EXCLUDED.consumer_kind,
-            envelope_kind = EXCLUDED.envelope_kind,
-            workflow_id = EXCLUDED.workflow_id,
-            run_id = EXCLUDED.run_id,
-            cursor_scope = EXCLUDED.cursor_scope,
-            status = EXCLUDED.status,
-            delivery_policy = EXCLUDED.delivery_policy,
-            filter_policy = EXCLUDED.filter_policy
-        RETURNING
-            subscription_id,
-            subscription_name,
-            consumer_kind,
-            envelope_kind,
-            workflow_id,
-            run_id,
-            cursor_scope,
-            status,
-            delivery_policy,
-            filter_policy,
-            created_at
-        """,
-        normalized_definition.subscription_id,
-        normalized_definition.subscription_name,
-        normalized_definition.consumer_kind,
-        normalized_definition.envelope_kind,
-        normalized_definition.workflow_id,
-        normalized_definition.run_id,
-        normalized_definition.cursor_scope,
-        normalized_definition.status,
-        json.dumps(
-            normalized_definition.delivery_policy,
-            sort_keys=True,
-            separators=(",", ":"),
-        ),
-        json.dumps(
-            normalized_definition.filter_policy,
-            sort_keys=True,
-            separators=(",", ":"),
-        ),
-        normalized_definition.created_at,
+    row = await upsert_event_subscription_record(
+        conn,
+        subscription_id=normalized_definition.subscription_id,
+        subscription_name=normalized_definition.subscription_name,
+        consumer_kind=normalized_definition.consumer_kind,
+        envelope_kind=normalized_definition.envelope_kind,
+        workflow_id=normalized_definition.workflow_id,
+        run_id=normalized_definition.run_id,
+        cursor_scope=normalized_definition.cursor_scope,
+        status=normalized_definition.status,
+        delivery_policy=normalized_definition.delivery_policy,
+        filter_policy=normalized_definition.filter_policy,
+        created_at=normalized_definition.created_at,
     )
-    if row is None:  # pragma: no cover - asyncpg always returns a row here
-        raise SubscriptionRepositoryError(
-            "subscription.write_failed",
-            "subscription definition could not be persisted",
-        )
     return _definition_from_row(row)
 
 
@@ -470,55 +423,16 @@ async def persist_subscription_checkpoint(
             field_name="checkpoint.metadata",
         ),
     )
-    row = await conn.fetchrow(
-        """
-        INSERT INTO subscription_checkpoints (
-            checkpoint_id,
-            subscription_id,
-            run_id,
-            last_evidence_seq,
-            last_authority_id,
-            checkpoint_status,
-            checkpointed_at,
-            metadata
-        ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8::jsonb
-        )
-        ON CONFLICT (subscription_id, run_id) DO UPDATE SET
-            checkpoint_id = EXCLUDED.checkpoint_id,
-            last_evidence_seq = EXCLUDED.last_evidence_seq,
-            last_authority_id = EXCLUDED.last_authority_id,
-            checkpoint_status = EXCLUDED.checkpoint_status,
-            checkpointed_at = EXCLUDED.checkpointed_at,
-            metadata = EXCLUDED.metadata
-        RETURNING
-            checkpoint_id,
-            subscription_id,
-            run_id,
-            last_evidence_seq,
-            last_authority_id,
-            checkpoint_status,
-            checkpointed_at,
-            metadata
-        """,
-        normalized_checkpoint.checkpoint_id,
-        normalized_checkpoint.subscription_id,
-        normalized_checkpoint.run_id,
-        normalized_checkpoint.last_evidence_seq,
-        normalized_checkpoint.last_authority_id,
-        normalized_checkpoint.checkpoint_status,
-        normalized_checkpoint.checkpointed_at,
-        json.dumps(
-            normalized_checkpoint.metadata,
-            sort_keys=True,
-            separators=(",", ":"),
-        ),
+    row = await upsert_subscription_checkpoint_record(
+        conn,
+        subscription_id=normalized_checkpoint.subscription_id,
+        run_id=normalized_checkpoint.run_id,
+        last_evidence_seq=normalized_checkpoint.last_evidence_seq,
+        last_authority_id=normalized_checkpoint.last_authority_id,
+        checkpoint_status=normalized_checkpoint.checkpoint_status,
+        metadata=normalized_checkpoint.metadata,
+        checkpointed_at=normalized_checkpoint.checkpointed_at,
     )
-    if row is None:  # pragma: no cover - asyncpg always returns a row here
-        raise SubscriptionRepositoryError(
-            "subscription.write_failed",
-            "subscription checkpoint could not be persisted",
-        )
     return _checkpoint_from_row(row)
 
 

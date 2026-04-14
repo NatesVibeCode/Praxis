@@ -15,7 +15,6 @@ from adapters.http_transport import HTTPResponse
 from adapters.llm_client import LLMClientError, LLMRequest, LLMResponse, call_llm, call_llm_streaming
 from adapters.llm_task import LLMTaskAdapter
 from adapters.provider_registry import resolve_api_endpoint
-from surfaces.api.handlers.workflow_admin import _handle_transport_support
 from runtime.task_type_router import TaskTypeRouter
 
 
@@ -302,81 +301,118 @@ def test_cursor_profile_is_registered_for_cli_only(monkeypatch) -> None:
 
 
 def test_transport_support_handler_returns_provider_and_model_support(monkeypatch) -> None:
-    import adapters.provider_registry as provider_registry_mod
+    monkeypatch.setenv(
+        "WORKFLOW_DATABASE_URL",
+        "postgresql://test@localhost:5432/praxis_test",
+    )
+    import surfaces.api.handlers.workflow_admin as workflow_admin
 
-    monkeypatch.setattr(provider_registry_mod, "validate_profiles", lambda: {
-        "openai": {
-            "binary": "codex",
-            "binary_found": True,
-            "binary_path": "/usr/local/bin/codex",
-            "default_model": "gpt-4.1",
-            "api_endpoint": "https://api.openai.com/v1/chat/completions",
-            "api_protocol_family": "openai_chat_completions",
-            "api_key_env_vars": ["OPENAI_API_KEY"],
-            "api_supported": True,
-            "adapter_economics": {
-                "cli_llm": {"billing_mode": "subscription_included"},
-                "llm_task": {"billing_mode": "metered_api"},
+    captured: dict[str, object] = {}
+    fake_health_mod = object()
+    fake_pg = object()
+
+    def _fake_query_transport_support(**kwargs):
+        captured.update(kwargs)
+        return {
+            "default_provider_slug": "openai",
+            "default_adapter_type": "cli_llm",
+            "providers": [{"provider_slug": "openai"}],
+            "models": [{"provider_slug": "openai", "model_slug": "gpt-4.1"}],
+            "route_preflight": {
+                "runtime_profile_ref": kwargs["runtime_profile_ref"],
+                "overall": "ready",
+                "jobs": list(kwargs["jobs"] or ()),
             },
-            "flags_safe": True,
-        },
-    })
-    monkeypatch.setattr(provider_registry_mod, "registered_providers", lambda: ["openai"])
-    monkeypatch.setattr(provider_registry_mod, "supports_adapter", lambda provider_slug, adapter_type: provider_slug == "openai" and adapter_type in {"cli_llm", "llm_task"})
-    monkeypatch.setattr(provider_registry_mod, "supports_model_adapter", lambda provider_slug, model_slug, adapter_type: provider_slug == "openai" and model_slug == "gpt-4.1" and adapter_type in {"cli_llm", "llm_task"})
-    monkeypatch.setattr(provider_registry_mod, "resolve_api_endpoint", lambda provider_slug, model_slug=None: f"https://api.example.test/{provider_slug}/{model_slug or 'default'}")
-    monkeypatch.setattr(provider_registry_mod, "default_provider_slug", lambda: "openai")
-    monkeypatch.setattr(provider_registry_mod, "default_llm_adapter_type", lambda: "cli_llm")
+            "count": {"providers": 1, "models": 1},
+        }
 
-    class _FakeProbe:
-        def __init__(self, provider_slug: str, adapter_type: str) -> None:
-            self._provider_slug = provider_slug
-            self._adapter_type = adapter_type
-
-        def check(self):
-            return SimpleNamespace(
-                passed=True,
-                status="ok",
-                message="ready",
-                details={
-                    "provider_slug": self._provider_slug,
-                    "adapter_type": self._adapter_type,
-                    "transport_ready": True,
-                },
-            )
-
-    class _FakeHealthMod:
-        ProviderTransportProbe = _FakeProbe
-
-    class _FakePG:
-        def execute(self, sql: str):
-            del sql
-            return [
-                {
-                    "provider_slug": "openai",
-                    "model_slug": "gpt-4.1",
-                    "capability_tags": ["chat"],
-                    "route_tier": "high",
-                    "latency_class": "instant",
-                }
-            ]
+    monkeypatch.setattr(
+        workflow_admin.operator_read,
+        "query_transport_support",
+        _fake_query_transport_support,
+    )
 
     class _FakeSubs:
         def get_health_mod(self):
-            return _FakeHealthMod()
+            return fake_health_mod
 
         def get_pg_conn(self):
-            return _FakePG()
+            return fake_pg
 
-    payload = _handle_transport_support(_FakeSubs(), {})
+    payload = workflow_admin._handle_transport_support(
+        _FakeSubs(),
+        {
+            "provider_slug": " openai ",
+            "model_slug": " gpt-4.1 ",
+            "runtime_profile_ref": " native ",
+            "jobs": [{"label": "build", "agent": "auto/build"}],
+        },
+    )
+
     assert payload["default_provider_slug"] == "openai"
-    assert payload["default_adapter_type"] == "cli_llm"
-    assert payload["count"]["providers"] == 1
-    assert payload["count"]["models"] == 1
-    assert payload["models"][0]["adapter_support"]["cli_llm"]["details"]["transport_ready"] is True
-    assert payload["models"][0]["adapter_support"]["llm_task"]["details"]["transport_ready"] is True
-    assert payload["models"][0]["adapter_support"]["llm_task"]["details"]["model_supported"] is True
-    assert payload["models"][0]["adapter_support"]["llm_task"]["details"]["endpoint_uri"] == "https://api.example.test/openai/gpt-4.1"
+    assert payload["count"] == {"providers": 1, "models": 1}
+    assert captured == {
+        "health_mod": fake_health_mod,
+        "pg": fake_pg,
+        "provider_filter": "openai",
+        "model_filter": "gpt-4.1",
+        "runtime_profile_ref": "native",
+        "jobs": [{"label": "build", "agent": "auto/build"}],
+    }
+
+
+def test_query_transport_support_uses_authority_and_repository(monkeypatch) -> None:
+    monkeypatch.setenv(
+        "WORKFLOW_DATABASE_URL",
+        "postgresql://test@localhost:5432/praxis_test",
+    )
+    import surfaces.api.operator_read as operator_read
+
+    captured: dict[str, object] = {}
+    fake_pg = object()
+    fake_health_mod = object()
+
+    class _FakeRepository:
+        def __init__(self, conn) -> None:
+            captured["repository_conn"] = conn
+
+    class _FakeAuthority:
+        def to_json(self) -> dict[str, object]:
+            return {"status": "ready", "count": {"providers": 1, "models": 2}}
+
+    def _fake_load_transport_eligibility_authority(**kwargs):
+        captured.update(kwargs)
+        return _FakeAuthority()
+
+    monkeypatch.setattr(
+        operator_read,
+        "PostgresTransportEligibilityRepository",
+        _FakeRepository,
+    )
+    monkeypatch.setattr(
+        operator_read,
+        "load_transport_eligibility_authority",
+        _fake_load_transport_eligibility_authority,
+    )
+
+    payload = operator_read.query_transport_support(
+        health_mod=fake_health_mod,
+        pg=fake_pg,
+        provider_filter="openai",
+        model_filter="gpt-5.4",
+        runtime_profile_ref="native",
+        jobs=[{"label": "verify", "agent": "auto/review"}],
+    )
+
+    assert payload == {"status": "ready", "count": {"providers": 1, "models": 2}}
+    assert captured["repository_conn"] is fake_pg
+    assert captured["repository"].__class__ is _FakeRepository
+    assert captured["health_mod"] is fake_health_mod
+    assert captured["pg"] is fake_pg
+    assert captured["provider_filter"] == "openai"
+    assert captured["model_filter"] == "gpt-5.4"
+    assert captured["runtime_profile_ref"] == "native"
+    assert captured["jobs"] == [{"label": "verify", "agent": "auto/review"}]
 
 
 def test_cli_and_api_transports_can_be_compared_for_same_provider_and_model(monkeypatch) -> None:
@@ -473,39 +509,37 @@ def test_provider_adapter_contract_exposes_explicit_transport_surface() -> None:
 
 
 def test_route_economics_preserves_zero_cost_for_prepaid_lanes(monkeypatch) -> None:
-    import runtime.task_type_router as router_mod
+    import runtime.routing_economics as routing_economics_mod
 
-    router = object.__new__(TaskTypeRouter)
-    router._default_adapter_type = "cli_llm"
-
-    monkeypatch.setattr(router_mod, "resolve_adapter_economics", lambda provider_slug, adapter_type: {
+    monkeypatch.setattr(routing_economics_mod, "resolve_adapter_economics", lambda provider_slug, adapter_type: {
         "billing_mode": "subscription_included",
         "budget_bucket": f"{provider_slug}_monthly",
         "effective_marginal_cost": 0.0,
         "prefer_prepaid": True,
         "allow_payg_fallback": True,
     })
-    monkeypatch.setattr(router_mod, "supports_adapter", lambda provider_slug, adapter_type: True)
+    monkeypatch.setattr(routing_economics_mod, "supports_adapter", lambda provider_slug, adapter_type: True)
 
-    economics = TaskTypeRouter._route_economics(
-        router,
+    economics = routing_economics_mod.resolve_route_economics(
         provider_slug="openai",
         adapter_type=None,
         provider_policy_id=None,
         raw_cost_per_m_tokens=8.75,
         budget_windows={},
+        default_adapter="cli_llm",
     )
 
     assert economics["effective_marginal_cost"] == 0.0
 
 
 def test_route_economics_prefers_prepaid_adapter_over_metered_default(monkeypatch) -> None:
-    import runtime.task_type_router as router_mod
+    import runtime.routing_economics as routing_economics_mod
 
-    router = object.__new__(TaskTypeRouter)
-    router._default_adapter_type = "llm_task"
-
-    monkeypatch.setattr(router_mod, "supports_adapter", lambda provider_slug, adapter_type: adapter_type in {"cli_llm", "llm_task"})
+    monkeypatch.setattr(
+        routing_economics_mod,
+        "supports_adapter",
+        lambda provider_slug, adapter_type: adapter_type in {"cli_llm", "llm_task"},
+    )
 
     def _economics(provider_slug: str, adapter_type: str) -> dict[str, object]:
         del provider_slug
@@ -525,15 +559,15 @@ def test_route_economics_prefers_prepaid_adapter_over_metered_default(monkeypatc
             "allow_payg_fallback": True,
         }
 
-    monkeypatch.setattr(router_mod, "resolve_adapter_economics", _economics)
+    monkeypatch.setattr(routing_economics_mod, "resolve_adapter_economics", _economics)
 
-    economics = TaskTypeRouter._route_economics(
-        router,
+    economics = routing_economics_mod.resolve_route_economics(
         provider_slug="openai",
         adapter_type=None,
         provider_policy_id=None,
         raw_cost_per_m_tokens=8.75,
         budget_windows={},
+        default_adapter="llm_task",
     )
 
     assert economics["adapter_type"] == "cli_llm"

@@ -11,6 +11,8 @@ import json
 import logging
 from typing import Any
 
+from storage.postgres import PostgresSubscriptionRepository
+
 logger = logging.getLogger(__name__)
 
 MAX_EVENTS_PER_CYCLE = 50
@@ -21,6 +23,10 @@ _TRIGGER_EVALUATOR_SUBSCRIPTION_NAME = "Workflow Trigger Evaluator"
 _TRIGGER_EVALUATOR_CONSUMER_KIND = "system"
 _TRIGGER_EVALUATOR_ENVELOPE_KIND = "system_event"
 _TRIGGER_EVALUATOR_CURSOR_SCOPE = "global"
+
+
+def _subscription_writes(conn: Any) -> PostgresSubscriptionRepository:
+    return PostgresSubscriptionRepository(conn)
 
 
 def evaluate_triggers(conn: Any) -> int:
@@ -83,39 +89,17 @@ def _load_workflow_events_from_checkpoint(conn: Any, last_checkpoint: int) -> li
 
 def _ensure_trigger_evaluator_subscription(conn: Any) -> None:
     """Persist the trigger evaluator as a first-class durable subscriber."""
-    conn.execute(
-        """INSERT INTO public.event_subscriptions (
-               subscription_id,
-               subscription_name,
-               consumer_kind,
-               envelope_kind,
-               workflow_id,
-               run_id,
-               cursor_scope,
-               status,
-               delivery_policy,
-               filter_policy,
-               created_at
-           ) VALUES (
-               $1, $2, $3, $4, NULL, NULL, $5, 'active', $6::jsonb, $7::jsonb, now()
-           )
-           ON CONFLICT (subscription_id) DO UPDATE SET
-               subscription_name = EXCLUDED.subscription_name,
-               consumer_kind = EXCLUDED.consumer_kind,
-               envelope_kind = EXCLUDED.envelope_kind,
-               workflow_id = EXCLUDED.workflow_id,
-               run_id = EXCLUDED.run_id,
-               cursor_scope = EXCLUDED.cursor_scope,
-               status = EXCLUDED.status,
-               delivery_policy = EXCLUDED.delivery_policy,
-               filter_policy = EXCLUDED.filter_policy""",
-        _TRIGGER_EVALUATOR_SUBSCRIPTION_ID,
-        _TRIGGER_EVALUATOR_SUBSCRIPTION_NAME,
-        _TRIGGER_EVALUATOR_CONSUMER_KIND,
-        _TRIGGER_EVALUATOR_ENVELOPE_KIND,
-        _TRIGGER_EVALUATOR_CURSOR_SCOPE,
-        json.dumps({}, sort_keys=True),
-        json.dumps({}, sort_keys=True),
+    _subscription_writes(conn).upsert_event_subscription(
+        subscription_id=_TRIGGER_EVALUATOR_SUBSCRIPTION_ID,
+        subscription_name=_TRIGGER_EVALUATOR_SUBSCRIPTION_NAME,
+        consumer_kind=_TRIGGER_EVALUATOR_CONSUMER_KIND,
+        envelope_kind=_TRIGGER_EVALUATOR_ENVELOPE_KIND,
+        workflow_id=None,
+        run_id=None,
+        cursor_scope=_TRIGGER_EVALUATOR_CURSOR_SCOPE,
+        status="active",
+        delivery_policy={},
+        filter_policy={},
     )
 
 
@@ -233,9 +217,8 @@ def _evaluate_workflow_triggers_for_event(
             continue
 
         if did_fire:
-            conn.execute(
-                "UPDATE public.workflow_triggers SET last_fired_at = now(), fire_count = fire_count + 1 WHERE id = $1",
-                trigger_id,
+            _subscription_writes(conn).increment_workflow_trigger_fire_count(
+                trigger_id=trigger_id,
             )
             fired += 1
 
@@ -592,10 +575,6 @@ def _subscription_checkpoint_run_id(subscription: dict[str, Any]) -> str:
     return f"subscription:{subscription['subscription_id']}"
 
 
-def _subscription_checkpoint_id(subscription_id: str, checkpoint_run_id: str) -> str:
-    return f"checkpoint:{subscription_id}:{checkpoint_run_id}"
-
-
 def _upsert_subscription_checkpoint(
     conn: Any,
     *,
@@ -604,33 +583,13 @@ def _upsert_subscription_checkpoint(
     last_processed_id: int,
     metadata: dict[str, Any],
 ) -> None:
-    conn.execute(
-        """INSERT INTO public.subscription_checkpoints (
-               checkpoint_id,
-               subscription_id,
-               run_id,
-               last_evidence_seq,
-               last_authority_id,
-               checkpoint_status,
-               checkpointed_at,
-               metadata
-           ) VALUES (
-               $1, $2, $3, $4, $5, $6, now(), $7::jsonb
-           )
-           ON CONFLICT (subscription_id, run_id) DO UPDATE SET
-               checkpoint_id = EXCLUDED.checkpoint_id,
-               last_evidence_seq = EXCLUDED.last_evidence_seq,
-               last_authority_id = EXCLUDED.last_authority_id,
-               checkpoint_status = EXCLUDED.checkpoint_status,
-               checkpointed_at = EXCLUDED.checkpointed_at,
-               metadata = EXCLUDED.metadata""",
-        _subscription_checkpoint_id(subscription_id, checkpoint_run_id),
-        subscription_id,
-        checkpoint_run_id,
-        last_processed_id,
-        f"system_event:{last_processed_id}",
-        "committed",
-        json.dumps(metadata, default=str),
+    _subscription_writes(conn).upsert_subscription_checkpoint(
+        subscription_id=subscription_id,
+        run_id=checkpoint_run_id,
+        last_evidence_seq=last_processed_id,
+        last_authority_id=f"system_event:{last_processed_id}",
+        checkpoint_status="committed",
+        metadata=metadata,
     )
 
 
@@ -724,20 +683,16 @@ def _emit_depth_exceeded_event(
     event: dict[str, Any],
 ) -> None:
     payload = _event_payload(event)
-    conn.execute(
-        "INSERT INTO public.system_events (event_type, source_id, source_type, payload) "
-        "VALUES ($1, $2, $3, $4::jsonb)",
-        "trigger.depth_exceeded",
-        str(trigger_id),
-        "workflow_trigger",
-        json.dumps(
-            {
-                "trigger_id": trigger_id,
-                "workflow_id": workflow_id,
-                "depth": payload.get("trigger_depth", 0),
-                "max_depth": MAX_TRIGGER_DEPTH,
-            }
-        ),
+    _subscription_writes(conn).insert_system_event(
+        event_type="trigger.depth_exceeded",
+        source_id=str(trigger_id),
+        source_type="workflow_trigger",
+        payload={
+            "trigger_id": trigger_id,
+            "workflow_id": workflow_id,
+            "depth": payload.get("trigger_depth", 0),
+            "max_depth": MAX_TRIGGER_DEPTH,
+        },
     )
 
 

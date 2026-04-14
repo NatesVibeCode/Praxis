@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Optional
 if TYPE_CHECKING:
     from storage.postgres import SyncPostgresConnection
     from runtime.embedding_service import EmbeddingService
+    from storage.postgres.friction_repository import PostgresFrictionRepository
 
 from storage.postgres.vector_store import PostgresVectorStore, decode_vector_value
 
@@ -40,9 +41,6 @@ class FrictionStats:
     bounce_rate: float
 
 
-_TABLE = "friction_events"
-
-
 class FrictionLedger:
     """Postgres-backed ledger for friction events."""
 
@@ -56,6 +54,12 @@ class FrictionLedger:
         self._vector_store = (
             PostgresVectorStore(conn, embedder) if embedder is not None else None
         )
+
+    @property
+    def _repository(self) -> "PostgresFrictionRepository":
+        from storage.postgres.friction_repository import PostgresFrictionRepository
+
+        return PostgresFrictionRepository(self._conn)
 
     def record(
         self,
@@ -76,13 +80,17 @@ class FrictionLedger:
             except Exception:
                 vector_query = None
 
-        self._conn.execute(
-            f"INSERT INTO {_TABLE} (event_id, friction_type, source, job_label, message, timestamp, is_test) "
-            "VALUES ($1, $2, $3, $4, $5, $6, $7)",
-            event_id, friction_type.value, source, job_label, message, ts, is_test,
+        self._repository.record_friction_event(
+            event_id=event_id,
+            friction_type=friction_type.value,
+            source=source,
+            job_label=job_label,
+            message=message,
+            timestamp=ts,
+            is_test=is_test,
         )
         if vector_query is not None:
-            vector_query.set_embedding(_TABLE, "event_id", event_id)
+            vector_query.set_embedding("friction_events", "event_id", event_id)
         return FrictionEvent(
             event_id=event_id, friction_type=friction_type,
             source=source, job_label=job_label, message=message, timestamp=ts,
@@ -108,10 +116,8 @@ class FrictionLedger:
         except ImportError:
             return []
 
-        rows = self._conn.execute(
-            f"SELECT event_id, friction_type, source, message, embedding "
-            f"FROM {_TABLE} "
-            f"WHERE embedding IS NOT NULL AND timestamp >= NOW() - interval '{since_hours} hours'"
+        rows = self._repository.list_embedded_events_since(
+            since=datetime.now(timezone.utc) - timedelta(hours=since_hours),
         )
         if not rows:
             return []
@@ -182,42 +188,17 @@ class FrictionLedger:
         limit: int = 50,
         include_test: bool = False,
     ) -> list[FrictionEvent]:
-        clauses: list[str] = []
-        params: list = []
-        idx = 1
-        if not include_test:
-            clauses.append(f"is_test = ${idx}")
-            params.append(False)
-            idx += 1
-        if friction_type is not None:
-            clauses.append(f"friction_type = ${idx}")
-            params.append(friction_type.value)
-            idx += 1
-        if source is not None:
-            clauses.append(f"source = ${idx}")
-            params.append(source)
-            idx += 1
-        if since is not None:
-            clauses.append(f"timestamp >= ${idx}")
-            params.append(since)
-            idx += 1
-
-        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-        sql = f"SELECT event_id, friction_type, source, job_label, message, timestamp, is_test FROM {_TABLE}{where} ORDER BY timestamp DESC LIMIT ${idx}"
-        params.append(limit)
-
-        rows = self._conn.execute(sql, *params)
+        rows = self._repository.list_friction_events(
+            friction_type=friction_type.value if friction_type is not None else None,
+            source=source,
+            since=since,
+            limit=limit,
+            include_test=include_test,
+        )
         return [self._row_to_event(r) for r in rows]
 
     def stats(self, include_test: bool = False) -> FrictionStats:
-        if include_test:
-            rows = self._conn.execute(
-                f"SELECT friction_type, source FROM {_TABLE}"
-            )
-        else:
-            rows = self._conn.execute(
-                f"SELECT friction_type, source FROM {_TABLE} WHERE is_test = false"
-            )
+        rows = self._repository.list_type_source_rows(include_test=include_test)
         total = len(rows)
         by_type: dict[str, int] = {}
         by_source: dict[str, int] = {}
@@ -233,16 +214,10 @@ class FrictionLedger:
 
     def bounce_rate(self, since_hours: int = 24, include_test: bool = False) -> float:
         since = datetime.now(timezone.utc) - timedelta(hours=since_hours)
-        if include_test:
-            rows = self._conn.execute(
-                f"SELECT friction_type FROM {_TABLE} WHERE timestamp >= $1",
-                since,
-            )
-        else:
-            rows = self._conn.execute(
-                f"SELECT friction_type FROM {_TABLE} WHERE timestamp >= $1 AND is_test = false",
-                since,
-            )
+        rows = self._repository.list_type_rows_since(
+            since=since,
+            include_test=include_test,
+        )
         if not rows:
             return 0.0
         bounces = sum(1 for r in rows if r["friction_type"] == FrictionType.GUARDRAIL_BOUNCE.value)

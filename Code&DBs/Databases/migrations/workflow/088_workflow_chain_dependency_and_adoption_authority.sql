@@ -51,9 +51,9 @@ CROSS JOIN LATERAL (
     FROM jsonb_array_elements_text(
         COALESCE(
             (
-                SELECT wave_definition->'depends_on'
-                FROM jsonb_array_elements(COALESCE(chain_header.definition->'waves', '[]'::jsonb)) AS wave_definition
-                WHERE wave_definition->>'wave_id' = wave.wave_id
+                SELECT wave_definition.value->'depends_on'
+                FROM jsonb_array_elements(COALESCE(chain_header.definition->'waves', '[]'::jsonb)) AS wave_definition(value)
+                WHERE wave_definition.value->>'wave_id' = wave.wave_id
                 LIMIT 1
             ),
             '[]'::jsonb

@@ -13,6 +13,9 @@ BEGIN;
 ALTER TABLE workflow_jobs
     ADD COLUMN IF NOT EXISTS touch_keys jsonb NOT NULL DEFAULT '[]'::jsonb;
 
+ALTER TABLE dispatch_runs
+    ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
+
 CREATE INDEX IF NOT EXISTS workflow_jobs_touch_keys_gin_idx
     ON workflow_jobs
     USING gin (touch_keys);

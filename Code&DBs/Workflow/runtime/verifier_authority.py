@@ -20,6 +20,7 @@ import runtime.verifier_builtins as _verifier_builtins
 
 if TYPE_CHECKING:
     from storage.postgres.connection import SyncPostgresConnection
+    from storage.postgres.verification_repository import PostgresVerificationRepository
 
 
 class VerifierAuthorityError(RuntimeError):
@@ -142,6 +143,14 @@ def _optional_connection(conn: "SyncPostgresConnection | None" = None) -> "SyncP
         return None
 
 
+def _verification_repository(
+    conn: "SyncPostgresConnection | None" = None,
+) -> "PostgresVerificationRepository":
+    from storage.postgres.verification_repository import PostgresVerificationRepository
+
+    return PostgresVerificationRepository(_connection(conn))
+
+
 def _verifier_from_row(row: dict[str, Any]) -> VerifierDefinition:
     verifier_ref = str(row.get("verifier_ref") or "").strip()
     if not verifier_ref:
@@ -196,60 +205,21 @@ def _binding_from_row(row: dict[str, Any]) -> VerifierHealerBinding:
 def list_registered_verifiers(
     conn: "SyncPostgresConnection | None" = None,
 ) -> tuple[VerifierDefinition, ...]:
-    rows = _connection(conn).execute(
-        """
-        SELECT verifier_ref,
-               display_name,
-               description,
-               verifier_kind,
-               verification_ref,
-               builtin_ref,
-               default_inputs,
-               enabled,
-               decision_ref
-          FROM verifier_registry
-         ORDER BY verifier_ref ASC
-        """
-    )
+    rows = _verification_repository(conn).list_registered_verifiers()
     return tuple(_verifier_from_row(dict(row)) for row in rows or [])
 
 
 def list_registered_healers(
     conn: "SyncPostgresConnection | None" = None,
 ) -> tuple[HealerDefinition, ...]:
-    rows = _connection(conn).execute(
-        """
-        SELECT healer_ref,
-               display_name,
-               description,
-               executor_kind,
-               action_ref,
-               auto_mode,
-               safety_mode,
-               enabled,
-               decision_ref
-          FROM healer_registry
-         ORDER BY healer_ref ASC
-        """
-    )
+    rows = _verification_repository(conn).list_registered_healers()
     return tuple(_healer_from_row(dict(row)) for row in rows or [])
 
 
 def list_verifier_healer_bindings(
     conn: "SyncPostgresConnection | None" = None,
 ) -> tuple[VerifierHealerBinding, ...]:
-    rows = _connection(conn).execute(
-        """
-        SELECT binding_ref,
-               verifier_ref,
-               healer_ref,
-               enabled,
-               binding_revision,
-               decision_ref
-          FROM verifier_healer_bindings
-         ORDER BY verifier_ref ASC, healer_ref ASC
-        """
-    )
+    rows = _verification_repository(conn).list_verifier_healer_bindings()
     return tuple(_binding_from_row(dict(row)) for row in rows or [])
 
 
@@ -258,23 +228,7 @@ def _load_verifier(
     *,
     conn: "SyncPostgresConnection | None" = None,
 ) -> VerifierDefinition:
-    rows = _connection(conn).execute(
-        """
-        SELECT verifier_ref,
-               display_name,
-               description,
-               verifier_kind,
-               verification_ref,
-               builtin_ref,
-               default_inputs,
-               enabled,
-               decision_ref
-          FROM verifier_registry
-         WHERE verifier_ref = $1
-        """,
-        verifier_ref,
-    )
-    row = dict(rows[0]) if rows else None
+    row = _verification_repository(conn).load_verifier(verifier_ref=verifier_ref)
     if row is None:
         raise VerifierAuthorityError(f"verifier_registry missing {verifier_ref}")
     definition = _verifier_from_row(row)
@@ -288,23 +242,7 @@ def _load_healer(
     *,
     conn: "SyncPostgresConnection | None" = None,
 ) -> HealerDefinition:
-    rows = _connection(conn).execute(
-        """
-        SELECT healer_ref,
-               display_name,
-               description,
-               executor_kind,
-               action_ref,
-               auto_mode,
-               safety_mode,
-               enabled,
-               decision_ref
-          FROM healer_registry
-         WHERE healer_ref = $1
-        """,
-        healer_ref,
-    )
-    row = dict(rows[0]) if rows else None
+    row = _verification_repository(conn).load_healer(healer_ref=healer_ref)
     if row is None:
         raise VerifierAuthorityError(f"healer_registry missing {healer_ref}")
     definition = _healer_from_row(row)
@@ -318,17 +256,9 @@ def _bound_healer_refs(
     *,
     conn: "SyncPostgresConnection | None" = None,
 ) -> tuple[str, ...]:
-    rows = _connection(conn).execute(
-        """
-        SELECT healer_ref
-          FROM verifier_healer_bindings
-         WHERE verifier_ref = $1
-           AND enabled = TRUE
-         ORDER BY healer_ref ASC
-        """,
-        verifier_ref,
+    return _verification_repository(conn).list_bound_healer_refs(
+        verifier_ref=verifier_ref,
     )
-    return tuple(str(row.get("healer_ref") or "").strip() for row in rows or [])
 
 
 def _first_bound_healer_ref(
@@ -336,20 +266,11 @@ def _first_bound_healer_ref(
     *,
     conn: "SyncPostgresConnection | None" = None,
 ) -> str | None:
-    rows = _connection(conn).execute(
-        """
-        SELECT healer_ref
-          FROM verifier_healer_bindings
-         WHERE verifier_ref = $1
-           AND enabled = TRUE
-         ORDER BY healer_ref ASC
-         LIMIT 1
-        """,
-        verifier_ref,
+    rows = _verification_repository(conn).list_bound_healer_refs(
+        verifier_ref=verifier_ref,
+        limit=1,
     )
-    if not rows:
-        return None
-    return str(rows[0].get("healer_ref") or "").strip() or None
+    return rows[0] if rows else None
 
 
 def registry_snapshot(
@@ -383,35 +304,18 @@ def _record_verification_run(
     if db is None:
         return None
     verification_run_id = f"verification_run:{uuid.uuid4().hex}"
-    db.execute(
-        """
-        INSERT INTO verification_runs (
-            verification_run_id,
-            verifier_ref,
-            target_kind,
-            target_ref,
-            status,
-            inputs,
-            outputs,
-            suggested_healer_ref,
-            healing_candidate,
-            decision_ref,
-            duration_ms
-        ) VALUES (
-            $1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9, $10, $11
-        )
-        """,
-        verification_run_id,
-        verifier.verifier_ref,
-        target_kind,
-        target_ref,
-        status,
-        json.dumps(inputs, sort_keys=True, default=str),
-        json.dumps(outputs, sort_keys=True, default=str),
-        suggested_healer_ref,
-        healing_candidate,
-        verifier.decision_ref,
-        max(duration_ms, 0),
+    _verification_repository(db).record_verification_run(
+        verification_run_id=verification_run_id,
+        verifier_ref=verifier.verifier_ref,
+        target_kind=target_kind,
+        target_ref=target_ref,
+        status=status,
+        inputs=inputs,
+        outputs=outputs,
+        suggested_healer_ref=suggested_healer_ref,
+        healing_candidate=healing_candidate,
+        decision_ref=verifier.decision_ref,
+        duration_ms=max(duration_ms, 0),
     )
     return verification_run_id
 
@@ -432,33 +336,17 @@ def _record_healing_run(
     if db is None:
         return None
     healing_run_id = f"healing_run:{uuid.uuid4().hex}"
-    db.execute(
-        """
-        INSERT INTO healing_runs (
-            healing_run_id,
-            healer_ref,
-            verifier_ref,
-            target_kind,
-            target_ref,
-            status,
-            inputs,
-            outputs,
-            decision_ref,
-            duration_ms
-        ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10
-        )
-        """,
-        healing_run_id,
-        healer.healer_ref,
-        verifier_ref,
-        target_kind,
-        target_ref,
-        status,
-        json.dumps(inputs, sort_keys=True, default=str),
-        json.dumps(outputs, sort_keys=True, default=str),
-        healer.decision_ref,
-        max(duration_ms, 0),
+    _verification_repository(db).record_healing_run(
+        healing_run_id=healing_run_id,
+        healer_ref=healer.healer_ref,
+        verifier_ref=verifier_ref,
+        target_kind=target_kind,
+        target_ref=target_ref,
+        status=status,
+        inputs=inputs,
+        outputs=outputs,
+        decision_ref=healer.decision_ref,
+        duration_ms=max(duration_ms, 0),
     )
     return healing_run_id
 

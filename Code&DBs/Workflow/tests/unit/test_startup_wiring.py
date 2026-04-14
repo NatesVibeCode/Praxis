@@ -162,6 +162,7 @@ def test_sync_integration_registry_projects_static_and_mcp_rows() -> None:
         "status",
         "scoreboard",
         "graph",
+        "lineage",
         "replay_ready_bugs",
     ]
 
@@ -253,7 +254,7 @@ def test_mcp_workflow_database_env_falls_back_to_repo_local_default(monkeypatch,
     monkeypatch.setattr(mcp_subsystems, "_REPO_ROOT", tmp_path)
 
     assert mcp_subsystems.workflow_database_env() == {
-        "WORKFLOW_DATABASE_URL": "postgresql://test@localhost:5432/praxis_test",
+        "WORKFLOW_DATABASE_URL": "postgresql://localhost:5432/praxis",
         "PATH": "/usr/bin:/bin",
     }
 

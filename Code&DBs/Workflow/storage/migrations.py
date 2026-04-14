@@ -187,6 +187,66 @@ _WORKFLOW_MIGRATION_EXPECTED_OBJECTS = {
             "provider_policies_decision_ref_idx",
         ),
     ),
+    "002_registry_authority.sql": _expected_objects(
+        tables=(
+            "registry_workspace_authority",
+            "registry_runtime_profile_authority",
+        ),
+    ),
+    "003_gate_and_promotion_policy.sql": _expected_objects(
+        tables=(
+            "gate_evaluations",
+        ),
+        indexes=(
+            "gate_evaluations_proposal_id_decided_at_idx",
+            "gate_evaluations_decision_decided_at_idx",
+            "gate_evaluations_workflow_id_decided_at_idx",
+            "gate_evaluations_authority_truth_idx",
+            "promotion_decisions_gate_evaluation_id_idx",
+        ),
+        columns=(
+            "promotion_decisions.gate_evaluation_id",
+            "promotion_decisions.current_head_ref",
+        ),
+        constraints=(
+            "gate_evaluations.gate_evaluations_authority_fields_present",
+            "promotion_decisions.promotion_decisions_decision_check",
+            "promotion_decisions.promotion_decisions_gate_context_present_check",
+            "promotion_decisions.promotion_decisions_gate_truth_fkey",
+            "promotion_decisions.promotion_decisions_finalization_pair_check",
+            "promotion_decisions.promotion_decisions_reject_has_no_finalization_check",
+            "promotion_decisions.promotion_decisions_accept_evidence_check",
+        ),
+    ),
+    "004_claim_lease_proposal_runtime.sql": _expected_objects(
+        tables=(
+            "workflow_claim_lease_proposal_runtime",
+            "sandbox_sessions",
+            "sandbox_bindings",
+        ),
+        indexes=(
+            "workflow_claim_lease_proposal_runtime_claim_id_key",
+            "workflow_claim_lease_proposal_runtime_lease_id_key",
+            "workflow_claim_lease_proposal_runtime_proposal_id_key",
+            "workflow_claim_lease_proposal_runtime_sandbox_session_idx",
+            "sandbox_sessions_group_open_idx",
+            "sandbox_sessions_profile_share_open_idx",
+            "sandbox_sessions_live_shared_compatibility_key_key",
+            "sandbox_bindings_session_bound_idx",
+            "sandbox_bindings_claim_id_idx",
+            "sandbox_bindings_proposal_id_idx",
+        ),
+        columns=(
+            "sandbox_sessions.authority_context_digest",
+            "sandbox_sessions.shared_compatibility_key",
+        ),
+        constraints=(
+            "sandbox_sessions.sandbox_sessions_owner_route_ref_fkey",
+            "sandbox_bindings.sandbox_bindings_sandbox_session_id_fkey",
+            "sandbox_bindings.sandbox_bindings_run_id_fkey",
+            "workflow_claim_lease_proposal_runtime.workflow_claim_lease_proposal_runtime_sandbox_session_id_fkey",
+        ),
+    ),
     "005_workflow_outbox.sql": _expected_objects(
         tables=(
             "workflow_outbox",
@@ -421,6 +481,44 @@ _WORKFLOW_MIGRATION_EXPECTED_OBJECTS = {
             "provider_policies.provider_policies_allowed_provider_refs_array_check",
         ),
     ),
+    "075_notify_system_events.sql": _expected_objects(
+        functions=(
+            "notify_system_event_ready",
+        ),
+    ),
+    "076_provider_cli_profile_transport_metadata.sql": _expected_objects(
+        columns=(
+            "provider_cli_profiles.default_model",
+            "provider_cli_profiles.api_endpoint",
+            "provider_cli_profiles.api_protocol_family",
+            "provider_cli_profiles.api_key_env_vars",
+            "provider_cli_profiles.adapter_economics",
+        ),
+        constraints=(
+            "provider_cli_profiles.provider_cli_profiles_api_key_env_vars_array_check",
+            "provider_cli_profiles.provider_cli_profiles_adapter_economics_object_check",
+        ),
+    ),
+    "077_provider_cli_profile_prompt_mode.sql": _expected_objects(
+        columns=(
+            "provider_cli_profiles.prompt_mode",
+        ),
+        constraints=(
+            "provider_cli_profiles.provider_cli_profiles_prompt_mode_check",
+        ),
+    ),
+    "078_provider_transport_admission_receipts.sql": _expected_objects(
+        tables=(
+            "provider_transport_admissions",
+            "provider_transport_probe_receipts",
+        ),
+        indexes=(
+            "provider_transport_admissions_provider_status_idx",
+            "provider_transport_admissions_adapter_status_idx",
+            "provider_transport_probe_receipts_provider_step_idx",
+            "provider_transport_probe_receipts_decision_idx",
+        ),
+    ),
     "079_workflow_job_runtime_context.sql": _expected_objects(
         tables=(
             "workflow_job_runtime_context",
@@ -464,6 +562,11 @@ _WORKFLOW_MIGRATION_EXPECTED_OBJECTS = {
             "idx_control_commands_type_requested_at",
             "uq_control_commands_idempotency_key",
             "idx_control_commands_result_ref",
+        ),
+    ),
+    "042_workflow_control_command_types.sql": _expected_objects(
+        constraints=(
+            "control_commands.control_commands_command_type_check",
         ),
     ),
     "087_workflow_chain_authority.sql": _expected_objects(

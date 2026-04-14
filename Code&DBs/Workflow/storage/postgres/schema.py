@@ -16,6 +16,7 @@ from storage.migrations import (
     WorkflowMigrationExpectedObject,
     workflow_migration_manifest,
     workflow_migration_expected_objects,
+    workflow_migrations_root,
     workflow_migration_path,
     workflow_migration_sql_text,
     workflow_migration_statements,
@@ -140,13 +141,38 @@ def _is_duplicate_object_error(error: BaseException) -> bool:
     return getattr(error, "sqlstate", None) in _DUPLICATE_SQLSTATES
 
 
+def _strip_leading_sql_comments(statement: str) -> str:
+    text = statement.lstrip()
+    while text:
+        if text.startswith("--"):
+            newline_index = text.find("\n")
+            if newline_index == -1:
+                return ""
+            text = text[newline_index + 1 :].lstrip()
+            continue
+        if text.startswith("/*"):
+            comment_end = text.find("*/", 2)
+            if comment_end == -1:
+                return ""
+            text = text[comment_end + 2 :].lstrip()
+            continue
+        break
+    return text
+
+
 def _is_transaction_wrapper_statement(statement: str) -> bool:
-    normalized = statement.strip().rstrip(";").strip().lower()
+    normalized = _strip_leading_sql_comments(statement).strip().rstrip(";").strip().lower()
     return normalized in {"begin", "begin transaction", "commit"}
 
 
 def _schema_bootstrap_monotonic() -> float:
     return time.monotonic()
+
+
+@lru_cache(maxsize=1)
+def _full_workflow_migration_filenames() -> tuple[str, ...]:
+    root = workflow_migrations_root()
+    return tuple(sorted(path.name for path in root.glob("*.sql")))
 
 
 async def _schema_bootstrap_lock_holder_details(
@@ -281,6 +307,11 @@ async def bootstrap_workflow_schema(conn: asyncpg.Connection) -> None:
         # bootstrap while we were waiting.
         readiness = await inspect_workflow_schema(conn)
         if readiness.is_bootstrapped:
+            return
+        control_readiness = await inspect_control_plane_schema(conn)
+        if not control_readiness.is_bootstrapped:
+            for filename in _full_workflow_migration_filenames():
+                await _bootstrap_migration(conn, filename)
             return
         for entry in workflow_migration_manifest():
             missing_objects = readiness.missing_by_migration.get(entry.filename, ())

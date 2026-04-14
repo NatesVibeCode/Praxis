@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -18,6 +18,7 @@ from runtime.receipt_provenance import (
     build_write_manifest,
     extract_write_paths,
 )
+from storage.postgres.receipt_repository import PostgresReceiptRepository
 
 _log = logging.getLogger("receipt_store")
 _COMPACT_GIT_PROVENANCE_KEYS = frozenset(
@@ -161,6 +162,10 @@ def _conn():
     from storage.postgres import ensure_postgres_available
 
     return ensure_postgres_available()
+
+
+def _repository(conn=None) -> PostgresReceiptRepository:
+    return PostgresReceiptRepository(conn or _conn())
 
 
 
@@ -491,60 +496,24 @@ def list_receipts(
     status: Optional[str] = None,
     agent: Optional[str] = None,
 ) -> list[ReceiptRecord]:
-    clauses: list[str] = []
-    params: list[Any] = []
-    idx = 1
-
-    if since_hours > 0:
-        clauses.append(f"COALESCE(finished_at, started_at) >= ${idx}")
-        params.append(datetime.now(timezone.utc) - timedelta(hours=since_hours))
-        idx += 1
-
-    if status:
-        clauses.append(f"status = ${idx}")
-        params.append(status)
-        idx += 1
-
-    if agent:
-        clauses.append(
-            f"COALESCE(inputs->>'agent_slug', inputs->>'agent', outputs->>'author_model', executor_type, '') = ${idx}"
-        )
-        params.append(agent)
-        idx += 1
-
-    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-    params.append(limit)
-
-    sql = (
-        "SELECT receipt_id, workflow_id, run_id, request_id, node_id, attempt_no, started_at, finished_at, "
-        "executor_type, status, inputs, outputs, artifacts, failure_code, decision_refs "
-        f"FROM receipts {where} "
-        f"ORDER BY COALESCE(finished_at, started_at) DESC NULLS LAST, receipt_id DESC LIMIT ${idx}"
+    rows = _repository().list_receipts(
+        limit=max(limit, 1),
+        since_hours=since_hours,
+        status=status,
+        agent=agent,
     )
-
-    rows = _conn().execute(sql, *params)
     return [_row_to_record(row) for row in rows]
 
 
 
 def load_receipt(receipt_id: int | str) -> Optional[ReceiptRecord]:
-    row = _conn().fetchrow(
-        "SELECT receipt_id, workflow_id, run_id, request_id, node_id, attempt_no, started_at, finished_at, "
-        "executor_type, status, inputs, outputs, artifacts, failure_code, decision_refs "
-        "FROM receipts WHERE receipt_id = $1 LIMIT 1",
-        str(receipt_id),
-    )
+    row = _repository().load_receipt(receipt_id=str(receipt_id))
     return _row_to_record(row) if row else None
 
 
 
 def find_receipt_by_run_id(run_id: str) -> Optional[ReceiptRecord]:
-    row = _conn().fetchrow(
-        "SELECT receipt_id, workflow_id, run_id, request_id, node_id, attempt_no, started_at, finished_at, "
-        "executor_type, status, inputs, outputs, artifacts, failure_code, decision_refs "
-        "FROM receipts WHERE run_id = $1 ORDER BY COALESCE(finished_at, started_at) DESC NULLS LAST LIMIT 1",
-        run_id,
-    )
+    row = _repository().load_latest_receipt_for_run(run_id=run_id)
     return _row_to_record(row) if row else None
 
 
@@ -557,36 +526,13 @@ def search_receipts(
     agent: Optional[str] = None,
     workflow_id: Optional[str] = None,
 ) -> list[ReceiptRecord]:
-    params: list[Any] = [query]
-    idx = 2
-    clauses = [
-        "(to_tsvector('english', COALESCE(node_id, '') || ' ' || COALESCE(status, '') || ' ' || COALESCE(failure_code, '') || ' ' || COALESCE(inputs::text, '') || ' ' || COALESCE(outputs::text, '')) @@ plainto_tsquery('english', $1) "
-        "OR COALESCE(node_id, '') ILIKE '%' || $1 || '%' "
-        "OR COALESCE(inputs::text, '') ILIKE '%' || $1 || '%' "
-        "OR COALESCE(outputs::text, '') ILIKE '%' || $1 || '%')"
-    ]
-    if status:
-        clauses.append(f"status = ${idx}")
-        params.append(status)
-        idx += 1
-    if agent:
-        clauses.append(
-            f"COALESCE(inputs->>'agent_slug', inputs->>'agent', outputs->>'author_model', executor_type, '') = ${idx}"
-        )
-        params.append(agent)
-        idx += 1
-    if workflow_id:
-        clauses.append(f"workflow_id = ${idx}")
-        params.append(workflow_id)
-        idx += 1
-    params.append(limit)
-    sql = (
-        "SELECT receipt_id, workflow_id, run_id, request_id, node_id, attempt_no, started_at, finished_at, "
-        "executor_type, status, inputs, outputs, artifacts, failure_code, decision_refs "
-        f"FROM receipts WHERE {' AND '.join(clauses)} "
-        f"ORDER BY COALESCE(finished_at, started_at) DESC NULLS LAST LIMIT ${idx}"
+    rows = _repository().search_receipts(
+        query=query,
+        limit=max(limit, 1),
+        status=status,
+        agent=agent,
+        workflow_id=workflow_id,
     )
-    rows = _conn().execute(sql, *params)
     return [_row_to_record(row) for row in rows]
 
 
@@ -605,20 +551,7 @@ def list_receipt_payloads(
 
 
 def receipt_stats(*, since_hours: int = 24) -> dict[str, Any]:
-    since = datetime.now(timezone.utc) - timedelta(hours=since_hours)
-    rows = _conn().execute(
-        """
-        SELECT COALESCE(inputs->>'agent_slug', inputs->>'agent', outputs->>'author_model', executor_type, 'unknown') AS agent,
-               COALESCE(SUM(COALESCE(NULLIF(outputs->>'token_input', '')::bigint, 0)), 0) AS total_input,
-               COALESCE(SUM(COALESCE(NULLIF(outputs->>'token_output', '')::bigint, 0)), 0) AS total_output,
-               COALESCE(SUM(COALESCE(NULLIF(outputs->>'cost_usd', '')::double precision, 0)), 0) AS total_cost,
-               COUNT(*) AS receipt_count
-          FROM receipts
-         WHERE COALESCE(finished_at, started_at) >= $1
-         GROUP BY 1
-        """,
-        since,
-    )
+    rows = _repository().receipt_stats(since_hours=since_hours)
 
     by_agent: dict[str, dict[str, Any]] = {}
     totals = {"input_tokens": 0, "output_tokens": 0, "cost": 0.0, "receipts": 0}
@@ -641,152 +574,13 @@ def receipt_stats(*, since_hours: int = 24) -> dict[str, Any]:
 
 def proof_metrics(*, since_hours: int = 0, conn=None) -> dict[str, Any]:
     """Return proof completeness metrics from receipts and the memory graph."""
-
-    conn = conn or _conn()
-    clauses: list[str] = []
-    params: list[Any] = []
-    if since_hours > 0:
-        clauses.append("COALESCE(finished_at, started_at) >= $1")
-        params.append(datetime.now(timezone.utc) - timedelta(hours=since_hours))
-    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-    rows = conn.execute(
-        f"""
-        SELECT
-            COUNT(*) AS receipts_total,
-            COUNT(*) FILTER (
-                WHERE COALESCE(outputs->>'verification_status', '') <> ''
-            ) AS receipts_with_verification_status,
-            COUNT(*) FILTER (
-                WHERE COALESCE(outputs->>'verification_status', '') IN ('passed', 'failed', 'error')
-            ) AS receipts_with_attempted_verification,
-            COUNT(*) FILTER (
-                WHERE COALESCE(outputs->>'verification_status', '') = 'configured'
-            ) AS receipts_with_configured_verification,
-            COUNT(*) FILTER (
-                WHERE COALESCE(outputs->>'verification_status', '') = 'skipped'
-            ) AS receipts_with_skipped_verification,
-            COUNT(*) FILTER (
-                WHERE jsonb_typeof(outputs->'verification') = 'object'
-                  AND outputs->'verification' <> '{{}}'::jsonb
-            ) AS receipts_with_verification,
-            COUNT(*) FILTER (
-                WHERE jsonb_typeof(outputs->'verified_paths') = 'array'
-                  AND jsonb_array_length(outputs->'verified_paths') > 0
-            ) AS receipts_with_verified_paths,
-            COUNT(*) FILTER (
-                WHERE COALESCE(outputs->>'verification_status', '') IN ('passed', 'failed', 'error')
-                  AND NOT COALESCE((
-                      jsonb_typeof(outputs->'verification') = 'object'
-                      AND outputs->'verification' <> '{{}}'::jsonb
-                  ), FALSE)
-                  AND NOT COALESCE((
-                      jsonb_typeof(outputs->'verified_paths') = 'array'
-                      AND jsonb_array_length(outputs->'verified_paths') > 0
-                  ), FALSE)
-            ) AS receipts_with_status_only_verification,
-            COUNT(*) FILTER (
-                WHERE COALESCE(outputs->>'verification_status', '') IN ('passed', 'failed', 'error')
-                  AND jsonb_typeof(outputs->'verified_paths') = 'array'
-                  AND jsonb_array_length(outputs->'verified_paths') > 0
-            ) AS receipts_with_path_backed_verification,
-            COUNT(*) FILTER (
-                WHERE COALESCE(outputs->>'verification_status', '') IN ('passed', 'failed', 'error')
-                  AND jsonb_typeof(outputs->'verification') = 'object'
-                  AND outputs->'verification' <> '{{}}'::jsonb
-                  AND jsonb_typeof(outputs->'verified_paths') = 'array'
-                  AND jsonb_array_length(outputs->'verified_paths') > 0
-            ) AS receipts_with_fully_proved_verification,
-            COUNT(*) FILTER (WHERE outputs ? 'write_manifest') AS receipts_with_write_manifest,
-            COUNT(*) FILTER (WHERE outputs ? 'mutation_provenance') AS receipts_with_mutation_provenance,
-            COUNT(*) FILTER (WHERE outputs ? 'git_provenance') AS receipts_with_git_provenance,
-            COUNT(*) FILTER (
-                WHERE COALESCE(outputs->'git_provenance'->>'repo_snapshot_ref', '') <> ''
-            ) AS receipts_with_repo_snapshot_ref
-        FROM receipts
-        {where}
-        """,
-        *params,
-    )
-    row = rows[0] if rows else {}
-    memory = conn.fetchrow(
-        """
-        SELECT
-            COUNT(*) FILTER (WHERE entity_type = 'code_unit') AS code_units,
-            COUNT(*) FILTER (WHERE entity_type = 'table') AS tables,
-            COUNT(*) FILTER (
-                WHERE entity_type = 'fact' AND COALESCE(metadata->>'entity_subtype', '') = 'verification_result'
-            ) AS verification_results,
-            COUNT(*) FILTER (
-                WHERE entity_type = 'fact' AND COALESCE(metadata->>'entity_subtype', '') = 'failure_result'
-            ) AS failure_results
-        FROM memory_entities
-        WHERE archived = false
-        """
-    ) or {}
-    edges = conn.fetchrow(
-        """
-        SELECT
-            COUNT(*) FILTER (WHERE relation_type = 'verified_by' AND active = true) AS verified_by_edges,
-            COUNT(*) FILTER (WHERE relation_type = 'recorded_in' AND active = true) AS recorded_in_edges,
-            COUNT(*) FILTER (WHERE relation_type = 'produced' AND active = true) AS produced_edges,
-            COUNT(*) FILTER (WHERE relation_type = 'related_to' AND active = true) AS related_edges
-        FROM memory_edges
-        """
-    ) or {}
-    compile_row = conn.fetchrow(
-        """
-        SELECT
-            to_regclass('public.compile_artifacts') IS NOT NULL AS compile_artifacts_ready,
-            to_regclass('public.capability_catalog') IS NOT NULL AS capability_catalog_ready,
-            to_regclass('public.verify_refs') IS NOT NULL AS verify_refs_ready,
-            to_regclass('public.verification_registry') IS NOT NULL AS verification_registry_ready,
-            to_regclass('public.compile_index_snapshots') IS NOT NULL AS compile_index_snapshots_ready,
-            to_regclass('public.execution_packets') IS NOT NULL AS execution_packets_ready,
-            to_regclass('public.repo_snapshots') IS NOT NULL AS repo_snapshots_ready,
-            to_regclass('public.verifier_registry') IS NOT NULL AS verifier_registry_ready,
-            to_regclass('public.healer_registry') IS NOT NULL AS healer_registry_ready,
-            to_regclass('public.verifier_healer_bindings') IS NOT NULL AS verifier_healer_bindings_ready,
-            to_regclass('public.verification_runs') IS NOT NULL AS verification_runs_ready,
-            to_regclass('public.healing_runs') IS NOT NULL AS healing_runs_ready
-        """
-    ) or {}
-    repo_snapshot_row = (
-        conn.fetchrow(
-            """
-            SELECT COUNT(*) AS repo_snapshots
-            FROM repo_snapshots
-            """
-        )
-        or {}
-    ) if bool(compile_row.get("repo_snapshots_ready")) else {"repo_snapshots": 0}
-    verifier_healer_row = (
-        conn.fetchrow(
-            """
-            SELECT
-                (SELECT COUNT(*) FROM verifier_registry) AS verifiers,
-                (SELECT COUNT(*) FROM healer_registry) AS healers,
-                (SELECT COUNT(*) FROM verifier_healer_bindings WHERE enabled = TRUE) AS verifier_healer_bindings,
-                (SELECT COUNT(*) FROM verification_runs) AS verification_runs,
-                (SELECT COUNT(*) FROM healing_runs) AS healing_runs
-            """
-        )
-        or {}
-    ) if all(
-        bool(compile_row.get(key))
-        for key in (
-            "verifier_registry_ready",
-            "healer_registry_ready",
-            "verifier_healer_bindings_ready",
-            "verification_runs_ready",
-            "healing_runs_ready",
-        )
-    ) else {
-        "verifiers": 0,
-        "healers": 0,
-        "verifier_healer_bindings": 0,
-        "verification_runs": 0,
-        "healing_runs": 0,
-    }
+    snapshot = _repository(conn).proof_metrics_snapshot(since_hours=since_hours)
+    row = snapshot.get("receipts") or {}
+    memory = snapshot.get("memory_graph") or {}
+    edges = snapshot.get("edges") or {}
+    compile_row = snapshot.get("compile_authority") or {}
+    repo_snapshot_row = snapshot.get("repo_snapshots") or {}
+    verifier_healer_row = snapshot.get("recovery_authority") or {}
 
     receipts_total = int(row.get("receipts_total") or 0)
 
@@ -900,35 +694,8 @@ def backfill_receipt_provenance(
     """Enrich historical receipts with mutation and git provenance when derivable."""
 
     conn = conn or _conn()
-    params: list[Any] = []
-    where_clauses: list[str] = []
-    if run_id:
-        params.append(run_id)
-        where_clauses.append(f"r.run_id = ${len(params)}")
-    where = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
-    limit_sql = ""
-    if limit is not None:
-        params.append(max(limit, 0))
-        limit_sql = f" LIMIT ${len(params)}"
-    rows = conn.execute(
-        f"""
-        SELECT
-            r.receipt_id,
-            r.inputs,
-            r.outputs,
-            j.touch_keys,
-            wr.request_envelope
-        FROM receipts AS r
-        LEFT JOIN workflow_jobs AS j
-            ON j.receipt_id = r.receipt_id
-        LEFT JOIN workflow_runs AS wr
-            ON wr.run_id = r.run_id
-        {where}
-        ORDER BY r.evidence_seq ASC
-        {limit_sql}
-        """,
-        *params,
-    )
+    repository = _repository(conn)
+    rows = repository.list_receipts_for_provenance_backfill(run_id=run_id, limit=limit)
     updated = 0
     for row in rows or []:
         inputs = _json_object(row.get("inputs"))
@@ -973,16 +740,10 @@ def backfill_receipt_provenance(
             and json.dumps(outputs, sort_keys=True, default=str) == outputs_before
         ):
             continue
-        conn.execute(
-            """
-            UPDATE receipts
-            SET inputs = $2::jsonb,
-                outputs = $3::jsonb
-            WHERE receipt_id = $1
-            """,
-            str(row.get("receipt_id") or ""),
-            json.dumps(inputs, sort_keys=True, default=str),
-            json.dumps(outputs, sort_keys=True, default=str),
+        repository.update_receipt_payloads(
+            receipt_id=str(row.get("receipt_id") or ""),
+            inputs=inputs,
+            outputs=outputs,
         )
         updated += 1
     return {
@@ -996,6 +757,7 @@ def write_receipt(receipt_dict: dict[str, Any], *, conn=None) -> None:
     """Persist a receipt payload to the canonical ``receipts`` table."""
     normalized = normalize_receipt_payload(dict(receipt_dict))
     conn = conn or _conn()
+    repository = _repository(conn)
     now = datetime.now(timezone.utc)
 
     run_id = str(normalized.get("run_id") or "")
@@ -1068,56 +830,23 @@ def write_receipt(receipt_dict: dict[str, Any], *, conn=None) -> None:
     artifacts = normalized.get("artifacts") if isinstance(normalized.get("artifacts"), dict) else {}
     decision_refs = normalized.get("decision_refs") if isinstance(normalized.get("decision_refs"), list) else []
 
-    conn.execute(
-        """
-        INSERT INTO receipts (
-            receipt_id, receipt_type, schema_version,
-            workflow_id, run_id, request_id,
-            causation_id, node_id, attempt_no, supersedes_receipt_id,
-            started_at, finished_at, evidence_seq,
-            executor_type, status, inputs, outputs, artifacts,
-            failure_code, decision_refs
-        ) VALUES (
-            $1, $2, $3,
-            $4, $5, $6,
-            NULL, $7, $8, NULL,
-            $9, $10, $11,
-            $12, $13, $14::jsonb, $15::jsonb, $16::jsonb,
-            $17, $18::jsonb
-        )
-        ON CONFLICT (receipt_id) DO UPDATE SET
-            workflow_id = EXCLUDED.workflow_id,
-            run_id = EXCLUDED.run_id,
-            request_id = EXCLUDED.request_id,
-            node_id = EXCLUDED.node_id,
-            attempt_no = EXCLUDED.attempt_no,
-            started_at = EXCLUDED.started_at,
-            finished_at = EXCLUDED.finished_at,
-            evidence_seq = EXCLUDED.evidence_seq,
-            executor_type = EXCLUDED.executor_type,
-            status = EXCLUDED.status,
-            inputs = EXCLUDED.inputs,
-            outputs = EXCLUDED.outputs,
-            artifacts = EXCLUDED.artifacts,
-            failure_code = EXCLUDED.failure_code,
-            decision_refs = EXCLUDED.decision_refs
-        """,
-        receipt_id,
-        "workflow_result",
-        1,
-        workflow_id,
-        run_id,
-        request_id,
-        label,
-        attempt_no,
-        started_at,
-        finished_at,
-        int(normalized.get("evidence_count") or attempt_no),
-        str(normalized.get("adapter_type") or normalized.get("executor_type") or "workflow"),
-        str(normalized.get("status") or ""),
-        json.dumps(inputs, sort_keys=True, default=str),
-        json.dumps(outputs, sort_keys=True, default=str),
-        json.dumps(artifacts, sort_keys=True, default=str),
-        str(normalized.get("failure_code") or normalized.get("error_code") or ""),
-        json.dumps(decision_refs, sort_keys=True, default=str),
+    repository.upsert_receipt(
+        receipt_id=receipt_id,
+        receipt_type="workflow_result",
+        schema_version=1,
+        workflow_id=workflow_id,
+        run_id=run_id,
+        request_id=request_id,
+        node_id=label,
+        attempt_no=attempt_no,
+        started_at=started_at,
+        finished_at=finished_at,
+        evidence_seq=int(normalized.get("evidence_count") or attempt_no),
+        executor_type=str(normalized.get("adapter_type") or normalized.get("executor_type") or "workflow"),
+        status=str(normalized.get("status") or ""),
+        inputs=inputs,
+        outputs=outputs,
+        artifacts=artifacts,
+        failure_code=str(normalized.get("failure_code") or normalized.get("error_code") or ""),
+        decision_refs=[dict(item) for item in decision_refs if isinstance(item, dict)],
     )

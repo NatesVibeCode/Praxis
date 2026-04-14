@@ -446,8 +446,6 @@ def _handle_task_route_eligibility_post(subs: Any, body: dict[str, Any]) -> dict
 
 
 def _handle_transport_support(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
-    from adapters import provider_registry as provider_registry_mod
-
     # --- input validation (handler responsibility) ---
     provider_filter = body.get("provider_slug")
     if provider_filter is not None and (not isinstance(provider_filter, str) or not provider_filter.strip()):
@@ -469,8 +467,7 @@ def _handle_transport_support(subs: Any, body: dict[str, Any]) -> dict[str, Any]
         else "praxis"
     )
 
-    # --- delegate to registry ---
-    return provider_registry_mod.transport_support_report(
+    return operator_read.query_transport_support(
         health_mod=subs.get_health_mod(),
         pg=subs.get_pg_conn(),
         provider_filter=provider_filter.strip() if isinstance(provider_filter, str) else None,

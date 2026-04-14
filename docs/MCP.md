@@ -42,7 +42,7 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_manifest_refine` | `planning` | `advanced` | - | `write` | Iterate on a previously generated app manifest. Apply user feedback to adjust layout, add/remove modules, change data sources, or modify behavior. |
 | `praxis_session` | `planning` | `advanced` | - | `read` | View or validate session carry-forward packs — compressed context snapshots that help new sessions pick up where previous ones left off. |
 | `praxis_query` | `query` | `stable` | `workflow query` | `read` | Ask any question about the system in plain English. This is the best starting point when you're unsure which tool to use — it automatically routes your question to the right subsystem. Think of it as a router, not as the deep authority for every domain. |
-| `praxis_research_workflow` | `research` | `advanced` | - | `dispatch`, `read` | Run a parallel multi-angle research workflow on any topic. One call generates a DAG spec (seed decomposition, N parallel research workers via replicate, synthesis) and launches it through the service bus. |
+| `praxis_research_workflow` | `research` | `advanced` | - | `dispatch`, `read` | Run a parallel multi-angle research workflow on any topic. One call generates a workflow spec (seed decomposition, N parallel research workers via replicate, synthesis) and launches it through the service bus. |
 | `praxis_context_shard` | `session` | `session` | - | `session` | Return the bounded execution shard for the current workflow MCP session. This is only valid inside workflow Docker jobs using the signed MCP bridge. |
 | `praxis_session_context` | `session` | `session` | - | `session` | Read or write persistent context on your agent session. Context survives across tool calls and is available on retry. |
 | `praxis_subscribe_events` | `session` | `session` | - | `session` | Pull build state events since the agent's last cursor position. Returns new events and advances the cursor. Call repeatedly to stay in sync with platform state changes. |
@@ -537,15 +537,15 @@ Example input:
 - CLI schema help: `workflow tools describe praxis_operator_view`
 - When to use: Discover native operator status, scoreboard, topology, or replay-ready bug views.
 - When not to use: Do not use it to mutate operator state.
-- Selector: `view`; default `status`; values `status`, `scoreboard`, `graph`, `replay_ready_bugs`
+- Selector: `view`; default `status`; values `status`, `scoreboard`, `graph`, `lineage`, `replay_ready_bugs`
 - Required args: `view`
 
 Example input:
 
 ```json
 {
-  "view": "replay_ready_bugs",
-  "limit": 25
+  "view": "graph",
+  "run_id": "run_123"
 }
 ```
 

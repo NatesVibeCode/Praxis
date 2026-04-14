@@ -103,13 +103,42 @@ class _Conn:
                 return rows[-1:] if rows else []
             return rows
         if (
-            "INSERT INTO event_subscriptions" in normalized
-            or "INSERT INTO public.event_subscriptions" in normalized
+            "UPDATE public.workflow_triggers" in normalized
+            or "UPDATE workflow_triggers" in normalized
         ):
-            return []
+            return [{"id": args[0]}]
+        return []
+
+    def fetchrow(self, query: str, *args):
+        self.calls.append((query, args))
+        normalized = " ".join(query.split())
         if (
-            "INSERT INTO subscription_checkpoints" in normalized
-            or "INSERT INTO public.subscription_checkpoints" in normalized
+            "INSERT INTO public.event_subscriptions" in normalized
+            or "INSERT INTO event_subscriptions" in normalized
+        ):
+            row = {
+                "subscription_id": args[0],
+                "subscription_name": args[1],
+                "consumer_kind": args[2],
+                "envelope_kind": args[3],
+                "workflow_id": args[4],
+                "run_id": args[5],
+                "cursor_scope": args[6],
+                "status": args[7],
+                "delivery_policy": json.loads(args[8]),
+                "filter_policy": json.loads(args[9]),
+                "created_at": args[10],
+            }
+            self.subscriptions = [
+                existing
+                for existing in self.subscriptions
+                if existing["subscription_id"] != row["subscription_id"]
+            ]
+            self.subscriptions.append(row)
+            return row
+        if (
+            "INSERT INTO public.subscription_checkpoints" in normalized
+            or "INSERT INTO subscription_checkpoints" in normalized
         ):
             checkpoint_row = {
                 "checkpoint_id": args[0],
@@ -118,7 +147,8 @@ class _Conn:
                 "last_evidence_seq": args[3],
                 "last_authority_id": args[4],
                 "checkpoint_status": args[5],
-                "metadata": json.loads(args[6]),
+                "checkpointed_at": args[6],
+                "metadata": json.loads(args[7]),
             }
             self.subscription_checkpoints = [
                 row
@@ -129,8 +159,20 @@ class _Conn:
                 )
             ]
             self.subscription_checkpoints.append(checkpoint_row)
-            return []
-        return []
+            return checkpoint_row
+        if (
+            "INSERT INTO public.system_events" in normalized
+            or "INSERT INTO system_events" in normalized
+        ):
+            row = {
+                "id": len(self.workflow_events) + len(self.subscription_events) + 1,
+                "event_type": args[0],
+                "source_id": args[1],
+                "source_type": args[2],
+                "payload": json.loads(args[3]),
+            }
+            return row
+        return None
 
 
 def _install_submit_stub(monkeypatch: pytest.MonkeyPatch, handler):
@@ -195,7 +237,7 @@ def test_evaluate_triggers_emits_depth_exceeded_event(caplog):
     assert checkpoint_call[3] == 1
     assert checkpoint_call[4] == "system_event:1"
     assert checkpoint_call[5] == "committed"
-    assert json.loads(checkpoint_call[6])["processor"] == "runtime.triggers._evaluate_workflow_triggers"
+    assert json.loads(checkpoint_call[7])["processor"] == "runtime.triggers._evaluate_workflow_triggers"
 
 
 def test_evaluate_triggers_bootstraps_durable_trigger_evaluator_subscription(monkeypatch):
@@ -250,7 +292,9 @@ def test_evaluate_triggers_bootstraps_durable_trigger_evaluator_subscription(mon
     assert bootstrap_call[1] == "Workflow Trigger Evaluator"
     assert bootstrap_call[2] == "system"
     assert bootstrap_call[3] == "system_event"
-    assert bootstrap_call[4] == "global"
+    assert bootstrap_call[4] is None
+    assert bootstrap_call[5] is None
+    assert bootstrap_call[6] == "global"
     assert not any("processed = FALSE" in query for query, _ in conn.calls)
 
 

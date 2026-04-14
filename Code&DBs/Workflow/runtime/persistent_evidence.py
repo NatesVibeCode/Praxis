@@ -41,10 +41,9 @@ from runtime.domain import (
     RouteIdentity,
     RuntimeBoundaryError,
 )
-from storage.postgres import (
-    connect_workflow_database,
-    fetch_workflow_evidence_timeline,
-)
+from storage.postgres.connection import connect_workflow_database
+from storage.postgres.evidence import fetch_workflow_evidence_timeline
+from storage.postgres.evidence_repository import PostgresEvidenceRepository
 from storage.postgres.connection import resolve_workflow_database_url
 
 RUN_CANCELLED_NOTIFY_CHANNEL = "workflow_run_cancelled"
@@ -139,11 +138,9 @@ class _PostgresRunCancellationSignal:
                 try:
                     conn = await asyncpg.connect(self._database_url, timeout=5.0)
                     await conn.add_listener(RUN_CANCELLED_NOTIFY_CHANNEL, self._on_notify)
+                    repository = PostgresEvidenceRepository(conn)
                     while not self._stop_event.is_set() and not self._cancel_event.is_set():
-                        state = await conn.fetchval(
-                            "SELECT current_state FROM workflow_runs WHERE run_id = $1",
-                            self._run_id,
-                        )
+                        state = await repository.load_current_state(run_id=self._run_id)
                         if str(state or "").strip().lower() == "cancelled":
                             self._cancel_event.set()
                             break
@@ -315,6 +312,10 @@ class PostgresEvidenceWriter:
             "Call _ensure_conn() first."
         )
 
+    def _repository(self, conn: asyncpg.Connection | None = None) -> PostgresEvidenceRepository:
+        active_conn = conn if conn is not None else self._get_conn()
+        return PostgresEvidenceRepository(active_conn)
+
     def operator_frame_repository(self):
         """Return the canonical Postgres operator-frame authority for this writer."""
 
@@ -350,10 +351,7 @@ class PostgresEvidenceWriter:
         return self._conn
 
     async def _lock_run(self, conn: asyncpg.Connection, run_id: str) -> None:
-        await conn.execute(
-            "SELECT pg_advisory_xact_lock($1::bigint)",
-            _run_lock_key(run_id),
-        )
+        await self._repository(conn).lock_workflow_run(run_lock_key=_run_lock_key(run_id))
 
     async def _load_persisted_evidence_state(
         self,
@@ -367,13 +365,7 @@ class PostgresEvidenceWriter:
 
     async def _load_current_state(self, *, run_id: str) -> str | None:
         conn = await self._ensure_conn()
-        state = await conn.fetchval(
-            "SELECT current_state FROM workflow_runs WHERE run_id = $1",
-            run_id,
-        )
-        if state is None:
-            return None
-        return str(state)
+        return await self._repository(conn).load_current_state(run_id=run_id)
 
     def commit_submission(
         self,
@@ -440,7 +432,7 @@ class PostgresEvidenceWriter:
                 occurred_at=occurred_at,
             )
         )
-        request_envelope_json = _encode_jsonb(request_payload)
+        repository = self._repository(conn)
 
         async with conn.transaction():
             await self._lock_run(conn, run_id)
@@ -450,95 +442,37 @@ class PostgresEvidenceWriter:
                     f"persistent evidence submission already exists for run {run_id}"
                 )
             # Insert workflow_definitions (idempotent)
-            await conn.execute(
-                """
-                INSERT INTO workflow_definitions (
-                    workflow_definition_id,
-                    workflow_id,
-                    schema_version,
-                    definition_version,
-                    definition_hash,
-                    status,
-                    request_envelope,
-                    normalized_definition,
-                    created_at,
-                    supersedes_workflow_definition_id
-                ) VALUES ($1, $2, 1, 1, $3, 'active', $4::jsonb, $4::jsonb, $5, NULL)
-                ON CONFLICT DO NOTHING
-                """,
-                admitted_definition_ref,
-                workflow_id,
-                admitted_definition_hash,
-                request_envelope_json,
-                occurred_at,
+            await repository.insert_workflow_definition_if_absent(
+                workflow_definition_id=admitted_definition_ref,
+                workflow_id=workflow_id,
+                definition_hash=admitted_definition_hash,
+                request_envelope=dict(request_payload),
+                created_at=occurred_at,
             )
 
-            # Insert admission_decisions
             admission_decision_id = f"admission:{run_id}"
-            await conn.execute(
-                """
-                INSERT INTO admission_decisions (
-                    admission_decision_id,
-                    workflow_id,
-                    request_id,
-                    decision,
-                    reason_code,
-                    decided_at,
-                    decided_by,
-                    policy_snapshot_ref,
-                    validation_result_ref,
-                    authority_context_ref
-                ) VALUES ($1, $2, $3, 'admit', 'auto_admit', $4, 'runtime', 'none', 'none', $5)
-                ON CONFLICT DO NOTHING
-                """,
-                admission_decision_id,
-                workflow_id,
-                request_id,
-                occurred_at,
-                normalized_route_identity.authority_context_ref,
+            await repository.insert_admission_decision_if_absent(
+                admission_decision_id=admission_decision_id,
+                workflow_id=workflow_id,
+                request_id=request_id,
+                decided_at=occurred_at,
+                authority_context_ref=normalized_route_identity.authority_context_ref,
             )
 
-            # Insert workflow_runs
-            await conn.execute(
-                """
-                INSERT INTO workflow_runs (
-                    run_id,
-                    workflow_id,
-                    request_id,
-                    request_digest,
-                    authority_context_digest,
-                    workflow_definition_id,
-                    admitted_definition_hash,
-                    run_idempotency_key,
-                    schema_version,
-                    request_envelope,
-                    context_bundle_id,
-                    admission_decision_id,
-                    current_state,
-                    terminal_reason_code,
-                    requested_at,
-                    admitted_at,
-                    started_at,
-                    finished_at,
-                    last_event_id
-                ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, 1,
-                    $9::jsonb, $10, $11, 'claim_received', NULL, $12, NULL, NULL, NULL, NULL
-                )
-                ON CONFLICT DO NOTHING
-                """,
-                run_id,
-                workflow_id,
-                request_id,
-                f"sha256:{run_id}",
-                normalized_route_identity.authority_context_digest,
-                admitted_definition_ref,
-                admitted_definition_hash,
-                f"idempotency:{run_id}",
-                request_envelope_json,
-                f"context:{run_id}",
-                admission_decision_id,
-                occurred_at,
+            await repository.insert_workflow_run_if_absent(
+                run_id=run_id,
+                workflow_id=workflow_id,
+                request_id=request_id,
+                request_digest=f"sha256:{run_id}",
+                authority_context_digest=normalized_route_identity.authority_context_digest,
+                workflow_definition_id=admitted_definition_ref,
+                admitted_definition_hash=admitted_definition_hash,
+                run_idempotency_key=f"idempotency:{run_id}",
+                request_envelope=dict(request_payload),
+                context_bundle_id=f"context:{run_id}",
+                admission_decision_id=admission_decision_id,
+                current_state="claim_received",
+                requested_at=occurred_at,
             )
 
             await self._insert_evidence_row(
@@ -713,115 +647,65 @@ class PostgresEvidenceWriter:
         row: EvidenceRow,
     ) -> None:
         """Insert a single evidence row (event or receipt) into Postgres."""
+        repository = self._repository(conn)
 
         if row.kind == "workflow_event":
             event: WorkflowEventV1 = row.record
-            await conn.execute(
-                """
-                INSERT INTO workflow_events (
-                    event_id,
-                    event_type,
-                    schema_version,
-                    workflow_id,
-                    run_id,
-                    request_id,
-                    causation_id,
-                    node_id,
-                    occurred_at,
-                    evidence_seq,
-                    actor_type,
-                    reason_code,
-                    payload
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb)
-                ON CONFLICT DO NOTHING
-                """,
-                event.event_id,
-                event.event_type,
-                event.schema_version,
-                event.workflow_id,
-                event.run_id,
-                event.request_id,
-                event.causation_id,
-                event.node_id,
-                event.occurred_at,
-                event.evidence_seq,
-                event.actor_type,
-                event.reason_code,
-                _encode_jsonb(event.payload),
+            await repository.insert_workflow_event_if_absent(
+                event_id=event.event_id,
+                event_type=event.event_type,
+                schema_version=event.schema_version,
+                workflow_id=event.workflow_id,
+                run_id=event.run_id,
+                request_id=event.request_id,
+                causation_id=event.causation_id,
+                node_id=event.node_id,
+                occurred_at=event.occurred_at,
+                evidence_seq=event.evidence_seq,
+                actor_type=event.actor_type,
+                reason_code=event.reason_code,
+                payload=event.payload,
             )
 
         elif row.kind == "receipt":
             receipt: ReceiptV1 = row.record
-            await conn.execute(
-                """
-                INSERT INTO receipts (
-                    receipt_id,
-                    receipt_type,
-                    schema_version,
-                    workflow_id,
-                    run_id,
-                    request_id,
-                    causation_id,
-                    node_id,
-                    attempt_no,
-                    supersedes_receipt_id,
-                    started_at,
-                    finished_at,
-                    evidence_seq,
-                    executor_type,
-                    status,
-                    inputs,
-                    outputs,
-                    artifacts,
-                    failure_code,
-                    decision_refs
-                ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-                    $11, $12, $13, $14, $15, $16::jsonb, $17::jsonb,
-                    $18::jsonb, $19, $20::jsonb
-                )
-                ON CONFLICT DO NOTHING
-                """,
-                receipt.receipt_id,
-                receipt.receipt_type,
-                receipt.schema_version,
-                receipt.workflow_id,
-                receipt.run_id,
-                receipt.request_id,
-                receipt.causation_id,
-                receipt.node_id,
-                receipt.attempt_no,
-                receipt.supersedes_receipt_id,
-                receipt.started_at,
-                receipt.finished_at,
-                receipt.evidence_seq,
-                receipt.executor_type,
-                receipt.status,
-                _encode_jsonb(receipt.inputs),
-                _encode_jsonb(receipt.outputs),
-                _encode_jsonb(
-                    [
-                        {
-                            "artifact_id": a.artifact_id,
-                            "artifact_type": a.artifact_type,
-                            "content_hash": a.content_hash,
-                            "storage_ref": a.storage_ref,
-                        }
-                        for a in receipt.artifacts
-                    ]
-                ),
-                receipt.failure_code,
-                _encode_jsonb(
-                    [
-                        {
-                            "decision_type": d.decision_type,
-                            "decision_id": d.decision_id,
-                            "reason_code": d.reason_code,
-                            "source_table": d.source_table,
-                        }
-                        for d in receipt.decision_refs
-                    ]
-                ),
+            await repository.insert_receipt_if_absent(
+                receipt_id=receipt.receipt_id,
+                receipt_type=receipt.receipt_type,
+                schema_version=receipt.schema_version,
+                workflow_id=receipt.workflow_id,
+                run_id=receipt.run_id,
+                request_id=receipt.request_id,
+                causation_id=receipt.causation_id,
+                node_id=receipt.node_id,
+                attempt_no=receipt.attempt_no,
+                supersedes_receipt_id=receipt.supersedes_receipt_id,
+                started_at=receipt.started_at,
+                finished_at=receipt.finished_at,
+                evidence_seq=receipt.evidence_seq,
+                executor_type=receipt.executor_type,
+                status=receipt.status,
+                inputs=receipt.inputs,
+                outputs=receipt.outputs,
+                artifacts=[
+                    {
+                        "artifact_id": a.artifact_id,
+                        "artifact_type": a.artifact_type,
+                        "content_hash": a.content_hash,
+                        "storage_ref": a.storage_ref,
+                    }
+                    for a in receipt.artifacts
+                ],
+                failure_code=receipt.failure_code,
+                decision_refs=[
+                    {
+                        "decision_type": d.decision_type,
+                        "decision_id": d.decision_id,
+                        "reason_code": d.reason_code,
+                        "source_table": d.source_table,
+                    }
+                    for d in receipt.decision_refs
+                ],
             )
 
     async def _update_workflow_run_state(
@@ -841,41 +725,23 @@ class PostgresEvidenceWriter:
             terminal_reason = reason_code
             finished_at = occurred_at
 
-        result = await conn.execute(
-            """
-            UPDATE workflow_runs
-            SET current_state = $2,
-                admitted_at = CASE
-                    WHEN $2 IN ('claim_accepted', 'claim_rejected', 'claim_blocked')
-                    THEN COALESCE(admitted_at, $6)
-                    ELSE admitted_at
-                END,
-                started_at = CASE
-                    WHEN $2 IN ('lease_requested', 'lease_active', 'proposal_submitted', 'gate_evaluating', 'running', 'succeeded', 'failed', 'cancelled')
-                    THEN COALESCE(started_at, admitted_at, requested_at, $6)
-                    ELSE started_at
-                END,
-                terminal_reason_code = COALESCE($3, terminal_reason_code),
-                finished_at = COALESCE($4, finished_at),
-                last_event_id = $5
-            WHERE run_id = $1
-            """,
-            run_id,
-            new_state,
-            terminal_reason,
-            finished_at,
-            last_event_id,
-            occurred_at,
+        repository = self._repository(conn)
+        updated = await repository.update_workflow_run_state(
+            run_id=run_id,
+            new_state=new_state,
+            terminal_reason_code=terminal_reason,
+            finished_at=finished_at,
+            last_event_id=last_event_id,
+            occurred_at=occurred_at,
         )
-        if result != "UPDATE 1":
+        if not updated:
             raise RuntimeBoundaryError(
                 f"persistent evidence missing workflow_runs row for {run_id}"
             )
         if new_state == "cancelled":
-            await conn.execute(
-                "SELECT pg_notify($1, $2)",
-                RUN_CANCELLED_NOTIFY_CHANNEL,
-                run_id,
+            await repository.notify_run_cancelled(
+                channel=RUN_CANCELLED_NOTIFY_CHANNEL,
+                run_id=run_id,
             )
 
     def append_transition_proof(
@@ -901,6 +767,7 @@ class PostgresEvidenceWriter:
         proof: TransitionProofV1,
     ) -> EvidenceCommitResult:
         conn = await self._ensure_conn()
+        repository = self._repository(conn)
         normalized_proof = _normalize_proof(proof)
         route_identity = normalized_proof.route_identity
         run_id = route_identity.run_id
@@ -1006,83 +873,46 @@ class PostgresEvidenceWriter:
                 )
 
             if state.last_route_identity is None:
-                existing_run_id = await conn.fetchval(
-                    "SELECT run_id FROM workflow_runs WHERE run_id = $1",
-                    run_id,
-                )
-                if existing_run_id is not None:
-                    existing_run_id = str(existing_run_id)
+                existing_run_id = run_id if await repository.workflow_run_exists(run_id=run_id) else None
             else:
                 existing_run_id = route_identity.run_id
 
             if state.last_route_identity is None and existing_run_id is None:
-                req_json = _encode_jsonb(normalized_proof.receipt.inputs)
                 def_id = f"workflow_definition.{route_identity.workflow_id}:v1"
                 def_hash = f"sha256:{route_identity.workflow_id}"
                 adm_id = f"admission:{run_id}"
 
-                await conn.execute(
-                    """
-                    INSERT INTO workflow_definitions (
-                        workflow_definition_id, workflow_id, schema_version,
-                        definition_version, definition_hash, status,
-                        request_envelope, normalized_definition, created_at,
-                        supersedes_workflow_definition_id
-                    ) VALUES ($1, $2, 1, 1, $3, 'active', $4::jsonb, $4::jsonb, $5, NULL)
-                    ON CONFLICT DO NOTHING
-                    """,
-                    def_id,
-                    route_identity.workflow_id,
-                    def_hash,
-                    req_json,
-                    normalized_proof.event.occurred_at,
+                await repository.insert_workflow_definition_if_absent(
+                    workflow_definition_id=def_id,
+                    workflow_id=route_identity.workflow_id,
+                    definition_hash=def_hash,
+                    request_envelope=normalized_proof.receipt.inputs,
+                    created_at=normalized_proof.event.occurred_at,
                 )
 
-                await conn.execute(
-                    """
-                    INSERT INTO admission_decisions (
-                        admission_decision_id, workflow_id, request_id,
-                        decision, reason_code, decided_at, decided_by,
-                        policy_snapshot_ref, validation_result_ref, authority_context_ref
-                    ) VALUES ($1, $2, $3, 'admit', 'auto_admit', $4, 'runtime', 'none', 'none', $5)
-                    ON CONFLICT DO NOTHING
-                    """,
-                    adm_id,
-                    route_identity.workflow_id,
-                    route_identity.request_id,
-                    normalized_proof.event.occurred_at,
-                    route_identity.authority_context_ref,
+                await repository.insert_admission_decision_if_absent(
+                    admission_decision_id=adm_id,
+                    workflow_id=route_identity.workflow_id,
+                    request_id=route_identity.request_id,
+                    decided_at=normalized_proof.event.occurred_at,
+                    authority_context_ref=route_identity.authority_context_ref,
                 )
 
-                await conn.execute(
-                    """
-                    INSERT INTO workflow_runs (
-                        run_id, workflow_id, request_id, request_digest,
-                        authority_context_digest, workflow_definition_id,
-                        admitted_definition_hash, run_idempotency_key,
-                        schema_version, request_envelope, context_bundle_id,
-                    admission_decision_id, current_state, terminal_reason_code,
-                    requested_at, admitted_at, started_at, finished_at, last_event_id
-                ) VALUES (
-                        $1, $2, $3, $4, $5, $6, $7, $8, 1,
-                        $9::jsonb, $10, $11, $13, NULL,
-                        $12, $12, NULL, NULL, NULL
-                    )
-                    ON CONFLICT DO NOTHING
-                    """,
-                    run_id,
-                    route_identity.workflow_id,
-                    route_identity.request_id,
-                    f"sha256:{run_id}",
-                    route_identity.authority_context_digest,
-                    def_id,
-                    def_hash,
-                    f"idem:{run_id}",
-                    req_json,
-                    f"ctx:{run_id}",
-                    adm_id,
-                    normalized_proof.event.occurred_at,
-                    normalized_proof.receipt.status,
+                await repository.insert_workflow_run_if_absent(
+                    run_id=run_id,
+                    workflow_id=route_identity.workflow_id,
+                    request_id=route_identity.request_id,
+                    request_digest=f"sha256:{run_id}",
+                    authority_context_digest=route_identity.authority_context_digest,
+                    workflow_definition_id=def_id,
+                    admitted_definition_hash=def_hash,
+                    run_idempotency_key=f"idem:{run_id}",
+                    request_envelope=normalized_proof.receipt.inputs,
+                    context_bundle_id=f"ctx:{run_id}",
+                    admission_decision_id=adm_id,
+                    current_state=normalized_proof.receipt.status,
+                    requested_at=normalized_proof.event.occurred_at,
+                    admitted_at=normalized_proof.event.occurred_at,
                 )
 
             await self._insert_evidence_row(
@@ -1183,23 +1013,7 @@ async def _fetch_recent_runs(
     *,
     limit: int = 20,
 ) -> list[dict[str, Any]]:
-    rows = await conn.fetch(
-        """
-        SELECT
-            run_id,
-            workflow_id,
-            current_state,
-            terminal_reason_code,
-            requested_at,
-            started_at,
-            finished_at,
-            last_event_id
-        FROM workflow_runs
-        ORDER BY requested_at DESC
-        LIMIT $1
-        """,
-        limit,
-    )
+    rows = await PostgresEvidenceRepository(conn).list_recent_runs(limit=limit)
     results = []
     for row in rows:
         results.append({
@@ -1219,41 +1033,13 @@ async def _fetch_run_detail(
     *,
     run_id: str,
 ) -> dict[str, Any] | None:
-    row = await conn.fetchrow(
-        """
-        SELECT
-            run_id,
-            workflow_id,
-            request_id,
-            current_state,
-            terminal_reason_code,
-            requested_at,
-            admitted_at,
-            started_at,
-            finished_at,
-            last_event_id,
-            schema_version,
-            workflow_definition_id,
-            admitted_definition_hash,
-            admission_decision_id,
-            context_bundle_id
-        FROM workflow_runs
-        WHERE run_id = $1
-        """,
-        run_id,
-    )
+    repository = PostgresEvidenceRepository(conn)
+    row = await repository.load_run_detail(run_id=run_id)
     if row is None:
         return None
 
-    # Count evidence rows
-    event_count = await conn.fetchval(
-        "SELECT count(*) FROM workflow_events WHERE run_id = $1",
-        run_id,
-    )
-    receipt_count = await conn.fetchval(
-        "SELECT count(*) FROM receipts WHERE run_id = $1",
-        run_id,
-    )
+    event_count = await repository.count_events_for_run(run_id=run_id)
+    receipt_count = await repository.count_receipts_for_run(run_id=run_id)
 
     return {
         "run_id": row["run_id"],

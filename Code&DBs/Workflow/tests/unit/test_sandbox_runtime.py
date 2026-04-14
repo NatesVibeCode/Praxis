@@ -133,6 +133,34 @@ def test_sandbox_runtime_runs_provider_contract_and_persists_artifacts(tmp_path)
     ]
 
 
+def test_sandbox_runtime_falls_back_to_host_local_when_docker_is_unavailable(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    (tmp_path / "seed.txt").write_text("seed", encoding="utf-8")
+    monkeypatch.setattr("runtime.sandbox_runtime._docker_available", lambda: False)
+
+    runtime = SandboxRuntime()
+    result = runtime.execute_command(
+        provider_name="docker_local",
+        sandbox_session_id="sandbox_session:run.alpha:job.alpha",
+        sandbox_group_id="group:run.alpha",
+        workdir=str(tmp_path),
+        command="printf updated > changed.txt",
+        stdin_text="",
+        env={},
+        timeout_seconds=15,
+        network_policy="provider_only",
+        workspace_materialization="copy",
+        execution_transport="cli",
+    )
+
+    assert result.sandbox_provider == "host_local"
+    assert result.execution_mode == "host_local"
+    assert result.artifact_refs == ("changed.txt",)
+    assert (tmp_path / "changed.txt").read_text(encoding="utf-8") == "updated"
+
+
 def test_derive_sandbox_identity_prefers_run_scoped_ids(tmp_path) -> None:
     session_id, group_id = derive_sandbox_identity(
         workdir=str(tmp_path),
@@ -465,5 +493,4 @@ def test_docker_local_autobuilds_default_image_when_missing(monkeypatch, tmp_pat
 
     assert seen["image"] == "praxis-worker:latest"
     assert result.execution_mode == "docker_local"
-
 

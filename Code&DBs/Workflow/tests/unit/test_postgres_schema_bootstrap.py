@@ -91,6 +91,19 @@ def _readiness(
     )
 
 
+def _control_readiness(*, bootstrapped: bool) -> postgres_schema.ControlPlaneSchemaReadiness:
+    expected = (
+        postgres_schema.WorkflowMigrationExpectedObject(
+            object_type="table",
+            object_name="workflow_runs",
+        ),
+    )
+    return postgres_schema.ControlPlaneSchemaReadiness(
+        expected_objects=expected,
+        missing_objects=() if bootstrapped else expected,
+    )
+
+
 def test_bootstrap_workflow_schema_skips_advisory_lock_when_schema_is_ready(
     monkeypatch,
 ) -> None:
@@ -142,6 +155,11 @@ def test_bootstrap_workflow_schema_locks_and_applies_only_missing_migrations(
         applied.append(filename)
 
     monkeypatch.setattr(postgres_schema, "inspect_workflow_schema", _inspect)
+    monkeypatch.setattr(
+        postgres_schema,
+        "inspect_control_plane_schema",
+        lambda _conn: asyncio.sleep(0, result=_control_readiness(bootstrapped=True)),
+    )
     monkeypatch.setattr(postgres_schema, "_bootstrap_migration", _bootstrap_migration)
     acquire_calls: list[_FakeAsyncConn] = []
 
@@ -222,6 +240,11 @@ def test_bootstrap_workflow_schema_applies_missing_constraint_migration(
         applied.append(filename)
 
     monkeypatch.setattr(postgres_schema, "inspect_workflow_schema", _inspect)
+    monkeypatch.setattr(
+        postgres_schema,
+        "inspect_control_plane_schema",
+        lambda _conn: asyncio.sleep(0, result=_control_readiness(bootstrapped=True)),
+    )
     monkeypatch.setattr(postgres_schema, "_bootstrap_migration", _bootstrap_migration)
     monkeypatch.setattr(
         postgres_schema,
@@ -296,6 +319,11 @@ def test_bootstrap_workflow_schema_applies_partially_drifted_migration(
         applied.append(filename)
 
     monkeypatch.setattr(postgres_schema, "inspect_workflow_schema", _inspect)
+    monkeypatch.setattr(
+        postgres_schema,
+        "inspect_control_plane_schema",
+        lambda _conn: asyncio.sleep(0, result=_control_readiness(bootstrapped=True)),
+    )
     monkeypatch.setattr(postgres_schema, "_bootstrap_migration", _bootstrap_migration)
     monkeypatch.setattr(
         postgres_schema,
@@ -314,6 +342,94 @@ def test_bootstrap_workflow_schema_applies_partially_drifted_migration(
     asyncio.run(postgres_schema.bootstrap_workflow_schema(conn))
 
     assert applied == ["074_provider_policy_multi_provider_refs.sql"]
+
+
+def test_bootstrap_workflow_schema_uses_full_tree_for_fresh_cluster(
+    monkeypatch,
+) -> None:
+    conn = _FakeAsyncConn()
+    readiness_states = iter(
+        (
+            _readiness(
+                bootstrapped=False,
+                missing_objects=(("table", "workflow_runs"),),
+                missing_by_migration={
+                    "001_v1_control_plane.sql": (("table", "workflow_runs"),),
+                },
+            ),
+            _readiness(
+                bootstrapped=False,
+                missing_objects=(("table", "workflow_runs"),),
+                missing_by_migration={
+                    "001_v1_control_plane.sql": (("table", "workflow_runs"),),
+                },
+            ),
+        )
+    )
+    applied: list[str] = []
+
+    async def _inspect(_conn):
+        return next(readiness_states)
+
+    async def _bootstrap_migration(_conn, filename: str) -> None:
+        applied.append(filename)
+
+    monkeypatch.setattr(postgres_schema, "inspect_workflow_schema", _inspect)
+    monkeypatch.setattr(
+        postgres_schema,
+        "inspect_control_plane_schema",
+        lambda _conn: asyncio.sleep(0, result=_control_readiness(bootstrapped=False)),
+    )
+    monkeypatch.setattr(postgres_schema, "_bootstrap_migration", _bootstrap_migration)
+    monkeypatch.setattr(
+        postgres_schema,
+        "_acquire_schema_bootstrap_lock",
+        lambda _conn: asyncio.sleep(0, result=0.0),
+    )
+    monkeypatch.setattr(
+        postgres_schema,
+        "_full_workflow_migration_filenames",
+        lambda: (
+            "001_v1_control_plane.sql",
+            "002_registry_authority.sql",
+            "032_triggers_and_events.sql",
+        ),
+    )
+
+    asyncio.run(postgres_schema.bootstrap_workflow_schema(conn))
+
+    assert applied == [
+        "001_v1_control_plane.sql",
+        "002_registry_authority.sql",
+        "032_triggers_and_events.sql",
+    ]
+
+
+def test_bootstrap_migration_skips_commented_transaction_wrappers(
+    monkeypatch,
+) -> None:
+    conn = _FakeAsyncConn()
+
+    monkeypatch.setattr(
+        postgres_schema,
+        "workflow_migration_statements",
+        lambda _filename: (
+            "-- migration header\nBEGIN",
+            "-- create the relation\nCREATE TABLE demo (id INT)",
+            "-- migration footer\nCOMMIT",
+        ),
+    )
+
+    asyncio.run(postgres_schema._bootstrap_migration(conn, "demo.sql"))
+
+    assert len(conn.executed) == 1
+    executed_query, executed_params = conn.executed[0]
+    assert "CREATE TABLE demo (id INT)" in executed_query
+    assert "BEGIN" not in executed_query
+    assert "COMMIT" not in executed_query
+    assert executed_params == ()
+    assert conn.transaction_entries == 1
+    assert conn.transaction_exits == 1
 
 
 def test_acquire_schema_bootstrap_lock_logs_wait_holder_details(

@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from surfaces.api import operator_read, operator_write
+from surfaces.api.handlers import workflow_query_core
 from storage.postgres.workflow_runtime_repository import reset_observability_metrics
 
 from ..subsystems import _subs
@@ -145,59 +146,12 @@ def tool_praxis_maintenance(params: dict) -> dict:
 
 
 def tool_praxis_operator_view(params: dict) -> dict:
-    """Observability views: operator status, scoreboard, graph, and replay-ready bugs.
+    """Observability views: operator status, scoreboard, graph, lineage, and replay-ready bugs."""
 
-    Native operator graph/status views still require async Postgres (asyncpg) and
-    are returned as CLI contracts. The replay-ready bug view is DB-backed and can
-    be returned directly from MCP.
-    """
-    view = params.get("view", "status")
-    if view == "replay_ready_bugs":
-        limit = max(1, int(params.get("limit", 50) or 50))
-        refresh_backfill = bool(params.get("refresh_backfill", True))
-        bug_tracker = _subs.get_bug_tracker()
-        maintenance = None
-        if refresh_backfill:
-            maintenance = bug_tracker.bulk_backfill_replay_provenance(
-                open_only=True,
-                receipt_limit=1,
-            )
-        from .bugs import tool_praxis_bugs
-
-        listed = tool_praxis_bugs(
-            {
-                "action": "list",
-                "open_only": True,
-                "replay_ready_only": True,
-                "include_replay_state": True,
-                "limit": limit,
-            }
-        )
-        return {
-            "view": view,
-            "requires": "sync Postgres",
-            "maintenance": maintenance,
-            "bugs": listed.get("bugs", []),
-            "count": listed.get("count", 0),
-            "returned_count": listed.get("returned_count", 0),
-            "limit": limit,
-            "refresh_backfill": refresh_backfill,
-        }
-    cli_commands = {
-        "status": "workflow native-operator inspect",
-        "scoreboard": "workflow native-operator scoreboard",
-        "graph": "workflow native-operator graph-topology",
-        "lineage": "workflow native-operator graph-lineage",
-    }
-    cmd = cli_commands.get(view)
-    if not cmd:
-        return {"error": f"Unknown view: {view}. Options: {', '.join(cli_commands)}"}
-    return {
-        "view": view,
-        "requires": "async Postgres (asyncpg)",
-        "cli_command": cmd,
-        "message": f"Run `{cmd}` in the CLI — these views need a live Postgres connection.",
-    }
+    try:
+        return workflow_query_core.handle_operator_view(_subs, params)
+    except Exception as exc:
+        return {"error": str(exc)}
 
 
 def tool_praxis_operator_write(params: dict) -> dict:
@@ -343,11 +297,13 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "  'scoreboard' — cutover readiness: which gates are proven, which are blocked\n"
                 "  'graph'      — full operator graph projection: bugs, roadmap items, decisions, "
                 "gates, and their connections\n"
+                "  'lineage'    — graph lineage for one run, including operator frames\n"
                 "  'replay_ready_bugs' — replayable bug backlog with optional safe provenance refresh\n\n"
                 "USE WHEN: you need detailed operational insight beyond pass/fail rates. "
                 "'Show me the operator graph.' 'What's the cutover status?' 'Which bugs can I replay right now?'\n\n"
                 "EXAMPLES:\n"
-                "  praxis_operator_view(view='graph')\n"
+                "  praxis_operator_view(view='graph', run_id='run_123')\n"
+                "  praxis_operator_view(view='lineage', run_id='run_123')\n"
                 "  praxis_operator_view(view='replay_ready_bugs')"
             ),
             "inputSchema": {
@@ -355,8 +311,12 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "properties": {
                     "view": {
                         "type": "string",
-                        "description": "View to render: 'status', 'scoreboard', 'graph', or 'replay_ready_bugs'.",
-                        "enum": ["status", "scoreboard", "graph", "replay_ready_bugs"],
+                        "description": "View to render: 'status', 'scoreboard', 'graph', 'lineage', or 'replay_ready_bugs'.",
+                        "enum": ["status", "scoreboard", "graph", "lineage", "replay_ready_bugs"],
+                    },
+                    "run_id": {
+                        "type": "string",
+                        "description": "Required for run-scoped views: 'status', 'scoreboard', 'graph', and 'lineage'.",
                     },
                     "limit": {
                         "type": "integer",

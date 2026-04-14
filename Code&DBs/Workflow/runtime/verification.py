@@ -12,6 +12,7 @@ from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from storage.postgres.connection import SyncPostgresConnection
+    from storage.postgres.verification_repository import PostgresVerificationRepository
 
 
 _DEFAULT_VERIFY_TIMEOUT = int(os.environ.get("PRAXIS_VERIFY_TIMEOUT", "60"))
@@ -110,22 +111,7 @@ def _verify_ref_to_binding(
     conn: "SyncPostgresConnection",
     verify_ref: str,
 ) -> VerificationBinding:
-    rows = conn.execute(
-        """
-        SELECT verify_ref,
-               verification_ref,
-               label,
-               description,
-               inputs,
-               enabled,
-               binding_revision,
-               decision_ref
-          FROM verify_refs
-         WHERE verify_ref = $1
-        """,
-        verify_ref,
-    )
-    row = dict(rows[0]) if rows else None
+    row = _repository(conn).load_verify_ref(verify_ref=verify_ref)
     if row is None:
         raise VerificationAuthorityError(f"verify_refs missing {verify_ref}")
     if not bool(row.get("enabled")):
@@ -215,19 +201,8 @@ def resolve_verify_commands(
         refs.append(verify_ref)
 
     bindings = [_verify_ref_to_binding(conn, verify_ref) for verify_ref in refs]
-    rows = conn.execute(
-        """
-        SELECT verification_ref,
-               display_name,
-               executor_kind,
-               argv_template,
-               template_inputs,
-               default_timeout_seconds,
-               enabled
-          FROM verification_registry
-         WHERE verification_ref = ANY($1::text[])
-        """,
-        refs,
+    rows = _repository(conn).list_verification_registry_rows(
+        verification_refs=[binding.verification_ref for binding in bindings],
     )
     authority_rows = {str(row["verification_ref"]): dict(row) for row in rows or []}
 
@@ -277,48 +252,16 @@ def sync_verify_refs(
         return 0
 
     try:
-        conn.execute_many(
-            """
-            INSERT INTO verify_refs (
-                verify_ref,
-                verification_ref,
-                label,
-                description,
-                inputs,
-                enabled,
-                binding_revision,
-                decision_ref
-            ) VALUES (
-                $1, $2, $3, $4, $5::jsonb, $6, $7, $8
-            )
-            ON CONFLICT (verify_ref) DO UPDATE SET
-                verification_ref = EXCLUDED.verification_ref,
-                label = EXCLUDED.label,
-                description = EXCLUDED.description,
-                inputs = EXCLUDED.inputs,
-                enabled = EXCLUDED.enabled,
-                binding_revision = EXCLUDED.binding_revision,
-                decision_ref = EXCLUDED.decision_ref,
-                updated_at = now()
-            """,
-            [
-                (
-                    row["verify_ref"],
-                    row["verification_ref"],
-                    row["label"],
-                    row.get("description", ""),
-                    json.dumps(row.get("inputs") or {}),
-                    bool(row.get("enabled", True)),
-                    row["binding_revision"],
-                    row["decision_ref"],
-                )
-                for row in verify_refs
-            ],
-        )
+        return _repository(conn).upsert_verify_refs(verify_refs=verify_refs)
     except Exception as exc:
         raise VerificationAuthorityError(f"failed to persist verify_refs authority rows: {exc}") from exc
 
-    return len(verify_refs)
+ 
+
+def _repository(conn: "SyncPostgresConnection") -> "PostgresVerificationRepository":
+    from storage.postgres.verification_repository import PostgresVerificationRepository
+
+    return PostgresVerificationRepository(conn)
 
 
 def run_verify(

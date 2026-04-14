@@ -17,15 +17,15 @@ CREATE INDEX IF NOT EXISTS idx_ref_catalog_type ON reference_catalog (ref_type);
 -- Auto-populate from integration_registry
 INSERT INTO reference_catalog (slug, ref_type, display_name, resolved_id, resolved_table, description)
 SELECT
-    '@' || ir.id || '/' || cap->>'action' AS slug,
+    '@' || ir.id || '/' || (cap.value->>'action') AS slug,
     'integration' AS ref_type,
-    ir.name || ': ' || cap->>'action' AS display_name,
+    ir.name || ': ' || (cap.value->>'action') AS display_name,
     ir.id AS resolved_id,
     'integration_registry' AS resolved_table,
-    cap->>'description' AS description
+    cap.value->>'description' AS description
 FROM integration_registry ir,
-     jsonb_array_elements(CASE WHEN jsonb_typeof(ir.capabilities) = 'array' THEN ir.capabilities ELSE '[]'::jsonb END) AS cap
-WHERE cap->>'action' IS NOT NULL
+     jsonb_array_elements(CASE WHEN jsonb_typeof(ir.capabilities) = 'array' THEN ir.capabilities ELSE '[]'::jsonb END) AS cap(value)
+WHERE cap.value->>'action' IS NOT NULL
 ON CONFLICT (slug) DO NOTHING;
 
 -- Also add integration-level references (without action)
@@ -55,16 +55,16 @@ ON CONFLICT (slug) DO NOTHING;
 -- Auto-populate object fields from property_definitions
 INSERT INTO reference_catalog (slug, ref_type, display_name, resolved_id, resolved_table, schema, description)
 SELECT
-    '#' || ot.type_id || '/' || prop->>'name' AS slug,
+    '#' || ot.type_id || '/' || (prop.value->>'name') AS slug,
     'object' AS ref_type,
-    ot.name || '.' || prop->>'name' AS display_name,
+    ot.name || '.' || (prop.value->>'name') AS display_name,
     ot.type_id AS resolved_id,
     'object_types' AS resolved_table,
-    jsonb_build_object('field_type', prop->>'type', 'required', COALESCE(prop->>'required', 'false')) AS schema,
-    COALESCE(prop->>'description', '') AS description
+    jsonb_build_object('field_type', prop.value->>'type', 'required', COALESCE(prop.value->>'required', 'false')) AS schema,
+    COALESCE(prop.value->>'description', '') AS description
 FROM object_types ot,
-     jsonb_array_elements(CASE WHEN jsonb_typeof(ot.property_definitions) = 'array' THEN ot.property_definitions ELSE '[]'::jsonb END) AS prop
-WHERE prop->>'name' IS NOT NULL
+     jsonb_array_elements(CASE WHEN jsonb_typeof(ot.property_definitions) = 'array' THEN ot.property_definitions ELSE '[]'::jsonb END) AS prop(value)
+WHERE prop.value->>'name' IS NOT NULL
 ON CONFLICT (slug) DO NOTHING;
 
 -- Auto-populate agent routes from task_type_routing.
