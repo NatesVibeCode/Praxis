@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+from datetime import datetime, timezone
 
 import pytest
 
@@ -64,3 +65,68 @@ def test_unified_workflow_circuit_breaker_gate_degrades_without_database_url(
     )
 
     assert module._circuit_breakers() is None
+
+
+def test_manual_force_open_override_blocks_requests() -> None:
+    from runtime.circuit_breaker import (
+        CircuitBreakerRegistry,
+        CircuitState,
+        ManualCircuitOverride,
+    )
+
+    registry = CircuitBreakerRegistry(failure_threshold=3, recovery_timeout_s=45.0)
+    override = ManualCircuitOverride(
+        provider_slug="openai",
+        override_state=CircuitState.OPEN,
+        operator_decision_id="operator-decision.circuit-breaker.openai",
+        decision_key="circuit-breaker::openai",
+        decision_kind="circuit_breaker_force_open",
+        decision_status="active",
+        rationale="Provider outage",
+        decided_by="ops",
+        decision_source="workflow.circuits.provider-outage",
+        effective_from=datetime(2026, 4, 15, 18, 0, tzinfo=timezone.utc),
+        effective_to=None,
+        updated_at=datetime(2026, 4, 15, 18, 0, tzinfo=timezone.utc),
+    )
+    registry._manual_override_map = lambda: {"openai": override}  # type: ignore[method-assign]
+
+    assert registry.allow_request("openai") is False
+
+    state = registry.all_states()["openai"]
+    assert state["state"] == "OPEN"
+    assert state["runtime_state"] == "CLOSED"
+    assert state["manual_override"]["override_state"] == "OPEN"
+
+
+def test_manual_force_closed_override_allows_even_when_runtime_is_open() -> None:
+    from runtime.circuit_breaker import (
+        CircuitBreakerRegistry,
+        CircuitState,
+        ManualCircuitOverride,
+    )
+
+    registry = CircuitBreakerRegistry(failure_threshold=1, recovery_timeout_s=45.0)
+    registry.record_outcome("anthropic", succeeded=False, failure_code="timeout")
+    override = ManualCircuitOverride(
+        provider_slug="anthropic",
+        override_state=CircuitState.CLOSED,
+        operator_decision_id="operator-decision.circuit-breaker.anthropic",
+        decision_key="circuit-breaker::anthropic",
+        decision_kind="circuit_breaker_force_closed",
+        decision_status="active",
+        rationale="Manual recovery probe",
+        decided_by="ops",
+        decision_source="workflow.circuits.manual-recovery",
+        effective_from=datetime(2026, 4, 15, 18, 0, tzinfo=timezone.utc),
+        effective_to=None,
+        updated_at=datetime(2026, 4, 15, 18, 0, tzinfo=timezone.utc),
+    )
+    registry._manual_override_map = lambda: {"anthropic": override}  # type: ignore[method-assign]
+
+    assert registry.allow_request("anthropic") is True
+
+    state = registry.all_states()["anthropic"]
+    assert state["state"] == "CLOSED"
+    assert state["runtime_state"] == "OPEN"
+    assert state["manual_override"]["override_state"] == "CLOSED"

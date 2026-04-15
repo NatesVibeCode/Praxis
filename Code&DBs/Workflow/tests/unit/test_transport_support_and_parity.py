@@ -16,6 +16,7 @@ from adapters.http_transport import HTTPResponse
 from adapters.llm_client import LLMClientError, LLMRequest, LLMResponse, call_llm, call_llm_streaming
 from adapters.llm_task import LLMTaskAdapter
 from adapters.provider_registry import resolve_api_endpoint
+from runtime.http_transport import TransportExecutionError
 from runtime.task_type_router import TaskTypeRouter
 
 
@@ -399,7 +400,7 @@ def test_db_backed_provider_profile_inherits_http_contract_fields(monkeypatch) -
         provider_registry_authority._DB_LOADED = original_loaded
 
 
-def test_cursor_profile_is_registered_for_cli_only(monkeypatch) -> None:
+def test_cursor_profile_is_registered_from_db_authority(monkeypatch) -> None:
     import adapters.provider_registry as provider_registry_mod
     import registry.provider_execution_registry as provider_registry_authority
 
@@ -409,11 +410,14 @@ def test_cursor_profile_is_registered_for_cli_only(monkeypatch) -> None:
 
     health = provider_registry_mod.registry_health()
 
-    assert health["status"] == "load_failed"
-    assert health["provider_count"] == 0
-    assert health["providers"] == []
-    assert health["error"]
-    assert provider_registry_authority.get_profile("cursor") is None
+    assert health["status"] == "loaded_from_db"
+    assert health["provider_count"] >= 1
+    assert "cursor" in health["providers"]
+    cursor_profile = provider_registry_authority.get_profile("cursor")
+    assert cursor_profile is not None
+    assert cursor_profile.api_protocol_family == "cursor_background_agent"
+    assert provider_registry_mod.supports_adapter("cursor", "llm_task") is True
+    assert provider_registry_mod.supports_adapter("cursor", "cli_llm") is False
 
 
 def test_transport_support_handler_returns_provider_and_model_support(monkeypatch) -> None:
@@ -592,6 +596,138 @@ def test_cli_and_api_transports_can_be_compared_for_same_provider_and_model(monk
     assert _normalize(cli_result) == _normalize(api_result)
 
 
+def test_llm_task_uses_transport_registry_for_non_chat_protocols(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    import adapters.llm_task as llm_task_mod
+
+    def _fake_call_transport(
+        protocol_family: str,
+        prompt: str,
+        *,
+        model: str,
+        max_tokens: int,
+        timeout: int,
+        api_endpoint: str,
+        api_key: str | None = None,
+        api_key_env: str = "",
+        workdir: str | None = None,
+        reasoning_effort: str | None = None,
+    ) -> str:
+        captured["protocol_family"] = protocol_family
+        captured["prompt"] = prompt
+        captured["model"] = model
+        captured["max_tokens"] = max_tokens
+        captured["timeout"] = timeout
+        captured["api_endpoint"] = api_endpoint
+        captured["api_key"] = api_key
+        captured["api_key_env"] = api_key_env
+        captured["workdir"] = workdir
+        captured["reasoning_effort"] = reasoning_effort
+        return "CURSOR_TRANSPORT_OK"
+
+    def _unexpected_call_llm(_request: LLMRequest) -> LLMResponse:
+        raise AssertionError("call_llm should not be used for cursor_background_agent")
+
+    monkeypatch.setattr(llm_task_mod, "call_transport", _fake_call_transport)
+    monkeypatch.setattr(llm_task_mod, "call_llm", _unexpected_call_llm)
+    monkeypatch.setattr(
+        llm_task_mod,
+        "resolve_credential",
+        lambda auth_ref, env=None: SimpleNamespace(
+            auth_ref=auth_ref,
+            api_key="cursor-test-key",
+            provider_hint="cursor",
+        ),
+    )
+
+    request = DeterministicTaskRequest(
+        node_id="node_cursor",
+        task_name="cursor_task",
+        input_payload={
+            "prompt": "Reply with CURSOR_TRANSPORT_OK",
+            "provider_slug": "cursor",
+            "model_slug": "auto",
+            "workdir": "/tmp/repo",
+        },
+        expected_outputs={},
+        dependency_inputs={},
+        execution_boundary_ref="workspace:test",
+    )
+
+    result = LLMTaskAdapter(
+        default_provider="cursor",
+        default_model="auto",
+        credential_env={"CURSOR_API_KEY": "cursor-test-key"},
+    ).execute(request=request)
+
+    assert result.status == "succeeded"
+    assert result.outputs["completion"] == "CURSOR_TRANSPORT_OK"
+    assert result.outputs["provider"] == "cursor"
+    assert result.outputs["model"] == "auto"
+    assert captured == {
+        "protocol_family": "cursor_background_agent",
+        "prompt": "User:\nReply with CURSOR_TRANSPORT_OK",
+        "model": "auto",
+        "max_tokens": 4096,
+        "timeout": 120,
+        "api_endpoint": "https://api.cursor.com/v0/agents",
+        "api_key": "cursor-test-key",
+        "api_key_env": "secret.default-path.cursor",
+        "workdir": "/tmp/repo",
+        "reasoning_effort": None,
+    }
+
+
+def test_llm_task_maps_custom_transport_http_errors(monkeypatch) -> None:
+    import adapters.llm_task as llm_task_mod
+
+    monkeypatch.setattr(
+        llm_task_mod,
+        "call_transport",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            TransportExecutionError(
+                "http_transport.http_error",
+                "HTTP 400: cursor repository access denied",
+                status_code=400,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        llm_task_mod,
+        "resolve_credential",
+        lambda auth_ref, env=None: SimpleNamespace(
+            auth_ref=auth_ref,
+            api_key="cursor-test-key",
+            provider_hint="cursor",
+        ),
+    )
+
+    result = LLMTaskAdapter(
+        default_provider="cursor",
+        default_model="auto",
+    ).execute(
+        request=DeterministicTaskRequest(
+            node_id="node_cursor_error",
+            task_name="cursor_task_error",
+            input_payload={
+                "prompt": "Reply with CURSOR_TRANSPORT_OK",
+                "provider_slug": "cursor",
+                "model_slug": "auto",
+                "workdir": "/tmp/repo",
+            },
+            expected_outputs={},
+            dependency_inputs={},
+            execution_boundary_ref="workspace:test",
+        )
+    )
+
+    assert result.status == "failed"
+    assert result.reason_code == "adapter.http_error"
+    assert result.failure_code == "adapter.http_error"
+    assert result.outputs["status_code"] == 400
+    assert result.outputs["stderr"] == "HTTP 400: cursor repository access denied"
+
+
 def test_provider_adapter_contract_exposes_explicit_transport_surface() -> None:
     from adapters.provider_registry import resolve_adapter_contract
 
@@ -622,6 +758,16 @@ def test_provider_adapter_contract_exposes_explicit_transport_surface() -> None:
         set(api_contract.retryable_failure_codes)
     )
     assert api_contract.failure_mapping["llm_client.timeout"] == "adapter.timeout"
+    assert api_contract.failure_mapping["http_transport.http_error"] == "adapter.http_error"
+
+
+def test_http_failure_mapping_merges_db_overrides_without_dropping_builtin_codes() -> None:
+    mapping = provider_transport._http_failure_mapping(  # type: ignore[attr-defined]
+        {"http": {"llm_client.timeout": "adapter.timeout.override"}}
+    )
+
+    assert mapping["llm_client.timeout"] == "adapter.timeout.override"
+    assert mapping["http_transport.http_error"] == "adapter.http_error"
 
 
 def test_route_economics_preserves_zero_cost_for_prepaid_lanes(monkeypatch) -> None:

@@ -16,14 +16,20 @@ from __future__ import annotations
 
 import logging
 import threading
-from dataclasses import dataclass, field
+import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
+from runtime._workflow_database import resolve_runtime_database_url
+from storage.postgres.connection import SyncPostgresConnection, get_workflow_pool
+
 from .failure_classifier import classify_failure
 
 _log = logging.getLogger(__name__)
+_OVERRIDE_DECISION_PREFIX = "circuit-breaker::"
+_OVERRIDE_CACHE_TTL_S = 2.0
 
 def _require_cb_config() -> tuple[int, float]:
     """Read circuit breaker values from authoritative config."""
@@ -37,6 +43,80 @@ def _require_cb_config() -> tuple[int, float]:
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+@dataclass(frozen=True, slots=True)
+class ManualCircuitOverride:
+    provider_slug: str
+    override_state: "CircuitState"
+    operator_decision_id: str
+    decision_key: str
+    decision_kind: str
+    decision_status: str
+    rationale: str
+    decided_by: str
+    decision_source: str
+    effective_from: datetime
+    effective_to: datetime | None
+    updated_at: datetime
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "provider_slug": self.provider_slug,
+            "override_state": self.override_state.value,
+            "operator_decision_id": self.operator_decision_id,
+            "decision_key": self.decision_key,
+            "decision_kind": self.decision_kind,
+            "decision_status": self.decision_status,
+            "rationale": self.rationale,
+            "decided_by": self.decided_by,
+            "decision_source": self.decision_source,
+            "effective_from": self.effective_from.isoformat(),
+            "effective_to": (
+                None if self.effective_to is None else self.effective_to.isoformat()
+            ),
+            "updated_at": self.updated_at.isoformat(),
+        }
+
+
+def _override_state_from_kind(decision_kind: str) -> CircuitState | None:
+    if decision_kind == "circuit_breaker_force_open":
+        return CircuitState.OPEN
+    if decision_kind == "circuit_breaker_force_closed":
+        return CircuitState.CLOSED
+    return None
+
+
+def _parse_manual_override(row: Any) -> ManualCircuitOverride | None:
+    decision_key = str(row.get("decision_key") or "").strip()
+    decision_kind = str(row.get("decision_kind") or "").strip()
+    if not decision_key.startswith(_OVERRIDE_DECISION_PREFIX):
+        return None
+    override_state = _override_state_from_kind(decision_kind)
+    if override_state is None:
+        return None
+    provider_slug = decision_key[len(_OVERRIDE_DECISION_PREFIX):].strip().lower()
+    if not provider_slug:
+        return None
+    effective_from = row.get("effective_from")
+    updated_at = row.get("updated_at")
+    if not isinstance(effective_from, datetime) or not isinstance(updated_at, datetime):
+        return None
+    effective_to = row.get("effective_to")
+    return ManualCircuitOverride(
+        provider_slug=provider_slug,
+        override_state=override_state,
+        operator_decision_id=str(row.get("operator_decision_id") or ""),
+        decision_key=decision_key,
+        decision_kind=decision_kind,
+        decision_status=str(row.get("decision_status") or ""),
+        rationale=str(row.get("rationale") or ""),
+        decided_by=str(row.get("decided_by") or ""),
+        decision_source=str(row.get("decision_source") or ""),
+        effective_from=effective_from,
+        effective_to=effective_to if isinstance(effective_to, datetime) else None,
+        updated_at=updated_at,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -244,12 +324,18 @@ class CircuitBreaker:
 
     # -- observability ---------------------------------------------------------
 
-    def state_summary(self) -> dict[str, Any]:
+    def state_summary(
+        self,
+        *,
+        effective_state: CircuitState | None = None,
+        manual_override: ManualCircuitOverride | None = None,
+    ) -> dict[str, Any]:
         """Return a JSON-serializable summary of the breaker state."""
         with self._lock:
             return {
                 "provider_slug": self.provider_slug,
-                "state": self._state.value,
+                "state": (effective_state or self._state).value,
+                "runtime_state": self._state.value,
                 "failure_count": self._failure_count,
                 "success_count": self._success_count,
                 "failure_threshold": self.failure_threshold,
@@ -269,6 +355,9 @@ class CircuitBreaker:
                     else None
                 ),
                 "half_open_calls": self._half_open_calls,
+                "manual_override": (
+                    None if manual_override is None else manual_override.to_json()
+                ),
             }
 
 # ---------------------------------------------------------------------------
@@ -302,6 +391,9 @@ class CircuitBreakerRegistry:
         self._half_open_max_calls = half_open_max_calls
         self._lock = threading.Lock()
         self._breakers: dict[str, CircuitBreaker] = {}
+        self._override_lock = threading.Lock()
+        self._manual_overrides: dict[str, ManualCircuitOverride] = {}
+        self._manual_override_cache_until = 0.0
 
     def _make_breaker(self, provider_slug: str) -> CircuitBreaker:
         return CircuitBreaker(
@@ -313,12 +405,72 @@ class CircuitBreakerRegistry:
 
     def get(self, provider_slug: str) -> CircuitBreaker:
         """Return the breaker for a provider, creating one if needed."""
+        normalized_provider_slug = provider_slug.strip().lower()
         with self._lock:
-            breaker = self._breakers.get(provider_slug)
+            breaker = self._breakers.get(normalized_provider_slug)
             if breaker is None:
-                breaker = self._make_breaker(provider_slug)
-                self._breakers[provider_slug] = breaker
+                breaker = self._make_breaker(normalized_provider_slug)
+                self._breakers[normalized_provider_slug] = breaker
             return breaker
+
+    def invalidate_manual_override_cache(self) -> None:
+        with self._override_lock:
+            self._manual_overrides = {}
+            self._manual_override_cache_until = 0.0
+
+    def _query_manual_overrides(self) -> dict[str, ManualCircuitOverride]:
+        database_url = resolve_runtime_database_url(required=False)
+        if database_url is None:
+            return {}
+        conn = SyncPostgresConnection(
+            get_workflow_pool(env={"WORKFLOW_DATABASE_URL": database_url})
+        )
+        rows = conn.execute(
+            """
+            SELECT
+                operator_decision_id,
+                decision_key,
+                decision_kind,
+                decision_status,
+                rationale,
+                decided_by,
+                decision_source,
+                effective_from,
+                effective_to,
+                updated_at
+            FROM operator_decisions
+            WHERE decision_status = 'active'
+              AND decision_kind IN (
+                    'circuit_breaker_force_open',
+                    'circuit_breaker_force_closed'
+              )
+              AND effective_from <= now()
+              AND (effective_to IS NULL OR effective_to > now())
+            ORDER BY updated_at DESC, operator_decision_id DESC
+            """
+        )
+        overrides: dict[str, ManualCircuitOverride] = {}
+        for row in rows:
+            override = _parse_manual_override(row)
+            if override is None or override.provider_slug in overrides:
+                continue
+            overrides[override.provider_slug] = override
+        return overrides
+
+    def _manual_override_map(self) -> dict[str, ManualCircuitOverride]:
+        now = time.monotonic()
+        with self._override_lock:
+            if now < self._manual_override_cache_until:
+                return dict(self._manual_overrides)
+        try:
+            overrides = self._query_manual_overrides()
+        except Exception as exc:
+            _log.warning("circuit_breaker overrides unavailable: %s", exc)
+            overrides = {}
+        with self._override_lock:
+            self._manual_overrides = dict(overrides)
+            self._manual_override_cache_until = now + _OVERRIDE_CACHE_TTL_S
+            return dict(self._manual_overrides)
 
     def record_outcome(
         self,
@@ -347,13 +499,27 @@ class CircuitBreakerRegistry:
 
     def allow_request(self, provider_slug: str) -> bool:
         """Check whether the provider's circuit allows a request."""
-        return self.get(provider_slug).allow_request()
+        normalized_provider_slug = provider_slug.strip().lower()
+        override = self._manual_override_map().get(normalized_provider_slug)
+        if override is not None:
+            return override.override_state != CircuitState.OPEN
+        return self.get(normalized_provider_slug).allow_request()
 
     def all_states(self) -> dict[str, dict[str, Any]]:
         """Return a summary dict for every known breaker."""
+        overrides = self._manual_override_map()
         with self._lock:
             slugs = list(self._breakers.keys())
-        return {slug: self.get(slug).state_summary() for slug in slugs}
+        all_slugs = sorted(set(slugs) | set(overrides.keys()))
+        payload: dict[str, dict[str, Any]] = {}
+        for slug in all_slugs:
+            override = overrides.get(slug)
+            breaker = self.get(slug)
+            payload[slug] = breaker.state_summary(
+                effective_state=override.override_state if override is not None else None,
+                manual_override=override,
+            )
+        return payload
 
 # ---------------------------------------------------------------------------
 # Module-level singleton
@@ -377,3 +543,11 @@ def get_circuit_breakers() -> CircuitBreakerRegistry:
             registry = CircuitBreakerRegistry()
             _CIRCUIT_BREAKERS = registry
         return registry
+
+
+def invalidate_circuit_breaker_override_cache() -> None:
+    """Drop the process-local manual override cache so operator writes apply immediately."""
+
+    registry = _CIRCUIT_BREAKERS
+    if registry is not None:
+        registry.invalidate_manual_override_cache()

@@ -438,6 +438,7 @@ def _finalize_compile_result(
 ) -> dict[str, Any]:
     from runtime.build_planning_contract import (
         build_candidate_resolution_manifest,
+        build_intent_brief,
         build_reviewable_plan,
     )
 
@@ -506,8 +507,14 @@ def _finalize_compile_result(
         compiled_spec=compiled_spec,
         candidate_manifest=candidate_resolution_manifest,
     )
+    intent_brief = build_intent_brief(
+        definition=hydrated_definition,
+        workflow_id=_as_text(hydrated_definition.get("workflow_id")) or None,
+        conn=conn,
+    )
 
     return {
+        "intent_brief": intent_brief,
         "definition": hydrated_definition,
         "unresolved": _unresolved_reference_slugs(hydrated_definition),
         "error": "; ".join(error for error in errors if error) if errors else None,

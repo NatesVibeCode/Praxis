@@ -7,6 +7,7 @@ import logging
 import os
 import shlex
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -581,8 +582,9 @@ def execute_api(
         if isinstance(sandbox_profile, dict)
         else ""
     )
+    python_executable = shlex.quote(sys.executable or "python3")
     command = (
-        "python3 -m runtime.api_transport_worker "
+        f"{python_executable} -m runtime.api_transport_worker "
         f"--api-protocol {shlex.quote(_api_protocol)} "
         f"--api-endpoint {shlex.quote(_api_endpoint)} "
         f"--api-key-env {shlex.quote(_api_key_env)} "

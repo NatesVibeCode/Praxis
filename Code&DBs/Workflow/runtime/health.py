@@ -158,9 +158,13 @@ def _aggregate_platform(checks: list[PreflightCheck]) -> HealthStatus:
 
 
 def _provider_api_key_present(provider_slug: str) -> bool:
+    from adapters.keychain import resolve_secret
     from adapters.provider_registry import resolve_api_key_env_vars
 
-    return any(os.environ.get(name) for name in resolve_api_key_env_vars(provider_slug))
+    return any(
+        resolve_secret(name, env=dict(os.environ))
+        for name in resolve_api_key_env_vars(provider_slug)
+    )
 
 
 def _sync_lane_admission(

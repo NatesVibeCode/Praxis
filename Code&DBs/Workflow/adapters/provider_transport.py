@@ -357,26 +357,32 @@ def resolve_lane_policy(
 
 
 def _cli_failure_mapping(failure_mappings: Mapping[str, dict[str, str]]) -> dict[str, str]:
-    cached = failure_mappings.get("cli")
-    if cached:
-        return dict(cached)
-    return {
+    defaults = {
         "cli_adapter.timeout": "cli_adapter.timeout",
         "cli_adapter.nonzero_exit": "cli_adapter.nonzero_exit",
         "cli_adapter.exec_error": "cli_adapter.exec_error",
     }
+    cached = failure_mappings.get("cli")
+    if cached:
+        defaults.update(dict(cached))
+    return defaults
 
 
 def _http_failure_mapping(failure_mappings: Mapping[str, dict[str, str]]) -> dict[str, str]:
-    cached = failure_mappings.get("http")
-    if cached:
-        return dict(cached)
-    return {
+    defaults = {
         "llm_client.http_error": "adapter.http_error",
         "llm_client.network_error": "adapter.network_error",
         "llm_client.timeout": "adapter.timeout",
         "llm_client.response_parse_error": "adapter.response_parse_error",
+        "http_transport.http_error": "adapter.http_error",
+        "http_transport.network_error": "adapter.network_error",
+        "http_transport.timeout": "adapter.timeout",
+        "http_transport.response_parse_error": "adapter.response_parse_error",
     }
+    cached = failure_mappings.get("http")
+    if cached:
+        defaults.update(dict(cached))
+    return defaults
 
 
 def _cli_adapter_contract(

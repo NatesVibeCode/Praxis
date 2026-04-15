@@ -100,15 +100,22 @@ def _normalize_build_review_decision_body(body: dict[str, Any]) -> dict[str, Any
     candidate_ref = _text(body.get("candidate_ref"))
     if not candidate_ref and isinstance(candidate_payload, dict):
         candidate_ref = _text(candidate_payload.get("target_ref"))
-    if decision in {"approve", "proposal_request"} and target_kind in {"binding", "import_snapshot"}:
+    if not candidate_ref and decision in {"approve", "proposal_request"}:
+        candidate_ref = target_ref
+    if decision in {"approve", "proposal_request"} and target_kind in _BUILD_REVIEW_TARGET_KINDS:
         if candidate_payload is None and not candidate_ref:
             raise WorkflowRuntimeBoundaryError(
                 "candidate_payload or candidate_ref is required for approve/proposal_request decisions"
             )
+    slot_ref = _text(body.get("slot_ref")) or target_ref
     return {
         "target_kind": target_kind,
         "target_ref": target_ref,
         "decision": decision,
+        "slot_ref": slot_ref or None,
+        "review_group_ref": _text(body.get("review_group_ref")) or None,
+        "authority_scope": _text(body.get("authority_scope")) or None,
+        "supersedes_decision_ref": _text(body.get("supersedes_decision_ref")) or None,
         "candidate_ref": candidate_ref or None,
         "candidate_payload": candidate_payload,
     }
@@ -592,6 +599,7 @@ def mutate_workflow_build(
                 definition_revision=current_definition_revision,
                 target_kind="binding",
                 target_ref=binding_id,
+                slot_ref=binding_id,
             )
         review_decision_payload = {
             "target_kind": "binding",
@@ -611,6 +619,7 @@ def mutate_workflow_build(
                 definition_revision=current_definition_revision,
                 target_kind="binding",
                 target_ref=binding_id,
+                slot_ref=binding_id,
             )
         review_decision_payload = {
             "target_kind": "binding",
@@ -629,6 +638,7 @@ def mutate_workflow_build(
                 definition_revision=current_definition_revision,
                 target_kind="binding",
                 target_ref=binding_id,
+                slot_ref=binding_id,
             )
         review_decision_payload = {
             "target_kind": "binding",
@@ -674,6 +684,7 @@ def mutate_workflow_build(
                 definition_revision=current_definition_revision,
                 target_kind="import_snapshot",
                 target_ref=snapshot_id,
+                slot_ref=snapshot_id,
             )
         review_decision_payload = {
             "target_kind": "import_snapshot",
@@ -691,6 +702,7 @@ def mutate_workflow_build(
                 definition_revision=current_definition_revision,
                 target_kind=review_decision_payload["target_kind"],
                 target_ref=review_decision_payload["target_ref"],
+                slot_ref=review_decision_payload.get("slot_ref"),
             )
     elif subpath.startswith("imports/") and subpath.endswith("/restore"):
         snapshot_id = subpath[len("imports/") : -len("/restore")].strip("/")
@@ -759,23 +771,40 @@ def mutate_workflow_build(
         updated_definition_revision = _text(definition.get("definition_revision")) or current_definition_revision
         if not updated_definition_revision:
             raise WorkflowRuntimeBoundaryError("definition_revision is required for build review decisions")
-        record_build_review_decision(
-            conn,
-            workflow_id=workflow_id,
-            definition_revision=updated_definition_revision,
-            target_kind=review_decision_payload["target_kind"],
-            target_ref=review_decision_payload["target_ref"],
-            decision=review_decision_payload["decision"],
-            candidate_ref=review_decision_payload.get("candidate_ref"),
-            candidate_payload=review_decision_payload.get("candidate_payload"),
-            actor_type=_text(body.get("review_actor_type")) or None,
-            actor_ref=_text(body.get("review_actor_ref")) or None,
-            approval_mode=_text(body.get("approval_mode")) or None,
-            rationale=_text(body.get("rationale")) or None,
-            source_subpath=subpath,
-        )
+        try:
+            record_build_review_decision(
+                conn,
+                workflow_id=workflow_id,
+                definition_revision=updated_definition_revision,
+                target_kind=review_decision_payload["target_kind"],
+                target_ref=review_decision_payload["target_ref"],
+                decision=review_decision_payload["decision"],
+                slot_ref=review_decision_payload.get("slot_ref"),
+                review_group_ref=review_decision_payload.get("review_group_ref"),
+                authority_scope=review_decision_payload.get("authority_scope"),
+                supersedes_decision_ref=review_decision_payload.get("supersedes_decision_ref"),
+                candidate_ref=review_decision_payload.get("candidate_ref"),
+                candidate_payload=review_decision_payload.get("candidate_payload"),
+                actor_type=_text(body.get("actor_type") or body.get("review_actor_type")) or None,
+                actor_ref=_text(body.get("actor_ref") or body.get("review_actor_ref")) or None,
+                approval_mode=_text(body.get("approval_mode")) or None,
+                rationale=_text(body.get("rationale")) or None,
+                source_subpath=subpath,
+            )
+        except ValueError as exc:
+            raise WorkflowRuntimeBoundaryError(str(exc)) from exc
 
-    hydrated_definition, durable_definition, compiled_spec, build_bundle, planning_notes = _rebuild_workflow_build(
+    (
+        intent_brief,
+        hydrated_definition,
+        durable_definition,
+        compiled_spec,
+        build_bundle,
+        planning_notes,
+        candidate_resolution_manifest,
+        reviewable_plan,
+        execution_manifest,
+    ) = _rebuild_workflow_build(
         definition,
         workflow_id=workflow_id,
         workflow_name=_text(row.get("name")) or workflow_id,
@@ -811,10 +840,14 @@ def mutate_workflow_build(
     )
     return {
         "row": persisted_row,
+        "intent_brief": intent_brief,
         "definition": hydrated_definition,
         "compiled_spec": compiled_spec,
         "build_bundle": build_bundle,
         "planning_notes": planning_notes,
+        "candidate_resolution_manifest": candidate_resolution_manifest,
+        "reviewable_plan": reviewable_plan,
+        "execution_manifest": execution_manifest,
         "undo_receipt": undo_receipt,
         "mutation_event_id": mutation_event_id,
     }
@@ -826,39 +859,123 @@ def _rebuild_workflow_build(
     workflow_id: str,
     workflow_name: str,
     conn: Any,
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any] | None, dict[str, Any], list[str]]:
+) -> tuple[
+    dict[str, Any] | None,
+    dict[str, Any],
+    dict[str, Any],
+    dict[str, Any] | None,
+    dict[str, Any],
+    list[str],
+    dict[str, Any] | None,
+    dict[str, Any] | None,
+    dict[str, Any] | None,
+]:
     from runtime.build_authority import apply_authority_bundle, build_authority_bundle
+    from runtime.build_planning_contract import (
+        build_candidate_resolution_manifest,
+        build_execution_manifest,
+        build_intent_brief,
+        build_reviewable_plan,
+    )
     from runtime.operating_model_planner import PlanningBlockedError, plan_definition
 
     planning_notes: list[str] = []
     compiled_spec: dict[str, Any] | None = None
+    intent_brief: dict[str, Any] | None = None
+    candidate_manifest: dict[str, Any] | None = None
+    reviewable_plan: dict[str, Any] | None = None
+    execution_manifest: dict[str, Any] | None = None
     reviewed_definition, has_db_review_state = materialize_reviewed_build_definition(
         conn,
         workflow_id=workflow_id,
         definition=definition,
     )
+    intent_brief = build_intent_brief(
+        definition=reviewed_definition,
+        workflow_id=workflow_id,
+        conn=conn,
+    )
     bundle = build_authority_bundle(reviewed_definition)
+    candidate_manifest = build_candidate_resolution_manifest(
+        definition=reviewed_definition,
+        workflow_id=workflow_id,
+        conn=conn,
+        compiled_spec=None,
+    )
+    reviewable_plan = build_reviewable_plan(
+        definition=reviewed_definition,
+        workflow_id=workflow_id,
+        conn=conn,
+        compiled_spec=None,
+        candidate_manifest=candidate_manifest,
+    )
     if _text(bundle.get("projection_status", {}).get("state")) == "ready":
-        try:
-            plan_result = plan_definition(reviewed_definition, title=workflow_name, conn=conn)
-            candidate_spec = plan_result.get("compiled_spec")
-            if isinstance(candidate_spec, dict):
-                compiled_spec = candidate_spec
-            planning_notes = [
-                note
-                for note in plan_result.get("planning_notes", [])
-                if isinstance(note, str) and note.strip()
-            ]
-        except PlanningBlockedError as exc:
-            planning_notes = [str(exc)]
+        review_blockers: list[str] = []
+        if candidate_manifest.get("execution_readiness") != "ready":
+            review_blockers.extend(
+                [
+                    _text(item.get("reason"))
+                    for item in candidate_manifest.get("required_confirmations", [])
+                    if isinstance(item, dict) and _text(item.get("reason"))
+                ]
+            )
+        if reviewable_plan.get("proposal_requests"):
+            review_blockers.append("Proposal requests must be resolved before hardening can proceed.")
+        if reviewable_plan.get("widening_ops"):
+            review_blockers.append("Pending widening requests must be resolved before hardening can proceed.")
+        if review_blockers:
+            planning_notes = list(dict.fromkeys([note for note in review_blockers if note]))
+        else:
+            try:
+                plan_result = plan_definition(reviewed_definition, title=workflow_name, conn=conn)
+                candidate_spec = plan_result.get("compiled_spec")
+                if isinstance(candidate_spec, dict):
+                    compiled_spec = candidate_spec
+                planning_notes = [
+                    note
+                    for note in plan_result.get("planning_notes", [])
+                    if isinstance(note, str) and note.strip()
+                ]
+                execution_manifest = build_execution_manifest(
+                    definition=reviewed_definition,
+                    workflow_id=workflow_id,
+                    conn=conn,
+                    compiled_spec=compiled_spec,
+                    candidate_manifest=candidate_manifest,
+                    reviewable_plan=reviewable_plan,
+                )
+                if execution_manifest is None:
+                    compiled_spec = None
+                    planning_notes.append(
+                        "Execution manifest not produced; approved capability bundles and reviewed authority are required before hardening can complete."
+                    )
+            except PlanningBlockedError as exc:
+                planning_notes = [str(exc)]
     hydrated_definition = apply_authority_bundle(reviewed_definition, compiled_spec=compiled_spec)
+    if has_db_review_state:
+        hydrated_definition, _ = materialize_reviewed_build_definition(
+            conn,
+            workflow_id=workflow_id,
+            definition=hydrated_definition,
+            compiled_spec=compiled_spec,
+        )
     bundle = build_authority_bundle(hydrated_definition, compiled_spec=compiled_spec)
     durable_definition = (
         scrub_review_state_for_persistence(hydrated_definition)
         if has_db_review_state
         else hydrated_definition
     )
-    return hydrated_definition, durable_definition, compiled_spec, bundle, planning_notes
+    return (
+        intent_brief,
+        hydrated_definition,
+        durable_definition,
+        compiled_spec,
+        bundle,
+        planning_notes,
+        candidate_manifest,
+        reviewable_plan,
+        execution_manifest,
+    )
 
 
 def delete_workflow(

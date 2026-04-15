@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from adapters.provider_registry import default_llm_adapter_type, get_profile, supports_adapter
+from runtime._workflow_database import resolve_runtime_database_url
 from storage.postgres import PostgresConfigurationError, ensure_postgres_available
 
 from .domain import (
@@ -273,7 +274,8 @@ def _json_text_array(value: object, *, field_name: str) -> tuple[str, ...]:
 
 def _default_sync_conn():
     try:
-        return ensure_postgres_available()
+        database_url = resolve_runtime_database_url(repo_root=Path(__file__).resolve().parents[3], required=True)
+        return ensure_postgres_available(env={"WORKFLOW_DATABASE_URL": database_url})
     except PostgresConfigurationError as exc:
         raise NativeRuntimeProfileSyncError(
             f"native runtime authority unavailable: {exc.reason_code}",

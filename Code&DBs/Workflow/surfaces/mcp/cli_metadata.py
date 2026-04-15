@@ -75,6 +75,28 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             _example("File a new bug", {"action": "file", "title": "Runner hangs after retry", "severity": "P1"}),
         ],
     ),
+    "praxis_circuits": _tool(
+        surface="operations",
+        tier="stable",
+        recommended_alias="circuits",
+        when_to_use="Inspect effective circuit-breaker state or apply a durable manual override for one provider.",
+        when_not_to_use="Do not use it for task-route eligibility windows or generic health checks.",
+        risks={
+            "default": "read",
+            "actions": {
+                "list": "read",
+                "open": "write",
+                "close": "write",
+                "reset": "write",
+            },
+        },
+        examples=[
+            _example("List effective circuit states", {"action": "list"}),
+            _example("Force a provider open", {"action": "open", "provider_slug": "openai", "rationale": "Provider outage"}),
+            _example("Force a provider closed", {"action": "close", "provider_slug": "anthropic", "rationale": "Allow manual recovery probes"}),
+            _example("Clear the manual override", {"action": "reset", "provider_slug": "openai"}),
+        ],
+    ),
     "praxis_connector": _tool(
         surface="workflow",
         tier="advanced",

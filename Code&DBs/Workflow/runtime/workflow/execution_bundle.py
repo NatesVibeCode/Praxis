@@ -154,6 +154,38 @@ def _select_mcp_tool_names(
     return [name for name in _dedupe_strings(names) if name in catalog]
 
 
+def _execution_manifest_tool_authority(
+    *,
+    execution_manifest: Mapping[str, Any] | None,
+    explicit_mcp_tools: Sequence[str],
+    explicit_allowed_tools: Sequence[str],
+) -> tuple[list[str], list[str], list[str]]:
+    if not isinstance(execution_manifest, Mapping):
+        return [], [], []
+    allowlist = execution_manifest.get("tool_allowlist")
+    if not isinstance(allowlist, Mapping):
+        return [], [], []
+    mcp_tools = [
+        *_INTERNAL_WORKFLOW_MCP_TOOLS,
+        *_string_list(allowlist.get("mcp_tools")),
+        *_string_list(explicit_mcp_tools),
+    ]
+    adapter_tools = [
+        *_string_list(allowlist.get("adapter_tools")),
+        *_string_list(explicit_allowed_tools),
+    ]
+    verify_refs = _string_list(execution_manifest.get("verify_refs"))
+    if verify_refs:
+        mcp_tools.append("praxis_workflow_validate")
+    catalog = get_tool_catalog()
+    normalized_mcp_tools = [
+        name
+        for name in _dedupe_strings(canonical_tool_name(item) for item in mcp_tools if str(item).strip())
+        if name in catalog
+    ]
+    return normalized_mcp_tools, _dedupe_strings(adapter_tools), _dedupe_strings(verify_refs)
+
+
 def _mcp_tool_entries(tool_names: Sequence[str]) -> list[dict[str, Any]]:
     catalog = get_tool_catalog()
     entries: list[dict[str, Any]] = []
@@ -297,24 +329,41 @@ def build_execution_bundle(
     output_schema: Mapping[str, Any] | None = None,
     authoring_contract: Mapping[str, Any] | None = None,
     acceptance_contract: Mapping[str, Any] | None = None,
+    execution_manifest: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    normalized_task_type = str(task_type or "").strip() or infer_task_type(prompt, label=job_label)
+    manifest_mcp_tools, manifest_allowed_tools, manifest_verify_refs = _execution_manifest_tool_authority(
+        execution_manifest=execution_manifest,
+        explicit_mcp_tools=_string_list(explicit_mcp_tools),
+        explicit_allowed_tools=_string_list(allowed_tools),
+    )
+    normalized_task_type = (
+        str(task_type or "").strip()
+        or ("approved_execution" if manifest_mcp_tools or manifest_allowed_tools else infer_task_type(prompt, label=job_label))
+    )
     normalized_capabilities = _dedupe_strings(_string_list(capabilities))
-    normalized_verify_refs = _dedupe_strings(_string_list(verify_refs))
+    normalized_verify_refs = (
+        manifest_verify_refs
+        if manifest_verify_refs
+        else _dedupe_strings(_string_list(verify_refs))
+    )
     bucket = _bucket_from_task(
         task_type=normalized_task_type,
         capabilities=normalized_capabilities,
         verify_refs=normalized_verify_refs,
     )
     profile = try_resolve_profile(_profile_task_type(normalized_task_type))
-    normalized_allowed_tools = _dedupe_strings(
-        [
-            canonical_tool_name(tool)
-            for tool in merge_allowed_tools(
-                profile.allowed_tools if profile is not None else (),
-                _string_list(allowed_tools),
-            )
-        ]
+    normalized_allowed_tools = (
+        manifest_allowed_tools
+        if manifest_allowed_tools
+        else _dedupe_strings(
+            [
+                canonical_tool_name(tool)
+                for tool in merge_allowed_tools(
+                    profile.allowed_tools if profile is not None else (),
+                    _string_list(allowed_tools),
+                )
+            ]
+        )
     )
     completion_contract = _completion_contract(
         task_type=normalized_task_type,
@@ -334,14 +383,18 @@ def build_execution_bundle(
         acceptance_contract=acceptance_contract,
         verify_refs=normalized_verify_refs,
     )
-    normalized_mcp_tools = _select_mcp_tool_names(
-        bucket=bucket,
-        verify_refs=normalized_verify_refs,
-        explicit_mcp_tools=[
-            *_string_list(explicit_mcp_tools),
-            *_string_list(completion_contract.get("submit_tool_names")),
-            *_string_list(completion_contract.get("review_tool_names")),
-        ],
+    normalized_mcp_tools = (
+        manifest_mcp_tools
+        if manifest_mcp_tools
+        else _select_mcp_tool_names(
+            bucket=bucket,
+            verify_refs=normalized_verify_refs,
+            explicit_mcp_tools=[
+                *_string_list(explicit_mcp_tools),
+                *_string_list(completion_contract.get("submit_tool_names")),
+                *_string_list(completion_contract.get("review_tool_names")),
+            ],
+        )
     )
     normalized_skill_refs = _dedupe_strings(
         [*_BUCKET_SKILLS.get(bucket, _BUCKET_SKILLS["general"]), *_string_list(explicit_skill_refs)],
@@ -385,6 +438,16 @@ def build_execution_bundle(
             label=job_label,
             write_scope=normalized_write_scope,
             read_scope=normalized_resolved_read_scope or normalized_declared_read_scope,
+        ),
+        "execution_manifest_ref": (
+            str(execution_manifest.get("execution_manifest_ref") or "").strip()
+            if isinstance(execution_manifest, Mapping)
+            else None
+        ),
+        "approved_bundle_refs": (
+            _dedupe_strings(_string_list(execution_manifest.get("approved_bundle_refs")))
+            if isinstance(execution_manifest, Mapping)
+            else []
         ),
         "access_policy": {
             "workspace_mode": "docker_packet_only",

@@ -105,8 +105,12 @@ def _manifest_record_payload(row: dict[str, object]) -> dict[str, object]:
 
 def _workflow_runtime_conn():
     from storage.postgres.connection import SyncPostgresConnection, get_workflow_pool
+    from runtime._workflow_database import resolve_runtime_database_url
 
-    return SyncPostgresConnection(get_workflow_pool())
+    database_url = resolve_runtime_database_url(required=True)
+    return SyncPostgresConnection(
+        get_workflow_pool(env={"WORKFLOW_DATABASE_URL": database_url})
+    )
 
 
 def _render_templated_spec_to_temp_file(spec_path: str, variables: dict[str, str]) -> str:

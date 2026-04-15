@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from registry.native_runtime_profile_sync import (
     NativeRuntimeProfileConfig,
     _default_live_budget_window,
+    _default_sync_conn,
     _latest_budget_window_sync,
     _upsert_profile_authority_rows_sync,
 )
@@ -124,3 +125,23 @@ def test_default_live_budget_window_falls_back_to_provider_name() -> None:
     assert budget.provider_ref == "provider.openai"
     assert budget.budget_scope == "runtime"
     assert budget.budget_status == "available"
+
+
+def test_default_sync_conn_uses_runtime_database_authority(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "registry.native_runtime_profile_sync.resolve_runtime_database_url",
+        lambda repo_root=None, required=True: "postgresql://postgres@127.0.0.1:5432/praxis",
+    )
+    monkeypatch.setattr(
+        "registry.native_runtime_profile_sync.ensure_postgres_available",
+        lambda env=None: captured.setdefault("env", env) or object(),
+    )
+
+    conn = _default_sync_conn()
+
+    assert captured["env"] == {
+        "WORKFLOW_DATABASE_URL": "postgresql://postgres@127.0.0.1:5432/praxis",
+    }
+    assert conn == captured["env"]

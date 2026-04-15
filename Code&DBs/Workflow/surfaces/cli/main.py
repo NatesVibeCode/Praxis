@@ -268,6 +268,7 @@ _ARG_COMMANDS: dict[str, ArgsCommandHandler] = {
     "runs": _runs_command,
     "retry": _retry_command,
     "cancel": _cancel_command,
+    "circuits": _circuits_command,
     "params": _params_command,
     "notifications": _notifications_command,
     "config": _config_command,
@@ -300,7 +301,6 @@ _STDOUT_COMMANDS: dict[str, StdoutCommandHandler] = {
     "commands": lambda *, stdout: _commands_index_command(stdout=stdout),
     "status": _status_command,
     "costs": _costs_command,
-    "circuits": _circuits_command,
     "slots": _slots_command,
     "active": _active_command,
 }
@@ -492,7 +492,6 @@ def _help_topic_text(topic: str, *, stdout: TextIO) -> int:
             "status": "usage: workflow status [--since-hours N]",
             "active": "usage: workflow active",
             "costs": "usage: workflow costs",
-            "circuits": "usage: workflow circuits",
             "slots": "usage: workflow slots",
         }.get(topic)
         if usage is not None:

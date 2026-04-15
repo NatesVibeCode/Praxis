@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from types import SimpleNamespace
 
 from runtime.workflow import execution_backends
@@ -370,7 +371,7 @@ def test_execute_api_routes_through_sandbox_runtime(monkeypatch, tmp_path) -> No
     )
 
     command = str(captured["command"])
-    assert "python3 -m runtime.api_transport_worker" in command
+    assert f"{sys.executable} -m runtime.api_transport_worker" in command
     assert "--api-protocol anthropic_messages" in command
     assert f"--workdir {tmp_path}" in command
     assert "--model claude-haiku-4-5-20251001" in command

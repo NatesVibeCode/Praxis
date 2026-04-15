@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Protocol
 
+from authority.operator_control import OperatorDecisionAuthorityRecord
 from policy.workflow_classes import (
     WorkflowClassAuthorityRecord,
     WorkflowClassCatalog,
@@ -21,6 +22,7 @@ from policy.native_primary_cutover import (
     NativePrimaryCutoverRuntime,
     PostgresNativePrimaryCutoverRepository,
 )
+from runtime.circuit_breaker import invalidate_circuit_breaker_override_cache
 from runtime.instance import NativeWorkflowInstance, resolve_native_instance
 from runtime.route_authority_snapshot import invalidate_route_authority_cache_key
 from runtime.recurring_review_repair_flow import (
@@ -35,6 +37,7 @@ from runtime.work_item_workflow_bindings import (
     WorkItemWorkflowBindingRuntime,
 )
 from storage.postgres import (
+    PostgresOperatorControlRepository,
     PostgresRoadmapAuthoringRepository,
     PostgresTaskRouteEligibilityRepository,
     connect_workflow_database,
@@ -66,6 +69,7 @@ _WORK_ITEM_CLOSEOUT_ACTIONS = frozenset({"preview", "commit"})
 _ROADMAP_ITEM_KINDS = frozenset({"capability", "initiative"})
 _ROADMAP_STATUSES = frozenset({"active"})
 _ROADMAP_PRIORITIES = frozenset({"p1", "p2"})
+_CIRCUIT_BREAKER_OVERRIDE_STATES = frozenset({"open", "closed", "reset"})
 _BUG_CLOSEOUT_EVIDENCE_ROLE = "validates_fix"
 _ROADMAP_COMPLETED_STATUS = "completed"
 
@@ -459,6 +463,134 @@ def _default_task_route_rationale(
     return f"Operator {action} route scope {_task_route_scope_label(provider_slug=provider_slug, task_type=task_type, model_slug=model_slug)}{until}"
 
 
+def _normalize_circuit_breaker_override_state(value: object) -> str:
+    normalized = _require_text(value, field_name="override_state").lower()
+    if normalized not in _CIRCUIT_BREAKER_OVERRIDE_STATES:
+        allowed = ", ".join(sorted(_CIRCUIT_BREAKER_OVERRIDE_STATES))
+        raise ValueError(f"override_state must be one of {allowed}")
+    return normalized
+
+
+def _circuit_breaker_scope_label(provider_slug: str) -> str:
+    return _scope_fragment(provider_slug, fallback="provider")
+
+
+def _circuit_breaker_operator_decision_id(provider_slug: str) -> str:
+    return f"operator-decision.circuit-breaker.{_circuit_breaker_scope_label(provider_slug)}"
+
+
+def _circuit_breaker_decision_key(provider_slug: str) -> str:
+    return f"circuit-breaker::{_circuit_breaker_scope_label(provider_slug)}"
+
+
+def _circuit_breaker_decision_kind(override_state: str) -> str:
+    return {
+        "open": "circuit_breaker_force_open",
+        "closed": "circuit_breaker_force_closed",
+        "reset": "circuit_breaker_reset",
+    }[override_state]
+
+
+def _circuit_breaker_override_title(provider_slug: str, override_state: str) -> str:
+    action = {
+        "open": "Force open",
+        "closed": "Force closed",
+        "reset": "Reset",
+    }[override_state]
+    return f"{action} circuit breaker for {provider_slug}"
+
+
+def _default_circuit_breaker_rationale(
+    *,
+    provider_slug: str,
+    override_state: str,
+    effective_to: datetime | None,
+) -> str:
+    until = (
+        ""
+        if effective_to is None
+        else f" until {effective_to.astimezone(timezone.utc).isoformat()}"
+    )
+    if override_state == "open":
+        return f"Operator forced circuit breaker OPEN for {provider_slug}{until}"
+    if override_state == "closed":
+        return f"Operator forced circuit breaker CLOSED for {provider_slug}{until}"
+    return f"Operator cleared manual circuit breaker override for {provider_slug}"
+
+
+@dataclass(frozen=True, slots=True)
+class CircuitBreakerOverrideRecord:
+    operator_decision_id: str
+    decision_key: str
+    provider_slug: str
+    override_state: str
+    decision_kind: str
+    decision_status: str
+    title: str
+    rationale: str
+    decided_by: str
+    decision_source: str
+    effective_from: datetime
+    effective_to: datetime | None
+    decided_at: datetime
+    created_at: datetime
+    updated_at: datetime
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "operator_decision_id": self.operator_decision_id,
+            "decision_key": self.decision_key,
+            "provider_slug": self.provider_slug,
+            "override_state": self.override_state,
+            "decision_kind": self.decision_kind,
+            "decision_status": self.decision_status,
+            "title": self.title,
+            "rationale": self.rationale,
+            "decided_by": self.decided_by,
+            "decision_source": self.decision_source,
+            "effective_from": self.effective_from.isoformat(),
+            "effective_to": (
+                None if self.effective_to is None else self.effective_to.isoformat()
+            ),
+            "decided_at": self.decided_at.isoformat(),
+            "created_at": self.created_at.isoformat(),
+            "updated_at": self.updated_at.isoformat(),
+        }
+
+
+def _circuit_breaker_override_record_from_decision(
+    decision: OperatorDecisionAuthorityRecord,
+) -> CircuitBreakerOverrideRecord:
+    prefix = "circuit-breaker::"
+    provider_slug = (
+        decision.decision_key[len(prefix):]
+        if decision.decision_key.startswith(prefix)
+        else decision.decision_key
+    )
+    override_state = {
+        "circuit_breaker_force_open": "open",
+        "circuit_breaker_force_closed": "closed",
+        "circuit_breaker_reset": "reset",
+    }.get(decision.decision_kind, decision.decision_kind)
+    return CircuitBreakerOverrideRecord(
+        operator_decision_id=decision.operator_decision_id,
+        decision_key=decision.decision_key,
+        provider_slug=provider_slug,
+        override_state=override_state,
+        decision_kind=decision.decision_kind,
+        decision_status=decision.decision_status,
+        title=decision.title,
+        rationale=decision.rationale,
+        decided_by=decision.decided_by,
+        decision_source=decision.decision_source,
+        effective_from=decision.effective_from,
+        effective_to=decision.effective_to,
+        decided_at=decision.decided_at,
+        created_at=decision.created_at,
+        updated_at=decision.updated_at,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class TaskRouteEligibilityRecord:
     task_route_eligibility_id: str
@@ -536,6 +668,9 @@ class OperatorControlFrontdoor:
     connect_database: Callable[[Mapping[str, str] | None], Awaitable[_Connection]] = (
         connect_workflow_database
     )
+    operator_control_repository_factory: Callable[[
+        _Connection,
+    ], PostgresOperatorControlRepository] | None = None
     task_route_eligibility_repository_factory: Callable[[
         _Connection,
     ], Any] | None = None
@@ -550,6 +685,10 @@ class OperatorControlFrontdoor:
     ], NativePrimaryCutoverRepository] | None = None
 
     def __post_init__(self) -> None:
+        if self.operator_control_repository_factory is None:
+            self.operator_control_repository_factory = (
+                self._default_operator_control_repository_factory
+            )
         if self.task_route_eligibility_repository_factory is None:
             self.task_route_eligibility_repository_factory = (
                 self._default_task_route_eligibility_repository_factory
@@ -562,6 +701,12 @@ class OperatorControlFrontdoor:
             self.native_primary_cutover_repository_factory = (
                 self._default_native_primary_cutover_repository_factory
             )
+
+    @staticmethod
+    def _default_operator_control_repository_factory(
+        conn: _Connection,
+    ) -> PostgresOperatorControlRepository:
+        return PostgresOperatorControlRepository(conn)  # type: ignore[arg-type]
 
     @staticmethod
     def _default_task_route_eligibility_repository_factory(
@@ -1545,6 +1690,134 @@ class OperatorControlFrontdoor:
         finally:
             await conn.close()
 
+    async def _set_circuit_breaker_override(
+        self,
+        *,
+        env: Mapping[str, str] | None,
+        provider_slug: str,
+        override_state: str,
+        effective_to: datetime | None,
+        reason_code: str,
+        rationale: str | None,
+        effective_from: datetime | None,
+        decided_by: str | None,
+        decision_source: str | None,
+    ) -> CircuitBreakerOverrideRecord:
+        normalized_provider_slug = _require_text(
+            provider_slug,
+            field_name="provider_slug",
+        ).lower()
+        normalized_override_state = _normalize_circuit_breaker_override_state(
+            override_state,
+        )
+        normalized_reason_code = _require_text(reason_code, field_name="reason_code")
+        normalized_effective_from = (
+            _now()
+            if effective_from is None
+            else _normalize_as_of(
+                effective_from,
+                error_type=ValueError,
+                reason_code="operator_control.invalid_effective_from",
+            )
+        )
+        normalized_effective_to = (
+            normalized_effective_from
+            if normalized_override_state == "reset" and effective_to is None
+            else (
+                None
+                if effective_to is None
+                else _normalize_as_of(
+                    effective_to,
+                    error_type=ValueError,
+                    reason_code="operator_control.invalid_effective_to",
+                )
+            )
+        )
+        if (
+            normalized_effective_to is not None
+            and normalized_override_state != "reset"
+            and normalized_effective_to <= normalized_effective_from
+        ):
+            raise ValueError("effective_to must be later than effective_from")
+        normalized_rationale = (
+            _optional_text(rationale, field_name="rationale")
+            or _default_circuit_breaker_rationale(
+                provider_slug=normalized_provider_slug,
+                override_state=normalized_override_state,
+                effective_to=normalized_effective_to,
+            )
+        )
+        normalized_decided_by = (
+            _optional_text(decided_by, field_name="decided_by")
+            or "workflow circuits"
+        )
+        source_suffix = _scope_fragment(normalized_reason_code, fallback="operator-control")
+        normalized_decision_source = (
+            _optional_text(decision_source, field_name="decision_source")
+            or f"workflow.circuits.{source_suffix}"
+        )
+        decision = OperatorDecisionAuthorityRecord(
+            operator_decision_id=_circuit_breaker_operator_decision_id(
+                normalized_provider_slug,
+            ),
+            decision_key=_circuit_breaker_decision_key(normalized_provider_slug),
+            decision_kind=_circuit_breaker_decision_kind(normalized_override_state),
+            decision_status=(
+                "inactive" if normalized_override_state == "reset" else "active"
+            ),
+            title=_circuit_breaker_override_title(
+                normalized_provider_slug,
+                normalized_override_state,
+            ),
+            rationale=normalized_rationale,
+            decided_by=normalized_decided_by,
+            decision_source=normalized_decision_source,
+            effective_from=normalized_effective_from,
+            effective_to=normalized_effective_to,
+            decided_at=normalized_effective_from,
+            created_at=normalized_effective_from,
+            updated_at=_now(),
+        )
+
+        conn = await self.connect_database(env)
+        try:
+            assert self.operator_control_repository_factory is not None
+            repository = self.operator_control_repository_factory(conn)
+            persisted = await repository.record_operator_decision(
+                operator_decision=decision,
+            )
+        finally:
+            await conn.close()
+
+        invalidate_circuit_breaker_override_cache()
+        return _circuit_breaker_override_record_from_decision(persisted)
+
+    async def set_circuit_breaker_override_async(
+        self,
+        *,
+        provider_slug: str,
+        override_state: str,
+        effective_to: datetime | None = None,
+        reason_code: str = "operator_control",
+        rationale: str | None = None,
+        effective_from: datetime | None = None,
+        decided_by: str | None = None,
+        decision_source: str | None = None,
+        env: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
+        record = await self._set_circuit_breaker_override(
+            env=env,
+            provider_slug=provider_slug,
+            override_state=override_state,
+            effective_to=effective_to,
+            reason_code=reason_code,
+            rationale=rationale,
+            effective_from=effective_from,
+            decided_by=decided_by,
+            decision_source=decision_source,
+        )
+        return {"circuit_breaker_override": record.to_json()}
+
     async def set_task_route_eligibility_window_async(
         self,
         *,
@@ -1625,7 +1898,7 @@ class OperatorControlFrontdoor:
         bug_ids: tuple[str, ...] | list[str] | None = None,
         roadmap_item_ids: tuple[str, ...] | list[str] | None = None,
         env: Mapping[str, str] | None = None,
-    ) -> dict[str, Any]:
+        ) -> dict[str, Any]:
         return await self._reconcile_work_item_closeout(
             env=env,
             action=action,
@@ -1633,6 +1906,37 @@ class OperatorControlFrontdoor:
             roadmap_item_ids=_coerce_text_sequence(
                 roadmap_item_ids,
                 field_name="roadmap_item_ids",
+            ),
+        )
+
+    def set_circuit_breaker_override(
+        self,
+        *,
+        provider_slug: str,
+        override_state: str,
+        effective_to: datetime | None = None,
+        reason_code: str = "operator_control",
+        rationale: str | None = None,
+        effective_from: datetime | None = None,
+        decided_by: str | None = None,
+        decision_source: str | None = None,
+        env: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
+        return _run_async(
+            self.set_circuit_breaker_override_async(
+                provider_slug=provider_slug,
+                override_state=override_state,
+                effective_to=effective_to,
+                reason_code=reason_code,
+                rationale=rationale,
+                effective_from=effective_from,
+                decided_by=decided_by,
+                decision_source=decision_source,
+                env=env,
+            ),
+            message=(
+                "operator_control.async_boundary_required: "
+                "operator control sync entrypoints require a non-async call boundary"
             ),
         )
 
@@ -1957,6 +2261,60 @@ async def arecord_work_item_workflow_binding(
         bound_by_decision_id=bound_by_decision_id,
         created_at=created_at,
         updated_at=updated_at,
+        env=env,
+    )
+
+
+def set_circuit_breaker_override(
+    *,
+    provider_slug: str,
+    override_state: str,
+    effective_to: datetime | None = None,
+    reason_code: str = "operator_control",
+    rationale: str | None = None,
+    effective_from: datetime | None = None,
+    decided_by: str | None = None,
+    decision_source: str | None = None,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Persist one durable circuit-breaker override through the default frontdoor."""
+
+    return OperatorControlFrontdoor().set_circuit_breaker_override(
+        provider_slug=provider_slug,
+        override_state=override_state,
+        effective_to=effective_to,
+        reason_code=reason_code,
+        rationale=rationale,
+        effective_from=effective_from,
+        decided_by=decided_by,
+        decision_source=decision_source,
+        env=env,
+    )
+
+
+async def aset_circuit_breaker_override(
+    *,
+    provider_slug: str,
+    override_state: str,
+    effective_to: datetime | None = None,
+    reason_code: str = "operator_control",
+    rationale: str | None = None,
+    effective_from: datetime | None = None,
+    decided_by: str | None = None,
+    decision_source: str | None = None,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Persist one durable circuit-breaker override in async contexts."""
+
+    return await OperatorControlFrontdoor().set_circuit_breaker_override_async(
+        provider_slug=provider_slug,
+        override_state=override_state,
+        effective_to=effective_to,
+        reason_code=reason_code,
+        rationale=rationale,
+        effective_from=effective_from,
+        decided_by=decided_by,
+        decision_source=decision_source,
         env=env,
     )
 
@@ -2521,9 +2879,11 @@ __all__ = [
     "NativeWorkflowFlowFrontdoor",
     "NativeWorkflowFlowRecord",
     "NativeRecurringReviewRepairFlowReadModel",
+    "CircuitBreakerOverrideRecord",
     "OperatorControlFrontdoor",
     "TaskRouteEligibilityRecord",
     "TaskRouteEligibilityWriteResult",
+    "aset_circuit_breaker_override",
     "aadmit_native_primary_cutover_gate",
     "aroadmap_write",
     "areconcile_work_item_closeout",
@@ -2535,5 +2895,6 @@ __all__ = [
     "roadmap_write",
     "reconcile_work_item_closeout",
     "record_work_item_workflow_binding",
+    "set_circuit_breaker_override",
     "set_task_route_eligibility_window",
 ]

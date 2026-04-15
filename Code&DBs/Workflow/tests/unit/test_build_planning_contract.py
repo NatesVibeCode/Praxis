@@ -35,8 +35,19 @@ def _base_definition() -> dict[str, object]:
 
 def test_candidate_resolution_manifest_surfaces_proposals_only(monkeypatch) -> None:
     monkeypatch.setattr(
-        "runtime.build_planning_contract.list_latest_workflow_build_review_decisions",
-        lambda conn, workflow_id, definition_revision: [],
+        "runtime.build_planning_contract.effective_workflow_build_review_state",
+        lambda conn, workflow_id, definition_revision: {
+            "review_group_ref": None,
+            "latest_records": [],
+            "latest_by_target": {},
+            "approval_records": [],
+            "approved_binding_refs": [],
+            "approved_import_snapshot_refs": [],
+            "approved_bundle_refs": [],
+            "approved_workflow_shape_ref": None,
+            "proposal_requests": [],
+            "widening_ops": [],
+        },
     )
 
     manifest = build_candidate_resolution_manifest(
@@ -64,14 +75,18 @@ def test_reviewable_plan_tracks_approvals_and_proposal_requests(monkeypatch) -> 
             "review_decision_id": "wbrd_binding_approve",
             "workflow_id": "wf_alpha",
             "definition_revision": "def_candidate_manifest_alpha",
+            "review_group_ref": "workflow_build:wf_alpha:def_candidate_manifest_alpha",
             "target_kind": "binding",
             "target_ref": "binding:ref-001",
+            "slot_ref": "binding:ref-001",
             "decision": "approve",
             "actor_type": "model",
             "actor_ref": "planner-agent",
+            "authority_scope": "workflow_build/binding",
             "approval_mode": "review",
             "rationale": "Top ranked Gmail search binding is correct.",
             "source_subpath": "review_decisions",
+            "supersedes_decision_ref": None,
             "candidate_ref": "integration_registry:gmail/search",
             "candidate_payload": {
                 "target_ref": "integration_registry:gmail/search",
@@ -84,14 +99,18 @@ def test_reviewable_plan_tracks_approvals_and_proposal_requests(monkeypatch) -> 
             "review_decision_id": "wbrd_shape_widen",
             "workflow_id": "wf_alpha",
             "definition_revision": "def_candidate_manifest_alpha",
+            "review_group_ref": "workflow_build:wf_alpha:def_candidate_manifest_alpha",
             "target_kind": "workflow_shape",
             "target_ref": "shape:current",
+            "slot_ref": "workflow_shape",
             "decision": "widen",
             "actor_type": "human",
             "actor_ref": "nate",
+            "authority_scope": "workflow_build/workflow_shape",
             "approval_mode": "manual",
             "rationale": "Show an alternate escalation-only path.",
             "source_subpath": "review_decisions",
+            "supersedes_decision_ref": "wbrd_shape_old",
             "candidate_ref": None,
             "candidate_payload": {
                 "operation": "request_alternate_workflow_shapes",
@@ -103,14 +122,18 @@ def test_reviewable_plan_tracks_approvals_and_proposal_requests(monkeypatch) -> 
             "review_decision_id": "wbrd_bundle_proposal",
             "workflow_id": "wf_alpha",
             "definition_revision": "def_candidate_manifest_alpha",
+            "review_group_ref": "workflow_build:wf_alpha:def_candidate_manifest_alpha",
             "target_kind": "capability_bundle",
             "target_ref": "capability_bundle:email_triage",
+            "slot_ref": "capability_bundle:support_triage",
             "decision": "proposal_request",
             "actor_type": "policy",
             "actor_ref": "workflow.review.policy",
+            "authority_scope": "workflow_build/capability_bundle",
             "approval_mode": "policy",
             "rationale": "Surface the outbound-reply bundle for explicit review.",
             "source_subpath": "review_decisions",
+            "supersedes_decision_ref": None,
             "candidate_ref": "bundle:email-triage-reply",
             "candidate_payload": {
                 "bundle_ref": "bundle:email-triage-reply",
@@ -120,8 +143,21 @@ def test_reviewable_plan_tracks_approvals_and_proposal_requests(monkeypatch) -> 
         },
     ]
     monkeypatch.setattr(
-        "runtime.build_planning_contract.list_latest_workflow_build_review_decisions",
-        lambda conn, workflow_id, definition_revision: decisions,
+        "runtime.build_planning_contract.effective_workflow_build_review_state",
+        lambda conn, workflow_id, definition_revision: {
+            "review_group_ref": "workflow_build:wf_alpha:def_candidate_manifest_alpha",
+            "latest_records": decisions,
+            "latest_by_target": {
+                (str(item["target_kind"]), str(item["target_ref"])): item for item in decisions
+            },
+            "approval_records": decisions,
+            "approved_binding_refs": ["binding:ref-001"],
+            "approved_import_snapshot_refs": [],
+            "approved_bundle_refs": [],
+            "approved_workflow_shape_ref": None,
+            "proposal_requests": [decisions[2]],
+            "widening_ops": [decisions[1]],
+        },
     )
 
     manifest = build_candidate_resolution_manifest(
@@ -148,8 +184,10 @@ def test_reviewable_plan_tracks_approvals_and_proposal_requests(monkeypatch) -> 
     ]
     assert reviewable_plan["proposal_requests"][0]["target_kind"] == "capability_bundle"
     assert reviewable_plan["proposal_requests"][0]["requested_by"]["actor_type"] == "policy"
+    assert reviewable_plan["proposal_requests"][0]["authority_scope"] == "workflow_build/capability_bundle"
     assert reviewable_plan["widening_ops"][0]["operation"] == {
         "operation": "request_alternate_workflow_shapes",
         "count": 2,
     }
+    assert reviewable_plan["widening_ops"][0]["supersedes_decision_ref"] == "wbrd_shape_old"
     assert reviewable_plan["status"] == "needs_proposals"

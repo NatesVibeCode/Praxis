@@ -1085,6 +1085,8 @@ def _workflow_build_payload(
     compiled_spec: dict[str, Any] | None = None,
     build_bundle: dict[str, Any] | None = None,
     planning_notes: list[str] | None = None,
+    intent_brief: dict[str, Any] | None = None,
+    execution_manifest: dict[str, Any] | None = None,
     undo_receipt: dict[str, Any] | None = None,
     mutation_event_id: int | None = None,
 ) -> dict[str, Any]:
@@ -1095,9 +1097,13 @@ def _workflow_build_payload(
         from runtime.build_review_decisions import materialize_reviewed_build_definition
         from runtime.build_planning_contract import (
             build_candidate_resolution_manifest,
+            build_intent_brief,
             build_reviewable_plan,
         )
         from runtime.operating_model_planner import current_compiled_spec
+        from storage.postgres.workflow_build_planning_repository import (
+            load_latest_workflow_build_execution_manifest,
+        )
 
         current_plan = current_compiled_spec(effective_definition, effective_compiled_spec)
         if conn is not None:
@@ -1113,11 +1119,35 @@ def _workflow_build_payload(
             effective_definition = apply_authority_bundle(effective_definition, compiled_spec=current_plan)
         effective_compiled_spec = current_plan
         build_bundle = build_authority_bundle(effective_definition, compiled_spec=current_plan)
+        if not isinstance(intent_brief, dict):
+            intent_brief = build_intent_brief(
+                definition=effective_definition,
+                workflow_id=_text(row.get("id")) or None,
+                conn=conn,
+            )
+        if not isinstance(execution_manifest, dict) and conn is not None:
+            definition_revision = _text(effective_definition.get("definition_revision"))
+            if definition_revision and isinstance(effective_compiled_spec, dict):
+                try:
+                    execution_manifest = load_latest_workflow_build_execution_manifest(
+                        conn,
+                        workflow_id=_text(row.get("id")),
+                        definition_revision=definition_revision,
+                    )
+                except Exception:
+                    execution_manifest = None
     else:
         from runtime.build_planning_contract import (
             build_candidate_resolution_manifest,
+            build_intent_brief,
             build_reviewable_plan,
         )
+        if not isinstance(intent_brief, dict):
+            intent_brief = build_intent_brief(
+                definition=effective_definition,
+                workflow_id=_text(row.get("id")) or None,
+                conn=conn,
+            )
     blocking_issues = [
         issue
         for issue in build_bundle.get("build_issues", [])
@@ -1144,6 +1174,7 @@ def _workflow_build_payload(
             "version": int(row.get("version") or 1),
             "updated_at": _isoformat(row.get("updated_at")),
         },
+        "intent_brief": intent_brief or {},
         "definition": effective_definition,
         "compiled_spec": effective_compiled_spec,
         "planning_notes": planning_notes or [],
@@ -1153,11 +1184,17 @@ def _workflow_build_payload(
         "binding_ledger": build_bundle.get("binding_ledger") or [],
         "import_snapshots": build_bundle.get("import_snapshots") or [],
         "authority_attachments": build_bundle.get("authority_attachments") or [],
+        "review_state": (
+            _serialize(effective_definition.get("review_state"))
+            if isinstance(effective_definition.get("review_state"), dict)
+            else {}
+        ),
         "build_issues": build_bundle.get("build_issues") or [],
         "projection_status": build_bundle.get("projection_status") or {},
         "compiled_spec_projection": build_bundle.get("compiled_spec_projection"),
         "candidate_resolution_manifest": candidate_resolution_manifest,
         "reviewable_plan": reviewable_plan,
+        "execution_manifest": execution_manifest,
         "undo_receipt": undo_receipt,
         "mutation_event_id": mutation_event_id,
     }
@@ -1975,6 +2012,8 @@ def _handle_workflow_build_post(request: Any, path: str) -> None:
                 compiled_spec=result["compiled_spec"],
                 build_bundle=result["build_bundle"],
                 planning_notes=result["planning_notes"],
+                intent_brief=result.get("intent_brief"),
+                execution_manifest=result.get("execution_manifest"),
                 undo_receipt=result.get("undo_receipt"),
                 mutation_event_id=result.get("mutation_event_id"),
             ),

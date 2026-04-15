@@ -158,17 +158,62 @@ def _render_route_facets(rows: object, *, field_name: str, limit: int = 5) -> st
     return ", ".join(parts)
 
 
-def _circuits_command(*, stdout: TextIO) -> int:
-    """Handle `workflow circuits` — print all circuit breaker states as JSON."""
+def _circuits_command(args: list[str], *, stdout: TextIO) -> int:
+    """Handle `workflow circuits [list|open|close|reset]`."""
 
-    import json as _json
+    if args and args[0] in {"-h", "--help"}:
+        stdout.write(
+            "usage: workflow circuits [list [provider_slug]]\n"
+            "       workflow circuits open <provider_slug> [--effective-to <iso8601>] [--reason <code>] [--rationale <text>] [--decided-by <principal>] [--decision-source <source>]\n"
+            "       workflow circuits close <provider_slug> [--effective-to <iso8601>] [--reason <code>] [--rationale <text>] [--decided-by <principal>] [--decision-source <source>]\n"
+            "       workflow circuits reset <provider_slug> [--reason <code>] [--rationale <text>] [--decided-by <principal>] [--decision-source <source>]\n"
+            "\n"
+            "Show effective circuit state or apply a durable manual override through operator-control authority.\n"
+        )
+        return 0
 
-    from runtime.circuit_breaker import get_circuit_breakers
+    action = "list"
+    tail = list(args)
+    if tail and tail[0] in {"list", "open", "close", "reset"}:
+        action = tail.pop(0)
 
-    registry = get_circuit_breakers()
-    states = registry.all_states()
-    stdout.write(_json.dumps(states, indent=2) + "\n")
-    return 0
+    params: dict[str, object] = {"action": action}
+    if action == "list":
+        if tail:
+            params["provider_slug"] = tail.pop(0)
+        if tail:
+            stdout.write(f"error: unexpected arguments for circuits list: {' '.join(tail)}\n")
+            return 2
+    else:
+        if not tail:
+            stdout.write(f"error: workflow circuits {action} requires <provider_slug>\n")
+            return 2
+        params["provider_slug"] = tail.pop(0)
+        index = 0
+        while index < len(tail):
+            flag = tail[index]
+            if index + 1 >= len(tail):
+                stdout.write(f"error: missing value for {flag}\n")
+                return 2
+            value = tail[index + 1]
+            if flag == "--effective-to":
+                params["effective_to"] = value
+            elif flag == "--reason":
+                params["reason_code"] = value
+            elif flag == "--rationale":
+                params["rationale"] = value
+            elif flag == "--decided-by":
+                params["decided_by"] = value
+            elif flag == "--decision-source":
+                params["decision_source"] = value
+            else:
+                stdout.write(f"error: unknown flag for workflow circuits {action}: {flag}\n")
+                return 2
+            index += 2
+
+    exit_code, payload = run_cli_tool("praxis_circuits", params)
+    print_json(stdout, payload)
+    return exit_code
 
 
 def _slots_command(*, stdout: TextIO) -> int:

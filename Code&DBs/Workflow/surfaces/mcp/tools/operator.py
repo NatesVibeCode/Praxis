@@ -1,6 +1,7 @@
 """Tools: praxis_operator_view, praxis_status."""
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from surfaces.api import operator_read, operator_write
@@ -8,6 +9,18 @@ from surfaces.api.handlers import workflow_query_core
 from storage.postgres.workflow_runtime_repository import reset_observability_metrics
 
 from ..subsystems import _subs
+
+
+def _parse_iso_datetime(value: object, *, field_name: str) -> datetime:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field_name} must be a non-empty ISO-8601 datetime string")
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(f"{field_name} must be a valid ISO-8601 datetime string") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError(f"{field_name} must include a timezone offset")
+    return parsed
 
 
 def tool_praxis_status(params: dict) -> dict:
@@ -234,6 +247,61 @@ def tool_praxis_operator_roadmap_view(params: dict) -> dict:
 
     return operator_read.query_roadmap_tree(
         root_roadmap_item_id=root_roadmap_item_id,
+    )
+
+
+def tool_praxis_circuits(params: dict) -> dict:
+    """Inspect or override provider circuit breakers through operator-control authority."""
+
+    action = str(params.get("action") or "list").strip().lower()
+    if action == "list":
+        from runtime.circuit_breaker import get_circuit_breakers
+
+        try:
+            payload = get_circuit_breakers().all_states()
+        except Exception as exc:
+            return {"error": str(exc)}
+        provider_slug = str(params.get("provider_slug") or "").strip().lower()
+        if provider_slug:
+            return {
+                "circuits": (
+                    {provider_slug: payload[provider_slug]}
+                    if provider_slug in payload
+                    else {}
+                )
+            }
+        return {"circuits": payload}
+
+    provider_slug = str(params.get("provider_slug") or "").strip().lower()
+    if not provider_slug:
+        return {"error": "provider_slug is required for circuit override actions"}
+
+    if action not in {"open", "close", "reset"}:
+        return {"error": "Unknown action. Supported actions: list, open, close, reset"}
+
+    effective_to = params.get("effective_to")
+    effective_from = params.get("effective_from")
+    return operator_write.set_circuit_breaker_override(
+        provider_slug=provider_slug,
+        override_state={
+            "open": "open",
+            "close": "closed",
+            "reset": "reset",
+        }[action],
+        effective_to=(
+            _parse_iso_datetime(effective_to, field_name="effective_to")
+            if effective_to is not None
+            else None
+        ),
+        reason_code=str(params.get("reason_code") or "operator_control"),
+        rationale=params.get("rationale"),
+        effective_from=(
+            _parse_iso_datetime(effective_from, field_name="effective_from")
+            if effective_from is not None
+            else None
+        ),
+        decided_by=params.get("decided_by"),
+        decision_source=params.get("decision_source"),
     )
 
 
@@ -511,6 +579,59 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "type": "object",
                 "properties": {
                     "root_roadmap_item_id": {"type": "string"},
+                },
+            },
+        },
+    ),
+    "praxis_circuits": (
+        tool_praxis_circuits,
+        {
+            "description": (
+                "Inspect effective circuit-breaker state or apply a durable manual override for one provider.\n\n"
+                "ACTIONS:\n"
+                "  'list'  — show effective state, runtime state, and any active manual override metadata\n"
+                "  'open'  — force the breaker open for one provider until reset or effective_to\n"
+                "  'close' — force the breaker closed for one provider until reset or effective_to\n"
+                "  'reset' — clear the manual override and return to runtime-managed breaker behavior\n\n"
+                "USE WHEN: you need operator control over provider traffic without mutating in-memory state by hand."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["list", "open", "close", "reset"],
+                        "default": "list",
+                    },
+                    "provider_slug": {
+                        "type": "string",
+                        "description": "Provider slug for open, close, reset, or to filter list output.",
+                    },
+                    "effective_to": {
+                        "type": "string",
+                        "description": "Optional ISO-8601 datetime when the manual override expires.",
+                    },
+                    "effective_from": {
+                        "type": "string",
+                        "description": "Optional ISO-8601 datetime for the decision timestamp.",
+                    },
+                    "reason_code": {
+                        "type": "string",
+                        "description": "Operator reason code stored on the decision row.",
+                        "default": "operator_control",
+                    },
+                    "rationale": {
+                        "type": "string",
+                        "description": "Human-readable rationale for the override.",
+                    },
+                    "decided_by": {
+                        "type": "string",
+                        "description": "Principal applying the override.",
+                    },
+                    "decision_source": {
+                        "type": "string",
+                        "description": "Source artifact or workflow applying the override.",
+                    },
                 },
             },
         },

@@ -24,6 +24,7 @@ from typing import Any
 
 from adapters import provider_transport
 from adapters.provider_types import ProviderAdapterContract, ProviderCLIProfile
+from runtime._workflow_database import resolve_runtime_database_url
 from storage.postgres.connection import resolve_workflow_database_url
 from storage.postgres.validators import PostgresConfigurationError
 
@@ -171,13 +172,8 @@ def _read_repo_env_file(path: Path) -> dict[str, str]:
 
 
 def _require_database_url() -> str:
-    if _DATABASE_URL_ENV not in os.environ:
-        repo_env_path = _repo_root() / ".env"
-        repo_env = _read_repo_env_file(repo_env_path)
-        if _DATABASE_URL_ENV in repo_env:
-            return resolve_workflow_database_url(repo_env)
     try:
-        return resolve_workflow_database_url()
+        return str(resolve_runtime_database_url(repo_root=_repo_root(), required=True))
     except PostgresConfigurationError as exc:
         raise RuntimeError(
             "provider_registry requires explicit WORKFLOW_DATABASE_URL Postgres authority"

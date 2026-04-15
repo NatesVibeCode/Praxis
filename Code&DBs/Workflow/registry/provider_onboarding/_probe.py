@@ -13,6 +13,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import Any
 
+from adapters.keychain import resolve_secret
+
 from ._spec import (
     ProviderOnboardingModelSpec,
     ProviderOnboardingSpec,
@@ -140,7 +142,7 @@ def _resolve_api_key_from_env(
     env: Mapping[str, str],
 ) -> str | None:
     for env_var in spec.api_key_env_vars:
-        value = str(env.get(env_var, "")).strip()
+        value = str(resolve_secret(env_var, env=dict(env)) or "").strip()
         if value:
             return value
     return None

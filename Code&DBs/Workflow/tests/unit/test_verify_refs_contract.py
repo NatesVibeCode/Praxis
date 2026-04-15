@@ -1122,6 +1122,7 @@ def test_spec_uses_graph_runtime_for_single_prompt_dispatch_jobs() -> None:
     assert nodes["run"].adapter_type == "cli_llm"
     assert nodes["run"].inputs["provider_slug"] == "openai"
     assert nodes["run"].inputs["model_slug"] == "gpt-5.4-mini"
+    assert nodes["run"].inputs["workdir"] == "/tmp/workspace"
     assert nodes["run"].inputs["scope_write"] == ["greeting.py"]
     assert nodes["run__context"].inputs["system_prompt"] == "Stay inside scope."
     assert nodes["run__writer"].inputs["workspace_root"] == "/tmp/workspace"

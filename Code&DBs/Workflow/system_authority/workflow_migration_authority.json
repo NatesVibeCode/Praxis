@@ -50,7 +50,8 @@
     "119_context_bundle_sandbox_profile_ref.sql",
     "120_workflow_build_review_proposal_requests.sql",
     "121_cursor_background_agent_api.sql",
-    "122_workflow_build_review_contract_fields.sql"
+    "122_workflow_build_review_contract_fields.sql",
+    "123_workflow_build_planning_state_registry.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -1698,6 +1699,80 @@
         "object_type": "index",
         "object_name": "idx_workflow_build_review_decisions_group_target"
       }
+    ],
+    "123_workflow_build_planning_state_registry.sql": [
+      {
+        "object_type": "table",
+        "object_name": "review_policy_definitions"
+      },
+      {
+        "object_type": "index",
+        "object_name": "review_policy_definitions_status_scope_idx"
+      },
+      {
+        "object_type": "table",
+        "object_name": "capability_bundle_definitions"
+      },
+      {
+        "object_type": "index",
+        "object_name": "capability_bundle_definitions_status_family_idx"
+      },
+      {
+        "object_type": "table",
+        "object_name": "workflow_shape_family_definitions"
+      },
+      {
+        "object_type": "index",
+        "object_name": "workflow_shape_family_definitions_status_policy_idx"
+      },
+      {
+        "object_type": "table",
+        "object_name": "workflow_build_intents"
+      },
+      {
+        "object_type": "index",
+        "object_name": "workflow_build_intents_workflow_definition_idx"
+      },
+      {
+        "object_type": "table",
+        "object_name": "workflow_build_candidate_manifests"
+      },
+      {
+        "object_type": "index",
+        "object_name": "workflow_build_candidate_manifests_workflow_definition_idx"
+      },
+      {
+        "object_type": "table",
+        "object_name": "workflow_build_candidate_slots"
+      },
+      {
+        "object_type": "index",
+        "object_name": "workflow_build_candidate_slots_manifest_kind_idx"
+      },
+      {
+        "object_type": "table",
+        "object_name": "workflow_build_candidates"
+      },
+      {
+        "object_type": "index",
+        "object_name": "workflow_build_candidates_manifest_slot_rank_idx"
+      },
+      {
+        "object_type": "table",
+        "object_name": "workflow_build_review_sessions"
+      },
+      {
+        "object_type": "index",
+        "object_name": "workflow_build_review_sessions_workflow_definition_idx"
+      },
+      {
+        "object_type": "table",
+        "object_name": "workflow_build_execution_manifests"
+      },
+      {
+        "object_type": "index",
+        "object_name": "workflow_build_execution_manifests_workflow_definition_idx"
+      }
     ]
   },
   "policy_buckets": {
@@ -1752,7 +1827,8 @@
       "119_context_bundle_sandbox_profile_ref.sql",
       "120_workflow_build_review_proposal_requests.sql",
       "121_cursor_background_agent_api.sql",
-      "122_workflow_build_review_contract_fields.sql"
+      "122_workflow_build_review_contract_fields.sql",
+      "123_workflow_build_planning_state_registry.sql"
     ],
     "bootstrap_only": [
       "012_execution_leases.sql",

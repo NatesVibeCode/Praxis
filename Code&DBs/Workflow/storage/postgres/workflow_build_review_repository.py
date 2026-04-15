@@ -152,6 +152,7 @@ def record_workflow_build_review_decision(
             definition_revision=normalized_definition_revision,
             target_kind=normalized_target_kind,
             target_ref=normalized_target_ref,
+            slot_ref=normalized_slot_ref,
         )
         if previous is not None:
             normalized_supersedes_decision_ref = _optional_text(
@@ -181,7 +182,7 @@ def record_workflow_build_review_decision(
             candidate_payload,
             decided_at
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb, $17
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17::jsonb, $18
         )
         RETURNING
             review_decision_id,
@@ -235,6 +236,7 @@ def get_latest_workflow_build_review_decision(
     definition_revision: str,
     target_kind: str,
     target_ref: str,
+    slot_ref: str | None = None,
 ) -> dict[str, Any] | None:
     normalized_workflow_id = _require_text(workflow_id, field_name="workflow_id")
     normalized_definition_revision = _require_text(
@@ -243,8 +245,8 @@ def get_latest_workflow_build_review_decision(
     )
     normalized_target_kind = _require_text(target_kind, field_name="target_kind")
     normalized_target_ref = _require_text(target_ref, field_name="target_ref")
-    row = conn.fetchrow(
-        """
+    normalized_slot_ref = _optional_text(slot_ref, field_name="slot_ref")
+    query = """
         SELECT
             review_decision_id,
             workflow_id,
@@ -270,14 +272,21 @@ def get_latest_workflow_build_review_decision(
           AND definition_revision = $2
           AND target_kind = $3
           AND target_ref = $4
-        ORDER BY decided_at DESC, created_at DESC, review_decision_id DESC
-        LIMIT 1
-        """,
+    """
+    params: list[Any] = [
         normalized_workflow_id,
         normalized_definition_revision,
         normalized_target_kind,
         normalized_target_ref,
-    )
+    ]
+    if normalized_slot_ref is not None:
+        query += " AND slot_ref = $5"
+        params.append(normalized_slot_ref)
+    query += """
+        ORDER BY decided_at DESC, created_at DESC, review_decision_id DESC
+        LIMIT 1
+    """
+    row = conn.fetchrow(query, *params)
     return _normalize_row(row, operation="get_latest_workflow_build_review_decision") if row else None
 
 

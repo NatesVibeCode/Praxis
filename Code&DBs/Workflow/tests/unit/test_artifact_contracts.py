@@ -93,6 +93,39 @@ def test_build_execution_bundle_renders_authoring_and_acceptance_contracts() -> 
     assert "** APPROVAL REQUIRED **" in rendered
 
 
+def test_build_execution_bundle_can_derive_tool_authority_from_execution_manifest() -> None:
+    execution_manifest = {
+        "execution_manifest_ref": "execution_manifest:wf_alpha:def_alpha:manifest_alpha",
+        "approved_bundle_refs": ["capability_bundle:email_triage"],
+        "tool_allowlist": {
+            "mcp_tools": ["praxis_integration", "praxis_status"],
+            "adapter_tools": ["repo_fs"],
+        },
+        "verify_refs": ["verify_ref.workflow.support_triage"],
+    }
+
+    build_bundle = build_execution_bundle(
+        job_label="builder.support",
+        prompt="Debug the support inbox flow and then research alternatives.",
+        task_type=None,
+        execution_manifest=execution_manifest,
+    )
+    architecture_bundle = build_execution_bundle(
+        job_label="builder.support",
+        prompt="Design a totally different architecture essay about otters.",
+        task_type=None,
+        execution_manifest=execution_manifest,
+    )
+
+    assert build_bundle["execution_manifest_ref"] == execution_manifest["execution_manifest_ref"]
+    assert build_bundle["approved_bundle_refs"] == ["capability_bundle:email_triage"]
+    assert build_bundle["allowed_tools"] == ["repo_fs"]
+    assert build_bundle["mcp_tool_names"] == architecture_bundle["mcp_tool_names"]
+    assert "praxis_integration" in build_bundle["mcp_tool_names"]
+    assert "praxis_status" in build_bundle["mcp_tool_names"]
+    assert "praxis_workflow_validate" in build_bundle["mcp_tool_names"]
+
+
 def test_evaluate_submission_acceptance_tracks_pending_and_passed_states() -> None:
     acceptance_contract = {
         "structural": {

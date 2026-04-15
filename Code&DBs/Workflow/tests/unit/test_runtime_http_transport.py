@@ -36,6 +36,34 @@ def test_openai_handler_delegates_to_llm_client(monkeypatch) -> None:
     assert captured["messages"] == ({"role": "user", "content": "Reply with OPENAI_HANDLER_OK"},)
 
 
+def test_openai_handler_resolves_api_key_from_secret_store(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_call_llm(request):
+        captured["api_key"] = request.api_key
+        return SimpleNamespace(content="OPENAI_SECRET_OK")
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(
+        http_transport,
+        "resolve_secret",
+        lambda env_var, env=None: "openai-secret-key" if env_var == "OPENAI_API_KEY" else None,
+    )
+    monkeypatch.setattr(http_transport, "call_llm", _fake_call_llm)
+
+    result = http_transport.get_handler("openai_chat_completions")(
+        "Reply with OPENAI_SECRET_OK",
+        model="gpt-4.1",
+        max_tokens=64,
+        timeout=30,
+        api_endpoint="https://api.openai.com/v1/chat/completions",
+        api_key_env="OPENAI_API_KEY",
+    )
+
+    assert result == "OPENAI_SECRET_OK"
+    assert captured["api_key"] == "openai-secret-key"
+
+
 def test_cursor_background_agent_handler_uses_git_repo_context(monkeypatch) -> None:
     calls: list[tuple[str, str, dict[str, object] | None]] = []
 
@@ -74,6 +102,11 @@ def test_cursor_background_agent_handler_uses_git_repo_context(monkeypatch) -> N
         raise AssertionError(f"unexpected cursor API url: {url}")
 
     monkeypatch.setenv("CURSOR_API_KEY", "cursor-test-key")
+    monkeypatch.setattr(
+        http_transport,
+        "resolve_secret",
+        lambda env_var, env=None: "cursor-test-key" if env_var == "CURSOR_API_KEY" else None,
+    )
     monkeypatch.setattr(http_transport.subprocess, "run", _fake_run)
     monkeypatch.setattr(http_transport, "_json_request", _fake_json_request)
     monkeypatch.setattr(http_transport.time, "sleep", lambda _seconds: None)

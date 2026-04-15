@@ -30,9 +30,13 @@ from .provider_registry import (
     supports_adapter,
 )
 from .task_profiles import try_resolve_profile
+from runtime.http_transport import call_transport
 
 _DEFAULT_MAX_TOKENS = 4096
 _DEFAULT_TEMPERATURE = 0.0
+_LLM_CLIENT_PROTOCOL_FAMILIES = frozenset(
+    {"anthropic_messages", "google_generate_content", "openai_chat_completions"}
+)
 
 
 def _utc_now() -> datetime:
@@ -57,6 +61,24 @@ def _extract_messages(
         return ({"role": "user", "content": prompt.strip()},)
 
     return None
+
+
+def _plain_text_prompt(
+    messages: tuple[dict[str, str], ...],
+    *,
+    system_prompt: str | None,
+) -> str:
+    segments: list[str] = []
+    normalized_system = str(system_prompt or "").strip()
+    if normalized_system:
+        segments.append(f"System:\n{normalized_system}")
+    for message in messages:
+        content = str(message.get("content") or "").strip()
+        if not content:
+            continue
+        role = str(message.get("role") or "user").strip().title() or "User"
+        segments.append(f"{role}:\n{content}")
+    return "\n\n".join(segments).strip()
 
 
 def _failure_outputs(
@@ -756,9 +778,39 @@ class LLMTaskAdapter(BaseNodeAdapter):
             )
 
         try:
-            response = call_llm(llm_request)
-        except LLMClientError as exc:
-            if exc.reason_code == "llm_client.cancelled":
+            if llm_request.protocol_family in _LLM_CLIENT_PROTOCOL_FAMILIES:
+                response = call_llm(llm_request)
+                completion = response.content
+                response_model = response.model
+                response_provider = response.provider_slug
+                response_usage = response.usage
+                response_latency_ms = response.latency_ms
+            else:
+                completion = call_transport(
+                    llm_request.protocol_family or "",
+                    _plain_text_prompt(messages, system_prompt=system_prompt),
+                    model=model_slug,
+                    max_tokens=max_tokens,
+                    timeout=normalized_timeout_seconds or contract.timeout_seconds,
+                    api_endpoint=endpoint_uri,
+                    api_key=credential.api_key,
+                    api_key_env=auth_ref,
+                    workdir=(
+                        _text_value(
+                            payload.get("workdir"),
+                            field_name="input_payload.workdir",
+                        )
+                        if payload.get("workdir") is not None
+                        else None
+                    ),
+                )
+                response_model = model_slug
+                response_provider = provider_slug
+                response_usage = {}
+                response_latency_ms = None
+        except (LLMClientError, RuntimeError) as exc:
+            reason_code_value = getattr(exc, "reason_code", "adapter.network_error")
+            if reason_code_value == "llm_client.cancelled":
                 return cancelled_task_result(
                     request=request,
                     executor_type=LLMTaskAdapter.executor_type,
@@ -773,15 +825,24 @@ class LLMTaskAdapter(BaseNodeAdapter):
                         protocol_family=llm_request.protocol_family,
                     )),
                 )
+            status_code = getattr(exc, "status_code", None)
             if contract is not None:
-                reason_code = contract.map_failure_code(exc.reason_code)
-            elif exc.reason_code == "llm_client.http_error":
+                reason_code = contract.map_failure_code(reason_code_value)
+            elif reason_code_value == "llm_client.http_error":
                 reason_code = f"{failure_namespace}.http_error"
-            elif exc.reason_code == "llm_client.network_error":
+            elif reason_code_value == "http_transport.http_error":
+                reason_code = f"{failure_namespace}.http_error"
+            elif reason_code_value == "llm_client.network_error":
                 reason_code = f"{failure_namespace}.network_error"
-            elif exc.reason_code == "llm_client.timeout":
+            elif reason_code_value == "http_transport.network_error":
+                reason_code = f"{failure_namespace}.network_error"
+            elif reason_code_value == "llm_client.timeout":
                 reason_code = f"{failure_namespace}.timeout"
-            elif exc.reason_code == "llm_client.response_parse_error":
+            elif reason_code_value == "http_transport.timeout":
+                reason_code = f"{failure_namespace}.timeout"
+            elif reason_code_value == "llm_client.response_parse_error":
+                reason_code = f"{failure_namespace}.response_parse_error"
+            elif reason_code_value == "http_transport.response_parse_error":
                 reason_code = f"{failure_namespace}.response_parse_error"
             else:
                 reason_code = f"{failure_namespace}.network_error"
@@ -799,7 +860,7 @@ class LLMTaskAdapter(BaseNodeAdapter):
                     model_slug=model_slug,
                     endpoint_uri=endpoint_uri,
                     protocol_family=llm_request.protocol_family,
-                    status_code=exc.status_code,
+                    status_code=status_code,
                     stderr=str(exc),
                 )),
             )
@@ -812,11 +873,11 @@ class LLMTaskAdapter(BaseNodeAdapter):
             executor_type=self.executor_type,
             inputs=inputs,
             outputs={
-                "completion": response.content,
-                "model": response.model,
-                "provider": response.provider_slug,
-                "usage": response.usage,
-                "latency_ms": response.latency_ms,
+                "completion": completion,
+                "model": response_model,
+                "provider": response_provider,
+                "usage": response_usage,
+                "latency_ms": response_latency_ms,
                 "transport_kind": transport_kind,
                 "failure_namespace": failure_namespace,
                 "endpoint_uri": endpoint_uri,

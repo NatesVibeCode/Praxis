@@ -733,6 +733,16 @@ def test_help_can_show_command_specific_usage() -> None:
     assert "workflow run -p <prompt>" in rendered
 
 
+def test_help_can_show_circuits_usage() -> None:
+    stdout = StringIO()
+
+    assert workflow_cli_main(["help", "circuits"], stdout=stdout) == 0
+
+    rendered = stdout.getvalue()
+    assert "workflow circuits open <provider_slug>" in rendered
+    assert "workflow circuits reset <provider_slug>" in rendered
+
+
 def test_help_can_show_native_operator_usage() -> None:
     stdout = StringIO()
 
@@ -762,6 +772,58 @@ def test_native_operator_help_entrypoint_is_available() -> None:
     rendered = stdout.getvalue()
     assert "workflow native-operator status" in rendered
     assert "workflow native-operator provider-onboard" in rendered
+
+
+def test_circuits_command_routes_to_catalog_tool(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _run_cli_tool(tool_name: str, params: dict[str, object] | None = None, *, workflow_token: str = ""):
+        captured["tool_name"] = tool_name
+        captured["params"] = dict(params or {})
+        captured["workflow_token"] = workflow_token
+        return 0, {"ok": True, "params": params or {}}
+
+    monkeypatch.setattr(operate_commands, "run_cli_tool", _run_cli_tool)
+
+    stdout = StringIO()
+    assert (
+        workflow_cli_main(
+            [
+                "circuits",
+                "open",
+                "openai",
+                "--reason",
+                "provider_outage",
+                "--rationale",
+                "Provider outage",
+                "--decided-by",
+                "ops",
+            ],
+            stdout=stdout,
+        )
+        == 0
+    )
+
+    payload = json.loads(stdout.getvalue())
+    assert captured["tool_name"] == "praxis_circuits"
+    assert captured["params"] == {
+        "action": "open",
+        "provider_slug": "openai",
+        "reason_code": "provider_outage",
+        "rationale": "Provider outage",
+        "decided_by": "ops",
+    }
+    assert payload["ok"] is True
+
+
+def test_tools_search_finds_circuits_tool() -> None:
+    stdout = StringIO()
+
+    assert workflow_cli_main(["tools", "search", "circuit"], stdout=stdout) == 0
+
+    rendered = stdout.getvalue()
+    assert "praxis_circuits" in rendered
+    assert "workflow circuits" in rendered
 
 
 def test_help_can_show_command_group_usage() -> None:

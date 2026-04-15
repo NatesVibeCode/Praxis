@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable
 
+from adapters.keychain import resolve_secret
+
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -82,7 +84,7 @@ class ProviderReadinessChecker:
             )
 
         for key in env_keys:
-            if os.environ.get(key):
+            if resolve_secret(key, env=dict(os.environ)):
                 return ProviderReadiness(
                     provider=provider,
                     ready=True,
@@ -104,7 +106,7 @@ class ProviderReadinessChecker:
         return ProviderReadiness(
             provider=provider,
             ready=False,
-            reason=f"Missing env var: {expected}",
+            reason=f"Missing credential: {expected}",
             checked_at=now,
         )
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -35,6 +36,65 @@ def _try_resolve_database_url(source: Mapping[str, str]) -> str | None:
         return None
 
 
+def _try_resolve_docker_database_url(repo_root: Path) -> str | None:
+    compose_file = repo_root / "docker-compose.yml"
+    if not compose_file.is_file():
+        return None
+
+    try:
+        postgres_container = subprocess.run(
+            ["docker", "compose", "-f", str(compose_file), "ps", "-q", "postgres"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if not postgres_container:
+        return None
+
+    try:
+        container_state = subprocess.run(
+            [
+                "docker",
+                "inspect",
+                "--format",
+                "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}",
+                postgres_container,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if container_state not in {"healthy", "running"}:
+        return None
+
+    try:
+        published = subprocess.run(
+            ["docker", "compose", "-f", str(compose_file), "port", "postgres", "5432"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if not published or ":" not in published:
+        return None
+
+    docker_host, docker_port = published.rsplit(":", 1)
+    docker_host = docker_host.strip().lstrip("[").rstrip("]")
+    if docker_host in {"", "0.0.0.0", "::"}:
+        docker_host = "127.0.0.1"
+    if not docker_port.strip():
+        return None
+    return f"postgresql://postgres@{docker_host}:{docker_port.strip()}/praxis"
+
+
 def workflow_database_env_for_repo(
     repo_root: Path,
     *,
@@ -49,6 +109,8 @@ def workflow_database_env_for_repo(
         repo_env_path = repo_root / ".env"
         repo_env = _read_repo_env_file(repo_env_path)
         database_url = _try_resolve_database_url(repo_env)
+        if database_url is None:
+            database_url = _try_resolve_docker_database_url(repo_root)
         if database_url is None:
             raise PostgresConfigurationError(
                 "postgres.config_missing",

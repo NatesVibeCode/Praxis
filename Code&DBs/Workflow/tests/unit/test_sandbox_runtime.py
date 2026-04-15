@@ -477,7 +477,7 @@ def test_derive_sandbox_identity_changes_when_adhoc_request_changes(tmp_path) ->
         identity_payload={
             "provider_slug": "anthropic",
             "model_slug": "claude-haiku",
-            "command": "python3 -m runtime.api_transport_worker --model claude-haiku",
+            "command": "/usr/bin/python3 -m runtime.api_transport_worker --model claude-haiku",
             "stdin_text": "hello world",
         },
     )
@@ -488,7 +488,7 @@ def test_derive_sandbox_identity_changes_when_adhoc_request_changes(tmp_path) ->
         identity_payload={
             "provider_slug": "anthropic",
             "model_slug": "claude-haiku",
-            "command": "python3 -m runtime.api_transport_worker --model claude-haiku",
+            "command": "/usr/bin/python3 -m runtime.api_transport_worker --model claude-haiku",
             "stdin_text": "hello again",
         },
     )

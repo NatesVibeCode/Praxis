@@ -1,0 +1,93 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+from surfaces.api import operator_write
+
+
+class _FakeConn:
+    async def close(self) -> None:
+        return None
+
+
+class _FakeOperatorControlRepository:
+    def __init__(self) -> None:
+        self.recorded = None
+
+    async def record_operator_decision(self, *, operator_decision):
+        self.recorded = operator_decision
+        return operator_decision
+
+
+def test_set_circuit_breaker_override_records_force_open(monkeypatch) -> None:
+    repository = _FakeOperatorControlRepository()
+
+    async def _connect(_env=None):
+        return _FakeConn()
+
+    invalidations: list[str] = []
+    monkeypatch.setattr(
+        operator_write,
+        "invalidate_circuit_breaker_override_cache",
+        lambda: invalidations.append("invalidated"),
+    )
+
+    frontdoor = operator_write.OperatorControlFrontdoor(
+        connect_database=_connect,
+        operator_control_repository_factory=lambda _conn: repository,
+    )
+
+    payload = frontdoor.set_circuit_breaker_override(
+        provider_slug="OpenAI",
+        override_state="open",
+        rationale="Provider outage",
+        reason_code="provider_outage",
+        decided_by="ops",
+    )
+
+    recorded = repository.recorded
+    assert recorded is not None
+    assert recorded.operator_decision_id == "operator-decision.circuit-breaker.openai"
+    assert recorded.decision_key == "circuit-breaker::openai"
+    assert recorded.decision_kind == "circuit_breaker_force_open"
+    assert recorded.decision_status == "active"
+    assert recorded.rationale == "Provider outage"
+    assert recorded.decided_by == "ops"
+    assert recorded.decision_source == "workflow.circuits.provider-outage"
+    assert invalidations == ["invalidated"]
+    assert payload["circuit_breaker_override"]["provider_slug"] == "openai"
+    assert payload["circuit_breaker_override"]["override_state"] == "open"
+
+
+def test_set_circuit_breaker_override_reset_marks_decision_inactive(monkeypatch) -> None:
+    repository = _FakeOperatorControlRepository()
+
+    async def _connect(_env=None):
+        return _FakeConn()
+
+    fixed_now = datetime(2026, 4, 15, 18, 30, tzinfo=timezone.utc)
+    monkeypatch.setattr(operator_write, "_now", lambda: fixed_now)
+    monkeypatch.setattr(
+        operator_write,
+        "invalidate_circuit_breaker_override_cache",
+        lambda: None,
+    )
+
+    frontdoor = operator_write.OperatorControlFrontdoor(
+        connect_database=_connect,
+        operator_control_repository_factory=lambda _conn: repository,
+    )
+
+    payload = frontdoor.set_circuit_breaker_override(
+        provider_slug="anthropic",
+        override_state="reset",
+    )
+
+    recorded = repository.recorded
+    assert recorded is not None
+    assert recorded.decision_kind == "circuit_breaker_reset"
+    assert recorded.decision_status == "inactive"
+    assert recorded.effective_from == fixed_now
+    assert recorded.effective_to == fixed_now
+    assert payload["circuit_breaker_override"]["override_state"] == "reset"
+    assert payload["circuit_breaker_override"]["decision_status"] == "inactive"

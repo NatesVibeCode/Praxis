@@ -60,7 +60,8 @@ def test_workflow_migration_manifest_includes_provider_route_health_budget_migra
     assert "120_workflow_build_review_proposal_requests.sql" in filenames
     assert "121_cursor_background_agent_api.sql" in filenames
     assert "122_workflow_build_review_contract_fields.sql" in filenames
-    assert filenames[-1] == "122_workflow_build_review_contract_fields.sql"
+    assert "123_workflow_build_planning_state_registry.sql" in filenames
+    assert filenames[-1] == "123_workflow_build_planning_state_registry.sql"
 
 
 def test_every_manifest_migration_has_expected_object_contract() -> None:
@@ -128,6 +129,33 @@ def test_workflow_build_review_contract_field_migration_expected_objects_are_reg
     assert "supersedes_decision_ref" in names
     assert "workflow_build_review_decisions.workflow_build_review_decisions_supersedes_decision_ref_fkey" in names
     assert "idx_workflow_build_review_decisions_group_target" in names
+
+
+def test_workflow_build_planning_state_registry_expected_objects_are_registered() -> None:
+    objects = workflow_migration_expected_objects("123_workflow_build_planning_state_registry.sql")
+    names = {item.object_name for item in objects}
+    assert names.issuperset(
+        {
+            "review_policy_definitions",
+            "review_policy_definitions_status_scope_idx",
+            "capability_bundle_definitions",
+            "capability_bundle_definitions_status_family_idx",
+            "workflow_shape_family_definitions",
+            "workflow_shape_family_definitions_status_policy_idx",
+            "workflow_build_intents",
+            "workflow_build_intents_workflow_definition_idx",
+            "workflow_build_candidate_manifests",
+            "workflow_build_candidate_manifests_workflow_definition_idx",
+            "workflow_build_candidate_slots",
+            "workflow_build_candidate_slots_manifest_kind_idx",
+            "workflow_build_candidates",
+            "workflow_build_candidates_manifest_slot_rank_idx",
+            "workflow_build_review_sessions",
+            "workflow_build_review_sessions_workflow_definition_idx",
+            "workflow_build_execution_manifests",
+            "workflow_build_execution_manifests_workflow_definition_idx",
+        }
+    )
 
 
 def test_provider_route_health_budget_expected_objects_are_registered() -> None:

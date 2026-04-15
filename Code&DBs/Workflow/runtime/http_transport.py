@@ -20,6 +20,7 @@ import subprocess
 import time
 from typing import Any, Callable
 
+from adapters.keychain import resolve_secret
 from adapters.http_transport import HTTPTransportError, perform_http_request
 from adapters.llm_client import LLMClientError, LLMRequest, call_llm
 
@@ -39,6 +40,19 @@ _CURSOR_API_BASE = "https://api.cursor.com"
 _CURSOR_NONTERMINAL_STATUSES = frozenset({"CREATING", "RUNNING"})
 _CURSOR_SUCCESS_STATUSES = frozenset({"FINISHED"})
 _CURSOR_FAILURE_STATUSES = frozenset({"ERROR", "EXPIRED"})
+
+
+class TransportExecutionError(RuntimeError):
+    def __init__(
+        self,
+        reason_code: str,
+        message: str,
+        *,
+        status_code: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.reason_code = reason_code
+        self.status_code = status_code
 
 
 def register(protocol_family: str) -> Callable[[TransportHandler], TransportHandler]:
@@ -114,8 +128,11 @@ def format_tool_messages(
     )
 
 
-def _required_api_key(api_key_env: str) -> str:
-    value = str(os.environ.get(api_key_env, "")).strip()
+def _required_api_key(api_key_env: str, *, api_key: str | None = None) -> str:
+    value = str(api_key or "").strip()
+    if value:
+        return value
+    value = str(resolve_secret(api_key_env, env=dict(os.environ)) or "").strip()
     if value:
         return value
     raise RuntimeError(f"missing API credential in {api_key_env}")
@@ -130,13 +147,14 @@ def _call_chat_completion_protocol(
     timeout: int,
     api_endpoint: str,
     api_key_env: str,
+    api_key: str | None = None,
     **_: Any,
 ) -> str:
     try:
         response = call_llm(
             LLMRequest(
                 endpoint_uri=api_endpoint,
-                api_key=_required_api_key(api_key_env),
+                api_key=_required_api_key(api_key_env, api_key=api_key),
                 provider_slug=protocol_family,
                 model_slug=model,
                 messages=({"role": "user", "content": prompt},),
@@ -191,21 +209,37 @@ def _json_request(
             timeout_seconds=float(timeout_seconds),
         )
     except TimeoutError as exc:
-        raise RuntimeError(f"request timed out: {exc}") from exc
+        raise TransportExecutionError(
+            "http_transport.timeout",
+            f"request timed out: {exc}",
+        ) from exc
     except HTTPTransportError as exc:
-        raise RuntimeError(str(exc)) from exc
+        raise TransportExecutionError(
+            "http_transport.network_error",
+            str(exc),
+        ) from exc
 
     raw_text = response.body.decode("utf-8", errors="replace")
     if response.status_code >= 400:
-        raise RuntimeError(f"HTTP {response.status_code}: {raw_text[:500]}")
+        raise TransportExecutionError(
+            "http_transport.http_error",
+            f"HTTP {response.status_code}: {raw_text[:500]}",
+            status_code=response.status_code,
+        )
     if not raw_text.strip():
         return {}
     try:
         data = json.loads(raw_text)
     except (json.JSONDecodeError, ValueError) as exc:
-        raise RuntimeError(f"invalid JSON response from {url}: {exc}") from exc
+        raise TransportExecutionError(
+            "http_transport.response_parse_error",
+            f"invalid JSON response from {url}: {exc}",
+        ) from exc
     if not isinstance(data, dict):
-        raise RuntimeError(f"expected JSON object from {url}")
+        raise TransportExecutionError(
+            "http_transport.response_parse_error",
+            f"expected JSON object from {url}",
+        )
     return data
 
 
@@ -319,10 +353,11 @@ def _call_cursor_background_agent(
     model: str,
     timeout: int,
     api_key_env: str,
+    api_key: str | None = None,
     workdir: str | None = None,
     **_: Any,
 ) -> str:
-    api_key = _required_api_key(api_key_env)
+    api_key = _required_api_key(api_key_env, api_key=api_key)
     repository, base_ref, branch_name = _cursor_repo_context(workdir)
     created = _json_request(
         method="POST",
@@ -377,6 +412,40 @@ def _call_cursor_background_agent(
     if detail:
         return detail
     return json.dumps(status_payload, sort_keys=True)
+
+
+def call_transport(
+    protocol_family: str,
+    prompt: str,
+    *,
+    model: str,
+    max_tokens: int,
+    timeout: int,
+    api_endpoint: str,
+    api_key: str | None = None,
+    api_key_env: str = "",
+    workdir: str | None = None,
+    reasoning_effort: str | None = None,
+) -> str:
+    """Execute one registered transport handler directly.
+
+    This is the canonical escape hatch for provider-backed lanes whose protocol
+    semantics are not chat-completions shaped.
+    """
+
+    handler = get_handler(protocol_family.strip().lower())
+    kwargs: dict[str, Any] = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "timeout": timeout,
+        "api_endpoint": api_endpoint,
+        "api_key": api_key,
+        "api_key_env": api_key_env,
+        "workdir": workdir,
+    }
+    if reasoning_effort:
+        kwargs["reasoning_effort"] = reasoning_effort
+    return handler(prompt, **kwargs)
 
 
 # ---------------------------------------------------------------------------

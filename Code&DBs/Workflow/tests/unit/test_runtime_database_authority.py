@@ -28,6 +28,34 @@ def test_resolve_runtime_database_url_uses_repo_env_when_process_authority_missi
     assert resolve_runtime_database_url(repo_root=tmp_path) == "postgresql://postgres@repo.test/workflow"
 
 
+def test_resolve_runtime_database_url_falls_back_to_docker_authority(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("WORKFLOW_DATABASE_URL", raising=False)
+    (tmp_path / "docker-compose.yml").write_text("services:\n  postgres:\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "runtime._workflow_database._try_resolve_docker_database_url",
+        lambda _repo_root: "postgresql://postgres@127.0.0.1:5432/praxis",
+    )
+
+    assert resolve_runtime_database_url(repo_root=tmp_path) == "postgresql://postgres@127.0.0.1:5432/praxis"
+
+
+def test_resolve_runtime_database_url_uses_runtime_repo_root_when_repo_root_omitted(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("WORKFLOW_DATABASE_URL", raising=False)
+    (tmp_path / ".env").write_text(
+        "WORKFLOW_DATABASE_URL=postgresql://repo.test/workflow\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("runtime._workflow_database._runtime_repo_root", lambda: tmp_path)
+
+    assert resolve_runtime_database_url() == "postgresql://postgres@repo.test/workflow"
+
+
 def test_resolve_runtime_database_url_returns_none_when_optional_and_unconfigured(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

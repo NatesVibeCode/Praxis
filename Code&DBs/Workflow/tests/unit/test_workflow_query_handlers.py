@@ -370,7 +370,7 @@ class _RecordingPg:
                 if workflow.get("name") == workflow_name:
                     return [workflow]
             return []
-        if "FROM workflow_build_review_decisions" in query and "SELECT DISTINCT ON (target_kind, target_ref)" in query:
+        if "FROM workflow_build_review_decisions" in query and "SELECT DISTINCT ON (target_kind, target_ref" in query:
             workflow_id = str(params[0])
             definition_revision = str(params[1])
             filtered = [
@@ -381,7 +381,11 @@ class _RecordingPg:
             ]
             latest: dict[tuple[str, str], dict[str, Any]] = {}
             for row in filtered:
-                key = (str(row.get("target_kind")), str(row.get("target_ref")))
+                key = (
+                    str(row.get("target_kind")),
+                    str(row.get("target_ref")),
+                    str(row.get("slot_ref") or ""),
+                )
                 current = latest.get(key)
                 row_key = (
                     str(row.get("decided_at") or ""),
@@ -468,18 +472,22 @@ class _RecordingPg:
                 "review_decision_id": params[0],
                 "workflow_id": params[1],
                 "definition_revision": params[2],
-                "target_kind": params[3],
-                "target_ref": params[4],
-                "decision": params[5],
-                "actor_type": params[6],
-                "actor_ref": params[7],
-                "approval_mode": params[8],
-                "rationale": params[9],
-                "source_subpath": params[10],
-                "candidate_ref": params[11],
-                "candidate_payload": json.loads(params[12]) if params[12] is not None else None,
-                "decided_at": params[13],
-                "created_at": params[13],
+                "review_group_ref": params[3],
+                "target_kind": params[4],
+                "target_ref": params[5],
+                "slot_ref": params[6],
+                "decision": params[7],
+                "actor_type": params[8],
+                "actor_ref": params[9],
+                "authority_scope": params[10],
+                "approval_mode": params[11],
+                "rationale": params[12],
+                "source_subpath": params[13],
+                "supersedes_decision_ref": params[14],
+                "candidate_ref": params[15],
+                "candidate_payload": json.loads(params[16]) if params[16] is not None else None,
+                "decided_at": params[17],
+                "created_at": params[17],
             }
             self.build_review_decision_rows.append(row)
             self.executed.append((query, params))
@@ -517,6 +525,7 @@ class _RecordingPg:
             definition_revision = str(params[1])
             target_kind = str(params[2])
             target_ref = str(params[3])
+            slot_ref = str(params[4]) if len(params) > 4 else None
             rows = [
                 row
                 for row in self.build_review_decision_rows
@@ -524,6 +533,7 @@ class _RecordingPg:
                 and str(row.get("definition_revision")) == definition_revision
                 and str(row.get("target_kind")) == target_kind
                 and str(row.get("target_ref")) == target_ref
+                and (slot_ref is None or str(row.get("slot_ref") or "") == slot_ref)
             ]
             rows.sort(
                 key=lambda row: (
@@ -1900,10 +1910,14 @@ def test_handle_workflow_build_get_overlays_db_review_decisions_over_definition_
     assert binding["state"] == "accepted"
     assert binding["accepted_target"]["target_ref"] == "task_type_routing:auto/review"
     assert payload["build_state"] == "ready"
-    assert payload["candidate_resolution_manifest"]["execution_readiness"] == "ready"
+    assert payload["candidate_resolution_manifest"]["execution_readiness"] == "review_required"
     manifest_slot = payload["candidate_resolution_manifest"]["binding_slots"][0]
     assert manifest_slot["approval_state"] == "approved"
     assert manifest_slot["approved_ref"] == "task_type_routing:auto/review"
+    assert any(
+        item["slot_ref"] == "workflow_shape"
+        for item in payload["candidate_resolution_manifest"]["required_confirmations"]
+    )
     assert payload["reviewable_plan"]["approved_binding_refs"] == [
         {
             "slot_ref": "binding:ref-001",
@@ -2114,9 +2128,9 @@ def test_handle_workflow_build_post_accept_binding_emits_restore_receipt() -> No
     assert review_payload["decision"] == "approve"
     assert review_payload["candidate_ref"] == "task_type_routing:auto/review"
     assert review_payload["actor_type"] == "human"
-    assert review_row[3] == "binding"
-    assert review_row[4] == binding_id
-    assert review_row[5] == "approve"
+    assert review_row[4] == "binding"
+    assert review_row[5] == binding_id
+    assert review_row[7] == "approve"
     assert payload["undo_receipt"] == {
         "workflow_id": "wf_build_binding_accept",
         "steps": [
@@ -2125,6 +2139,7 @@ def test_handle_workflow_build_post_accept_binding_emits_restore_receipt() -> No
                 "body": {
                     "target_kind": "binding",
                     "target_ref": binding_id,
+                    "slot_ref": binding_id,
                     "decision": "revoke",
                     "approval_mode": "undo_restore",
                     "rationale": "Undo restore to the prior unapproved build-review state.",
@@ -2233,7 +2248,7 @@ def test_handle_workflow_build_post_records_proposal_request_without_binding_acc
         for query, params in pg.executed
         if "INSERT INTO workflow_build_review_decisions" in query
     )
-    assert review_row[5] == "proposal_request"
+    assert review_row[7] == "proposal_request"
     proposal_request = payload["reviewable_plan"]["proposal_requests"][0]
     assert proposal_request["target_kind"] == "binding"
     assert proposal_request["target_ref"] == binding_id
@@ -2714,8 +2729,8 @@ def test_handle_workflow_build_post_admit_import_emits_restore_receipt() -> None
     assert review_payload["target_ref"] == snapshot_id
     assert review_payload["decision"] == "approve"
     assert review_payload["candidate_ref"] == "#escalation-policy"
-    assert review_row[3] == "import_snapshot"
-    assert review_row[4] == snapshot_id
+    assert review_row[4] == "import_snapshot"
+    assert review_row[5] == snapshot_id
     assert payload["undo_receipt"] == {
         "workflow_id": "wf_build_import_admit",
         "steps": [
@@ -2724,6 +2739,7 @@ def test_handle_workflow_build_post_admit_import_emits_restore_receipt() -> None
                 "body": {
                     "target_kind": "import_snapshot",
                     "target_ref": snapshot_id,
+                    "slot_ref": snapshot_id,
                     "decision": "revoke",
                     "approval_mode": "undo_restore",
                     "rationale": "Undo restore to the prior unapproved build-review state.",

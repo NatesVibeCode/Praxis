@@ -392,10 +392,13 @@ def _compile_llm_inputs(job: Mapping[str, Any], *, display_name: str) -> dict[st
     inputs = dict(job.get("inputs") or {}) if _is_mapping(job.get("inputs")) else {}
     prompt = _as_text(job.get("prompt"))
     system_prompt = _as_text(job.get("system_prompt"))
+    workdir = _as_text(job.get("workdir"))
     if prompt:
         inputs["prompt"] = prompt
     if system_prompt:
         inputs["system_prompt"] = system_prompt
+    if workdir:
+        inputs.setdefault("workdir", workdir)
     provider_slug, model_slug = _provider_and_model(job.get("model"))
     agent_provider_slug, agent_model_slug = _concrete_provider_and_model(job.get("agent"))
     chosen_provider_slug = provider_slug or agent_provider_slug

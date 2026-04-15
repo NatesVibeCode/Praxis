@@ -8,6 +8,7 @@ import pytest
 from adapters.provider_types import ProviderCLIProfile
 
 from registry import provider_onboarding
+import registry.provider_onboarding._probe as provider_onboarding_probe
 from surfaces.api.handlers import workflow_admin
 import surfaces.mcp.tools.provider_onboard as provider_onboard_tool
 from surfaces.cli import native_operator
@@ -96,6 +97,44 @@ def _localcli_cli_spec() -> provider_onboarding.ProviderOnboardingSpec:
         cli_prompt_mode="argv",
         adapter_economics={"cli_llm": {"billing_mode": "subscription_included"}},
     )
+
+
+def test_provider_onboarding_model_discovery_uses_secret_resolution(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    spec = provider_onboarding.ProviderOnboardingSpec(
+        provider_slug="cursor",
+        selected_transport="api",
+        requested_models=("auto",),
+        api_endpoint="https://api.cursor.com/v0/agents",
+        api_protocol_family="cursor_background_agent",
+        api_key_env_vars=("CURSOR_API_KEY",),
+    )
+
+    monkeypatch.setattr(
+        provider_onboarding_probe,
+        "resolve_secret",
+        lambda env_var, env=None: "cursor-secret-key" if env_var == "CURSOR_API_KEY" else None,
+    )
+    monkeypatch.setattr(
+        provider_onboarding_probe,
+        "_http_get_json",
+        lambda url, headers, timeout_seconds: (
+            captured.update(
+                {"url": url, "headers": headers, "timeout_seconds": timeout_seconds}
+            )
+            or {"models": ["auto"]}
+        ),
+    )
+
+    models = provider_onboarding_probe._discover_api_models_impl(
+        spec,
+        env={},
+        transport_details={},
+    )
+
+    assert models == ("auto",)
+    assert captured["url"] == "https://api.cursor.com/v0/models"
+    assert captured["headers"] == {"Authorization": "Bearer cursor-secret-key"}
 
 
 def _seed_profile(provider_slug: str) -> ProviderCLIProfile | None:
