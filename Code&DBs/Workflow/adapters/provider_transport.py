@@ -124,12 +124,14 @@ BUILTIN_PROVIDER_PROFILES: tuple[ProviderCLIProfile, ...] = (
     ),
     ProviderCLIProfile(
         provider_slug="cursor",
-        binary="cursor-agent",
-        prompt_mode="argv",
-        default_model="composer-2",
+        binary="cursor-api",
+        prompt_mode="stdin",
+        default_model="auto",
+        api_endpoint="https://api.cursor.com/v0/agents",
+        api_protocol_family="cursor_background_agent",
         api_key_env_vars=("CURSOR_API_KEY",),
         adapter_economics={
-            "cli_llm": {
+            "llm_task": {
                 "billing_mode": "subscription_included",
                 "budget_bucket": "cursor_monthly",
                 "effective_marginal_cost": 0.0,
@@ -138,28 +140,20 @@ BUILTIN_PROVIDER_PROFILES: tuple[ProviderCLIProfile, ...] = (
             },
         },
         lane_policies={
-            "cli_llm": {
+            "llm_task": {
                 "admitted_by_policy": True,
-                "execution_topology": "local_cli",
-                "transport_kind": "cli",
-                "policy_reason": "Admitted local CLI lane.",
+                "execution_topology": "repo_agent_http",
+                "transport_kind": "http",
+                "policy_reason": "Admitted Cursor background-agent API lane.",
             },
         },
-        base_flags=("--trust", "-p", "--output-format", "json", "--sandbox", "disabled"),
-        model_flag="--model",
+        base_flags=(),
+        model_flag=None,
         system_prompt_flag=None,
         json_schema_flag=None,
-        output_format="json",
-        output_envelope_key="result",
-        forbidden_flags=(
-            "--cloud",
-            "--force",
-            "-f",
-            "--yolo",
-            "--workspace",
-            "-w",
-            "--worktree",
-        ),
+        output_format="text",
+        output_envelope_key="text",
+        forbidden_flags=(),
         default_timeout=900,
     ),
     ProviderCLIProfile(
@@ -487,6 +481,34 @@ def default_llm_adapter_type(
         ):
             return candidate
     raise RuntimeError("provider_registry has no supported LLM adapter types")
+
+
+def default_adapter_type_for_provider(
+    provider_slug: str,
+    *,
+    profiles: Mapping[str, ProviderCLIProfile],
+) -> str | None:
+    profile = profiles.get(provider_slug)
+    if profile is None:
+        return None
+
+    lane_policies = profile.lane_policies or {}
+    admitted = [
+        adapter_type
+        for adapter_type in ("cli_llm", "llm_task")
+        if isinstance(lane_policies.get(adapter_type), dict)
+        and bool(lane_policies[adapter_type].get("admitted_by_policy"))
+    ]
+    if len(admitted) == 1:
+        return admitted[0]
+    if len(admitted) > 1:
+        return "cli_llm" if "cli_llm" in admitted else admitted[0]
+
+    if resolve_lane_policy(provider_slug, "cli_llm", profiles=profiles):
+        return "cli_llm"
+    if resolve_lane_policy(provider_slug, "llm_task", profiles=profiles):
+        return "llm_task"
+    return None
 
 
 def default_model_for_provider(

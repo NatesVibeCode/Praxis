@@ -57,7 +57,10 @@ class ContextBundleSnapshot:
 
 
 _DUPLICATE_SQLSTATES = {"42P07", "42710", "23505"}
-_PLATFORM_AUTHORITY_SCHEMA_FILENAME = "006_platform_authority_schema.sql"
+_CONTEXT_BUNDLE_SCHEMA_FILENAMES = (
+    "006_platform_authority_schema.sql",
+    "119_context_bundle_sandbox_profile_ref.sql",
+)
 _CONTEXT_BUNDLE_SCHEMA_MARKERS = ("context_bundles", "context_bundle_anchors")
 
 
@@ -74,35 +77,38 @@ def _is_duplicate_object_error(error: BaseException) -> bool:
 
 @lru_cache(maxsize=1)
 def _context_bundle_schema_statements() -> tuple[str, ...]:
-    try:
-        statements = workflow_migration_statements(_PLATFORM_AUTHORITY_SCHEMA_FILENAME)
-    except WorkflowMigrationError as exc:
-        reason_code = (
-            "context.schema_empty"
-            if exc.reason_code == "workflow.migration_empty"
-            else "context.schema_missing"
+    statements: list[str] = []
+    for filename in _CONTEXT_BUNDLE_SCHEMA_FILENAMES:
+        try:
+            migration_statements = workflow_migration_statements(filename)
+        except WorkflowMigrationError as exc:
+            reason_code = (
+                "context.schema_empty"
+                if exc.reason_code == "workflow.migration_empty"
+                else "context.schema_missing"
+            )
+            message = (
+                "context bundle schema file did not contain executable statements"
+                if reason_code == "context.schema_empty"
+                else "context bundle schema file could not be read from the canonical workflow migration root"
+            )
+            raise ContextBundleRepositoryError(
+                reason_code,
+                message,
+                details=exc.details,
+            ) from exc
+        statements.extend(
+            statement
+            for statement in migration_statements
+            if any(marker in statement for marker in _CONTEXT_BUNDLE_SCHEMA_MARKERS)
         )
-        message = (
-            "context bundle schema file did not contain executable statements"
-            if reason_code == "context.schema_empty"
-            else "context bundle schema file could not be read from the canonical workflow migration root"
-        )
-        raise ContextBundleRepositoryError(
-            reason_code,
-            message,
-            details=exc.details,
-        ) from exc
 
-    statements = tuple(
-        statement
-        for statement in statements
-        if any(marker in statement for marker in _CONTEXT_BUNDLE_SCHEMA_MARKERS)
-    )
+    statements = tuple(statements)
     if not statements:
         raise ContextBundleRepositoryError(
             "context.schema_missing",
             "canonical workflow migration packet does not define context bundle tables",
-            details={"filename": _PLATFORM_AUTHORITY_SCHEMA_FILENAME},
+            details={"filenames": list(_CONTEXT_BUNDLE_SCHEMA_FILENAMES)},
         )
     return statements
 
@@ -142,6 +148,7 @@ def _bundle_identity(bundle: ContextBundle) -> dict[str, Any]:
         "provider_policy_id": bundle.provider_policy_id,
         "resolved_at": bundle.resolved_at.isoformat(),
         "run_id": bundle.run_id,
+        "sandbox_profile_ref": bundle.sandbox_profile_ref,
         "source_decision_refs": list(bundle.source_decision_refs),
         "workspace_ref": bundle.workspace_ref,
         "workflow_id": bundle.workflow_id,
@@ -167,6 +174,7 @@ def _bundle_row_from_record(row: asyncpg.Record) -> ContextBundle:
         runtime_profile_ref=str(row["runtime_profile_ref"]),
         model_profile_id=str(row["model_profile_id"]),
         provider_policy_id=str(row["provider_policy_id"]),
+        sandbox_profile_ref=str(row["sandbox_profile_ref"]),
         bundle_version=int(row["bundle_version"]),
         bundle_hash=str(row["bundle_hash"]),
         bundle_payload=_json_value(row["bundle_payload"]),
@@ -197,6 +205,7 @@ def _bundle_payload(bundle: ContextBundle) -> dict[str, Any]:
             "model_profile_id": bundle.model_profile_id,
             "provider_policy_id": bundle.provider_policy_id,
             "runtime_profile_ref": bundle.runtime_profile_ref,
+            "sandbox_profile_ref": bundle.sandbox_profile_ref,
         },
         "source_decision_refs": list(bundle.source_decision_refs),
         "workspace": {
@@ -307,6 +316,7 @@ class PostgresContextBundleRepository:
                             runtime_profile_ref,
                             model_profile_id,
                             provider_policy_id,
+                            sandbox_profile_ref,
                             bundle_version,
                             bundle_hash,
                             bundle_payload,
@@ -401,6 +411,10 @@ class PostgresContextBundleRepository:
             bundle.provider_policy_id,
             field_name="provider_policy_id",
         )
+        sandbox_profile_ref = _require_text(
+            bundle.sandbox_profile_ref,
+            field_name="sandbox_profile_ref",
+        )
         if bundle.bundle_version < 1:
             raise ContextBundleRepositoryError(
                 "context.bundle_invalid",
@@ -493,12 +507,13 @@ class PostgresContextBundleRepository:
                         runtime_profile_ref,
                         model_profile_id,
                         provider_policy_id,
+                        sandbox_profile_ref,
                         bundle_version,
                         bundle_hash,
                         bundle_payload,
                         source_decision_refs,
                         resolved_at
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12)
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13)
                     ON CONFLICT (context_bundle_id) DO NOTHING
                     RETURNING
                         context_bundle_id,
@@ -508,6 +523,7 @@ class PostgresContextBundleRepository:
                         runtime_profile_ref,
                         model_profile_id,
                         provider_policy_id,
+                        sandbox_profile_ref,
                         bundle_version,
                         bundle_hash,
                         bundle_payload,
@@ -521,6 +537,7 @@ class PostgresContextBundleRepository:
                     runtime_profile_ref,
                     model_profile_id,
                     provider_policy_id,
+                    sandbox_profile_ref,
                     bundle.bundle_version,
                     bundle.bundle_hash,
                     bundle_payload_json,
@@ -538,6 +555,7 @@ class PostgresContextBundleRepository:
                             runtime_profile_ref,
                             model_profile_id,
                             provider_policy_id,
+                            sandbox_profile_ref,
                             bundle_version,
                             bundle_hash,
                             bundle_payload,

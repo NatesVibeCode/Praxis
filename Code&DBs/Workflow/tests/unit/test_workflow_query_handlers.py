@@ -1900,6 +1900,17 @@ def test_handle_workflow_build_get_overlays_db_review_decisions_over_definition_
     assert binding["state"] == "accepted"
     assert binding["accepted_target"]["target_ref"] == "task_type_routing:auto/review"
     assert payload["build_state"] == "ready"
+    assert payload["candidate_resolution_manifest"]["execution_readiness"] == "ready"
+    manifest_slot = payload["candidate_resolution_manifest"]["binding_slots"][0]
+    assert manifest_slot["approval_state"] == "approved"
+    assert manifest_slot["approved_ref"] == "task_type_routing:auto/review"
+    assert payload["reviewable_plan"]["approved_binding_refs"] == [
+        {
+            "slot_ref": "binding:ref-001",
+            "candidate_ref": "task_type_routing:auto/review",
+        }
+    ]
+    assert payload["reviewable_plan"]["approval_records"][0]["approved_by"] == "build_workspace"
 
 
 def test_handle_workflow_build_post_persists_attachment_and_replans() -> None:
@@ -2125,6 +2136,113 @@ def test_handle_workflow_build_post_accept_binding_emits_restore_receipt() -> No
     persisted_binding = next(entry for entry in persisted_definition["binding_ledger"] if entry["binding_id"] == binding_id)
     assert persisted_binding["accepted_target"] is None
     assert persisted_binding["state"] == "suggested"
+
+
+def test_handle_workflow_build_post_records_proposal_request_without_binding_acceptance() -> None:
+    binding_id = "binding:ref-001"
+    workflow_row = {
+        "id": "wf_build_binding_proposal",
+        "name": "Support Intake",
+        "description": "Compile support intake",
+        "definition": {
+            "type": "operating_model",
+            "source_prose": "triage-agent reviews the support inbox.",
+            "compiled_prose": "triage-agent reviews the support inbox.",
+            "narrative_blocks": [],
+            "references": [],
+            "capabilities": [],
+            "authority": "",
+            "sla": {},
+            "trigger_intent": [],
+            "draft_flow": [
+                {
+                    "id": "step-001",
+                    "title": "Review support inbox",
+                    "summary": "triage-agent reviews the support inbox.",
+                    "source_block_ids": [],
+                    "depends_on": [],
+                    "order": 1,
+                }
+            ],
+            "binding_ledger": [
+                {
+                    "binding_id": binding_id,
+                    "source_kind": "reference",
+                    "source_label": "triage-agent",
+                    "source_span": None,
+                    "source_node_ids": ["step-001"],
+                    "state": "captured",
+                    "candidate_targets": [
+                        {
+                            "target_ref": "task_type_routing:auto/review",
+                            "label": "Auto Review",
+                            "kind": "agent",
+                        }
+                    ],
+                    "accepted_target": None,
+                    "rationale": "Needs an accepted authority target before planning can run cleanly.",
+                    "created_at": "2026-04-09T19:00:00+00:00",
+                    "updated_at": "2026-04-09T19:00:00+00:00",
+                    "freshness": None,
+                }
+            ],
+            "definition_revision": "def_build_binding_proposal",
+        },
+        "compiled_spec": None,
+        "version": 1,
+        "updated_at": "2026-04-09T19:00:00Z",
+    }
+    pg = _MutableWorkflowPg(workflow_rows={"wf_build_binding_proposal": workflow_row})
+    request = _RequestStub(
+        {
+            "target_kind": "binding",
+            "target_ref": binding_id,
+            "decision": "proposal_request",
+            "candidate_payload": {
+                "target_ref": "task_type_routing:auto/escalate",
+                "label": "Auto Escalate",
+                "kind": "agent",
+            },
+            "rationale": "Please surface the escalation route as an alternate candidate.",
+            "review_actor_type": "model",
+            "review_actor_ref": "planner-agent",
+            "approval_mode": "review",
+        },
+        subsystems=SimpleNamespace(get_pg_conn=lambda: pg),
+        path="/api/workflows/wf_build_binding_proposal/build/review_decisions",
+    )
+
+    workflow_query._handle_workflow_build_post(
+        request,
+        "/api/workflows/wf_build_binding_proposal/build/review_decisions",
+    )
+
+    assert request.sent is not None
+    status, payload = request.sent
+    assert status == 200
+    binding = next(entry for entry in payload["binding_ledger"] if entry["binding_id"] == binding_id)
+    assert binding["accepted_target"] is None
+    manifest_slot = next(
+        entry
+        for entry in payload["candidate_resolution_manifest"]["binding_slots"]
+        if entry["slot_ref"] == binding_id
+    )
+    assert manifest_slot["approval_state"] == "unapproved"
+    review_row = next(
+        params
+        for query, params in pg.executed
+        if "INSERT INTO workflow_build_review_decisions" in query
+    )
+    assert review_row[5] == "proposal_request"
+    proposal_request = payload["reviewable_plan"]["proposal_requests"][0]
+    assert proposal_request["target_kind"] == "binding"
+    assert proposal_request["target_ref"] == binding_id
+    assert proposal_request["candidate_ref"] == "task_type_routing:auto/escalate"
+    assert proposal_request["requested_by"] == {
+        "actor_type": "model",
+        "actor_ref": "planner-agent",
+    }
+    assert proposal_request["rationale"] == "Please surface the escalation route as an alternate candidate."
 
 
 def test_handle_workflow_build_post_restores_attachment_record() -> None:
@@ -3501,11 +3619,6 @@ def test_handle_workflow_build_post_materializes_import_and_attachment() -> None
                 "target_ref": "#escalation-policy",
                 "kind": "type",
             },
-            "admitted_target": {
-                "target_ref": "#escalation-policy",
-                "label": "Escalation Policy",
-                "kind": "type",
-            },
             "authority_kind": "reference",
             "authority_ref": "#escalation-policy",
             "role": "evidence",
@@ -3521,9 +3634,9 @@ def test_handle_workflow_build_post_materializes_import_and_attachment() -> None
     status, payload = request.sent
     assert status == 200
     assert payload["authority_attachments"][0]["authority_ref"] == "#escalation-policy"
-    assert payload["import_snapshots"][0]["approval_state"] == "admitted"
-    assert payload["import_snapshots"][0]["admitted_targets"][0]["target_ref"] == "#escalation-policy"
-    assert payload["mutation_event_id"] == 2
+    assert payload["import_snapshots"][0]["approval_state"] == "staged"
+    assert payload["import_snapshots"][0]["admitted_targets"] == []
+    assert payload["mutation_event_id"] == 1
     assert payload["undo_receipt"] == {
         "workflow_id": "wf_build_materialize",
         "steps": [
@@ -3535,21 +3648,11 @@ def test_handle_workflow_build_post_materializes_import_and_attachment() -> None
                 "subpath": f"imports/{payload['import_snapshots'][0]['snapshot_id']}/restore",
                 "body": {"snapshot": None},
             },
-            {
-                "subpath": "review_decisions/restore",
-                "body": {
-                    "target_kind": "import_snapshot",
-                    "target_ref": payload["import_snapshots"][0]["snapshot_id"],
-                    "decision": "revoke",
-                    "approval_mode": "undo_restore",
-                    "rationale": "Undo restore to the prior unapproved build-review state.",
-                },
-            },
         ],
     }
     mutation_event = next(row for row in pg.event_log_rows if row["emitted_by"] == "mutate_workflow_build")
     assert mutation_event == {
-        "id": 2,
+        "id": 1,
         "channel": "build_state",
         "event_type": "mutation",
         "entity_id": "wf_build_materialize",
@@ -3571,7 +3674,7 @@ def test_handle_workflow_build_post_materializes_import_and_attachment() -> None
     assert persisted_definition["import_snapshots"][0]["approval_state"] == "staged"
 
 
-def test_handle_workflow_build_post_materialize_here_is_idempotent_for_admitted_targets() -> None:
+def test_handle_workflow_build_post_materialize_here_stays_structural_without_review_approval() -> None:
     workflow_row = {
         "id": "wf_build_materialize_idempotent",
         "name": "Support Intake",
@@ -3612,11 +3715,6 @@ def test_handle_workflow_build_post_materialize_here_is_idempotent_for_admitted_
             "target_ref": "#escalation-policy",
             "kind": "type",
         },
-        "admitted_target": {
-            "target_ref": "#escalation-policy",
-            "label": "Escalation Policy",
-            "kind": "type",
-        },
         "authority_kind": "reference",
         "authority_ref": "#escalation-policy",
         "role": "evidence",
@@ -3646,14 +3744,8 @@ def test_handle_workflow_build_post_materialize_here_is_idempotent_for_admitted_
     assert second_request.sent is not None
     status, payload = second_request.sent
     assert status == 200
-    assert payload["import_snapshots"][0]["approval_state"] == "admitted"
-    assert payload["import_snapshots"][0]["admitted_targets"] == [
-        {
-            "target_ref": "#escalation-policy",
-            "label": "Escalation Policy",
-            "kind": "type",
-        }
-    ]
+    assert payload["import_snapshots"][0]["approval_state"] == "staged"
+    assert payload["import_snapshots"][0]["admitted_targets"] == []
     assert len(payload["authority_attachments"]) == 1
     assert payload["authority_attachments"][0]["authority_ref"] == "#escalation-policy"
 

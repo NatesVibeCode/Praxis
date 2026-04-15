@@ -293,9 +293,14 @@ def test_context_bundle_repository_persists_and_replays_canonical_bundle_rows() 
     assert snapshot.bundle.context_bundle_id == context_bundle_id
     assert snapshot.bundle.workflow_id == "workflow.alpha"
     assert snapshot.bundle.run_id == run_id
+    assert snapshot.bundle.sandbox_profile_ref == runtime_profile.sandbox_profile_ref
     assert snapshot.bundle.bundle_hash == packet_one.packet_payload["context_bundle"]["bundle_hash"]
     assert snapshot.bundle.bundle_payload["workspace"]["repo_root"] == workspace.repo_root
     assert snapshot.bundle.bundle_payload["workspace"]["workdir"] == workspace.workdir
+    assert (
+        snapshot.bundle.bundle_payload["runtime_profile"]["sandbox_profile_ref"]
+        == runtime_profile.sandbox_profile_ref
+    )
     assert tuple(anchor.anchor_ref for anchor in snapshot.anchors) == (
         "context.policy.alpha",
         "context.workflow.alpha",

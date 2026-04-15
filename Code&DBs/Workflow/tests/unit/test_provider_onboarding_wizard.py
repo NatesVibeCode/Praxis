@@ -9,6 +9,7 @@ from adapters.provider_types import ProviderCLIProfile
 
 from registry import provider_onboarding
 from surfaces.api.handlers import workflow_admin
+import surfaces.mcp.tools.provider_onboard as provider_onboard_tool
 from surfaces.cli import native_operator
 from surfaces.mcp.tools.provider_onboard import tool_praxis_provider_onboard
 
@@ -77,12 +78,23 @@ def _openai_api_spec(*, benchmark_api_key: str | None = "aa-test-key") -> provid
     )
 
 
-def _cursor_cli_spec() -> provider_onboarding.ProviderOnboardingSpec:
+def _localcli_cli_spec() -> provider_onboarding.ProviderOnboardingSpec:
     return provider_onboarding.ProviderOnboardingSpec(
-        provider_slug="cursor",
+        provider_slug="localcli",
+        provider_name="Local CLI",
         selected_transport="cli",
-        requested_models=("composer-2",),
-        provider_api_key="crsr-test-key",
+        binary_name="localcli-agent",
+        base_flags=("--json",),
+        output_format="json",
+        output_envelope_key="result",
+        default_timeout=900,
+        model_flag="--model",
+        default_model="localcli-1",
+        requested_models=("localcli-1",),
+        api_key_env_vars=("LOCALCLI_API_KEY",),
+        provider_api_key="localcli-test-key",
+        cli_prompt_mode="argv",
+        adapter_economics={"cli_llm": {"billing_mode": "subscription_included"}},
     )
 
 
@@ -107,20 +119,20 @@ def _seed_profile(provider_slug: str) -> ProviderCLIProfile | None:
             forbidden_flags=("--full-auto",),
             default_timeout=300,
         ),
-        "cursor": ProviderCLIProfile(
-            provider_slug="cursor",
-            binary="cursor-agent",
-            default_model="composer-2",
-            api_key_env_vars=("CURSOR_API_KEY",),
+        "localcli": ProviderCLIProfile(
+            provider_slug="localcli",
+            binary="localcli-agent",
+            default_model="localcli-1",
+            api_key_env_vars=("LOCALCLI_API_KEY",),
             adapter_economics={
                 "cli_llm": {"billing_mode": "subscription_included"},
             },
             prompt_mode="argv",
-            base_flags=("--trust", "-p", "--output-format", "json", "--sandbox", "disabled"),
+            base_flags=("--json",),
             model_flag="--model",
             output_format="json",
             output_envelope_key="result",
-            forbidden_flags=("--cloud", "--force", "-f", "--yolo", "--workspace", "-w", "--worktree"),
+            forbidden_flags=("--workspace", "--worktree"),
             default_timeout=900,
         ),
     }
@@ -363,6 +375,115 @@ def test_provider_onboarding_mcp_tool_serializes_slots_dataclass(monkeypatch) ->
     assert payload["provider_slug"] == "openai"
     assert payload["steps"][0]["summary"] == "ok"
     assert payload["steps"][0]["details"]["binary_found"] is True
+
+
+def test_provider_onboarding_mcp_tool_does_not_force_cli_transport(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    expected = provider_onboarding.ProviderOnboardingResult(
+        ok=True,
+        provider_slug="cursor",
+        provider_name="Cursor",
+        decision_ref="decision.provider-onboarding.cursor.20260415T120000Z",
+        dry_run=True,
+        steps=(),
+    )
+
+    def _capture_spec(raw):
+        captured["raw_spec"] = raw
+        return provider_onboarding.ProviderOnboardingSpec(provider_slug="cursor")
+
+    monkeypatch.setattr(
+        provider_onboarding,
+        "normalize_provider_onboarding_spec",
+        _capture_spec,
+    )
+    monkeypatch.setattr(
+        provider_onboarding,
+        "run_provider_onboarding",
+        lambda **kwargs: expected,
+    )
+    monkeypatch.setattr(
+        "surfaces.mcp.tools.provider_onboard.resolve_workflow_database_url",
+        lambda env=None: "postgresql://example.test/workflow",
+    )
+    monkeypatch.setattr(
+        "surfaces.mcp.tools.provider_onboard.workflow_database_env",
+        lambda: {"WORKFLOW_DATABASE_URL": "postgresql://example.test/workflow", "PATH": ""},
+    )
+
+    tool_praxis_provider_onboard(
+        {
+            "action": "probe",
+            "provider_slug": "cursor",
+        }
+    )
+
+    assert captured["raw_spec"] == {"provider_slug": "cursor"}
+
+
+def test_provider_onboarding_resolve_spec_infers_single_declared_api_transport(monkeypatch) -> None:
+    monkeypatch.setattr(
+        provider_onboarding.provider_registry_mod,
+        "get_profile",
+        lambda provider_slug: ProviderCLIProfile(
+            provider_slug="cursor",
+            binary="cursor-api",
+            default_model="auto",
+            api_endpoint="https://api.cursor.com/v0/agents",
+            api_protocol_family="cursor_background_agent",
+            api_key_env_vars=("CURSOR_API_KEY",),
+            adapter_economics={"llm_task": {"billing_mode": "subscription_included"}},
+            lane_policies={"llm_task": {"admitted_by_policy": True}},
+        )
+        if provider_slug == "cursor"
+        else None,
+    )
+
+    resolved, template, transport_template, authority_step = provider_onboarding._resolve_spec(
+        provider_onboarding.ProviderOnboardingSpec(provider_slug="cursor")
+    )
+
+    assert resolved.selected_transport == "api"
+    assert sorted(template.transports) == ["api"]
+    assert transport_template.transport == "api"
+    assert authority_step.details["supported_transports"] == ["api"]
+
+
+def test_post_onboarding_sync_updates_native_runtime_allowed_models(monkeypatch) -> None:
+    class _FakeSyncConn:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+        def execute(self, query: str, *params: object):
+            self.calls.append((query, params))
+            if "FROM registry_native_runtime_profile_authority" in query:
+                return [{"runtime_profile_ref": "praxis", "allowed_models": '["gpt-5.4"]'}]
+            return []
+
+    fake_sync_conn = _FakeSyncConn()
+
+    monkeypatch.setattr(
+        "storage.postgres.connection.SyncPostgresConnection",
+        lambda pool: fake_sync_conn,
+    )
+    monkeypatch.setattr(
+        "storage.postgres.connection.get_workflow_pool",
+        lambda: object(),
+    )
+
+    result = provider_onboard_tool._post_onboarding_sync(
+        db_url="postgresql://example.test/workflow",
+        provider_slug="openai",
+        model_reports=({"model_slug": "gpt-5.4-mini"},),
+    )
+
+    assert result["native_runtime_profiles"] is True
+    assert result["updated_runtime_profile_refs"] == ["praxis"]
+    assert result["added_to_allowed_models"] == ["gpt-5.4-mini"]
+    assert any(
+        "UPDATE registry_native_runtime_profile_authority" in query
+        for query, _ in fake_sync_conn.calls
+    )
 
 
 def test_provider_onboarding_warns_when_benchmark_key_is_missing(monkeypatch) -> None:
@@ -609,7 +730,7 @@ def test_provider_onboarding_provisions_cli_registry_rows_when_capacity_probe_fa
                 summary="cli ready",
                 details={
                     "selected_transport": spec.selected_transport,
-                    "binary_path": "/Users/nate/.local/bin/cursor-agent",
+                    "binary_path": "/Users/nate/.local/bin/localcli-agent",
                     "credential_source": "ambient_cli_session",
                 },
             ),
@@ -624,13 +745,13 @@ def test_provider_onboarding_provisions_cli_registry_rows_when_capacity_probe_fa
                 status="succeeded",
                 summary="models discovered",
                 details={
-                    "selected_models": ["composer-2"],
-                    "default_model": "composer-2",
+                    "selected_models": ["localcli-1"],
+                    "default_model": "localcli-1",
                 },
             ),
             (
                 provider_onboarding.ProviderOnboardingModelSpec(
-                    model_slug="composer-2",
+                    model_slug="localcli-1",
                     route_tier="high",
                     route_tier_rank=1,
                     latency_class="reasoning",
@@ -645,10 +766,10 @@ def test_provider_onboarding_provisions_cli_registry_rows_when_capacity_probe_fa
         return provider_onboarding.ProviderOnboardingStepResult(
             step="capacity_probe",
             status="failed",
-            summary="Prompt probe did not complete successfully for cursor/composer-2",
+            summary="Prompt probe did not complete successfully for localcli/localcli-1",
             details={
                 "selected_transport": "cli",
-                "default_model": "composer-2",
+                "default_model": "localcli-1",
                 "attempts": [
                     {
                         "prompt_mode": "argv",
@@ -686,7 +807,7 @@ def test_provider_onboarding_provisions_cli_registry_rows_when_capacity_probe_fa
 
     result = provider_onboarding.run_provider_onboarding(
         database_url="postgresql://example.test/workflow",
-        spec=_cursor_cli_spec(),
+        spec=_localcli_cli_spec(),
     )
 
     assert result.ok is False
@@ -713,69 +834,59 @@ def test_provider_onboarding_provisions_cli_registry_rows_when_capacity_probe_fa
         for query, params in fake_conn.executed
         if "INSERT INTO provider_cli_profiles" in query
     )
-    assert provider_profile_insert[0] == "cursor"
+    assert provider_profile_insert[0] == "localcli"
     assert provider_profile_insert[-1] == "argv"
 
 
-def test_cursor_template_exposes_local_cli_contract(monkeypatch) -> None:
-    cursor_profile = _seed_profile("cursor")
-    assert cursor_profile is not None
-    monkeypatch.setattr(provider_onboarding.provider_registry_mod, "get_profile", lambda _slug: cursor_profile)
+def test_registry_backed_cli_template_exposes_local_cli_contract(monkeypatch) -> None:
+    localcli_profile = _seed_profile("localcli")
+    assert localcli_profile is not None
+    monkeypatch.setattr(provider_onboarding.provider_registry_mod, "get_profile", lambda _slug: localcli_profile)
 
-    template = provider_onboarding._provider_template("cursor")
+    template = provider_onboarding._provider_template("localcli")
 
-    assert template.provider_slug == "cursor"
+    assert template.provider_slug == "localcli"
     assert template.adapter_economics["cli_llm"]["billing_mode"] == "subscription_included"
     assert template.transports["cli"].supported is True
-    assert template.transports["cli"].binary_name == "cursor-agent"
-    assert template.transports["cli"].base_flags == (
-        "--trust",
-        "-p",
-        "--output-format",
-        "json",
-        "--sandbox",
-        "disabled",
-    )
+    assert template.transports["cli"].binary_name == "localcli-agent"
+    assert template.transports["cli"].base_flags == ("--json",)
     assert template.transports["cli"].cli_prompt_modes == ("argv", "stdin")
-    assert template.transports["api"].supported is False
-    assert template.transports["api"].unsupported_reason == (
-        "This provider does not expose an admitted llm_task transport in the registry yet."
-    )
+    assert "api" not in template.transports
 
 
-def test_cursor_template_requires_explicit_registry_profile(monkeypatch) -> None:
+def test_provider_template_requires_explicit_registry_profile(monkeypatch) -> None:
     monkeypatch.setattr(provider_onboarding.provider_registry_mod, "get_profile", lambda _slug: None)
 
     with pytest.raises(ValueError, match="seed provider_cli_profiles in Postgres or provide explicit transport fields"):
-        provider_onboarding._provider_template("cursor")
+        provider_onboarding._provider_template("localcli")
 
 
-def test_provider_template_can_be_derived_from_explicit_cli_wizard_payload(monkeypatch) -> None:
+def test_provider_template_can_be_derived_from_explicit_cli_payload(monkeypatch) -> None:
     monkeypatch.setattr(provider_onboarding.provider_registry_mod, "get_profile", lambda _slug: None)
 
     spec = provider_onboarding.ProviderOnboardingSpec(
-        provider_slug="cursor",
-        provider_name="Cursor",
+        provider_slug="examplecli",
+        provider_name="Example CLI",
         selected_transport="cli",
-        binary_name="cursor-agent",
-        base_flags=("--trust", "-p", "--output-format", "json"),
+        binary_name="examplecli-agent",
+        base_flags=("--json",),
         output_format="json",
         output_envelope_key="result",
         default_timeout=900,
         model_flag="--model",
-        forbidden_flags=("--cloud",),
-        default_model="composer-2",
-        requested_models=("composer-2",),
-        api_key_env_vars=("CURSOR_API_KEY",),
+        forbidden_flags=("--workspace",),
+        default_model="examplecli-1",
+        requested_models=("examplecli-1",),
+        api_key_env_vars=("EXAMPLECLI_API_KEY",),
         cli_prompt_mode="argv",
         adapter_economics={"cli_llm": {"billing_mode": "subscription_included"}},
     )
 
-    template = provider_onboarding._provider_template("cursor", explicit_spec=spec)
+    template = provider_onboarding._provider_template("examplecli", explicit_spec=spec)
 
-    assert template.provider_slug == "cursor"
-    assert template.provider_name == "Cursor"
-    assert template.transports["cli"].binary_name == "cursor-agent"
+    assert template.provider_slug == "examplecli"
+    assert template.provider_name == "Example CLI"
+    assert template.transports["cli"].binary_name == "examplecli-agent"
     assert template.transports["cli"].cli_prompt_modes == ("argv", "stdin")
     assert "api" not in template.transports
 
@@ -886,3 +997,66 @@ def test_discover_api_models_filters_google_generate_content_models(monkeypatch)
     )
 
     assert models == ("gemini-2.5-flash",)
+
+
+def test_discover_api_models_lists_cursor_background_agent_models(monkeypatch) -> None:
+    monkeypatch.setattr(
+        provider_onboarding,
+        "_http_get_json",
+        lambda url, *, headers, timeout_seconds: {
+            "models": ["claude-4-sonnet-thinking", "o3", "claude-4-opus-thinking"]
+        },
+    )
+
+    spec = provider_onboarding.ProviderOnboardingSpec(
+        provider_slug="cursor",
+        selected_transport="api",
+        api_protocol_family="cursor_background_agent",
+        api_key_env_vars=("CURSOR_API_KEY",),
+        default_timeout=30,
+    )
+
+    models = provider_onboarding._discover_api_models(
+        spec,
+        env={"CURSOR_API_KEY": "test-key"},
+        transport_details={"discovery_strategy": "cursor_models_list"},
+    )
+
+    assert models == (
+        "claude-4-sonnet-thinking",
+        "o3",
+        "claude-4-opus-thinking",
+    )
+
+
+def test_probe_capacity_succeeds_for_cursor_background_agent_auth_probe() -> None:
+    spec = provider_onboarding.ProviderOnboardingSpec(
+        provider_slug="cursor",
+        selected_transport="api",
+        default_model="auto",
+        api_endpoint="https://api.cursor.com/v0/agents",
+        api_protocol_family="cursor_background_agent",
+        api_key_env_vars=("CURSOR_API_KEY",),
+        adapter_economics={"llm_task": {"billing_mode": "subscription_included"}},
+    )
+    transport_template = provider_onboarding.ProviderTransportAuthorityTemplate(
+        transport="api",
+        supported=True,
+        api_endpoint="https://api.cursor.com/v0/agents",
+        api_protocol_family="cursor_background_agent",
+        api_key_env_vars=("CURSOR_API_KEY",),
+        default_model="auto",
+        discovery_strategy="cursor_models_list",
+        prompt_probe_strategy="api_model_discovery_auth_probe",
+    )
+
+    result = provider_onboarding._probe_capacity(
+        spec,
+        transport_template,
+        env={"CURSOR_API_KEY": "cursor-test-key"},
+        transport_details={"discovery_strategy": "cursor_models_list"},
+        models=(provider_onboarding.ProviderOnboardingModelSpec(model_slug="auto"),),
+    )
+
+    assert result.status == "succeeded"
+    assert result.details["probe_strategy"] == "api_model_discovery_auth_probe"

@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from ..subsystems import REPO_ROOT, workflow_database_env
+from ..subsystems import workflow_database_env
 from ..helpers import _serialize
 from storage.postgres.connection import resolve_workflow_database_url
 
@@ -61,14 +61,15 @@ def tool_praxis_provider_onboard(params: dict, _progress_emitter=None) -> dict:
     if not provider_slug:
         return {"error": "provider_slug is required"}
 
-    transport = str(params.get("transport", "cli")).strip().lower()
+    transport = str(params.get("transport", "")).strip().lower()
     models = params.get("models") or []
     api_key_env_var = params.get("api_key_env_var")
 
     raw_spec: dict[str, Any] = {
         "provider_slug": provider_slug,
-        "selected_transport": transport,
     }
+    if transport:
+        raw_spec["selected_transport"] = transport
     if models:
         raw_spec["requested_models"] = list(models)
     if api_key_env_var:
@@ -88,7 +89,12 @@ def tool_praxis_provider_onboard(params: dict, _progress_emitter=None) -> dict:
 
     if _progress_emitter:
         label = "probe" if dry_run else "onboard"
-        _progress_emitter.emit(progress=1, total=3, message=f"Running provider {label} ({transport})")
+        transport_label = f" ({transport})" if transport else ""
+        _progress_emitter.emit(
+            progress=1,
+            total=3,
+            message=f"Running provider {label}{transport_label}",
+        )
 
     result = run_provider_onboarding(
         database_url=db_url,
@@ -121,11 +127,11 @@ def _post_onboarding_sync(
     provider_slug: str,
     model_reports: tuple[dict[str, Any], ...],
 ) -> dict[str, Any]:
-    """Post-onboarding: populate cap_ columns, routing rows, and runtime_profiles.json."""
+    """Post-onboarding: populate cap_ columns, routing rows, and native runtime authority."""
     from storage.postgres.connection import SyncPostgresConnection, get_workflow_pool
 
     conn = SyncPostgresConnection(get_workflow_pool())
-    results: dict[str, Any] = {"cap_columns": [], "routing_rows": 0, "runtime_profiles": False}
+    results: dict[str, Any] = {"cap_columns": [], "routing_rows": 0, "native_runtime_profiles": False}
 
     for report in model_reports:
         model_slug = report.get("model_slug", "")
@@ -236,33 +242,50 @@ def _post_onboarding_sync(
 
         results["routing_rows"] += routing_count
 
-    # 4. Update config/runtime_profiles.json allowed_models
+    # 4. Extend native runtime authority allowed_models for any matching profiles.
     try:
-        config_path = REPO_ROOT / "config" / "runtime_profiles.json"
-        if config_path.is_file():
-            config = json.loads(config_path.read_text(encoding="utf-8"))
-            profiles = config.get("runtime_profiles", {})
-            for profile_name, profile in profiles.items():
-                allowed = list(profile.get("allowed_models", []))
-                new_slugs = [
-                    r.get("model_slug", "")
-                    for r in model_reports
-                    if r.get("model_slug") and r["model_slug"] not in allowed
-                ]
-                if new_slugs:
-                    allowed.extend(new_slugs)
-                    profile["allowed_models"] = allowed
-            config_path.write_text(
-                json.dumps(config, indent=2, ensure_ascii=False) + "\n",
-                encoding="utf-8",
-            )
-            results["runtime_profiles"] = True
-            results["added_to_allowed_models"] = [
-                r.get("model_slug", "") for r in model_reports
-                if r.get("model_slug")
-            ]
+        native_rows = conn.execute(
+            """
+            SELECT runtime_profile_ref, allowed_models
+            FROM registry_native_runtime_profile_authority
+            ORDER BY runtime_profile_ref
+            """
+        )
+        added_models = [
+            str(report.get("model_slug") or "").strip()
+            for report in model_reports
+            if str(report.get("model_slug") or "").strip()
+        ]
+        added_models = list(dict.fromkeys(added_models))
+        if native_rows and added_models:
+            updated_profiles: list[str] = []
+            for row in native_rows:
+                allowed = row.get("allowed_models") or []
+                if isinstance(allowed, str):
+                    allowed = json.loads(allowed)
+                allowed_list = [str(value).strip() for value in allowed if str(value).strip()]
+                merged = list(dict.fromkeys([*allowed_list, *added_models]))
+                if merged == allowed_list:
+                    continue
+                conn.execute(
+                    """
+                    UPDATE registry_native_runtime_profile_authority
+                    SET allowed_models = $2::jsonb,
+                        recorded_at = now()
+                    WHERE runtime_profile_ref = $1
+                    """,
+                    str(row["runtime_profile_ref"]),
+                    json.dumps(merged),
+                )
+                updated_profiles.append(str(row["runtime_profile_ref"]))
+            if updated_profiles:
+                results["native_runtime_profiles"] = True
+                results["updated_runtime_profile_refs"] = updated_profiles
+                results["added_to_allowed_models"] = added_models
+        else:
+            results["native_runtime_profiles"] = False
     except Exception as exc:
-        results["runtime_profiles_error"] = str(exc)
+        results["native_runtime_profiles_error"] = str(exc)
 
     return results
 
@@ -274,7 +297,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
             "description": (
                 "Onboard a CLI or API provider into Praxis Engine. "
                 "Probes transport, discovers models, tests capacity, writes to all routing tables, "
-                "and updates runtime config.\n\n"
+                "and updates native runtime authority.\n\n"
                 "USE WHEN: connecting a new provider (claude, codex, gemini, openrouter) or "
                 "adding models to an existing provider.\n\n"
                 "EXAMPLES:\n"
@@ -284,7 +307,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "api_key_env_var='OPENROUTER_API_KEY')\n\n"
                 "The 'probe' action is a dry run — shows what would happen without writing. "
                 "The 'onboard' action writes to provider_model_candidates, task_type_routing, "
-                "model_profiles, and config/runtime_profiles.json.\n\n"
+                "model_profiles, and registry_native_runtime_profile_authority.\n\n"
                 "DO NOT USE: for checking provider health (use praxis_health)."
             ),
             "inputSchema": {
@@ -293,7 +316,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "action": {
                         "type": "string",
                         "enum": ["probe", "onboard"],
-                        "description": "'probe' (dry run) or 'onboard' (write to DB + config)",
+                        "description": "'probe' (dry run) or 'onboard' (write to DB authority)",
                     },
                     "provider_slug": {
                         "type": "string",

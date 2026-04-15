@@ -43,6 +43,7 @@ __all__ = [
     "resolve_provider_from_alias",
     "default_provider_slug",
     "default_llm_adapter_type",
+    "default_adapter_type_for_provider",
     "default_model_for_provider",
     "resolve_adapter_economics",
     "resolve_api_endpoint",
@@ -641,6 +642,14 @@ def default_llm_adapter_type() -> str:
         _REGISTRY,
         adapter_config=_ADAPTER_CONFIG,
         failure_mappings=_ADAPTER_FAILURE_MAPPINGS,
+    )
+
+
+def default_adapter_type_for_provider(provider_slug: str) -> str | None:
+    _load_from_db()
+    return provider_transport.default_adapter_type_for_provider(
+        provider_slug,
+        profiles=_REGISTRY,
     )
 
 

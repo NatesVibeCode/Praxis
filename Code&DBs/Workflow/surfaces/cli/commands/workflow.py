@@ -245,7 +245,7 @@ def _run_command(args: list[str], *, stdout: TextIO) -> int:
         provider = _default_prompt_provider_slug()
         model = None
         tier = None
-        adapter = "cli_llm"
+        adapter = None
         scope_write = None
         workdir = None
         context_files = None

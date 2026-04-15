@@ -373,7 +373,7 @@ def _get_pg_conn():
     try:
         from storage.postgres.connection import ensure_postgres_available
         env = {
-            "WORKFLOW_DATABASE_URL": "postgresql://test@localhost:5432/praxis_test",
+            "WORKFLOW_DATABASE_URL": "postgresql://postgres@localhost:5432/praxis_test",
             "PATH": os.environ.get("PATH", ""),
         }
         return ensure_postgres_available(env=env)

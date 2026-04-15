@@ -32,6 +32,7 @@ __all__ = [
     "resolve_provider_from_alias",
     "default_provider_slug",
     "default_llm_adapter_type",
+    "default_adapter_type_for_provider",
     "default_model_for_provider",
     "resolve_adapter_economics",
     "resolve_api_endpoint",
@@ -102,6 +103,10 @@ def default_provider_slug() -> str:
 
 def default_llm_adapter_type() -> str:
     return _execution_registry().default_llm_adapter_type()
+
+
+def default_adapter_type_for_provider(provider_slug: str) -> str | None:
+    return _execution_registry().default_adapter_type_for_provider(provider_slug)
 
 
 def default_model_for_provider(provider_slug: str) -> str | None:

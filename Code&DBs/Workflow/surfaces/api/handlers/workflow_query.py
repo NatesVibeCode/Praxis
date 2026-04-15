@@ -43,6 +43,10 @@ from runtime.payload_coercion import (
     json_object as _parse_properties,
     parse_json_field as _parse_json_field,
 )
+from runtime.surface_catalog_reviews import (
+    list_surface_catalog_reviews,
+    record_surface_catalog_review,
+)
 from runtime.integrations.display_names import (
     base_integration_name,
     display_name_for_integration,
@@ -54,6 +58,7 @@ from registry.control_plane_manifests import (
     list_control_manifest_history as _list_control_manifest_history,
 )
 from surfaces.api.catalog_authority import build_catalog_payload
+from storage.postgres.validators import PostgresWriteError
 from . import workflow_query_core as _workflow_query_core
 from ._surface_usage import record_api_route_usage as _record_api_route_usage
 from ._shared import (
@@ -1088,6 +1093,10 @@ def _workflow_build_payload(
     if not isinstance(build_bundle, dict):
         from runtime.build_authority import build_authority_bundle
         from runtime.build_review_decisions import materialize_reviewed_build_definition
+        from runtime.build_planning_contract import (
+            build_candidate_resolution_manifest,
+            build_reviewable_plan,
+        )
         from runtime.operating_model_planner import current_compiled_spec
 
         current_plan = current_compiled_spec(effective_definition, effective_compiled_spec)
@@ -1104,11 +1113,29 @@ def _workflow_build_payload(
             effective_definition = apply_authority_bundle(effective_definition, compiled_spec=current_plan)
         effective_compiled_spec = current_plan
         build_bundle = build_authority_bundle(effective_definition, compiled_spec=current_plan)
+    else:
+        from runtime.build_planning_contract import (
+            build_candidate_resolution_manifest,
+            build_reviewable_plan,
+        )
     blocking_issues = [
         issue
         for issue in build_bundle.get("build_issues", [])
         if isinstance(issue, dict) and _text(issue.get("severity")) == "blocking"
     ]
+    candidate_resolution_manifest = build_candidate_resolution_manifest(
+        definition=effective_definition,
+        workflow_id=_text(row.get("id")) or None,
+        conn=conn,
+        compiled_spec=effective_compiled_spec,
+    )
+    reviewable_plan = build_reviewable_plan(
+        definition=effective_definition,
+        workflow_id=_text(row.get("id")) or None,
+        conn=conn,
+        compiled_spec=effective_compiled_spec,
+        candidate_manifest=candidate_resolution_manifest,
+    )
     return {
         "workflow": {
             "id": row["id"],
@@ -1129,6 +1156,8 @@ def _workflow_build_payload(
         "build_issues": build_bundle.get("build_issues") or [],
         "projection_status": build_bundle.get("projection_status") or {},
         "compiled_spec_projection": build_bundle.get("compiled_spec_projection"),
+        "candidate_resolution_manifest": candidate_resolution_manifest,
+        "reviewable_plan": reviewable_plan,
         "undo_receipt": undo_receipt,
         "mutation_event_id": mutation_event_id,
     }
@@ -2682,6 +2711,94 @@ def _handle_catalog_get(request: Any, path: str) -> None:
         request._send_json(500, {"error": str(exc)})
 
 
+def _handle_catalog_review_decisions_get(request: Any, path: str) -> None:
+    try:
+        params = _query_params(request.path)
+        surface_name = (params.get("surface") or ["moon"])[0].strip() or "moon"
+        target_kind = (params.get("target_kind") or [""])[0].strip() or None
+        target_ref = (params.get("target_ref") or [""])[0].strip() or None
+        pg = request.subsystems.get_pg_conn()
+        decisions = list_surface_catalog_reviews(
+            pg,
+            surface_name=surface_name,
+            target_kind=target_kind,
+            target_ref=target_ref,
+        )
+        request._send_json(
+            200,
+            {
+                "surface_name": surface_name,
+                "filters": {
+                    key: value
+                    for key, value in {
+                        "target_kind": target_kind,
+                        "target_ref": target_ref,
+                    }.items()
+                    if value is not None
+                },
+                "review_decisions": [_serialize(item) for item in decisions],
+                "count": len(decisions),
+            },
+        )
+    except PostgresWriteError as exc:
+        request._send_json(
+            400,
+            {
+                "error": str(exc),
+                "reason_code": exc.reason_code,
+                "details": _serialize(exc.details),
+            },
+        )
+    except Exception as exc:
+        request._send_json(500, {"error": str(exc)})
+
+
+def _handle_catalog_review_decisions_post(request: Any, path: str) -> None:
+    try:
+        body = _read_json_body(request)
+    except (json.JSONDecodeError, ValueError) as exc:
+        request._send_json(400, {"error": f"Invalid JSON: {exc}"})
+        return
+
+    try:
+        pg = request.subsystems.get_pg_conn()
+        surface_name = _text(body.get("surface_name") or body.get("surface") or "moon") or "moon"
+        review_decision = record_surface_catalog_review(
+            pg,
+            surface_name=surface_name,
+            target_kind=body.get("target_kind"),
+            target_ref=body.get("target_ref"),
+            decision=body.get("decision"),
+            actor_type=body.get("actor_type"),
+            actor_ref=body.get("actor_ref"),
+            approval_mode=body.get("approval_mode"),
+            rationale=body.get("rationale"),
+            candidate_payload=body.get("candidate_payload"),
+        )
+        request._send_json(
+            200,
+            {
+                "surface_name": surface_name,
+                "review_decision": _serialize(review_decision),
+                "applies_overlay": (
+                    str(review_decision.get("decision") or "").lower() in {"approve", "widen"}
+                    and isinstance(review_decision.get("candidate_payload"), dict)
+                ),
+            },
+        )
+    except PostgresWriteError as exc:
+        request._send_json(
+            400,
+            {
+                "error": str(exc),
+                "reason_code": exc.reason_code,
+                "details": _serialize(exc.details),
+            },
+        )
+    except Exception as exc:
+        request._send_json(500, {"error": str(exc)})
+
+
 def _handle_intent_analyze_get(request: Any, path: str) -> None:
     try:
         params = _query_params(request.path)
@@ -3474,6 +3591,7 @@ QUERY_POST_ROUTES: list[RouteEntry] = [
     (_exact("/api/refine-definition"), _handle_refine_definition_post),
     (_exact("/api/plan"), _handle_plan_post),
     (_exact("/api/commit"), _handle_commit_post),
+    (_exact("/api/catalog/review-decisions"), _handle_catalog_review_decisions_post),
     (_workflow_build_path, _handle_workflow_build_post),
     (
         lambda candidate: candidate == "/api/documents"
@@ -3521,6 +3639,7 @@ QUERY_GET_ROUTES: list[RouteEntry] = [
     (_exact("/api/models/market"), _handle_market_models_get),
     (_exact("/api/integrations"), _handle_integrations_get),
     (_exact("/api/catalog"), _handle_catalog_get),
+    (_exact("/api/catalog/review-decisions"), _handle_catalog_review_decisions_get),
     (_exact("/api/intent/analyze"), _handle_intent_analyze_get),
     (_exact("/api/search"), _handle_search_get),
     (_exact("/api/bugs/replay-ready"), _handle_bugs_replay_ready_get),

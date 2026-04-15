@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import json
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
 
+import runtime.instance as native_instance
 from runtime.instance import (
     PRAXIS_RUNTIME_PROFILE_ENV,
     PRAXIS_RUNTIME_PROFILES_CONFIG_ENV,
@@ -13,82 +14,51 @@ from runtime.instance import (
 )
 
 
-def _runtime_profile(
-    *,
-    instance_name: str,
-    workdir: str = ".",
-) -> dict[str, str]:
-    return {
-        "instance_name": instance_name,
-        "repo_root": ".",
-        "workdir": workdir,
-        "receipts_dir": "artifacts/runtime_receipts",
-        "topology_dir": "artifacts/runtime_topology",
+def _native_profile(**overrides):
+    values = {
+        "runtime_profile_ref": "praxis",
+        "workspace_ref": "praxis",
+        "sandbox_profile_ref": "sandbox_profile.praxis.default",
+        "model_profile_id": "model_profile.praxis.default",
+        "provider_policy_id": "provider_policy.praxis.default",
+        "provider_name": "openai",
+        "provider_names": ("openai",),
+        "allowed_models": ("gpt-5.4",),
+        "repo_root": str(Path(__file__).resolve().parents[4]),
+        "workdir": str(Path(__file__).resolve().parents[4]),
+        "instance_name": "praxis",
+        "receipts_dir": str(Path(__file__).resolve().parents[4] / "artifacts" / "runtime_receipts"),
+        "topology_dir": str(Path(__file__).resolve().parents[4] / "artifacts" / "runtime_topology"),
     }
+    values.update(overrides)
+    return SimpleNamespace(**values)
 
 
-def _write_runtime_profiles_config(
-    tmp_path: Path,
-    payload: dict[str, object],
-) -> Path:
-    repo_root = tmp_path / "dag-repo"
-    (repo_root / "config").mkdir(parents=True)
-    (repo_root / "artifacts" / "runtime_receipts").mkdir(parents=True)
-    (repo_root / "artifacts" / "runtime_topology").mkdir(parents=True)
-    config_path = repo_root / "config" / "runtime_profiles.json"
-    config_path.write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    return config_path
-
-
-def test_native_instance_rejects_legacy_runtime_profile_grammar(tmp_path: Path) -> None:
-    config_path = _write_runtime_profiles_config(
-        tmp_path,
-        {
-            "schema_version": 1,
-            "default_profile": "praxis-project",
-            "profiles": [
-                {
-                    "profile": "praxis-project",
-                    **_runtime_profile(instance_name="praxis-project"),
-                }
-            ],
-        },
-    )
+def test_native_instance_rejects_noncanonical_runtime_profile_assertion_path(tmp_path: Path) -> None:
+    rogue_path = tmp_path / "rogue" / "runtime_profiles.json"
 
     with pytest.raises(NativeInstanceResolutionError) as exc_info:
         resolve_native_instance(
-            env={PRAXIS_RUNTIME_PROFILES_CONFIG_ENV: str(config_path)},
+            env={PRAXIS_RUNTIME_PROFILES_CONFIG_ENV: str(rogue_path)},
         )
 
-    assert exc_info.value.reason_code == "native_instance.config_invalid"
-    assert exc_info.value.details == {"field": "default_profile"}
+    assert exc_info.value.reason_code == "native_instance.config_boundary"
 
 
-def test_native_instance_runtime_profile_env_can_only_assert_checked_in_default(
-    tmp_path: Path,
+def test_native_instance_runtime_profile_env_can_only_assert_db_default(
+    monkeypatch,
 ) -> None:
-    config_path = _write_runtime_profiles_config(
-        tmp_path,
-        {
-            "schema_version": 1,
-            "default_runtime_profile": "praxis",
-            "runtime_profiles": {
-                "praxis": _runtime_profile(instance_name="praxis"),
-                "alt-project": _runtime_profile(
-                    instance_name="alt-project",
-                    workdir="artifacts",
-                ),
-            },
-        },
+    monkeypatch.setattr(native_instance, "ensure_postgres_available", lambda env=None: object())
+    monkeypatch.setattr(
+        native_instance,
+        "resolve_native_runtime_profile_config",
+        lambda conn=None: _native_profile(),
     )
 
     with pytest.raises(NativeInstanceResolutionError) as exc_info:
         resolve_native_instance(
             env={
-                PRAXIS_RUNTIME_PROFILES_CONFIG_ENV: str(config_path),
+                PRAXIS_RUNTIME_PROFILES_CONFIG_ENV: str(Path(__file__).resolve().parents[4] / "config" / "runtime_profiles.json"),
                 PRAXIS_RUNTIME_PROFILE_ENV: "alt-project",
             },
         )
@@ -99,3 +69,23 @@ def test_native_instance_runtime_profile_env_can_only_assert_checked_in_default(
         "expected": "praxis",
         "actual": "alt-project",
     }
+
+
+def test_native_instance_resolves_contract_from_db_authority(monkeypatch) -> None:
+    monkeypatch.setattr(native_instance, "ensure_postgres_available", lambda env=None: object())
+    monkeypatch.setattr(
+        native_instance,
+        "resolve_native_runtime_profile_config",
+        lambda conn=None: _native_profile(),
+    )
+
+    instance = resolve_native_instance(
+        env={
+            PRAXIS_RUNTIME_PROFILES_CONFIG_ENV: str(Path(__file__).resolve().parents[4] / "config" / "runtime_profiles.json"),
+            PRAXIS_RUNTIME_PROFILE_ENV: "praxis",
+        },
+    )
+
+    assert instance.runtime_profile_ref == "praxis"
+    assert instance.instance_name == "praxis"
+    assert instance.runtime_profiles_config.endswith("/config/runtime_profiles.json")

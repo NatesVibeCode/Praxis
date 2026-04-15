@@ -30,6 +30,9 @@ CalibrationOutcome = _cal.CalibrationOutcome
 ComplexityTier = _dto.ComplexityTier
 DynamicTimeoutCalculator = _dto.DynamicTimeoutCalculator
 TimeoutConfig = _dto.TimeoutConfig
+complexity_tier_from_name = _dto.complexity_tier_from_name
+max_complexity_tier = _dto.max_complexity_tier
+calculate_timeout_seconds = _dto.calculate_timeout_seconds
 
 
 # ── Calibration Engine ──────────────────────────────────────────────
@@ -221,6 +224,28 @@ class TestDynamicTimeoutClamp:
         result = calc.calculate("huge", ComplexityTier.FRONTIER)
         # 1000 * 3.0 = 3000, clamped to 1800
         assert result == 1800
+
+
+class TestDynamicTimeoutHelpers:
+    def test_complexity_name_mapping(self):
+        assert complexity_tier_from_name("low") == ComplexityTier.TRIVIAL
+        assert complexity_tier_from_name("moderate") == ComplexityTier.STANDARD
+        assert complexity_tier_from_name("medium") == ComplexityTier.STANDARD
+        assert complexity_tier_from_name("high") == ComplexityTier.COMPLEX
+        assert complexity_tier_from_name("frontier") == ComplexityTier.FRONTIER
+        assert complexity_tier_from_name("unknown") == ComplexityTier.STANDARD
+
+    def test_max_complexity_tier(self):
+        assert max_complexity_tier(["low", "moderate", "high"]) == ComplexityTier.COMPLEX
+
+    def test_calculate_timeout_seconds_uses_history(self):
+        result = calculate_timeout_seconds(
+            "spec-a",
+            "moderate",
+            default_timeout=300,
+            historical_p95_seconds=118.0,
+        )
+        assert result == 177
 
 
 class TestDynamicTimeoutRecordAndP95:

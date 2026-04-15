@@ -29,7 +29,9 @@ def test_runtime_breadth_authority_schema_is_the_canonical_tail_migration() -> N
     filenames = [entry.filename for entry in workflow_migration_manifest()]
     assert "011_runtime_breadth_authority.sql" in filenames
     assert "071_repo_snapshots_runtime_breadth_repair.sql" in filenames
-    assert filenames[-1] == "111_cursor_cli_provider_seed.sql"
+    assert "116_native_runtime_registry_authority.sql" in filenames
+    assert "119_context_bundle_sandbox_profile_ref.sql" in filenames
+    assert filenames[-1] == "121_cursor_background_agent_api.sql"
 
 
 def test_runtime_breadth_authority_schema_expected_objects_are_declared() -> None:

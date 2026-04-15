@@ -230,15 +230,39 @@ def _source_policy_rows() -> list[dict[str, Any]]:
 
 
 class _CatalogPg:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        surface_review_rows: list[dict[str, Any]] | None = None,
+    ) -> None:
         self.executed: list[tuple[str, tuple[Any, ...]]] = []
+        self.surface_review_rows = surface_review_rows or []
+        self.recorded_review_rows: list[dict[str, Any]] = []
+        self.event_log_rows: list[dict[str, Any]] = []
 
     def execute(self, query: str, *params: Any) -> list[dict[str, Any]]:
         self.executed.append((query, params))
+        stripped = query.strip()
+        if stripped.startswith("INSERT INTO event_log"):
+            row = {
+                "id": len(self.event_log_rows) + 1,
+                "channel": params[0],
+                "event_type": params[1],
+                "entity_id": params[2],
+                "entity_kind": params[3],
+                "payload": json.loads(params[4]) if isinstance(params[4], str) else params[4],
+                "emitted_by": params[5],
+            }
+            self.event_log_rows.append(row)
+            return [{"id": row["id"]}]
+        if stripped.startswith("SELECT pg_notify"):
+            return []
         if "FROM surface_catalog_registry" in query:
             return _surface_registry_rows()
         if "FROM surface_catalog_source_policy_registry" in query:
             return _source_policy_rows()
+        if "FROM surface_catalog_review_decisions" in query:
+            return list(self.surface_review_rows)
         if "FROM capability_catalog" in query:
             return [
                 {
@@ -278,6 +302,36 @@ class _CatalogPg:
                 }
             ]
         return []
+
+    def fetchrow(self, query: str, *params: Any) -> dict[str, Any] | None:
+        self.executed.append((query, params))
+        if query.strip().startswith("INSERT INTO surface_catalog_review_decisions"):
+            row = {
+                "review_decision_id": params[0],
+                "surface_name": params[1],
+                "target_kind": params[2],
+                "target_ref": params[3],
+                "decision": params[4],
+                "actor_type": params[5],
+                "actor_ref": params[6],
+                "approval_mode": params[7],
+                "rationale": params[8],
+                "candidate_payload": json.loads(params[9]) if isinstance(params[9], str) else params[9],
+                "decided_at": params[10],
+                "created_at": params[10],
+            }
+            self.recorded_review_rows.append(row)
+            self.surface_review_rows = [
+                current
+                for current in self.surface_review_rows
+                if not (
+                    current.get("target_kind") == row["target_kind"]
+                    and current.get("target_ref") == row["target_ref"]
+                )
+            ]
+            self.surface_review_rows.append(row)
+            return row
+        return None
 
 
 class _NoSurfaceCatalogPg(_CatalogPg):
@@ -375,8 +429,72 @@ def test_build_catalog_payload_surfaces_shared_static_and_connector_items() -> N
     assert items_by_id["conn-gmail"]["truth"]["category"] == "runtime"
     assert payload["sources"]["surface_registry"] == len(_surface_registry_rows())
     assert payload["sources"]["source_policy_registry"] == len(_source_policy_rows())
+    assert payload["sources"]["surface_review_overlays"] == 0
+    assert payload["source_policies"][0]["source_kind"] == "capability"
+    assert payload["source_policies"][0]["surfacePolicy"]["tier"] == "hidden"
     assert payload["sources"]["connectors"] == 1
     assert payload["fetched_at"]
+
+
+def test_build_catalog_payload_applies_latest_catalog_item_review_overlay() -> None:
+    payload = build_catalog_payload(
+        _CatalogPg(
+            surface_review_rows=[
+                {
+                    "review_decision_id": "scrd_001",
+                    "surface_name": "moon",
+                    "target_kind": "catalog_item",
+                    "target_ref": "ctrl-retry",
+                    "decision": "approve",
+                    "candidate_payload": {
+                        "label": "Retry Policy",
+                        "displayOrder": 1,
+                        "surfacePolicy": {
+                            "tier": "hidden",
+                            "badge": "Removed",
+                            "detail": "Retry is now advanced policy only.",
+                            "hardChoice": "Keep retry off the primary gate surface.",
+                        },
+                    },
+                }
+            ]
+        )
+    )
+
+    items_by_id = {item["id"]: item for item in payload["items"]}
+
+    assert payload["sources"]["surface_review_overlays"] == 1
+    assert items_by_id["ctrl-retry"]["label"] == "Retry Policy"
+    assert items_by_id["ctrl-retry"]["surfacePolicy"]["tier"] == "hidden"
+    assert payload["items"][0]["id"] == "ctrl-retry"
+
+
+def test_build_catalog_payload_applies_latest_source_policy_review_overlay() -> None:
+    payload = build_catalog_payload(
+        _CatalogPg(
+            surface_review_rows=[
+                {
+                    "review_decision_id": "scrd_002",
+                    "surface_name": "moon",
+                    "target_kind": "source_policy",
+                    "target_ref": "capability",
+                    "decision": "widen",
+                    "candidate_payload": {
+                        "surfacePolicy": {
+                            "tier": "advanced",
+                            "badge": "Later",
+                            "detail": "Capability rows are visible in advanced surfaces for operator review.",
+                        }
+                    },
+                }
+            ]
+        )
+    )
+
+    items_by_id = {item["id"]: item for item in payload["items"]}
+
+    assert payload["sources"]["surface_review_overlays"] == 1
+    assert items_by_id["cap-debug"]["surfacePolicy"]["tier"] == "advanced"
 
 
 def test_workflow_template_handler_reads_registry_workflows() -> None:
@@ -414,6 +532,7 @@ def test_build_catalog_payload_does_not_fabricate_surface_rows_when_registry_is_
     assert "ctrl-branch" not in items_by_id
     assert payload["sources"]["surface_registry"] == 0
     assert payload["sources"]["source_policy_registry"] == 0
+    assert payload["sources"]["surface_review_overlays"] == 0
     assert items_by_id["cap-debug"]["actionValue"] == "task/debug"
     assert items_by_id["cap-debug"]["truth"]["category"] == "partial"
     assert items_by_id["cap-debug"]["surfacePolicy"]["tier"] == "hidden"
@@ -441,3 +560,68 @@ def test_legacy_catalog_handler_uses_shared_catalog_authority() -> None:
     assert items_by_id["ctrl-review"]["surfacePolicy"]["tier"] == "hidden"
     assert items_by_id["ctrl-retry"]["surfacePolicy"]["tier"] == "advanced"
     assert items_by_id["int-workflow-invoke"]["surfacePolicy"]["tier"] == "hidden"
+
+
+def test_catalog_review_decisions_get_lists_latest_surface_decisions() -> None:
+    pg = _CatalogPg(
+        surface_review_rows=[
+            {
+                "review_decision_id": "scrd_003",
+                "surface_name": "moon",
+                "target_kind": "catalog_item",
+                "target_ref": "ctrl-retry",
+                "decision": "approve",
+                "candidate_payload": {
+                    "label": "Retry Policy",
+                },
+            }
+        ]
+    )
+    request = _RequestStub(pg)
+    request.path = "/api/catalog/review-decisions?surface=moon&target_kind=catalog_item"
+
+    workflow_query._handle_catalog_review_decisions_get(request, request.path)
+
+    assert request.sent is not None
+    status, payload = request.sent
+    assert status == 200
+    assert payload["surface_name"] == "moon"
+    assert payload["count"] == 1
+    assert payload["filters"] == {"target_kind": "catalog_item"}
+    assert payload["review_decisions"][0]["target_ref"] == "ctrl-retry"
+
+
+def test_catalog_review_decisions_post_records_decision_and_event() -> None:
+    pg = _CatalogPg()
+    request = _RequestStub(pg)
+    request.path = "/api/catalog/review-decisions"
+    request.headers = {}
+    body = {
+        "surface_name": "moon",
+        "target_kind": "source_policy",
+        "target_ref": "capability",
+        "decision": "widen",
+        "candidate_payload": {
+            "surfacePolicy": {
+                "tier": "advanced",
+                "badge": "Later",
+                "detail": "Show capability rows in advanced surfaces.",
+            }
+        },
+        "rationale": "Operator approved the advanced surface exposure.",
+    }
+    raw = json.dumps(body).encode("utf-8")
+    request.headers = {"Content-Length": str(len(raw))}
+    request.rfile = io.BytesIO(raw)
+
+    workflow_query._handle_catalog_review_decisions_post(request, request.path)
+
+    assert request.sent is not None
+    status, payload = request.sent
+    assert status == 200
+    assert payload["applies_overlay"] is True
+    assert payload["review_decision"]["target_kind"] == "source_policy"
+    assert payload["review_decision"]["target_ref"] == "capability"
+    assert payload["review_decision"]["decision"] == "widen"
+    assert pg.recorded_review_rows[-1]["candidate_payload"]["surfacePolicy"]["tier"] == "advanced"
+    assert pg.event_log_rows[-1]["event_type"] == "review_decision"

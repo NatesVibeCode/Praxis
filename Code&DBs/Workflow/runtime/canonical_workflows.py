@@ -61,7 +61,7 @@ _TRIGGER_MANUAL_ROUTE = "trigger"
 _TRIGGER_SCHEDULE_ROUTE = "trigger/schedule"
 _TRIGGER_WEBHOOK_ROUTE = "trigger/webhook"
 _WEBHOOK_TRIGGER_EVENT_TYPE = "db.webhook_events.insert"
-_BUILD_REVIEW_DECISIONS = {"approve", "reject", "defer", "widen", "revoke"}
+_BUILD_REVIEW_DECISIONS = {"approve", "reject", "defer", "widen", "revoke", "proposal_request"}
 _BUILD_REVIEW_TARGET_KINDS = {
     "binding",
     "import_snapshot",
@@ -88,7 +88,9 @@ def _normalize_build_review_decision_body(body: dict[str, Any]) -> dict[str, Any
     if not target_ref:
         raise WorkflowRuntimeBoundaryError("target_ref is required")
     if decision not in _BUILD_REVIEW_DECISIONS:
-        raise WorkflowRuntimeBoundaryError("decision must be approve, reject, defer, widen, or revoke")
+        raise WorkflowRuntimeBoundaryError(
+            "decision must be approve, reject, defer, widen, revoke, or proposal_request"
+        )
 
     candidate_payload = (
         _json_clone(body.get("candidate_payload"))
@@ -98,10 +100,10 @@ def _normalize_build_review_decision_body(body: dict[str, Any]) -> dict[str, Any
     candidate_ref = _text(body.get("candidate_ref"))
     if not candidate_ref and isinstance(candidate_payload, dict):
         candidate_ref = _text(candidate_payload.get("target_ref"))
-    if decision == "approve" and target_kind in {"binding", "import_snapshot"}:
+    if decision in {"approve", "proposal_request"} and target_kind in {"binding", "import_snapshot"}:
         if candidate_payload is None and not candidate_ref:
             raise WorkflowRuntimeBoundaryError(
-                "candidate_payload or candidate_ref is required for approve decisions"
+                "candidate_payload or candidate_ref is required for approve/proposal_request decisions"
             )
     return {
         "target_kind": target_kind,

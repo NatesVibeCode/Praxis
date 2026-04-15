@@ -586,6 +586,7 @@ def execute_api(
         f"--api-protocol {shlex.quote(_api_protocol)} "
         f"--api-endpoint {shlex.quote(_api_endpoint)} "
         f"--api-key-env {shlex.quote(_api_key_env)} "
+        f"--workdir {shlex.quote(resolved_workdir)} "
         f"--model {shlex.quote(model_slug)} "
         f"--max-output-tokens {max_output_tokens} "
         f"--timeout-seconds {timeout}"

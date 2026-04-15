@@ -39,7 +39,7 @@ from storage.postgres import (
     persist_workflow_admission,
 )
 
-_TEST_ENV = {"WORKFLOW_DATABASE_URL": "postgresql://test@localhost:5432/praxis_test"}
+_TEST_ENV = {"WORKFLOW_DATABASE_URL": "postgresql://postgres@localhost:5432/praxis_test"}
 
 
 def _unique_suffix() -> str:

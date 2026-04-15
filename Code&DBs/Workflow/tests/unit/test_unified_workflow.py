@@ -40,6 +40,7 @@ class _FakeConn:
         existing_idempotency: dict[str, dict] | None = None,
         existing_jobs: dict[tuple[str, str], dict] | None = None,
         existing_run_states: dict[str, str] | None = None,
+        workflow_run_rows: list[dict[str, object]] | None = None,
         compile_artifact_rows: list[dict[str, object]] | None = None,
         execution_packet_rows: list[dict[str, object]] | None = None,
         queue_depth: int = 0,
@@ -49,6 +50,7 @@ class _FakeConn:
         self.existing_idempotency = existing_idempotency or {}
         self.existing_jobs = existing_jobs or {}
         self.existing_run_states = existing_run_states or {}
+        self.workflow_run_rows = workflow_run_rows or []
         self.compile_artifact_rows = compile_artifact_rows or []
         self.execution_packet_rows = execution_packet_rows or []
         self.queue_depth = queue_depth
@@ -67,6 +69,17 @@ class _FakeConn:
         if "FROM execution_packets" in query:
             run_id = args[0]
             return [row for row in self.execution_packet_rows if row["run_id"] == run_id]
+        if "FROM workflow_runs" in query and "request_envelope->>'name'" in query:
+            spec_name = args[0]
+            limit = int(args[1]) if len(args) > 1 else 50
+            rows = [
+                row
+                for row in self.workflow_run_rows
+                if row.get("spec_name") == spec_name
+                and row.get("started_at") is not None
+                and row.get("finished_at") is not None
+            ]
+            return rows[:limit]
         if "FROM route_policy_registry" in query:
             return [{
                 "task_rank_weight": 0.35,
@@ -2140,17 +2153,30 @@ def test_submit_graph_workflow_inline_reports_current_state_for_success(monkeypa
     monkeypatch.setenv("WORKFLOW_DATABASE_URL", "postgresql://postgres@127.0.0.1:5432/praxis")
     monkeypatch.setattr(_admission_mod, "compile_graph_workflow_request", lambda *_args, **_kwargs: fake_request)
     monkeypatch.setattr(_admission_mod, "_graph_registry_for_request", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(_admission_mod, "_graph_adapter_registry", lambda: object())
     monkeypatch.setattr(_admission_mod, "WorkflowIntakePlanner", _FakePlanner)
     monkeypatch.setattr(_admission_mod, "_persist_graph_authority", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(_admission_mod, "PostgresEvidenceWriter", _FakeWriter)
-    monkeypatch.setattr(
-        _admission_mod,
-        "execute_workflow_request",
-        lambda **_kwargs: (fake_execution_result, None),
-    )
+    monkeypatch.setattr(_admission_mod, "default_provider_slug", lambda: "openai")
+    monkeypatch.setattr(_admission_mod, "_graph_runtime_timeout_seconds", lambda *_args, **_kwargs: 222)
+    captured: dict[str, object] = {}
+
+    def _fake_execute_workflow_request(**kwargs):
+        captured.update(kwargs)
+        return fake_execution_result, None
+
+    monkeypatch.setattr(_admission_mod, "execute_workflow_request", _fake_execute_workflow_request)
 
     result = _admission_mod._submit_graph_workflow_inline(
-        _FakeConn(),
+        _FakeConn(
+            workflow_run_rows=[
+                {
+                    "spec_name": "deterministic smoke",
+                    "started_at": datetime(2026, 4, 9, 11, 0, tzinfo=timezone.utc),
+                    "finished_at": datetime(2026, 4, 9, 11, 1, 40, tzinfo=timezone.utc),
+                },
+            ],
+        ),
         {"name": "deterministic smoke", "jobs": [{}, {}]},
         run_id="run:graph:inline",
     )
@@ -2159,6 +2185,56 @@ def test_submit_graph_workflow_inline_reports_current_state_for_success(monkeypa
     assert result["status"] == "succeeded"
     assert result["terminal_reason_code"] == "runtime.workflow_succeeded"
     assert result["execution_mode"] == "graph_runtime"
+    assert captured["timeout"] == 222
+
+
+def test_graph_runtime_timeout_seconds_uses_finished_run_history(monkeypatch):
+    from runtime.workflow._admission import _graph_runtime_timeout_seconds
+
+    started = datetime(2026, 4, 9, 11, 0, tzinfo=timezone.utc)
+    conn = _FakeConn(
+        workflow_run_rows=[
+            {
+                "spec_name": "deterministic smoke",
+                "started_at": started,
+                "finished_at": started + timedelta(seconds=100),
+            },
+            {
+                "spec_name": "deterministic smoke",
+                "started_at": started,
+                "finished_at": started + timedelta(seconds=119),
+            },
+        ],
+    )
+
+    timeout = _graph_runtime_timeout_seconds(
+        conn,
+        spec_dict={
+            "name": "deterministic smoke",
+            "jobs": [{"complexity": "low"}],
+        },
+    )
+
+    assert timeout == 178
+
+
+def test_graph_runtime_timeout_seconds_respects_explicit_floor(monkeypatch):
+    from runtime.workflow._admission import _graph_runtime_timeout_seconds
+
+    conn = _FakeConn()
+    monkeypatch.setattr(_admission_mod, "_graph_runtime_history_p95_seconds", lambda *_args, **_kwargs: 10.0)
+    monkeypatch.setattr(_admission_mod, "calculate_timeout_seconds", lambda *_args, **_kwargs: 120)
+
+    timeout = _graph_runtime_timeout_seconds(
+        conn,
+        spec_dict={
+            "name": "deterministic smoke",
+            "timeout": 300,
+            "jobs": [{"complexity": "high"}],
+        },
+    )
+
+    assert timeout == 300
 
 
 def test_submit_workflow_insert_keeps_integration_action_and_args(monkeypatch):

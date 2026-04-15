@@ -465,7 +465,7 @@ def test_workflow_run_prompt_frontdoor_uses_prompt_compiler(monkeypatch: pytest.
         "provider_slug": "openai",
         "model_slug": None,
         "tier": None,
-        "adapter_type": "cli_llm",
+        "adapter_type": None,
         "scope_write": ["runtime/example.py"],
         "workdir": ".",
         "context_files": None,
@@ -488,7 +488,7 @@ def test_workflow_run_prompt_frontdoor_reports_unadmitted_provider(monkeypatch: 
         "compile_prompt_launch_spec",
         lambda **_kwargs: (_ for _ in ()).throw(
             ValueError(
-                "provider 'cursor' is not admitted for cli_llm; "
+                "provider 'cursor' is not admitted for llm_task; "
                 "reason: Prompt probe did not complete successfully for cursor/composer-2; "
                 "decision_ref: decision.provider-onboarding.cursor.20260415T165657Z; "
                 "known providers: cursor, google, openai"
@@ -514,7 +514,7 @@ def test_workflow_run_prompt_frontdoor_reports_unadmitted_provider(monkeypatch: 
         stdout=stdout,
     ) == 2
 
-    assert "error: provider 'cursor' is not admitted for cli_llm" in stdout.getvalue()
+    assert "error: provider 'cursor' is not admitted for llm_task" in stdout.getvalue()
     assert "Prompt probe did not complete successfully for cursor/composer-2" in stdout.getvalue()
 
 

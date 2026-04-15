@@ -470,6 +470,7 @@ class ContextCompiler:
                 "model_profile_id": runtime_profile.model_profile_id,
                 "provider_policy_id": runtime_profile.provider_policy_id,
                 "runtime_profile_ref": runtime_profile.runtime_profile_ref,
+                "sandbox_profile_ref": runtime_profile.sandbox_profile_ref,
             },
             "source_decision_refs": list(source_decision_refs),
             "workspace": {
@@ -494,6 +495,7 @@ class ContextCompiler:
             runtime_profile_ref=runtime_profile.runtime_profile_ref,
             model_profile_id=runtime_profile.model_profile_id,
             provider_policy_id=runtime_profile.provider_policy_id,
+            sandbox_profile_ref=runtime_profile.sandbox_profile_ref,
             bundle_version=bundle_version,
             bundle_hash=bundle_hash,
             bundle_payload=canonical_payload,

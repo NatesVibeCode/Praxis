@@ -10,10 +10,7 @@ from pathlib import Path
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Callable
 
-from registry.native_runtime_profile_sync import (
-    default_native_runtime_profile_ref,
-    default_native_workspace_ref,
-)
+from runtime.native_authority import default_native_authority_refs
 from runtime.receipt_provenance import (
     build_git_provenance,
     build_mutation_provenance,
@@ -36,8 +33,6 @@ if TYPE_CHECKING:
 
 
 _ATTEMPTED_VERIFICATION_STATUSES = frozenset({"passed", "failed", "error"})
-_DEFAULT_NATIVE_RUNTIME_PROFILE_REF = default_native_runtime_profile_ref()
-_DEFAULT_NATIVE_WORKSPACE_REF = default_native_workspace_ref()
 _MAX_COMMAND_AGGREGATED_OUTPUT_CHARS = 32_000
 _MAX_OUTPUT_ARTIFACT_CHARS = 250_000
 _RECURSIVE_OUTPUT_MARKERS = (
@@ -51,6 +46,14 @@ _TRANSCRIPT_EVENT_TYPES = frozenset({
     "item.started",
     "item.completed",
 })
+
+
+def _default_native_workspace_ref() -> str:
+    return default_native_authority_refs()[0]
+
+
+def _default_native_runtime_profile_ref() -> str:
+    return default_native_authority_refs()[1]
 
 
 
@@ -255,11 +258,11 @@ def write_job_receipt(
     touch_entries = _job_touch_entries(workflow_row)
     workspace_ref = (
         str(envelope.get("workspace_ref") or "").strip()
-        or _DEFAULT_NATIVE_WORKSPACE_REF
+        or _default_native_workspace_ref()
     )
     runtime_profile_ref = (
         str(envelope.get("runtime_profile_ref") or "").strip()
-        or _DEFAULT_NATIVE_RUNTIME_PROFILE_REF
+        or _default_native_runtime_profile_ref()
     )
     packet_provenance = _json_safe(
         envelope.get("packet_provenance") or spec_snapshot.get("packet_provenance") or {}

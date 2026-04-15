@@ -6,6 +6,7 @@ import concurrent.futures
 import hashlib
 import json
 import logging
+import os
 import time
 import uuid
 from contextlib import nullcontext
@@ -56,6 +57,10 @@ from ._context_building import (
     _build_job_execution_bundles,
     _build_execution_packet,
     _shadow_packet_inspection_from_rows,
+)
+from runtime.dynamic_timeout import (
+    calculate_timeout_seconds,
+    max_complexity_tier,
 )
 from runtime.compile_artifacts import CompileArtifactError, CompileArtifactStore
 from runtime.workflow.job_runtime_context import persist_workflow_job_runtime_contexts
@@ -143,7 +148,12 @@ def _enforce_queue_admission(
     return queue_depth
 
 
-_DEFAULT_WORKSPACE_REF, _DEFAULT_RUNTIME_PROFILE_REF = default_native_authority_refs()
+def _default_workspace_ref() -> str:
+    return default_native_authority_refs()[0]
+
+
+def _default_runtime_profile_ref() -> str:
+    return default_native_authority_refs()[1]
 
 
 def _run_async(coro):
@@ -219,9 +229,9 @@ def _graph_request_envelope(request: WorkflowRequest) -> dict[str, object]:
 
 
 def _graph_registry_for_request(request: WorkflowRequest) -> RegistryResolver:
-    runtime_profile_ref = request.runtime_profile_ref or _DEFAULT_RUNTIME_PROFILE_REF
+    runtime_profile_ref = request.runtime_profile_ref or _default_runtime_profile_ref()
     config = resolve_native_runtime_profile_config(runtime_profile_ref)
-    workspace_ref = request.workspace_ref or config.workspace_ref or _DEFAULT_WORKSPACE_REF
+    workspace_ref = request.workspace_ref or config.workspace_ref or _default_workspace_ref()
     workdir = config.workdir or os.getcwd()
     return RegistryResolver(
         workspace_records={
@@ -258,6 +268,71 @@ def _graph_adapter_registry() -> AdapterRegistry:
     registry.register("file_writer", FileWriterAdapter())
     registry.register("verifier", VerifyAdapter())
     return registry
+
+
+def _graph_runtime_history_p95_seconds(
+    conn: SyncPostgresConnection,
+    *,
+    spec_name: str,
+    limit: int = 50,
+) -> float | None:
+    rows = conn.execute(
+        """
+        SELECT started_at, finished_at
+        FROM workflow_runs
+        WHERE COALESCE(request_envelope->>'name', '') = $1
+          AND started_at IS NOT NULL
+          AND finished_at IS NOT NULL
+        ORDER BY requested_at DESC
+        LIMIT $2
+        """,
+        spec_name,
+        max(1, int(limit)),
+    )
+    durations = sorted(
+        max((row["finished_at"] - row["started_at"]).total_seconds(), 0.0)
+        for row in rows
+        if isinstance(row["started_at"], datetime) and isinstance(row["finished_at"], datetime)
+    )
+    if not durations:
+        return None
+    index = min(int(len(durations) * 0.95), len(durations) - 1)
+    return durations[index]
+
+
+def _graph_runtime_timeout_seconds(
+    conn: SyncPostgresConnection,
+    *,
+    spec_dict: Mapping[str, object],
+) -> int:
+    spec_name = str(spec_dict.get("name") or "inline").strip() or "inline"
+    raw_jobs = spec_dict.get("jobs")
+    job_complexities: list[object] = []
+    if isinstance(raw_jobs, list):
+        for job in raw_jobs:
+            if isinstance(job, Mapping):
+                job_complexities.append(job.get("complexity"))
+
+    explicit_timeout = spec_dict.get("timeout")
+    base_timeout = 900
+    explicit_timeout_provided = False
+    if explicit_timeout is not None:
+        try:
+            base_timeout = int(explicit_timeout)
+            explicit_timeout_provided = True
+        except (TypeError, ValueError):
+            base_timeout = 900
+
+    historical_p95_seconds = _graph_runtime_history_p95_seconds(conn, spec_name=spec_name)
+    computed_timeout = calculate_timeout_seconds(
+        spec_name,
+        max_complexity_tier(job_complexities),
+        default_timeout=base_timeout,
+        historical_p95_seconds=historical_p95_seconds,
+    )
+    if explicit_timeout_provided:
+        return max(base_timeout, computed_timeout)
+    return computed_timeout
 
 
 def _persist_graph_authority(
@@ -430,13 +505,14 @@ def _submit_graph_workflow_inline(
         started_at=requested_at,
         start_ns=time.monotonic_ns(),
     )
+    timeout_seconds = _graph_runtime_timeout_seconds(conn, spec_dict=spec_dict)
     try:
         execution_result, failure = execute_workflow_request(
             intake_outcome=intake_outcome,
             adapter_registry=_graph_adapter_registry(),
             evidence_writer=evidence_writer,
             context=context,
-            timeout=int(spec_dict.get("timeout") or 900),
+            timeout=timeout_seconds,
         )
     finally:
         evidence_writer.close_blocking()

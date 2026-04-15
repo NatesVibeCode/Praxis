@@ -700,6 +700,51 @@ def _template_from_profile(
     provider_name: str | None,
     profile: ProviderCLIProfile,
 ) -> ProviderAuthorityTemplate:
+    lane_policies = profile.lane_policies or {}
+    use_legacy_inference = not lane_policies
+    cli_declared = bool(lane_policies.get("cli_llm")) or (
+        use_legacy_inference and bool(profile.binary)
+    )
+    api_declared = bool(lane_policies.get("llm_task")) or (
+        use_legacy_inference and bool(profile.api_endpoint and profile.api_protocol_family)
+    )
+    transports: dict[str, ProviderTransportAuthorityTemplate] = {}
+    if cli_declared:
+        transports["cli"] = ProviderTransportAuthorityTemplate(
+            transport="cli",
+            supported=True,
+            docs_url=None,
+            binary_name=profile.binary,
+            base_flags=tuple(profile.base_flags),
+            output_format=profile.output_format,
+            output_envelope_key=profile.output_envelope_key,
+            default_timeout=profile.default_timeout,
+            model_flag=profile.model_flag,
+            system_prompt_flag=profile.system_prompt_flag,
+            json_schema_flag=profile.json_schema_flag,
+            forbidden_flags=tuple(profile.forbidden_flags),
+            aliases=tuple(profile.aliases),
+            default_model=profile.default_model,
+            api_key_env_vars=tuple(profile.api_key_env_vars),
+            cli_prompt_modes=_normalize_unique(
+                [profile.prompt_mode or "", "stdin", "argv"]
+            ),
+            prompt_probe_strategy="cli_headless_prompt",
+            default_context_window=_DEFAULT_CONTEXT_WINDOW,
+        )
+    if api_declared:
+        transports["api"] = ProviderTransportAuthorityTemplate(
+            transport="api",
+            supported=True,
+            docs_url=None,
+            api_endpoint=profile.api_endpoint,
+            api_protocol_family=profile.api_protocol_family,
+            api_key_env_vars=tuple(profile.api_key_env_vars),
+            default_model=profile.default_model,
+            discovery_strategy=_api_model_discovery_strategy_for(profile.api_protocol_family),
+            prompt_probe_strategy=_api_prompt_probe_strategy_for(profile.api_protocol_family),
+            default_context_window=_DEFAULT_CONTEXT_WINDOW,
+        )
     return ProviderAuthorityTemplate(
         provider_slug=provider_slug,
         provider_name=(provider_name or provider_slug.title()),
@@ -707,47 +752,7 @@ def _template_from_profile(
         benchmark_source_slug="artificial_analysis",
         default_context_window=_DEFAULT_CONTEXT_WINDOW,
         adapter_economics=dict(profile.adapter_economics or {}),
-        transports={
-            "cli": ProviderTransportAuthorityTemplate(
-                transport="cli",
-                supported=bool(profile.binary),
-                docs_url=None,
-                binary_name=profile.binary,
-                base_flags=tuple(profile.base_flags),
-                output_format=profile.output_format,
-                output_envelope_key=profile.output_envelope_key,
-                default_timeout=profile.default_timeout,
-                model_flag=profile.model_flag,
-                system_prompt_flag=profile.system_prompt_flag,
-                json_schema_flag=profile.json_schema_flag,
-                forbidden_flags=tuple(profile.forbidden_flags),
-                aliases=tuple(profile.aliases),
-                default_model=profile.default_model,
-                api_key_env_vars=tuple(profile.api_key_env_vars),
-                cli_prompt_modes=_normalize_unique(
-                    [profile.prompt_mode or "", "stdin", "argv"]
-                ),
-                prompt_probe_strategy="cli_headless_prompt",
-                default_context_window=_DEFAULT_CONTEXT_WINDOW,
-            ),
-            "api": ProviderTransportAuthorityTemplate(
-                transport="api",
-                supported=bool(profile.api_endpoint and profile.api_protocol_family),
-                docs_url=None,
-                api_endpoint=profile.api_endpoint,
-                api_protocol_family=profile.api_protocol_family,
-                api_key_env_vars=tuple(profile.api_key_env_vars),
-                default_model=profile.default_model,
-                discovery_strategy=_api_model_discovery_strategy_for(profile.api_protocol_family),
-                prompt_probe_strategy=_api_prompt_probe_strategy_for(profile.api_protocol_family),
-                unsupported_reason=(
-                    None
-                    if profile.api_endpoint and profile.api_protocol_family
-                    else "This provider does not expose an admitted llm_task transport in the registry yet."
-                ),
-                default_context_window=_DEFAULT_CONTEXT_WINDOW,
-            ),
-        },
+        transports=transports,
     )
 
 
@@ -870,9 +875,14 @@ def _resolve_spec(
     template = _provider_template(spec.provider_slug, explicit_spec=spec)
     selected_transport = (spec.selected_transport or "").strip().lower()
     if not selected_transport:
-        raise ValueError(
-            f"provider.selected_transport is required for {spec.provider_slug}; choose cli or api"
-        )
+        declared_transports = sorted(template.transports)
+        if len(declared_transports) == 1:
+            selected_transport = declared_transports[0]
+        else:
+            raise ValueError(
+                f"provider.selected_transport is required for {spec.provider_slug}; "
+                f"choose from {declared_transports}"
+            )
     transport_template = template.transports.get(selected_transport)
     if transport_template is None:
         raise ValueError(
@@ -1000,10 +1010,14 @@ def _api_model_discovery_strategy_for(protocol_family: str | None) -> str | None
         "openai_chat_completions": "openai_models_list",
         "anthropic_messages": "anthropic_models_list",
         "google_generate_content": "google_models_list",
+        "cursor_background_agent": "cursor_models_list",
     }.get(normalized)
 
 
 def _api_prompt_probe_strategy_for(protocol_family: str | None) -> str | None:
+    normalized = (protocol_family or "").strip().lower()
+    if normalized == "cursor_background_agent":
+        return "api_model_discovery_auth_probe"
     if _api_model_discovery_strategy_for(protocol_family):
         return "api_llm_request"
     return None

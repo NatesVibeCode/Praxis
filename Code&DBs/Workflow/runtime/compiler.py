@@ -436,6 +436,11 @@ def _finalize_compile_result(
     matched_building_blocks: list[dict[str, Any]] | None = None,
     composition_plan: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    from runtime.build_planning_contract import (
+        build_candidate_resolution_manifest,
+        build_reviewable_plan,
+    )
+
     compiled_spec: dict[str, Any] | None = None
     planning_notes: list[str] = []
     authority_bundle = build_authority_bundle(definition)
@@ -488,6 +493,19 @@ def _finalize_compile_result(
             pass  # compilation itself must not fail because of event log
 
     enriched_ledger = _enrich_binding_ledger(authority_bundle["binding_ledger"], conn)
+    candidate_resolution_manifest = build_candidate_resolution_manifest(
+        definition=hydrated_definition,
+        workflow_id=_as_text(hydrated_definition.get("workflow_id")) or None,
+        conn=conn,
+        compiled_spec=compiled_spec,
+    )
+    reviewable_plan = build_reviewable_plan(
+        definition=hydrated_definition,
+        workflow_id=_as_text(hydrated_definition.get("workflow_id")) or None,
+        conn=conn,
+        compiled_spec=compiled_spec,
+        candidate_manifest=candidate_resolution_manifest,
+    )
 
     return {
         "definition": hydrated_definition,
@@ -508,6 +526,8 @@ def _finalize_compile_result(
         "planning_notes": planning_notes,
         "compiled_spec": compiled_spec,
         "compiled_spec_projection": authority_bundle["compiled_spec_projection"],
+        "candidate_resolution_manifest": candidate_resolution_manifest,
+        "reviewable_plan": reviewable_plan,
         "matched_building_blocks": matched_building_blocks or [],
         "composition_plan": composition_plan or {},
     }

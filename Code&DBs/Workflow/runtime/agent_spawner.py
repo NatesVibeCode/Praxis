@@ -53,13 +53,13 @@ class SpawnResult:
 
 _PROVIDER_ENV_KEYS: dict[str, list[str]] = {
     "anthropic": ["ANTHROPIC_API_KEY"],
+    "cursor": ["CURSOR_API_KEY"],
     "openai": ["OPENAI_API_KEY"],
     "google": ["GOOGLE_API_KEY", "GEMINI_API_KEY"],
 }
 
 _PROVIDER_CLI_BINARIES: dict[str, str] = {
     "anthropic": "claude",
-    "cursor": "cursor-agent",
     "google": "gemini",
     "openai": "codex",
 }

@@ -44,7 +44,13 @@
     "113_sandbox_cleanup_reconciliation.sql",
     "114_workflow_build_review_decisions.sql",
     "115_surface_catalog_registry.sql",
-    "116_native_runtime_registry_authority.sql"
+    "116_native_runtime_registry_authority.sql",
+    "117_surface_catalog_review_decisions.sql",
+    "118_surface_catalog_source_policy_registry.sql",
+    "119_context_bundle_sandbox_profile_ref.sql",
+    "120_workflow_build_review_proposal_requests.sql",
+    "121_cursor_background_agent_api.sql",
+    "122_workflow_build_review_contract_fields.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -1604,6 +1610,94 @@
         "object_type": "table",
         "object_name": "registry_native_runtime_defaults"
       }
+    ],
+    "117_surface_catalog_review_decisions.sql": [
+      {
+        "object_type": "table",
+        "object_name": "surface_catalog_review_decisions"
+      },
+      {
+        "object_type": "index",
+        "object_name": "surface_catalog_review_decisions_surface_target_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "surface_catalog_review_decisions_surface_decided_idx"
+      }
+    ],
+    "118_surface_catalog_source_policy_registry.sql": [
+      {
+        "object_type": "table",
+        "object_name": "surface_catalog_source_policy_registry"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "surface_catalog_source_policy_registry.surface_catalog_source_policy_registry_surface_source_kind_key"
+      },
+      {
+        "object_type": "index",
+        "object_name": "surface_catalog_source_policy_registry_surface_enabled_idx"
+      }
+    ],
+    "119_context_bundle_sandbox_profile_ref.sql": [
+      {
+        "object_type": "column",
+        "object_name": "sandbox_profile_ref"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "context_bundles.context_bundles_sandbox_profile_ref_nonblank"
+      },
+      {
+        "object_type": "index",
+        "object_name": "context_bundles_sandbox_profile_idx"
+      }
+    ],
+    "120_workflow_build_review_proposal_requests.sql": [
+      {
+        "object_type": "constraint",
+        "object_name": "workflow_build_review_decisions.workflow_build_review_decisions_decision_check_v2"
+      }
+    ],
+    "121_cursor_background_agent_api.sql": [
+      {
+        "object_type": "table",
+        "object_name": "provider_cli_profiles"
+      },
+      {
+        "object_type": "table",
+        "object_name": "provider_transport_admissions"
+      },
+      {
+        "object_type": "table",
+        "object_name": "provider_model_candidates"
+      }
+    ],
+    "122_workflow_build_review_contract_fields.sql": [
+      {
+        "object_type": "column",
+        "object_name": "review_group_ref"
+      },
+      {
+        "object_type": "column",
+        "object_name": "slot_ref"
+      },
+      {
+        "object_type": "column",
+        "object_name": "authority_scope"
+      },
+      {
+        "object_type": "column",
+        "object_name": "supersedes_decision_ref"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "workflow_build_review_decisions.workflow_build_review_decisions_supersedes_decision_ref_fkey"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_workflow_build_review_decisions_group_target"
+      }
     ]
   },
   "policy_buckets": {
@@ -1652,7 +1746,13 @@
       "113_sandbox_cleanup_reconciliation.sql",
       "114_workflow_build_review_decisions.sql",
       "115_surface_catalog_registry.sql",
-      "116_native_runtime_registry_authority.sql"
+      "116_native_runtime_registry_authority.sql",
+      "117_surface_catalog_review_decisions.sql",
+      "118_surface_catalog_source_policy_registry.sql",
+      "119_context_bundle_sandbox_profile_ref.sql",
+      "120_workflow_build_review_proposal_requests.sql",
+      "121_cursor_background_agent_api.sql",
+      "122_workflow_build_review_contract_fields.sql"
     ],
     "bootstrap_only": [
       "012_execution_leases.sql",

@@ -6,10 +6,10 @@ import random
 from typing import TYPE_CHECKING
 
 from ._shared import (
-    _DEFAULT_NATIVE_RUNTIME_PROFILE_REF,
-    _DEFAULT_NATIVE_WORKSPACE_REF,
     _READ_ONLY_MODE,
     _WRITE_MODE,
+    _default_native_runtime_profile_ref,
+    _default_native_workspace_ref,
     _json_loads_maybe,
     _normalize_paths,
     _workflow_id_for_spec,
@@ -256,7 +256,7 @@ def _runtime_profile_ref_from_spec(spec) -> str | None:
     runtime_profile_ref = getattr(spec, "runtime_profile_ref", None)
     if isinstance(runtime_profile_ref, str) and runtime_profile_ref.strip():
         return runtime_profile_ref.strip()
-    return _DEFAULT_NATIVE_RUNTIME_PROFILE_REF
+    return _default_native_runtime_profile_ref()
 
 
 def _workspace_ref_from_spec(spec) -> str | None:
@@ -268,7 +268,7 @@ def _workspace_ref_from_spec(spec) -> str | None:
     workspace_ref = getattr(spec, "workspace_ref", None)
     if isinstance(workspace_ref, str) and workspace_ref.strip():
         return workspace_ref.strip()
-    return _DEFAULT_NATIVE_WORKSPACE_REF
+    return _default_native_workspace_ref()
 
 
 def _runtime_profile_admitted_route_candidates(

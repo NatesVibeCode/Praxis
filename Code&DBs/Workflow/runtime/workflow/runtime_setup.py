@@ -27,7 +27,12 @@ if TYPE_CHECKING:
     from .orchestrator import WorkflowSpec
 
 
-_DEFAULT_WORKSPACE, _DEFAULT_RUNTIME_PROFILE = default_native_authority_refs()
+def _default_workspace() -> str:
+    return default_native_authority_refs()[0]
+
+
+def _default_runtime_profile() -> str:
+    return default_native_authority_refs()[1]
 
 
 def _utc_now() -> datetime:
@@ -201,9 +206,9 @@ def _build_workflow_graph(spec: "WorkflowSpec") -> WorkflowRequest:
 def _build_registry(spec: "WorkflowSpec") -> RegistryResolver:
     """Build runtime registry state for workflow intake."""
 
-    runtime_profile_ref = spec.runtime_profile_ref or _DEFAULT_RUNTIME_PROFILE
+    runtime_profile_ref = spec.runtime_profile_ref or _default_runtime_profile()
     config = resolve_native_runtime_profile_config(runtime_profile_ref)
-    workspace_ref = spec.workspace_ref or config.workspace_ref or _DEFAULT_WORKSPACE
+    workspace_ref = spec.workspace_ref or config.workspace_ref or _default_workspace()
     workdir = spec.workdir or config.workdir
     repo_root = workdir
 

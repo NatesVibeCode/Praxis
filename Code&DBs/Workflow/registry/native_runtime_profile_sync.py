@@ -211,6 +211,13 @@ def _require_string_list(value: object, *, field_name: str) -> tuple[str, ...]:
 def _optional_string_list(value: object) -> tuple[str, ...]:
     if value is None:
         return ()
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise NativeRuntimeProfileSyncError(
+                "secret_allowlist must decode to an array when present",
+            ) from exc
     if not isinstance(value, list):
         raise NativeRuntimeProfileSyncError("secret_allowlist must be an array when present")
     normalized: list[str] = []

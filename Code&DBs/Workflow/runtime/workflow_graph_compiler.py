@@ -24,7 +24,6 @@ from contracts.domain import (
 )
 from runtime.native_authority import default_native_authority_refs
 
-_DEFAULT_WORKSPACE_REF, _DEFAULT_RUNTIME_PROFILE_REF = default_native_authority_refs()
 _GRAPH_SUPPORTED_ADAPTER_TYPES = frozenset({
     "llm_task",
     "api_task",
@@ -42,6 +41,14 @@ _GRAPH_RUNTIME_TRIGGER_ADAPTER_TYPES = _GRAPH_SUPPORTED_ADAPTER_TYPES - frozense
     "llm_task",
 })
 _STATIC_BRANCHING_KINDS = frozenset({"if", "switch"})
+
+
+def _default_workspace_ref() -> str:
+    return default_native_authority_refs()[0]
+
+
+def _default_runtime_profile_ref() -> str:
+    return default_native_authority_refs()[1]
 
 
 class GraphWorkflowCompileError(ValueError):
@@ -719,9 +726,9 @@ def compile_graph_workflow_request(
             "workflow.graph_invalid",
             "graph-capable workflow spec requires a non-empty jobs array",
         )
-    workspace_ref = _as_text(spec_dict.get("workspace_ref")) or _DEFAULT_WORKSPACE_REF
+    workspace_ref = _as_text(spec_dict.get("workspace_ref")) or _default_workspace_ref()
     runtime_profile_ref = (
-        _as_text(spec_dict.get("runtime_profile_ref")) or _DEFAULT_RUNTIME_PROFILE_REF
+        _as_text(spec_dict.get("runtime_profile_ref")) or _default_runtime_profile_ref()
     )
     state = _CompileState(
         workspace_ref=workspace_ref,

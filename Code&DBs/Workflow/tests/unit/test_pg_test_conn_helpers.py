@@ -16,6 +16,21 @@ def test_resolve_test_env_prefers_runtime_override(monkeypatch) -> None:
     assert "PATH" in env
 
 
+def test_resolve_test_env_bootstraps_default_database_when_runtime_override_missing(
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("WORKFLOW_DATABASE_URL", raising=False)
+    monkeypatch.setattr(
+        pg_test_conn,
+        "ensure_test_database_ready",
+        lambda: "postgresql://postgres@localhost:5432/praxis_test",
+    )
+
+    env = pg_test_conn._resolve_test_env()
+
+    assert env["WORKFLOW_DATABASE_URL"] == "postgresql://postgres@localhost:5432/praxis_test"
+
+
 def test_transactional_test_conn_closes_connection(monkeypatch) -> None:
     closed: list[bool] = []
 

@@ -13,10 +13,19 @@ from runtime import spec_compiler
 def test_compile_prompt_launch_spec_uses_provider_default_model_when_model_missing(monkeypatch) -> None:
     monkeypatch.setattr(
         spec_compiler,
+        "default_adapter_type_for_provider",
+        lambda provider_slug: "cli_llm" if provider_slug == "openai" else None,
+    )
+    monkeypatch.setattr(
+        spec_compiler,
         "default_model_for_provider",
         lambda provider_slug: "gpt-4.1" if provider_slug == "openai" else None,
     )
-    monkeypatch.setattr(spec_compiler, "supports_adapter", lambda provider_slug, adapter_type: True)
+    monkeypatch.setattr(
+        spec_compiler,
+        "resolve_lane_policy",
+        lambda provider_slug, adapter_type: {"admitted_by_policy": True},
+    )
 
     spec = spec_compiler.compile_prompt_launch_spec(
         prompt="Reply with exactly: OPENAI_DEFAULT_WORKFLOW_OK",
@@ -33,12 +42,39 @@ def test_compile_prompt_launch_spec_uses_provider_default_model_when_model_missi
     assert spec.to_inline_spec_dict()["graph_runtime_submit"] is True
 
 
+def test_compile_prompt_launch_spec_prefers_provider_specific_adapter_when_unspecified(monkeypatch) -> None:
+    monkeypatch.setattr(
+        spec_compiler,
+        "default_adapter_type_for_provider",
+        lambda provider_slug: "llm_task" if provider_slug == "cursor" else None,
+    )
+    monkeypatch.setattr(
+        spec_compiler,
+        "resolve_lane_policy",
+        lambda provider_slug, adapter_type: {"admitted_by_policy": True},
+    )
+
+    spec = spec_compiler.compile_prompt_launch_spec(
+        prompt="Reply with exactly: CURSOR_BACKGROUND_AGENT_OK",
+        provider_slug="cursor",
+        model_slug="auto",
+    )
+
+    assert spec.jobs[0]["adapter_type"] == "llm_task"
+    assert spec.jobs[0]["agent"] == "cursor/auto"
+
+
 def test_compile_prompt_launch_spec_rejects_unadmitted_prompt_provider(monkeypatch) -> None:
-    monkeypatch.setattr(spec_compiler, "supports_adapter", lambda provider_slug, adapter_type: False)
+    monkeypatch.setattr(
+        spec_compiler,
+        "default_adapter_type_for_provider",
+        lambda provider_slug: "llm_task" if provider_slug == "cursor" else None,
+    )
     monkeypatch.setattr(
         spec_compiler,
         "resolve_lane_policy",
         lambda provider_slug, adapter_type: {
+            "admitted_by_policy": False,
             "policy_reason": "Prompt probe did not complete successfully for cursor/composer-2",
             "decision_ref": "decision.provider-onboarding.cursor.20260415T165657Z",
         },
@@ -56,7 +92,7 @@ def test_compile_prompt_launch_spec_rejects_unadmitted_prompt_provider(monkeypat
     else:
         raise AssertionError("compile_prompt_launch_spec should reject unadmitted providers")
 
-    assert "provider 'cursor' is not admitted for cli_llm" in message
+    assert "provider 'cursor' is not admitted for llm_task" in message
     assert "Prompt probe did not complete successfully for cursor/composer-2" in message
     assert "decision.provider-onboarding.cursor.20260415T165657Z" in message
     assert "google, openai" in message

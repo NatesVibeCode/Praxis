@@ -209,7 +209,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
             "description": (
                 "Clear all in-process caches so DB and config changes take effect "
                 "without restarting Claude Desktop.\n\n"
-                "USE WHEN: you just applied a migration, updated runtime_profiles.json, "
+                "USE WHEN: you just applied a migration, updated native runtime authority, "
                 "added a model to provider_model_candidates, or changed anything in Postgres "
                 "that the MCP server caches on first load.\n\n"
                 "EXAMPLE: praxis_reload()\n\n"

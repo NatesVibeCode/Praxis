@@ -16,6 +16,18 @@ async function _json(resp: Response): Promise<any> {
   return body;
 }
 
+export interface CatalogReviewDecisionRequest {
+  surface_name?: string;
+  target_kind: 'catalog_item' | 'source_policy';
+  target_ref: string;
+  decision: 'approve' | 'widen' | 'reject' | 'defer' | 'revoke';
+  actor_type?: string;
+  actor_ref?: string;
+  approval_mode?: string;
+  rationale?: string;
+  candidate_payload?: Record<string, unknown>;
+}
+
 export async function loadWorkflowDefinition(workflowId: string): Promise<any> {
   return _json(await fetch(`/api/workflows/${workflowId}`));
 }
@@ -65,8 +77,33 @@ export async function commitDefinition(
   }));
 }
 
+export async function fetchCatalogEnvelope(): Promise<any> {
+  return _json(await fetch('/api/catalog'));
+}
+
 export async function fetchCatalog(): Promise<any[]> {
-  return _json(await fetch('/api/catalog')).then(r => r.items);
+  return fetchCatalogEnvelope().then(r => r.items);
+}
+
+export async function fetchCatalogReviewDecisions(params?: {
+  surface?: string;
+  target_kind?: string;
+  target_ref?: string;
+}): Promise<any> {
+  const search = new URLSearchParams();
+  if (params?.surface) search.set('surface', params.surface);
+  if (params?.target_kind) search.set('target_kind', params.target_kind);
+  if (params?.target_ref) search.set('target_ref', params.target_ref);
+  const query = search.toString();
+  return _json(await fetch(`/api/catalog/review-decisions${query ? `?${query}` : ''}`));
+}
+
+export async function postCatalogReviewDecision(body: CatalogReviewDecisionRequest): Promise<any> {
+  return _json(await fetch('/api/catalog/review-decisions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }));
 }
 
 export async function createWorkflow(

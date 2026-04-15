@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from collections import deque
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
 
@@ -25,6 +26,18 @@ class TimeoutConfig:
     complexity_tier: ComplexityTier
     stage_default: int | None
     historical_p95_seconds: float | None
+
+
+_COMPLEXITY_NAME_TO_TIER: dict[str, ComplexityTier] = {
+    "low": ComplexityTier.TRIVIAL,
+    "trivial": ComplexityTier.TRIVIAL,
+    "standard": ComplexityTier.STANDARD,
+    "moderate": ComplexityTier.STANDARD,
+    "medium": ComplexityTier.STANDARD,
+    "high": ComplexityTier.COMPLEX,
+    "complex": ComplexityTier.COMPLEX,
+    "frontier": ComplexityTier.FRONTIER,
+}
 
 
 class DynamicTimeoutCalculator:
@@ -64,12 +77,13 @@ class DynamicTimeoutCalculator:
         job_label: str,
         complexity: ComplexityTier,
         stage: str | None = None,
+        historical_p95_seconds: float | None = None,
     ) -> int:
         # Step a: base from default * complexity multiplier
         base = self.default_timeout * complexity.multiplier
 
         # Step b: if historical data, use p95 * 1.5
-        p95 = self._p95(job_label)
+        p95 = historical_p95_seconds if historical_p95_seconds is not None else self._p95(job_label)
         if p95 is not None:
             base = p95 * 1.5
 
@@ -81,3 +95,40 @@ class DynamicTimeoutCalculator:
         # Clamp
         result = max(self.min_timeout, min(self.max_timeout, int(base)))
         return result
+
+
+def complexity_tier_from_name(value: object) -> ComplexityTier:
+    raw = str(value or "").strip().lower()
+    return _COMPLEXITY_NAME_TO_TIER.get(raw, ComplexityTier.STANDARD)
+
+
+def max_complexity_tier(values: Sequence[object]) -> ComplexityTier:
+    tier = ComplexityTier.TRIVIAL
+    for value in values:
+        candidate = complexity_tier_from_name(value)
+        if candidate.multiplier > tier.multiplier:
+            tier = candidate
+    return tier
+
+
+def calculate_timeout_seconds(
+    job_label: str,
+    complexity: object,
+    *,
+    default_timeout: int = 300,
+    min_timeout: int = 60,
+    max_timeout: int = 1800,
+    historical_p95_seconds: float | None = None,
+    stage: str | None = None,
+) -> int:
+    calculator = DynamicTimeoutCalculator(
+        default_timeout=default_timeout,
+        min_timeout=min_timeout,
+        max_timeout=max_timeout,
+    )
+    return calculator.calculate(
+        job_label,
+        complexity_tier_from_name(complexity),
+        stage=stage,
+        historical_p95_seconds=historical_p95_seconds,
+    )

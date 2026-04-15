@@ -1,8 +1,8 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { compileDefinition, refineDefinition, commitDefinition, createWorkflow } from '../shared/buildController';
 import type { BuildPayload } from '../shared/types';
-import { loadCatalog, getCatalog, FAMILY_LABELS } from './catalog';
-import type { CatalogItem, CatalogFamily } from './catalog';
+import { loadCatalogEnvelope, refreshCatalogEnvelope, getCatalogEnvelope, FAMILY_LABELS } from './catalog';
+import type { CatalogEnvelope, CatalogItem, CatalogFamily } from './catalog';
 import {
   getCatalogSurfacePolicy,
   getCatalogTruth,
@@ -11,6 +11,7 @@ import {
   summarizeCatalogTruth,
 } from './actionTruth';
 import { MoonGlyph } from './MoonGlyph';
+import { MoonSurfaceReviewPanel } from './MoonSurfaceReviewPanel';
 
 interface Props {
   workflowId: string | null;
@@ -20,20 +21,43 @@ interface Props {
   onStartCatalogDrag: (event: React.PointerEvent, item: CatalogItem) => void;
   onPayloadChange: (payload: BuildPayload) => void;
   onWorkflowCreated?: (workflowId: string) => void;
+  onCatalogChange?: (catalog: CatalogItem[]) => void;
 }
 
 const DOCK_FAMILIES: CatalogFamily[] = ['trigger', 'gather', 'think', 'act', 'control'];
 
-export function MoonActionDock({ workflowId, payload, onReload, onClose, onStartCatalogDrag, onPayloadChange, onWorkflowCreated }: Props) {
+export function MoonActionDock({
+  workflowId,
+  payload,
+  onReload,
+  onClose,
+  onStartCatalogDrag,
+  onPayloadChange,
+  onWorkflowCreated,
+  onCatalogChange,
+}: Props) {
   const [prose, setProse] = useState('');
   const [loading, setLoading] = useState(false);
   const [action, setAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [catalog, setCatalog] = useState<CatalogItem[]>(getCatalog());
+  const [catalogEnvelope, setCatalogEnvelope] = useState<CatalogEnvelope>(getCatalogEnvelope());
   const [familyFilter, setFamilyFilter] = useState<CatalogFamily | null>(null);
 
-  useEffect(() => { loadCatalog().then(setCatalog); }, []);
+  useEffect(() => {
+    loadCatalogEnvelope().then((nextEnvelope) => {
+      setCatalogEnvelope(nextEnvelope);
+      onCatalogChange?.(nextEnvelope.items);
+    });
+  }, [onCatalogChange]);
+
+  const handleCatalogReload = useCallback(async () => {
+    const nextEnvelope = await refreshCatalogEnvelope();
+    setCatalogEnvelope(nextEnvelope);
+    onCatalogChange?.(nextEnvelope.items);
+  }, [onCatalogChange]);
+
+  const catalog = catalogEnvelope.items;
 
   const visibleCatalog = useMemo(() => catalog.filter(c => c.status === 'ready'), [catalog]);
   const moonSurfaceCatalog = useMemo(
@@ -250,6 +274,11 @@ export function MoonActionDock({ workflowId, payload, onReload, onClose, onStart
             </div>
           </div>
         </div>
+        <MoonSurfaceReviewPanel
+          catalogItems={catalogEnvelope.items}
+          sourcePolicies={catalogEnvelope.sourcePolicies}
+          onCatalogReload={handleCatalogReload}
+        />
         <div className="moon-dock__section-label">Catalog — drag onto a step or edge</div>
         <div className="moon-catalog__filters">
           {filterableFamilies.map(f => (

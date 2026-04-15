@@ -11,9 +11,12 @@ WORKFLOW_ROOT = Path(__file__).resolve().parents[2]
 if str(WORKFLOW_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKFLOW_ROOT))
 
-# Set WORKFLOW_DATABASE_URL for tests that need Postgres
+import _pg_test_conn
+
+# Set WORKFLOW_DATABASE_URL for tests that need Postgres using the repo-local
+# authority path, and ensure the default test database actually exists.
 if "WORKFLOW_DATABASE_URL" not in os.environ:
-    os.environ["WORKFLOW_DATABASE_URL"] = "postgresql://test@localhost:5432/praxis_test"
+    os.environ["WORKFLOW_DATABASE_URL"] = _pg_test_conn.ensure_test_database_ready()
 
 # Ensure Postgres tools (pg_ctl, psql) are on PATH for dev_postgres tests
 # Add platform-specific Postgres bin to PATH if present

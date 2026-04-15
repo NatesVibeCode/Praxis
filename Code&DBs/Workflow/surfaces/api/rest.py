@@ -274,7 +274,12 @@ app.mount(
     name="launcher-app-assets",
 )
 
-_DEFAULT_WORKSPACE_REF, _DEFAULT_RUNTIME_PROFILE_REF = default_native_authority_refs()
+def _default_workspace_ref() -> str:
+    return default_native_authority_refs()[0]
+
+
+def _default_runtime_profile_ref() -> str:
+    return default_native_authority_refs()[1]
 
 
 def _default_workflow_provider_slug() -> str:
@@ -305,8 +310,8 @@ class WorkflowRunRequest(BaseModel):
     max_tokens: int = 4096
     temperature: float = 0.0
     label: str | None = None
-    workspace_ref: str = _DEFAULT_WORKSPACE_REF
-    runtime_profile_ref: str = _DEFAULT_RUNTIME_PROFILE_REF
+    workspace_ref: str = Field(default_factory=_default_workspace_ref)
+    runtime_profile_ref: str = Field(default_factory=_default_runtime_profile_ref)
     system_prompt: str | None = None
     context_sections: list[dict[str, str]] | None = None
     max_retries: int = 0
@@ -2392,6 +2397,16 @@ def get_routes(
 def get_catalog() -> dict[str, Any]:
     """Return live catalog items from platform registries + static primitives."""
     return build_catalog_payload(_shared_pg_conn())
+
+
+@app.get("/api/catalog/review-decisions")
+async def catalog_review_decisions_get(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+
+@app.post("/api/catalog/review-decisions")
+async def catalog_review_decisions_post(request: Request) -> Response:
+    return await _route_to_handler(request)
 
 
 # No catch-all routes — every endpoint is explicitly registered above.

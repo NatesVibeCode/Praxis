@@ -21,12 +21,12 @@ from typing import Any
 import uuid
 
 from adapters.provider_registry import (
+    default_adapter_type_for_provider,
     default_llm_adapter_type,
     default_model_for_provider,
     default_provider_slug,
     registered_providers,
     resolve_lane_policy,
-    supports_adapter,
 )
 from runtime.capability_catalog import (
     CapabilityCatalogError,
@@ -62,7 +62,12 @@ _STAGE_TEMPLATES: dict[str, str] = {
     "research": "Research and report on the following:\n\n{description}",
 }
 
-_DEFAULT_WORKSPACE_REF, _DEFAULT_RUNTIME_PROFILE_REF = default_native_authority_refs()
+def _default_workspace_ref() -> str:
+    return default_native_authority_refs()[0]
+
+
+def _default_runtime_profile_ref() -> str:
+    return default_native_authority_refs()[1]
 
 
 def _default_provider_slug() -> str:
@@ -117,8 +122,8 @@ class CompiledSpec:
     provider_slug: str | None = None
     model_slug: str | None = None
     adapter_type: str = field(default_factory=_default_llm_adapter)
-    workspace_ref: str = _DEFAULT_WORKSPACE_REF
-    runtime_profile_ref: str = _DEFAULT_RUNTIME_PROFILE_REF
+    workspace_ref: str = field(default_factory=_default_workspace_ref)
+    runtime_profile_ref: str = field(default_factory=_default_runtime_profile_ref)
     max_retries: int = 0
     definition_graph: dict[str, Any] | None = None
     definition_revision: str | None = None
@@ -415,7 +420,15 @@ def compile_prompt_launch_spec(
     if provider_slug is None:
         provider_slug = _default_provider_slug()
     if adapter_type is None:
-        adapter_type = _default_llm_adapter()
+        normalized_provider_slug = str(provider_slug or "").strip()
+        if (
+            normalized_provider_slug
+            and "/" not in normalized_provider_slug
+            and not normalized_provider_slug.startswith("auto/")
+        ):
+            adapter_type = default_adapter_type_for_provider(normalized_provider_slug)
+        if adapter_type is None:
+            adapter_type = _default_llm_adapter()
 
     if scope_write and not workdir:
         workdir = os.getcwd()
@@ -426,19 +439,28 @@ def compile_prompt_launch_spec(
         and "/" not in normalized_provider_slug
         and not normalized_provider_slug.startswith("auto/")
         and adapter_type in {"cli_llm", "llm_task"}
-        and not supports_adapter(normalized_provider_slug, adapter_type)
     ):
+        lane_policy = resolve_lane_policy(normalized_provider_slug, adapter_type)
+        admitted_by_policy = bool(
+            isinstance(lane_policy, dict) and lane_policy.get("admitted_by_policy")
+        )
+        if admitted_by_policy:
+            lane_policy = None
+        else:
+            lane_policy = lane_policy if isinstance(lane_policy, dict) else {}
+    else:
+        lane_policy = None
+
+    if lane_policy is not None:
         message_parts = [
             f"provider {normalized_provider_slug!r} is not admitted for {adapter_type}"
         ]
-        lane_policy = resolve_lane_policy(normalized_provider_slug, adapter_type)
-        if isinstance(lane_policy, dict):
-            policy_reason = str(lane_policy.get("policy_reason") or "").strip()
-            decision_ref = str(lane_policy.get("decision_ref") or "").strip()
-            if policy_reason:
-                message_parts.append(f"reason: {policy_reason}")
-            if decision_ref:
-                message_parts.append(f"decision_ref: {decision_ref}")
+        policy_reason = str(lane_policy.get("policy_reason") or "").strip()
+        decision_ref = str(lane_policy.get("decision_ref") or "").strip()
+        if policy_reason:
+            message_parts.append(f"reason: {policy_reason}")
+        if decision_ref:
+            message_parts.append(f"decision_ref: {decision_ref}")
         message_parts.append(f"known providers: {', '.join(registered_providers())}")
         raise ValueError("; ".join(message_parts))
 

@@ -10,6 +10,7 @@ import sys
 import tempfile
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -415,6 +416,43 @@ class TestReceiptWriting:
         assert receipt_files == []
         assert len(result.receipts_written) == result.total_jobs
         assert all(receipt_ref for receipt_ref in result.receipts_written)
+
+
+class TestBatchNotifications:
+    """Tests for run-level notification wiring."""
+
+    def test_run_workflow_emits_batch_summary_notification(self, tmp_path, monkeypatch):
+        captured: list[dict[str, object]] = []
+
+        def _capture(payload: dict[str, object]) -> int:
+            captured.append(payload)
+            return 1
+
+        monkeypatch.setattr(_workflow_runner, "dispatch_notification_payload", _capture)
+
+        spec_path = _write_spec(tmp_path, _minimal_spec())
+        spec = WorkflowSpec.load(spec_path)
+
+        runner = WorkflowRunner.__new__(WorkflowRunner)
+        runner._config_root = _REPO_ROOT
+        runner._receipts_dir = str(tmp_path / "receipts")
+        runner._db_path = str(tmp_path / "test.db")
+        runner._pg_conn = None
+        runner._agent_registry = SimpleNamespace(get=lambda _slug: SimpleNamespace(timeout_seconds=900))
+        runner._pipeline = SimpleNamespace(pre_dispatch=lambda _payload: SimpleNamespace(passed=True, blocked_by=[]))
+
+        result = runner.run_workflow(spec, dry_run=True)
+
+        assert captured, "expected a batch completion notification to be emitted"
+        payload = captured[0]
+        assert payload["kind"] == "workflow_batch_summary"
+        assert payload["run_id"] == runner._run_id
+        assert payload["workflow_id"] == runner._workflow_id
+        assert payload["spec_name"] == spec.name
+        assert payload["total_jobs"] == result.total_jobs
+        assert payload["succeeded"] == result.succeeded
+        assert payload["failed"] == result.failed
+        assert payload["blocked"] == result.blocked
 
 
 # ---------------------------------------------------------------------------

@@ -16,6 +16,8 @@ from runtime.integrations.display_names import display_name_for_integration
 
 logger = logging.getLogger(__name__)
 
+_OVERLAY_DECISIONS = {"approve", "widen"}
+
 _KIND_TO_FAMILY: dict[str, str] = {
     "task": "think",
     "memory": "gather",
@@ -97,6 +99,21 @@ def _decorate_catalog_item(item: dict[str, Any]) -> dict[str, Any]:
     return decorated
 
 
+def _json_clone(value: Any) -> Any:
+    return json.loads(json.dumps(value))
+
+
+def _int_value(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
 def _surface_catalog_item_from_row(row: dict[str, Any]) -> dict[str, Any]:
     item: dict[str, Any] = {
         "id": _text(row.get("catalog_item_id")),
@@ -116,6 +133,10 @@ def _surface_catalog_item_from_row(row: dict[str, Any]) -> dict[str, Any]:
     gate_family = _text(row.get("gate_family"))
     if gate_family:
         item["gateFamily"] = gate_family
+
+    display_order = _int_value(row.get("display_order"))
+    if display_order is not None:
+        item["_displayOrder"] = display_order
 
     truth_category = _text(row.get("truth_category"))
     if truth_category:
@@ -142,6 +163,7 @@ def _surface_catalog_item_from_row(row: dict[str, Any]) -> dict[str, Any]:
 def _load_surface_catalog_items(pg: Any, *, surface_name: str = "moon") -> list[dict[str, Any]]:
     rows = pg.execute(
         """SELECT catalog_item_id, label, icon, family, status, drop_kind,
+                  display_order,
                   action_value, gate_family, description,
                   truth_category, truth_badge, truth_detail,
                   surface_tier, surface_badge, surface_detail, hard_choice
@@ -176,6 +198,42 @@ def _source_policy_from_row(row: dict[str, Any]) -> dict[str, Any]:
     return policy
 
 
+def _normalize_review_payload(payload: Any) -> dict[str, Any] | None:
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except (json.JSONDecodeError, TypeError):
+            return None
+    if not isinstance(payload, dict):
+        return None
+    return _json_clone(payload)
+
+
+def _load_surface_review_decisions(pg: Any, *, surface_name: str = "moon") -> list[dict[str, Any]]:
+    rows = pg.execute(
+        """
+        SELECT DISTINCT ON (target_kind, target_ref)
+            review_decision_id,
+            surface_name,
+            target_kind,
+            target_ref,
+            decision,
+            actor_type,
+            actor_ref,
+            approval_mode,
+            rationale,
+            candidate_payload,
+            decided_at,
+            created_at
+        FROM surface_catalog_review_decisions
+        WHERE surface_name = $1
+        ORDER BY target_kind, target_ref, decided_at DESC, created_at DESC, review_decision_id DESC
+        """,
+        surface_name,
+    )
+    return [dict(row) for row in rows or []]
+
+
 def _load_surface_source_policies(pg: Any, *, surface_name: str = "moon") -> dict[str, dict[str, Any]]:
     rows = pg.execute(
         """SELECT source_kind,
@@ -195,6 +253,93 @@ def _load_surface_source_policies(pg: Any, *, surface_name: str = "moon") -> dic
     return policies
 
 
+def _apply_catalog_item_review_overlay(
+    item: dict[str, Any],
+    review: dict[str, Any],
+) -> dict[str, Any]:
+    if _text(review.get("decision")).lower() not in _OVERLAY_DECISIONS:
+        return item
+    payload = _normalize_review_payload(review.get("candidate_payload"))
+    if not payload:
+        return item
+
+    merged = dict(item)
+    for field in ("label", "icon", "status", "description"):
+        value = _text(payload.get(field))
+        if value:
+            merged[field] = value
+
+    if "displayOrder" in payload:
+        display_order = _int_value(payload.get("displayOrder"))
+        if display_order is not None:
+            merged["_displayOrder"] = display_order
+
+    truth = payload.get("truth")
+    if isinstance(truth, dict):
+        merged["truth"] = _json_clone(truth)
+    surface_policy = payload.get("surfacePolicy")
+    if isinstance(surface_policy, dict):
+        merged["surfacePolicy"] = _json_clone(surface_policy)
+    return _decorate_catalog_item(merged)
+
+
+def _apply_source_policy_review_overlay(
+    policy: dict[str, Any],
+    review: dict[str, Any],
+) -> dict[str, Any]:
+    if _text(review.get("decision")).lower() not in _OVERLAY_DECISIONS:
+        return policy
+    payload = _normalize_review_payload(review.get("candidate_payload"))
+    if not payload:
+        return policy
+
+    merged = dict(policy)
+    truth = payload.get("truth")
+    if isinstance(truth, dict):
+        merged["truth"] = _json_clone(truth)
+    surface_policy = payload.get("surfacePolicy")
+    if isinstance(surface_policy, dict):
+        merged["surfacePolicy"] = _json_clone(surface_policy)
+    return merged
+
+
+def _apply_surface_review_overlays(
+    items: list[dict[str, Any]],
+    source_policies: dict[str, dict[str, Any]],
+    review_decisions: list[dict[str, Any]],
+) -> int:
+    if not review_decisions:
+        return 0
+
+    item_indexes = {
+        _text(item.get("id")): index
+        for index, item in enumerate(items)
+        if _text(item.get("id"))
+    }
+    applied = 0
+
+    for review in review_decisions:
+        target_kind = _text(review.get("target_kind")).lower()
+        target_ref = _text(review.get("target_ref"))
+        if not target_ref:
+            continue
+        if target_kind == "catalog_item":
+            index = item_indexes.get(target_ref)
+            if index is None:
+                continue
+            items[index] = _apply_catalog_item_review_overlay(items[index], review)
+            applied += 1
+            continue
+        if target_kind == "source_policy" and target_ref in source_policies:
+            source_policies[target_ref] = _apply_source_policy_review_overlay(
+                source_policies[target_ref],
+                review,
+            )
+            applied += 1
+
+    return applied
+
+
 def _with_source_policy(
     item: dict[str, Any],
     source_policies: dict[str, dict[str, Any]],
@@ -212,6 +357,38 @@ def _with_source_policy(
     return merged
 
 
+def _item_sort_key(item: dict[str, Any], fallback_index: int) -> tuple[int, int]:
+    display_order = _int_value(item.get("_displayOrder"))
+    if display_order is None:
+        return (10_000, fallback_index)
+    return (display_order, fallback_index)
+
+
+def _strip_internal_catalog_fields(item: dict[str, Any]) -> dict[str, Any]:
+    stripped = dict(item)
+    stripped.pop("_displayOrder", None)
+    return stripped
+
+
+def _serialize_source_policies(
+    source_policies: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for source_kind in sorted(source_policies):
+        policy = source_policies[source_kind]
+        row: dict[str, Any] = {
+            "source_kind": source_kind,
+        }
+        truth = policy.get("truth")
+        if isinstance(truth, dict):
+            row["truth"] = _json_clone(truth)
+        surface_policy = policy.get("surfacePolicy")
+        if isinstance(surface_policy, dict):
+            row["surfacePolicy"] = _json_clone(surface_policy)
+        rows.append(row)
+    return rows
+
+
 def build_catalog_payload(pg: Any) -> dict[str, Any]:
     """Project DB-backed surface registry and live catalog items into API payload form."""
 
@@ -219,11 +396,13 @@ def build_catalog_payload(pg: Any) -> dict[str, Any]:
     sources: dict[str, int] = {
         "surface_registry": 0,
         "source_policy_registry": 0,
+        "surface_review_overlays": 0,
         "capabilities": 0,
         "integrations": 0,
         "connectors": 0,
     }
     source_policies: dict[str, dict[str, Any]] = {}
+    review_decisions: list[dict[str, Any]] = []
 
     try:
         items.extend(_load_surface_catalog_items(pg))
@@ -236,6 +415,16 @@ def build_catalog_payload(pg: Any) -> dict[str, Any]:
         sources["source_policy_registry"] = len(source_policies)
     except Exception as exc:
         logger.warning("catalog: surface_catalog_source_policy_registry query failed: %s", exc)
+
+    try:
+        review_decisions = _load_surface_review_decisions(pg)
+        sources["surface_review_overlays"] = _apply_surface_review_overlays(
+            items,
+            source_policies,
+            review_decisions,
+        )
+    except Exception as exc:
+        logger.warning("catalog: surface_catalog_review_decisions query failed: %s", exc)
 
     try:
         capability_rows = pg.execute(
@@ -252,15 +441,15 @@ def build_catalog_payload(pg: Any) -> dict[str, Any]:
                 _decorate_catalog_item(
                     _with_source_policy(
                         {
-                        "id": f"cap-{slug.replace('/', '-')}",
-                        "label": _text(row.get("title")) or slug,
-                        "icon": _KIND_TO_ICON.get(kind, "classify"),
-                        "family": _KIND_TO_FAMILY.get(kind, "think"),
-                        "status": "ready",
-                        "dropKind": "node",
-                        "actionValue": _text(row.get("route")) or f"auto/{slug}",
-                        "description": _text(row.get("summary")) or _text(row.get("description")),
-                        "source": "capability",
+                            "id": f"cap-{slug.replace('/', '-')}",
+                            "label": _text(row.get("title")) or slug,
+                            "icon": _KIND_TO_ICON.get(kind, "classify"),
+                            "family": _KIND_TO_FAMILY.get(kind, "think"),
+                            "status": "ready",
+                            "dropKind": "node",
+                            "actionValue": _text(row.get("route")) or f"auto/{slug}",
+                            "description": _text(row.get("summary")) or _text(row.get("description")),
+                            "source": "capability",
                         },
                         source_policies,
                     )
@@ -285,16 +474,16 @@ def build_catalog_payload(pg: Any) -> dict[str, Any]:
                     _decorate_catalog_item(
                         _with_source_policy(
                             {
-                            "id": f"int-{integration_id}",
-                            "label": name,
-                            "icon": _text(row.get("icon")) or "tool",
-                            "family": "act",
-                            "status": "ready" if auth == "connected" else "coming_soon",
-                            "dropKind": "node",
-                            "actionValue": f"@{integration_id}",
-                            "description": _text(row.get("description")) or f"Use {name}",
-                            "source": "integration",
-                            "connectionStatus": auth,
+                                "id": f"int-{integration_id}",
+                                "label": name,
+                                "icon": _text(row.get("icon")) or "tool",
+                                "family": "act",
+                                "status": "ready" if auth == "connected" else "coming_soon",
+                                "dropKind": "node",
+                                "actionValue": f"@{integration_id}",
+                                "description": _text(row.get("description")) or f"Use {name}",
+                                "source": "integration",
+                                "connectionStatus": auth,
                             },
                             source_policies,
                         )
@@ -314,16 +503,16 @@ def build_catalog_payload(pg: Any) -> dict[str, Any]:
                     _decorate_catalog_item(
                         _with_source_policy(
                             {
-                            "id": f"int-{integration_id}-{action}".replace(" ", "-").lower(),
-                            "label": f"{name}: {action}" if action else name,
-                            "icon": _text(row.get("icon")) or "tool",
-                            "family": "act",
-                            "status": "ready" if auth == "connected" else "coming_soon",
-                            "dropKind": "node",
-                            "actionValue": f"@{integration_id}/{action}" if action else f"@{integration_id}",
-                            "description": description or _text(row.get("description")) or f"Use {name}",
-                            "source": "integration",
-                            "connectionStatus": auth,
+                                "id": f"int-{integration_id}-{action}".replace(" ", "-").lower(),
+                                "label": f"{name}: {action}" if action else name,
+                                "icon": _text(row.get("icon")) or "tool",
+                                "family": "act",
+                                "status": "ready" if auth == "connected" else "coming_soon",
+                                "dropKind": "node",
+                                "actionValue": f"@{integration_id}/{action}" if action else f"@{integration_id}",
+                                "description": description or _text(row.get("description")) or f"Use {name}",
+                                "source": "integration",
+                                "connectionStatus": auth,
                             },
                             source_policies,
                         )
@@ -345,20 +534,20 @@ def build_catalog_payload(pg: Any) -> dict[str, Any]:
                 _decorate_catalog_item(
                     _with_source_policy(
                         {
-                        "id": f"conn-{slug}",
-                        "label": _text(row.get("display_name")) or slug,
-                        "icon": "tool",
-                        "family": "act",
-                        "status": "ready" if health in ("healthy", "degraded") else "coming_soon",
-                        "dropKind": "node",
-                        "actionValue": f"@{slug}",
-                        "description": (
-                            f"v{_text(row.get('version')) or '?'}"
-                            f" — {_text(row.get('auth_type'))} auth"
-                            f" — {_text(row.get('base_url'))}"
-                        ),
-                        "source": "connector",
-                        "connectionStatus": health,
+                            "id": f"conn-{slug}",
+                            "label": _text(row.get("display_name")) or slug,
+                            "icon": "tool",
+                            "family": "act",
+                            "status": "ready" if health in ("healthy", "degraded") else "coming_soon",
+                            "dropKind": "node",
+                            "actionValue": f"@{slug}",
+                            "description": (
+                                f"v{_text(row.get('version')) or '?'}"
+                                f" — {_text(row.get('auth_type'))} auth"
+                                f" — {_text(row.get('base_url'))}"
+                            ),
+                            "source": "connector",
+                            "connectionStatus": health,
                         },
                         source_policies,
                     )
@@ -369,8 +558,17 @@ def build_catalog_payload(pg: Any) -> dict[str, Any]:
         # connector_registry is optional in some test/dev footprints
         pass
 
+    ordered_items = [
+        _strip_internal_catalog_fields(item)
+        for _, item in sorted(
+            enumerate(items),
+            key=lambda pair: _item_sort_key(pair[1], pair[0]),
+        )
+    ]
+
     return {
-        "items": items,
+        "items": ordered_items,
+        "source_policies": _serialize_source_policies(source_policies),
         "sources": sources,
         "fetched_at": datetime.now(timezone.utc).isoformat(),
     }

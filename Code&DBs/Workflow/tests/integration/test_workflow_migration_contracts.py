@@ -53,8 +53,14 @@ def test_workflow_migration_manifest_includes_provider_route_health_budget_migra
     assert "113_sandbox_cleanup_reconciliation.sql" in filenames
     assert "114_workflow_build_review_decisions.sql" in filenames
     assert "115_surface_catalog_registry.sql" in filenames
-    assert "116_surface_catalog_source_policy_registry.sql" in filenames
-    assert filenames[-1] == "116_surface_catalog_source_policy_registry.sql"
+    assert "116_native_runtime_registry_authority.sql" in filenames
+    assert "117_surface_catalog_review_decisions.sql" in filenames
+    assert "118_surface_catalog_source_policy_registry.sql" in filenames
+    assert "119_context_bundle_sandbox_profile_ref.sql" in filenames
+    assert "120_workflow_build_review_proposal_requests.sql" in filenames
+    assert "121_cursor_background_agent_api.sql" in filenames
+    assert "122_workflow_build_review_contract_fields.sql" in filenames
+    assert filenames[-1] == "122_workflow_build_review_contract_fields.sql"
 
 
 def test_every_manifest_migration_has_expected_object_contract() -> None:
@@ -97,6 +103,31 @@ def test_platform_authority_migration_expected_objects_are_registered() -> None:
     assert "subscription_checkpoints" in names
     assert "workflow_lanes" in names
     assert "workflow_lane_policies" in names
+
+
+def test_context_bundle_sandbox_profile_migration_expected_objects_are_registered() -> None:
+    objects = workflow_migration_expected_objects("119_context_bundle_sandbox_profile_ref.sql")
+    names = {item.object_name for item in objects}
+    assert "sandbox_profile_ref" in names
+    assert "context_bundles.context_bundles_sandbox_profile_ref_nonblank" in names
+    assert "context_bundles_sandbox_profile_idx" in names
+
+
+def test_workflow_build_review_proposal_request_migration_expected_objects_are_registered() -> None:
+    objects = workflow_migration_expected_objects("120_workflow_build_review_proposal_requests.sql")
+    names = {item.object_name for item in objects}
+    assert "workflow_build_review_decisions.workflow_build_review_decisions_decision_check_v2" in names
+
+
+def test_workflow_build_review_contract_field_migration_expected_objects_are_registered() -> None:
+    objects = workflow_migration_expected_objects("122_workflow_build_review_contract_fields.sql")
+    names = {item.object_name for item in objects}
+    assert "review_group_ref" in names
+    assert "slot_ref" in names
+    assert "authority_scope" in names
+    assert "supersedes_decision_ref" in names
+    assert "workflow_build_review_decisions.workflow_build_review_decisions_supersedes_decision_ref_fkey" in names
+    assert "idx_workflow_build_review_decisions_group_target" in names
 
 
 def test_provider_route_health_budget_expected_objects_are_registered() -> None:
@@ -195,12 +226,11 @@ def test_surface_catalog_registry_expected_objects_are_registered() -> None:
     assert "surface_catalog_registry_surface_tier_idx" in names
 
 
-def test_surface_catalog_source_policy_registry_expected_objects_are_registered() -> None:
-    objects = workflow_migration_expected_objects("116_surface_catalog_source_policy_registry.sql")
+def test_native_runtime_registry_authority_expected_objects_are_registered() -> None:
+    objects = workflow_migration_expected_objects("116_native_runtime_registry_authority.sql")
     names = {item.object_name for item in objects}
-    assert "surface_catalog_source_policy_registry" in names
-    assert "surface_catalog_source_policy_registry_surface_enabled_idx" in names
-    assert "surface_catalog_source_policy_registry.surface_catalog_source_policy_registry_surface_source_kind_key" in names
+    assert "registry_native_runtime_profile_authority" in names
+    assert "registry_native_runtime_defaults" in names
 
 
 def test_sandbox_cleanup_reconciliation_expected_objects_are_registered() -> None:
@@ -378,6 +408,11 @@ def test_notify_and_provider_transport_migration_expected_objects_are_registered
     assert "'cursor'" in cursor_seed_sql
     assert "'cursor-agent'" in cursor_seed_sql
     assert "'provider_transport_admission.cursor.cli_llm'" in cursor_seed_sql
+
+    cursor_api_sql = workflow_migration_sql_text("121_cursor_background_agent_api.sql")
+    assert "'cursor_background_agent'" in cursor_api_sql
+    assert "'provider_transport_admission.cursor.llm_task'" in cursor_api_sql
+    assert "'candidate.cursor.auto'" in cursor_api_sql
 
 
 def test_stale_postgres_completion_prune_migration_is_resolvable_and_targeted() -> None:

@@ -6,10 +6,7 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
-from registry.native_runtime_profile_sync import (
-    default_native_runtime_profile_ref,
-    default_native_workspace_ref,
-)
+from runtime.native_authority import default_native_authority_refs
 from runtime.circuit_breaker import get_circuit_breakers
 
 if TYPE_CHECKING:
@@ -23,8 +20,8 @@ __all__ = [
     "_BLOCKING_PARENT_STATUSES",
     "_CIRCUIT_BREAKERS",
     "_CIRCUIT_BREAKERS_UNSET",
-    "_DEFAULT_NATIVE_RUNTIME_PROFILE_REF",
-    "_DEFAULT_NATIVE_WORKSPACE_REF",
+    "_default_native_runtime_profile_ref",
+    "_default_native_workspace_ref",
     "_MAX_INT32",
     "_READ_ONLY_MODE",
     "_TERMINAL_JOB_STATUSES",
@@ -52,8 +49,6 @@ _WORKFLOW_REPLAYABLE_RUN_STATES = {"queued", "running", "claim_accepted", "succe
 _READ_ONLY_MODE = "read"
 _WRITE_MODE = "write"
 _MAX_INT32 = 2_147_483_647
-_DEFAULT_NATIVE_RUNTIME_PROFILE_REF = default_native_runtime_profile_ref()
-_DEFAULT_NATIVE_WORKSPACE_REF = default_native_workspace_ref()
 _CIRCUIT_BREAKERS_UNSET = object()
 _CIRCUIT_BREAKERS = _CIRCUIT_BREAKERS_UNSET
 
@@ -88,6 +83,14 @@ def _circuit_breakers():
             message,
         )
         return None
+
+
+def _default_native_workspace_ref() -> str:
+    return default_native_authority_refs()[0]
+
+
+def _default_native_runtime_profile_ref() -> str:
+    return default_native_authority_refs()[1]
 
 
 def _json_loads_maybe(value, default):

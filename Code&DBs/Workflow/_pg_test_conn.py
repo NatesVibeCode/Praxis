@@ -14,6 +14,9 @@ import os
 import sys
 from contextlib import contextmanager
 from pathlib import Path
+from urllib.parse import urlsplit
+
+import asyncpg
 
 _wf = str(Path(__file__).resolve().parent)
 if _wf not in sys.path:
@@ -22,14 +25,79 @@ if _wf not in sys.path:
 _pool = None
 _conn = None
 _AUTHORITY_UNAVAILABLE = "postgres.authority_unavailable"
+_DEFAULT_TEST_DATABASE = "praxis_test"
+_DEFAULT_TEST_DATABASE_URL = f"postgresql://localhost:5432/{_DEFAULT_TEST_DATABASE}"
+_DEFAULT_ADMIN_DATABASE_URL = "postgresql://localhost:5432/postgres"
+
+
+def _database_name_from_url(database_url: str) -> str:
+    parsed = urlsplit(database_url)
+    return parsed.path.lstrip("/") or _DEFAULT_TEST_DATABASE
+
+
+async def _create_database_if_missing(*, admin_database_url: str, database_name: str) -> None:
+    from storage.postgres.connection import connect_workflow_database
+
+    conn = await connect_workflow_database(env={"WORKFLOW_DATABASE_URL": admin_database_url})
+    try:
+        exists = await conn.fetchval(
+            "SELECT 1 FROM pg_database WHERE datname = $1",
+            database_name,
+        )
+        if exists:
+            return
+        escaped_identifier = '"' + database_name.replace('"', '""') + '"'
+        try:
+            await conn.execute(f"CREATE DATABASE {escaped_identifier}")
+        except (asyncpg.DuplicateDatabaseError, asyncpg.UniqueViolationError):
+            # Parallel test collectors may race on the first create; that's fine.
+            pass
+    finally:
+        await conn.close()
+
+
+def _default_test_database_url() -> str:
+    from storage.postgres.connection import resolve_workflow_database_url
+
+    return resolve_workflow_database_url(
+        env={"WORKFLOW_DATABASE_URL": _DEFAULT_TEST_DATABASE_URL},
+    )
+
+
+def ensure_test_database_ready() -> str:
+    from storage.postgres import ensure_postgres_available
+    from storage.postgres.connection import _run_sync, resolve_workflow_database_url
+
+    database_url = _default_test_database_url()
+    admin_database_url = resolve_workflow_database_url(
+        env={"WORKFLOW_DATABASE_URL": _DEFAULT_ADMIN_DATABASE_URL},
+    )
+    database_name = _database_name_from_url(database_url)
+    create_database = _create_database_if_missing(
+        admin_database_url=admin_database_url,
+        database_name=database_name,
+    )
+    try:
+        _run_sync(create_database)
+        ensure_postgres_available(
+            env={"WORKFLOW_DATABASE_URL": database_url},
+        ).close()
+    except Exception as exc:
+        try:
+            create_database.close()
+        except Exception:
+            pass
+        _skip_for_unavailable_authority(exc)
+        raise
+    return database_url
 
 
 def _resolve_test_env() -> dict[str, str]:
+    database_url = os.environ.get("WORKFLOW_DATABASE_URL")
+    if database_url is None:
+        database_url = ensure_test_database_ready()
     return {
-        "WORKFLOW_DATABASE_URL": os.environ.get(
-            "WORKFLOW_DATABASE_URL",
-            "postgresql://test@localhost:5432/praxis_test",
-        ),
+        "WORKFLOW_DATABASE_URL": database_url,
         "PATH": os.environ.get("PATH", ""),
     }
 
@@ -54,7 +122,8 @@ def _skip_for_unavailable_authority(exc: BaseException) -> None:
 
     pytest.skip(
         "repo-local Postgres authority unavailable for DB-backed tests: "
-        f"{reason_code}"
+        f"{reason_code}",
+        allow_module_level=True,
     )
 
 

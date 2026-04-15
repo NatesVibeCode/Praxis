@@ -23,8 +23,6 @@ from runtime.execution_transport import resolve_execution_transport
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_NATIVE_RUNTIME_PROFILE_REF = default_native_runtime_profile_ref_required()
-
 # Edge kinds that require upstream success to fire
 SUCCESS_EDGES = {
     'proceeds_to', 'mission_to_decision', 'decision_to_action',
@@ -352,7 +350,7 @@ def _execute_action(conn, run_id: str, card: dict, repo_root: str) -> dict:
 
             decision = TaskTypeRouter(conn).resolve(
                 agent_slug,
-                runtime_profile_ref=_DEFAULT_NATIVE_RUNTIME_PROFILE_REF,
+                runtime_profile_ref=default_native_runtime_profile_ref_required(),
             )
             resolved_agent_slug = f"{decision.provider_slug}/{decision.model_slug}"
 

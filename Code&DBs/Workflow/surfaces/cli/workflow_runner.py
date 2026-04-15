@@ -20,6 +20,7 @@ from runtime.receipt_provenance import (
 )
 from runtime.execution_transport import resolve_execution_transport
 from runtime._workflow_database import resolve_runtime_database_url
+from runtime.notifications import dispatch_notification_payload
 from runtime.workflow.receipt_writer import prepare_output_artifact
 from runtime.workflow.execution_backends import execute_api as execute_api_in_sandbox
 from runtime.workflow_spec import WorkflowSpec, WorkflowSpecError
@@ -336,7 +337,7 @@ class WorkflowRunner:
         blocked = sum(1 for result in job_results if result.status == "blocked")
         skipped = sum(1 for result in job_results if result.status == "skipped")
 
-        return RunResult(
+        result = RunResult(
             spec_name=spec.name,
             total_jobs=len(spec.jobs),
             succeeded=succeeded,
@@ -347,6 +348,34 @@ class WorkflowRunner:
             duration_seconds=duration_seconds,
             receipts_written=tuple(receipts_written),
         )
+
+        try:
+            dispatch_notification_payload(
+                {
+                    "kind": "workflow_batch_summary",
+                    "status": "succeeded"
+                    if failed == 0 and blocked == 0
+                    else "failed"
+                    if failed > 0
+                    else "blocked",
+                    "reason_code": "workflow_runner.batch_complete",
+                    "run_id": self._run_id,
+                    "workflow_id": self._workflow_id,
+                    "spec_name": spec.name,
+                    "total_jobs": len(spec.jobs),
+                    "succeeded": succeeded,
+                    "failed": failed,
+                    "skipped": skipped,
+                    "blocked": blocked,
+                    "duration_seconds": duration_seconds,
+                    "latency_ms": int(duration_seconds * 1000),
+                    "receipt_count": len(receipts_written),
+                }
+            )
+        except Exception:
+            pass
+
+        return result
 
     # ------------------------------------------------------------------
     # Job execution

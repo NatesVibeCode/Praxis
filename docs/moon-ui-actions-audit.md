@@ -34,6 +34,7 @@ Updated source audit for the Moon builder as of 2026-04-15.
 - The detail dock now mirrors that product cut with three explicit buckets: `Control now`, `Worth building later`, and `Hard choices`.
 - `/api/catalog` now ships truth and surface policy metadata so the backend, action dock, popout, and gate editor classify the same catalog row the same way.
 - Moon primitive metadata now lives in `surface_catalog_registry`; `/api/catalog` reads the table instead of carrying a Python-owned primitive list.
+- Dynamic capability, integration, and connector rows now inherit truth and surface policy from `surface_catalog_source_policy_registry`; `/api/catalog` fail-closes when that DB authority is missing.
 - Moon no longer carries a browser-owned fallback copy of the action catalog; `/api/catalog` is the only authority for the primary action inventory now.
 - Conditional branches now edit through a Then/Else composer first, with JSON kept as an escape hatch for nested condition trees.
 - `On Failure` now edits as a structural failure path with one honest reset control, not as a fake fallback-settings form.

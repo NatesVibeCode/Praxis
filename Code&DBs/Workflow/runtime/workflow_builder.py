@@ -30,7 +30,12 @@ def _unique_id() -> str:
     return uuid.uuid4().hex[:10]
 
 
-_DEFAULT_WORKSPACE, _DEFAULT_RUNTIME_PROFILE = default_native_authority_refs()
+def _default_workspace() -> str:
+    return default_native_authority_refs()[0]
+
+
+def _default_runtime_profile() -> str:
+    return default_native_authority_refs()[1]
 
 
 def _default_llm_adapter() -> str:
@@ -103,8 +108,8 @@ class WorkflowStep:
 def build_workflow_request(
     steps: list[WorkflowStep],
     *,
-    workspace_ref: str = _DEFAULT_WORKSPACE,
-    runtime_profile_ref: str = _DEFAULT_RUNTIME_PROFILE,
+    workspace_ref: str | None = None,
+    runtime_profile_ref: str | None = None,
 ) -> WorkflowRequest:
     """Build a ``WorkflowRequest`` from an ordered list of steps.
 
@@ -119,6 +124,8 @@ def build_workflow_request(
     ``completion`` output as ``upstream_completion`` in the downstream
     node's ``dependency_inputs``.
     """
+    normalized_workspace_ref = workspace_ref or _default_workspace()
+    normalized_runtime_profile_ref = runtime_profile_ref or _default_runtime_profile()
 
     if not steps:
         raise ValueError("At least one step is required")
@@ -229,8 +236,8 @@ def build_workflow_request(
         request_id=request_id,
         workflow_definition_id=definition_id,
         definition_hash=definition_hash,
-        workspace_ref=workspace_ref,
-        runtime_profile_ref=runtime_profile_ref,
+        workspace_ref=normalized_workspace_ref,
+        runtime_profile_ref=normalized_runtime_profile_ref,
         nodes=tuple(nodes),
         edges=tuple(edges),
         requested_at=_utc_now(),

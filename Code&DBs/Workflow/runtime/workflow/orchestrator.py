@@ -60,8 +60,15 @@ from .runtime_setup import (
 )
 
 
-_DEFAULT_WORKSPACE, _DEFAULT_RUNTIME_PROFILE = default_native_authority_refs()
 logger = logging.getLogger(__name__)
+
+
+def _default_workspace() -> str:
+    return default_native_authority_refs()[0]
+
+
+def _default_runtime_profile() -> str:
+    return default_native_authority_refs()[1]
 
 
 def _utc_now() -> datetime:
@@ -90,8 +97,8 @@ class WorkflowSpec:
     max_tokens: int = 4096
     temperature: float = 0.0
     label: str | None = None
-    workspace_ref: str = _DEFAULT_WORKSPACE
-    runtime_profile_ref: str = _DEFAULT_RUNTIME_PROFILE
+    workspace_ref: str = field(default_factory=_default_workspace)
+    runtime_profile_ref: str = field(default_factory=_default_runtime_profile)
     system_prompt: str | None = None
     context_sections: list[dict[str, str]] | None = None
     max_retries: int = 0
@@ -410,8 +417,8 @@ def run_workflow_pipeline(
     steps: list,
     *,
     timeout: int = 600,
-    workspace_ref: str = _DEFAULT_WORKSPACE,
-    runtime_profile_ref: str = _DEFAULT_RUNTIME_PROFILE,
+    workspace_ref: str | None = None,
+    runtime_profile_ref: str | None = None,
     max_context_tokens: int | None = None,
     parent_run_id: str | None = None,
 ) -> WorkflowResult:
@@ -441,8 +448,8 @@ def run_workflow_pipeline(
     # 1. Build the multi-node workflow request
     request = build_workflow_request(
         steps,
-        workspace_ref=workspace_ref,
-        runtime_profile_ref=runtime_profile_ref,
+        workspace_ref=workspace_ref or _default_workspace(),
+        runtime_profile_ref=runtime_profile_ref or _default_runtime_profile(),
     )
 
     # Determine provider/model from the first step for result metadata

@@ -1146,6 +1146,7 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
                 onStartCatalogDrag={startCatalogDrag}
                 onPayloadChange={(nextPayload) => setPayload(nextPayload)}
                 onWorkflowCreated={onWorkflowCreated}
+                onCatalogChange={setCatalog}
               />
             )}
           </div>

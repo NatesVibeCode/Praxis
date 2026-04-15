@@ -305,6 +305,20 @@ def _discover_api_models_impl(
                 break
         return _normalize_unique(models)
 
+    if strategy == "cursor_models_list":
+        data = _http_get_json(
+            "https://api.cursor.com/v0/models",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout_seconds=timeout_seconds,
+        )
+        return _normalize_unique(
+            [
+                str(model_slug).strip()
+                for model_slug in data.get("models", [])
+                if str(model_slug).strip()
+            ]
+        )
+
     raise RuntimeError(f"Unsupported API discovery strategy: {strategy}")
 
 
@@ -731,6 +745,26 @@ def _probe_capacity(
             or _api_prompt_probe_strategy_for(spec.api_protocol_family)
             or ""
         ).strip()
+        if probe_strategy == "api_model_discovery_auth_probe":
+            return ProviderOnboardingStepResult(
+                step="capacity_probe",
+                status="succeeded",
+                summary=(
+                    f"API auth and model discovery succeeded for {spec.provider_slug}; "
+                    "repo-bound execution will be validated at workflow runtime"
+                ),
+                details={
+                    "selected_transport": spec.selected_transport,
+                    "default_model": default_model,
+                    "available_model_count": len(models),
+                    "api_endpoint": spec.api_endpoint,
+                    "api_protocol_family": spec.api_protocol_family,
+                    "billing_mode": economics.get("billing_mode"),
+                    "budget_bucket": economics.get("budget_bucket"),
+                    "effective_marginal_cost": economics.get("effective_marginal_cost"),
+                    "probe_strategy": probe_strategy,
+                },
+            )
         if probe_strategy != "api_llm_request":
             return ProviderOnboardingStepResult(
                 step="capacity_probe",

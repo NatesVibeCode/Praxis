@@ -9,7 +9,7 @@ from typing import Any
 
 from .validators import PostgresWriteError, _encode_jsonb, _optional_text, _require_text
 
-_VALID_DECISIONS = {"approve", "reject", "defer", "widen", "revoke"}
+_VALID_DECISIONS = {"approve", "reject", "defer", "widen", "revoke", "proposal_request"}
 _VALID_ACTOR_TYPES = {"model", "human", "policy"}
 
 
@@ -29,12 +29,20 @@ def _normalize_row(row: Any, *, operation: str) -> dict[str, Any]:
     return payload
 
 
+def _default_review_group_ref(*, workflow_id: str, definition_revision: str) -> str:
+    return f"workflow_build:{workflow_id}:{definition_revision}"
+
+
+def _default_authority_scope(*, target_kind: str) -> str:
+    return f"workflow_build/{target_kind}"
+
+
 def _normalize_decision(value: object) -> str:
     decision = _require_text(value, field_name="decision").lower()
     if decision not in _VALID_DECISIONS:
         raise PostgresWriteError(
             "workflow_build_review.invalid_input",
-            "decision must be one of approve, reject, defer, widen, or revoke",
+            "decision must be one of approve, reject, defer, widen, revoke, or proposal_request",
             details={"field": "decision", "value": decision},
         )
     return decision
@@ -85,6 +93,10 @@ def record_workflow_build_review_decision(
     approval_mode: str | None = None,
     rationale: str | None = None,
     source_subpath: str | None = None,
+    slot_ref: str | None = None,
+    review_group_ref: str | None = None,
+    authority_scope: str | None = None,
+    supersedes_decision_ref: str | None = None,
     candidate_ref: str | None = None,
     candidate_payload: object | None = None,
     decided_at: datetime | None = None,
@@ -110,6 +122,18 @@ def record_workflow_build_review_decision(
     ) or "manual"
     normalized_rationale = _optional_text(rationale, field_name="rationale")
     normalized_source_subpath = _optional_text(source_subpath, field_name="source_subpath")
+    normalized_slot_ref = _optional_text(slot_ref, field_name="slot_ref") or normalized_target_ref
+    normalized_review_group_ref = (
+        _optional_text(review_group_ref, field_name="review_group_ref")
+        or _default_review_group_ref(
+            workflow_id=normalized_workflow_id,
+            definition_revision=normalized_definition_revision,
+        )
+    )
+    normalized_authority_scope = (
+        _optional_text(authority_scope, field_name="authority_scope")
+        or _default_authority_scope(target_kind=normalized_target_kind)
+    )
     normalized_candidate_ref = _optional_text(candidate_ref, field_name="candidate_ref")
     normalized_decided_at = _normalize_decided_at(decided_at)
     normalized_candidate_payload = None
@@ -117,6 +141,23 @@ def record_workflow_build_review_decision(
         normalized_candidate_payload = json.loads(
             _encode_jsonb(candidate_payload, field_name="candidate_payload")
         )
+    normalized_supersedes_decision_ref = _optional_text(
+        supersedes_decision_ref,
+        field_name="supersedes_decision_ref",
+    )
+    if normalized_supersedes_decision_ref is None:
+        previous = get_latest_workflow_build_review_decision(
+            conn,
+            workflow_id=normalized_workflow_id,
+            definition_revision=normalized_definition_revision,
+            target_kind=normalized_target_kind,
+            target_ref=normalized_target_ref,
+        )
+        if previous is not None:
+            normalized_supersedes_decision_ref = _optional_text(
+                previous.get("review_decision_id"),
+                field_name="review_decision_id",
+            )
 
     row = conn.fetchrow(
         """
@@ -124,32 +165,40 @@ def record_workflow_build_review_decision(
             review_decision_id,
             workflow_id,
             definition_revision,
+            review_group_ref,
             target_kind,
             target_ref,
+            slot_ref,
             decision,
             actor_type,
             actor_ref,
+            authority_scope,
             approval_mode,
             rationale,
             source_subpath,
+            supersedes_decision_ref,
             candidate_ref,
             candidate_payload,
             decided_at
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb, $17
         )
         RETURNING
             review_decision_id,
             workflow_id,
             definition_revision,
+            review_group_ref,
             target_kind,
             target_ref,
+            slot_ref,
             decision,
             actor_type,
             actor_ref,
+            authority_scope,
             approval_mode,
             rationale,
             source_subpath,
+            supersedes_decision_ref,
             candidate_ref,
             candidate_payload,
             decided_at,
@@ -158,14 +207,18 @@ def record_workflow_build_review_decision(
         normalized_review_decision_id,
         normalized_workflow_id,
         normalized_definition_revision,
+        normalized_review_group_ref,
         normalized_target_kind,
         normalized_target_ref,
+        normalized_slot_ref,
         normalized_decision,
         normalized_actor_type,
         normalized_actor_ref,
+        normalized_authority_scope,
         normalized_approval_mode,
         normalized_rationale,
         normalized_source_subpath,
+        normalized_supersedes_decision_ref,
         normalized_candidate_ref,
         _encode_jsonb(normalized_candidate_payload, field_name="candidate_payload")
         if normalized_candidate_payload is not None
@@ -196,14 +249,18 @@ def get_latest_workflow_build_review_decision(
             review_decision_id,
             workflow_id,
             definition_revision,
+            review_group_ref,
             target_kind,
             target_ref,
+            slot_ref,
             decision,
             actor_type,
             actor_ref,
+            authority_scope,
             approval_mode,
             rationale,
             source_subpath,
+            supersedes_decision_ref,
             candidate_ref,
             candidate_payload,
             decided_at,
@@ -237,18 +294,22 @@ def list_latest_workflow_build_review_decisions(
     )
     rows = conn.execute(
         """
-        SELECT DISTINCT ON (target_kind, target_ref)
+        SELECT DISTINCT ON (target_kind, target_ref, COALESCE(slot_ref, ''))
             review_decision_id,
             workflow_id,
             definition_revision,
+            review_group_ref,
             target_kind,
             target_ref,
+            slot_ref,
             decision,
             actor_type,
             actor_ref,
+            authority_scope,
             approval_mode,
             rationale,
             source_subpath,
+            supersedes_decision_ref,
             candidate_ref,
             candidate_payload,
             decided_at,
@@ -256,7 +317,7 @@ def list_latest_workflow_build_review_decisions(
         FROM workflow_build_review_decisions
         WHERE workflow_id = $1
           AND definition_revision = $2
-        ORDER BY target_kind, target_ref, decided_at DESC, created_at DESC, review_decision_id DESC
+        ORDER BY target_kind, target_ref, COALESCE(slot_ref, ''), decided_at DESC, created_at DESC, review_decision_id DESC
         """,
         normalized_workflow_id,
         normalized_definition_revision,
