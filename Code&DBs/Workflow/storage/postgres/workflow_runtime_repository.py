@@ -16,6 +16,23 @@ from .validators import (
 )
 
 _MANIFEST_UNSET = object()
+_CONTROL_MANIFEST_HEAD_SCHEMA_STATEMENTS = (
+    """
+    CREATE TABLE IF NOT EXISTS control_manifest_heads (
+        workspace_ref text NOT NULL,
+        scope_ref text NOT NULL,
+        manifest_type text NOT NULL,
+        manifest_id text NOT NULL REFERENCES app_manifests(id) ON DELETE CASCADE,
+        head_status text NOT NULL,
+        recorded_at timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (workspace_ref, scope_ref, manifest_type)
+    )
+    """.strip(),
+    """
+    CREATE INDEX IF NOT EXISTS idx_control_manifest_heads_manifest_id
+        ON control_manifest_heads(manifest_id)
+    """.strip(),
+)
 
 
 def _normalize_manifest_payload(manifest: object) -> dict[str, Any]:
@@ -307,8 +324,197 @@ def record_app_manifest_history(
         raise PostgresWriteError(
             "workflow_runtime.write_failed",
             "recording app manifest history returned no row",
+    )
+    return dict(row)
+
+
+def bootstrap_control_manifest_head_schema(conn: Any) -> None:
+    for statement in _CONTROL_MANIFEST_HEAD_SCHEMA_STATEMENTS:
+        conn.execute(statement)
+
+
+def upsert_control_manifest_head(
+    conn: Any,
+    *,
+    workspace_ref: str,
+    scope_ref: str,
+    manifest_type: str,
+    manifest_id: str,
+    head_status: str,
+) -> dict[str, Any]:
+    bootstrap_control_manifest_head_schema(conn)
+    row = conn.fetchrow(
+        """
+        INSERT INTO control_manifest_heads (
+            workspace_ref,
+            scope_ref,
+            manifest_type,
+            manifest_id,
+            head_status,
+            recorded_at
+        ) VALUES ($1, $2, $3, $4, $5, now())
+        ON CONFLICT (workspace_ref, scope_ref, manifest_type) DO UPDATE
+        SET manifest_id = EXCLUDED.manifest_id,
+            head_status = EXCLUDED.head_status,
+            recorded_at = now()
+        RETURNING workspace_ref, scope_ref, manifest_type, manifest_id, head_status, recorded_at
+        """,
+        _require_text(workspace_ref, field_name="workspace_ref"),
+        _require_text(scope_ref, field_name="scope_ref"),
+        _require_text(manifest_type, field_name="manifest_type"),
+        _require_text(manifest_id, field_name="manifest_id"),
+        _require_text(head_status, field_name="head_status"),
+    )
+    if row is None:
+        raise PostgresWriteError(
+            "workflow_runtime.write_failed",
+            "upserting control manifest head returned no row",
         )
     return dict(row)
+
+
+def load_control_manifest_head_record(
+    conn: Any,
+    *,
+    workspace_ref: str,
+    scope_ref: str,
+    manifest_type: str,
+) -> dict[str, Any] | None:
+    bootstrap_control_manifest_head_schema(conn)
+    row = conn.fetchrow(
+        """
+        SELECT
+            h.workspace_ref,
+            h.scope_ref,
+            h.manifest_type,
+            h.manifest_id AS head_manifest_id,
+            h.head_status,
+            h.recorded_at,
+            m.id,
+            m.name,
+            m.description,
+            m.created_by,
+            m.intent_history,
+            m.manifest,
+            m.version,
+            m.parent_manifest_id,
+            m.status,
+            m.created_at,
+            m.updated_at
+        FROM control_manifest_heads h
+        JOIN app_manifests m ON m.id = h.manifest_id
+        WHERE h.workspace_ref = $1
+          AND h.scope_ref = $2
+          AND h.manifest_type = $3
+        """,
+        _require_text(workspace_ref, field_name="workspace_ref"),
+        _require_text(scope_ref, field_name="scope_ref"),
+        _require_text(manifest_type, field_name="manifest_type"),
+    )
+    return None if row is None else dict(row)
+
+
+def list_control_manifest_head_records(
+    conn: Any,
+    *,
+    workspace_ref: str | None = None,
+    scope_ref: str | None = None,
+    manifest_type: str | None = None,
+    head_status: str | None = None,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    bootstrap_control_manifest_head_schema(conn)
+    if not isinstance(limit, int) or limit <= 0:
+        raise PostgresWriteError(
+            "workflow_runtime.invalid_submission",
+            "limit must be a positive integer",
+            details={"field": "limit"},
+        )
+    sql = """
+        SELECT
+            h.workspace_ref,
+            h.scope_ref,
+            h.manifest_type,
+            h.manifest_id AS head_manifest_id,
+            h.head_status,
+            h.recorded_at,
+            m.id,
+            m.name,
+            m.description,
+            m.created_by,
+            m.intent_history,
+            m.manifest,
+            m.version,
+            m.parent_manifest_id,
+            m.status,
+            m.created_at,
+            m.updated_at
+        FROM control_manifest_heads h
+        JOIN app_manifests m ON m.id = h.manifest_id
+        WHERE 1=1
+    """
+    params: list[Any] = []
+    if workspace_ref is not None:
+        params.append(_require_text(workspace_ref, field_name="workspace_ref"))
+        sql += f" AND h.workspace_ref = ${len(params)}"
+    if scope_ref is not None:
+        params.append(_require_text(scope_ref, field_name="scope_ref"))
+        sql += f" AND h.scope_ref = ${len(params)}"
+    if manifest_type is not None:
+        params.append(_require_text(manifest_type, field_name="manifest_type"))
+        sql += f" AND h.manifest_type = ${len(params)}"
+    if head_status is not None:
+        params.append(_require_text(head_status, field_name="head_status"))
+        sql += f" AND h.head_status = ${len(params)}"
+    params.append(limit)
+    sql += f" ORDER BY h.recorded_at DESC, h.workspace_ref ASC, h.scope_ref ASC LIMIT ${len(params)}"
+    rows = conn.execute(sql, *params)
+    return [dict(row) for row in rows]
+
+
+def list_control_manifest_history_records(
+    conn: Any,
+    *,
+    workspace_ref: str,
+    scope_ref: str,
+    manifest_type: str,
+    status: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    if not isinstance(limit, int) or limit <= 0:
+        raise PostgresWriteError(
+            "workflow_runtime.invalid_submission",
+            "limit must be a positive integer",
+            details={"field": "limit"},
+        )
+    params: list[Any] = [
+        _require_text(workspace_ref, field_name="workspace_ref"),
+        _require_text(scope_ref, field_name="scope_ref"),
+        _require_text(manifest_type, field_name="manifest_type"),
+    ]
+    sql = """
+        SELECT
+            id,
+            manifest_id,
+            version,
+            manifest_snapshot,
+            change_description,
+            changed_by,
+            created_at
+        FROM app_manifest_history
+        WHERE COALESCE(manifest_snapshot->>'kind', '') = 'praxis_control_manifest'
+          AND COALESCE(manifest_snapshot->>'manifest_family', '') = 'control_plane'
+          AND manifest_snapshot->>'workspace_ref' = $1
+          AND manifest_snapshot->>'scope_ref' = $2
+          AND manifest_snapshot->>'manifest_type' = $3
+    """
+    if status is not None:
+        params.append(_require_text(status, field_name="status"))
+        sql += f" AND manifest_snapshot->>'status' = ${len(params)}"
+    params.append(limit)
+    sql += f" ORDER BY created_at DESC, manifest_id ASC, version DESC LIMIT ${len(params)}"
+    rows = conn.execute(sql, *params)
+    return [dict(row) for row in rows]
 
 
 def create_authority_checkpoint(
@@ -790,11 +996,15 @@ def record_workflow_invocation(
 
 
 __all__ = [
+    "bootstrap_control_manifest_head_schema",
     "create_app_manifest",
     "create_authority_checkpoint",
     "delete_workflow_record",
     "decide_authority_checkpoint",
+    "list_control_manifest_head_records",
+    "list_control_manifest_history_records",
     "load_app_manifest_record",
+    "load_control_manifest_head_record",
     "load_workflow_record",
     "persist_workflow_build_record",
     "persist_workflow_record",
@@ -805,6 +1015,7 @@ __all__ = [
     "reset_observability_metrics",
     "update_workflow_record",
     "update_workflow_trigger_record",
+    "upsert_control_manifest_head",
     "upsert_workflow_trigger_record",
     "upsert_app_manifest",
     "workflow_exists",

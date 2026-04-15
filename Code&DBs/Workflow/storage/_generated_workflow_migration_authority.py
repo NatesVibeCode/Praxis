@@ -180,7 +180,8 @@ WORKFLOW_FULL_BOOTSTRAP_SEQUENCE = ('001_v1_control_plane.sql',
  '107_name_cleanup_praxis_branding.sql',
  '107_workflow_notifications_resource_telemetry.sql',
  '108_retrieval_metrics.sql',
- '109_friction_events_is_test.sql')
+ '109_friction_events_is_test.sql',
+ '110_surface_usage_telemetry.sql')
 
 WORKFLOW_POLICY_BUCKETS = {'canonical': ('001_v1_control_plane.sql',
                '002_registry_authority.sql',
@@ -316,7 +317,8 @@ WORKFLOW_POLICY_BUCKETS = {'canonical': ('001_v1_control_plane.sql',
                     '107_name_cleanup_praxis_branding.sql',
                     '107_workflow_notifications_resource_telemetry.sql',
                     '108_retrieval_metrics.sql',
-                    '109_friction_events_is_test.sql'),
+                    '109_friction_events_is_test.sql',
+                    '110_surface_usage_telemetry.sql'),
  'deprecated': (),
  'dead': ()}
 
@@ -454,7 +456,8 @@ WORKFLOW_MIGRATION_POLICIES = {'001_v1_control_plane.sql': 'canonical',
  '107_name_cleanup_praxis_branding.sql': 'bootstrap_only',
  '107_workflow_notifications_resource_telemetry.sql': 'bootstrap_only',
  '108_retrieval_metrics.sql': 'bootstrap_only',
- '109_friction_events_is_test.sql': 'bootstrap_only'}
+ '109_friction_events_is_test.sql': 'bootstrap_only',
+ '110_surface_usage_telemetry.sql': 'bootstrap_only'}
 
 WORKFLOW_MIGRATION_EXPECTED_OBJECTS = {'001_v1_control_plane.sql': (('table', 'workflow_definitions'),
                               ('table', 'workflow_definition_nodes'),

@@ -320,6 +320,8 @@ def normalize_data_job(
         "operation": operation,
         "job_name": _text(raw.get("job_name")) or f"{operation}-data-job",
         "workspace_root": _text(raw.get("workspace_root")) or None,
+        "workspace_ref": _text(raw.get("workspace_ref")) or None,
+        "scope_ref": _text(raw.get("scope_ref")) or None,
         "input": input_ref,
         "secondary_input": secondary_input,
         "predicates": predicates,

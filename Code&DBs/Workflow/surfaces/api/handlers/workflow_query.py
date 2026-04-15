@@ -47,8 +47,15 @@ from runtime.integrations.display_names import (
     base_integration_name,
     display_name_for_integration,
 )
+from registry.control_plane_manifests import (
+    CONTROL_MANIFEST_FAMILY as _CONTROL_MANIFEST_FAMILY,
+    CONTROL_MANIFEST_KIND as _CONTROL_MANIFEST_KIND,
+    list_control_manifest_heads as _list_control_manifest_heads,
+    list_control_manifest_history as _list_control_manifest_history,
+)
 from surfaces.api.catalog_authority import build_catalog_payload
 from . import workflow_query_core as _workflow_query_core
+from ._surface_usage import record_api_route_usage as _record_api_route_usage
 from ._shared import (
     REPO_ROOT,
     RouteEntry,
@@ -124,8 +131,6 @@ _SOURCE_OPTION_SEEDS: tuple[dict[str, Any], ...] = (
     },
 )
 _DASHBOARD_SECTION_ORDER: tuple[str, ...] = ("live", "saved", "draft")
-
-
 def _prefix_single_segment(
     path_prefix: str,
     *,
@@ -1453,17 +1458,46 @@ def _handle_compile_post(request: Any, path: str) -> None:
     try:
         body = _read_json_body(request)
     except (json.JSONDecodeError, ValueError) as exc:
-        request._send_json(400, {"error": f"Invalid JSON: {exc}"})
+        payload = {"error": f"Invalid JSON: {exc}"}
+        request._send_json(400, payload)
+        _record_api_route_usage(
+            request.subsystems,
+            path=path,
+            method="POST",
+            status_code=400,
+            response_payload=payload,
+            headers=request.headers,
+        )
         return
 
     try:
         prose = body.get("prose", "")
         if not isinstance(prose, str) or not prose.strip():
-            request._send_json(400, {"error": "prose is required"})
+            payload = {"error": "prose is required"}
+            request._send_json(400, payload)
+            _record_api_route_usage(
+                request.subsystems,
+                path=path,
+                method="POST",
+                status_code=400,
+                request_body=body,
+                response_payload=payload,
+                headers=request.headers,
+            )
             return
         title = body.get("title")
         if title is not None and not isinstance(title, str):
-            request._send_json(400, {"error": "title must be a string"})
+            payload = {"error": "title must be a string"}
+            request._send_json(400, payload)
+            _record_api_route_usage(
+                request.subsystems,
+                path=path,
+                method="POST",
+                status_code=400,
+                request_body=body,
+                response_payload=payload,
+                headers=request.headers,
+            )
             return
 
         try:
@@ -1472,13 +1506,24 @@ def _handle_compile_post(request: Any, path: str) -> None:
             from runtime.compile_index import CompileIndexAuthorityError
 
             if isinstance(exc, CompileIndexAuthorityError):
+                payload = {
+                    "error": str(exc),
+                    "reason_code": exc.reason_code,
+                    "details": dict(getattr(exc, "details", {}) or {}),
+                }
                 request._send_json(
                     409,
-                    {
-                        "error": str(exc),
-                        "reason_code": exc.reason_code,
-                        "details": dict(getattr(exc, "details", {}) or {}),
-                    },
+                    payload,
+                )
+                _record_api_route_usage(
+                    request.subsystems,
+                    path=path,
+                    method="POST",
+                    status_code=409,
+                    request_body=body,
+                    response_payload=payload,
+                    headers=request.headers,
+                    conn=getattr(request.subsystems, "get_pg_conn", lambda: None)(),
                 )
                 return
             raise
@@ -1491,25 +1536,74 @@ def _handle_compile_post(request: Any, path: str) -> None:
             compile_index_snapshot=compile_index_snapshot,
         )
         request._send_json(200, result)
+        _record_api_route_usage(
+            request.subsystems,
+            path=path,
+            method="POST",
+            status_code=200,
+            request_body=body,
+            response_payload=result,
+            headers=request.headers,
+            conn=conn,
+        )
     except Exception as exc:
-        request._send_json(500, {"error": str(exc)})
+        payload = {"error": str(exc)}
+        request._send_json(500, payload)
+        _record_api_route_usage(
+            request.subsystems,
+            path=path,
+            method="POST",
+            status_code=500,
+            request_body=body,
+            response_payload=payload,
+            headers=request.headers,
+        )
 
 
 def _handle_refine_definition_post(request: Any, path: str) -> None:
     try:
         body = _read_json_body(request)
     except (json.JSONDecodeError, ValueError) as exc:
-        request._send_json(400, {"error": f"Invalid JSON: {exc}"})
+        payload = {"error": f"Invalid JSON: {exc}"}
+        request._send_json(400, payload)
+        _record_api_route_usage(
+            request.subsystems,
+            path=path,
+            method="POST",
+            status_code=400,
+            response_payload=payload,
+            headers=request.headers,
+        )
         return
 
     try:
         prose = body.get("prose", "")
         if not isinstance(prose, str) or not prose.strip():
-            request._send_json(400, {"error": "prose is required"})
+            payload = {"error": "prose is required"}
+            request._send_json(400, payload)
+            _record_api_route_usage(
+                request.subsystems,
+                path=path,
+                method="POST",
+                status_code=400,
+                request_body=body,
+                response_payload=payload,
+                headers=request.headers,
+            )
             return
         title = body.get("title")
         if title is not None and not isinstance(title, str):
-            request._send_json(400, {"error": "title must be a string"})
+            payload = {"error": "title must be a string"}
+            request._send_json(400, payload)
+            _record_api_route_usage(
+                request.subsystems,
+                path=path,
+                method="POST",
+                status_code=400,
+                request_body=body,
+                response_payload=payload,
+                headers=request.headers,
+            )
             return
 
         try:
@@ -1518,13 +1612,24 @@ def _handle_refine_definition_post(request: Any, path: str) -> None:
             from runtime.compile_index import CompileIndexAuthorityError
 
             if isinstance(exc, CompileIndexAuthorityError):
+                payload = {
+                    "error": str(exc),
+                    "reason_code": exc.reason_code,
+                    "details": dict(getattr(exc, "details", {}) or {}),
+                }
                 request._send_json(
                     409,
-                    {
-                        "error": str(exc),
-                        "reason_code": exc.reason_code,
-                        "details": dict(getattr(exc, "details", {}) or {}),
-                    },
+                    payload,
+                )
+                _record_api_route_usage(
+                    request.subsystems,
+                    path=path,
+                    method="POST",
+                    status_code=409,
+                    request_body=body,
+                    response_payload=payload,
+                    headers=request.headers,
+                    conn=getattr(request.subsystems, "get_pg_conn", lambda: None)(),
                 )
                 return
             raise
@@ -1538,22 +1643,61 @@ def _handle_refine_definition_post(request: Any, path: str) -> None:
             compile_index_snapshot=compile_index_snapshot,
         )
         request._send_json(200, result)
+        _record_api_route_usage(
+            request.subsystems,
+            path=path,
+            method="POST",
+            status_code=200,
+            request_body=body,
+            response_payload=result,
+            headers=request.headers,
+            conn=conn,
+        )
     except Exception as exc:
-        request._send_json(500, {"error": str(exc)})
+        payload = {"error": str(exc)}
+        request._send_json(500, payload)
+        _record_api_route_usage(
+            request.subsystems,
+            path=path,
+            method="POST",
+            status_code=500,
+            request_body=body,
+            response_payload=payload,
+            headers=request.headers,
+        )
 
 
 def _handle_plan_post(request: Any, path: str) -> None:
     try:
         body = _read_json_body(request)
     except (json.JSONDecodeError, ValueError) as exc:
-        request._send_json(400, {"error": f"Invalid JSON: {exc}"})
+        payload = {"error": f"Invalid JSON: {exc}"}
+        request._send_json(400, payload)
+        _record_api_route_usage(
+            request.subsystems,
+            path=path,
+            method="POST",
+            status_code=400,
+            response_payload=payload,
+            headers=request.headers,
+        )
         return
 
     try:
         definition = body.get("definition")
         build_graph = body.get("build_graph")
         if not isinstance(definition, dict) and not isinstance(build_graph, dict):
-            request._send_json(400, {"error": "definition or build_graph is required and must be an object"})
+            payload = {"error": "definition or build_graph is required and must be an object"}
+            request._send_json(400, payload)
+            _record_api_route_usage(
+                request.subsystems,
+                path=path,
+                method="POST",
+                status_code=400,
+                request_body=body,
+                response_payload=payload,
+                headers=request.headers,
+            )
             return
         if isinstance(build_graph, dict):
             definition = materialize_definition_from_build_graph(
@@ -1562,7 +1706,17 @@ def _handle_plan_post(request: Any, path: str) -> None:
             )
         title = body.get("title")
         if title is not None and not isinstance(title, str):
-            request._send_json(400, {"error": "title must be a string"})
+            payload = {"error": "title must be a string"}
+            request._send_json(400, payload)
+            _record_api_route_usage(
+                request.subsystems,
+                path=path,
+                method="POST",
+                status_code=400,
+                request_body=body,
+                response_payload=payload,
+                headers=request.headers,
+            )
             return
 
         from runtime.operating_model_planner import PlanningBlockedError, plan_definition
@@ -1570,58 +1724,173 @@ def _handle_plan_post(request: Any, path: str) -> None:
         try:
             result = plan_definition(definition, title=title, conn=request.subsystems.get_pg_conn())
         except PlanningBlockedError as exc:
-            request._send_json(400, {"error": str(exc), "unresolved": exc.unresolved})
+            payload = {"error": str(exc), "unresolved": exc.unresolved}
+            request._send_json(400, payload)
+            _record_api_route_usage(
+                request.subsystems,
+                path=path,
+                method="POST",
+                status_code=400,
+                request_body=body,
+                response_payload=payload,
+                headers=request.headers,
+            )
             return
 
         request._send_json(200, result)
+        _record_api_route_usage(
+            request.subsystems,
+            path=path,
+            method="POST",
+            status_code=200,
+            request_body=body,
+            response_payload=result,
+            headers=request.headers,
+        )
     except Exception as exc:
-        request._send_json(500, {"error": str(exc)})
+        payload = {"error": str(exc)}
+        request._send_json(500, payload)
+        _record_api_route_usage(
+            request.subsystems,
+            path=path,
+            method="POST",
+            status_code=500,
+            request_body=body,
+            response_payload=payload,
+            headers=request.headers,
+        )
 
 
 def _handle_commit_post(request: Any, path: str) -> None:
     try:
         body = _read_json_body(request)
     except (json.JSONDecodeError, ValueError) as exc:
-        request._send_json(400, {"error": f"Invalid JSON: {exc}"})
+        payload = {"error": f"Invalid JSON: {exc}"}
+        request._send_json(400, payload)
+        _record_api_route_usage(
+            request.subsystems,
+            path=path,
+            method="POST",
+            status_code=400,
+            response_payload=payload,
+            headers=request.headers,
+        )
         return
 
     try:
         title = body.get("title", "")
         if not isinstance(title, str) or not title.strip():
-            request._send_json(400, {"error": "title is required"})
+            payload = {"error": "title is required"}
+            request._send_json(400, payload)
+            _record_api_route_usage(
+                request.subsystems,
+                path=path,
+                method="POST",
+                status_code=400,
+                request_body=body,
+                response_payload=payload,
+                headers=request.headers,
+            )
             return
         definition = body.get("definition")
         build_graph = body.get("build_graph")
         if not isinstance(definition, dict) and not isinstance(build_graph, dict):
-            request._send_json(400, {"error": "definition or build_graph is required and must be an object"})
+            payload = {"error": "definition or build_graph is required and must be an object"}
+            request._send_json(400, payload)
+            _record_api_route_usage(
+                request.subsystems,
+                path=path,
+                method="POST",
+                status_code=400,
+                request_body=body,
+                response_payload=payload,
+                headers=request.headers,
+            )
             return
         if "build_graph" in body and build_graph is not None and not isinstance(build_graph, dict):
-            request._send_json(400, {"error": "build_graph must be an object"})
+            payload = {"error": "build_graph must be an object"}
+            request._send_json(400, payload)
+            _record_api_route_usage(
+                request.subsystems,
+                path=path,
+                method="POST",
+                status_code=400,
+                request_body=body,
+                response_payload=payload,
+                headers=request.headers,
+            )
             return
         compiled_spec = body.get("compiled_spec")
         if "compiled_spec" in body and compiled_spec is not None and not isinstance(compiled_spec, dict):
-            request._send_json(400, {"error": "compiled_spec must be an object"})
+            payload = {"error": "compiled_spec must be an object"}
+            request._send_json(400, payload)
+            _record_api_route_usage(
+                request.subsystems,
+                path=path,
+                method="POST",
+                status_code=400,
+                request_body=body,
+                response_payload=payload,
+                headers=request.headers,
+            )
             return
         workflow_id = body.get("workflow_id")
         if workflow_id is not None and not isinstance(workflow_id, str):
-            request._send_json(400, {"error": "workflow_id must be a string"})
+            payload = {"error": "workflow_id must be a string"}
+            request._send_json(400, payload)
+            _record_api_route_usage(
+                request.subsystems,
+                path=path,
+                method="POST",
+                status_code=400,
+                request_body=body,
+                response_payload=payload,
+                headers=request.headers,
+            )
             return
 
-        request._send_json(
-            200,
-            commit_workflow(
-                request.subsystems.get_pg_conn(),
-                title=title.strip(),
-                definition=definition if isinstance(definition, dict) else None,
-                compiled_spec=compiled_spec,
-                workflow_id=workflow_id,
-                build_graph=build_graph if isinstance(build_graph, dict) else None,
-            ),
+        result = commit_workflow(
+            request.subsystems.get_pg_conn(),
+            title=title.strip(),
+            definition=definition if isinstance(definition, dict) else None,
+            compiled_spec=compiled_spec,
+            workflow_id=workflow_id,
+            build_graph=build_graph if isinstance(build_graph, dict) else None,
+        )
+        request._send_json(200, result)
+        _record_api_route_usage(
+            request.subsystems,
+            path=path,
+            method="POST",
+            status_code=200,
+            request_body=body,
+            response_payload=result,
+            headers=request.headers,
         )
     except WorkflowRuntimeBoundaryError as exc:
-        request._send_json(exc.status_code, {"error": str(exc)})
+        payload = {"error": str(exc)}
+        request._send_json(exc.status_code, payload)
+        _record_api_route_usage(
+            request.subsystems,
+            path=path,
+            method="POST",
+            status_code=exc.status_code,
+            request_body=body,
+            response_payload=payload,
+            headers=request.headers,
+        )
     except Exception as exc:
-        request._send_json(500, {"error": str(exc)})
+        payload = {"error": str(exc)}
+        request._send_json(500, payload)
+        _record_api_route_usage(
+            request.subsystems,
+            path=path,
+            method="POST",
+            status_code=500,
+            request_body=body,
+            response_payload=payload,
+            headers=request.headers,
+        )
 
 
 def _handle_workflow_build_get(request: Any, path: str) -> None:
@@ -1800,6 +2069,65 @@ def _manifest_type_from_payload(manifest: Any) -> str | None:
     return str(manifest.get("manifest_type") or "").strip() or None
 
 
+def _manifest_text_from_payload(manifest: Any, *path: str) -> str | None:
+    if isinstance(manifest, str):
+        try:
+            manifest = json.loads(manifest)
+        except (TypeError, json.JSONDecodeError):
+            return None
+    current: Any = manifest
+    for key in path:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return str(current or "").strip() or None
+
+
+def _control_manifest_workspace_ref(manifest: Any) -> str | None:
+    for path in (
+        ("workspace_ref",),
+        ("plan", "workspace_ref"),
+        ("approval", "workspace_ref"),
+        ("job", "workspace_ref"),
+    ):
+        value = _manifest_text_from_payload(manifest, *path)
+        if value:
+            return value
+    return None
+
+
+def _control_manifest_scope_ref(manifest: Any) -> str | None:
+    for path in (
+        ("scope_ref",),
+        ("plan", "scope_ref"),
+        ("approval", "scope_ref"),
+        ("job", "scope_ref"),
+    ):
+        value = _manifest_text_from_payload(manifest, *path)
+        if value:
+            return value
+    return None
+
+
+def _control_manifest_row_base(row: dict[str, Any], *, manifest_key: str) -> dict[str, Any]:
+    manifest = row.get(manifest_key)
+    return {
+        "id": row.get("id"),
+        "name": row.get("name"),
+        "description": row.get("description") or "",
+        "status": row.get("status"),
+        "version": row.get("version"),
+        "parent_manifest_id": row.get("parent_manifest_id"),
+        "kind": _manifest_text_from_payload(manifest, "kind"),
+        "manifest_family": _manifest_family_from_payload(manifest),
+        "manifest_type": _manifest_type_from_payload(manifest),
+        "workspace_ref": _control_manifest_workspace_ref(manifest),
+        "scope_ref": _control_manifest_scope_ref(manifest),
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
+    }
+
+
 def _manifest_listing_row(row: dict[str, Any]) -> dict[str, Any]:
     manifest = row.get("manifest")
     return {
@@ -1811,6 +2139,101 @@ def _manifest_listing_row(row: dict[str, Any]) -> dict[str, Any]:
         "manifest_type": _manifest_type_from_payload(manifest),
         "updated_at": row.get("updated_at"),
     }
+
+
+def _control_manifest_filter_sql(column: str, field: str) -> str:
+    return (
+        "COALESCE("
+        f"{column}->>'{field}', "
+        f"{column}->'plan'->>'{field}', "
+        f"{column}->'approval'->>'{field}', "
+        f"{column}->'job'->>'{field}', "
+        "''"
+        ")"
+    )
+
+
+def _handle_manifest_heads_get(request: Any, path: str) -> None:
+    try:
+        pg = request.subsystems.get_pg_conn()
+        params = _query_params(request.path)
+        workspace_ref = str((params.get("workspace_ref") or [""])[0]).strip()
+        scope_ref = str((params.get("scope_ref") or [""])[0]).strip()
+        manifest_type = str((params.get("manifest_type") or [""])[0]).strip()
+        status = str((params.get("status") or [""])[0]).strip()
+        limit = _safe_int_impl((params.get("limit") or ["20"])[0], default=20, minimum=1, maximum=100)
+        rows = _list_control_manifest_heads(
+            pg,
+            workspace_ref=workspace_ref or None,
+            scope_ref=scope_ref or None,
+            manifest_type=manifest_type or None,
+            status=status or None,
+            limit=limit,
+        )
+        request._send_json(
+            200,
+            _serialize(
+                {
+                    "heads": rows,
+                    "count": len(rows),
+                    "filters": {
+                        "workspace_ref": workspace_ref or None,
+                        "scope_ref": scope_ref or None,
+                        "manifest_type": manifest_type or None,
+                        "status": status or None,
+                        "limit": limit,
+                    },
+                }
+            ),
+        )
+    except Exception as exc:
+        request._send_json(500, {"error": str(exc)})
+
+
+def _handle_manifest_history_get(request: Any, path: str) -> None:
+    try:
+        pg = request.subsystems.get_pg_conn()
+        params = _query_params(request.path)
+        workspace_ref = str((params.get("workspace_ref") or [""])[0]).strip()
+        scope_ref = str((params.get("scope_ref") or [""])[0]).strip()
+        manifest_type = str((params.get("manifest_type") or [""])[0]).strip()
+        status = str((params.get("status") or [""])[0]).strip()
+        limit = _safe_int_impl((params.get("limit") or ["20"])[0], default=20, minimum=1, maximum=100)
+        if not workspace_ref or not scope_ref or not manifest_type:
+            request._send_json(
+                400,
+                {
+                    "error": "workspace_ref, scope_ref, and manifest_type are required for control manifest history",
+                },
+            )
+            return
+
+        rows = _list_control_manifest_history(
+            pg,
+            workspace_ref=workspace_ref,
+            scope_ref=scope_ref,
+            manifest_type=manifest_type,
+            status=status or None,
+            limit=limit,
+        )
+        request._send_json(
+            200,
+            _serialize(
+                {
+                    "history": rows,
+                    "count": len(rows),
+                    "filters": {
+                        "workspace_ref": workspace_ref or None,
+                        "scope_ref": scope_ref or None,
+                        "manifest_type": manifest_type or None,
+                        "status": status or None,
+                        "limit": limit,
+                    },
+                }
+            ),
+        )
+    except Exception as exc:
+        request._send_json(500, {"error": str(exc)})
 
 
 def _handle_manifests_get(request: Any, path: str) -> None:
@@ -2699,26 +3122,67 @@ def _handle_runs_recent_get(request: Any, path: str) -> None:
 
 def _handle_trigger_post(request: Any, path: str) -> None:
     """POST /api/trigger/{workflow_id} — manually trigger a workflow."""
+    body: dict[str, Any] = {}
     try:
         parts = path.rstrip("/").split("/")
         workflow_id = parts[-1] if len(parts) >= 3 else ""
 
         if not workflow_id:
-            request._send_json(400, {"error": "workflow_id required"})
+            payload = {"error": "workflow_id required"}
+            request._send_json(400, payload)
+            _record_api_route_usage(
+                request.subsystems,
+                path=path,
+                method="POST",
+                status_code=400,
+                request_body=body,
+                response_payload=payload,
+                headers=request.headers,
+            )
             return
 
-        request._send_json(
-            200,
-            trigger_workflow_manually(
-                request.subsystems,
-                workflow_id=workflow_id,
-                repo_root=REPO_ROOT,
-            ),
+        result = trigger_workflow_manually(
+            request.subsystems,
+            workflow_id=workflow_id,
+            repo_root=REPO_ROOT,
+        )
+        request._send_json(200, result)
+        _record_api_route_usage(
+            request.subsystems,
+            path=path,
+            method="POST",
+            status_code=200,
+            request_body=body,
+            response_payload=result,
+            headers=request.headers,
+            conn=getattr(request.subsystems, "get_pg_conn", lambda: None)(),
         )
     except WorkflowRuntimeBoundaryError as exc:
-        request._send_json(exc.status_code, {"error": str(exc)})
+        payload = {"error": str(exc)}
+        request._send_json(exc.status_code, payload)
+        _record_api_route_usage(
+            request.subsystems,
+            path=path,
+            method="POST",
+            status_code=exc.status_code,
+            request_body=body,
+            response_payload=payload,
+            headers=request.headers,
+            conn=getattr(request.subsystems, "get_pg_conn", lambda: None)(),
+        )
     except Exception as exc:
-        request._send_json(500, {"error": str(exc)})
+        payload = {"error": str(exc)}
+        request._send_json(500, payload)
+        _record_api_route_usage(
+            request.subsystems,
+            path=path,
+            method="POST",
+            status_code=500,
+            request_body=body,
+            response_payload=payload,
+            headers=request.headers,
+            conn=getattr(request.subsystems, "get_pg_conn", lambda: None)(),
+        )
 
 
 def _file_id_from_path(path: str, *, suffix: str = "") -> str:
@@ -3035,7 +3499,9 @@ QUERY_GET_ROUTES: list[RouteEntry] = [
     (_exact("/api/runs/recent"), _handle_runs_recent_get),
     (_exact("/api/references"), _handle_references_get),
     (_exact("/api/source-options"), _handle_source_options_get),
+    (_exact("/api/manifest-heads"), _handle_manifest_heads_get),
     (_exact("/api/manifests"), _handle_manifests_get),
+    (_exact("/api/manifests/history"), _handle_manifest_history_get),
     (_exact("/api/templates"), _handle_templates_get),
     (_exact("/api/models"), _handle_models_get),
     (_exact("/api/models/market"), _handle_market_models_get),

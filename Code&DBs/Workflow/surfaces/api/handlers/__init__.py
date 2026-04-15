@@ -7,6 +7,7 @@ import traceback
 from typing import Any
 
 from ._shared import _ClientError, _read_json_body
+from ._surface_usage import record_api_route_usage as _record_api_route_usage
 from .workflow_admin import ADMIN_GET_ROUTES, ADMIN_POST_ROUTES, ADMIN_ROUTES
 from .workflow_mcp import MCP_POST_ROUTES
 from .workflow_notify import NOTIFY_GET_ROUTES, NOTIFY_POST_ROUTES, NOTIFY_ROUTES
@@ -66,24 +67,71 @@ def _dispatch_standard_post(request: Any, path: str) -> bool:
     try:
         body = _read_json_body(request)
         if not isinstance(body, dict):
-            request._send_json(400, {"error": "Request body must be a JSON object"})
+            payload = {"error": "Request body must be a JSON object"}
+            request._send_json(400, payload)
+            _record_api_route_usage(
+                request.subsystems,
+                path=path,
+                method="POST",
+                status_code=400,
+                response_payload=payload,
+                headers=request.headers,
+            )
             return True
     except (json.JSONDecodeError, ValueError) as exc:
-        request._send_json(400, {"error": f"Invalid JSON: {exc}"})
+        payload = {"error": f"Invalid JSON: {exc}"}
+        request._send_json(400, payload)
+        _record_api_route_usage(
+            request.subsystems,
+            path=path,
+            method="POST",
+            status_code=400,
+            response_payload=payload,
+            headers=request.headers,
+        )
         return True
 
     try:
         result = handler(request.subsystems, body)
         request._send_json(200, result)
+        _record_api_route_usage(
+            request.subsystems,
+            path=path,
+            method="POST",
+            status_code=200,
+            request_body=body,
+            response_payload=result,
+            headers=request.headers,
+        )
     except _ClientError as exc:
-        request._send_json(400, {"error": str(exc)})
+        payload = {"error": str(exc)}
+        request._send_json(400, payload)
+        _record_api_route_usage(
+            request.subsystems,
+            path=path,
+            method="POST",
+            status_code=400,
+            request_body=body,
+            response_payload=payload,
+            headers=request.headers,
+        )
     except Exception as exc:
+        payload = {
+            "error": f"{type(exc).__name__}: {exc}",
+            "traceback": traceback.format_exc(),
+        }
         request._send_json(
             500,
-            {
-                "error": f"{type(exc).__name__}: {exc}",
-                "traceback": traceback.format_exc(),
-            },
+            payload,
+        )
+        _record_api_route_usage(
+            request.subsystems,
+            path=path,
+            method="POST",
+            status_code=500,
+            request_body=body,
+            response_payload=payload,
+            headers=request.headers,
         )
     return True
 

@@ -98,6 +98,7 @@ from .observability_maintenance_repository import (
 )
 from .bug_evidence_repository import PostgresBugEvidenceRepository
 from .workflow_metrics_repository import PostgresWorkflowMetricsRepository
+from .workflow_surface_usage_repository import PostgresWorkflowSurfaceUsageRepository
 from .subscription_repository import PostgresSubscriptionRepository
 from .task_route_eligibility_repository import (
     PostgresTaskRouteEligibilityRepository,
@@ -130,6 +131,7 @@ __all__ = [
     "PostgresObservabilityMaintenanceRepository",
     "PostgresUploadedFileRepository",
     "PostgresWorkflowMetricsRepository",
+    "PostgresWorkflowSurfaceUsageRepository",
     "PostgresOperatorControlRepository",
     "PostgresOperatorFrameRepository",
     "PostgresReceiptRepository",

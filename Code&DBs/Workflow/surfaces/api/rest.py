@@ -41,7 +41,9 @@ from runtime.native_authority import default_native_authority_refs
 from runtime.workflow._status import summarize_run_health
 from runtime.workflow_graph_compiler import compile_graph_workflow_request, spec_uses_graph_runtime
 from surfaces.api.catalog_authority import build_catalog_payload
+from storage.postgres import PostgresWorkflowSurfaceUsageRepository
 from .handlers._subsystems import _Subsystems
+from .handlers._surface_usage import record_api_route_usage as _record_api_route_usage
 from .handlers import (
     handle_delete_request,
     handle_get_request,
@@ -564,21 +566,139 @@ async def _dispatch_standard_route(request: Request) -> Response:
         body_bytes = await request.body()
         body = json.loads(body_bytes) if body_bytes else {}
         if not isinstance(body, dict):
+            payload = {"error": "Request body must be a JSON object"}
+            _record_api_route_usage(
+                subsystems,
+                path=path,
+                method="POST",
+                status_code=400,
+                response_payload=payload,
+                headers=request.headers,
+            )
             return JSONResponse({"error": "Request body must be a JSON object"}, status_code=400)
     except (json.JSONDecodeError, ValueError) as exc:
+        payload = {"error": f"Invalid JSON: {exc}"}
+        _record_api_route_usage(
+            subsystems,
+            path=path,
+            method="POST",
+            status_code=400,
+            response_payload=payload,
+            headers=request.headers,
+        )
         return JSONResponse({"error": f"Invalid JSON: {exc}"}, status_code=400)
 
     try:
         result = handler(subsystems, body)
+        _record_api_route_usage(
+            subsystems,
+            path=path,
+            method="POST",
+            status_code=200,
+            request_body=body,
+            response_payload=result,
+            headers=request.headers,
+        )
         return JSONResponse(result, status_code=200)
     except _ClientError as exc:
+        payload = {"error": str(exc)}
+        _record_api_route_usage(
+            subsystems,
+            path=path,
+            method="POST",
+            status_code=400,
+            request_body=body,
+            response_payload=payload,
+            headers=request.headers,
+        )
         return JSONResponse({"error": str(exc)}, status_code=400)
     except Exception as exc:
         import traceback
+        payload = {
+            "error": f"{type(exc).__name__}: {exc}",
+            "traceback": traceback.format_exc(),
+        }
+        _record_api_route_usage(
+            subsystems,
+            path=path,
+            method="POST",
+            status_code=500,
+            request_body=body,
+            response_payload=payload,
+            headers=request.headers,
+        )
         return JSONResponse(
-            {"error": f"{type(exc).__name__}: {exc}", "traceback": traceback.format_exc()},
+            payload,
             status_code=500,
         )
+
+
+def _serialize_surface_usage_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "usage_date": (
+            row.get("usage_date").isoformat() if row.get("usage_date") is not None else None
+        ),
+        "surface_kind": row.get("surface_kind"),
+        "transport_kind": row.get("transport_kind"),
+        "entrypoint_kind": row.get("entrypoint_kind"),
+        "entrypoint_name": row.get("entrypoint_name"),
+        "caller_kind": row.get("caller_kind"),
+        "http_method": row.get("http_method") or None,
+        "invocation_count": int(row.get("invocation_count") or 0),
+        "success_count": int(row.get("success_count") or 0),
+        "client_error_count": int(row.get("client_error_count") or 0),
+        "server_error_count": int(row.get("server_error_count") or 0),
+        "first_invoked_at": _iso_or_none(row.get("first_invoked_at")),
+        "last_invoked_at": _iso_or_none(row.get("last_invoked_at")),
+    }
+
+
+def _json_or_none(value: Any) -> Any:
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return value
+    return value
+
+
+def _serialize_surface_usage_event_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "event_id": int(row.get("event_id") or 0),
+        "occurred_at": _iso_or_none(row.get("occurred_at")),
+        "surface_kind": row.get("surface_kind"),
+        "transport_kind": row.get("transport_kind"),
+        "entrypoint_kind": row.get("entrypoint_kind"),
+        "entrypoint_name": row.get("entrypoint_name"),
+        "caller_kind": row.get("caller_kind"),
+        "http_method": row.get("http_method") or None,
+        "status_code": int(row.get("status_code") or 0),
+        "result_state": row.get("result_state"),
+        "reason_code": row.get("reason_code") or None,
+        "routed_to": row.get("routed_to") or None,
+        "workflow_id": row.get("workflow_id") or None,
+        "run_id": row.get("run_id") or None,
+        "job_label": row.get("job_label") or None,
+        "request_id": row.get("request_id") or None,
+        "client_version": row.get("client_version") or None,
+        "payload_size_bytes": int(row.get("payload_size_bytes") or 0),
+        "response_size_bytes": int(row.get("response_size_bytes") or 0),
+        "prose_chars": int(row.get("prose_chars") or 0),
+        "query_chars": int(row.get("query_chars") or 0),
+        "result_count": int(row.get("result_count") or 0),
+        "unresolved_count": int(row.get("unresolved_count") or 0),
+        "capability_count": int(row.get("capability_count") or 0),
+        "reference_count": int(row.get("reference_count") or 0),
+        "compiled_job_count": int(row.get("compiled_job_count") or 0),
+        "trigger_count": int(row.get("trigger_count") or 0),
+        "definition_hash": row.get("definition_hash") or None,
+        "definition_revision": row.get("definition_revision") or None,
+        "task_class": row.get("task_class") or None,
+        "planner_required": bool(row.get("planner_required")),
+        "llm_used": bool(row.get("llm_used")),
+        "has_current_plan": bool(row.get("has_current_plan")),
+        "metadata": _json_or_none(row.get("metadata")) or {},
+    }
 
 
 def _read_job_output(output_path: str | None, stdout_preview: str | None) -> tuple[str, str]:
@@ -1425,6 +1545,14 @@ async def manifests_save_as_post(request: Request) -> Response:
 async def manifests_list(request: Request) -> Response:
     return await _route_to_handler(request)
 
+@app.get("/api/manifest-heads")
+async def manifest_heads_get(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+@app.get("/api/manifests/history")
+async def manifests_history_get(request: Request) -> Response:
+    return await _route_to_handler(request)
+
 @app.get("/api/manifests/{manifest_id}")
 async def manifests_get(request: Request, manifest_id: str) -> Response:
     return await _route_to_handler(request)
@@ -1930,6 +2058,73 @@ def get_metrics(days: int = Query(default=7, ge=1)) -> dict[str, Any]:
         "failure_category_breakdown": view.failure_category_breakdown(days=days),
         "hourly_workflow_volume": view.hourly_workflow_volume(days=days),
         "capability_distribution": view.capability_distribution(days=days),
+    }
+
+
+@app.get("/api/metrics/surface-usage")
+def get_surface_usage_metrics(
+    days: int = Query(default=30, ge=1),
+    entrypoint: str | None = Query(default=None),
+    event_limit: int = Query(default=50, ge=1, le=200),
+) -> dict[str, Any]:
+    """Return durable frontdoor surface-usage counters for the last N days."""
+
+    repo = PostgresWorkflowSurfaceUsageRepository(_shared_pg_conn())
+    entries = [
+        _serialize_surface_usage_row(row)
+        for row in repo.list_usage_rollup(days=days, entrypoint_name=entrypoint)
+    ]
+    daily = [
+        _serialize_surface_usage_row(row)
+        for row in repo.list_usage_daily(days=days, entrypoint_name=entrypoint)
+    ]
+    recent_events = [
+        _serialize_surface_usage_event_row(row)
+        for row in repo.list_usage_events(
+            days=days,
+            entrypoint_name=entrypoint,
+            limit=event_limit,
+        )
+    ]
+    query_routing_quality = [
+        {
+            "entrypoint_name": row.get("entrypoint_name"),
+            "caller_kind": row.get("caller_kind"),
+            "routed_to": row.get("routed_to") or None,
+            "result_state": row.get("result_state"),
+            "reason_code": row.get("reason_code") or None,
+            "invocation_count": int(row.get("invocation_count") or 0),
+            "success_count": int(row.get("success_count") or 0),
+            "average_query_chars": float(row.get("average_query_chars") or 0.0),
+            "total_result_count": int(row.get("total_result_count") or 0),
+        }
+        for row in repo.summarize_query_routing(days=days)
+    ]
+    builder_funnels = repo.summarize_builder_funnels(days=days)
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "days": days,
+        "filters": {
+            key: value
+            for key, value in {
+                "entrypoint": (entrypoint or "").strip() or None,
+                "event_limit": event_limit,
+            }.items()
+            if value is not None
+        },
+        "totals": {
+            "entry_count": len(entries),
+            "invocation_count": sum(row["invocation_count"] for row in entries),
+            "success_count": sum(row["success_count"] for row in entries),
+            "client_error_count": sum(row["client_error_count"] for row in entries),
+            "server_error_count": sum(row["server_error_count"] for row in entries),
+            "event_count": len(recent_events),
+        },
+        "entries": entries,
+        "daily": daily,
+        "recent_events": recent_events,
+        "query_routing_quality": query_routing_quality,
+        "builder_funnels": builder_funnels,
     }
 
 

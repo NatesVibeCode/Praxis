@@ -14,6 +14,7 @@ if str(_WORKFLOW_ROOT) not in sys.path:
     sys.path.insert(0, str(_WORKFLOW_ROOT))
 
 import surfaces.api.rest as rest
+from surfaces.api import handlers as api_handlers
 
 
 def test_rest_startup_initializes_shared_subsystems_once(monkeypatch) -> None:
@@ -121,6 +122,183 @@ def test_api_routes_endpoint_filters_the_live_http_surface() -> None:
     assert payload["count"] == 1
     assert payload["filters"] == {"path_prefix": "/api/routes"}
     assert [row["path"] for row in payload["routes"]] == ["/api/routes"]
+
+
+def test_query_route_records_surface_usage(monkeypatch) -> None:
+    recorded: list[dict[str, Any]] = []
+    fake_subsystems = object()
+
+    monkeypatch.setattr(rest, "_ensure_shared_subsystems", lambda _app: fake_subsystems)
+    monkeypatch.setitem(
+        api_handlers.ROUTES,
+        "/query",
+        lambda _subs, body: {"ok": True, "question": body["question"]},
+    )
+    monkeypatch.setattr(
+        rest,
+        "_record_api_route_usage",
+        lambda _subs, **kwargs: recorded.append(kwargs),
+    )
+
+    with TestClient(rest.app) as client:
+        response = client.post("/query", json={"question": "status"})
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "question": "status"}
+    assert len(recorded) == 1
+    assert recorded[0]["path"] == "/query"
+    assert recorded[0]["method"] == "POST"
+    assert recorded[0]["status_code"] == 200
+    assert recorded[0]["request_body"] == {"question": "status"}
+    assert recorded[0]["response_payload"] == {"ok": True, "question": "status"}
+    assert recorded[0]["headers"] is not None
+
+
+def test_surface_usage_metrics_endpoint_returns_serialized_rows(monkeypatch) -> None:
+    class _FakeRepo:
+        def __init__(self, conn) -> None:
+            assert conn == "surface-usage-pg"
+
+        def list_usage_rollup(self, *, days: int, entrypoint_name: str | None = None):
+            assert days == 14
+            assert entrypoint_name == "/api/compile"
+            return [
+                {
+                    "surface_kind": "api",
+                    "transport_kind": "http",
+                    "entrypoint_kind": "route",
+                    "entrypoint_name": "/api/compile",
+                    "caller_kind": "direct",
+                    "http_method": "POST",
+                    "invocation_count": 7,
+                    "success_count": 6,
+                    "client_error_count": 1,
+                    "server_error_count": 0,
+                    "first_invoked_at": datetime(2026, 4, 14, 8, 0, tzinfo=timezone.utc),
+                    "last_invoked_at": datetime(2026, 4, 15, 9, 0, tzinfo=timezone.utc),
+                }
+            ]
+
+        def list_usage_daily(self, *, days: int, entrypoint_name: str | None = None):
+            assert days == 14
+            assert entrypoint_name == "/api/compile"
+            return [
+                {
+                    "usage_date": datetime(2026, 4, 15, tzinfo=timezone.utc).date(),
+                    "surface_kind": "api",
+                    "transport_kind": "http",
+                    "entrypoint_kind": "route",
+                    "entrypoint_name": "/api/compile",
+                    "caller_kind": "direct",
+                    "http_method": "POST",
+                    "invocation_count": 3,
+                    "success_count": 3,
+                    "client_error_count": 0,
+                    "server_error_count": 0,
+                    "first_invoked_at": datetime(2026, 4, 15, 8, 0, tzinfo=timezone.utc),
+                    "last_invoked_at": datetime(2026, 4, 15, 9, 0, tzinfo=timezone.utc),
+                }
+            ]
+
+        def list_usage_events(self, *, days: int, entrypoint_name: str | None = None, limit: int = 50):
+            assert days == 14
+            assert entrypoint_name == "/api/compile"
+            assert limit == 5
+            return [
+                {
+                    "event_id": 7,
+                    "occurred_at": datetime(2026, 4, 15, 9, 0, tzinfo=timezone.utc),
+                    "surface_kind": "api",
+                    "transport_kind": "http",
+                    "entrypoint_kind": "route",
+                    "entrypoint_name": "/api/compile",
+                    "caller_kind": "direct",
+                    "http_method": "POST",
+                    "status_code": 200,
+                    "result_state": "ok",
+                    "reason_code": "",
+                    "routed_to": "",
+                    "workflow_id": "",
+                    "run_id": "",
+                    "job_label": "",
+                    "request_id": "req-123",
+                    "client_version": "moon-ui/1.2.3",
+                    "payload_size_bytes": 120,
+                    "response_size_bytes": 240,
+                    "prose_chars": 19,
+                    "query_chars": 0,
+                    "result_count": 0,
+                    "unresolved_count": 0,
+                    "capability_count": 2,
+                    "reference_count": 1,
+                    "compiled_job_count": 0,
+                    "trigger_count": 0,
+                    "definition_hash": "defhash",
+                    "definition_revision": "def_123",
+                    "task_class": "research",
+                    "planner_required": True,
+                    "llm_used": False,
+                    "has_current_plan": False,
+                    "metadata": {"compile_index_ref": "compile_index.alpha"},
+                }
+            ]
+
+        def summarize_query_routing(self, *, days: int):
+            assert days == 14
+            return [
+                {
+                    "entrypoint_name": "praxis_query",
+                    "caller_kind": "workflow_session",
+                    "routed_to": "knowledge_graph",
+                    "result_state": "ok",
+                    "reason_code": "",
+                    "invocation_count": 4,
+                    "success_count": 4,
+                    "average_query_chars": 18.5,
+                    "total_result_count": 12,
+                }
+            ]
+
+        def summarize_builder_funnels(self, *, days: int):
+            assert days == 14
+            return {
+                "definition_count": 3,
+                "compile_lane_count": 3,
+                "refine_lane_count": 1,
+                "plan_count": 2,
+                "commit_count": 2,
+                "run_count": 1,
+                "compile_to_plan_count": 2,
+                "plan_to_commit_count": 2,
+                "commit_to_run_count": 1,
+                "full_path_count": 1,
+            }
+
+    monkeypatch.setattr(rest, "_shared_pg_conn", lambda: "surface-usage-pg")
+    monkeypatch.setattr(rest, "PostgresWorkflowSurfaceUsageRepository", _FakeRepo)
+
+    with TestClient(rest.app) as client:
+        response = client.get(
+            "/api/metrics/surface-usage",
+            params={"days": 14, "entrypoint": "/api/compile", "event_limit": 5},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["filters"] == {"entrypoint": "/api/compile", "event_limit": 5}
+    assert payload["totals"] == {
+        "entry_count": 1,
+        "invocation_count": 7,
+        "success_count": 6,
+        "client_error_count": 1,
+        "server_error_count": 0,
+        "event_count": 1,
+    }
+    assert payload["entries"][0]["first_invoked_at"] == "2026-04-14T08:00:00+00:00"
+    assert payload["daily"][0]["usage_date"] == "2026-04-15"
+    assert payload["recent_events"][0]["request_id"] == "req-123"
+    assert payload["query_routing_quality"][0]["total_result_count"] == 12
+    assert payload["builder_funnels"]["full_path_count"] == 1
 
 
 def test_launcher_app_serves_index_from_dist(monkeypatch, tmp_path: Path) -> None:

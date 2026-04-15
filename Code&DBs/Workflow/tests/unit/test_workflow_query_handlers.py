@@ -19,6 +19,7 @@ from policy.workflow_lanes import (
 )
 from surfaces.api.handlers import workflow_query
 from surfaces.api.handlers import workflow_query_core
+from surfaces.api import handlers as api_handlers
 
 
 class _RequestStub:
@@ -47,6 +48,8 @@ class _RecordingPg:
         integration_rows: list[dict[str, Any]] | None = None,
         capability_rows: list[dict[str, Any]] | None = None,
         manifest_rows: dict[str, dict[str, Any]] | None = None,
+        head_rows: list[dict[str, Any]] | None = None,
+        history_rows: list[dict[str, Any]] | None = None,
         workflow_rows: dict[str, dict[str, Any]] | None = None,
         market_rows: list[dict[str, Any]] | None = None,
         binding_rows: list[dict[str, Any]] | None = None,
@@ -58,6 +61,8 @@ class _RecordingPg:
         self.integration_rows = integration_rows or []
         self.capability_rows = capability_rows or []
         self.manifest_rows = manifest_rows or {}
+        self.head_rows = head_rows or []
+        self.history_rows = history_rows or []
         self.workflow_rows = workflow_rows or {}
         self.market_rows = market_rows or [
             {
@@ -103,6 +108,103 @@ class _RecordingPg:
             return self.market_rows
         if "FROM provider_model_market_bindings" in query:
             return self.binding_rows
+        if "FROM control_manifest_heads h" in query:
+            rows = list(self.head_rows)
+            param_index = 0
+            if "h.workspace_ref = $" in query:
+                workspace_ref = str(params[param_index]).strip()
+                param_index += 1
+                rows = [row for row in rows if str(row.get("workspace_ref") or "").strip() == workspace_ref]
+            if "h.scope_ref = $" in query:
+                scope_ref = str(params[param_index]).strip()
+                param_index += 1
+                rows = [row for row in rows if str(row.get("scope_ref") or "").strip() == scope_ref]
+            if "h.manifest_type = $" in query:
+                manifest_type = str(params[param_index]).strip()
+                param_index += 1
+                rows = [row for row in rows if str(row.get("manifest_type") or "").strip() == manifest_type]
+            if "h.head_status = $" in query:
+                head_status = str(params[param_index]).strip()
+                param_index += 1
+                rows = [row for row in rows if str(row.get("head_status") or "").strip() == head_status]
+            limit = int(params[param_index]) if param_index < len(params) else len(rows)
+            return rows[:limit]
+        if "FROM app_manifest_history" in query and "manifest_snapshot" in query and "change_description" in query:
+            rows = list(self.history_rows)
+            param_index = 0
+
+            def _payload_text(payload: Any, *path: str) -> str:
+                if isinstance(payload, str):
+                    try:
+                        payload = json.loads(payload)
+                    except (TypeError, json.JSONDecodeError):
+                        return ""
+                current: Any = payload
+                for key in path:
+                    if not isinstance(current, dict):
+                        return ""
+                    current = current.get(key)
+                return str(current or "").strip()
+
+            def _control_ref(payload: Any, field: str) -> str:
+                for path in (
+                    (field,),
+                    ("plan", field),
+                    ("approval", field),
+                    ("job", field),
+                ):
+                    value = _payload_text(payload, *path)
+                    if value:
+                        return value
+                return ""
+
+            if "COALESCE(manifest_snapshot->>'kind', '') = $" in query:
+                kind = str(params[param_index]).strip()
+                param_index += 1
+                rows = [row for row in rows if _payload_text(row.get("manifest_snapshot"), "kind") == kind]
+            if "COALESCE(manifest_snapshot->>'manifest_family', '') = $" in query:
+                manifest_family = str(params[param_index]).strip()
+                param_index += 1
+                rows = [
+                    row
+                    for row in rows
+                    if _payload_text(row.get("manifest_snapshot"), "manifest_family") == manifest_family
+                ]
+            if "manifest_snapshot->>'workspace_ref' = $" in query or "COALESCE(manifest_snapshot->>'workspace_ref'" in query:
+                workspace_ref = str(params[param_index]).strip()
+                param_index += 1
+                rows = [row for row in rows if _control_ref(row.get("manifest_snapshot"), "workspace_ref") == workspace_ref]
+            if "manifest_snapshot->>'scope_ref' = $" in query or "COALESCE(manifest_snapshot->>'scope_ref'" in query:
+                scope_ref = str(params[param_index]).strip()
+                param_index += 1
+                rows = [row for row in rows if _control_ref(row.get("manifest_snapshot"), "scope_ref") == scope_ref]
+            if "manifest_snapshot->>'manifest_type' = $" in query:
+                manifest_type = str(params[param_index]).strip()
+                param_index += 1
+                rows = [
+                    row
+                    for row in rows
+                    if _payload_text(row.get("manifest_snapshot"), "manifest_type") == manifest_type
+                ]
+            if "manifest_snapshot->>'status' = $" in query:
+                status = str(params[param_index]).strip()
+                param_index += 1
+                rows = [
+                    row
+                    for row in rows
+                    if _payload_text(row.get("manifest_snapshot"), "status") == status
+                ]
+            rows = sorted(
+                rows,
+                key=lambda row: (
+                    str(row.get("created_at") or ""),
+                    str(row.get("manifest_id") or ""),
+                    int(row.get("version") or 0),
+                ),
+                reverse=True,
+            )
+            limit = int(params[param_index]) if param_index < len(params) else len(rows)
+            return rows[:limit]
         if "FROM app_manifests" in query and "SELECT id, name, description, status, manifest, updated_at" in query:
             rows = list(self.manifest_rows.values())
             param_index = 0
@@ -149,6 +251,78 @@ class _RecordingPg:
                 rows,
                 key=lambda row: (
                     str(row.get("updated_at") or ""),
+                    str(row.get("name") or ""),
+                ),
+                reverse=True,
+            )
+            limit = int(params[param_index]) if param_index < len(params) else len(rows)
+            return rows[:limit]
+        if "FROM app_manifests" in query and "SELECT id, name, description, status, version, parent_manifest_id, manifest, created_at, updated_at" in query:
+            rows = list(self.manifest_rows.values())
+            param_index = 0
+
+            def _payload_text(payload: Any, *path: str) -> str:
+                if isinstance(payload, str):
+                    try:
+                        payload = json.loads(payload)
+                    except (TypeError, json.JSONDecodeError):
+                        return ""
+                current: Any = payload
+                for key in path:
+                    if not isinstance(current, dict):
+                        return ""
+                    current = current.get(key)
+                return str(current or "").strip()
+
+            def _control_ref(payload: Any, field: str) -> str:
+                for path in (
+                    (field,),
+                    ("plan", field),
+                    ("approval", field),
+                    ("job", field),
+                ):
+                    value = _payload_text(payload, *path)
+                    if value:
+                        return value
+                return ""
+
+            if "COALESCE(manifest->>'kind', '') = $" in query:
+                kind = str(params[param_index]).strip()
+                param_index += 1
+                rows = [row for row in rows if _payload_text(row.get("manifest"), "kind") == kind]
+            if "COALESCE(manifest->>'manifest_family', '') = $" in query:
+                manifest_family = str(params[param_index]).strip()
+                param_index += 1
+                rows = [
+                    row
+                    for row in rows
+                    if _payload_text(row.get("manifest"), "manifest_family") == manifest_family
+                ]
+            if "manifest->>'workspace_ref' = $" in query or "COALESCE(manifest->>'workspace_ref'" in query:
+                workspace_ref = str(params[param_index]).strip()
+                param_index += 1
+                rows = [row for row in rows if _control_ref(row.get("manifest"), "workspace_ref") == workspace_ref]
+            if "manifest->>'scope_ref' = $" in query or "COALESCE(manifest->>'scope_ref'" in query:
+                scope_ref = str(params[param_index]).strip()
+                param_index += 1
+                rows = [row for row in rows if _control_ref(row.get("manifest"), "scope_ref") == scope_ref]
+            if "manifest->>'manifest_type' = $" in query:
+                manifest_type = str(params[param_index]).strip()
+                param_index += 1
+                rows = [
+                    row
+                    for row in rows
+                    if _payload_text(row.get("manifest"), "manifest_type") == manifest_type
+                ]
+            if "status = $" in query:
+                status = str(params[param_index]).strip()
+                param_index += 1
+                rows = [row for row in rows if str(row.get("status") or "") == status]
+            rows = sorted(
+                rows,
+                key=lambda row: (
+                    str(row.get("updated_at") or ""),
+                    int(row.get("version") or 0),
                     str(row.get("name") or ""),
                 ),
                 reverse=True,
@@ -687,6 +861,51 @@ def test_handle_compile_post_returns_definition_only_and_preserves_nonfatal_erro
     assert request.sent == (200, result)
 
 
+def test_handle_compile_post_records_surface_usage_on_success(monkeypatch) -> None:
+    pg = SimpleNamespace(label="compile-telemetry-pg")
+    snapshot = SimpleNamespace(
+        compile_index_ref="compile_index.compiler.test",
+        compile_surface_revision="compile_surface.compiler.test",
+    )
+    request = _RequestStub(
+        {"prose": "Route support mail", "title": "Support Mail"},
+        subsystems=SimpleNamespace(get_pg_conn=lambda: pg),
+        path="/api/compile",
+    )
+    recorded: list[dict[str, Any]] = []
+
+    monkeypatch.setattr(
+        workflow_query,
+        "_record_api_route_usage",
+        lambda _subs, **kwargs: recorded.append(kwargs),
+    )
+    monkeypatch.setattr(
+        "runtime.compile_index.load_compile_index_snapshot",
+        lambda *_args, **_kwargs: snapshot,
+    )
+    monkeypatch.setattr(
+        "runtime.compiler.compile_prose",
+        lambda *_args, **_kwargs: {"definition": {"type": "operating_model"}, "unresolved": []},
+    )
+
+    workflow_query._handle_compile_post(request, "/api/compile")
+
+    assert len(recorded) == 1
+    assert recorded[0]["path"] == "/api/compile"
+    assert recorded[0]["method"] == "POST"
+    assert recorded[0]["status_code"] == 200
+    assert recorded[0]["conn"] is pg
+    assert recorded[0]["request_body"] == {
+        "prose": "Route support mail",
+        "title": "Support Mail",
+    }
+    assert recorded[0]["response_payload"] == {
+        "definition": {"type": "operating_model"},
+        "unresolved": [],
+    }
+    assert recorded[0]["headers"] == request.headers
+
+
 def test_load_compile_index_snapshot_for_request_refreshes_missing_snapshot() -> None:
     pg = SimpleNamespace(label="compile-missing-test-pg")
     snapshot = SimpleNamespace(
@@ -925,6 +1144,225 @@ def test_handle_refine_definition_post_uses_explicit_llm_compile_lane() -> None:
         compile_index_snapshot=snapshot,
     )
     assert request.sent == (200, result)
+
+
+def test_handle_refine_definition_post_records_surface_usage_on_conflict(monkeypatch) -> None:
+    pg = SimpleNamespace(label="refine-telemetry-pg")
+    request = _RequestStub(
+        {"prose": "Route support mail", "title": "Support Mail"},
+        subsystems=SimpleNamespace(get_pg_conn=lambda: pg),
+        path="/api/refine-definition",
+    )
+    recorded: list[dict[str, Any]] = []
+
+    monkeypatch.setattr(
+        workflow_query,
+        "_record_api_route_usage",
+        lambda _subs, **kwargs: recorded.append(kwargs),
+    )
+
+    with patch(
+        "runtime.compile_index.load_compile_index_snapshot",
+        side_effect=CompileIndexAuthorityError(
+            "compile_index.snapshot_stale",
+            "compile index snapshot is stale",
+            details={"freshness_state": "stale"},
+        ),
+    ), patch(
+        "runtime.compile_index.refresh_compile_index",
+        side_effect=CompileIndexAuthorityError(
+            "compile_index.snapshot_stale",
+            "compile index snapshot is stale",
+            details={"freshness_state": "stale"},
+        ),
+    ):
+        workflow_query._handle_refine_definition_post(request, "/api/refine-definition")
+
+    assert len(recorded) == 1
+    assert recorded[0]["path"] == "/api/refine-definition"
+    assert recorded[0]["method"] == "POST"
+    assert recorded[0]["status_code"] == 409
+    assert recorded[0]["conn"] is pg
+    assert recorded[0]["request_body"] == {
+        "prose": "Route support mail",
+        "title": "Support Mail",
+    }
+    assert recorded[0]["response_payload"]["reason_code"] == "compile_index.snapshot_stale"
+    assert recorded[0]["headers"] == request.headers
+
+
+def test_handle_post_request_records_query_surface_usage(monkeypatch) -> None:
+    request = _RequestStub({"question": "status"}, subsystems=SimpleNamespace(), path="/query")
+    recorded: list[dict[str, Any]] = []
+
+    monkeypatch.setitem(
+        api_handlers.ROUTES,
+        "/query",
+        lambda _subs, body: {"ok": True, "question": body["question"]},
+    )
+    monkeypatch.setattr(
+        api_handlers,
+        "_record_api_route_usage",
+        lambda _subs, **kwargs: recorded.append(kwargs),
+    )
+
+    handled = api_handlers.handle_post_request(request, "/query")
+
+    assert handled is True
+    assert request.sent == (200, {"ok": True, "question": "status"})
+    assert len(recorded) == 1
+    assert recorded[0]["path"] == "/query"
+    assert recorded[0]["method"] == "POST"
+    assert recorded[0]["status_code"] == 200
+    assert recorded[0]["request_body"] == {"question": "status"}
+    assert recorded[0]["response_payload"] == {"ok": True, "question": "status"}
+    assert recorded[0]["headers"] == request.headers
+
+
+def test_handle_plan_post_records_surface_usage_on_success(monkeypatch) -> None:
+    request = _RequestStub(
+        {
+            "title": "Inbox Triage",
+            "definition": {
+                "type": "operating_model",
+                "source_prose": "Review support inbox",
+                "compiled_prose": "Review support inbox",
+                "references": [],
+                "capabilities": [],
+                "definition_revision": "def_plan_usage",
+            },
+        },
+        subsystems=SimpleNamespace(get_pg_conn=lambda: object()),
+        path="/api/plan",
+    )
+    recorded: list[dict[str, Any]] = []
+
+    monkeypatch.setattr(
+        workflow_query,
+        "_record_api_route_usage",
+        lambda _subs, **kwargs: recorded.append(kwargs),
+    )
+    monkeypatch.setattr(
+        "runtime.operating_model_planner.plan_definition",
+        lambda *_args, **_kwargs: {
+            "compiled_spec": {
+                "definition_revision": "def_plan_usage",
+                "jobs": [{"label": "review"}],
+                "triggers": [],
+            },
+            "planning_notes": [],
+            "reuse_provenance": {"reason_code": "plan.compile.miss"},
+        },
+    )
+
+    workflow_query._handle_plan_post(request, "/api/plan")
+
+    assert request.sent is not None
+    assert request.sent[0] == 200
+    assert len(recorded) == 1
+    assert recorded[0]["path"] == "/api/plan"
+    assert recorded[0]["status_code"] == 200
+    assert recorded[0]["request_body"]["title"] == "Inbox Triage"
+    assert recorded[0]["response_payload"]["compiled_spec"]["definition_revision"] == "def_plan_usage"
+
+
+def test_handle_commit_post_records_surface_usage_on_success(monkeypatch) -> None:
+    request = _RequestStub(
+        {
+            "title": "Inbox Triage",
+            "definition": {"type": "operating_model", "definition_revision": "def_commit_usage"},
+        },
+        subsystems=SimpleNamespace(get_pg_conn=lambda: object()),
+        path="/api/commit",
+    )
+    recorded: list[dict[str, Any]] = []
+
+    monkeypatch.setattr(
+        workflow_query,
+        "_record_api_route_usage",
+        lambda _subs, **kwargs: recorded.append(kwargs),
+    )
+    monkeypatch.setattr(
+        workflow_query,
+        "commit_workflow",
+        lambda *_args, **_kwargs: {
+            "workflow_id": "wf_commit_usage",
+            "status": "committed",
+            "title": "Inbox Triage",
+            "jobs": 1,
+            "triggers": 0,
+            "has_current_plan": True,
+        },
+    )
+
+    workflow_query._handle_commit_post(request, "/api/commit")
+
+    assert request.sent == (
+        200,
+        {
+            "workflow_id": "wf_commit_usage",
+            "status": "committed",
+            "title": "Inbox Triage",
+            "jobs": 1,
+            "triggers": 0,
+            "has_current_plan": True,
+        },
+    )
+    assert len(recorded) == 1
+    assert recorded[0]["path"] == "/api/commit"
+    assert recorded[0]["status_code"] == 200
+    assert recorded[0]["request_body"]["title"] == "Inbox Triage"
+    assert recorded[0]["response_payload"]["workflow_id"] == "wf_commit_usage"
+
+
+def test_handle_trigger_post_records_surface_usage_on_success(monkeypatch) -> None:
+    pg = _RecordingPg(
+        workflow_rows={
+            "wf_123": {
+                "id": "wf_123",
+                "definition": {"definition_revision": "def_trigger_usage"},
+                "compiled_spec": {"jobs": [{"label": "review"}], "triggers": []},
+            }
+        }
+    )
+    request = _RequestStub(
+        subsystems=SimpleNamespace(get_pg_conn=lambda: pg),
+        path="/api/trigger/wf_123",
+    )
+    recorded: list[dict[str, Any]] = []
+
+    monkeypatch.setattr(
+        workflow_query,
+        "_record_api_route_usage",
+        lambda _subs, **kwargs: recorded.append(kwargs),
+    )
+    monkeypatch.setattr(
+        workflow_query,
+        "trigger_workflow_manually",
+        lambda *_args, **_kwargs: {
+            "triggered": True,
+            "workflow_id": "wf_123",
+            "workflow_name": "Inbox Triage",
+            "run_id": "run_123",
+        },
+    )
+
+    workflow_query._handle_trigger_post(request, "/api/trigger/wf_123")
+
+    assert request.sent == (
+        200,
+        {
+            "triggered": True,
+            "workflow_id": "wf_123",
+            "workflow_name": "Inbox Triage",
+            "run_id": "run_123",
+        },
+    )
+    assert len(recorded) == 1
+    assert recorded[0]["path"] == "/api/trigger/wf_123"
+    assert recorded[0]["status_code"] == 200
+    assert recorded[0]["conn"] is pg
+    assert recorded[0]["response_payload"]["run_id"] == "run_123"
 
 
 def test_handle_plan_post_stamps_definition_revision_into_compiled_spec() -> None:
@@ -4362,6 +4800,162 @@ def test_handle_manifests_get_combines_search_and_manifest_filters() -> None:
     assert payload["manifests"][0]["manifest_type"] == "data_plan"
     assert payload["filters"]["q"] == "cleanup"
     assert payload["filters"]["manifest_type"] == "data_plan"
+
+
+def test_handle_manifest_heads_get_filters_control_plane_rows() -> None:
+    pg = _RecordingPg(
+        manifest_rows={
+            "bundle_789": {
+                "id": "bundle_789",
+                "name": "Workspace Bundle",
+                "description": "Not a control manifest",
+                "status": "active",
+                "version": 1,
+                "parent_manifest_id": None,
+                "created_at": "2026-04-15T12:00:00+00:00",
+                "updated_at": "2026-04-15T12:00:00+00:00",
+                "manifest": {
+                    "kind": "helm_surface_bundle",
+                    "tabs": [{"id": "main"}],
+                },
+            },
+        },
+        head_rows=[
+            {
+                "workspace_ref": "workspace.alpha",
+                "scope_ref": "scope.beta",
+                "manifest_type": "data_plan",
+                "head_manifest_id": "plan_123",
+                "head_status": "draft",
+                "recorded_at": "2026-04-15T12:05:00+00:00",
+                "id": "plan_123",
+                "name": "Data Cleanup Plan",
+                "description": "Plan for cleanup",
+                "status": "draft",
+                "version": 3,
+                "parent_manifest_id": None,
+                "created_at": "2026-04-15T12:00:00+00:00",
+                "updated_at": "2026-04-15T12:05:00+00:00",
+                "manifest": {
+                    "kind": "praxis_control_manifest",
+                    "manifest_family": "control_plane",
+                    "manifest_type": "data_plan",
+                    "workspace_ref": "workspace.alpha",
+                    "scope_ref": "scope.beta",
+                    "status": "draft",
+                },
+            },
+            {
+                "workspace_ref": "workspace.other",
+                "scope_ref": "scope.beta",
+                "manifest_type": "data_plan",
+                "head_manifest_id": "plan_456",
+                "head_status": "draft",
+                "recorded_at": "2026-04-15T12:00:30+00:00",
+                "id": "plan_456",
+                "name": "Other Plan",
+                "description": "Different workspace",
+                "status": "draft",
+                "version": 1,
+                "parent_manifest_id": None,
+                "created_at": "2026-04-15T12:00:00+00:00",
+                "updated_at": "2026-04-15T12:00:30+00:00",
+                "manifest": {
+                    "kind": "praxis_control_manifest",
+                    "manifest_family": "control_plane",
+                    "manifest_type": "data_plan",
+                    "workspace_ref": "workspace.other",
+                    "scope_ref": "scope.beta",
+                    "status": "draft",
+                },
+            },
+        ],
+    )
+    request = _RequestStub(
+        subsystems=SimpleNamespace(get_pg_conn=lambda: pg),
+        path="/api/manifest-heads?workspace_ref=workspace.alpha&scope_ref=scope.beta&manifest_type=data_plan&status=draft&limit=10",
+    )
+
+    workflow_query._handle_manifest_heads_get(request, "/api/manifest-heads")
+
+    assert request.sent is not None
+    status, payload = request.sent
+    assert status == 200
+    assert payload["count"] == 1
+    assert payload["heads"][0]["id"] == "plan_123"
+    assert payload["heads"][0]["manifest_family"] == "control_plane"
+    assert payload["heads"][0]["manifest_type"] == "data_plan"
+    assert payload["heads"][0]["workspace_ref"] == "workspace.alpha"
+    assert payload["heads"][0]["scope_ref"] == "scope.beta"
+    assert payload["heads"][0]["head_manifest_id"] == "plan_123"
+    assert payload["heads"][0]["head_status"] == "draft"
+    assert payload["filters"]["workspace_ref"] == "workspace.alpha"
+    assert payload["filters"]["scope_ref"] == "scope.beta"
+    assert payload["filters"]["status"] == "draft"
+
+
+def test_handle_manifest_history_get_filters_control_plane_rows() -> None:
+    pg = _RecordingPg(
+        history_rows=[
+            {
+                "id": "hist_123",
+                "manifest_id": "plan_123",
+                "version": 2,
+                "manifest_snapshot": {
+                    "kind": "praxis_control_manifest",
+                    "manifest_family": "control_plane",
+                    "manifest_type": "data_approval",
+                    "workspace_ref": "workspace.alpha",
+                    "scope_ref": "scope.beta",
+                    "status": "approved",
+                },
+                "change_description": "Approved control manifest",
+                "changed_by": "ops",
+                "created_at": "2026-04-15T12:10:00+00:00",
+            },
+            {
+                "id": "hist_999",
+                "manifest_id": "bundle_789",
+                "version": 1,
+                "manifest_snapshot": {
+                    "kind": "helm_surface_bundle",
+                    "status": "active",
+                    "workspace_ref": "workspace.alpha",
+                },
+                "change_description": "Bundle history",
+                "changed_by": "system",
+                "created_at": "2026-04-15T12:00:00+00:00",
+            },
+        ]
+    )
+    request = _RequestStub(
+        subsystems=SimpleNamespace(get_pg_conn=lambda: pg),
+        path="/api/manifests/history?workspace_ref=workspace.alpha&scope_ref=scope.beta&manifest_type=data_approval&status=approved&limit=10",
+    )
+
+    workflow_query._handle_manifest_history_get(request, "/api/manifests/history")
+
+    assert request.sent is not None
+    status, payload = request.sent
+    assert status == 200
+    assert payload["count"] == 1
+    assert payload["history"][0]["id"] == "hist_123"
+    assert payload["history"][0]["manifest_id"] == "plan_123"
+    assert payload["history"][0]["manifest_family"] == "control_plane"
+    assert payload["history"][0]["manifest_type"] == "data_approval"
+    assert payload["history"][0]["workspace_ref"] == "workspace.alpha"
+    assert payload["history"][0]["scope_ref"] == "scope.beta"
+    assert payload["history"][0]["change_description"] == "Approved control manifest"
+    assert payload["filters"]["manifest_type"] == "data_approval"
+    assert payload["filters"]["status"] == "approved"
+
+
+def test_api_rest_registers_control_manifest_history_routes() -> None:
+    from surfaces.api import rest as api_rest
+
+    paths = {route.path for route in api_rest.app.routes if getattr(route, "path", None)}
+    assert "/api/manifest-heads" in paths
+    assert "/api/manifests/history" in paths
 
 
 def test_handle_decompose_returns_estimates_and_files() -> None:

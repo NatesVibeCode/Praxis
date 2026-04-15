@@ -78,6 +78,40 @@ def test_invoke_tool_supports_keyword_only_handlers_and_context(monkeypatch: pyt
     assert captured["subsystems"] is not None
 
 
+def test_invoke_tool_records_surface_usage_on_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    recorded: list[dict[str, Any]] = []
+
+    monkeypatch.setattr(
+        invocation,
+        "_record_tool_usage",
+        lambda **kwargs: recorded.append(kwargs),
+    )
+    monkeypatch.setattr(
+        invocation,
+        "get_tool_catalog",
+        lambda: {"praxis_query": _definition(name="praxis_query")},
+    )
+    monkeypatch.setattr(
+        invocation,
+        "resolve_tool_entry",
+        lambda _name: (lambda **_kw: {"ok": True}, {}),
+    )
+
+    result = invocation.invoke_tool("praxis_query", {"question": "status"})
+
+    assert result == {"ok": True}
+    assert recorded == [
+        {
+            "canonical_name": "praxis_query",
+            "workflow_token": "",
+            "status_code": 200,
+            "tool_input": {"question": "status"},
+            "result_payload": {"ok": True},
+            "claims": None,
+        }
+    ]
+
+
 def test_invoke_tool_requires_workflow_token_for_session_tools(monkeypatch: pytest.MonkeyPatch) -> None:
     definition = _definition(name="session_tool", session=True)
     monkeypatch.setattr(invocation, "get_tool_catalog", lambda: {"session_tool": definition})
@@ -92,6 +126,13 @@ def test_invoke_tool_requires_workflow_token_for_session_tools(monkeypatch: pyte
 
 def test_invoke_tool_enforces_allowed_tools_from_workflow_token(monkeypatch: pytest.MonkeyPatch) -> None:
     definition = _definition(name="session_tool", session=True)
+    recorded: list[dict[str, Any]] = []
+
+    monkeypatch.setattr(
+        invocation,
+        "_record_tool_usage",
+        lambda **kwargs: recorded.append(kwargs),
+    )
     monkeypatch.setattr(invocation, "get_tool_catalog", lambda: {"session_tool": definition})
     monkeypatch.setattr(invocation, "resolve_tool_entry", lambda _name: (lambda **_kw: {"ok": True}, {}))
     monkeypatch.setattr(
@@ -111,3 +152,22 @@ def test_invoke_tool_enforces_allowed_tools_from_workflow_token(monkeypatch: pyt
 
     assert exc_info.value.reason_code == "workflow_mcp.tool_not_allowed"
     assert "Tool not allowed by workflow token" in exc_info.value.message
+    assert recorded == [
+        {
+            "canonical_name": "session_tool",
+            "workflow_token": "signed-token",
+            "status_code": 400,
+            "tool_input": {},
+            "result_payload": {
+                "error": "Tool not allowed by workflow token: session_tool",
+                "reason_code": "workflow_mcp.tool_not_allowed",
+            },
+            "claims": {
+                "run_id": "run-1",
+                "workflow_id": "wf-1",
+                "job_label": "job-1",
+                "allowed_tools": ["different_tool"],
+                "exp": 9999999999,
+            },
+        }
+    ]

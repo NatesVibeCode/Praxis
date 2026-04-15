@@ -1642,7 +1642,8 @@
       "107_name_cleanup_praxis_branding.sql",
       "107_workflow_notifications_resource_telemetry.sql",
       "108_retrieval_metrics.sql",
-      "109_friction_events_is_test.sql"
+      "109_friction_events_is_test.sql",
+      "110_surface_usage_telemetry.sql"
     ],
     "deprecated": [],
     "dead": []
