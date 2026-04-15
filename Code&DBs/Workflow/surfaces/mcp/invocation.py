@@ -277,7 +277,7 @@ def _tool_result_state(
         return "unavailable"
     if result_count == 0 and (
         result_payload.get("results") == []
-        or result_payload.get("rollup") is None
+        or ("rollup" in result_payload and result_payload.get("rollup") is None)
     ):
         return "empty"
     return "ok"
