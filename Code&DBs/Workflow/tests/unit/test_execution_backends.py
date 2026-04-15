@@ -311,6 +311,52 @@ def test_execute_cli_builds_default_command_from_provider_registry(monkeypatch, 
     assert result["status"] == "succeeded"
 
 
+def test_execute_cli_parses_cursor_agent_usage_camel_case(monkeypatch, tmp_path) -> None:
+    class _FakeRuntime:
+        def execute_command(self, **kwargs):
+            del kwargs
+            return _sandbox_result(
+                stdout='{"type":"result","subtype":"success","result":"CURSOR_CLI_OK","usage":{"inputTokens":123,"outputTokens":45,"cacheReadTokens":6,"cacheWriteTokens":7}}',
+                artifact_refs=(),
+            )
+
+    monkeypatch.setenv("CURSOR_API_KEY", "cursor-test-key")
+    monkeypatch.setattr(execution_backends, "SandboxRuntime", lambda: _FakeRuntime())
+    monkeypatch.setattr(
+        execution_backends,
+        "augment_cli_command_for_workflow_mcp",
+        lambda **kwargs: list(kwargs["command_parts"]),
+    )
+    monkeypatch.setattr(
+        execution_backends,
+        "build_command",
+        lambda provider_slug, model=None: [
+            "cursor-agent",
+            "-p",
+            "--output-format",
+            "json",
+            "--mode",
+            "ask",
+            "-f",
+            "--model",
+            model or provider_slug,
+        ],
+    )
+
+    result = execution_backends.execute_cli(
+        _agent(wrapper_command=None, provider="cursor_local", model="composer-2"),
+        "hello from stdin",
+        str(tmp_path),
+    )
+
+    assert result["status"] == "succeeded"
+    assert result["stdout"] == "CURSOR_CLI_OK"
+    assert result["token_input"] == 123
+    assert result["token_output"] == 45
+    assert result["cache_read_tokens"] == 6
+    assert result["cache_creation_tokens"] == 7
+
+
 def test_execute_cli_returns_sandbox_error_when_default_command_build_fails(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setattr(

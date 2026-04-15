@@ -420,6 +420,24 @@ def test_cursor_profile_is_registered_from_db_authority(monkeypatch) -> None:
     assert provider_registry_mod.supports_adapter("cursor", "cli_llm") is False
 
 
+def test_cursor_local_profile_is_registered_for_local_cli(monkeypatch) -> None:
+    import adapters.provider_registry as provider_registry_mod
+
+    original_resolve_binary = provider_transport.resolve_binary
+    monkeypatch.setattr(
+        provider_transport,
+        "resolve_binary",
+        lambda provider_slug, *, profiles: "/usr/local/bin/cursor-agent"
+        if provider_slug == "cursor_local"
+        else original_resolve_binary(provider_slug, profiles=profiles),
+    )
+
+    profile = _builtin_profiles_map()["cursor_local"]
+    assert profile.binary == "cursor-agent"
+    assert profile.prompt_mode == "stdin"
+    assert provider_registry_mod.supports_adapter("cursor_local", "cli_llm") is True
+
+
 def test_transport_support_handler_returns_provider_and_model_support(monkeypatch) -> None:
     monkeypatch.setenv(
         "WORKFLOW_DATABASE_URL",

@@ -46,6 +46,15 @@ def object_type_exists(conn: Any, *, type_id: str) -> bool:
     )
 
 
+def load_object_type_record(conn: Any, *, type_id: str) -> dict[str, Any] | None:
+    row = conn.fetchrow(
+        "SELECT type_id, name, description, icon, property_definitions, created_at "
+        "FROM object_types WHERE type_id = $1",
+        _require_text(type_id, field_name="type_id"),
+    )
+    return None if row is None else dict(row)
+
+
 def create_object_type_record(
     conn: Any,
     *,
@@ -72,6 +81,40 @@ def create_object_type_record(
         ),
     )
     return _row_dict(row, operation="creating object type")
+
+
+def upsert_object_type_record(
+    conn: Any,
+    *,
+    type_id: str,
+    name: str,
+    description: str = "",
+    icon: str = "",
+    property_definitions: object | None = None,
+) -> dict[str, Any]:
+    row = conn.fetchrow(
+        "INSERT INTO object_types (type_id, name, description, icon, property_definitions) "
+        "VALUES ($1, $2, $3, $4, $5::jsonb) "
+        "ON CONFLICT (type_id) DO UPDATE SET "
+        "name = EXCLUDED.name, "
+        "description = EXCLUDED.description, "
+        "icon = EXCLUDED.icon, "
+        "property_definitions = EXCLUDED.property_definitions "
+        "RETURNING *",
+        _require_text(type_id, field_name="type_id"),
+        _require_text(name, field_name="name"),
+        str(description or ""),
+        str(icon or ""),
+        _encode_jsonb(
+            _json_document(
+                property_definitions if property_definitions is not None else {},
+                field_name="property_definitions",
+                allow_list=True,
+            ),
+            field_name="property_definitions",
+        ),
+    )
+    return _row_dict(row, operation="upserting object type")
 
 
 def ensure_object_type_record(
@@ -123,6 +166,15 @@ def create_object_record(
         ),
     )
     return _row_dict(row, operation="creating object")
+
+
+def load_object_record(conn: Any, *, object_id: str) -> dict[str, Any] | None:
+    row = conn.fetchrow(
+        "SELECT object_id, type_id, properties, status, created_at, updated_at "
+        "FROM objects WHERE object_id = $1",
+        _require_text(object_id, field_name="object_id"),
+    )
+    return None if row is None else dict(row)
 
 
 def update_object_properties_record(

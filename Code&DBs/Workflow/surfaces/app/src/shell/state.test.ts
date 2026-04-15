@@ -54,6 +54,13 @@ describe('shell state helpers', () => {
     expect(payload.chatOpen).toBe(false);
   });
 
+  test('parses manifests urls into the manifest catalog tab', () => {
+    const payload = parseShellLocationState('?page=manifests', '/app/manifests');
+
+    expect(payload.shellState.activeTabId).toBe('manifests');
+    expect(payload.chatOpen).toBe(false);
+  });
+
   test('maps legacy edit-model urls into the build tab', () => {
     const payload = parseShellLocationState('?page=edit-model&workflow=wf_legacy&surface=details');
 
@@ -81,6 +88,15 @@ describe('shell state helpers', () => {
     };
 
     expect(buildShellUrl(state, false)).toBe('/app/costs');
+  });
+
+  test('builds manifest catalog urls from the active static tab', () => {
+    const state = {
+      ...createDefaultShellState(),
+      activeTabId: 'manifests' as const,
+    };
+
+    expect(buildShellUrl(state, false)).toBe('/app/manifests');
   });
 
   test('closing the active dynamic tab falls back to dashboard when none remain', () => {

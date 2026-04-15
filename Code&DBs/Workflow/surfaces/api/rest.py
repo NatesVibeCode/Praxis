@@ -23,15 +23,20 @@ import dataclasses
 import io
 import json
 import logging
+import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, Header, HTTPException, Query, Request, Security
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.routing import APIRoute
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -59,6 +64,135 @@ __all__ = ["app"]
 
 logger = logging.getLogger(__name__)
 
+_PUBLIC_API_VERSION = "v1"
+_PUBLIC_ROUTE_PREFIX = "/v1/"
+_PUBLIC_AUTH_TOKEN_ENV = "PRAXIS_API_TOKEN"
+_REQUEST_ID_HEADER = "X-Request-Id"
+_CLIENT_VERSION_HEADERS = (
+    "X-Client-Version",
+    "X-Praxis-Client-Version",
+    "User-Agent",
+)
+_IDEMPOTENCY_HEADER = "Idempotency-Key"
+_HTTP_BEARER = HTTPBearer(auto_error=False)
+
+
+def _is_public_request_path(path: str) -> bool:
+    return path == "/v1" or path.startswith(_PUBLIC_ROUTE_PREFIX)
+
+
+def _route_visibility(route: APIRoute) -> str:
+    openapi_extra = route.openapi_extra or {}
+    visibility = str(openapi_extra.get("x-praxis-visibility") or "").strip().lower()
+    if visibility in {"public", "internal"}:
+        return visibility
+    return "public" if _is_public_request_path(route.path) else "internal"
+
+
+def _route_operation_id(route: APIRoute) -> str:
+    operation_id = getattr(route, "operation_id", None)
+    if isinstance(operation_id, str) and operation_id.strip():
+        return operation_id
+    return _unique_operation_id(route)
+
+
+def _public_api_token() -> str | None:
+    value = str(os.getenv(_PUBLIC_AUTH_TOKEN_ENV, "")).strip()
+    return value or None
+
+
+def _configured_cors_origins() -> list[str]:
+    raw_value = str(os.getenv("PRAXIS_API_ALLOWED_ORIGINS", "*")).strip()
+    origins = [part.strip() for part in raw_value.split(",") if part.strip()]
+    return origins or ["*"]
+
+
+def _request_id_from_request(request: Request) -> str:
+    header_value = str(request.headers.get(_REQUEST_ID_HEADER, "")).strip()
+    if header_value:
+        return header_value
+    return f"req_{uuid4().hex[:16]}"
+
+
+def _client_version_from_request(request: Request) -> str | None:
+    for header_name in _CLIENT_VERSION_HEADERS:
+        value = str(request.headers.get(header_name, "")).strip()
+        if value:
+            return value
+    return None
+
+
+def _problem_type(error_code: str | None) -> str:
+    normalized = str(error_code or "internal_error").strip().lower().replace(" ", "_")
+    return f"urn:praxis:problem:{normalized}"
+
+
+def _problem_response(
+    request: Request,
+    *,
+    status_code: int,
+    title: str,
+    detail: str,
+    error_code: str | None = None,
+    invalid_params: list[dict[str, Any]] | None = None,
+    extra: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
+) -> JSONResponse:
+    normalized_error_code = error_code or "request_failed"
+    payload: dict[str, Any] = {
+        "type": _problem_type(normalized_error_code),
+        "title": title,
+        "status": status_code,
+        "detail": detail,
+        "error_code": normalized_error_code,
+        "request_id": getattr(request.state, "request_id", None),
+    }
+    if invalid_params:
+        payload["invalid_params"] = invalid_params
+    if extra:
+        payload.update(extra)
+    response = JSONResponse(
+        status_code=status_code,
+        content=payload,
+        media_type="application/problem+json",
+        headers=headers,
+    )
+    return response
+
+
+async def _require_public_api_access(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Security(_HTTP_BEARER),
+) -> str | None:
+    expected_token = _public_api_token()
+    if expected_token is None:
+        return None
+    if credentials is None or str(credentials.scheme).lower() != "bearer":
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "message": "Bearer token required for the public API",
+                "error_code": "public_api_auth_required",
+            },
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    if credentials.credentials != expected_token:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "message": "Bearer token rejected for the public API",
+                "error_code": "public_api_auth_rejected",
+            },
+        )
+    request.state.authenticated_principal = "public_api_token"
+    return "public_api_token"
+
+
+def _slugify_identifier(value: str, *, fallback: str) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", ".", value.strip().lower())
+    normalized = normalized.strip(".")
+    return normalized or fallback
+
 
 def _unique_operation_id(route: APIRoute) -> str:
     methods = "_".join(
@@ -80,6 +214,7 @@ def _api_route_record(route: APIRoute) -> dict[str, Any]:
     methods = sorted(method for method in (route.methods or set()) if method != "HEAD")
     description = (route.description or "").strip()
     summary = (route.summary or "").strip()
+    visibility = _route_visibility(route)
     return {
         "path": route.path,
         "name": route.name,
@@ -88,7 +223,8 @@ def _api_route_record(route: APIRoute) -> dict[str, Any]:
         "description": description,
         "tags": list(route.tags or ()),
         "include_in_schema": bool(route.include_in_schema),
-        "operation_id": route.operation_id,
+        "operation_id": _route_operation_id(route),
+        "visibility": visibility,
     }
 
 
@@ -181,9 +317,20 @@ def list_api_routes(
     method: str | None = None,
     tag: str | None = None,
     path_prefix: str | None = None,
+    visibility: str = "public",
 ) -> dict[str, Any]:
     """Return the live FastAPI route catalog for discovery surfaces."""
 
+    normalized_visibility = str(visibility or "public").strip().lower() or "public"
+    if normalized_visibility not in {"public", "internal", "all"}:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": f"Unsupported route visibility filter: {visibility}",
+                "error_code": "invalid_route_visibility",
+                "supported": ["public", "internal", "all"],
+            },
+        )
     routes = [
         _api_route_record(route)
         for route in app.routes
@@ -193,6 +340,10 @@ def list_api_routes(
     filtered_routes = [
         route
         for route in routes
+        if (
+            normalized_visibility == "all"
+            or route.get("visibility") == normalized_visibility
+        )
         if _route_matches(
             route,
             search=search,
@@ -208,6 +359,7 @@ def list_api_routes(
             "method": str(method or "").strip().upper() or None,
             "tag": str(tag or "").strip() or None,
             "path_prefix": str(path_prefix or "").strip() or None,
+            "visibility": normalized_visibility if normalized_visibility != "public" else None,
         }.items()
         if value is not None
     }
@@ -259,11 +411,91 @@ app.include_router(webhook_ingest_router)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_configured_cors_origins(),
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def _praxis_transport_middleware(request: Request, call_next):
+    request.state.request_id = _request_id_from_request(request)
+    request.state.client_version = _client_version_from_request(request)
+    request.state.idempotency_key = str(request.headers.get(_IDEMPOTENCY_HEADER, "")).strip() or None
+
+    response = await call_next(request)
+    response.headers.setdefault(_REQUEST_ID_HEADER, request.state.request_id)
+    if _is_public_request_path(request.url.path):
+        response.headers.setdefault("X-Praxis-Api-Version", _PUBLIC_API_VERSION)
+    return response
+
+
+@app.exception_handler(HTTPException)
+async def _http_exception_handler(request: Request, exc: HTTPException) -> Response:
+    if _is_public_request_path(request.url.path):
+        detail = exc.detail
+        error_code = None
+        extra: dict[str, Any] | None = None
+        if isinstance(detail, dict):
+            error_code = str(detail.get("error_code") or "").strip() or None
+            extra = {
+                key: value
+                for key, value in detail.items()
+                if key not in {"message", "detail", "error_code"}
+            } or None
+            detail_text = str(detail.get("message") or detail.get("detail") or exc.status_code)
+        else:
+            detail_text = str(detail)
+        return _problem_response(
+            request,
+            status_code=exc.status_code,
+            title="Request failed",
+            detail=detail_text,
+            error_code=error_code,
+            extra=extra,
+            headers=exc.headers,
+        )
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail}, headers=exc.headers)
+
+
+@app.exception_handler(RequestValidationError)
+async def _request_validation_exception_handler(
+    request: Request,
+    exc: RequestValidationError,
+) -> Response:
+    if _is_public_request_path(request.url.path):
+        invalid_params = [
+            {
+                "name": ".".join(str(part) for part in error.get("loc", [])),
+                "reason": error.get("msg"),
+                "type": error.get("type"),
+            }
+            for error in exc.errors()
+        ]
+        return _problem_response(
+            request,
+            status_code=422,
+            title="Validation failed",
+            detail="The request body or parameters did not match the public API contract.",
+            error_code="validation_error",
+            invalid_params=invalid_params,
+        )
+    return JSONResponse(status_code=422, content={"detail": exc.errors()})
+
+
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request: Request, exc: Exception) -> Response:
+    logger.exception("unhandled API exception for %s", request.url.path)
+    if _is_public_request_path(request.url.path):
+        return _problem_response(
+            request,
+            status_code=500,
+            title="Internal server error",
+            detail="The API could not complete the request safely.",
+            error_code="internal_error",
+        )
+    return JSONResponse(status_code=500, content={"error": f"{type(exc).__name__}: {exc}"})
 
 # Serve the launcher app assets from the built SPA bundle.
 _APP_DIST_DIR = Path(__file__).resolve().parent.parent / "app" / "dist"
@@ -275,11 +507,17 @@ app.mount(
 )
 
 def _default_workspace_ref() -> str:
-    return default_native_authority_refs()[0]
+    try:
+        return default_native_authority_refs()[0]
+    except Exception:
+        return "native"
 
 
 def _default_runtime_profile_ref() -> str:
-    return default_native_authority_refs()[1]
+    try:
+        return default_native_authority_refs()[1]
+    except Exception:
+        return "native"
 
 
 def _default_workflow_provider_slug() -> str:
@@ -383,6 +621,30 @@ class LauncherRecoverRequest(BaseModel):
     open_browser: bool = False
 
 
+class PublicRunJobRequest(BaseModel):
+    """One public API workflow job."""
+
+    label: str
+    prompt: str
+    agent: str | None = None
+    depends_on: list[str] = Field(default_factory=list)
+    read_scope: list[str] = Field(default_factory=list)
+    write_scope: list[str] = Field(default_factory=list)
+    max_attempts: int = 1
+
+
+class PublicRunCreateRequest(BaseModel):
+    """Body for POST /v1/runs."""
+
+    name: str
+    workflow_id: str | None = None
+    phase: str = "build"
+    workspace_ref: str = Field(default_factory=_default_workspace_ref)
+    runtime_profile_ref: str = Field(default_factory=_default_runtime_profile_ref)
+    jobs: list[PublicRunJobRequest]
+    force_fresh_run: bool = False
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -431,6 +693,51 @@ def _spec_from_request(req: WorkflowRunRequest):
 
 def _iso_or_none(value: Any) -> str | None:
     return value.isoformat() if value else None
+
+
+def _public_run_links(run_id: str) -> dict[str, str]:
+    return {
+        "self": f"/v1/runs/{run_id}",
+        "jobs": f"/v1/runs/{run_id}/jobs",
+        "cancel": f"/v1/runs/{run_id}:cancel",
+    }
+
+
+def _public_run_summary_payload(
+    *,
+    conn: Any,
+    run_status: dict[str, Any],
+) -> dict[str, Any]:
+    run_id = str(run_status.get("run_id") or "")
+    jobs = [_serialize_run_job(dict(row)) for row in run_status.get("jobs", []) if isinstance(row, dict)]
+    total_jobs = int(run_status.get("total_jobs") or len(jobs))
+    payload = {
+        "run_id": run_id,
+        "workflow_id": run_status.get("workflow_id"),
+        "request_id": run_status.get("request_id"),
+        "status": run_status.get("current_state") or run_status.get("status"),
+        "total_jobs": total_jobs,
+        "completed_jobs": int(run_status.get("completed_jobs") or 0),
+        "total_cost_usd": float(
+            run_status.get("total_cost_usd")
+            or run_status.get("total_cost")
+            or 0.0
+        ),
+        "total_duration_ms": int(
+            run_status.get("total_duration_ms")
+            or run_status.get("duration_ms")
+            or 0
+        ),
+        "created_at": _iso_or_none(run_status.get("requested_at") or run_status.get("created_at")),
+        "finished_at": _iso_or_none(run_status.get("finished_at")),
+        "summary": _build_run_summary(conn, run_id, jobs),
+        "health": summarize_run_health({**run_status, "jobs": jobs}, datetime.now(timezone.utc)),
+        "graph": _build_run_graph(conn, run_id, jobs),
+        "links": _public_run_links(run_id),
+    }
+    if jobs:
+        payload["jobs"] = jobs
+    return payload
 
 
 class _BufferedWriter:
@@ -618,10 +925,9 @@ async def _dispatch_standard_route(request: Request) -> Response:
         )
         return JSONResponse({"error": str(exc)}, status_code=400)
     except Exception as exc:
-        import traceback
         payload = {
             "error": f"{type(exc).__name__}: {exc}",
-            "traceback": traceback.format_exc(),
+            "error_code": "internal_error",
         }
         _record_api_route_usage(
             subsystems,
@@ -1319,6 +1625,301 @@ def get_run_job_detail(run_id: str, job_id: int) -> dict[str, Any]:
     return job
 
 
+@app.get("/v1/runs", tags=["public", "runs"])
+def public_list_runs(
+    limit: int = Query(default=20, ge=1, le=100),
+    _auth: str | None = Security(_require_public_api_access),
+) -> dict[str, Any]:
+    del _auth
+    runs = [
+        {
+            **row,
+            "total_cost_usd": float(row.get("total_cost") or 0.0),
+        }
+        for row in list_recent_runs(limit=limit)
+    ]
+    for row in runs:
+        row.pop("total_cost", None)
+    return {
+        "count": len(runs),
+        "runs": runs,
+    }
+
+
+@app.post("/v1/runs", tags=["public", "runs"])
+def public_create_run(
+    req: PublicRunCreateRequest,
+    request: Request,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    _auth: str | None = Security(_require_public_api_access),
+) -> JSONResponse:
+    del _auth
+    if not req.jobs:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "At least one job is required to create a workflow run.",
+                "error_code": "workflow_jobs_required",
+            },
+        )
+
+    labels = [job.label.strip() for job in req.jobs if job.label.strip()]
+    if len(labels) != len(req.jobs) or len(set(labels)) != len(labels):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Each public workflow job must have a unique non-empty label.",
+                "error_code": "workflow_job_labels_invalid",
+            },
+        )
+
+    phase = str(req.phase or "build").strip() or "build"
+    workflow_id = req.workflow_id or f"workflow.api.v1.{_slugify_identifier(req.name, fallback='run')}"
+    inline_spec = {
+        "name": req.name,
+        "workflow_id": workflow_id,
+        "phase": phase,
+        "workspace_ref": req.workspace_ref,
+        "runtime_profile_ref": req.runtime_profile_ref,
+        "jobs": [
+            {
+                "label": job.label,
+                "agent": job.agent or f"auto/{phase}",
+                "prompt": job.prompt,
+                "depends_on": list(job.depends_on),
+                "read_scope": list(job.read_scope),
+                "write_scope": list(job.write_scope),
+                "max_attempts": int(job.max_attempts),
+            }
+            for job in req.jobs
+        ],
+    }
+
+    from runtime.control_commands import ControlCommandError, ControlCommandIdempotencyConflict
+    from runtime.command_handlers import (
+        render_workflow_submit_response,
+        request_workflow_submit_command,
+    )
+
+    request_key = idempotency_key or request.state.idempotency_key
+    try:
+        command = request_workflow_submit_command(
+            _shared_pg_conn(),
+            requested_by_kind="http",
+            requested_by_ref=f"public_api.runs.{request.state.request_id}",
+            inline_spec=inline_spec,
+            repo_root=str(REPO_ROOT),
+            force_fresh_run=bool(req.force_fresh_run),
+            idempotency_key=request_key,
+        )
+        result = render_workflow_submit_response(
+            command,
+            spec_name=inline_spec["name"],
+            total_jobs=len(inline_spec["jobs"]),
+        )
+    except ControlCommandIdempotencyConflict as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": str(exc),
+                "error_code": exc.reason_code,
+                "details": exc.details,
+            },
+        ) from exc
+    except ControlCommandError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": str(exc),
+                "error_code": exc.reason_code,
+                "details": exc.details,
+            },
+        ) from exc
+
+    if result.get("status") == "failed":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": str(result.get("error") or "Workflow run could not be queued"),
+                "error_code": str(result.get("error_code") or "workflow_submit_failed"),
+                "details": result,
+            },
+        )
+
+    run_id = str(result.get("run_id") or "").strip()
+    payload = {
+        "run_id": run_id,
+        "workflow_id": workflow_id,
+        "status": result.get("status"),
+        "command_id": result.get("command_id"),
+        "command_status": result.get("command_status"),
+        "request_id": request.state.request_id,
+        "idempotency_key": request_key,
+        "links": _public_run_links(run_id) if run_id else {},
+    }
+    return JSONResponse(status_code=202, content=payload)
+
+
+@app.get("/v1/runs/{run_id}", tags=["public", "runs"])
+def public_get_run(
+    run_id: str,
+    _auth: str | None = Security(_require_public_api_access),
+) -> dict[str, Any]:
+    del _auth
+    from runtime.workflow._status import get_run_status
+
+    conn = _shared_pg_conn()
+    status = get_run_status(conn, run_id)
+    if status is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "message": f"Run not found: {run_id}",
+                "error_code": "run_not_found",
+            },
+        )
+    return _public_run_summary_payload(conn=conn, run_status=status)
+
+
+@app.get("/v1/runs/{run_id}/jobs", tags=["public", "runs"])
+def public_list_run_jobs(
+    run_id: str,
+    _auth: str | None = Security(_require_public_api_access),
+) -> dict[str, Any]:
+    del _auth
+    from runtime.workflow._status import get_run_status
+
+    conn = _shared_pg_conn()
+    status = get_run_status(conn, run_id)
+    if status is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "message": f"Run not found: {run_id}",
+                "error_code": "run_not_found",
+            },
+        )
+    jobs = [_serialize_run_job(dict(row)) for row in status.get("jobs", []) if isinstance(row, dict)]
+    return {
+        "run_id": run_id,
+        "count": len(jobs),
+        "jobs": jobs,
+        "links": _public_run_links(run_id),
+    }
+
+
+@app.post("/v1/runs/{run_id}:cancel", tags=["public", "runs"])
+def public_cancel_run(
+    run_id: str,
+    request: Request,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    _auth: str | None = Security(_require_public_api_access),
+) -> JSONResponse:
+    del _auth
+    from runtime.control_commands import (
+        ControlCommandError,
+        ControlCommandIdempotencyConflict,
+        ControlCommandType,
+        ControlIntent,
+        execute_control_intent,
+        render_control_command_response,
+    )
+
+    conn = _shared_pg_conn()
+    request_key = (
+        idempotency_key
+        or request.state.idempotency_key
+        or f"workflow.cancel.public_api.{run_id}"
+    )
+    try:
+        command = execute_control_intent(
+            conn,
+            ControlIntent(
+                command_type=ControlCommandType.WORKFLOW_CANCEL,
+                requested_by_kind="http",
+                requested_by_ref=f"public_api.cancel.{request.state.request_id}",
+                idempotency_key=request_key,
+                payload={"run_id": run_id, "include_running": True},
+            ),
+            approved_by="public_api.cancel",
+        )
+        result = render_control_command_response(conn, command, action="cancel", run_id=run_id)
+    except ControlCommandIdempotencyConflict as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": str(exc),
+                "error_code": exc.reason_code,
+                "details": exc.details,
+            },
+        ) from exc
+    except ControlCommandError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": str(exc),
+                "error_code": exc.reason_code,
+                "details": exc.details,
+            },
+        ) from exc
+
+    status_code = 200
+    if result.get("status") == "failed":
+        if result.get("error_code") == "control.command.workflow_cancel_target_not_found":
+            status_code = 404
+        else:
+            status_code = 409
+    payload = {
+        **result,
+        "request_id": request.state.request_id,
+        "idempotency_key": request_key,
+        "links": _public_run_links(run_id),
+    }
+    return JSONResponse(status_code=status_code, content=payload)
+
+
+@app.get("/v1/events", tags=["public", "events"])
+def public_get_events(
+    type: str | None = Query(default=None, alias="type"),
+    limit: int = Query(default=50, ge=1, le=1000),
+    _auth: str | None = Security(_require_public_api_access),
+) -> dict[str, Any]:
+    del _auth
+    payload = get_events(type=type, limit=limit)
+    return {
+        "count": payload["event_count"],
+        "event_type_filter": payload["event_type_filter"],
+        "limit": payload["limit"],
+        "events": payload["events"],
+    }
+
+
+@app.get("/v1/receipts/{receipt_id}", tags=["public", "receipts"])
+def public_get_receipt(
+    receipt_id: str,
+    _auth: str | None = Security(_require_public_api_access),
+) -> dict[str, Any]:
+    del _auth
+    return get_receipt(receipt_id)
+
+
+@app.get("/v1/catalog", tags=["public", "catalog"])
+def public_get_catalog(
+    _auth: str | None = Security(_require_public_api_access),
+) -> dict[str, Any]:
+    del _auth
+    return {
+        "version": _PUBLIC_API_VERSION,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "auth": {
+            "bearer_required": _public_api_token() is not None,
+            "token_env": _PUBLIC_AUTH_TOKEN_ENV,
+        },
+        "routes": list_api_routes(visibility="public"),
+        "runtime_catalog": build_catalog_payload(_shared_pg_conn()),
+    }
+
+
 @app.get("/api/costs")
 def get_costs() -> dict[str, Any]:
     """Return the cost summary from the in-memory cost tracker."""
@@ -1622,10 +2223,6 @@ async def workflow_status_alias_get(request: Request) -> Response:
 async def launcher_status_get(request: Request) -> Response:
     return await _route_to_handler(request)
 
-@app.post("/api/launcher/recover")
-async def launcher_recover_post(request: Request) -> Response:
-    return await _route_to_handler(request)
-
 @app.get("/api/platform-overview")
 async def platform_overview_get(request: Request) -> Response:
     return await _route_to_handler(request)
@@ -1769,12 +2366,6 @@ async def heartbeat_post(request: Request) -> Response:
 @app.post("/session")
 async def session_post(request: Request) -> Response:
     return await _dispatch_standard_route(request)
-
-# -- Root info --
-@app.get("/")
-async def root_info(request: Request) -> Response:
-    return await _route_to_handler(request)
-
 
 @app.get("/api/circuits")
 def get_circuits() -> dict[str, Any]:
@@ -2387,10 +2978,17 @@ def get_routes(
     method: str | None = Query(default=None, description="Filter to one HTTP method such as GET or POST."),
     tag: str | None = Query(default=None, description="Filter to routes carrying a specific FastAPI tag."),
     path_prefix: str | None = Query(default=None, description="Filter to routes whose path starts with this prefix."),
+    visibility: str = Query(default="public", description="Route visibility slice: public, internal, or all."),
 ) -> dict[str, Any]:
     """Return the live HTTP route catalog for CLI and API discovery."""
 
-    return list_api_routes(search=search, method=method, tag=tag, path_prefix=path_prefix)
+    return list_api_routes(
+        search=search,
+        method=method,
+        tag=tag,
+        path_prefix=path_prefix,
+        visibility=visibility,
+    )
 
 
 @app.get("/api/catalog")
@@ -2452,3 +3050,19 @@ def launcher_app_root_slash() -> Any:
 def launcher_app_path(path: str = "") -> Any:
     del path
     return _launcher_index_response()
+
+
+def _apply_route_visibility_policy() -> None:
+    for route in app.routes:
+        if not isinstance(route, APIRoute):
+            continue
+        visibility = "public" if _is_public_request_path(route.path) else "internal"
+        openapi_extra = dict(route.openapi_extra or {})
+        openapi_extra["x-praxis-visibility"] = visibility
+        route.openapi_extra = openapi_extra
+        route.include_in_schema = visibility == "public"
+
+    app.openapi_schema = None
+
+
+_apply_route_visibility_policy()

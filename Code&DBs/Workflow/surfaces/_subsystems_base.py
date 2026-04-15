@@ -58,6 +58,7 @@ class _BaseSubsystems:
         self._manifest_generator = None
         self._module_indexer = None
         self._embedding_service = None
+        self._embedding_service_loaded = False
         self._notification_consumer = None
         self._pg_conn = None
 
@@ -310,14 +311,27 @@ class _BaseSubsystems:
 
     def get_embedding_service(self):
         self._ensure_init()
-        if self._embedding_service is None:
+        if not self._embedding_service_loaded:
             from runtime.embedding_service import (
                 EmbeddingService,
                 resolve_embedding_runtime_authority,
             )
-            self._embedding_service = EmbeddingService(
-                authority=resolve_embedding_runtime_authority()
-            )
+            self._embedding_service_loaded = True
+            if not EmbeddingService.backend_available():
+                reason = EmbeddingService.backend_unavailable_reason() or "unknown"
+                self._logger.info("embedding service unavailable; semantic reads degrade: %s", reason)
+                self._embedding_service = None
+                return self._embedding_service
+            try:
+                self._embedding_service = EmbeddingService(
+                    authority=resolve_embedding_runtime_authority()
+                )
+            except Exception as exc:
+                self._logger.warning(
+                    "embedding service initialization failed; semantic reads degrade: %s",
+                    exc,
+                )
+                self._embedding_service = None
         return self._embedding_service
 
     def get_notification_consumer(self):

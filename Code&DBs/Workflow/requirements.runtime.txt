@@ -4,14 +4,18 @@
 #
 # Scope annotations are declarative, human-readable evidence inside the same
 # manifest. `scope=all` means the full contract; `api_server`, `workflow_worker`,
-# and `scheduler` are build/install projections from this one manifest.
+# `scheduler`, and `semantic_backend` are build/install projections from this
+# one manifest.
 
 # scopes: api_server,workflow_worker,scheduler,runtime
-# Core database + contract surface
+# Core database surface
 asyncpg==0.31.0
+
+# scopes: api_server,workflow_worker,scheduler,semantic_backend,runtime
+# Core typed contract surface
 pydantic==2.12.5
 
-# scopes: api_server,runtime
+# scopes: api_server,semantic_backend,runtime
 # HTTP frontdoor surface
 fastapi==0.135.1
 uvicorn==0.41.0
@@ -27,7 +31,7 @@ openai==2.24.0
 croniter==6.2.2
 psycopg2-binary==2.9.11
 
-# scopes: api_server,workflow_worker,runtime
+# scopes: semantic_backend,runtime
 # Embedding and semantic retrieval support
 numpy==2.4.4
 sentence-transformers==5.3.0

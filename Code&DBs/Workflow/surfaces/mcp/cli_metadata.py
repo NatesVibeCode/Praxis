@@ -85,6 +85,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             "default": "read",
             "actions": {
                 "list": "read",
+                "history": "read",
                 "open": "write",
                 "close": "write",
                 "reset": "write",
@@ -92,6 +93,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         },
         examples=[
             _example("List effective circuit states", {"action": "list"}),
+            _example("Show override history", {"action": "history", "provider_slug": "openai"}),
             _example("Force a provider open", {"action": "open", "provider_slug": "openai", "rationale": "Provider outage"}),
             _example("Force a provider closed", {"action": "close", "provider_slug": "anthropic", "rationale": "Allow manual recovery probes"}),
             _example("Clear the manual override", {"action": "reset", "provider_slug": "openai"}),

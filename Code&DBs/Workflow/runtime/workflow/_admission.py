@@ -798,6 +798,7 @@ def _do_submit_workflow(
             else _build_job_execution_bundles(
                 conn=conn,
                 spec=spec,
+                raw_snapshot=raw_snapshot,
                 execution_context_shards=execution_context_shards,
                 run_id=run_id,
                 workflow_id=authority["workflow_id"],

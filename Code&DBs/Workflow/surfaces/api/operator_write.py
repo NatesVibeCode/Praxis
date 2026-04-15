@@ -584,8 +584,8 @@ def _circuit_breaker_override_record_from_decision(
     decision: OperatorDecisionAuthorityRecord,
 ) -> CircuitBreakerOverrideRecord:
     prefix = "circuit-breaker::"
-    provider_slug = decision.decision_key
-    if decision.decision_key.startswith(prefix):
+    provider_slug = decision.decision_scope_ref or decision.decision_key
+    if decision.decision_scope_ref is None and decision.decision_key.startswith(prefix):
         suffix = decision.decision_key[len(prefix):]
         provider_slug = suffix.split("::", 1)[0]
     override_state = {
@@ -1803,6 +1803,8 @@ class OperatorControlFrontdoor:
             decided_at=normalized_effective_from,
             created_at=normalized_effective_from,
             updated_at=_now(),
+            decision_scope_kind="provider",
+            decision_scope_ref=normalized_provider_slug,
         )
 
         conn = await self.connect_database(env)

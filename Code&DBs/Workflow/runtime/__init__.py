@@ -9,11 +9,6 @@ from .domain import (
     RuntimeBoundaryError,
     RuntimeLifecycleError,
 )
-from .intake import (
-    LifecycleProofStep,
-    WorkflowIntakeOutcome,
-    WorkflowIntakePlanner,
-)
 
 __all__ = [
     "AtomicEvidenceWriter",
@@ -46,6 +41,7 @@ def __getattr__(name: str):
         "ClaimLeaseProposalRuntime",
         "ClaimLeaseProposalSnapshot",
         "ClaimLeaseProposalTransitionRequest",
+        "LifecycleProofStep",
         "NodeExecutionRecord",
         "RunExecutionResult",
         "NativeWorkflowClassRecord",
@@ -55,6 +51,8 @@ def __getattr__(name: str):
         "NativeSchedulerRuntime",
         "RuntimeOrchestrator",
         "SandboxSessionRequest",
+        "WorkflowIntakeOutcome",
+        "WorkflowIntakePlanner",
     }:
         exports = {}
         if name in {
@@ -73,6 +71,24 @@ def __getattr__(name: str):
                     "NodeExecutionRecord": NodeExecutionRecord,
                     "RunExecutionResult": RunExecutionResult,
                     "RuntimeOrchestrator": RuntimeOrchestrator,
+                }
+            )
+        if name in {
+            "LifecycleProofStep",
+            "WorkflowIntakeOutcome",
+            "WorkflowIntakePlanner",
+        }:
+            from .intake import (
+                LifecycleProofStep,
+                WorkflowIntakeOutcome,
+                WorkflowIntakePlanner,
+            )
+
+            exports.update(
+                {
+                    "LifecycleProofStep": LifecycleProofStep,
+                    "WorkflowIntakeOutcome": WorkflowIntakeOutcome,
+                    "WorkflowIntakePlanner": WorkflowIntakePlanner,
                 }
             )
         if name in {

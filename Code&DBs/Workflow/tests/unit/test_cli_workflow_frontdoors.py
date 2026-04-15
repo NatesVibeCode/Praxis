@@ -195,6 +195,7 @@ def test_api_routes_frontdoor_supports_discovery_filters(monkeypatch: pytest.Mon
         "method": "GET",
         "tag": "platform",
         "path_prefix": "/api",
+        "visibility": "public",
     }
     payload = json.loads(stdout.getvalue())
     assert payload["filters"] == {
@@ -202,6 +203,7 @@ def test_api_routes_frontdoor_supports_discovery_filters(monkeypatch: pytest.Mon
         "method": "GET",
         "tag": "platform",
         "path_prefix": "/api",
+        "visibility": "public",
     }
 
 
@@ -253,6 +255,7 @@ def test_routes_alias_frontdoor_supports_discovery_filters(monkeypatch: pytest.M
         "method": "GET",
         "tag": "platform",
         "path_prefix": "/api",
+        "visibility": "public",
     }
     payload = json.loads(stdout.getvalue())
     assert payload["filters"] == {
@@ -260,6 +263,35 @@ def test_routes_alias_frontdoor_supports_discovery_filters(monkeypatch: pytest.M
         "method": "GET",
         "tag": "platform",
         "path_prefix": "/api",
+        "visibility": "public",
+    }
+
+
+def test_api_routes_frontdoor_supports_visibility_filter(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_list_api_routes(**kwargs):
+        captured.update(kwargs)
+        return {
+            "count": 1,
+            "docs_url": "/docs",
+            "openapi_url": "/openapi.json",
+            "redoc_url": "/redoc",
+            "filters": {key: value for key, value in kwargs.items() if value is not None},
+            "routes": [{"path": "/api/routes", "methods": ["GET"], "summary": "Internal route catalog"}],
+        }
+
+    monkeypatch.setattr(rest, "list_api_routes", _fake_list_api_routes)
+    stdout = StringIO()
+
+    assert workflow_cli_main(["api", "routes", "--visibility", "all", "--json"], stdout=stdout) == 0
+
+    assert captured == {
+        "search": None,
+        "method": None,
+        "tag": None,
+        "path_prefix": None,
+        "visibility": "all",
     }
 
 
@@ -740,6 +772,7 @@ def test_help_can_show_circuits_usage() -> None:
 
     rendered = stdout.getvalue()
     assert "workflow circuits open <provider_slug>" in rendered
+    assert "workflow circuits history [provider_slug]" in rendered
     assert "workflow circuits reset <provider_slug>" in rendered
 
 
@@ -814,6 +847,26 @@ def test_circuits_command_routes_to_catalog_tool(monkeypatch: pytest.MonkeyPatch
         "decided_by": "ops",
     }
     assert payload["ok"] is True
+
+
+def test_circuits_history_routes_to_catalog_tool(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _run_cli_tool(tool_name: str, params: dict[str, object] | None = None, *, workflow_token: str = ""):
+        captured["tool_name"] = tool_name
+        captured["params"] = dict(params or {})
+        return 0, {"history": []}
+
+    monkeypatch.setattr(operate_commands, "run_cli_tool", _run_cli_tool)
+
+    stdout = StringIO()
+    assert workflow_cli_main(["circuits", "history", "openai"], stdout=stdout) == 0
+
+    assert captured["tool_name"] == "praxis_circuits"
+    assert captured["params"] == {
+        "action": "history",
+        "provider_slug": "openai",
+    }
 
 
 def test_tools_search_finds_circuits_tool() -> None:

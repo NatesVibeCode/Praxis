@@ -47,10 +47,14 @@ def test_set_circuit_breaker_override_records_force_open(monkeypatch) -> None:
 
     recorded = repository.recorded
     assert recorded is not None
-    assert recorded.operator_decision_id == "operator-decision.circuit-breaker.openai"
-    assert recorded.decision_key == "circuit-breaker::openai"
+    assert recorded.operator_decision_id.startswith(
+        "operator-decision.circuit-breaker.openai.open."
+    )
+    assert recorded.decision_key.startswith("circuit-breaker::openai::")
     assert recorded.decision_kind == "circuit_breaker_force_open"
     assert recorded.decision_status == "active"
+    assert recorded.decision_scope_kind == "provider"
+    assert recorded.decision_scope_ref == "openai"
     assert recorded.rationale == "Provider outage"
     assert recorded.decided_by == "ops"
     assert recorded.decision_source == "workflow.circuits.provider-outage"
@@ -85,8 +89,14 @@ def test_set_circuit_breaker_override_reset_marks_decision_inactive(monkeypatch)
 
     recorded = repository.recorded
     assert recorded is not None
+    assert recorded.operator_decision_id.startswith(
+        "operator-decision.circuit-breaker.anthropic.reset."
+    )
+    assert recorded.decision_key.startswith("circuit-breaker::anthropic::")
     assert recorded.decision_kind == "circuit_breaker_reset"
     assert recorded.decision_status == "inactive"
+    assert recorded.decision_scope_kind == "provider"
+    assert recorded.decision_scope_ref == "anthropic"
     assert recorded.effective_from == fixed_now
     assert recorded.effective_to == fixed_now
     assert payload["circuit_breaker_override"]["override_state"] == "reset"

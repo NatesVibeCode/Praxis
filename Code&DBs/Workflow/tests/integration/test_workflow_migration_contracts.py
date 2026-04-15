@@ -61,7 +61,9 @@ def test_workflow_migration_manifest_includes_provider_route_health_budget_migra
     assert "121_cursor_background_agent_api.sql" in filenames
     assert "122_workflow_build_review_contract_fields.sql" in filenames
     assert "123_workflow_build_planning_state_registry.sql" in filenames
-    assert filenames[-1] == "123_workflow_build_planning_state_registry.sql"
+    assert "124_operator_decision_scope_authority.sql" in filenames
+    assert "125_cursor_local_cli_provider_seed.sql" in filenames
+    assert filenames[-1] == "125_cursor_local_cli_provider_seed.sql"
 
 
 def test_every_manifest_migration_has_expected_object_contract() -> None:
@@ -156,6 +158,26 @@ def test_workflow_build_planning_state_registry_expected_objects_are_registered(
             "workflow_build_execution_manifests_workflow_definition_idx",
         }
     )
+
+
+def test_operator_decision_scope_authority_expected_objects_are_registered() -> None:
+    objects = workflow_migration_expected_objects("124_operator_decision_scope_authority.sql")
+    names = {item.object_name for item in objects}
+    assert names.issuperset(
+        {
+            "decision_scope_kind",
+            "decision_scope_ref",
+            "operator_decisions.operator_decisions_scope_pair",
+            "operator_decisions_scope_decided_idx",
+        }
+    )
+
+
+def test_cursor_local_cli_provider_seed_expected_objects_are_registered() -> None:
+    objects = workflow_migration_expected_objects("125_cursor_local_cli_provider_seed.sql")
+    names = {item.object_name for item in objects}
+    assert "provider_cli_profiles" in names
+    assert "provider_transport_admissions" in names
 
 
 def test_provider_route_health_budget_expected_objects_are_registered() -> None:
@@ -441,6 +463,11 @@ def test_notify_and_provider_transport_migration_expected_objects_are_registered
     assert "'cursor_background_agent'" in cursor_api_sql
     assert "'provider_transport_admission.cursor.llm_task'" in cursor_api_sql
     assert "'candidate.cursor.auto'" in cursor_api_sql
+
+    cursor_local_sql = workflow_migration_sql_text("125_cursor_local_cli_provider_seed.sql")
+    assert "'cursor_local'" in cursor_local_sql
+    assert "'cursor-agent'" in cursor_local_sql
+    assert "'provider_transport_admission.cursor_local.cli_llm'" in cursor_local_sql
 
 
 def test_stale_postgres_completion_prune_migration_is_resolvable_and_targeted() -> None:

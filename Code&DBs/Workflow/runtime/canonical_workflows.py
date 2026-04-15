@@ -56,6 +56,32 @@ def _json_clone(value: Any) -> Any:
     return json.loads(json.dumps(value, default=str))
 
 
+def _latest_execution_manifest(
+    conn: Any,
+    *,
+    workflow_id: str,
+    definition_revision: str | None,
+) -> dict[str, Any] | None:
+    normalized_workflow_id = _text(workflow_id)
+    normalized_definition_revision = _text(definition_revision)
+    if not normalized_workflow_id or not normalized_definition_revision:
+        return None
+    try:
+        from storage.postgres.workflow_build_planning_repository import (
+            load_latest_workflow_build_execution_manifest,
+        )
+    except Exception:
+        return None
+    try:
+        return load_latest_workflow_build_execution_manifest(
+            conn,
+            workflow_id=normalized_workflow_id,
+            definition_revision=normalized_definition_revision,
+        )
+    except Exception:
+        return None
+
+
 _UNSET = object()
 _TRIGGER_MANUAL_ROUTE = "trigger"
 _TRIGGER_SCHEDULE_ROUTE = "trigger/schedule"
@@ -927,7 +953,13 @@ def _rebuild_workflow_build(
             planning_notes = list(dict.fromkeys([note for note in review_blockers if note]))
         else:
             try:
-                plan_result = plan_definition(reviewed_definition, title=workflow_name, conn=conn)
+                plan_result = plan_definition(
+                    reviewed_definition,
+                    title=workflow_name,
+                    conn=conn,
+                    candidate_manifest=candidate_manifest,
+                    reviewable_plan=reviewable_plan,
+                )
                 candidate_spec = plan_result.get("compiled_spec")
                 if isinstance(candidate_spec, dict):
                     compiled_spec = candidate_spec
@@ -1016,12 +1048,23 @@ def trigger_workflow_manually(
         raise WorkflowRuntimeBoundaryError(missing_execution_plan_message(workflow_row.get("name")))
 
     spec_to_submit = _json_clone(spec)
-    spec_to_submit["packet_provenance"] = {
+    execution_manifest = _latest_execution_manifest(
+        pg,
+        workflow_id=str(workflow_row["id"]),
+        definition_revision=_text(spec.get("definition_revision")),
+    )
+    if isinstance(execution_manifest, dict):
+        spec_to_submit["execution_manifest"] = _json_clone(execution_manifest)
+        spec_to_submit["execution_manifest_ref"] = _text(execution_manifest.get("execution_manifest_ref")) or None
+    packet_provenance = {
         "source_kind": "workflow_trigger",
         "workflow_row": dict(workflow_row),
         "definition_row": definition_row,
         "compiled_spec_row": spec,
     }
+    if isinstance(execution_manifest, dict):
+        packet_provenance["execution_manifest"] = _json_clone(execution_manifest)
+    spec_to_submit["packet_provenance"] = packet_provenance
     record_system_event(
         pg,
         event_type="manual",

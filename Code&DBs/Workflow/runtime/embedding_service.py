@@ -2,13 +2,19 @@
 from __future__ import annotations
 
 import contextlib
+import importlib.util
 import io
+import json
 import logging
 import os
+import sys
 import threading
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
 from typing import Any, ClassVar
+from urllib import error as urllib_error
+from urllib import parse as urllib_parse
+from urllib import request as urllib_request
 
 
 _DEFAULT_MODEL_NAME = "all-MiniLM-L6-v2"
@@ -18,6 +24,8 @@ _DEFAULT_REFRESH_FOLLOW_ON_INTENT_KIND = "refresh_vector_neighbors"
 _DEFAULT_REFRESH_FOLLOW_ON_BATCH_LIMIT = 25
 _DEFAULT_MISSING_EMBEDDER_MODE = "skip"
 _DEFAULT_MISSING_EMBEDDER_REASON = "embedder_unavailable"
+_DEFAULT_BACKEND_MODE = "auto"
+_DEFAULT_SERVICE_TIMEOUT_SECONDS = 10.0
 
 logger = logging.getLogger(__name__)
 
@@ -95,11 +103,11 @@ def resolve_embedding_runtime_authority() -> EmbeddingRuntimeAuthority:
 
 
 class EmbeddingService:
-    """Shared sentence-transformer embedding for semantic retrieval.
+    """Shared embedding surface for semantic retrieval.
 
     The authority object owns the runtime contract; the service exposes the
-    concrete model loader behind that contract. Vector literal formatting
-    stays in the storage adapter.
+    concrete backend behind that contract. Vector literal formatting stays in
+    the storage adapter.
     """
 
     DIMENSIONS = _DEFAULT_DIMENSIONS
@@ -109,6 +117,8 @@ class EmbeddingService:
     _shared_encode_locks: ClassVar[dict[str, threading.Lock]] = {}
     _prewarm_threads: ClassVar[dict[str, threading.Thread]] = {}
     _prewarm_lock: ClassVar[threading.Lock] = threading.Lock()
+    _service_cached_models: ClassVar[set[str]] = set()
+    _service_cache_lock: ClassVar[threading.Lock] = threading.Lock()
 
     def __init__(
         self,
@@ -131,6 +141,8 @@ class EmbeddingService:
         self._authority = runtime_authority
         self._model_name = runtime_authority.model_name
         self._model = None
+        self._backend_kind, self._backend_reason = self.resolve_backend_status()
+        self._service_url = self._resolve_service_url()
 
     @property
     def authority(self) -> EmbeddingRuntimeAuthority:
@@ -144,12 +156,134 @@ class EmbeddingService:
     def dimensions(self) -> int:
         return self._authority.dimensions
 
+    @property
+    def backend_kind(self) -> str:
+        return self._backend_kind
+
     @classmethod
     def _normalize_model_name(cls, model_name: str | None) -> str:
         normalized = str(model_name or resolve_embedding_runtime_authority().model_name).strip()
         if not normalized:
             raise RuntimeError("embedding_model_name_required")
         return normalized
+
+    @classmethod
+    def _normalize_backend_mode(cls, raw_mode: str | None) -> str:
+        normalized = str(raw_mode or _DEFAULT_BACKEND_MODE).strip().lower()
+        if normalized in {"", "auto"}:
+            return "auto"
+        if normalized in {"local"}:
+            return "local"
+        if normalized in {"service", "http", "remote"}:
+            return "service"
+        if normalized in {"disabled", "none", "off"}:
+            return "disabled"
+        return normalized
+
+    @classmethod
+    def _resolve_service_url(cls) -> str:
+        return str(os.environ.get("WORKFLOW_EMBEDDING_SERVICE_URL") or "").strip()
+
+    @classmethod
+    def _local_backend_available(cls) -> bool:
+        return (
+            "sentence_transformers" in sys.modules
+            or importlib.util.find_spec("sentence_transformers") is not None
+        )
+
+    @classmethod
+    def resolve_backend_status(cls) -> tuple[str, str | None]:
+        mode = cls._normalize_backend_mode(os.environ.get("WORKFLOW_EMBEDDING_BACKEND"))
+        service_url = cls._resolve_service_url()
+        local_available = cls._local_backend_available()
+
+        if mode == "disabled":
+            return "disabled", "embedding_backend_disabled"
+        if mode == "service":
+            if service_url:
+                return "service", None
+            return "unavailable", "embedding_service_url_required"
+        if mode == "local":
+            if local_available:
+                return "local", None
+            return "unavailable", "sentence_transformers_unavailable"
+        if mode == "auto":
+            if service_url:
+                return "service", None
+            if local_available:
+                return "local", None
+            return "unavailable", "embedding_backend_unavailable"
+        return "unavailable", f"embedding_backend_invalid:{mode}"
+
+    @classmethod
+    def backend_available(cls) -> bool:
+        backend_kind, _reason = cls.resolve_backend_status()
+        return backend_kind in {"local", "service"}
+
+    @classmethod
+    def backend_unavailable_reason(cls) -> str | None:
+        _backend_kind, reason = cls.resolve_backend_status()
+        return reason
+
+    @classmethod
+    def _service_timeout_seconds(cls) -> float:
+        raw_value = str(os.environ.get("WORKFLOW_EMBEDDING_SERVICE_TIMEOUT_S") or "").strip()
+        if not raw_value:
+            return _DEFAULT_SERVICE_TIMEOUT_SECONDS
+        try:
+            return max(0.1, float(raw_value))
+        except ValueError:
+            return _DEFAULT_SERVICE_TIMEOUT_SECONDS
+
+    @classmethod
+    def _service_endpoint(cls, path: str) -> str:
+        service_url = cls._resolve_service_url()
+        if not service_url:
+            raise RuntimeError("embedding_service_url_required")
+        normalized_base = service_url.rstrip("/") + "/"
+        return urllib_parse.urljoin(normalized_base, path.lstrip("/"))
+
+    @classmethod
+    def _service_request(cls, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        endpoint = cls._service_endpoint(path)
+        request = urllib_request.Request(
+            endpoint,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib_request.urlopen(request, timeout=cls._service_timeout_seconds()) as response:
+                status_code = int(getattr(response, "status", 200))
+                response_text = response.read().decode("utf-8", errors="replace")
+        except urllib_error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace").strip()
+            raise RuntimeError(
+                f"embedding_service_http_error:{exc.code}:{detail or exc.reason}"
+            ) from exc
+        except urllib_error.URLError as exc:
+            raise RuntimeError(f"embedding_service_unreachable:{exc.reason}") from exc
+        if status_code >= 400:
+            raise RuntimeError(f"embedding_service_http_error:{status_code}:{response_text.strip()}")
+        try:
+            payload = json.loads(response_text or "{}")
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("embedding_service_protocol_invalid:invalid_json") from exc
+        if not isinstance(payload, dict):
+            raise RuntimeError("embedding_service_protocol_invalid:object_required")
+        return payload
+
+    @classmethod
+    def _mark_service_model_cached(cls, model_name: str) -> None:
+        normalized = cls._normalize_model_name(model_name)
+        with cls._service_cache_lock:
+            cls._service_cached_models.add(normalized)
+
+    def _raise_backend_unavailable(self) -> None:
+        raise RuntimeError(self._backend_reason or "embedding_backend_unavailable")
 
     @classmethod
     @contextlib.contextmanager
@@ -223,11 +357,10 @@ class EmbeddingService:
                 local_files_only=True,
             )
         except Exception as exc:
-            if "local_files_only" not in str(exc):
-                raise
             logger.debug(
-                "Local embedding cache miss for %s; retrying with hub access",
+                "Local embedding cache unavailable for %s; retrying with hub access: %s",
                 model_name,
+                exc,
             )
         return cls._construct_model_for_name(
             model_name,
@@ -269,14 +402,26 @@ class EmbeddingService:
     @classmethod
     def prewarm_model(cls, model_name: str | None = None):
         normalized = cls._normalize_model_name(model_name)
-        return cls._get_or_load_shared_model(normalized)
+        backend_kind, reason = cls.resolve_backend_status()
+        if backend_kind == "local":
+            return cls._get_or_load_shared_model(normalized)
+        if backend_kind == "service":
+            payload = cls._service_request(
+                "/prewarm",
+                {"model_name": normalized},
+            )
+            cls._mark_service_model_cached(normalized)
+            return payload
+        raise RuntimeError(reason or "embedding_backend_unavailable")
 
     @classmethod
     def start_background_prewarm(cls, model_name: str | None = None) -> threading.Thread | None:
         normalized = cls._normalize_model_name(model_name)
-        with cls._shared_model_lock:
-            if normalized in cls._shared_models:
-                return None
+        backend_kind, _reason = cls.resolve_backend_status()
+        if backend_kind in {"disabled", "unavailable"}:
+            return None
+        if cls._is_model_cached(normalized):
+            return None
         with cls._prewarm_lock:
             existing = cls._prewarm_threads.get(normalized)
             if existing is not None and existing.is_alive():
@@ -311,6 +456,10 @@ class EmbeddingService:
     @classmethod
     def _is_model_cached(cls, model_name: str | None = None) -> bool:
         normalized = cls._normalize_model_name(model_name)
+        backend_kind, _reason = cls.resolve_backend_status()
+        if backend_kind == "service":
+            with cls._service_cache_lock:
+                return normalized in cls._service_cached_models
         with cls._shared_model_lock:
             return normalized in cls._shared_models
 
@@ -324,6 +473,8 @@ class EmbeddingService:
             cls._shared_encode_locks.clear()
         with cls._prewarm_lock:
             cls._prewarm_threads.clear()
+        with cls._service_cache_lock:
+            cls._service_cached_models.clear()
 
     @classmethod
     def _get_encode_lock(cls, model_name: str | None = None) -> threading.Lock:
@@ -336,14 +487,45 @@ class EmbeddingService:
             return lock
 
     def _get_model(self):
+        if self._backend_kind != "local":
+            self._raise_backend_unavailable()
         if self._model is None:
             self._model = self._get_or_load_shared_model(self._model_name)
         return self._model
+
+    def _embed_via_service(self, texts: list[str]) -> list[list[float]]:
+        payload = self._service_request(
+            "/embed",
+            {
+                "model_name": self._model_name,
+                "texts": list(texts),
+            },
+        )
+        self._authority.validate_embedder_model(payload.get("model_name"))
+        self._authority.validate_embedder_dimensions(payload.get("dimensions"))
+
+        raw_vectors = payload.get("vectors")
+        if not isinstance(raw_vectors, list):
+            raise RuntimeError("embedding_service_protocol_invalid:vectors_required")
+
+        vectors: list[list[float]] = []
+        for raw_vector in raw_vectors:
+            if not isinstance(raw_vector, Sequence) or isinstance(raw_vector, (str, bytes)):
+                raise RuntimeError("embedding_service_protocol_invalid:vector_sequence_required")
+            vector = [float(value) for value in raw_vector]
+            self._authority.validate_embedding_vector(vector)
+            vectors.append(vector)
+        self._mark_service_model_cached(self._model_name)
+        return vectors
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         """Embed a batch of texts. Returns list of authoritative-dimension vectors."""
         if not texts:
             return []
+        if self._backend_kind == "service":
+            return self._embed_via_service(texts)
+        if self._backend_kind != "local":
+            self._raise_backend_unavailable()
         encode_lock = self._get_encode_lock(self._model_name)
         with encode_lock:
             model = self._get_model()

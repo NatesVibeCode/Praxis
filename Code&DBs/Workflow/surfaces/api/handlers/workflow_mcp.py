@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import traceback
 from typing import Any
 
 from runtime.workflow.mcp_session import (
@@ -98,7 +97,7 @@ def _handle_mcp_post(request: Any, path: str) -> None:
                     500,
                     {
                         "error": f"{type(exc).__name__}: {exc}",
-                        "traceback": traceback.format_exc(),
+                        "error_code": "internal_error",
                     },
                 )
                 return
@@ -116,7 +115,7 @@ def _handle_mcp_post(request: Any, path: str) -> None:
                 500,
                 {
                     "error": f"{type(exc).__name__}: {exc}",
-                    "traceback": traceback.format_exc(),
+                    "error_code": "internal_error",
                 },
             )
             return

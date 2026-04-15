@@ -28,7 +28,6 @@ from storage.postgres.connection import SyncPostgresConnection, get_workflow_poo
 from .failure_classifier import classify_failure
 
 _log = logging.getLogger(__name__)
-_OVERRIDE_DECISION_PREFIX = "circuit-breaker::"
 _OVERRIDE_CACHE_TTL_S = 2.0
 
 def _require_cb_config() -> tuple[int, float]:
@@ -59,6 +58,8 @@ class ManualCircuitOverride:
     effective_from: datetime
     effective_to: datetime | None
     updated_at: datetime
+    decision_scope_kind: str | None = None
+    decision_scope_ref: str | None = None
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -76,6 +77,8 @@ class ManualCircuitOverride:
                 None if self.effective_to is None else self.effective_to.isoformat()
             ),
             "updated_at": self.updated_at.isoformat(),
+            "decision_scope_kind": self.decision_scope_kind,
+            "decision_scope_ref": self.decision_scope_ref,
         }
 
 
@@ -90,14 +93,12 @@ def _override_state_from_kind(decision_kind: str) -> CircuitState | None:
 def _parse_manual_override(row: Any) -> ManualCircuitOverride | None:
     decision_key = str(row.get("decision_key") or "").strip()
     decision_kind = str(row.get("decision_kind") or "").strip()
-    if not decision_key.startswith(_OVERRIDE_DECISION_PREFIX):
+    decision_scope_kind = str(row.get("decision_scope_kind") or "").strip() or None
+    decision_scope_ref = str(row.get("decision_scope_ref") or "").strip().lower() or None
+    if decision_scope_kind != "provider" or not decision_scope_ref:
         return None
     override_state = _override_state_from_kind(decision_kind)
     if override_state is None:
-        return None
-    suffix = decision_key[len(_OVERRIDE_DECISION_PREFIX):]
-    provider_slug = suffix.split("::", 1)[0].strip().lower()
-    if not provider_slug:
         return None
     effective_from = row.get("effective_from")
     updated_at = row.get("updated_at")
@@ -105,7 +106,7 @@ def _parse_manual_override(row: Any) -> ManualCircuitOverride | None:
         return None
     effective_to = row.get("effective_to")
     return ManualCircuitOverride(
-        provider_slug=provider_slug,
+        provider_slug=decision_scope_ref,
         override_state=override_state,
         operator_decision_id=str(row.get("operator_decision_id") or ""),
         decision_key=decision_key,
@@ -117,15 +118,9 @@ def _parse_manual_override(row: Any) -> ManualCircuitOverride | None:
         effective_from=effective_from,
         effective_to=effective_to if isinstance(effective_to, datetime) else None,
         updated_at=updated_at,
+        decision_scope_kind=decision_scope_kind,
+        decision_scope_ref=decision_scope_ref,
     )
-
-
-def _provider_slug_from_decision_key(decision_key: str) -> str | None:
-    if not decision_key.startswith(_OVERRIDE_DECISION_PREFIX):
-        return None
-    suffix = decision_key[len(_OVERRIDE_DECISION_PREFIX):]
-    provider_slug = suffix.split("::", 1)[0].strip().lower()
-    return provider_slug or None
 
 
 # ---------------------------------------------------------------------------
@@ -446,24 +441,33 @@ class CircuitBreakerRegistry:
                 decision_source,
                 effective_from,
                 effective_to,
-                updated_at
+                decided_at,
+                created_at,
+                updated_at,
+                decision_scope_kind,
+                decision_scope_ref
             FROM operator_decisions
             WHERE decision_kind IN (
                     'circuit_breaker_reset',
                     'circuit_breaker_force_open',
                     'circuit_breaker_force_closed'
               )
+              AND decision_scope_kind = 'provider'
+              AND decision_scope_ref IS NOT NULL
               AND effective_from <= now()
               AND (effective_to IS NULL OR effective_to > now())
-            ORDER BY updated_at DESC, operator_decision_id DESC
+            ORDER BY
+                decision_scope_ref,
+                effective_from DESC,
+                decided_at DESC,
+                created_at DESC,
+                operator_decision_id DESC
             """
         )
         overrides: dict[str, ManualCircuitOverride] = {}
         seen_providers: set[str] = set()
         for row in rows:
-            provider_slug = _provider_slug_from_decision_key(
-                str(row.get("decision_key") or "").strip()
-            )
+            provider_slug = str(row.get("decision_scope_ref") or "").strip().lower()
             if not provider_slug or provider_slug in seen_providers:
                 continue
             seen_providers.add(provider_slug)

@@ -103,25 +103,41 @@ def test_api_routes_endpoint_lists_the_live_http_surface() -> None:
     assert isinstance(payload["summary"]["tags"], list)
 
     route_paths = {row["path"] for row in payload["routes"]}
-    assert "/api/dashboard" in route_paths
-    assert "/api/health" in route_paths
-    assert "/api/routes" in route_paths
+    assert "/v1/catalog" in route_paths
+    assert "/v1/events" in route_paths
+    assert "/v1/runs" in route_paths
+    assert "/api/health" not in route_paths
 
-    health_route = next(row for row in payload["routes"] if row["path"] == "/api/health")
-    assert health_route["methods"] == ["GET"]
-    assert health_route["include_in_schema"] is True
+    runs_route = next(row for row in payload["routes"] if row["path"] == "/v1/runs")
+    assert runs_route["include_in_schema"] is True
+    assert runs_route["visibility"] == "public"
+    assert runs_route["operation_id"]
 
 
 def test_api_routes_endpoint_filters_the_live_http_surface() -> None:
     with TestClient(rest.app) as client:
-        response = client.get("/api/routes", params={"path_prefix": "/api/routes"})
+        response = client.get("/api/routes", params={"path_prefix": "/v1/catalog"})
 
     assert response.status_code == 200
     payload = response.json()
 
     assert payload["count"] == 1
-    assert payload["filters"] == {"path_prefix": "/api/routes"}
-    assert [row["path"] for row in payload["routes"]] == ["/api/routes"]
+    assert payload["filters"] == {"path_prefix": "/v1/catalog"}
+    assert [row["path"] for row in payload["routes"]] == ["/v1/catalog"]
+
+
+def test_api_routes_endpoint_can_include_internal_routes() -> None:
+    with TestClient(rest.app) as client:
+        response = client.get("/api/routes", params={"visibility": "all", "path_prefix": "/api"})
+
+    assert response.status_code == 200
+    payload = response.json()
+
+    route_paths = {row["path"] for row in payload["routes"]}
+    assert "/api/health" in route_paths
+    assert "/api/routes" in route_paths
+    routes_route = next(row for row in payload["routes"] if row["path"] == "/api/routes")
+    assert routes_route["visibility"] == "internal"
 
 
 def test_query_route_records_surface_usage(monkeypatch) -> None:
@@ -1023,6 +1039,17 @@ def test_rest_openapi_operation_ids_are_unique() -> None:
 
     assert operation_ids
     assert len(operation_ids) == len(set(operation_ids))
+
+
+def test_rest_openapi_only_exposes_public_v1_contract() -> None:
+    rest.app.openapi_schema = None
+    schema = rest.app.openapi()
+
+    paths = set(schema.get("paths", {}).keys())
+    assert "/v1/runs" in paths
+    assert "/v1/catalog" in paths
+    assert "/api/health" not in paths
+    assert "/api/routes" not in paths
 
 
 def test_rest_legacy_api_bridge_routes_unknown_api_paths_to_handler(monkeypatch) -> None:

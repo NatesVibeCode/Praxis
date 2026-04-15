@@ -20,6 +20,15 @@ from observability.read_models import (
 )
 
 from .commands.admin import _compile_command, _github_command, _parse_pr_spec
+from .commands.authority import (
+    _catalog_command,
+    _object_command,
+    _object_type_command,
+    _reconcile_command,
+    _registry_command,
+    _reload_command,
+    _schema_command,
+)
 from .commands.data import _data_command
 from .commands.workflow import (
     _active_command,
@@ -242,6 +251,13 @@ _ARG_COMMANDS: dict[str, ArgsCommandHandler] = {
     "chain": _chain_command,
     "query": _query_command,
     "data": _data_command,
+    "schema": _schema_command,
+    "registry": _registry_command,
+    "object-type": _object_type_command,
+    "object": _object_command,
+    "catalog": _catalog_command,
+    "reload": _reload_command,
+    "reconcile": _reconcile_command,
     "architecture": _architecture_command,
     "bugs": _bugs_command,
     "recall": _recall_command,
@@ -387,6 +403,8 @@ def _commands_index_text() -> str:
             "  workflow work <claim|acknowledge>             Claim or acknowledge worker work",
             "  workflow tools [list|search|describe|call]     Discover and call catalog-backed MCP tools",
             "  workflow data <action>                         Deterministic data cleanup, validation, and workflow launch",
+            "  workflow schema|registry|object-type|object|catalog|reload|reconcile",
+            "                                                  Direct database and registry authority frontdoors",
             "  workflow query|recall|discover|architecture|artifacts|bugs|costs|leaderboard|trust|fitness|trends|scope|risk|reviews|receipts",
             "                                                  Derived search and analysis reads",
             "  workflow inspect|replay|graph-topology|graph-lineage|topology|lineage",
@@ -424,6 +442,8 @@ def _help_text() -> str:
             "  workflow help api",
             "  workflow query <question>",
             "  workflow data profile artifacts/data/users.csv",
+            "  workflow schema status",
+            "  workflow object list --type-id ticket",
             "  workflow work claim --subscription-id <id> --run-id <run_id>",
             "  workflow inspect <run_id>",
             "  workflow replay <run_id>",
@@ -433,6 +453,7 @@ def _help_text() -> str:
             "Command groups:",
             "  workflow tools [list|search|describe|call]",
             "  workflow data <action>",
+            "  workflow schema|registry|object-type|object|catalog|reload|reconcile",
             "  workflow query|recall|discover|architecture|artifacts|bugs|costs|leaderboard|trust|fitness|trends|scope|risk|reviews|receipts",
             "  workflow run|run-status|status|active|scheduler|fan-out|debate|runs|manifest|triggers|retry|cancel|repair|heal|verify|verify-platform|pipeline|proof|queue|diagnose|inspect-job",
             "  workflow inspect|replay|graph-topology|graph-lineage|topology|lineage",

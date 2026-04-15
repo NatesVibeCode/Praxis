@@ -77,6 +77,12 @@ const CostsPanel = React.lazy(() =>
   }))
 );
 
+const ManifestCatalogPage = React.lazy(() =>
+  import('./praxis/ManifestCatalogPage').then(m => ({ default: m.ManifestCatalogPage })).catch(() => ({
+    default: () => <SurfacePlaceholder title="Manifest catalog loading..." />
+  }))
+);
+
 
 const MoonBuildPage = React.lazy(() =>
   import('./moon/MoonBuildPage').then(m => ({ default: m.MoonBuildPage })).catch(() => ({
@@ -524,6 +530,15 @@ export function AppShell() {
         <CostsPanel
           onBack={() => activateTab('dashboard')}
           onViewRun={(runId) => openRunDetail(runId)}
+        />
+      );
+    }
+
+    if (activeSurface.category === 'static' && activeSurface.id === 'manifests') {
+      return (
+        <ManifestCatalogPage
+          onOpenManifest={(manifestId) => openManifest(manifestId)}
+          onEditManifest={(manifestId) => openManifestEditor(manifestId)}
         />
       );
     }

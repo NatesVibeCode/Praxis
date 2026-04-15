@@ -33,7 +33,9 @@ def test_runtime_breadth_authority_schema_is_the_canonical_tail_migration() -> N
     assert "119_context_bundle_sandbox_profile_ref.sql" in filenames
     assert "122_workflow_build_review_contract_fields.sql" in filenames
     assert "123_workflow_build_planning_state_registry.sql" in filenames
-    assert filenames[-1] == "123_workflow_build_planning_state_registry.sql"
+    assert "124_operator_decision_scope_authority.sql" in filenames
+    assert "125_cursor_local_cli_provider_seed.sql" in filenames
+    assert filenames[-1] == "125_cursor_local_cli_provider_seed.sql"
 
 
 def test_runtime_breadth_authority_schema_expected_objects_are_declared() -> None:

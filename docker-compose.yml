@@ -13,6 +13,37 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+  semantic-backend:
+    build:
+      context: ./Code&DBs/Workflow
+      dockerfile: docker/praxis-control.Dockerfile
+      args:
+        PRAXIS_DEPENDENCY_SCOPE: semantic_backend
+    image: praxis-semantic-backend:latest
+    env_file:
+      - .env
+    environment:
+      PYTHONPATH: Code&DBs/Workflow
+      PRAXIS_SEMANTIC_HOST: 0.0.0.0
+      PRAXIS_SEMANTIC_PORT: 8421
+      WORKFLOW_EMBEDDING_BACKEND: local
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    command:
+      - python3
+      - -m
+      - runtime.embedding_backend_server
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8421"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8421/health >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
   api-server:
     build:
       context: ./Code&DBs/Workflow
@@ -23,10 +54,14 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      semantic-backend:
+        condition: service_healthy
     env_file:
       - .env
     environment:
       WORKFLOW_DATABASE_URL: postgresql://postgres@postgres:5432/praxis
+      WORKFLOW_EMBEDDING_BACKEND: service
+      WORKFLOW_EMBEDDING_SERVICE_URL: http://semantic-backend:8421
       PYTHONPATH: Code&DBs/Workflow
       PRAXIS_API_HOST: 0.0.0.0
       PRAXIS_API_PORT: 8420
@@ -88,6 +123,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      semantic-backend:
+        condition: service_healthy
       api-server:
         condition: service_healthy
       scheduler:
@@ -96,6 +133,9 @@ services:
       - .env
     environment:
       WORKFLOW_DATABASE_URL: postgresql://postgres@postgres:5432/praxis
+      WORKFLOW_EMBEDDING_BACKEND: service
+      WORKFLOW_EMBEDDING_SERVICE_URL: http://semantic-backend:8421
+      CURSOR_API_KEY: ${CURSOR_API_KEY:-}
       PYTHONPATH: Code&DBs/Workflow
       PRAXIS_CLI_AUTH_HOME: /Users/nate
     working_dir: /workspace

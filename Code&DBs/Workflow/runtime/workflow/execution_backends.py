@@ -249,8 +249,18 @@ def _parse_llm_output(stdout: str) -> tuple[str, dict[str, Any]]:
     if not isinstance(data, dict):
         return parsed_stdout, telemetry
     usage = data.get("usage", {})
-    input_tokens = usage.get("input_tokens", 0) or usage.get("prompt_tokens", 0)
-    output_tokens = usage.get("output_tokens", 0) or usage.get("completion_tokens", 0)
+    input_tokens = (
+        usage.get("input_tokens", 0)
+        or usage.get("prompt_tokens", 0)
+        or usage.get("inputTokens", 0)
+    )
+    output_tokens = (
+        usage.get("output_tokens", 0)
+        or usage.get("completion_tokens", 0)
+        or usage.get("outputTokens", 0)
+    )
+    cache_read_tokens = usage.get("cache_read_input_tokens", 0) or usage.get("cacheReadTokens", 0)
+    cache_creation_tokens = usage.get("cache_creation_input_tokens", 0) or usage.get("cacheWriteTokens", 0)
     if not input_tokens:
         stats = data.get("stats", {})
         for model_stats in stats.get("models", {}).values():
@@ -261,6 +271,8 @@ def _parse_llm_output(stdout: str) -> tuple[str, dict[str, Any]]:
     telemetry = {
         "token_input": input_tokens,
         "token_output": output_tokens,
+        "cache_read_tokens": cache_read_tokens,
+        "cache_creation_tokens": cache_creation_tokens,
         "cost_usd": data.get("total_cost_usd", 0.0) or data.get("cost_usd", 0.0),
     }
     for key in ("result", "response", "output", "text"):

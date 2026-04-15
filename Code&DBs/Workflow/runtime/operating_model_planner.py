@@ -114,6 +114,8 @@ def plan_definition(
     *,
     title: str | None = None,
     conn: Any | None = None,
+    candidate_manifest: dict[str, Any] | None = None,
+    reviewable_plan: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not isinstance(definition, dict):
         raise ValueError("definition is required and must be an object")
@@ -123,7 +125,9 @@ def plan_definition(
     if unresolved:
         raise PlanningBlockedError(unresolved)
 
-    if _has_explicit_build_authority_state(definition):
+    manifest = candidate_manifest if isinstance(candidate_manifest, dict) else None
+    review = reviewable_plan if isinstance(reviewable_plan, dict) else None
+    if _has_explicit_build_authority_state(definition) or manifest is not None or review is not None:
         authority_bundle = build_authority_bundle(definition)
         projection_status = authority_bundle.get("projection_status") if isinstance(authority_bundle, dict) else {}
         if _as_text((projection_status or {}).get("state")) == "blocked":
@@ -133,6 +137,15 @@ def plan_definition(
                 if isinstance(issue, dict) and _as_text(issue.get("severity")) == "blocking"
             ]
             raise PlanningBlockedError([label for label in blocking_labels if label])
+        manifest, review = _review_contract_for_definition(
+            definition=definition,
+            conn=conn,
+            candidate_manifest=manifest,
+            reviewable_plan=review,
+        )
+        hardening_blockers = _review_hardening_blockers(manifest=manifest, review=review)
+        if hardening_blockers:
+            raise PlanningBlockedError(hardening_blockers)
 
     compiled_prose = _as_text(definition.get("compiled_prose"))
     source_prose = _as_text(definition.get("source_prose"))
@@ -170,7 +183,7 @@ def plan_definition(
             }
 
     jobs = _plan_jobs(definition)
-    planning_source = "draft_flow"
+    planning_source = "reviewed_authority" if review is not None else "draft_flow"
 
     compiled_spec = {
         "name": effective_title,
@@ -208,6 +221,80 @@ def plan_definition(
             "input_fingerprint": compile_provenance["input_fingerprint"],
         },
     }
+
+
+def _review_contract_for_definition(
+    *,
+    definition: dict[str, Any],
+    conn: Any | None,
+    candidate_manifest: dict[str, Any] | None,
+    reviewable_plan: dict[str, Any] | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    if isinstance(candidate_manifest, dict) and isinstance(reviewable_plan, dict):
+        return candidate_manifest, reviewable_plan
+    from runtime.build_planning_contract import (
+        build_candidate_resolution_manifest,
+        build_reviewable_plan,
+    )
+
+    workflow_id = _as_text(definition.get("workflow_id")) or None
+    manifest = (
+        candidate_manifest
+        if isinstance(candidate_manifest, dict)
+        else build_candidate_resolution_manifest(
+            definition=definition,
+            workflow_id=workflow_id,
+            conn=conn,
+            compiled_spec=None,
+        )
+    )
+    review = (
+        reviewable_plan
+        if isinstance(reviewable_plan, dict)
+        else build_reviewable_plan(
+            definition=definition,
+            workflow_id=workflow_id,
+            conn=conn,
+            compiled_spec=None,
+            candidate_manifest=manifest,
+        )
+    )
+    return manifest, review
+
+
+def _review_hardening_blockers(
+    *,
+    manifest: dict[str, Any] | None,
+    review: dict[str, Any] | None,
+) -> list[str]:
+    if not isinstance(manifest, dict) or not isinstance(review, dict):
+        return ["Reviewed planning artifacts are required before hardening can proceed."]
+    blockers: list[str] = []
+    if _as_text(manifest.get("execution_readiness")) != "ready":
+        blockers.extend(
+            [
+                _as_text(item.get("reason"))
+                for item in manifest.get("required_confirmations", [])
+                if isinstance(item, dict) and _as_text(item.get("reason"))
+            ]
+        )
+        if not blockers:
+            blockers.append("Reviewed approvals are incomplete.")
+    if review.get("proposal_requests"):
+        blockers.append("Proposal requests must be resolved before hardening can proceed.")
+    if review.get("widening_ops"):
+        blockers.append("Pending widening requests must be resolved before hardening can proceed.")
+    if review.get("required_unapproved_slots"):
+        blockers.append("Required binding approvals are incomplete.")
+    if review.get("required_unapproved_bundle_slots"):
+        blockers.append("Required capability bundle approvals are incomplete.")
+    if not review.get("approved_workflow_shape_ref"):
+        blockers.append("An approved workflow shape is required before hardening can proceed.")
+    if not review.get("approved_binding_refs"):
+        blockers.append("At least one approved binding is required before hardening can proceed.")
+    if not review.get("approved_bundle_refs"):
+        blockers.append("At least one approved capability bundle is required before hardening can proceed.")
+    return list(dict.fromkeys([item for item in blockers if item]))
 
 def _plan_jobs(definition: dict[str, Any]) -> list[dict[str, Any]]:
     definition = materialize_definition(definition)

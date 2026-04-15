@@ -10,8 +10,11 @@ from storage.postgres.object_lifecycle_repository import (
     attach_document_record,
     create_object_record,
     create_object_type_record,
+    load_object_record,
+    load_object_type_record,
     mark_object_deleted,
     object_type_exists,
+    upsert_object_type_record,
     update_object_properties_record,
 )
 from storage.postgres.validators import PostgresWriteError
@@ -112,6 +115,37 @@ def create_object_type(
         _raise_storage_boundary(exc)
 
 
+def upsert_object_type(
+    conn: Any,
+    *,
+    type_id: Any = None,
+    name: Any,
+    description: Any = "",
+    property_definitions: Any = None,
+    icon: Any = "",
+) -> dict[str, Any]:
+    normalized_name = _text(name)
+    if not normalized_name:
+        raise ObjectLifecycleBoundaryError("name is required")
+    if description is not None and not isinstance(description, str):
+        raise ObjectLifecycleBoundaryError("description must be a string")
+    if icon is not None and not isinstance(icon, str):
+        raise ObjectLifecycleBoundaryError("icon must be a string")
+    normalized_type_id = _text(type_id) or f"{_slug_prefix(normalized_name)}-{uuid.uuid4().hex[:6]}"
+
+    try:
+        return upsert_object_type_record(
+            conn,
+            type_id=normalized_type_id,
+            name=normalized_name,
+            description=description or "",
+            icon=icon or "",
+            property_definitions=_property_definitions(property_definitions),
+        )
+    except PostgresWriteError as exc:
+        _raise_storage_boundary(exc)
+
+
 def create_object(
     conn: Any,
     *,
@@ -158,6 +192,90 @@ def update_object(
     if row is None:
         raise ObjectLifecycleBoundaryError(f"Object not found: {normalized_object_id}", status_code=404)
     return row
+
+
+def get_object_type(conn: Any, *, type_id: Any) -> dict[str, Any]:
+    normalized_type_id = _text(type_id)
+    if not normalized_type_id:
+        raise ObjectLifecycleBoundaryError("type_id is required")
+    row = load_object_type_record(conn, type_id=normalized_type_id)
+    if row is None:
+        raise ObjectLifecycleBoundaryError(f"Object type not found: {normalized_type_id}", status_code=404)
+    return row
+
+
+def list_object_types(
+    conn: Any,
+    *,
+    query: Any = "",
+    limit: int = 100,
+) -> dict[str, Any]:
+    if not isinstance(limit, int) or limit <= 0:
+        raise ObjectLifecycleBoundaryError("limit must be a positive integer")
+    normalized_query = _text(query)
+    if normalized_query:
+        rows = conn.execute(
+            "SELECT type_id, name, description, icon, property_definitions, created_at "
+            "FROM object_types WHERE search_vector @@ plainto_tsquery('english', $1) "
+            "ORDER BY name LIMIT $2",
+            normalized_query,
+            limit,
+        )
+    else:
+        rows = conn.execute(
+            "SELECT type_id, name, description, icon, property_definitions, created_at "
+            "FROM object_types ORDER BY name LIMIT $1",
+            limit,
+        )
+    return {"types": [dict(row) for row in rows], "count": len(rows)}
+
+
+def get_object(conn: Any, *, object_id: Any) -> dict[str, Any]:
+    normalized_object_id = _text(object_id)
+    if not normalized_object_id:
+        raise ObjectLifecycleBoundaryError("object_id is required")
+    row = load_object_record(conn, object_id=normalized_object_id)
+    if row is None:
+        raise ObjectLifecycleBoundaryError(f"Object not found: {normalized_object_id}", status_code=404)
+    return row
+
+
+def list_objects(
+    conn: Any,
+    *,
+    type_id: Any,
+    status: Any = "active",
+    query: Any = "",
+    limit: int = 100,
+) -> dict[str, Any]:
+    normalized_type_id = _text(type_id)
+    if not normalized_type_id:
+        raise ObjectLifecycleBoundaryError("type_id is required")
+    normalized_status = _text(status) or "active"
+    if not isinstance(limit, int) or limit <= 0:
+        raise ObjectLifecycleBoundaryError("limit must be a positive integer")
+    normalized_query = _text(query)
+    if normalized_query:
+        rows = conn.execute(
+            "SELECT object_id, type_id, properties, status, created_at, updated_at "
+            "FROM objects WHERE type_id = $1 AND status = $2 "
+            "AND search_vector @@ plainto_tsquery('english', $3) "
+            "ORDER BY updated_at DESC, object_id ASC LIMIT $4",
+            normalized_type_id,
+            normalized_status,
+            normalized_query,
+            limit,
+        )
+    else:
+        rows = conn.execute(
+            "SELECT object_id, type_id, properties, status, created_at, updated_at "
+            "FROM objects WHERE type_id = $1 AND status = $2 "
+            "ORDER BY updated_at DESC, object_id ASC LIMIT $3",
+            normalized_type_id,
+            normalized_status,
+            limit,
+        )
+    return {"objects": [dict(row) for row in rows], "count": len(rows), "type_id": normalized_type_id}
 
 
 def delete_object(
@@ -256,3 +374,19 @@ def attach_document(
     if not isinstance(attached, list):
         attached = []
     return {"id": row["object_id"], "attached_to": attached}
+
+
+__all__ = [
+    "ObjectLifecycleBoundaryError",
+    "attach_document",
+    "create_document",
+    "create_object",
+    "create_object_type",
+    "delete_object",
+    "get_object",
+    "get_object_type",
+    "list_objects",
+    "list_object_types",
+    "update_object",
+    "upsert_object_type",
+]

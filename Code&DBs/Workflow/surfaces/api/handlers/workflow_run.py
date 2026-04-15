@@ -7,7 +7,6 @@ import os
 import sys
 import tempfile
 import threading
-import traceback
 import uuid
 from typing import Any
 
@@ -46,6 +45,13 @@ def _workflow_spec_mod():
     import runtime.workflow_spec as spec_mod
 
     return spec_mod
+
+
+def _internal_error_payload(exc: Exception) -> dict[str, str]:
+    return {
+        "error": f"{type(exc).__name__}: {exc}",
+        "error_code": "internal_error",
+    }
 
 
 def _load_manifest_payload(raw_manifest: Any) -> dict[str, Any]:
@@ -568,7 +574,7 @@ def _handle_manifest_generate_post(request: Any, path: str) -> None:
     except Exception as exc:
         request._send_json(
             500,
-            {"error": str(exc), "trace": traceback.format_exc()},
+            _internal_error_payload(exc),
         )
 
 
@@ -592,7 +598,7 @@ def _handle_manifest_generate_quick_post(request: Any, path: str) -> None:
     except Exception as exc:
         request._send_json(
             500,
-            {"error": str(exc), "trace": traceback.format_exc()},
+            _internal_error_payload(exc),
         )
 
 
@@ -633,7 +639,7 @@ def _handle_manifest_refine_post(request: Any, path: str) -> None:
     except Exception as exc:
         request._send_json(
             500,
-            {"error": str(exc), "trace": traceback.format_exc()},
+            _internal_error_payload(exc),
         )
 
 
@@ -720,7 +726,7 @@ def _handle_models_run_post(request: Any, path: str) -> None:
     except Exception as exc:
         request._send_json(
             500,
-            {"error": str(exc), "trace": traceback.format_exc()},
+            _internal_error_payload(exc),
         )
 
 
@@ -808,7 +814,7 @@ def _handle_checkpoints_post(request: Any, path: str) -> None:
     except Exception as exc:
         request._send_json(
             500,
-            {"error": str(exc), "trace": traceback.format_exc()},
+            _internal_error_payload(exc),
         )
 
 
@@ -866,7 +872,7 @@ def _handle_workflow_async_post(request: Any, path: str) -> None:
     except Exception as exc:
         request._send_json(
             500,
-            {"error": str(exc), "trace": traceback.format_exc()},
+            _internal_error_payload(exc),
         )
 
 
@@ -914,7 +920,7 @@ def _handle_workflow_spawn_post(request: Any, path: str) -> None:
     except Exception as exc:
         request._send_json(
             500,
-            {"error": str(exc), "trace": traceback.format_exc()},
+            _internal_error_payload(exc),
         )
 
 
@@ -985,7 +991,7 @@ def _handle_workflows_run_post(request: Any, path: str) -> None:
     except Exception as exc:
         request._send_json(
             500,
-            {"error": str(exc), "trace": traceback.format_exc()},
+            _internal_error_payload(exc),
         )
 
 
@@ -1048,7 +1054,7 @@ def _handle_workflow_job_post(request: Any, path: str) -> None:
     except Exception as exc:
         request._send_json(
             500,
-            {"error": str(exc), "trace": traceback.format_exc()},
+            _internal_error_payload(exc),
         )
 
 
@@ -1086,7 +1092,7 @@ def _handle_manifest_save_post(request: Any, path: str) -> None:
     except Exception as exc:
         request._send_json(
             500,
-            {"error": str(exc), "trace": traceback.format_exc()},
+            _internal_error_payload(exc),
         )
 
 
@@ -1124,7 +1130,7 @@ def _handle_manifest_save_as_post(request: Any, path: str) -> None:
     except Exception as exc:
         request._send_json(
             500,
-            {"error": str(exc), "trace": traceback.format_exc()},
+            _internal_error_payload(exc),
         )
 
 
@@ -1247,7 +1253,7 @@ def _handle_model_run_status_get(request: Any, path: str) -> None:
     except Exception as exc:
         request._send_json(
             500,
-            {"error": str(exc), "trace": traceback.format_exc()},
+            _internal_error_payload(exc),
         )
 
 
@@ -1473,7 +1479,7 @@ def _handle_workflow_status(request: Any, path: str) -> None:
     except Exception as exc:
         request._send_json(
             500,
-            {"error": str(exc), "trace": traceback.format_exc()},
+            _internal_error_payload(exc),
         )
 
 

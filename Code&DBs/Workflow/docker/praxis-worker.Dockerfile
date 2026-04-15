@@ -9,6 +9,7 @@ FROM node:22-bookworm-slim
 ARG PRAXIS_DEPENDENCY_SCOPE=workflow_worker
 
 ENV DEBIAN_FRONTEND=noninteractive
+ENV PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 # ── system packages ──────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -34,6 +35,10 @@ RUN npm install -g \
         @google/gemini-cli@latest \
     && npm cache clean --force
 
+RUN curl https://cursor.com/install -fsS | bash
+RUN ln -sf /root/.local/bin/agent /usr/local/bin/agent \
+    && ln -sf /root/.local/bin/cursor-agent /usr/local/bin/cursor-agent
+
 RUN mkdir -p /opt/praxis/workflow/runtime /opt/praxis/workflow/scripts
 COPY requirements.runtime.txt /opt/praxis/workflow/requirements.runtime.txt
 COPY runtime/__init__.py /opt/praxis/workflow/runtime/__init__.py
@@ -53,4 +58,4 @@ RUN python3 /opt/praxis/workflow/scripts/export_dependency_scope.py \
 WORKDIR /workspace
 
 # Smoke test — verify tools are reachable from login shell
-RUN bash -lc "node --version && python3 --version && git --version && which claude && which codex && which gemini"
+RUN bash -lc "node --version && python3 --version && git --version && which claude && which codex && which gemini && which cursor-agent"

@@ -64,7 +64,7 @@ def _stable_id(prefix: str, payload: Any) -> str:
 
 
 def _can_use_planning_repo(conn: Any | None) -> bool:
-    return conn is not None and hasattr(conn, "fetchrow") and hasattr(conn, "fetch") and hasattr(conn, "execute")
+    return conn is not None and hasattr(conn, "fetchrow") and hasattr(conn, "execute")
 
 
 def _tokenize_text(*values: Any) -> set[str]:

@@ -62,6 +62,12 @@ def resolve_compiler_embedder() -> tuple[Any | None, dict[str, str | None]]:
 
     from runtime.embedding_service import EmbeddingService
 
+    if not EmbeddingService.backend_available():
+        reason = EmbeddingService.backend_unavailable_reason() or "embedding_backend_unavailable"
+        _COMPILER_EMBEDDER_ERROR = reason
+        logger.info("Compiler semantic retrieval unavailable: %s", reason)
+        return None, {"mode": "degraded", "reason": reason}
+
     try:
         _COMPILER_EMBEDDER = EmbeddingService()
     except Exception as exc:

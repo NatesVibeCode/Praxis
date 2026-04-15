@@ -550,6 +550,34 @@ def test_compile_prose_returns_plain_dict_when_llm_falls_back(monkeypatch) -> No
     assert result["refinement"]["applied"] is False
 
 
+def test_compile_prose_remains_bootstrap_only_when_projection_is_ready(monkeypatch) -> None:
+    monkeypatch.setattr("runtime.intent_matcher.IntentMatcher", _StubMatcher)
+    monkeypatch.setattr(compiler, "_get_connection", lambda: _FakeConn())
+    monkeypatch.setattr(
+        compiler,
+        "load_compile_index_snapshot",
+        lambda conn, **kwargs: _compile_index_snapshot(
+            catalog=[],
+            integrations=[],
+            object_types=[],
+            capabilities=compiler._build_capability_catalog([]),
+            route_hints=(("build", "auto/build"),),
+        ),
+    )
+    monkeypatch.setattr(
+        "runtime.operating_model_planner.plan_definition",
+        lambda *_args, **_kwargs: pytest.fail("compile bootstrap must not auto-plan"),
+    )
+
+    result = compiler.compile_prose("Build a workflow from this prose", conn=_FakeConn())
+
+    assert result["compiled_spec"] is None
+    assert any(
+        "bootstrap planning state only" in note
+        for note in result["planning_notes"]
+    )
+
+
 def test_compile_prose_uses_llm_output_and_resolves_catalog_entries(monkeypatch) -> None:
     monkeypatch.setenv("WORKFLOW_COMPILER_ENABLE_LLM", "1")
     catalog = [

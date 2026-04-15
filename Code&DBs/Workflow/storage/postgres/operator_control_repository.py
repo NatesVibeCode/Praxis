@@ -12,13 +12,14 @@ from authority.operator_control import (
     OperatorControlRepositoryError,
     OperatorDecisionAuthorityRecord,
     _normalize_as_of,
+    normalize_operator_decision_record,
     _require_datetime,
     _require_mapping,
     _require_text,
 )
 from storage.migrations import WorkflowMigrationError, workflow_migration_statements
 
-_DUPLICATE_SQLSTATES = {"42P07", "42710"}
+_DUPLICATE_SQLSTATES = {"42P07", "42701", "42710"}
 _SCHEMA_FILENAME = "010_operator_control_authority.sql"
 _SCHEMA_BOOTSTRAP_LOCK_ID = 741001
 
@@ -104,6 +105,16 @@ def _decision_record_from_row(row: asyncpg.Record) -> OperatorDecisionAuthorityR
         decided_at=_require_datetime(row["decided_at"], field_name="decided_at"),
         created_at=_require_datetime(row["created_at"], field_name="created_at"),
         updated_at=_require_datetime(row["updated_at"], field_name="updated_at"),
+        decision_scope_kind=(
+            _require_text(row["decision_scope_kind"], field_name="decision_scope_kind")
+            if row["decision_scope_kind"] is not None
+            else None
+        ),
+        decision_scope_ref=(
+            _require_text(row["decision_scope_ref"], field_name="decision_scope_ref")
+            if row["decision_scope_ref"] is not None
+            else None
+        ),
     )
 
 
@@ -157,6 +168,10 @@ class PostgresOperatorControlRepository:
     ) -> OperatorDecisionAuthorityRecord:
         """Persist one canonical operator decision row."""
 
+        normalized_operator_decision = normalize_operator_decision_record(
+            operator_decision,
+        )
+
         try:
             row = await self._conn.fetchrow(
                 """
@@ -173,9 +188,11 @@ class PostgresOperatorControlRepository:
                     effective_to,
                     decided_at,
                     created_at,
-                    updated_at
+                    updated_at,
+                    decision_scope_kind,
+                    decision_scope_ref
                 ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
                 )
                 ON CONFLICT (operator_decision_id) DO UPDATE SET
                     decision_key = EXCLUDED.decision_key,
@@ -188,7 +205,9 @@ class PostgresOperatorControlRepository:
                     effective_from = EXCLUDED.effective_from,
                     effective_to = EXCLUDED.effective_to,
                     decided_at = EXCLUDED.decided_at,
-                    updated_at = EXCLUDED.updated_at
+                    updated_at = EXCLUDED.updated_at,
+                    decision_scope_kind = EXCLUDED.decision_scope_kind,
+                    decision_scope_ref = EXCLUDED.decision_scope_ref
                 RETURNING
                     operator_decision_id,
                     decision_key,
@@ -202,29 +221,33 @@ class PostgresOperatorControlRepository:
                     effective_to,
                     decided_at,
                     created_at,
-                    updated_at
+                    updated_at,
+                    decision_scope_kind,
+                    decision_scope_ref
                 """,
-                operator_decision.operator_decision_id,
-                operator_decision.decision_key,
-                operator_decision.decision_kind,
-                operator_decision.decision_status,
-                operator_decision.title,
-                operator_decision.rationale,
-                operator_decision.decided_by,
-                operator_decision.decision_source,
-                operator_decision.effective_from,
-                operator_decision.effective_to,
-                operator_decision.decided_at,
-                operator_decision.created_at,
-                operator_decision.updated_at,
+                normalized_operator_decision.operator_decision_id,
+                normalized_operator_decision.decision_key,
+                normalized_operator_decision.decision_kind,
+                normalized_operator_decision.decision_status,
+                normalized_operator_decision.title,
+                normalized_operator_decision.rationale,
+                normalized_operator_decision.decided_by,
+                normalized_operator_decision.decision_source,
+                normalized_operator_decision.effective_from,
+                normalized_operator_decision.effective_to,
+                normalized_operator_decision.decided_at,
+                normalized_operator_decision.created_at,
+                normalized_operator_decision.updated_at,
+                normalized_operator_decision.decision_scope_kind,
+                normalized_operator_decision.decision_scope_ref,
             )
         except asyncpg.PostgresError as exc:
             raise OperatorControlRepositoryError(
                 "operator_control.write_failed",
                 "failed to record operator decision row",
                 details={
-                    "operator_decision_id": operator_decision.operator_decision_id,
-                    "decision_key": operator_decision.decision_key,
+                    "operator_decision_id": normalized_operator_decision.operator_decision_id,
+                    "decision_key": normalized_operator_decision.decision_key,
                     "sqlstate": getattr(exc, "sqlstate", None),
                 },
             ) from exc
@@ -233,8 +256,8 @@ class PostgresOperatorControlRepository:
                 "operator_control.write_failed",
                 "recording operator decision row returned no row",
                 details={
-                    "operator_decision_id": operator_decision.operator_decision_id,
-                    "decision_key": operator_decision.decision_key,
+                    "operator_decision_id": normalized_operator_decision.operator_decision_id,
+                    "decision_key": normalized_operator_decision.decision_key,
                 },
         )
         return _decision_record_from_row(row)
@@ -245,61 +268,68 @@ class PostgresOperatorControlRepository:
         operator_decision: OperatorDecisionAuthorityRecord,
         cutover_gate: CutoverGateAuthorityRecord,
     ) -> tuple[OperatorDecisionAuthorityRecord, CutoverGateAuthorityRecord]:
+        normalized_operator_decision = normalize_operator_decision_record(
+            operator_decision,
+            fallback_scope_kind=cutover_gate.target_kind,
+            fallback_scope_ref=cutover_gate.target_ref,
+        )
         normalized_operator_decision = OperatorDecisionAuthorityRecord(
             operator_decision_id=_require_text(
-                operator_decision.operator_decision_id,
+                normalized_operator_decision.operator_decision_id,
                 field_name="operator_decision.operator_decision_id",
             ),
             decision_key=_require_text(
-                operator_decision.decision_key,
+                normalized_operator_decision.decision_key,
                 field_name="operator_decision.decision_key",
             ),
             decision_kind=_require_text(
-                operator_decision.decision_kind,
+                normalized_operator_decision.decision_kind,
                 field_name="operator_decision.decision_kind",
             ),
             decision_status=_require_text(
-                operator_decision.decision_status,
+                normalized_operator_decision.decision_status,
                 field_name="operator_decision.decision_status",
             ),
             title=_require_text(
-                operator_decision.title,
+                normalized_operator_decision.title,
                 field_name="operator_decision.title",
             ),
             rationale=_require_text(
-                operator_decision.rationale,
+                normalized_operator_decision.rationale,
                 field_name="operator_decision.rationale",
             ),
             decided_by=_require_text(
-                operator_decision.decided_by,
+                normalized_operator_decision.decided_by,
                 field_name="operator_decision.decided_by",
             ),
             decision_source=_require_text(
-                operator_decision.decision_source,
+                normalized_operator_decision.decision_source,
                 field_name="operator_decision.decision_source",
             ),
             effective_from=_require_datetime(
-                operator_decision.effective_from,
+                normalized_operator_decision.effective_from,
                 field_name="operator_decision.effective_from",
             ),
             effective_to=_require_datetime(
-                operator_decision.effective_to,
+                normalized_operator_decision.effective_to,
                 field_name="operator_decision.effective_to",
             )
-            if operator_decision.effective_to is not None
+            if normalized_operator_decision.effective_to is not None
             else None,
             decided_at=_require_datetime(
-                operator_decision.decided_at,
+                normalized_operator_decision.decided_at,
                 field_name="operator_decision.decided_at",
             ),
             created_at=_require_datetime(
-                operator_decision.created_at,
+                normalized_operator_decision.created_at,
                 field_name="operator_decision.created_at",
             ),
             updated_at=_require_datetime(
-                operator_decision.updated_at,
+                normalized_operator_decision.updated_at,
                 field_name="operator_decision.updated_at",
             ),
+            decision_scope_kind=normalized_operator_decision.decision_scope_kind,
+            decision_scope_ref=normalized_operator_decision.decision_scope_ref,
         )
         normalized_cutover_gate = CutoverGateAuthorityRecord(
             cutover_gate_id=_require_text(
@@ -406,9 +436,11 @@ class PostgresOperatorControlRepository:
                         effective_to,
                         decided_at,
                         created_at,
-                        updated_at
+                        updated_at,
+                        decision_scope_kind,
+                        decision_scope_ref
                     ) VALUES (
-                        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+                        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
                     )
                     ON CONFLICT (operator_decision_id) DO UPDATE SET
                         decision_key = EXCLUDED.decision_key,
@@ -421,7 +453,9 @@ class PostgresOperatorControlRepository:
                         effective_from = EXCLUDED.effective_from,
                         effective_to = EXCLUDED.effective_to,
                         decided_at = EXCLUDED.decided_at,
-                        updated_at = EXCLUDED.updated_at
+                        updated_at = EXCLUDED.updated_at,
+                        decision_scope_kind = EXCLUDED.decision_scope_kind,
+                        decision_scope_ref = EXCLUDED.decision_scope_ref
                     RETURNING
                         operator_decision_id,
                         decision_key,
@@ -435,7 +469,9 @@ class PostgresOperatorControlRepository:
                         effective_to,
                         decided_at,
                         created_at,
-                        updated_at
+                        updated_at,
+                        decision_scope_kind,
+                        decision_scope_ref
                     """,
                     normalized_operator_decision.operator_decision_id,
                     normalized_operator_decision.decision_key,
@@ -450,6 +486,8 @@ class PostgresOperatorControlRepository:
                     normalized_operator_decision.decided_at,
                     normalized_operator_decision.created_at,
                     normalized_operator_decision.updated_at,
+                    normalized_operator_decision.decision_scope_kind,
+                    normalized_operator_decision.decision_scope_ref,
                 )
                 gate_row = await self._conn.fetchrow(
                     """
@@ -573,7 +611,9 @@ class PostgresOperatorControlRepository:
                     effective_to,
                     decided_at,
                     created_at,
-                    updated_at
+                    updated_at,
+                    decision_scope_kind,
+                    decision_scope_ref
                 FROM operator_decisions
                 WHERE effective_from <= $1
                   AND (effective_to IS NULL OR effective_to > $1)

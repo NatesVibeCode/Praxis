@@ -120,23 +120,25 @@ def test_default_manifest_exposes_the_api_server_subset(monkeypatch) -> None:
         scope="workflow_worker",
         manifest_path=manifest,
     )
+    semantic_backend_report = dependency_contract.dependency_truth_report(
+        scope="semantic_backend",
+        manifest_path=manifest,
+    )
     runtime_report = dependency_contract.dependency_truth_report(
         scope="runtime",
         manifest_path=manifest,
     )
 
     assert api_report["ok"] is True
-    assert api_report["required_count"] == 6
+    assert api_report["required_count"] == 4
     assert [pkg["distribution"] for pkg in api_report["packages"]] == [
         "asyncpg",
         "pydantic",
         "fastapi",
         "uvicorn",
-        "numpy",
-        "sentence-transformers",
     ]
     assert worker_report["ok"] is True
-    assert worker_report["required_count"] == 9
+    assert worker_report["required_count"] == 7
     assert [pkg["distribution"] for pkg in worker_report["packages"]] == [
         "asyncpg",
         "pydantic",
@@ -145,6 +147,13 @@ def test_default_manifest_exposes_the_api_server_subset(monkeypatch) -> None:
         "openai",
         "croniter",
         "psycopg2-binary",
+    ]
+    assert semantic_backend_report["ok"] is True
+    assert semantic_backend_report["required_count"] == 5
+    assert [pkg["distribution"] for pkg in semantic_backend_report["packages"]] == [
+        "pydantic",
+        "fastapi",
+        "uvicorn",
         "numpy",
         "sentence-transformers",
     ]

@@ -33,17 +33,17 @@ def _api_routes_command(args: list[str], *, stdout: TextIO) -> int:
 
     if args and args[0] in {"-h", "--help"}:
         stdout.write(
-            "usage: workflow api routes [--search TEXT] [--method METHOD] [--tag TAG] [--path-prefix PREFIX] [--json]\n"
+            "usage: workflow api routes [--search TEXT] [--method METHOD] [--tag TAG] [--path-prefix PREFIX] [--visibility public|internal|all] [--json]\n"
             "\n"
             "Show the live FastAPI route catalog without starting the server.\n"
-            "Use this to discover the HTTP surface from the CLI.\n"
+            "By default this shows the public `/v1` contract. Use --visibility all to inspect internal compatibility routes too.\n"
             "\n"
             "Examples:\n"
-            "  workflow api routes\n"
-            "  workflow routes\n"
-            "  workflow api routes --search health --method GET\n"
-            "  workflow routes --tag workflow --method GET\n"
-            "  workflow api routes --path-prefix /api/workflow-runs --json\n"
+            "  praxis workflow api routes\n"
+            "  praxis workflow routes\n"
+            "  praxis workflow api routes --search runs --method GET\n"
+            "  praxis workflow routes --visibility all --path-prefix /api --json\n"
+            "  praxis workflow api routes --path-prefix /v1/runs --json\n"
             "  workflow api routes --json\n"
             "\n"
             "Tip: plain output also shows the most common methods and tags, plus a suggested follow-up filter.\n"
@@ -59,6 +59,7 @@ def _api_routes_command(args: list[str], *, stdout: TextIO) -> int:
     method = None
     tag = None
     path_prefix = None
+    visibility = "public"
     i = 0
     while i < len(args):
         arg = args[i]
@@ -89,11 +90,26 @@ def _api_routes_command(args: list[str], *, stdout: TextIO) -> int:
                 return 2
             path_prefix = args[i + 1]
             i += 2
+        elif arg == "--visibility":
+            if i + 1 >= len(args):
+                stdout.write("error: --visibility requires a value\n")
+                return 2
+            visibility = args[i + 1]
+            if visibility not in {"public", "internal", "all"}:
+                stdout.write("error: --visibility must be one of: public, internal, all\n")
+                return 2
+            i += 2
         else:
             stdout.write(f"error: unknown argument: {arg}\n")
             return 2
 
-    payload = list_api_routes(search=search, method=method, tag=tag, path_prefix=path_prefix)
+    payload = list_api_routes(
+        search=search,
+        method=method,
+        tag=tag,
+        path_prefix=path_prefix,
+        visibility=visibility,
+    )
     if as_json:
         print_json(stdout, payload)
         return 0
@@ -159,11 +175,12 @@ def _render_route_facets(rows: object, *, field_name: str, limit: int = 5) -> st
 
 
 def _circuits_command(args: list[str], *, stdout: TextIO) -> int:
-    """Handle `workflow circuits [list|open|close|reset]`."""
+    """Handle `workflow circuits [list|history|open|close|reset]`."""
 
     if args and args[0] in {"-h", "--help"}:
         stdout.write(
             "usage: workflow circuits [list [provider_slug]]\n"
+            "       workflow circuits history [provider_slug]\n"
             "       workflow circuits open <provider_slug> [--effective-to <iso8601>] [--reason <code>] [--rationale <text>] [--decided-by <principal>] [--decision-source <source>]\n"
             "       workflow circuits close <provider_slug> [--effective-to <iso8601>] [--reason <code>] [--rationale <text>] [--decided-by <principal>] [--decision-source <source>]\n"
             "       workflow circuits reset <provider_slug> [--reason <code>] [--rationale <text>] [--decided-by <principal>] [--decision-source <source>]\n"
@@ -174,15 +191,15 @@ def _circuits_command(args: list[str], *, stdout: TextIO) -> int:
 
     action = "list"
     tail = list(args)
-    if tail and tail[0] in {"list", "open", "close", "reset"}:
+    if tail and tail[0] in {"list", "history", "open", "close", "reset"}:
         action = tail.pop(0)
 
     params: dict[str, object] = {"action": action}
-    if action == "list":
+    if action in {"list", "history"}:
         if tail:
             params["provider_slug"] = tail.pop(0)
         if tail:
-            stdout.write(f"error: unexpected arguments for circuits list: {' '.join(tail)}\n")
+            stdout.write(f"error: unexpected arguments for circuits {action}: {' '.join(tail)}\n")
             return 2
     else:
         if not tail:

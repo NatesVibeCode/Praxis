@@ -254,6 +254,62 @@ def tool_praxis_circuits(params: dict) -> dict:
     """Inspect or override provider circuit breakers through operator-control authority."""
 
     action = str(params.get("action") or "list").strip().lower()
+    if action == "history":
+        provider_slug = str(params.get("provider_slug") or "").strip().lower()
+        rows = _subs.get_pg_conn().execute(
+            """
+            SELECT
+                operator_decision_id,
+                decision_key,
+                decision_kind,
+                decision_status,
+                rationale,
+                decided_by,
+                decision_source,
+                effective_from,
+                effective_to,
+                decided_at,
+                created_at,
+                updated_at,
+                decision_scope_kind,
+                decision_scope_ref
+            FROM operator_decisions
+            WHERE decision_scope_kind = 'provider'
+              AND decision_kind IN (
+                    'circuit_breaker_reset',
+                    'circuit_breaker_force_open',
+                    'circuit_breaker_force_closed'
+              )
+              AND ($1::text = '' OR decision_scope_ref = $1)
+            ORDER BY decided_at DESC, created_at DESC, operator_decision_id DESC
+            """,
+            provider_slug,
+        )
+        history: list[dict[str, object]] = []
+        for row in rows:
+            decision_key = str(row.get("decision_key") or "")
+            row_provider_slug = str(row.get("decision_scope_ref") or "").strip().lower()
+            history.append(
+                {
+                    "provider_slug": row_provider_slug,
+                    "operator_decision_id": str(row.get("operator_decision_id") or ""),
+                    "decision_key": decision_key,
+                    "decision_kind": str(row.get("decision_kind") or ""),
+                    "decision_status": str(row.get("decision_status") or ""),
+                    "rationale": str(row.get("rationale") or ""),
+                    "decided_by": str(row.get("decided_by") or ""),
+                    "decision_source": str(row.get("decision_source") or ""),
+                    "effective_from": row.get("effective_from").isoformat() if row.get("effective_from") is not None else None,
+                    "effective_to": row.get("effective_to").isoformat() if row.get("effective_to") is not None else None,
+                    "decided_at": row.get("decided_at").isoformat() if row.get("decided_at") is not None else None,
+                    "created_at": row.get("created_at").isoformat() if row.get("created_at") is not None else None,
+                    "updated_at": row.get("updated_at").isoformat() if row.get("updated_at") is not None else None,
+                    "decision_scope_kind": str(row.get("decision_scope_kind") or ""),
+                    "decision_scope_ref": row_provider_slug,
+                }
+            )
+        return {"history": history}
+
     if action == "list":
         from runtime.circuit_breaker import get_circuit_breakers
 
@@ -277,7 +333,7 @@ def tool_praxis_circuits(params: dict) -> dict:
         return {"error": "provider_slug is required for circuit override actions"}
 
     if action not in {"open", "close", "reset"}:
-        return {"error": "Unknown action. Supported actions: list, open, close, reset"}
+        return {"error": "Unknown action. Supported actions: list, history, open, close, reset"}
 
     effective_to = params.get("effective_to")
     effective_from = params.get("effective_from")
@@ -590,6 +646,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "Inspect effective circuit-breaker state or apply a durable manual override for one provider.\n\n"
                 "ACTIONS:\n"
                 "  'list'  — show effective state, runtime state, and any active manual override metadata\n"
+                "  'history' — show append-only override decision history from operator authority\n"
                 "  'open'  — force the breaker open for one provider until reset or effective_to\n"
                 "  'close' — force the breaker closed for one provider until reset or effective_to\n"
                 "  'reset' — clear the manual override and return to runtime-managed breaker behavior\n\n"
@@ -600,12 +657,12 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["list", "open", "close", "reset"],
+                        "enum": ["list", "history", "open", "close", "reset"],
                         "default": "list",
                     },
                     "provider_slug": {
                         "type": "string",
-                        "description": "Provider slug for open, close, reset, or to filter list output.",
+                        "description": "Provider slug for open, close, reset, or to filter list/history output.",
                     },
                     "effective_to": {
                         "type": "string",

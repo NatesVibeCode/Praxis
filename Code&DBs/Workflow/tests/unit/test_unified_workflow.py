@@ -999,6 +999,135 @@ def test_execute_job_non_packet_runtime_injects_execution_bundle(monkeypatch) ->
     assert execution_bundle["access_policy"]["verify_refs"] == ["verify.spec.global"]
 
 
+def test_execute_job_non_packet_runtime_uses_execution_manifest_authority(monkeypatch) -> None:
+    class _Conn:
+        def execute(self, query: str, *args):
+            normalized = " ".join(query.split())
+            if normalized == "SELECT run_id, current_state, request_envelope FROM workflow_runs WHERE run_id = $1":
+                return [{
+                    "run_id": "run.alpha",
+                    "current_state": "queued",
+                    "request_envelope": {
+                        "workflow_id": "wf_alpha",
+                        "spec_snapshot": {
+                            "definition_revision": "def_alpha",
+                            "execution_manifest": {
+                                "execution_manifest_ref": "execution_manifest:wf_alpha:def_alpha:manifest_alpha",
+                                "approved_bundle_refs": ["capability_bundle:email_triage"],
+                                "tool_allowlist": {
+                                    "mcp_tools": ["praxis_integration", "praxis_status"],
+                                    "adapter_tools": ["repo_fs"],
+                                },
+                                "verify_refs": ["verify.approved"],
+                            },
+                            "jobs": [
+                                {
+                                    "label": "job-alpha",
+                                    "prompt": "Research otters and invent a totally different tool story.",
+                                    "write_scope": ["runtime/example.py"],
+                                }
+                            ],
+                        }
+                    },
+                }]
+            if "FROM workflow_job_runtime_context" in normalized:
+                return []
+            if "INSERT INTO workflow_job_runtime_context" in normalized:
+                return []
+            raise AssertionError(f"Unexpected query: {normalized}")
+
+    captured: dict[str, object] = {}
+    completed: dict[str, object] = {}
+
+    monkeypatch.setattr(_exec_mod, "mark_running", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "registry.agent_config.AgentRegistry.load_from_postgres",
+        lambda _conn: SimpleNamespace(get=lambda _slug: SimpleNamespace(provider="openai")),
+    )
+    monkeypatch.setattr(_exec_mod, "_runtime_profile_ref_for_run", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        _exec_mod,
+        "resolve_execution_transport",
+        lambda _config: SimpleNamespace(transport_kind="cli"),
+    )
+    import runtime.agent_spawner as agent_spawner_module
+
+    monkeypatch.setattr(
+        agent_spawner_module.AgentSpawner,
+        "preflight",
+        lambda self, agent_slug: SimpleNamespace(
+            provider=agent_slug.split("/", 1)[0],
+            ready=True,
+            reason=None,
+            checked_at=datetime.now(timezone.utc),
+        ),
+    )
+    monkeypatch.setattr(
+        _exec_mod,
+        "_resolve_job_prompt_authority",
+        lambda *_args, **_kwargs: ("Research otters and invent a tool story.", None, False, None, None),
+    )
+    monkeypatch.setattr(
+        _ctx_mod,
+        "resolve_scope",
+        lambda write_scope, root_dir: SimpleNamespace(
+            computed_read_scope=[],
+            test_scope=[],
+            blast_radius=[],
+            context_sections=[],
+        ),
+    )
+
+    def _capture_cli(_config, prompt, _repo_root, **kwargs):
+        captured["execution_bundle"] = kwargs.get("execution_bundle")
+        return {
+            "status": "succeeded",
+            "stdout": "done",
+            "exit_code": 0,
+            "token_input": 0,
+            "token_output": 0,
+            "cost_usd": 0.0,
+        }
+
+    monkeypatch.setattr(_exec_mod, "_execute_cli", _capture_cli)
+    monkeypatch.setattr(_exec_mod, "_write_output", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr(_exec_mod, "_write_job_receipt", lambda *_args, **_kwargs: "receipt.alpha")
+    monkeypatch.setattr(_exec_mod, "_get_verify_bindings", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(_exec_mod, "_resolve_submission", lambda _conn, **kwargs: _SubmissionGateResult(
+        submission_state={},
+        final_status=kwargs["final_status"],
+        final_error_code=kwargs["final_error_code"],
+        result=kwargs["result"],
+    ))
+    monkeypatch.setattr(
+        _exec_mod,
+        "complete_job",
+        lambda _conn, _job_id, **kwargs: completed.update(kwargs),
+    )
+    monkeypatch.setattr(_exec_mod, "_build_platform_context", lambda _repo_root: "platform context")
+
+    _exec_mod.execute_job(
+        _Conn(),
+        {
+            "id": 15,
+            "label": "job-alpha",
+            "agent_slug": "openai/gpt-5.4",
+            "prompt": "Research otters and invent a tool story.",
+            "run_id": "run.alpha",
+        },
+        repo_root="/tmp/workspace.alpha",
+    )
+
+    execution_bundle = captured["execution_bundle"]
+    assert completed["status"] == "succeeded"
+    assert execution_bundle["execution_manifest_ref"] == "execution_manifest:wf_alpha:def_alpha:manifest_alpha"
+    assert execution_bundle["allowed_tools"] == ["repo_fs"]
+    assert "praxis_integration" in execution_bundle["mcp_tool_names"]
+    assert "praxis_status" in execution_bundle["mcp_tool_names"]
+    assert "praxis_query" not in execution_bundle["mcp_tool_names"]
+    assert execution_bundle["access_policy"]["verify_refs"] == ["verify.approved"]
+
+
 def test_execute_job_allows_mcp_transport_through_cli_sandbox(monkeypatch) -> None:
     class _Conn:
         def execute(self, query: str, *args):
@@ -2331,6 +2460,9 @@ def test_submit_workflow_persists_execution_bundle_and_control_prompt(monkeypatc
             },
         },
     )
+    monkeypatch.setattr(_admission_mod, "_runtime_profile_ref_from_spec", lambda _spec: None)
+    monkeypatch.setattr("runtime.workflow._routing._runtime_profile_ref_from_spec", lambda _spec: None)
+    monkeypatch.setattr("runtime.workflow._routing._workspace_ref_from_spec", lambda _spec: None)
 
     conn = _FakeConn()
 
@@ -2363,13 +2495,84 @@ def test_submit_workflow_persists_execution_bundle_and_control_prompt(monkeypatc
         "praxis_submit_code_change",
         "praxis_get_submission",
     ]
+
+
+def test_submit_workflow_prefers_execution_manifest_authority_over_prompt_bucket(monkeypatch):
+    jobs = [
+        {
+            "label": "build_a",
+            "prompt": "Write an architecture essay about otters.",
+            "agent": "auto/build",
+            "write_scope": ["app.py"],
+        },
+    ]
+    raw = {
+        "name": "bundle-spec",
+        "workflow_id": "workflow.bundle_spec",
+        "phase": "build",
+        "jobs": [dict(job) for job in jobs],
+        "definition_revision": "definition.bundle",
+        "plan_revision": "plan.bundle",
+        "execution_manifest": {
+            "execution_manifest_ref": "execution_manifest:wf:definition.bundle:1",
+            "approved_bundle_refs": ["capability_bundle:email_triage"],
+            "tool_allowlist": {
+                "mcp_tools": ["praxis_integration", "praxis_status"],
+                "adapter_tools": ["repo_fs"],
+            },
+            "verify_refs": ["verify.approved"],
+        },
+    }
+    spec = SimpleNamespace(
+        name="bundle-spec",
+        workflow_id="workflow.bundle_spec",
+        phase="build",
+        jobs=jobs,
+        verify_refs=[],
+        outcome_goal="",
+        anti_requirements=[],
+        workspace_ref=None,
+        runtime_profile_ref=None,
+        _raw=raw,
+    )
+    monkeypatch.setattr(WorkflowSpec, "load", classmethod(lambda cls, path: spec))
+    monkeypatch.setattr(
+        _ctx_mod,
+        "resolve_scope",
+        lambda write_scope, root_dir: SimpleNamespace(
+            computed_read_scope=[],
+            test_scope=[],
+            blast_radius=[],
+            context_sections=[],
+        ),
+    )
+    monkeypatch.setattr(_ctx_mod, "proof_metrics", lambda conn: {})
+    monkeypatch.setattr(_admission_mod, "_runtime_profile_ref_from_spec", lambda _spec: None)
+    monkeypatch.setattr("runtime.workflow._routing._runtime_profile_ref_from_spec", lambda _spec: None)
+    monkeypatch.setattr("runtime.workflow._routing._workspace_ref_from_spec", lambda _spec: None)
+
+    conn = _FakeConn()
+
+    unified_workflow.submit_workflow(conn, "spec.queue.json", "/repo", run_id="dispatch_bundle_manifest")
+
+    _, insert_args = next(
+        (query, args)
+        for query, args in conn.queries
+        if "INSERT INTO execution_packets" in query
+    )
+    file_inputs = json.loads(insert_args[17])
+    bundle = file_inputs["execution_bundles"]["build_a"]
+
+    assert bundle["execution_manifest_ref"] == "execution_manifest:wf:definition.bundle:1"
+    assert bundle["approved_bundle_refs"] == ["capability_bundle:email_triage"]
+    assert bundle["allowed_tools"] == ["repo_fs"]
+    assert "praxis_integration" in bundle["mcp_tool_names"]
+    assert "praxis_status" in bundle["mcp_tool_names"]
+    assert "praxis_query" not in bundle["mcp_tool_names"]
+    assert bundle["access_policy"]["verify_refs"] == ["verify.approved"]
     assert bundle["access_policy"]["write_scope"] == ["app.py"]
-    assert bundle["access_policy"]["resolved_read_scope"] == ["runtime/helpers.py"]
-    assert bundle["access_policy"]["blast_radius"] == ["runtime/downstream.py"]
-    assert bundle["access_policy"]["verify_refs"] == ["verify.job.local", "verify.spec.global"]
-    assert capability_bindings[0]["tool_bucket"] == "build"
-    assert "praxis_query" in capability_bindings[0]["mcp_tools"]
-    assert "workflow" in capability_bindings[0]["skill_refs"]
+    assert bundle["access_policy"]["resolved_read_scope"] == []
+    assert bundle["access_policy"]["blast_radius"] == []
     assert any("INSERT INTO workflow_job_runtime_context" in query for query, _ in conn.queries)
 
 

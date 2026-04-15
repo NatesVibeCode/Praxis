@@ -88,6 +88,8 @@ def test_manual_force_open_override_blocks_requests() -> None:
         effective_from=datetime(2026, 4, 15, 18, 0, tzinfo=timezone.utc),
         effective_to=None,
         updated_at=datetime(2026, 4, 15, 18, 0, tzinfo=timezone.utc),
+        decision_scope_kind="provider",
+        decision_scope_ref="openai",
     )
     registry._manual_override_map = lambda: {"openai": override}  # type: ignore[method-assign]
 
@@ -121,6 +123,8 @@ def test_manual_force_closed_override_allows_even_when_runtime_is_open() -> None
         effective_from=datetime(2026, 4, 15, 18, 0, tzinfo=timezone.utc),
         effective_to=None,
         updated_at=datetime(2026, 4, 15, 18, 0, tzinfo=timezone.utc),
+        decision_scope_kind="provider",
+        decision_scope_ref="anthropic",
     )
     registry._manual_override_map = lambda: {"anthropic": override}  # type: ignore[method-assign]
 
@@ -130,3 +134,74 @@ def test_manual_force_closed_override_allows_even_when_runtime_is_open() -> None
     assert state["state"] == "CLOSED"
     assert state["runtime_state"] == "OPEN"
     assert state["manual_override"]["override_state"] == "CLOSED"
+
+
+def test_query_manual_overrides_uses_latest_event_and_reset_clears_prior_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from runtime import circuit_breaker as circuit_breaker_module
+
+    module = importlib.reload(circuit_breaker_module)
+    registry = module.CircuitBreakerRegistry(failure_threshold=3, recovery_timeout_s=45.0)
+
+    now = datetime(2026, 4, 15, 19, 0, tzinfo=timezone.utc)
+    rows = [
+        {
+            "operator_decision_id": "operator-decision.circuit-breaker.openai.reset.20260415T190000000000Z",
+            "decision_key": "circuit-breaker::openai::20260415T190000000000Z",
+            "decision_kind": "circuit_breaker_reset",
+            "decision_status": "inactive",
+            "rationale": "Recovered",
+            "decided_by": "ops",
+            "decision_source": "workflow.circuits.recovered",
+            "effective_from": now,
+            "effective_to": now,
+            "updated_at": now,
+            "decision_scope_kind": "provider",
+            "decision_scope_ref": "openai",
+        },
+        {
+            "operator_decision_id": "operator-decision.circuit-breaker.openai.open.20260415T180000000000Z",
+            "decision_key": "circuit-breaker::openai::20260415T180000000000Z",
+            "decision_kind": "circuit_breaker_force_open",
+            "decision_status": "active",
+            "rationale": "Outage",
+            "decided_by": "ops",
+            "decision_source": "workflow.circuits.outage",
+            "effective_from": datetime(2026, 4, 15, 18, 0, tzinfo=timezone.utc),
+            "effective_to": None,
+            "updated_at": datetime(2026, 4, 15, 18, 0, tzinfo=timezone.utc),
+            "decision_scope_kind": "provider",
+            "decision_scope_ref": "openai",
+        },
+        {
+            "operator_decision_id": "operator-decision.circuit-breaker.anthropic.closed.20260415T170000000000Z",
+            "decision_key": "circuit-breaker::anthropic::20260415T170000000000Z",
+            "decision_kind": "circuit_breaker_force_closed",
+            "decision_status": "active",
+            "rationale": "Probe window",
+            "decided_by": "ops",
+            "decision_source": "workflow.circuits.manual-recovery",
+            "effective_from": datetime(2026, 4, 15, 17, 0, tzinfo=timezone.utc),
+            "effective_to": None,
+            "updated_at": datetime(2026, 4, 15, 17, 0, tzinfo=timezone.utc),
+            "decision_scope_kind": "provider",
+            "decision_scope_ref": "anthropic",
+        },
+    ]
+
+    class _FakeSyncConn:
+        def __init__(self, _pool) -> None:
+            pass
+
+        def execute(self, _query: str, *_args):
+            return rows
+
+    monkeypatch.setattr(module, "resolve_runtime_database_url", lambda required=False: "postgresql://postgres@localhost:5432/praxis")
+    monkeypatch.setattr(module, "get_workflow_pool", lambda env=None: object())
+    monkeypatch.setattr(module, "SyncPostgresConnection", _FakeSyncConn)
+
+    overrides = registry._query_manual_overrides()
+
+    assert "openai" not in overrides
+    assert overrides["anthropic"].override_state == module.CircuitState.CLOSED

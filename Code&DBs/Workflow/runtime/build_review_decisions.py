@@ -52,7 +52,7 @@ def record_build_review_decision(
 ) -> dict[str, Any]:
     normalized_actor_type = _text(actor_type).lower() or "human"
     normalized_decision = _text(decision).lower()
-    if hasattr(conn, "fetchrow") and hasattr(conn, "fetch"):
+    if hasattr(conn, "fetchrow") and hasattr(conn, "execute"):
         try:
             session = load_workflow_build_review_session(
                 conn,

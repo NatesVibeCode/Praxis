@@ -82,6 +82,32 @@ def _current_compiled_spec(definition: dict[str, Any], compiled_spec: Any) -> di
     return current_compiled_spec(definition, compiled_spec)
 
 
+def _latest_execution_manifest(
+    pg: Any,
+    *,
+    workflow_id: str,
+    definition_revision: str | None,
+) -> dict[str, Any] | None:
+    normalized_workflow_id = _as_text(workflow_id)
+    normalized_definition_revision = _as_text(definition_revision)
+    if not normalized_workflow_id or not normalized_definition_revision:
+        return None
+    try:
+        from storage.postgres.workflow_build_planning_repository import (
+            load_latest_workflow_build_execution_manifest,
+        )
+    except Exception:
+        return None
+    try:
+        return load_latest_workflow_build_execution_manifest(
+            pg,
+            workflow_id=normalized_workflow_id,
+            definition_revision=normalized_definition_revision,
+        )
+    except Exception:
+        return None
+
+
 def _missing_execution_plan_message(workflow_name: str | None = None) -> str:
     from runtime.operating_model_planner import missing_execution_plan_message
 
@@ -449,6 +475,14 @@ def execute_workflow_invoke(args: dict[str, Any], pg: Any) -> dict[str, Any]:
     )
 
     spec_to_submit = _json_clone(spec)
+    execution_manifest = _latest_execution_manifest(
+        pg,
+        workflow_id=str(workflow_row["id"]),
+        definition_revision=_as_text(spec.get("definition_revision")),
+    )
+    if isinstance(execution_manifest, dict):
+        spec_to_submit["execution_manifest"] = _json_clone(execution_manifest)
+        spec_to_submit["execution_manifest_ref"] = _as_text(execution_manifest.get("execution_manifest_ref")) or None
     packet_provenance = {
         "source_kind": "integration_invoke",
         "integration_id": "workflow",
@@ -457,6 +491,8 @@ def execute_workflow_invoke(args: dict[str, Any], pg: Any) -> dict[str, Any]:
         "input_payload": input_payload,
         "trigger_event": trigger_event,
     }
+    if isinstance(execution_manifest, dict):
+        packet_provenance["execution_manifest"] = _json_clone(execution_manifest)
 
     try:
         result = _submit_workflow_inline(

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import traceback
 from typing import Any
 
 from ._shared import _ClientError, _read_json_body
@@ -118,7 +117,7 @@ def _dispatch_standard_post(request: Any, path: str) -> bool:
     except Exception as exc:
         payload = {
             "error": f"{type(exc).__name__}: {exc}",
-            "traceback": traceback.format_exc(),
+            "error_code": "internal_error",
         }
         request._send_json(
             500,

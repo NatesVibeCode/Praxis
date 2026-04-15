@@ -259,6 +259,55 @@ def test_plan_definition_emits_plan_revision() -> None:
     assert result["compiled_spec"]["plan_revision"].startswith("plan_")
 
 
+def test_plan_definition_blocks_build_authority_without_review_approval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from runtime import build_planning_contract as planning_contract
+
+    monkeypatch.setattr(
+        planner,
+        "build_authority_bundle",
+        lambda _definition: {"projection_status": {"state": "ready"}, "build_issues": []},
+    )
+    monkeypatch.setattr(
+        planning_contract,
+        "build_candidate_resolution_manifest",
+        lambda **_kwargs: {
+            "execution_readiness": "review_required",
+            "required_confirmations": [{"reason": "binding approval required"}],
+        },
+    )
+    monkeypatch.setattr(
+        planning_contract,
+        "build_reviewable_plan",
+        lambda **_kwargs: {
+            "proposal_requests": [],
+            "widening_ops": [],
+            "required_unapproved_slots": ["binding:ticket"],
+            "required_unapproved_bundle_slots": ["bundle:triage"],
+            "approved_binding_refs": [],
+            "approved_bundle_refs": [],
+            "approved_workflow_shape_ref": None,
+        },
+    )
+
+    with pytest.raises(planner.PlanningBlockedError) as exc_info:
+        planner.plan_definition(
+            {
+                "source_prose": "Build a thing",
+                "compiled_prose": "Build a thing",
+                "definition_revision": "def_review_gate",
+                "references": [],
+                "narrative_blocks": [],
+                "draft_flow": [],
+                "trigger_intent": [],
+                "build_graph": {"nodes": [], "edges": []},
+            }
+        )
+
+    assert "binding approval required" in str(exc_info.value)
+
+
 def test_plan_definition_uses_draft_flow_even_when_legacy_jobs_are_present(monkeypatch: pytest.MonkeyPatch) -> None:
     draft_jobs = [
         {

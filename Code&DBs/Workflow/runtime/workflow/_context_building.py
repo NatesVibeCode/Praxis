@@ -96,6 +96,83 @@ def _runtime_profile_sandbox_payload(
     )
     return sandbox_profile_execution_payload(record)
 
+
+def _execution_manifest_for_snapshot(
+    conn: SyncPostgresConnection,
+    *,
+    raw_snapshot: dict[str, object] | None,
+    workflow_id: str | None,
+) -> dict[str, object] | None:
+    def _normalized_execution_manifest(payload: dict[str, object]) -> dict[str, object]:
+        if "tool_allowlist" in payload and "verify_refs" in payload:
+            return json.loads(json.dumps(payload, default=str))
+        tool_allowlist = payload.get("tool_allowlist_json")
+        verify_refs = payload.get("verify_refs_json")
+        approved_bundle_refs = payload.get("approved_bundle_refs_json")
+        compiled_spec = payload.get("compiled_spec_json")
+        policy_gates = payload.get("policy_gates_json")
+        hardening_report = payload.get("hardening_report_json")
+        if isinstance(tool_allowlist, dict):
+            return {
+                "execution_manifest_ref": str(payload.get("execution_manifest_ref") or "").strip() or None,
+                "workflow_id": str(payload.get("workflow_id") or "").strip() or None,
+                "definition_revision": str(payload.get("definition_revision") or "").strip() or None,
+                "manifest_ref": str(payload.get("manifest_ref") or "").strip() or None,
+                "review_group_ref": str(payload.get("review_group_ref") or "").strip() or None,
+                "approved_bundle_refs": _normalize_string_list(approved_bundle_refs),
+                "tool_allowlist": json.loads(json.dumps(tool_allowlist, default=str)),
+                "verify_refs": _normalize_string_list(verify_refs),
+                "compiled_spec": json.loads(json.dumps(compiled_spec, default=str))
+                if isinstance(compiled_spec, dict)
+                else {},
+                "policy_gates": json.loads(json.dumps(policy_gates, default=str))
+                if isinstance(policy_gates, dict)
+                else {},
+                "hardening_report": json.loads(json.dumps(hardening_report, default=str))
+                if isinstance(hardening_report, dict)
+                else {},
+            }
+        return json.loads(json.dumps(payload, default=str))
+
+    snapshot = dict(raw_snapshot or {})
+    embedded_manifest = snapshot.get("execution_manifest")
+    if isinstance(embedded_manifest, dict):
+        return _normalized_execution_manifest(dict(embedded_manifest))
+
+    execution_manifest_ref = str(snapshot.get("execution_manifest_ref") or "").strip()
+    definition_revision = str(snapshot.get("definition_revision") or "").strip()
+    normalized_workflow_id = str(workflow_id or "").strip()
+    if not execution_manifest_ref and (not normalized_workflow_id or not definition_revision):
+        return None
+
+    try:
+        from storage.postgres.workflow_build_planning_repository import (
+            load_latest_workflow_build_execution_manifest,
+            load_workflow_build_execution_manifest_by_ref,
+        )
+    except Exception:
+        return None
+
+    try:
+        if execution_manifest_ref:
+            manifest = load_workflow_build_execution_manifest_by_ref(
+                conn,
+                execution_manifest_ref=execution_manifest_ref,
+            )
+            if isinstance(manifest, dict):
+                return _normalized_execution_manifest(manifest)
+        if normalized_workflow_id and definition_revision:
+            manifest = load_latest_workflow_build_execution_manifest(
+                conn,
+                workflow_id=normalized_workflow_id,
+                definition_revision=definition_revision,
+            )
+            if isinstance(manifest, dict):
+                return _normalized_execution_manifest(manifest)
+    except Exception:
+        return None
+    return None
+
 # ---------------------------------------------------------------------------
 # Extracted functions (lines ~260-1114 of unified.py)
 # ---------------------------------------------------------------------------
@@ -416,6 +493,7 @@ def _build_job_execution_bundles(
     *,
     conn: SyncPostgresConnection,
     spec,
+    raw_snapshot: dict[str, object] | None,
     execution_context_shards: dict[str, dict[str, object]],
     run_id: str | None = None,
     workflow_id: str | None = None,
@@ -427,6 +505,11 @@ def _build_job_execution_bundles(
         for dependency in _normalize_paths(job.get("depends_on")):
             downstream_by_label.setdefault(dependency, []).append(child_label)
     bundles: dict[str, dict[str, object]] = {}
+    execution_manifest = _execution_manifest_for_snapshot(
+        conn,
+        raw_snapshot=raw_snapshot,
+        workflow_id=workflow_id,
+    )
     for index, job in enumerate(spec.jobs):
         label = str(job.get("label") or f"job_{index}")
         context_shard = execution_context_shards.get(label) or {}
@@ -476,6 +559,7 @@ def _build_job_execution_bundles(
             acceptance_contract=job.get("acceptance_contract")
             if isinstance(job.get("acceptance_contract"), dict)
             else None,
+            execution_manifest=execution_manifest,
         )
     return bundles
 
@@ -657,6 +741,11 @@ def _runtime_execution_bundle(
         else []
     )
     snapshot = _json_loads_maybe(_workflow_run_envelope(run_row).get("spec_snapshot"), {}) or {}
+    execution_manifest = _execution_manifest_for_snapshot(
+        conn,
+        raw_snapshot=snapshot,
+        workflow_id=str(_workflow_run_envelope(run_row).get("workflow_id") or "").strip() or None,
+    )
     runtime_profile_ref = str(
         _workflow_run_envelope(run_row).get("runtime_profile_ref")
         or snapshot.get("runtime_profile_ref")
@@ -726,6 +815,7 @@ def _runtime_execution_bundle(
         acceptance_contract=source_job.get("acceptance_contract")
         if isinstance(source_job.get("acceptance_contract"), dict)
         else None,
+        execution_manifest=execution_manifest,
     )
 
 
@@ -847,6 +937,7 @@ def _build_execution_packet(
     execution_bundles = _build_job_execution_bundles(
         conn=conn,
         spec=spec,
+        raw_snapshot=raw_snapshot,
         execution_context_shards=execution_context_shards,
         run_id=run_id,
         workflow_id=workflow_id,

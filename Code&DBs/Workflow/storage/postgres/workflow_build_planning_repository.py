@@ -521,7 +521,7 @@ def load_default_workflow_build_review_policy(conn: Any) -> dict[str, Any] | Non
 
 
 def list_active_capability_bundle_definitions(conn: Any) -> list[dict[str, Any]]:
-    rows = conn.fetch(
+    rows = conn.execute(
         """
         SELECT *
         FROM capability_bundle_definitions
@@ -540,7 +540,7 @@ def load_capability_bundle_definitions(
     normalized_bundle_refs = _string_list(bundle_refs, field_name="bundle_refs")
     if not normalized_bundle_refs:
         return []
-    rows = conn.fetch(
+    rows = conn.execute(
         """
         SELECT *
         FROM capability_bundle_definitions
@@ -553,7 +553,7 @@ def load_capability_bundle_definitions(
 
 
 def list_active_workflow_shape_family_definitions(conn: Any) -> list[dict[str, Any]]:
-    rows = conn.fetch(
+    rows = conn.execute(
         """
         SELECT *
         FROM workflow_shape_family_definitions
@@ -649,6 +649,26 @@ def load_latest_workflow_build_execution_manifest(
     )
 
 
+def load_workflow_build_execution_manifest_by_ref(
+    conn: Any,
+    *,
+    execution_manifest_ref: str,
+) -> dict[str, Any] | None:
+    row = conn.fetchrow(
+        """
+        SELECT *
+        FROM workflow_build_execution_manifests
+        WHERE execution_manifest_ref = $1
+        LIMIT 1
+        """,
+        _require_text(execution_manifest_ref, field_name="execution_manifest_ref"),
+    )
+    return None if row is None else _normalize_row(
+        row,
+        operation="load_workflow_build_execution_manifest_by_ref",
+    )
+
+
 __all__ = [
     "list_active_capability_bundle_definitions",
     "list_active_workflow_shape_family_definitions",
@@ -656,6 +676,7 @@ __all__ = [
     "load_default_workflow_build_review_policy",
     "load_latest_workflow_build_candidate_manifest",
     "load_latest_workflow_build_execution_manifest",
+    "load_workflow_build_execution_manifest_by_ref",
     "load_review_policy_definition",
     "load_workflow_build_intent",
     "load_workflow_build_review_session",

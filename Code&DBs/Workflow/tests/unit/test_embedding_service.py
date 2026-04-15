@@ -218,3 +218,83 @@ def test_embedding_service_retries_with_hub_access_after_local_cache_miss(monkey
         ]
     finally:
         EmbeddingService._reset_shared_state_for_tests()
+
+
+def test_embedding_service_uses_service_backend_when_configured(monkeypatch) -> None:
+    observed: list[tuple[str, dict[str, object]]] = []
+
+    def _fake_service_request(cls, path: str, payload: dict[str, object]) -> dict[str, object]:
+        observed.append((path, dict(payload)))
+        return {
+            "model_name": "all-MiniLM-L6-v2",
+            "dimensions": 384,
+            "vectors": [[5.0] * 384],
+        }
+
+    monkeypatch.setenv("WORKFLOW_EMBEDDING_BACKEND", "service")
+    monkeypatch.setenv("WORKFLOW_EMBEDDING_SERVICE_URL", "http://semantic-backend:8421")
+    monkeypatch.setattr(EmbeddingService, "_service_request", classmethod(_fake_service_request))
+    EmbeddingService._reset_shared_state_for_tests()
+
+    try:
+        service = EmbeddingService()
+        assert service.backend_kind == "service"
+        assert service.embed_one("remote") == [5.0] * 384
+        assert observed == [
+            (
+                "/embed",
+                {
+                    "model_name": service.model_name,
+                    "texts": ["remote"],
+                },
+            )
+        ]
+        assert EmbeddingService._is_model_cached(service.model_name) is True
+    finally:
+        EmbeddingService._reset_shared_state_for_tests()
+
+
+def test_embedding_service_service_prewarm_marks_model_cached(monkeypatch) -> None:
+    observed: list[tuple[str, dict[str, object]]] = []
+
+    def _fake_service_request(cls, path: str, payload: dict[str, object]) -> dict[str, object]:
+        observed.append((path, dict(payload)))
+        return {
+            "status": "ok",
+            "model_name": str(payload.get("model_name") or "all-MiniLM-L6-v2"),
+            "dimensions": 384,
+        }
+
+    monkeypatch.setenv("WORKFLOW_EMBEDDING_BACKEND", "service")
+    monkeypatch.setenv("WORKFLOW_EMBEDDING_SERVICE_URL", "http://semantic-backend:8421")
+    monkeypatch.setattr(EmbeddingService, "_service_request", classmethod(_fake_service_request))
+    EmbeddingService._reset_shared_state_for_tests()
+
+    try:
+        thread = EmbeddingService.start_background_prewarm("all-MiniLM-L6-v2")
+        assert thread is not None
+        thread.join(timeout=1.0)
+
+        assert observed == [
+            (
+                "/prewarm",
+                {
+                    "model_name": "all-MiniLM-L6-v2",
+                },
+            )
+        ]
+        assert EmbeddingService._is_model_cached("all-MiniLM-L6-v2") is True
+    finally:
+        EmbeddingService._reset_shared_state_for_tests()
+
+
+def test_embedding_service_reports_unavailable_backend_without_local_or_service(monkeypatch) -> None:
+    monkeypatch.delenv("WORKFLOW_EMBEDDING_BACKEND", raising=False)
+    monkeypatch.delenv("WORKFLOW_EMBEDDING_SERVICE_URL", raising=False)
+    monkeypatch.setattr(EmbeddingService, "_local_backend_available", classmethod(lambda cls: False))
+
+    backend_kind, reason = EmbeddingService.resolve_backend_status()
+
+    assert backend_kind == "unavailable"
+    assert reason == "embedding_backend_unavailable"
+    assert EmbeddingService.backend_available() is False

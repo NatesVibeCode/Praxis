@@ -1549,16 +1549,10 @@ def test_handle_plan_post_stamps_definition_revision_into_compiled_spec() -> Non
 
     assert request.sent is not None
     status, payload = request.sent
-    assert status == 200
-    assert payload["compiled_spec"]["definition_revision"] == "def_plan_123"
-    assert payload["compiled_spec"]["jobs"][0]["agent"] == "auto/review"
-    assert payload["compiled_spec"]["triggers"] == [
-        {
-            "event_type": "email.received",
-            "filter": {"mailbox": "support"},
-            "source_trigger_id": "trigger-001",
-        }
-    ]
+    assert status == 400
+    assert payload["candidate_resolution_manifest"]["execution_readiness"] == "review_required"
+    assert payload["reviewable_plan"]["approved_binding_refs"] == []
+    assert payload["execution_manifest"] is None
 
 
 def test_handle_plan_post_accepts_build_graph_without_browser_projection() -> None:

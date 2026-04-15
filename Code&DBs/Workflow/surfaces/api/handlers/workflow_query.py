@@ -1797,12 +1797,59 @@ def _handle_plan_post(request: Any, path: str) -> None:
             )
             return
 
+        from runtime.build_planning_contract import (
+            build_candidate_resolution_manifest,
+            build_execution_manifest,
+            build_reviewable_plan,
+        )
         from runtime.operating_model_planner import PlanningBlockedError, plan_definition
 
+        explicit_build_authority_state = any(
+            key in (definition or {})
+            for key in (
+                "binding_ledger",
+                "import_snapshots",
+                "authority_attachments",
+                "build_graph",
+                "build_issues",
+                "projection_status",
+            )
+        )
+        candidate_manifest = None
+        reviewable_plan = None
+        execution_manifest = None
+        workflow_id = _optional_text((definition or {}).get("workflow_id"))
+        if explicit_build_authority_state:
+            candidate_manifest = build_candidate_resolution_manifest(
+                definition=definition,
+                workflow_id=workflow_id,
+                conn=request.subsystems.get_pg_conn(),
+                compiled_spec=None,
+            )
+            reviewable_plan = build_reviewable_plan(
+                definition=definition,
+                workflow_id=workflow_id,
+                conn=request.subsystems.get_pg_conn(),
+                compiled_spec=None,
+                candidate_manifest=candidate_manifest,
+            )
+
         try:
-            result = plan_definition(definition, title=title, conn=request.subsystems.get_pg_conn())
+            result = plan_definition(
+                definition,
+                title=title,
+                conn=request.subsystems.get_pg_conn(),
+                candidate_manifest=candidate_manifest,
+                reviewable_plan=reviewable_plan,
+            )
         except PlanningBlockedError as exc:
-            payload = {"error": str(exc), "unresolved": exc.unresolved}
+            payload = {
+                "error": str(exc),
+                "unresolved": exc.unresolved,
+                "candidate_resolution_manifest": candidate_manifest,
+                "reviewable_plan": reviewable_plan,
+                "execution_manifest": None,
+            }
             request._send_json(400, payload)
             _record_api_route_usage(
                 request.subsystems,
@@ -1814,6 +1861,22 @@ def _handle_plan_post(request: Any, path: str) -> None:
                 headers=request.headers,
             )
             return
+
+        if explicit_build_authority_state:
+            execution_manifest = build_execution_manifest(
+                definition=definition,
+                workflow_id=workflow_id,
+                conn=request.subsystems.get_pg_conn(),
+                compiled_spec=result.get("compiled_spec") if isinstance(result.get("compiled_spec"), dict) else None,
+                candidate_manifest=candidate_manifest,
+                reviewable_plan=reviewable_plan,
+            )
+        if candidate_manifest is not None:
+            result["candidate_resolution_manifest"] = candidate_manifest
+        if reviewable_plan is not None:
+            result["reviewable_plan"] = reviewable_plan
+        if execution_manifest is not None:
+            result["execution_manifest"] = execution_manifest
 
         request._send_json(200, result)
         _record_api_route_usage(

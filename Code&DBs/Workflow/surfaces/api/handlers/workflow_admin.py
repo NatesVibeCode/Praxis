@@ -903,9 +903,7 @@ def _handle_platform_overview_get(request: Any, path: str) -> None:
             },
         )
     except Exception as exc:
-        import traceback
-
-        request._send_json(500, {"error": str(exc), "trace": traceback.format_exc()})
+        request._send_json(500, {"error": f"{type(exc).__name__}: {exc}", "error_code": "internal_error"})
 
 
 def _handle_workflow_templates_get(request: Any, path: str) -> None:

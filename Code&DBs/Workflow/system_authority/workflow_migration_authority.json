@@ -51,7 +51,9 @@
     "120_workflow_build_review_proposal_requests.sql",
     "121_cursor_background_agent_api.sql",
     "122_workflow_build_review_contract_fields.sql",
-    "123_workflow_build_planning_state_registry.sql"
+    "123_workflow_build_planning_state_registry.sql",
+    "124_operator_decision_scope_authority.sql",
+    "125_cursor_local_cli_provider_seed.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -1773,6 +1775,34 @@
         "object_type": "index",
         "object_name": "workflow_build_execution_manifests_workflow_definition_idx"
       }
+    ],
+    "124_operator_decision_scope_authority.sql": [
+      {
+        "object_type": "column",
+        "object_name": "decision_scope_kind"
+      },
+      {
+        "object_type": "column",
+        "object_name": "decision_scope_ref"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "operator_decisions.operator_decisions_scope_pair"
+      },
+      {
+        "object_type": "index",
+        "object_name": "operator_decisions_scope_decided_idx"
+      }
+    ],
+    "125_cursor_local_cli_provider_seed.sql": [
+      {
+        "object_type": "table",
+        "object_name": "provider_cli_profiles"
+      },
+      {
+        "object_type": "table",
+        "object_name": "provider_transport_admissions"
+      }
     ]
   },
   "policy_buckets": {
@@ -1828,7 +1858,9 @@
       "120_workflow_build_review_proposal_requests.sql",
       "121_cursor_background_agent_api.sql",
       "122_workflow_build_review_contract_fields.sql",
-      "123_workflow_build_planning_state_registry.sql"
+      "123_workflow_build_planning_state_registry.sql",
+      "124_operator_decision_scope_authority.sql",
+      "125_cursor_local_cli_provider_seed.sql"
     ],
     "bootstrap_only": [
       "012_execution_leases.sql",

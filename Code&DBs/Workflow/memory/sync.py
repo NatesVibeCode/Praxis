@@ -750,7 +750,8 @@ class MemorySync(HeartbeatModule):
         rows = self._conn.execute(
             '''SELECT operator_decision_id, decision_key, decision_kind,
                       decision_status, title, rationale, decided_by,
-                      decision_source, effective_from, effective_to, decided_at
+                      decision_source, effective_from, effective_to, decided_at,
+                      decision_scope_kind, decision_scope_ref
                FROM operator_decisions WHERE decided_at > $1
                ORDER BY decided_at ASC LIMIT $2''',
             last_ts, _BATCH_LIMIT
@@ -778,6 +779,8 @@ class MemorySync(HeartbeatModule):
                     'decision_source': r['decision_source'] or '',
                     'effective_from': (r['effective_from'] or '').isoformat() if r['effective_from'] else '',
                     'effective_to': (r['effective_to'] or '').isoformat() if r['effective_to'] else '',
+                    'decision_scope_kind': r['decision_scope_kind'] or '',
+                    'decision_scope_ref': r['decision_scope_ref'] or '',
                     'entity_subtype': 'operator_decision',
                 },
                 created_at=ts,

@@ -8,7 +8,7 @@ history, or queue folklore.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any
 
@@ -83,6 +83,12 @@ def _require_mapping(value: object, *, field_name: str) -> Mapping[str, Any]:
     )
 
 
+def _optional_text(value: object, *, field_name: str) -> str | None:
+    if value is None:
+        return None
+    return _require_text(value, field_name=field_name)
+
+
 @dataclass(frozen=True, slots=True)
 class OperatorDecisionAuthorityRecord:
     """Canonical operator decision row."""
@@ -100,6 +106,192 @@ class OperatorDecisionAuthorityRecord:
     decided_at: datetime
     created_at: datetime
     updated_at: datetime
+    decision_scope_kind: str | None = None
+    decision_scope_ref: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class OperatorDecisionScopePolicy:
+    """Explicit scope contract for one decision kind."""
+
+    scope_mode: str
+    allowed_scope_kinds: tuple[str, ...] = ()
+    infer_from_decision_key: bool = False
+    infer_from_target: bool = False
+
+
+_CUTOVER_TARGET_SCOPE_KINDS = (
+    "roadmap_item",
+    "workflow_class",
+    "schedule_definition",
+)
+
+_OPERATOR_DECISION_SCOPE_POLICIES: dict[str, OperatorDecisionScopePolicy] = {
+    "binding": OperatorDecisionScopePolicy(scope_mode="none"),
+    "query": OperatorDecisionScopePolicy(scope_mode="none"),
+    "operator_graph": OperatorDecisionScopePolicy(scope_mode="none"),
+    "circuit_breaker_force_open": OperatorDecisionScopePolicy(
+        scope_mode="required",
+        allowed_scope_kinds=("provider",),
+        infer_from_decision_key=True,
+    ),
+    "circuit_breaker_force_closed": OperatorDecisionScopePolicy(
+        scope_mode="required",
+        allowed_scope_kinds=("provider",),
+        infer_from_decision_key=True,
+    ),
+    "circuit_breaker_reset": OperatorDecisionScopePolicy(
+        scope_mode="required",
+        allowed_scope_kinds=("provider",),
+        infer_from_decision_key=True,
+    ),
+    "native_primary_cutover": OperatorDecisionScopePolicy(
+        scope_mode="required",
+        allowed_scope_kinds=_CUTOVER_TARGET_SCOPE_KINDS,
+        infer_from_target=True,
+    ),
+    "cutover_gate": OperatorDecisionScopePolicy(
+        scope_mode="required",
+        allowed_scope_kinds=_CUTOVER_TARGET_SCOPE_KINDS,
+        infer_from_target=True,
+    ),
+}
+
+
+def operator_decision_scope_policy(*, decision_kind: str) -> OperatorDecisionScopePolicy:
+    normalized_decision_kind = _require_text(
+        decision_kind,
+        field_name="decision_kind",
+    )
+    try:
+        return _OPERATOR_DECISION_SCOPE_POLICIES[normalized_decision_kind]
+    except KeyError as exc:
+        raise OperatorControlRepositoryError(
+            "operator_control.unknown_decision_kind",
+            f"operator decision kind {normalized_decision_kind!r} has no registered scope policy",
+            details={"decision_kind": normalized_decision_kind},
+        ) from exc
+
+
+def _infer_scope_from_decision_key(
+    *,
+    decision_kind: str,
+    decision_key: str,
+) -> tuple[str | None, str | None]:
+    if decision_kind not in {
+        "circuit_breaker_force_open",
+        "circuit_breaker_force_closed",
+        "circuit_breaker_reset",
+    }:
+        return None, None
+    prefix = "circuit-breaker::"
+    if not decision_key.startswith(prefix):
+        return None, None
+    suffix = decision_key[len(prefix):]
+    provider_slug = suffix.split("::", 1)[0].strip().lower()
+    if not provider_slug:
+        return None, None
+    return "provider", provider_slug
+
+
+def normalize_operator_decision_record(
+    operator_decision: OperatorDecisionAuthorityRecord,
+    *,
+    fallback_scope_kind: str | None = None,
+    fallback_scope_ref: str | None = None,
+) -> OperatorDecisionAuthorityRecord:
+    """Normalize one operator decision against the registered scope policy."""
+
+    normalized_decision_kind = _require_text(
+        operator_decision.decision_kind,
+        field_name="operator_decision.decision_kind",
+    )
+    policy = operator_decision_scope_policy(decision_kind=normalized_decision_kind)
+    normalized_scope_kind = _optional_text(
+        operator_decision.decision_scope_kind,
+        field_name="operator_decision.decision_scope_kind",
+    )
+    normalized_scope_ref = _optional_text(
+        operator_decision.decision_scope_ref,
+        field_name="operator_decision.decision_scope_ref",
+    )
+    if (normalized_scope_kind is None) != (normalized_scope_ref is None):
+        raise OperatorControlRepositoryError(
+            "operator_control.invalid_row",
+            "operator decision scope must provide both decision_scope_kind and decision_scope_ref or neither",
+            details={"decision_kind": normalized_decision_kind},
+        )
+
+    if normalized_scope_kind is None and policy.infer_from_target:
+        inferred_scope_kind = _optional_text(
+            fallback_scope_kind,
+            field_name="fallback_scope_kind",
+        )
+        inferred_scope_ref = _optional_text(
+            fallback_scope_ref,
+            field_name="fallback_scope_ref",
+        )
+        if inferred_scope_kind is not None and inferred_scope_ref is not None:
+            normalized_scope_kind = inferred_scope_kind
+            normalized_scope_ref = inferred_scope_ref
+
+    if normalized_scope_kind is None and policy.infer_from_decision_key:
+        normalized_scope_kind, normalized_scope_ref = _infer_scope_from_decision_key(
+            decision_kind=normalized_decision_kind,
+            decision_key=_require_text(
+                operator_decision.decision_key,
+                field_name="operator_decision.decision_key",
+            ),
+        )
+
+    if policy.scope_mode == "none":
+        if normalized_scope_kind is not None or normalized_scope_ref is not None:
+            raise OperatorControlRepositoryError(
+                "operator_control.invalid_scope",
+                f"operator decision kind {normalized_decision_kind!r} must not carry typed scope",
+                details={
+                    "decision_kind": normalized_decision_kind,
+                    "decision_scope_kind": normalized_scope_kind or "",
+                    "decision_scope_ref": normalized_scope_ref or "",
+                },
+            )
+        return replace(
+            operator_decision,
+            decision_kind=normalized_decision_kind,
+            decision_scope_kind=None,
+            decision_scope_ref=None,
+        )
+
+    if normalized_scope_kind is None or normalized_scope_ref is None:
+        raise OperatorControlRepositoryError(
+            "operator_control.scope_required",
+            f"operator decision kind {normalized_decision_kind!r} requires typed scope",
+            details={"decision_kind": normalized_decision_kind},
+        )
+
+    if (
+        policy.allowed_scope_kinds
+        and normalized_scope_kind not in policy.allowed_scope_kinds
+    ):
+        raise OperatorControlRepositoryError(
+            "operator_control.invalid_scope",
+            (
+                f"operator decision kind {normalized_decision_kind!r} requires one of "
+                f"{', '.join(policy.allowed_scope_kinds)}"
+            ),
+            details={
+                "decision_kind": normalized_decision_kind,
+                "decision_scope_kind": normalized_scope_kind,
+                "allowed_scope_kinds": ",".join(policy.allowed_scope_kinds),
+            },
+        )
+
+    return replace(
+        operator_decision,
+        decision_kind=normalized_decision_kind,
+        decision_scope_kind=normalized_scope_kind,
+        decision_scope_ref=normalized_scope_ref,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,6 +349,14 @@ class OperatorDecisionResolution:
     @property
     def rationale(self) -> str:
         return self.operator_decision.rationale
+
+    @property
+    def decision_scope_kind(self) -> str | None:
+        return self.operator_decision.decision_scope_kind
+
+    @property
+    def decision_scope_ref(self) -> str | None:
+        return self.operator_decision.decision_scope_ref
 
 
 @dataclass(frozen=True, slots=True)

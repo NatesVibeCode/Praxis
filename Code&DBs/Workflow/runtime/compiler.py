@@ -445,23 +445,15 @@ def _finalize_compile_result(
     compiled_spec: dict[str, Any] | None = None
     planning_notes: list[str] = []
     authority_bundle = build_authority_bundle(definition)
-
-    if authority_bundle.get("projection_status", {}).get("state") == "ready":
-        try:
-            from runtime.operating_model_planner import plan_definition
-
-            plan_result = plan_definition(definition, title=title, conn=conn)
-            candidate_spec = plan_result.get("compiled_spec")
-            if isinstance(candidate_spec, dict):
-                compiled_spec = candidate_spec
-            planning_notes = [
-                note
-                for note in plan_result.get("planning_notes", [])
-                if isinstance(note, str) and note.strip()
-            ]
-        except Exception as exc:
-            errors.append(f"auto_plan_failed: {exc}")
-            planning_notes.append(f"Auto-plan skipped: {exc}")
+    projection_state = _as_text(authority_bundle.get("projection_status", {}).get("state")) or "blocked"
+    if projection_state == "ready":
+        planning_notes.append(
+            "Compile produced bootstrap planning state only. Review and harden the candidate manifest before generating execution authority."
+        )
+    else:
+        planning_notes.append(
+            "Compile produced bootstrap planning state with unresolved authority. Review and resolve blockers before hardening."
+        )
 
     hydrated_definition = apply_authority_bundle(definition, compiled_spec=compiled_spec)
     authority_bundle = build_authority_bundle(hydrated_definition, compiled_spec=compiled_spec)

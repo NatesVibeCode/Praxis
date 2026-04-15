@@ -116,13 +116,13 @@ See [docs/MCP.md](docs/MCP.md) for the full tool reference.
 The same catalog now powers terminal discovery:
 
 ```bash
-workflow tools list
-workflow tools describe praxis_query
-workflow tools call praxis_health --input-json '{}'
-workflow api routes
+praxis workflow tools list
+praxis workflow tools describe praxis_query
+praxis workflow tools call praxis_health --input-json '{}'
+praxis workflow api routes
 ```
 
-The API surface also exposes the live route catalog at `GET /api/routes` for clients that want discovery without scraping docs.
+The public HTTP contract lives under `/v1`. The internal route catalog remains available at `GET /api/routes`, which defaults to the public `/v1` slice and supports `visibility=all` when operators need the full internal surface.
 
 ## Architecture
 

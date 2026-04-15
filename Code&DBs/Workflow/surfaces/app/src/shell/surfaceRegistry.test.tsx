@@ -26,6 +26,7 @@ describe('surfaceRegistry', () => {
       { id: 'dashboard', label: 'Overview', kind: 'Suite', closable: false },
       { id: 'build', label: 'Workflow workspace', kind: 'Build', closable: false },
       { id: 'costs', label: 'Cost Summary', kind: 'Finance', closable: false },
+      { id: 'manifests', label: 'Manifests', kind: 'Catalog', closable: false },
       { id: 'run-detail:run_123', label: 'Run run_123', kind: 'Run', closable: true },
     ]);
 
@@ -48,6 +49,11 @@ describe('surfaceRegistry', () => {
       description: 'Inspect token spend and recent costed runs.',
       selected: false,
     });
+    expect(navigateItems.find((item) => item.id === 'navigate:manifests')).toMatchObject({
+      label: 'Manifests',
+      description: 'Open the manifest catalog.',
+      selected: false,
+    });
     expect(navigateItems.find((item) => item.id === 'tab:run-detail:run_123')).toMatchObject({
       label: 'Run run_123',
       description: 'Open the run detail tab.',
@@ -61,6 +67,15 @@ describe('surfaceRegistry', () => {
       context: {
         label: 'Run detail',
         detail: 'Trace execution, inspect jobs, and jump back into the builder without losing context.',
+      },
+    });
+
+    expect(resolveActiveShellSurface({ ...state, activeTabId: 'manifests' }, null)).toMatchObject({
+      category: 'static',
+      id: 'manifests',
+      context: {
+        label: 'Manifest catalog',
+        detail: 'Discover control-plane manifests before opening them by exact id.',
       },
     });
   });

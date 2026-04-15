@@ -4,10 +4,10 @@ Praxis exposes 45 catalog-backed tools via the [Model Context Protocol](https://
 
 CLI discovery is generated from the same catalog metadata:
 
-- `workflow tools list`
-- `workflow tools search <text> [--exact]`
-- `workflow tools describe <tool|alias>`
-- `workflow tools call <tool|alias> --input-json '{...}'`
+- `praxis workflow tools list`
+- `praxis workflow tools search <text> [--exact]`
+- `praxis workflow tools describe <tool|alias>`
+- `praxis workflow tools call <tool|alias> --input-json '{...}'`
 - single-result searches print the direct describe and entrypoint commands
 
 ## Catalog Summary
