@@ -6,10 +6,6 @@ import json
 from typing import TYPE_CHECKING, Any
 
 from .domain import SandboxProfileAuthorityRecord
-from .native_runtime_profile_sync import (
-    is_native_runtime_profile_ref,
-    sync_native_runtime_profile_authority,
-)
 
 if TYPE_CHECKING:
     from storage.postgres.connection import SyncPostgresConnection
@@ -93,8 +89,6 @@ def load_runtime_sandbox_profile_authority(
         runtime_profile_ref,
         field_name="runtime_profile_ref",
     )
-    if is_native_runtime_profile_ref(normalized_runtime_profile_ref):
-        sync_native_runtime_profile_authority(conn, prune=False)
 
     rows = conn.execute(
         """

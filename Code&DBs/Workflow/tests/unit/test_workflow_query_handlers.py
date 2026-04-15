@@ -2063,7 +2063,10 @@ def test_handle_workflow_build_post_accept_binding_emits_restore_receipt() -> No
     pg = _MutableWorkflowPg(workflow_rows={"wf_build_binding_accept": workflow_row})
     request = _RequestStub(
         {
-            "accepted_target": {
+            "target_kind": "binding",
+            "target_ref": binding_id,
+            "decision": "approve",
+            "candidate_payload": {
                 "target_ref": "task_type_routing:auto/review",
                 "label": "Auto Review",
                 "kind": "agent",
@@ -2071,12 +2074,12 @@ def test_handle_workflow_build_post_accept_binding_emits_restore_receipt() -> No
             "rationale": "Accepted in build workspace.",
         },
         subsystems=SimpleNamespace(get_pg_conn=lambda: pg),
-        path=f"/api/workflows/wf_build_binding_accept/build/bindings/{binding_id}/accept",
+        path="/api/workflows/wf_build_binding_accept/build/review_decisions",
     )
 
     workflow_query._handle_workflow_build_post(
         request,
-        f"/api/workflows/wf_build_binding_accept/build/bindings/{binding_id}/accept",
+        "/api/workflows/wf_build_binding_accept/build/review_decisions",
     )
 
     assert request.sent is not None
@@ -2107,7 +2110,7 @@ def test_handle_workflow_build_post_accept_binding_emits_restore_receipt() -> No
         "workflow_id": "wf_build_binding_accept",
         "steps": [
             {
-                "subpath": "review_decisions/restore",
+                "subpath": "review_decisions",
                 "body": {
                     "target_kind": "binding",
                     "target_ref": binding_id,
@@ -2264,12 +2267,12 @@ def test_handle_workflow_build_post_review_restore_revokes_binding_approval() ->
             "rationale": "Undo restore to the prior unapproved build-review state.",
         },
         subsystems=SimpleNamespace(get_pg_conn=lambda: pg),
-        path="/api/workflows/wf_build_review_restore/build/review_decisions/restore",
+        path="/api/workflows/wf_build_review_restore/build/review_decisions",
     )
 
     workflow_query._handle_workflow_build_post(
         request,
-        "/api/workflows/wf_build_review_restore/build/review_decisions/restore",
+        "/api/workflows/wf_build_review_restore/build/review_decisions",
     )
 
     assert request.sent is not None
@@ -2556,19 +2559,22 @@ def test_handle_workflow_build_post_admit_import_emits_restore_receipt() -> None
     pg = _MutableWorkflowPg(workflow_rows={"wf_build_import_admit": workflow_row})
     request = _RequestStub(
         {
-            "admitted_target": {
+            "target_kind": "import_snapshot",
+            "target_ref": snapshot_id,
+            "decision": "approve",
+            "candidate_payload": {
                 "target_ref": "#escalation-policy",
                 "label": "Escalation Policy",
                 "kind": "type",
             },
         },
         subsystems=SimpleNamespace(get_pg_conn=lambda: pg),
-        path=f"/api/workflows/wf_build_import_admit/build/imports/{snapshot_id}/admit",
+        path="/api/workflows/wf_build_import_admit/build/review_decisions",
     )
 
     workflow_query._handle_workflow_build_post(
         request,
-        f"/api/workflows/wf_build_import_admit/build/imports/{snapshot_id}/admit",
+        "/api/workflows/wf_build_import_admit/build/review_decisions",
     )
 
     assert request.sent is not None
@@ -2596,7 +2602,7 @@ def test_handle_workflow_build_post_admit_import_emits_restore_receipt() -> None
         "workflow_id": "wf_build_import_admit",
         "steps": [
             {
-                "subpath": "review_decisions/restore",
+                "subpath": "review_decisions",
                 "body": {
                     "target_kind": "import_snapshot",
                     "target_ref": snapshot_id,
