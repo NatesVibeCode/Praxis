@@ -161,7 +161,6 @@ def _query_result_state(status_code: int, payload: dict[str, Any]) -> str:
 
 def _compile_route_metrics(
     *,
-    path: str,
     request_body: dict[str, Any],
     response_payload: dict[str, Any],
 ) -> dict[str, Any]:
@@ -189,7 +188,7 @@ def _compile_route_metrics(
         **metrics,
         "prose_chars": len(str(request_body.get("prose") or "")),
         "unresolved_count": _list_count(unresolved) if isinstance(unresolved, list) else int(metrics.get("unresolved_count") or 0),
-        "llm_used": bool(refinement.get("used_llm")) if refinement else path == "/api/refine-definition",
+        "llm_used": bool(refinement.get("used_llm")) if refinement else False,
         "metadata": {key: value for key, value in metadata.items() if value not in {None, ""}},
     }
 
@@ -336,7 +335,6 @@ def record_api_route_usage(
     if normalized_path in {"/api/compile", "/api/refine-definition"}:
         event_payload.update(
             _compile_route_metrics(
-                path=normalized_path,
                 request_body=body_payload,
                 response_payload=response,
             )
