@@ -870,101 +870,26 @@ def test_handle_heal_infers_failure_code_from_stderr() -> None:
     assert payload["resolved_failure_code"] == "orchestration.failure_code_missing"
 
 
-def test_handle_compile_post_returns_definition_only_and_preserves_nonfatal_error() -> None:
-    pg = SimpleNamespace(label="compile-test-pg")
-    snapshot = SimpleNamespace(
-        compile_index_ref="compile_index.compiler.test",
-        compile_surface_revision="compile_surface.compiler.test",
-    )
+def test_handle_compile_post_returns_gone_with_bootstrap_guidance() -> None:
     request = _RequestStub(
         {"prose": "Route support mail with @gmail/search", "title": "Support Mail"},
-        subsystems=SimpleNamespace(get_pg_conn=lambda: pg),
+        subsystems=SimpleNamespace(get_pg_conn=lambda: object()),
+        path="/api/compile",
     )
-    result = {
-        "definition": {
-            "type": "operating_model",
-            "source_prose": "Route support mail with @gmail/search",
-            "compiled_prose": "Route support mail with @gmail/search",
-            "narrative_blocks": [],
-            "references": [],
-            "capabilities": [{"slug": "research/local-knowledge", "title": "Local knowledge recall"}],
-            "authority": "",
-            "sla": {},
-            "trigger_intent": [],
-            "draft_flow": [],
-            "definition_revision": "def_1234",
-            "execution_setup": {
-                "setup_version": 1,
-                "setup_state": "compiled_preview",
-                "planner_required": True,
-                "title": "Support Mail",
-                "task_class": "research",
-                "runtime_profile_ref": "compile/research.grounded",
-                "method": {
-                    "key": "grounded_research",
-                    "label": "Grounded Research",
-                    "summary": "Ground the work before planning.",
-                },
-                "constraints": {},
-                "budget_policy": {},
-                "phases": [],
-                "reference_slugs": [],
-                "capability_slugs": [],
-            },
-            "surface_manifest": {
-                "version": 1,
-                "headline": "Built a Grounded Research setup for Support Mail.",
-                "badges": ["Grounded Research"],
-                "surface_now": {
-                    "metrics": [],
-                    "approaches": [],
-                    "objects": [],
-                    "workflows": [],
-                    "commands": [],
-                },
-            },
-            "build_receipt": {
-                "version": 1,
-                "summary": "Built a Grounded Research setup with 0 phases.",
-                "explanation": "Compile built the setup and kept planning explicit.",
-                "decisions": [],
-                "tradeoffs": [],
-                "authority_refs": [],
-                "data_audit": {"transport_mode": "definition_embedded"},
-                "data_gaps": [],
-            },
+
+    workflow_query._handle_compile_post(request, "/api/compile")
+
+    assert request.sent == (
+        410,
+        {
+            "error": "/api/compile is gone. Bootstrap workflow state through /api/workflows/{workflow_id}/build/bootstrap.",
+            "replacement": "/api/workflows/{workflow_id}/build/bootstrap",
         },
-        "unresolved": [],
-        "error": "catalog_load_failed: missing seed data",
-    }
-
-    with patch("runtime.compile_index.load_compile_index_snapshot", return_value=snapshot) as load_mock, patch(
-        "runtime.compiler.compile_prose",
-        return_value=result,
-    ) as compile_mock:
-        workflow_query._handle_compile_post(request, "/api/compile")
-
-    load_mock.assert_called_once_with(
-        pg,
-        surface_name="compiler",
-        require_fresh=True,
-        repo_root=workflow_query.REPO_ROOT,
     )
-    compile_mock.assert_called_once_with(
-        "Route support mail with @gmail/search",
-        title="Support Mail",
-        conn=pg,
-        compile_index_snapshot=snapshot,
-    )
-    assert request.sent == (200, result)
 
 
-def test_handle_compile_post_records_surface_usage_on_success(monkeypatch) -> None:
+def test_handle_compile_post_records_surface_usage_on_gone(monkeypatch) -> None:
     pg = SimpleNamespace(label="compile-telemetry-pg")
-    snapshot = SimpleNamespace(
-        compile_index_ref="compile_index.compiler.test",
-        compile_surface_revision="compile_surface.compiler.test",
-    )
     request = _RequestStub(
         {"prose": "Route support mail", "title": "Support Mail"},
         subsystems=SimpleNamespace(get_pg_conn=lambda: pg),
@@ -977,30 +902,17 @@ def test_handle_compile_post_records_surface_usage_on_success(monkeypatch) -> No
         "_record_api_route_usage",
         lambda _subs, **kwargs: recorded.append(kwargs),
     )
-    monkeypatch.setattr(
-        "runtime.compile_index.load_compile_index_snapshot",
-        lambda *_args, **_kwargs: snapshot,
-    )
-    monkeypatch.setattr(
-        "runtime.compiler.compile_prose",
-        lambda *_args, **_kwargs: {"definition": {"type": "operating_model"}, "unresolved": []},
-    )
-
     workflow_query._handle_compile_post(request, "/api/compile")
 
     assert len(recorded) == 1
     assert recorded[0]["path"] == "/api/compile"
     assert recorded[0]["method"] == "POST"
-    assert recorded[0]["status_code"] == 200
-    assert recorded[0]["conn"] is pg
+    assert recorded[0]["status_code"] == 410
     assert recorded[0]["request_body"] == {
         "prose": "Route support mail",
         "title": "Support Mail",
     }
-    assert recorded[0]["response_payload"] == {
-        "definition": {"type": "operating_model"},
-        "unresolved": [],
-    }
+    assert recorded[0]["response_payload"]["replacement"] == "/api/workflows/{workflow_id}/build/bootstrap"
     assert recorded[0]["headers"] == request.headers
 
 
@@ -1042,118 +954,30 @@ def test_load_compile_index_snapshot_for_request_refreshes_missing_snapshot() ->
     )
 
 
-def test_handle_compile_post_refreshes_stale_compile_index_snapshot() -> None:
-    pg = SimpleNamespace(label="compile-stale-test-pg")
-    snapshot = SimpleNamespace(
-        compile_index_ref="compile_index.compiler.refreshed",
-        compile_surface_revision="compile_surface.compiler.refreshed",
-    )
+def test_handle_compile_post_does_not_attempt_compile_anymore() -> None:
     request = _RequestStub(
         {"prose": "Route support mail with @gmail/search", "title": "Support Mail"},
-        subsystems=SimpleNamespace(get_pg_conn=lambda: pg),
-        path="/api/compile",
-    )
-    result = {
-        "definition": {
-            "type": "operating_model",
-            "source_prose": "Route support mail with @gmail/search",
-            "compiled_prose": "Route support mail with @gmail/search",
-            "narrative_blocks": [],
-            "references": [],
-            "capabilities": [],
-            "authority": "",
-            "sla": {},
-            "trigger_intent": [],
-            "draft_flow": [],
-            "definition_revision": "def_refresh",
-        },
-        "unresolved": [],
-        "error": None,
-    }
-
-    with patch(
-        "runtime.compile_index.load_compile_index_snapshot",
-        side_effect=CompileIndexAuthorityError(
-            "compile_index.snapshot_stale",
-            "compile index snapshot is stale",
-            details={"freshness_state": "stale"},
-        ),
-    ) as load_mock, patch(
-        "runtime.compile_index.refresh_compile_index",
-        return_value=snapshot,
-    ) as refresh_mock, patch(
-        "runtime.compiler.compile_prose",
-        return_value=result,
-    ) as compile_mock:
-        workflow_query._handle_compile_post(request, "/api/compile")
-
-    load_mock.assert_called_once_with(
-        pg,
-        surface_name="compiler",
-        require_fresh=True,
-        repo_root=workflow_query.REPO_ROOT,
-    )
-    refresh_mock.assert_called_once_with(
-        pg,
-        repo_root=workflow_query.REPO_ROOT,
-        surface_name="compiler",
-    )
-    compile_mock.assert_called_once_with(
-        "Route support mail with @gmail/search",
-        title="Support Mail",
-        conn=pg,
-        compile_index_snapshot=snapshot,
-    )
-    assert request.sent == (200, result)
-
-
-def test_handle_compile_post_returns_explicit_error_when_refresh_fails() -> None:
-    pg = SimpleNamespace(label="compile-refresh-fail-pg")
-    request = _RequestStub(
-        {"prose": "Route support mail with @gmail/search", "title": "Support Mail"},
-        subsystems=SimpleNamespace(get_pg_conn=lambda: pg),
+        subsystems=SimpleNamespace(get_pg_conn=lambda: object()),
         path="/api/compile",
     )
 
-    with patch(
-        "runtime.compile_index.load_compile_index_snapshot",
-        side_effect=CompileIndexAuthorityError(
-            "compile_index.snapshot_stale",
-            "compile index snapshot is stale",
-            details={"freshness_state": "stale"},
-        ),
-    ) as load_mock, patch(
-        "runtime.compile_index.refresh_compile_index",
-        side_effect=CompileIndexAuthorityError(
-            "compile_index.snapshot_stale",
-            "compile index snapshot is stale",
-            details={"freshness_state": "stale", "reason": "surface_manifest_mismatch"},
-        ),
-    ) as refresh_mock:
+    with patch("runtime.compiler.compile_prose") as compile_mock:
         workflow_query._handle_compile_post(request, "/api/compile")
 
-    load_mock.assert_called_once_with(
-        pg,
-        surface_name="compiler",
-        require_fresh=True,
-        repo_root=workflow_query.REPO_ROOT,
-    )
-    refresh_mock.assert_called_once_with(
-        pg,
-        repo_root=workflow_query.REPO_ROOT,
-        surface_name="compiler",
-    )
-    assert request.sent == (
-        409,
-        {
-            "error": "compile index snapshot is stale",
-            "reason_code": "compile_index.snapshot_stale",
-            "details": {
-                "freshness_state": "stale",
-                "reason": "surface_manifest_mismatch",
-            },
-        },
-    )
+    compile_mock.assert_not_called()
+    assert request.sent is not None
+    assert request.sent[0] == 410
+
+
+def test_handle_compile_post_preserves_invalid_json_behavior() -> None:
+    request = _RequestStub(None, subsystems=SimpleNamespace(), path="/api/compile")
+    request.rfile = io.BytesIO(b"{")
+    request.headers = {"Content-Length": "1"}
+
+    workflow_query._handle_compile_post(request, "/api/compile")
+
+    assert request.sent is not None
+    assert request.sent[0] == 400
 
 
 def test_load_compile_index_snapshot_for_request_preserves_non_refreshable_errors() -> None:
@@ -1186,65 +1010,25 @@ def test_load_compile_index_snapshot_for_request_preserves_non_refreshable_error
     refresh_mock.assert_not_called()
 
 
-def test_handle_refine_definition_post_uses_explicit_llm_compile_lane() -> None:
-    pg = SimpleNamespace(label="refine-test-pg")
-    snapshot = SimpleNamespace(
-        compile_index_ref="compile_index.compiler.test",
-        compile_surface_revision="compile_surface.compiler.test",
-    )
+def test_handle_refine_definition_post_returns_gone_with_bootstrap_guidance() -> None:
     request = _RequestStub(
         {"prose": "Route support mail with @gmail/search", "title": "Support Mail"},
-        subsystems=SimpleNamespace(get_pg_conn=lambda: pg),
+        subsystems=SimpleNamespace(get_pg_conn=lambda: object()),
+        path="/api/refine-definition",
     )
-    result = {
-        "definition": {
-            "type": "operating_model",
-            "source_prose": "Route support mail with @gmail/search",
-            "compiled_prose": "Use @gmail/search to route support mail before triage-agent reviews the thread.",
-            "narrative_blocks": [],
-            "references": [],
-            "capabilities": [],
-            "authority": "",
-            "sla": {},
-            "trigger_intent": [],
-            "draft_flow": [],
-            "definition_revision": "def_refined_1234",
+
+    workflow_query._handle_refine_definition_post(request, "/api/refine-definition")
+
+    assert request.sent == (
+        410,
+        {
+            "error": "/api/refine-definition is gone. Re-bootstrap workflow state through /api/workflows/{workflow_id}/build/bootstrap.",
+            "replacement": "/api/workflows/{workflow_id}/build/bootstrap",
         },
-        "unresolved": [],
-        "error": None,
-        "refinement": {
-            "requested": True,
-            "applied": True,
-            "used_llm": True,
-            "status": "refined",
-            "message": "Refine improved the definition articulation and rebuilt the definition from source prose.",
-            "reason": None,
-        },
-    }
-
-    with patch("runtime.compile_index.load_compile_index_snapshot", return_value=snapshot) as load_mock, patch(
-        "runtime.compiler.compile_prose",
-        return_value=result,
-    ) as compile_mock:
-        workflow_query._handle_refine_definition_post(request, "/api/refine-definition")
-
-    load_mock.assert_called_once_with(
-        pg,
-        surface_name="compiler",
-        require_fresh=True,
-        repo_root=workflow_query.REPO_ROOT,
     )
-    compile_mock.assert_called_once_with(
-        "Route support mail with @gmail/search",
-        title="Support Mail",
-        enable_llm=True,
-        conn=pg,
-        compile_index_snapshot=snapshot,
-    )
-    assert request.sent == (200, result)
 
 
-def test_handle_refine_definition_post_records_surface_usage_on_conflict(monkeypatch) -> None:
+def test_handle_refine_definition_post_records_surface_usage_on_gone(monkeypatch) -> None:
     pg = SimpleNamespace(label="refine-telemetry-pg")
     request = _RequestStub(
         {"prose": "Route support mail", "title": "Support Mail"},
@@ -1259,33 +1043,17 @@ def test_handle_refine_definition_post_records_surface_usage_on_conflict(monkeyp
         lambda _subs, **kwargs: recorded.append(kwargs),
     )
 
-    with patch(
-        "runtime.compile_index.load_compile_index_snapshot",
-        side_effect=CompileIndexAuthorityError(
-            "compile_index.snapshot_stale",
-            "compile index snapshot is stale",
-            details={"freshness_state": "stale"},
-        ),
-    ), patch(
-        "runtime.compile_index.refresh_compile_index",
-        side_effect=CompileIndexAuthorityError(
-            "compile_index.snapshot_stale",
-            "compile index snapshot is stale",
-            details={"freshness_state": "stale"},
-        ),
-    ):
-        workflow_query._handle_refine_definition_post(request, "/api/refine-definition")
+    workflow_query._handle_refine_definition_post(request, "/api/refine-definition")
 
     assert len(recorded) == 1
     assert recorded[0]["path"] == "/api/refine-definition"
     assert recorded[0]["method"] == "POST"
-    assert recorded[0]["status_code"] == 409
-    assert recorded[0]["conn"] is pg
+    assert recorded[0]["status_code"] == 410
     assert recorded[0]["request_body"] == {
         "prose": "Route support mail",
         "title": "Support Mail",
     }
-    assert recorded[0]["response_payload"]["reason_code"] == "compile_index.snapshot_stale"
+    assert recorded[0]["response_payload"]["replacement"] == "/api/workflows/{workflow_id}/build/bootstrap"
     assert recorded[0]["headers"] == request.headers
 
 
@@ -1293,13 +1061,8 @@ def test_handle_post_request_records_query_surface_usage(monkeypatch) -> None:
     request = _RequestStub({"question": "status"}, subsystems=SimpleNamespace(), path="/query")
     recorded: list[dict[str, Any]] = []
 
-    monkeypatch.setitem(
-        api_handlers.ROUTES,
-        "/query",
-        lambda _subs, body: {"ok": True, "question": body["question"]},
-    )
     monkeypatch.setattr(
-        api_handlers,
+        workflow_query,
         "_record_api_route_usage",
         lambda _subs, **kwargs: recorded.append(kwargs),
     )
@@ -1307,17 +1070,23 @@ def test_handle_post_request_records_query_surface_usage(monkeypatch) -> None:
     handled = api_handlers.handle_post_request(request, "/query")
 
     assert handled is True
-    assert request.sent == (200, {"ok": True, "question": "status"})
+    assert request.sent == (
+        410,
+        {
+            "error": "/query is gone. Use praxis workflow query/discover/recall/tools or workflow-scoped build surfaces instead.",
+            "replacement": "praxis workflow query|discover|recall|tools",
+        },
+    )
     assert len(recorded) == 1
     assert recorded[0]["path"] == "/query"
     assert recorded[0]["method"] == "POST"
-    assert recorded[0]["status_code"] == 200
+    assert recorded[0]["status_code"] == 410
     assert recorded[0]["request_body"] == {"question": "status"}
-    assert recorded[0]["response_payload"] == {"ok": True, "question": "status"}
+    assert recorded[0]["response_payload"]["replacement"] == "praxis workflow query|discover|recall|tools"
     assert recorded[0]["headers"] == request.headers
 
 
-def test_handle_plan_post_records_surface_usage_on_success(monkeypatch) -> None:
+def test_handle_plan_post_records_surface_usage_on_gone(monkeypatch) -> None:
     request = _RequestStub(
         {
             "title": "Inbox Triage",
@@ -1340,28 +1109,15 @@ def test_handle_plan_post_records_surface_usage_on_success(monkeypatch) -> None:
         "_record_api_route_usage",
         lambda _subs, **kwargs: recorded.append(kwargs),
     )
-    monkeypatch.setattr(
-        "runtime.operating_model_planner.plan_definition",
-        lambda *_args, **_kwargs: {
-            "compiled_spec": {
-                "definition_revision": "def_plan_usage",
-                "jobs": [{"label": "review"}],
-                "triggers": [],
-            },
-            "planning_notes": [],
-            "reuse_provenance": {"reason_code": "plan.compile.miss"},
-        },
-    )
-
     workflow_query._handle_plan_post(request, "/api/plan")
 
     assert request.sent is not None
-    assert request.sent[0] == 200
+    assert request.sent[0] == 410
     assert len(recorded) == 1
     assert recorded[0]["path"] == "/api/plan"
-    assert recorded[0]["status_code"] == 200
+    assert recorded[0]["status_code"] == 410
     assert recorded[0]["request_body"]["title"] == "Inbox Triage"
-    assert recorded[0]["response_payload"]["compiled_spec"]["definition_revision"] == "def_plan_usage"
+    assert recorded[0]["response_payload"]["replacement"] == "/api/workflows/{workflow_id}/build/harden"
 
 
 def test_handle_commit_post_records_surface_usage_on_success(monkeypatch) -> None:
@@ -1463,102 +1219,88 @@ def test_handle_trigger_post_records_surface_usage_on_success(monkeypatch) -> No
     assert recorded[0]["response_payload"]["run_id"] == "run_123"
 
 
-def test_handle_plan_post_stamps_definition_revision_into_compiled_spec() -> None:
-    definition = {
-        "type": "operating_model",
-        "source_prose": "Review support inbox",
-        "compiled_prose": "triage-agent reviews the support inbox when new email arrives.",
-        "narrative_blocks": [
-            {
-                "id": "block-001",
-                "title": "Review support inbox",
-                "summary": "triage-agent reviews the support inbox when new email arrives.",
-                "text": "triage-agent reviews the support inbox when new email arrives.",
-                "order": 1,
-                "reference_slugs": ["triage-agent"],
-                "capability_slugs": [],
-            }
-        ],
-        "references": [
-            {
-                "id": "ref-001",
-                "type": "agent",
-                "slug": "triage-agent",
-                "resolved": True,
-                "resolved_to": "task_type_routing:auto/review",
-                "config": {"route": "auto/review"},
-            }
-        ],
-        "binding_ledger": [
-            {
-                "binding_id": "binding:ref-001",
-                "source_kind": "reference",
-                "source_label": "triage-agent",
-                "source_span": None,
-                "source_node_ids": ["step-001"],
-                "state": "accepted",
-                "candidate_targets": [
-                    {
-                        "target_ref": "task_type_routing:auto/review",
-                        "label": "Auto Review",
-                        "kind": "agent",
-                    }
-                ],
-                "accepted_target": {
-                    "target_ref": "task_type_routing:auto/review",
-                    "label": "Auto Review",
-                    "kind": "agent",
-                },
-                "rationale": "Accepted in build workspace.",
-                "created_at": "2026-04-15T10:00:00+00:00",
-                "updated_at": "2026-04-15T10:01:00+00:00",
-                "freshness": None,
-            }
-        ],
-        "capabilities": [],
-        "authority": "",
-        "sla": {},
-        "trigger_intent": [
-            {
-                "id": "trigger-001",
-                "title": "Email received",
-                "summary": "when new email arrives",
-                "event_type": "email.received",
-                "filter": {"mailbox": "support"},
-                "source_block_ids": ["block-001"],
-                "reference_slugs": [],
-            }
-        ],
-        "draft_flow": [
-            {
-                "id": "step-001",
-                "title": "Review support inbox",
-                "summary": "Review support inbox",
-                "source_block_ids": ["block-001"],
-                "reference_slugs": ["triage-agent"],
-                "capability_slugs": [],
-                "depends_on": [],
-                "order": 1,
-            }
-        ],
-        "definition_revision": "def_plan_123",
-    }
-    request = _RequestStub({"title": "Inbox Triage", "definition": definition})
+def test_handle_plan_post_returns_gone_with_harden_guidance() -> None:
+    request = _RequestStub(
+        {
+            "title": "Inbox Triage",
+            "definition": {
+                "type": "operating_model",
+                "definition_revision": "def_plan_123",
+            },
+        },
+        path="/api/plan",
+    )
 
     workflow_query._handle_plan_post(request, "/api/plan")
 
+    assert request.sent == (
+        410,
+        {
+            "error": "/api/plan is gone. Harden reviewed workflow state through /api/workflows/{workflow_id}/build/harden.",
+            "replacement": "/api/workflows/{workflow_id}/build/harden",
+        },
+    )
+
+
+def test_handle_workflow_build_post_bootstrap_compiles_into_workflow_build_payload() -> None:
+    workflow_row = {
+        "id": "wf_build_bootstrap",
+        "name": "Bootstrap Draft",
+        "description": "Bootstrap Draft",
+        "definition": {},
+        "compiled_spec": None,
+        "version": 1,
+        "updated_at": "2026-04-15T10:00:00Z",
+    }
+    pg = _MutableWorkflowPg(workflow_rows={"wf_build_bootstrap": workflow_row})
+    request = _RequestStub(
+        {"prose": "Review support inbox", "title": "Bootstrap Draft"},
+        subsystems=SimpleNamespace(get_pg_conn=lambda: pg),
+        path="/api/workflows/wf_build_bootstrap/build/bootstrap",
+    )
+
+    with patch(
+        "runtime.compiler.compile_prose",
+        return_value={
+            "definition": {
+                "type": "operating_model",
+                "source_prose": "Review support inbox",
+                "compiled_prose": "Review support inbox",
+                "references": [],
+                "capabilities": [],
+                "trigger_intent": [],
+                "draft_flow": [],
+                "definition_revision": "def_bootstrap_001",
+            }
+        },
+    ) as compile_mock:
+        workflow_query._handle_workflow_build_post(
+            request,
+            "/api/workflows/wf_build_bootstrap/build/bootstrap",
+        )
+
+    compile_mock.assert_called_once()
     assert request.sent is not None
     status, payload = request.sent
-    assert status == 400
-    assert payload["candidate_resolution_manifest"]["execution_readiness"] == "review_required"
-    assert payload["reviewable_plan"]["approved_binding_refs"] == []
-    assert payload["execution_manifest"] is None
+    assert status == 200
+    assert payload["workflow"]["id"] == "wf_build_bootstrap"
+    assert payload["definition"]["workflow_id"] == "wf_build_bootstrap"
 
 
-def test_handle_plan_post_accepts_build_graph_without_browser_projection() -> None:
+def test_handle_workflow_build_post_harden_uses_workflow_scoped_build_state() -> None:
+    workflow_row = {
+        "id": "wf_build_harden",
+        "name": "Graph Draft",
+        "description": "Graph Draft",
+        "definition": {},
+        "compiled_spec": None,
+        "version": 1,
+        "updated_at": "2026-04-15T10:00:00Z",
+    }
+    pg = _MutableWorkflowPg(workflow_rows={"wf_build_harden": workflow_row})
     request = _RequestStub(
         {
-            "title": "Graph Plan",
+            "title": "Graph Draft",
             "build_graph": {
                 "nodes": [
                     {
@@ -1566,23 +1308,17 @@ def test_handle_plan_post_accepts_build_graph_without_browser_projection() -> No
                         "kind": "step",
                         "title": "Manual",
                         "route": "trigger",
-                        "trigger": {
-                            "event_type": "manual",
-                            "filter": {},
-                        },
+                        "trigger": {"event_type": "manual", "filter": {}},
                     },
                     {
                         "node_id": "step-001",
                         "kind": "step",
-                        "title": "Post webhook",
-                        "summary": "Send the payload to the downstream webhook.",
+                        "title": "Fetch status",
                         "route": "@webhook/post",
                         "integration_args": {
-                            "request_preset": "post_json",
-                            "url": "https://example.com/hook",
-                            "method": "POST",
-                            "headers": {"Authorization": "Bearer token"},
-                            "body": {"status": "ready"},
+                            "request_preset": "fetch_json",
+                            "url": "https://api.example.com/status",
+                            "method": "GET",
                         },
                     },
                 ],
@@ -1595,23 +1331,22 @@ def test_handle_plan_post_accepts_build_graph_without_browser_projection() -> No
                     }
                 ],
             },
-        }
+        },
+        subsystems=SimpleNamespace(get_pg_conn=lambda: pg),
+        path="/api/workflows/wf_build_harden/build/harden",
     )
 
-    workflow_query._handle_plan_post(request, "/api/plan")
+    workflow_query._handle_workflow_build_post(
+        request,
+        "/api/workflows/wf_build_harden/build/harden",
+    )
 
     assert request.sent is not None
     status, payload = request.sent
     assert status == 200
-    assert payload["compiled_spec"]["definition_revision"].startswith("def_")
-    assert payload["compiled_spec"]["jobs"][0]["agent"] == "integration/webhook/post"
-    assert payload["compiled_spec"]["triggers"] == [
-        {
-            "event_type": "manual",
-            "filter": {},
-            "source_trigger_id": "trigger-001",
-        }
-    ]
+    assert payload["workflow"]["id"] == "wf_build_harden"
+    assert payload["definition"]["workflow_id"] == "wf_build_harden"
+    assert {node["node_id"] for node in payload["build_graph"]["nodes"]} == {"trigger-001", "step-001"}
 
 
 def test_handle_workflow_build_get_returns_authority_bundle() -> None:
@@ -2023,6 +1758,74 @@ def test_handle_workflow_build_post_persists_attachment_and_replans() -> None:
     assert payload["binding_ledger"][0]["state"] == "suggested"
     persisted_definition = pg.workflow_rows["wf_build_mutation"]["definition"]
     assert persisted_definition["authority_attachments"][0]["authority_ref"] == "@gmail/search"
+
+
+def test_handle_workflow_build_post_rejects_legacy_binding_accept_alias() -> None:
+    workflow_row = {
+        "id": "wf_build_binding_alias",
+        "name": "Support Intake",
+        "description": "Compile support intake",
+        "definition": {
+            "type": "operating_model",
+            "definition_revision": "def_build_binding_alias",
+            "binding_ledger": [],
+        },
+        "compiled_spec": None,
+        "version": 1,
+        "updated_at": "2026-04-09T19:00:00Z",
+    }
+    pg = _MutableWorkflowPg(workflow_rows={"wf_build_binding_alias": workflow_row})
+    request = _RequestStub(
+        {"accepted_target": {"target_ref": "task_type_routing:auto/review"}},
+        subsystems=SimpleNamespace(get_pg_conn=lambda: pg),
+        path="/api/workflows/wf_build_binding_alias/build/bindings/binding:ref-001/accept",
+    )
+
+    workflow_query._handle_workflow_build_post(
+        request,
+        "/api/workflows/wf_build_binding_alias/build/bindings/binding:ref-001/accept",
+    )
+
+    assert request.sent == (
+        410,
+        {
+            "error": "Legacy binding approval aliases are gone. Use /api/workflows/{workflow_id}/build/review_decisions.",
+        },
+    )
+
+
+def test_handle_workflow_build_post_rejects_legacy_import_admit_alias() -> None:
+    workflow_row = {
+        "id": "wf_build_import_alias",
+        "name": "Support Intake",
+        "description": "Compile support intake",
+        "definition": {
+            "type": "operating_model",
+            "definition_revision": "def_build_import_alias",
+            "import_snapshots": [],
+        },
+        "compiled_spec": None,
+        "version": 1,
+        "updated_at": "2026-04-09T19:00:00Z",
+    }
+    pg = _MutableWorkflowPg(workflow_rows={"wf_build_import_alias": workflow_row})
+    request = _RequestStub(
+        {"admitted_target": {"target_ref": "#escalation-policy"}},
+        subsystems=SimpleNamespace(get_pg_conn=lambda: pg),
+        path="/api/workflows/wf_build_import_alias/build/imports/import_001/admit",
+    )
+
+    workflow_query._handle_workflow_build_post(
+        request,
+        "/api/workflows/wf_build_import_alias/build/imports/import_001/admit",
+    )
+
+    assert request.sent == (
+        410,
+        {
+            "error": "Legacy import admission aliases are gone. Use /api/workflows/{workflow_id}/build/review_decisions.",
+        },
+    )
 
 
 def test_handle_workflow_build_post_accept_binding_emits_restore_receipt() -> None:
@@ -4615,7 +4418,7 @@ def test_handle_trigger_post_rejects_workflow_without_current_plan() -> None:
 
     assert request.sent == (
         400,
-        {"error": "Workflow 'Inbox Triage' has no current execution plan. Generate plan first."},
+        {"error": "Workflow 'Inbox Triage' has no approved execution manifest. Review and harden the workflow first."},
     )
     assert not any("INSERT INTO system_events" in query for query, _ in pg.executed)
 
@@ -4672,7 +4475,32 @@ def test_handle_trigger_post_uses_command_bus_helper(tmp_path, monkeypatch) -> N
         return fake_result
 
     with patch.object(canonical_workflows, "_submit_spec_via_service_bus", side_effect=_fake_submit) as bus_mock:
-        workflow_query._handle_trigger_post(request, "/api/trigger/wf_123")
+        with patch.object(
+            canonical_workflows,
+            "_latest_execution_manifest",
+            return_value={
+                "execution_manifest_ref": "execution_manifest:wf_123:def_123:1",
+                "compiled_spec": {
+                    "definition_revision": "def_123",
+                    "name": "Inbox Triage",
+                    "workflow_id": "wf_123",
+                    "phase": "build",
+                    "plan_revision": "plan_123",
+                    "jobs": [
+                        {
+                            "label": "search-inbox",
+                            "prompt": "Search the inbox",
+                        }
+                    ],
+                    "outcome_goal": "triage the inbox",
+                    "anti_requirements": [],
+                },
+                "tool_allowlist": {"mcp_tools": ["praxis_status"], "adapter_tools": ["repo_fs"]},
+                "verify_refs": ["verify.alpha"],
+                "approved_bundle_refs": ["capability_bundle:triage"],
+            },
+        ):
+            workflow_query._handle_trigger_post(request, "/api/trigger/wf_123")
 
     assert bus_mock.call_count == 1
     assert request.sent == (
@@ -4727,7 +4555,24 @@ def test_handle_trigger_post_uses_command_bus_helper(tmp_path, monkeypatch) -> N
             "outcome_goal": "triage the inbox",
             "anti_requirements": [],
         },
+        "execution_manifest": {
+            "execution_manifest_ref": "execution_manifest:wf_123:def_123:1",
+            "compiled_spec": {
+                "definition_revision": "def_123",
+                "name": "Inbox Triage",
+                "workflow_id": "wf_123",
+                "phase": "build",
+                "plan_revision": "plan_123",
+                "jobs": [{"label": "search-inbox", "prompt": "Search the inbox"}],
+                "outcome_goal": "triage the inbox",
+                "anti_requirements": [],
+            },
+            "tool_allowlist": {"mcp_tools": ["praxis_status"], "adapter_tools": ["repo_fs"]},
+            "verify_refs": ["verify.alpha"],
+            "approved_bundle_refs": ["capability_bundle:triage"],
+        },
     }
+    assert captured_spec["execution_manifest_ref"] == "execution_manifest:wf_123:def_123:1"
     assert any(
         "UPDATE public.workflows SET invocation_count = invocation_count + 1" in query
         for query, _ in pg.executed
@@ -4770,7 +4615,7 @@ def test_handle_trigger_post_rejects_definition_only_workflows_even_with_legacy_
 
     assert request.sent == (
         400,
-        {"error": "Workflow 'Explicit Inbox Triage' has no current execution plan. Generate plan first."},
+        {"error": "Workflow 'Explicit Inbox Triage' has no approved execution manifest. Review and harden the workflow first."},
     )
     assert not any("INSERT INTO system_events" in query for query, _ in pg.executed)
 
@@ -4992,7 +4837,7 @@ def test_handle_trigger_post_does_not_fall_back_to_definition_only_workflows(mon
 
     assert request.sent == (
         400,
-        {"error": "Workflow 'wf_name_only' has no current execution plan. Generate plan first."},
+        {"error": "Workflow 'wf_name_only' has no approved execution manifest. Review and harden the workflow first."},
     )
     assert any("FROM public.workflows WHERE id = $1" in query for query, _ in pg.executed)
     assert not any("FROM public.workflows WHERE name = $1" in query for query, _ in pg.executed)

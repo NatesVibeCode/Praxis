@@ -92,11 +92,17 @@ def test_execute_integration_routes_workflow_invoke_to_saved_workflow(monkeypatc
     )
     monkeypatch.setattr(
         platform_mod,
-        "_current_compiled_spec",
-        lambda definition, compiled_spec: {
-            "name": "Child Workflow",
-            "definition_revision": definition["definition_revision"],
-            "jobs": list(compiled_spec["jobs"]),
+        "_latest_execution_manifest",
+        lambda _pg, workflow_id, definition_revision: {
+            "execution_manifest_ref": f"execution_manifest:{workflow_id}:{definition_revision}:1",
+            "compiled_spec": {
+                "name": "Child Workflow",
+                "definition_revision": definition_revision,
+                "jobs": [{"label": "step-1"}],
+            },
+            "tool_allowlist": {"mcp_tools": ["praxis_status"], "adapter_tools": ["repo_fs"]},
+            "verify_refs": ["verify.child"],
+            "approved_bundle_refs": ["capability_bundle:child"],
         },
     )
 
@@ -167,6 +173,7 @@ def test_execute_integration_routes_workflow_invoke_to_saved_workflow(monkeypatc
     assert calls["trigger_depth"] == 0
     assert calls["lineage_depth"] is None
     assert calls["workflow_id"] == "wf_child"
+    assert calls["spec_dict"]["execution_manifest_ref"] == "execution_manifest:wf_child:def_123:1"
     assert calls["packet_provenance"]["input_payload"] == {"severity": "p1"}
     assert calls["event"]["event_type"] == "integration.workflow.invoke"
 
@@ -191,6 +198,39 @@ def test_execute_integration_requires_workflow_id_for_workflow_invoke(monkeypatc
 
     assert result["status"] == "failed"
     assert result["error"] == "missing_workflow_id"
+
+
+def test_execute_integration_workflow_invoke_requires_execution_manifest(monkeypatch) -> None:
+    monkeypatch.setattr(
+        integrations_mod,
+        "_load_integration_authority",
+        lambda _pg, _integration_id: {
+            "id": "workflow",
+            "auth_status": "connected",
+            "capabilities": [{"action": "invoke"}],
+        },
+    )
+    monkeypatch.setattr(
+        platform_mod,
+        "_load_workflow_record",
+        lambda _pg, workflow_id: {
+            "id": workflow_id,
+            "name": "Child Workflow",
+            "definition": {"definition_revision": "def_123"},
+            "compiled_spec": {"definition_revision": "def_123", "jobs": [{"label": "step-1"}]},
+        },
+    )
+    monkeypatch.setattr(platform_mod, "_latest_execution_manifest", lambda *_args, **_kwargs: None)
+
+    result = integrations_mod.execute_integration(
+        "workflow",
+        "invoke",
+        {"workflow_id": "wf_child"},
+        object(),
+    )
+
+    assert result["status"] == "failed"
+    assert result["error"] == "workflow_execution_manifest_missing"
 
 
 def test_execute_integration_routes_workflow_cancel_to_runtime_cancel(monkeypatch) -> None:

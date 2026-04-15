@@ -139,6 +139,7 @@ describe('MoonReleaseTray', () => {
 
   test('plans and dispatches graph-backed workflows through the canonical build_graph path', async () => {
     buildControllerMocks.planDefinition.mockResolvedValue({
+      workflow: { id: 'wf_graph', name: 'Graph Alpha' },
       compiled_spec: {
         jobs: [{ label: 'Planned fetch', agent: 'integration/webhook/post' }],
       },
@@ -159,6 +160,7 @@ describe('MoonReleaseTray', () => {
       expect(buildControllerMocks.planDefinition).toHaveBeenCalledTimes(1);
     });
     expect(buildControllerMocks.planDefinition).toHaveBeenCalledWith(expect.objectContaining({
+      workflowId: 'wf_graph',
       title: 'Graph Alpha',
       buildGraph: buildGraphPayload().build_graph,
     }));
@@ -167,20 +169,16 @@ describe('MoonReleaseTray', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Confirm Release' }));
 
     await waitFor(() => {
-      expect(buildControllerMocks.createWorkflow).toHaveBeenCalledWith(
-        'Graph Alpha',
-        expect.objectContaining({
-          buildGraph: buildGraphPayload().build_graph,
-        }),
-      );
+      expect(buildControllerMocks.commitDefinition).toHaveBeenCalledTimes(1);
     });
+    expect(buildControllerMocks.createWorkflow).not.toHaveBeenCalled();
     expect(buildControllerMocks.commitDefinition).toHaveBeenCalledWith(
-      'wf_created',
+      'wf_graph',
       expect.objectContaining({
         title: 'Graph Alpha',
         buildGraph: buildGraphPayload().build_graph,
       }),
     );
-    expect(buildControllerMocks.triggerWorkflow).toHaveBeenCalledWith('wf_created');
+    expect(buildControllerMocks.triggerWorkflow).toHaveBeenCalledWith('wf_graph');
   });
 });

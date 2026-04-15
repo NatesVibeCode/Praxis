@@ -9,6 +9,7 @@ requires-python = ">=3.11"
 dynamic = ["dependencies"]
 
 [project.scripts]
+praxis = "surfaces.cli.praxis:main"
 praxis-workflow = "surfaces.cli.main:main"
 workflow = "surfaces.cli.main:main"
 

@@ -7,7 +7,6 @@ from typing import Any
 
 from authority.transport_eligibility import load_transport_eligibility_authority
 from storage.postgres import PostgresTransportEligibilityRepository
-
 from ._operator_repository import (
     NativeOperatorQueryError,
     NativeOperatorQueryFrontdoor,

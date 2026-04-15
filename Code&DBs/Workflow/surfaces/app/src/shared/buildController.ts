@@ -4,6 +4,7 @@
 import type { BuildPayload } from './types';
 
 interface BuildDefinitionRequest {
+  workflowId?: string | null;
   title?: string;
   definition?: Record<string, unknown>;
   buildGraph?: BuildPayload['build_graph'] | null;
@@ -44,32 +45,53 @@ export async function saveWorkflowDefinition(workflowId: string, definition: any
   }));
 }
 
-export async function compileDefinition(prose: string, title?: string): Promise<BuildPayload> {
-  return _json(await fetch('/api/compile', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prose, title }),
-  }));
+async function _ensureWorkflowId(
+  workflowId: string | null | undefined,
+  title?: string,
+  opts?: Omit<BuildDefinitionRequest, 'workflowId' | 'title'>,
+): Promise<string> {
+  if (workflowId) return workflowId;
+  const created = await createWorkflow(title || 'Moon draft', {
+    definition: opts?.definition ?? {},
+    buildGraph: opts?.buildGraph,
+    compiled_spec: opts?.compiled_spec,
+  });
+  return created.id || created.workflow_id || '';
 }
 
-export async function refineDefinition(prose: string, definition: any): Promise<BuildPayload> {
-  return _json(await fetch('/api/refine-definition', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prose, definition }),
-  }));
+export async function compileDefinition(
+  prose: string,
+  opts?: Pick<BuildDefinitionRequest, 'workflowId' | 'title'>,
+): Promise<BuildPayload> {
+  const workflowId = await _ensureWorkflowId(opts?.workflowId, opts?.title, { definition: {} });
+  return postBuildMutation(workflowId, 'bootstrap', {
+    prose,
+    title: opts?.title,
+    enable_llm: false,
+  });
+}
+
+export async function refineDefinition(
+  prose: string,
+  opts?: Pick<BuildDefinitionRequest, 'workflowId' | 'title'>,
+): Promise<BuildPayload> {
+  const workflowId = await _ensureWorkflowId(opts?.workflowId, opts?.title, { definition: {} });
+  return postBuildMutation(workflowId, 'bootstrap', {
+    prose,
+    title: opts?.title,
+    enable_llm: true,
+  });
 }
 
 export async function commitDefinition(
   workflowId: string,
   opts?: BuildDefinitionRequest,
-): Promise<BuildPayload> {
-  return _json(await fetch('/api/commit', {
+): Promise<any> {
+  return _json(await fetch(`/api/workflows/${workflowId}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      workflow_id: workflowId,
-      title: opts?.title,
+      name: opts?.title,
       definition: opts?.definition,
       build_graph: opts?.buildGraph,
       compiled_spec: opts?.compiled_spec,
@@ -108,7 +130,7 @@ export async function postCatalogReviewDecision(body: CatalogReviewDecisionReque
 
 export async function createWorkflow(
   name: string,
-  opts?: Omit<BuildDefinitionRequest, 'title'>,
+  opts?: Omit<BuildDefinitionRequest, 'workflowId' | 'title'>,
 ): Promise<{ id: string; workflow_id?: string }> {
   const data = await _json(await fetch('/api/workflows', {
     method: 'POST',
@@ -125,15 +147,15 @@ export async function createWorkflow(
 }
 
 export async function planDefinition(opts?: Omit<BuildDefinitionRequest, 'compiled_spec'>): Promise<any> {
-  return _json(await fetch('/api/plan', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      definition: opts?.definition,
-      build_graph: opts?.buildGraph,
-      title: opts?.title,
-    }),
-  }));
+  const workflowId = await _ensureWorkflowId(opts?.workflowId, opts?.title, {
+    definition: opts?.definition,
+    buildGraph: opts?.buildGraph,
+  });
+  return postBuildMutation(workflowId, 'harden', {
+    definition: opts?.definition,
+    build_graph: opts?.buildGraph,
+    title: opts?.title,
+  });
 }
 
 export async function triggerWorkflow(workflowId: string): Promise<{ run_id: string; status: string }> {

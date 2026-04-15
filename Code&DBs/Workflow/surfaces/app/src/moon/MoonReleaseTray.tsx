@@ -17,6 +17,7 @@ interface PlannedReleaseState {
   buildGraph?: BuildPayload['build_graph'] | null;
   fingerprint: string;
   title: string;
+  workflow?: BuildPayload['workflow'] | null;
 }
 
 interface Props {
@@ -28,6 +29,7 @@ interface Props {
   onOpenDock?: (dock: string) => void;
   onViewRun?: (runId: string) => void;
   onDispatchSuccess?: (runId: string) => void;
+  onWorkflowCreated?: (workflowId: string) => void;
 }
 
 function disabledReason(release: ReleaseStatus, payload: BuildPayload | null, jobCount: number): string | null {
@@ -39,7 +41,17 @@ function disabledReason(release: ReleaseStatus, payload: BuildPayload | null, jo
   return null;
 }
 
-export function MoonReleaseTray({ release, payload, workflowId, onClose, onSelectNode, onOpenDock, onViewRun, onDispatchSuccess }: Props) {
+export function MoonReleaseTray({
+  release,
+  payload,
+  workflowId,
+  onClose,
+  onSelectNode,
+  onOpenDock,
+  onViewRun,
+  onDispatchSuccess,
+  onWorkflowCreated,
+}: Props) {
   const [dispatching, setDispatching] = useState(false);
   const [dispatchResult, setDispatchResult] = useState<string | null>(null);
   const [dispatchError, setDispatchError] = useState<string | null>(null);
@@ -91,6 +103,7 @@ export function MoonReleaseTray({ release, payload, workflowId, onClose, onSelec
     setPlanInvalidated(false);
     try {
       const result = await planDefinition({
+        workflowId: payload?.workflow?.id ?? workflowId,
         title: releaseSource.title,
         definition: releaseSource.definition,
         buildGraph: releaseSource.buildGraph,
@@ -106,12 +119,14 @@ export function MoonReleaseTray({ release, payload, workflowId, onClose, onSelec
         fingerprint: releaseSource.fingerprint,
         title: releaseSource.title,
       });
+      const nextWorkflowId = result?.workflow?.id;
+      if (nextWorkflowId && nextWorkflowId !== workflowId) onWorkflowCreated?.(nextWorkflowId);
     } catch (e: any) {
       setDispatchError(e.message || 'Planning failed');
     } finally {
       setPlanning(false);
     }
-  }, [releaseSource]);
+  }, [onWorkflowCreated, releaseSource, workflowId]);
   const reason = disabledReason(release, payload, jobs.length);
   const canPlan = !reason;
   const canDispatch = !reason && hasFullPlan && plannedJobs.length > 0;
@@ -134,12 +149,13 @@ export function MoonReleaseTray({ release, payload, workflowId, onClose, onSelec
     setDispatchError(null);
     setDispatchResult(null);
     try {
-      let wfId = workflowId;
+      let wfId = workflowId || activePlannedRelease.workflow?.id || null;
       const { definition, buildGraph, title, compiled_spec } = activePlannedRelease;
       if (!wfId) {
         const created = await createWorkflow(title, { definition, buildGraph, compiled_spec });
         wfId = created.id || (created as any).workflow_id;
         if (!wfId) throw new Error('Failed to create workflow');
+        onWorkflowCreated?.(wfId);
       }
       await commitDefinition(wfId, {
         title,
@@ -160,7 +176,7 @@ export function MoonReleaseTray({ release, payload, workflowId, onClose, onSelec
     } finally {
       setDispatching(false);
     }
-  }, [workflowId, activePlannedRelease, onViewRun, onDispatchSuccess]);
+  }, [workflowId, activePlannedRelease, onDispatchSuccess, onViewRun, onWorkflowCreated]);
 
   return (
     <>

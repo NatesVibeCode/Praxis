@@ -70,16 +70,44 @@ def _json_load(value: object) -> dict[str, Any]:
     return dict(parsed)
 
 
+def _normalized_execution_manifest(value: object) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    if "tool_allowlist" in value and "verify_refs" in value and "compiled_spec" in value:
+        return _json_clone(value)
+    tool_allowlist = value.get("tool_allowlist_json")
+    if not isinstance(tool_allowlist, dict):
+        return None
+    compiled_spec = value.get("compiled_spec_json")
+    policy_gates = value.get("policy_gates_json")
+    hardening_report = value.get("hardening_report_json")
+    return {
+        "execution_manifest_ref": _as_text(value.get("execution_manifest_ref")) or None,
+        "workflow_id": _as_text(value.get("workflow_id")) or None,
+        "definition_revision": _as_text(value.get("definition_revision")) or None,
+        "manifest_ref": _as_text(value.get("manifest_ref")) or None,
+        "review_group_ref": _as_text(value.get("review_group_ref")) or None,
+        "approved_bundle_refs": [
+            item
+            for item in (_json_clone(value.get("approved_bundle_refs_json")) if isinstance(value.get("approved_bundle_refs_json"), list) else [])
+            if _as_text(item)
+        ],
+        "tool_allowlist": _json_clone(tool_allowlist),
+        "verify_refs": [
+            item
+            for item in (_json_clone(value.get("verify_refs_json")) if isinstance(value.get("verify_refs_json"), list) else [])
+            if _as_text(item)
+        ],
+        "compiled_spec": _json_clone(compiled_spec) if isinstance(compiled_spec, dict) else {},
+        "policy_gates": _json_clone(policy_gates) if isinstance(policy_gates, dict) else {},
+        "hardening_report": _json_clone(hardening_report) if isinstance(hardening_report, dict) else {},
+    }
+
+
 def _load_workflow_record(pg: Any, *, workflow_id: str) -> dict[str, Any] | None:
     from storage.postgres.workflow_runtime_repository import load_workflow_record
 
     return load_workflow_record(pg, workflow_id=workflow_id)
-
-
-def _current_compiled_spec(definition: dict[str, Any], compiled_spec: Any) -> dict[str, Any] | None:
-    from runtime.operating_model_planner import current_compiled_spec
-
-    return current_compiled_spec(definition, compiled_spec)
 
 
 def _latest_execution_manifest(
@@ -99,19 +127,20 @@ def _latest_execution_manifest(
     except Exception:
         return None
     try:
-        return load_latest_workflow_build_execution_manifest(
+        manifest = load_latest_workflow_build_execution_manifest(
             pg,
             workflow_id=normalized_workflow_id,
             definition_revision=normalized_definition_revision,
         )
+        return _normalized_execution_manifest(manifest)
     except Exception:
         return None
 
 
-def _missing_execution_plan_message(workflow_name: str | None = None) -> str:
-    from runtime.operating_model_planner import missing_execution_plan_message
+def _missing_execution_manifest_message(workflow_name: str | None = None) -> str:
+    from runtime.operating_model_planner import missing_execution_manifest_message
 
-    return missing_execution_plan_message(workflow_name)
+    return missing_execution_manifest_message(workflow_name)
 
 
 def _submit_workflow_inline(
@@ -453,14 +482,26 @@ def execute_workflow_invoke(args: dict[str, Any], pg: Any) -> dict[str, Any]:
         }
 
     definition_row = _mapping(workflow_row.get("definition"))
-    compiled_spec_row = workflow_row.get("compiled_spec")
-    spec = _current_compiled_spec(definition_row, compiled_spec_row)
-    if spec is None:
+    definition_revision = _as_text(definition_row.get("definition_revision"))
+    execution_manifest = _latest_execution_manifest(
+        pg,
+        workflow_id=str(workflow_row["id"]),
+        definition_revision=definition_revision,
+    )
+    if not isinstance(execution_manifest, dict):
         return {
             "status": "failed",
             "data": None,
-            "summary": _missing_execution_plan_message(_as_text(workflow_row.get("name")) or workflow_id),
-            "error": "workflow_execution_plan_missing",
+            "summary": _missing_execution_manifest_message(_as_text(workflow_row.get("name")) or workflow_id),
+            "error": "workflow_execution_manifest_missing",
+        }
+    spec = execution_manifest.get("compiled_spec")
+    if not isinstance(spec, dict) or not _as_text(spec.get("definition_revision")):
+        return {
+            "status": "failed",
+            "data": None,
+            "summary": _missing_execution_manifest_message(_as_text(workflow_row.get("name")) or workflow_id),
+            "error": "workflow_execution_manifest_missing",
         }
 
     trigger_event = _mapping(args.get("_trigger_event"))
@@ -475,14 +516,8 @@ def execute_workflow_invoke(args: dict[str, Any], pg: Any) -> dict[str, Any]:
     )
 
     spec_to_submit = _json_clone(spec)
-    execution_manifest = _latest_execution_manifest(
-        pg,
-        workflow_id=str(workflow_row["id"]),
-        definition_revision=_as_text(spec.get("definition_revision")),
-    )
-    if isinstance(execution_manifest, dict):
-        spec_to_submit["execution_manifest"] = _json_clone(execution_manifest)
-        spec_to_submit["execution_manifest_ref"] = _as_text(execution_manifest.get("execution_manifest_ref")) or None
+    spec_to_submit["execution_manifest"] = _json_clone(execution_manifest)
+    spec_to_submit["execution_manifest_ref"] = _as_text(execution_manifest.get("execution_manifest_ref")) or None
     packet_provenance = {
         "source_kind": "integration_invoke",
         "integration_id": "workflow",
@@ -491,8 +526,7 @@ def execute_workflow_invoke(args: dict[str, Any], pg: Any) -> dict[str, Any]:
         "input_payload": input_payload,
         "trigger_event": trigger_event,
     }
-    if isinstance(execution_manifest, dict):
-        packet_provenance["execution_manifest"] = _json_clone(execution_manifest)
+    packet_provenance["execution_manifest"] = _json_clone(execution_manifest)
 
     try:
         result = _submit_workflow_inline(

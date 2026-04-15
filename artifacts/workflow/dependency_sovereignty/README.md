@@ -15,6 +15,21 @@ earns the right to exist.
 | `roadmap_item.dependency.vector.store.seam` | `artifacts/workflow/dependency_sovereignty/dependency_embedding_and_vector.queue.json` | `Code&DBs/Workflow/runtime/task_assembler.py`, `Code&DBs/Workflow/runtime/compiler.py`, `Code&DBs/Workflow/runtime/intent_matcher.py` |
 | `roadmap_item.dependency.provider.adapter.runtime` | `artifacts/workflow/dependency_sovereignty/dependency_provider_runtime.queue.json` | `Code&DBs/Workflow/adapters/llm_client.py`, `Code&DBs/Workflow/adapters/cli_llm.py`, `Code&DBs/Workflow/registry/provider_routing.py`, `Code&DBs/Workflow/registry/provider_fallback.py`, `Code&DBs/Workflow/runtime/provider_route_runtime.py` |
 
+## Decision Table
+
+Canonical authority is `operator_decisions` under the typed `architecture_policy`
+decision kind. This table is a compact projection of those durable rows, not a
+second source of truth.
+
+| Decision key | Scope | Decision | Current consequence |
+| --- | --- | --- | --- |
+| `architecture-policy::decision-tables::db-native-authority` | `decision_tables` | Decision tables stay DB-native authority. | Cross-cutting control belongs in durable Postgres-backed authority, not in shell folklore. |
+| `architecture-policy::decision-tables::scripts-support-only` | `decision_tables` | Scripts support the system; they do not replace it. | Dependency and orchestration work lands in runtime, registry, and DB seams rather than ad hoc scripts. |
+| `architecture-policy::embedding-runtime::service-boundary` | `embedding_runtime` | Semantic capability stays at the product surface while heavy local inference leaves default control-plane images. | `api-server` and `workflow-worker` use the service backend contract instead of carrying ambient `torch`. |
+| `architecture-policy::embedding-runtime::replacement-contract` | `embedding_runtime` | Do not remove semantic compile/query/discover behavior without a validated replacement. | `torch` stays isolated as the compatibility lane until a leaner backend proves the same contract and acceptable quality. |
+| `architecture-policy::embedding-runtime::no-custom-inference` | `embedding_runtime` | Do not hand-roll embedding inference ourselves. | Backend swaps stay behind the embedding contract instead of creating bespoke runtime debt. |
+| `architecture-policy::compile-authority::db-backed-enrichment` | `compile_authority` | Compile truth stays DB-backed; embeddings are enrichment. | Semantic degradation can reduce ranking quality without breaking structural compile authority. |
+
 ## Rule
 
 - Replacement rows remain directional only until these packets prove the current

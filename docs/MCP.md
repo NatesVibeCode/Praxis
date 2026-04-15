@@ -1,13 +1,13 @@
 # Praxis MCP Tools
 
-Praxis exposes 45 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
+Praxis exposes 48 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
 
 CLI discovery is generated from the same catalog metadata:
 
-- `praxis workflow tools list`
-- `praxis workflow tools search <text> [--exact]`
-- `praxis workflow tools describe <tool|alias>`
-- `praxis workflow tools call <tool|alias> --input-json '{...}'`
+- `workflow tools list`
+- `workflow tools search <text> [--exact]`
+- `workflow tools describe <tool|alias>`
+- `workflow tools call <tool|alias> --input-json '{...}'`
 - single-result searches print the direct describe and entrypoint commands
 
 ## Catalog Summary
@@ -24,18 +24,21 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_governance` | `governance` | `advanced` | - | `read` | Safety checks before dispatching work. Scan prompts for leaked secrets (API keys, tokens, passwords) or verify that a set of file paths falls within allowed scope. |
 | `praxis_heal` | `governance` | `advanced` | - | `read` | Diagnose why a workflow job failed and get a recommended recovery action: retry (transient error), escalate (needs human attention), skip (non-critical), or halt (stop the pipeline). |
 | `praxis_integration` | `integration` | `advanced` | - | `dispatch`, `read` | Call, list, or describe registered integrations (API connectors, webhooks, and other external services). |
-| `praxis_provider_onboard` | `integration` | `advanced` | - | `read`, `write` | Onboard a CLI or API provider into Praxis Engine. Probes transport, discovers models, tests capacity, writes to all routing tables, and updates runtime config. |
+| `praxis_provider_onboard` | `integration` | `advanced` | - | `read`, `write` | Onboard a CLI or API provider into Praxis Engine. Probes transport, discovers models, tests capacity, writes to all routing tables, and updates native runtime authority. |
 | `praxis_graph` | `knowledge` | `advanced` | - | `read` | Explore connections from one knowledge-graph entity. Shows what an entity depends on, what depends on it, and the blast radius of changes. |
 | `praxis_ingest` | `knowledge` | `advanced` | - | `write` | Store new information in the knowledge graph so it can be recalled later via praxis_recall. Content is automatically entity-extracted, deduplicated, and embedded for vector search. |
 | `praxis_recall` | `knowledge` | `stable` | `workflow recall` | `read` | Search the platform's knowledge graph for information about modules, functions, decisions, patterns, bugs, constraints, people, or any previously ingested content. Returns ranked results with confidence scores and how each result was found (text match, graph traversal, or vector similarity). |
 | `praxis_research` | `knowledge` | `stable` | - | `read` | Search the knowledge graph specifically for research findings and analysis results. Lighter-weight than praxis_recall — focused on retrieving prior research. |
+| `praxis_circuits` | `operations` | `stable` | `workflow circuits` | `read`, `write` | Inspect effective circuit-breaker state or apply a durable manual override for one provider. |
 | `praxis_diagnose` | `operations` | `stable` | `workflow diagnose` | `read` | Diagnose one workflow run by id. Combines the receipt, failure classification, and provider health into a single operator-facing report. |
 | `praxis_health` | `operations` | `stable` | `workflow health` | `read` | Full system health check — Postgres connectivity, disk space, operator panel state, workflow lane recommendations, context cache stats, and memory graph health. |
 | `praxis_heartbeat` | `operations` | `advanced` | - | `read`, `write` | Run or check the knowledge graph maintenance cycle. The heartbeat syncs receipts, bugs, constraints, and friction events into the knowledge graph, mines relationships between entities, generates daily/weekly rollups, and archives stale nodes. |
 | `praxis_maintenance` | `operations` | `advanced` | - | `write` | Run explicit operator maintenance actions that mutate observability aggregates. |
 | `praxis_reload` | `operations` | `advanced` | - | `write` | Clear all in-process caches so DB and config changes take effect without restarting Claude Desktop. |
 | `praxis_status` | `operations` | `advanced` | - | `read` | Quick snapshot of how workflows are performing — total runs, pass/fail rate, categorized failure breakdown by zone (external/config/internal), and adjusted pass rate that excludes external provider failures. |
+| `praxis_operator_architecture_policy` | `operator` | `advanced` | - | `write` | Record a durable architecture-policy decision in operator authority. |
 | `praxis_operator_closeout` | `operator` | `advanced` | - | `read`, `write` | Preview or commit proof-backed bug and roadmap closeout through the shared reconciliation gate. |
+| `praxis_operator_decisions` | `operator` | `advanced` | - | `read`, `write` | List or record canonical operator decisions through the shared operator_decisions table. |
 | `praxis_operator_native_primary_cutover_gate` | `operator` | `advanced` | - | `write` | Admit a native primary cutover gate into operator-control decision and gate authority tables. |
 | `praxis_operator_roadmap_view` | `operator` | `advanced` | - | `read` | Read one roadmap subtree and its dependency edges from DB-backed authority. |
 | `praxis_operator_view` | `operator` | `advanced` | - | `read` | Render detailed operator observability views — deeper than praxis_status. |
@@ -410,6 +413,28 @@ Example input:
 
 ### Operations
 
+#### `praxis_circuits`
+
+- Surface: `operations`
+- Tier: `stable`
+- Badges: `stable`, `operations`, `alias:circuits`, `mutates-state`
+- Risks: `read`, `write`
+- CLI entrypoint: `workflow circuits`
+- CLI schema help: `workflow tools describe praxis_circuits`
+- When to use: Inspect effective circuit-breaker state or apply a durable manual override for one provider.
+- When not to use: Do not use it for task-route eligibility windows or generic health checks.
+- Recommended alias: `workflow circuits`
+- Selector: `action`; default `list`; values `list`, `history`, `open`, `close`, `reset`
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "action": "list"
+}
+```
+
 #### `praxis_diagnose`
 
 - Surface: `operations`
@@ -537,6 +562,32 @@ Example input:
 
 ### Operator
 
+#### `praxis_operator_architecture_policy`
+
+- Surface: `operator`
+- Tier: `advanced`
+- Badges: `advanced`, `operator`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow tools call praxis_operator_architecture_policy`
+- CLI schema help: `workflow tools describe praxis_operator_architecture_policy`
+- When to use: Record one typed architecture policy decision in operator_decisions when explicit guidance should become durable control authority.
+- When not to use: Do not use it for generic decision history reads; use praxis_operator_decisions for that.
+- Selector: none
+- Required args: `authority_domain`, `policy_slug`, `title`, `rationale`, `decided_by`, `decision_source`
+
+Example input:
+
+```json
+{
+  "authority_domain": "decision_tables",
+  "policy_slug": "db-native-authority",
+  "title": "Decision tables are DB-native authority",
+  "rationale": "Keep authority in Postgres.",
+  "decided_by": "nate",
+  "decision_source": "cto.guidance"
+}
+```
+
 #### `praxis_operator_closeout`
 
 - Surface: `operator`
@@ -556,6 +607,28 @@ Example input:
 {
   "action": "preview",
   "work_item_id": "WI-123"
+}
+```
+
+#### `praxis_operator_decisions`
+
+- Surface: `operator`
+- Tier: `advanced`
+- Badges: `advanced`, `operator`, `mutates-state`
+- Risks: `read`, `write`
+- CLI entrypoint: `workflow tools call praxis_operator_decisions`
+- CLI schema help: `workflow tools describe praxis_operator_decisions`
+- When to use: List or record durable operator decisions such as architecture policy rows in the canonical operator_decisions table.
+- When not to use: Do not use it for roadmap item authoring or cutover-gate admission.
+- Selector: `action`; default `list`; values `list`, `record`
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "action": "list",
+  "decision_kind": "architecture_policy"
 }
 ```
 

@@ -205,7 +205,7 @@ async def _bootstrap_workflow_migration(conn, filename: str) -> None:
                 async with conn.transaction():
                     await conn.execute(statement)
             except asyncpg.PostgresError as exc:
-                if getattr(exc, "sqlstate", None) in {"42P07", "42710"}:
+                if getattr(exc, "sqlstate", None) in {"42P07", "42701", "42710"}:
                     continue
                 raise
 
@@ -235,6 +235,8 @@ async def _exercise_cutover_graph_status_surface_is_deterministic_and_surface_on
             "008_workflow_class_and_schedule_schema.sql",
             "009_bug_and_roadmap_authority.sql",
             "010_operator_control_authority.sql",
+            "124_operator_decision_scope_authority.sql",
+            "126_operator_decision_scope_policy.sql",
         ):
             await _bootstrap_workflow_migration(conn, filename)
 
@@ -372,9 +374,11 @@ async def _exercise_cutover_graph_status_surface_is_deterministic_and_surface_on
                 effective_to,
                 decided_at,
                 created_at,
-                updated_at
+                updated_at,
+                decision_scope_kind,
+                decision_scope_ref
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
             )
             """,
             decision_id,
@@ -390,6 +394,8 @@ async def _exercise_cutover_graph_status_surface_is_deterministic_and_surface_on
             as_of,
             as_of,
             as_of,
+            "roadmap_item",
+            roadmap_item_id,
         )
         await conn.execute(
             """

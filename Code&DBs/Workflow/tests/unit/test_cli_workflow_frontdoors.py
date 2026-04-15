@@ -784,6 +784,7 @@ def test_help_can_show_native_operator_usage() -> None:
     rendered = stdout.getvalue()
     assert "workflow native-operator instance" in rendered
     assert "workflow native-operator route-disable" in rendered
+    assert "workflow native-operator operator-decision" in rendered
     assert "start was removed" in rendered
 
 
@@ -804,6 +805,7 @@ def test_native_operator_help_entrypoint_is_available() -> None:
 
     rendered = stdout.getvalue()
     assert "workflow native-operator status" in rendered
+    assert "workflow native-operator operator-decision" in rendered
     assert "workflow native-operator provider-onboard" in rendered
 
 

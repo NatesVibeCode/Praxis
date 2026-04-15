@@ -148,14 +148,14 @@ def test_public_v1_catalog_lists_only_public_routes(monkeypatch) -> None:
 def test_internal_routes_no_longer_emit_tracebacks(monkeypatch) -> None:
     monkeypatch.setitem(
         api_handlers.ROUTES,
-        "/query",
+        "/bugs",
         lambda _subs, _body: (_ for _ in ()).throw(RuntimeError("boom")),
     )
     monkeypatch.setattr(rest, "_ensure_shared_subsystems", lambda _app: object())
     monkeypatch.setattr(rest, "_record_api_route_usage", lambda *_args, **_kwargs: None)
 
     with TestClient(rest.app) as client:
-        response = client.post("/query", json={"question": "status"})
+        response = client.post("/bugs", json={"question": "status"})
 
     assert response.status_code == 500
     assert response.json()["error"] == "RuntimeError: boom"

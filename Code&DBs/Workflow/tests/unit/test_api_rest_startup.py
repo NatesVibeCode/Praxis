@@ -15,6 +15,7 @@ if str(_WORKFLOW_ROOT) not in sys.path:
 
 import surfaces.api.rest as rest
 from surfaces.api import handlers as api_handlers
+from surfaces.api.handlers import workflow_query
 
 
 def test_rest_startup_initializes_shared_subsystems_once(monkeypatch) -> None:
@@ -140,18 +141,13 @@ def test_api_routes_endpoint_can_include_internal_routes() -> None:
     assert routes_route["visibility"] == "internal"
 
 
-def test_query_route_records_surface_usage(monkeypatch) -> None:
+def test_query_route_is_gone_from_rest_surface(monkeypatch) -> None:
     recorded: list[dict[str, Any]] = []
     fake_subsystems = object()
 
     monkeypatch.setattr(rest, "_ensure_shared_subsystems", lambda _app: fake_subsystems)
-    monkeypatch.setitem(
-        api_handlers.ROUTES,
-        "/query",
-        lambda _subs, body: {"ok": True, "question": body["question"]},
-    )
     monkeypatch.setattr(
-        rest,
+        workflow_query,
         "_record_api_route_usage",
         lambda _subs, **kwargs: recorded.append(kwargs),
     )
@@ -159,15 +155,8 @@ def test_query_route_records_surface_usage(monkeypatch) -> None:
     with TestClient(rest.app) as client:
         response = client.post("/query", json={"question": "status"})
 
-    assert response.status_code == 200
-    assert response.json() == {"ok": True, "question": "status"}
-    assert len(recorded) == 1
-    assert recorded[0]["path"] == "/query"
-    assert recorded[0]["method"] == "POST"
-    assert recorded[0]["status_code"] == 200
-    assert recorded[0]["request_body"] == {"question": "status"}
-    assert recorded[0]["response_payload"] == {"ok": True, "question": "status"}
-    assert recorded[0]["headers"] is not None
+    assert response.status_code == 404
+    assert recorded == []
 
 
 def test_surface_usage_metrics_endpoint_returns_serialized_rows(monkeypatch) -> None:

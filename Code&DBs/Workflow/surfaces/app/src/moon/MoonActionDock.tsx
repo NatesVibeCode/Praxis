@@ -109,13 +109,16 @@ export function MoonActionDock({
   }, [onPayloadChange, payload?.workflow, workflowId]);
 
   const handleRefine = useCallback(async () => {
-    if (!prose.trim() || !payload?.definition) return;
+    if (!prose.trim()) return;
     setLoading(true);
     setAction('refine');
     setError(null);
     setSuccess(null);
     try {
-      const result = await refineDefinition(prose.trim(), payload.definition);
+      const result = await refineDefinition(prose.trim(), {
+        workflowId: payload?.workflow?.id ?? workflowId,
+        title: payload?.workflow?.name,
+      });
       adoptBuildPayload(result);
       setSuccess('Definition refined');
       setProse('');
@@ -133,8 +136,13 @@ export function MoonActionDock({
     setError(null);
     setSuccess(null);
     try {
-      const result = await compileDefinition(prose.trim(), payload?.workflow?.name);
+      const result = await compileDefinition(prose.trim(), {
+        workflowId: payload?.workflow?.id ?? workflowId,
+        title: payload?.workflow?.name,
+      });
       adoptBuildPayload(result);
+      const createdWorkflowId = result.workflow?.id;
+      if (createdWorkflowId && createdWorkflowId !== workflowId) onWorkflowCreated?.(createdWorkflowId);
       setSuccess('Compiled');
       setProse('');
     } catch (e: any) {
@@ -142,7 +150,7 @@ export function MoonActionDock({
     } finally {
       setLoading(false);
     }
-  }, [adoptBuildPayload, payload?.workflow?.name, prose]);
+  }, [adoptBuildPayload, onWorkflowCreated, payload?.workflow?.name, prose, workflowId]);
 
   const handleCommit = useCallback(async () => {
     if (!hasDefinition && !hasGraphSteps) return;

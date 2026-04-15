@@ -53,7 +53,10 @@
     "122_workflow_build_review_contract_fields.sql",
     "123_workflow_build_planning_state_registry.sql",
     "124_operator_decision_scope_authority.sql",
-    "125_cursor_local_cli_provider_seed.sql"
+    "125_cursor_local_cli_provider_seed.sql",
+    "126_operator_decision_scope_policy.sql",
+    "127_operator_decision_architecture_policies.sql",
+    "128_operator_decision_embedding_architecture.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -1645,7 +1648,7 @@
     "119_context_bundle_sandbox_profile_ref.sql": [
       {
         "object_type": "column",
-        "object_name": "sandbox_profile_ref"
+        "object_name": "context_bundles.sandbox_profile_ref"
       },
       {
         "object_type": "constraint",
@@ -1679,19 +1682,19 @@
     "122_workflow_build_review_contract_fields.sql": [
       {
         "object_type": "column",
-        "object_name": "review_group_ref"
+        "object_name": "workflow_build_review_decisions.review_group_ref"
       },
       {
         "object_type": "column",
-        "object_name": "slot_ref"
+        "object_name": "workflow_build_review_decisions.slot_ref"
       },
       {
         "object_type": "column",
-        "object_name": "authority_scope"
+        "object_name": "workflow_build_review_decisions.authority_scope"
       },
       {
         "object_type": "column",
-        "object_name": "supersedes_decision_ref"
+        "object_name": "workflow_build_review_decisions.supersedes_decision_ref"
       },
       {
         "object_type": "constraint",
@@ -1779,11 +1782,11 @@
     "124_operator_decision_scope_authority.sql": [
       {
         "object_type": "column",
-        "object_name": "decision_scope_kind"
+        "object_name": "operator_decisions.decision_scope_kind"
       },
       {
         "object_type": "column",
-        "object_name": "decision_scope_ref"
+        "object_name": "operator_decisions.decision_scope_ref"
       },
       {
         "object_type": "constraint",
@@ -1802,6 +1805,28 @@
       {
         "object_type": "table",
         "object_name": "provider_transport_admissions"
+      }
+    ],
+    "126_operator_decision_scope_policy.sql": [
+      {
+        "object_type": "constraint",
+        "object_name": "operator_decisions.operator_decisions_kind_scope_policy"
+      }
+    ],
+    "127_operator_decision_architecture_policies.sql": [
+      {
+        "object_type": "table",
+        "object_name": "operator_decisions"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "operator_decisions.operator_decisions_kind_scope_policy"
+      }
+    ],
+    "128_operator_decision_embedding_architecture.sql": [
+      {
+        "object_type": "table",
+        "object_name": "operator_decisions"
       }
     ]
   },
@@ -1860,7 +1885,10 @@
       "122_workflow_build_review_contract_fields.sql",
       "123_workflow_build_planning_state_registry.sql",
       "124_operator_decision_scope_authority.sql",
-      "125_cursor_local_cli_provider_seed.sql"
+      "125_cursor_local_cli_provider_seed.sql",
+      "126_operator_decision_scope_policy.sql",
+      "127_operator_decision_architecture_policies.sql",
+      "128_operator_decision_embedding_architecture.sql"
     ],
     "bootstrap_only": [
       "012_execution_leases.sql",

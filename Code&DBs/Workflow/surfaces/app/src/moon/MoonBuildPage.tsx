@@ -740,7 +740,9 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
       const prefix = state.selectedTrigger
         ? `Starting with a ${state.selectedTrigger.label} trigger: `
         : '';
-      const result = await compileDefinition(prefix + state.compileProse.trim());
+      const result = await compileDefinition(prefix + state.compileProse.trim(), {
+        workflowId,
+      });
       // Patch first node with trigger route if trigger was selected
       if (state.selectedTrigger) {
         const graph = (result as any)?.build_graph;
@@ -764,7 +766,7 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
     } catch (e: any) {
       dispatch({ type: 'COMPILE_ERROR', error: e.message || 'Compilation failed' });
     }
-  }, [state.compileProse, state.selectedTrigger, onWorkflowCreated, setPayload]);
+  }, [onWorkflowCreated, setPayload, state.compileProse, state.selectedTrigger, workflowId]);
 
   const handleTriggerSelect = useCallback((item: CatalogItem) => {
     const trigger = {
@@ -1450,6 +1452,7 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
               release={viewModel.release}
               payload={payload}
               workflowId={workflowId}
+              onWorkflowCreated={onWorkflowCreated}
               onClose={() => dispatch({ type: 'TOGGLE_RELEASE' })}
               onSelectNode={(nodeId) => dispatch({ type: 'SELECT_NODE', nodeId })}
               onOpenDock={(dock) => dispatch({ type: 'OPEN_DOCK', dock: dock as 'action' | 'context' })}

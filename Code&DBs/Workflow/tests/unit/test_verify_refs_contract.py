@@ -292,7 +292,7 @@ def test_plan_definition_blocks_build_authority_without_review_approval(
     )
 
     with pytest.raises(planner.PlanningBlockedError) as exc_info:
-        planner.plan_definition(
+        planner.harden_reviewed_definition(
             {
                 "source_prose": "Build a thing",
                 "compiled_prose": "Build a thing",
@@ -306,6 +306,24 @@ def test_plan_definition_blocks_build_authority_without_review_approval(
         )
 
     assert "binding approval required" in str(exc_info.value)
+
+
+def test_plan_definition_rejects_builder_owned_workflow_state() -> None:
+    with pytest.raises(planner.PlanningBlockedError) as exc_info:
+        planner.plan_definition(
+            {
+                "source_prose": "Build a thing",
+                "compiled_prose": "Build a thing",
+                "definition_revision": "def_builder_owned",
+                "references": [],
+                "narrative_blocks": [],
+                "draft_flow": [],
+                "trigger_intent": [],
+                "build_graph": {"nodes": [], "edges": []},
+            }
+        )
+
+    assert "harden_reviewed_definition" in str(exc_info.value)
 
 
 def test_plan_definition_uses_draft_flow_even_when_legacy_jobs_are_present(monkeypatch: pytest.MonkeyPatch) -> None:

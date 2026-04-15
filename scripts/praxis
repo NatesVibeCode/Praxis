@@ -9,6 +9,19 @@ docker_only_usage() {
     cat <<'EOF'
 Usage: praxis <command> [service]
 
+Authoritative namespaces:
+  workflow ...            Canonical execution, query, and operator authority
+  db ...                  Schema authority plus SQL scaffolds
+  registry ...            Manifest registry authority
+  object-type ...         Object-type authority and scaffolds
+  objects ...             Object record authority
+  catalog ...             Surface catalog authority
+  data ...                Data shaping plans plus workflow data actions
+  page ...                App/page scaffolds
+  hierarchy ...           Hierarchy scaffolds
+  reload                  Runtime reload authority
+  reconcile               Data reconcile authority
+
 Docker-only commands:
   status                  Show Docker service state and active workflows
   start [service...]      Start Docker services (default: all)
@@ -212,6 +225,14 @@ if [ "${1:-}" = "workflow" ]; then
     PYTHON_BIN="${PYTHON_BIN:-$(command -v python3.14 || command -v python3.13 || command -v python3)}"
     exec "$PYTHON_BIN" -m surfaces.cli.main workflow "$@"
 fi
+
+case "${1:-}" in
+    db|registry|object-type|objects|object|catalog|data|page|hierarchy|reload|reconcile)
+        export PYTHONPATH="$WORKFLOW_DIR${PYTHONPATH:+:$PYTHONPATH}"
+        PYTHON_BIN="${PYTHON_BIN:-$(command -v python3.14 || command -v python3.13 || command -v python3)}"
+        exec "$PYTHON_BIN" -m surfaces.cli.praxis "$@"
+        ;;
+esac
 
 case "${1:-}" in
     help|--help|-h)

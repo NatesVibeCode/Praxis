@@ -1,0 +1,105 @@
+-- Canonical architecture-policy decisions for embedding runtime and compile authority.
+
+BEGIN;
+
+INSERT INTO operator_decisions (
+    operator_decision_id,
+    decision_key,
+    decision_kind,
+    decision_status,
+    title,
+    rationale,
+    decided_by,
+    decision_source,
+    effective_from,
+    effective_to,
+    decided_at,
+    created_at,
+    updated_at,
+    decision_scope_kind,
+    decision_scope_ref
+) VALUES
+    (
+        'operator_decision.architecture_policy.embedding_runtime.service_boundary',
+        'architecture-policy::embedding-runtime::service-boundary',
+        'architecture_policy',
+        'decided',
+        'Semantic inference leaves default control-plane images',
+        'Treat local embedding inference as a build/runtime boundary problem, not an API-shape problem. Keep semantic capability at the API and worker contracts, but host heavy local inference in a dedicated semantic backend instead of bundling torch into default control-plane images.',
+        'nate',
+        'cto.guidance',
+        TIMESTAMPTZ '2026-04-15T00:00:00Z',
+        NULL,
+        TIMESTAMPTZ '2026-04-15T00:00:00Z',
+        TIMESTAMPTZ '2026-04-15T00:00:00Z',
+        TIMESTAMPTZ '2026-04-15T00:00:00Z',
+        'authority_domain',
+        'embedding_runtime'
+    ),
+    (
+        'operator_decision.architecture_policy.embedding_runtime.replacement_contract',
+        'architecture-policy::embedding-runtime::replacement-contract',
+        'architecture_policy',
+        'decided',
+        'Semantic capability must survive backend swaps',
+        'Do not remove semantic compile, query, or discover behavior without a validated replacement. Torch remains the compatibility backend until a leaner backend such as ONNX proves the same embedding contract and acceptable retrieval quality.',
+        'nate',
+        'cto.guidance',
+        TIMESTAMPTZ '2026-04-15T00:00:00Z',
+        NULL,
+        TIMESTAMPTZ '2026-04-15T00:00:00Z',
+        TIMESTAMPTZ '2026-04-15T00:00:00Z',
+        TIMESTAMPTZ '2026-04-15T00:00:00Z',
+        'authority_domain',
+        'embedding_runtime'
+    ),
+    (
+        'operator_decision.architecture_policy.embedding_runtime.no_custom_inference',
+        'architecture-policy::embedding-runtime::no-custom-inference',
+        'architecture_policy',
+        'decided',
+        'Do not hand-roll embedding inference',
+        'Do not replace library or runtime choice by rebuilding tokenizer, model, pooling, or normalization behavior ourselves. Backend changes must happen behind the embedding contract instead of creating bespoke inference maintenance debt.',
+        'nate',
+        'cto.guidance',
+        TIMESTAMPTZ '2026-04-15T00:00:00Z',
+        NULL,
+        TIMESTAMPTZ '2026-04-15T00:00:00Z',
+        TIMESTAMPTZ '2026-04-15T00:00:00Z',
+        TIMESTAMPTZ '2026-04-15T00:00:00Z',
+        'authority_domain',
+        'embedding_runtime'
+    ),
+    (
+        'operator_decision.architecture_policy.compile_authority.db_backed_enrichment',
+        'architecture-policy::compile-authority::db-backed-enrichment',
+        'architecture_policy',
+        'decided',
+        'Compile authority stays DB-backed',
+        'Compile truth lives in Postgres-backed compile-index and registry authority. Embeddings are an enrichment and ranking lane, not the compile backbone, so degraded semantic mode must leave structural compile behavior intact.',
+        'nate',
+        'cto.guidance',
+        TIMESTAMPTZ '2026-04-15T00:00:00Z',
+        NULL,
+        TIMESTAMPTZ '2026-04-15T00:00:00Z',
+        TIMESTAMPTZ '2026-04-15T00:00:00Z',
+        TIMESTAMPTZ '2026-04-15T00:00:00Z',
+        'authority_domain',
+        'compile_authority'
+    )
+ON CONFLICT (operator_decision_id) DO UPDATE SET
+    decision_key = EXCLUDED.decision_key,
+    decision_kind = EXCLUDED.decision_kind,
+    decision_status = EXCLUDED.decision_status,
+    title = EXCLUDED.title,
+    rationale = EXCLUDED.rationale,
+    decided_by = EXCLUDED.decided_by,
+    decision_source = EXCLUDED.decision_source,
+    effective_from = EXCLUDED.effective_from,
+    effective_to = EXCLUDED.effective_to,
+    decided_at = EXCLUDED.decided_at,
+    updated_at = EXCLUDED.updated_at,
+    decision_scope_kind = EXCLUDED.decision_scope_kind,
+    decision_scope_ref = EXCLUDED.decision_scope_ref;
+
+COMMIT;

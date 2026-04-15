@@ -13,9 +13,12 @@ from types import SimpleNamespace
 import pytest
 
 from runtime import task_type_router
+import runtime._workflow_database as runtime_db
 import runtime.compile_index as compile_index
 from runtime.idempotency import canonical_hash
 import runtime.retry_orchestrator as retry_orchestrator
+from runtime.domain import RouteIdentity
+from receipts import EvidenceRow, ReceiptV1
 from runtime.shadow_execution_packet import inspect_shadow_execution_packets
 from runtime.workflow import unified as unified_dispatch
 from runtime.workflow import _admission as _admission_mod
@@ -27,6 +30,7 @@ from runtime.workflow import _worker_loop as _wloop_mod
 from runtime.workflow import _claiming as _claiming_mod
 from runtime.workflow import _shared as _shared_mod
 from runtime.workflow.worker import WorkflowWorker
+import storage.postgres as storage_postgres
 from storage.postgres import connection as pg_connection
 from surfaces.cli.workflow_runner import WorkflowSpec
 
@@ -729,6 +733,116 @@ def test_get_run_status_ignores_legacy_verify_snapshot_bindings():
     assert status["packet_inspection"] == expected_inspection
     assert status["packet_inspection"]["drift"]["status"] == "aligned"
     assert all(diff["field"] != "verify_refs" for diff in status["packet_inspection"]["drift"]["differences"])
+
+
+def test_get_run_status_graph_receipts_use_runtime_database_authority(monkeypatch) -> None:
+    run_row = {
+        "run_id": "dispatch_graph_receipts",
+        "workflow_id": "workflow.graph",
+        "request_id": "request.graph",
+        "current_state": "succeeded",
+        "request_envelope": {
+            "name": "graph-spec",
+            "nodes": [
+                {
+                    "node_id": "run",
+                    "adapter_type": "cli_llm",
+                    "position_index": 0,
+                    "display_name": "run",
+                }
+            ],
+        },
+        "requested_at": datetime.now(timezone.utc) - timedelta(seconds=10),
+        "started_at": datetime.now(timezone.utc) - timedelta(seconds=9),
+        "finished_at": datetime.now(timezone.utc) - timedelta(seconds=1),
+    }
+    route_identity = RouteIdentity(
+        workflow_id="workflow.graph",
+        run_id="dispatch_graph_receipts",
+        request_id="request.graph",
+        authority_context_ref="authority.graph",
+        authority_context_digest="digest.graph",
+        claim_id="claim.graph",
+        attempt_no=1,
+        transition_seq=1,
+    )
+    started_at = datetime.now(timezone.utc) - timedelta(seconds=8)
+    finished_at = datetime.now(timezone.utc) - timedelta(seconds=2)
+    receipt = ReceiptV1(
+        receipt_id="receipt.graph.1",
+        receipt_type="node_execution_receipt",
+        schema_version=1,
+        workflow_id="workflow.graph",
+        run_id="dispatch_graph_receipts",
+        request_id="request.graph",
+        route_identity=route_identity,
+        transition_seq=1,
+        evidence_seq=2,
+        started_at=started_at,
+        finished_at=finished_at,
+        executor_type="cli_llm",
+        status="succeeded",
+        inputs={},
+        outputs={"result": "CURSOR_WORKFLOW_OK"},
+        node_id="run",
+        attempt_no=1,
+    )
+    evidence_row = EvidenceRow(
+        kind="receipt",
+        evidence_seq=2,
+        row_id="receipt.graph.1",
+        route_identity=route_identity,
+        transition_seq=1,
+        record=receipt,
+    )
+    captured: dict[str, object] = {}
+
+    class _FakeReader:
+        def __init__(self, *, database_url=None, env=None):
+            captured["database_url"] = database_url
+            captured["env"] = env
+
+        def evidence_timeline(self, run_id: str):
+            captured["run_id"] = run_id
+            return (evidence_row,)
+
+    class _StatusConn:
+        def execute(self, query: str, *args):
+            normalized = " ".join(query.split())
+            if normalized.startswith("SELECT * FROM workflow_runs"):
+                return [dict(run_row)]
+            if "FROM workflow_jobs WHERE run_id = $1 ORDER BY created_at" in normalized:
+                return []
+            if "COALESCE(SUM(cost_usd)" in normalized:
+                return [{
+                    "total_cost": 0.0,
+                    "total_tokens_in": 0,
+                    "total_tokens_out": 0,
+                    "total_duration_ms": 0,
+                }]
+            if "FROM execution_packets" in normalized:
+                return [{"packets": []}]
+            raise AssertionError(f"Unexpected query: {normalized}")
+
+    monkeypatch.setattr(
+        runtime_db,
+        "resolve_runtime_database_url",
+        lambda *, required=True, **_: "postgresql://postgres@repo.test/workflow",
+    )
+    monkeypatch.setattr(storage_postgres, "PostgresEvidenceReader", _FakeReader)
+
+    status = unified_dispatch.get_run_status(_StatusConn(), "dispatch_graph_receipts")
+
+    assert status is not None
+    assert captured == {
+        "database_url": "postgresql://postgres@repo.test/workflow",
+        "env": None,
+        "run_id": "dispatch_graph_receipts",
+    }
+    assert status["completed_jobs"] == 1
+    assert status["jobs"][0]["status"] == "succeeded"
+    assert status["jobs"][0]["attempt"] == 1
+    assert "CURSOR_WORKFLOW_OK" in status["jobs"][0]["stdout_preview"]
 
 
 def test_execute_job_always_uses_job_prompt(monkeypatch) -> None:
@@ -2574,6 +2688,51 @@ def test_submit_workflow_prefers_execution_manifest_authority_over_prompt_bucket
     assert bundle["access_policy"]["resolved_read_scope"] == []
     assert bundle["access_policy"]["blast_radius"] == []
     assert any("INSERT INTO workflow_job_runtime_context" in query for query, _ in conn.queries)
+
+
+def test_submit_workflow_inline_fails_closed_for_builder_path_without_execution_manifest(monkeypatch):
+    monkeypatch.setattr(_admission_mod, "_runtime_profile_ref_from_spec", lambda _spec: None)
+    monkeypatch.setattr("runtime.workflow._routing._runtime_profile_ref_from_spec", lambda _spec: None)
+    monkeypatch.setattr("runtime.workflow._routing._workspace_ref_from_spec", lambda _spec: None)
+    monkeypatch.setattr(
+        _ctx_mod,
+        "resolve_scope",
+        lambda write_scope, root_dir: SimpleNamespace(
+            computed_read_scope=[],
+            test_scope=[],
+            blast_radius=[],
+            context_sections=[],
+        ),
+    )
+    monkeypatch.setattr(_ctx_mod, "proof_metrics", lambda conn: {})
+
+    conn = _FakeConn()
+
+    with pytest.raises(RuntimeError) as exc_info:
+        unified_workflow.submit_workflow_inline(
+            conn,
+            {
+                "name": "builder-inline",
+                "workflow_id": "wf.builder.inline",
+                "phase": "build",
+                "definition_revision": "definition.builder.inline",
+                "plan_revision": "plan.builder.inline",
+                "jobs": [
+                    {
+                        "label": "build_a",
+                        "prompt": "Write an architecture essay about otters.",
+                        "agent": "auto/build",
+                        "write_scope": ["app.py"],
+                    }
+                ],
+                "packet_provenance": {
+                    "source_kind": "workflow_trigger",
+                },
+            },
+            run_id="dispatch_builder_missing_manifest",
+        )
+
+    assert "ExecutionManifest authority" in str(exc_info.value)
 
 
 def test_submit_workflow_replays_existing_idempotency(monkeypatch, caplog):

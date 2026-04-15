@@ -16,7 +16,6 @@ from urllib.parse import quote
 from runtime.canonical_workflows import (
     WorkflowRuntimeBoundaryError,
     commit_workflow,
-    materialize_definition_from_build_graph,
     delete_workflow,
     mutate_workflow_build,
     save_workflow,
@@ -242,6 +241,45 @@ def _market_model_matches_query(row: dict[str, Any], query: str) -> bool:
 
 def _handle_query(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
     return _workflow_query_core.handle_query(subs, body)
+
+
+def _deprecated_surface_payload(*, error: str, replacement: str) -> dict[str, Any]:
+    return {
+        "error": error,
+        "replacement": replacement,
+    }
+
+
+def _handle_query_post(request: Any, path: str) -> None:
+    try:
+        body = _read_json_body(request)
+    except (json.JSONDecodeError, ValueError) as exc:
+        payload = {"error": f"Invalid JSON: {exc}"}
+        request._send_json(400, payload)
+        _record_api_route_usage(
+            request.subsystems,
+            path=path,
+            method="POST",
+            status_code=400,
+            response_payload=payload,
+            headers=request.headers,
+        )
+        return
+
+    payload = _deprecated_surface_payload(
+        error="/query is gone. Use praxis workflow query/discover/recall/tools or workflow-scoped build surfaces instead.",
+        replacement="praxis workflow query|discover|recall|tools",
+    )
+    request._send_json(410, payload)
+    _record_api_route_usage(
+        request.subsystems,
+        path=path,
+        method="POST",
+        status_code=410,
+        request_body=body,
+        response_payload=payload,
+        headers=request.headers,
+    )
 
 
 def _handle_bugs(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
@@ -1548,94 +1586,20 @@ def _handle_compile_post(request: Any, path: str) -> None:
         )
         return
 
-    try:
-        prose = body.get("prose", "")
-        if not isinstance(prose, str) or not prose.strip():
-            payload = {"error": "prose is required"}
-            request._send_json(400, payload)
-            _record_api_route_usage(
-                request.subsystems,
-                path=path,
-                method="POST",
-                status_code=400,
-                request_body=body,
-                response_payload=payload,
-                headers=request.headers,
-            )
-            return
-        title = body.get("title")
-        if title is not None and not isinstance(title, str):
-            payload = {"error": "title must be a string"}
-            request._send_json(400, payload)
-            _record_api_route_usage(
-                request.subsystems,
-                path=path,
-                method="POST",
-                status_code=400,
-                request_body=body,
-                response_payload=payload,
-                headers=request.headers,
-            )
-            return
-
-        try:
-            conn, compile_index_snapshot = _load_compile_index_snapshot_for_request(request)
-        except Exception as exc:
-            from runtime.compile_index import CompileIndexAuthorityError
-
-            if isinstance(exc, CompileIndexAuthorityError):
-                payload = {
-                    "error": str(exc),
-                    "reason_code": exc.reason_code,
-                    "details": dict(getattr(exc, "details", {}) or {}),
-                }
-                request._send_json(
-                    409,
-                    payload,
-                )
-                _record_api_route_usage(
-                    request.subsystems,
-                    path=path,
-                    method="POST",
-                    status_code=409,
-                    request_body=body,
-                    response_payload=payload,
-                    headers=request.headers,
-                    conn=getattr(request.subsystems, "get_pg_conn", lambda: None)(),
-                )
-                return
-            raise
-        from runtime.compiler import compile_prose
-
-        result = compile_prose(
-            prose,
-            title=title,
-            conn=conn,
-            compile_index_snapshot=compile_index_snapshot,
-        )
-        request._send_json(200, result)
-        _record_api_route_usage(
-            request.subsystems,
-            path=path,
-            method="POST",
-            status_code=200,
-            request_body=body,
-            response_payload=result,
-            headers=request.headers,
-            conn=conn,
-        )
-    except Exception as exc:
-        payload = {"error": str(exc)}
-        request._send_json(500, payload)
-        _record_api_route_usage(
-            request.subsystems,
-            path=path,
-            method="POST",
-            status_code=500,
-            request_body=body,
-            response_payload=payload,
-            headers=request.headers,
-        )
+    payload = _deprecated_surface_payload(
+        error="/api/compile is gone. Bootstrap workflow state through /api/workflows/{workflow_id}/build/bootstrap.",
+        replacement="/api/workflows/{workflow_id}/build/bootstrap",
+    )
+    request._send_json(410, payload)
+    _record_api_route_usage(
+        request.subsystems,
+        path=path,
+        method="POST",
+        status_code=410,
+        request_body=body,
+        response_payload=payload,
+        headers=request.headers,
+    )
 
 
 def _handle_refine_definition_post(request: Any, path: str) -> None:
@@ -1654,95 +1618,20 @@ def _handle_refine_definition_post(request: Any, path: str) -> None:
         )
         return
 
-    try:
-        prose = body.get("prose", "")
-        if not isinstance(prose, str) or not prose.strip():
-            payload = {"error": "prose is required"}
-            request._send_json(400, payload)
-            _record_api_route_usage(
-                request.subsystems,
-                path=path,
-                method="POST",
-                status_code=400,
-                request_body=body,
-                response_payload=payload,
-                headers=request.headers,
-            )
-            return
-        title = body.get("title")
-        if title is not None and not isinstance(title, str):
-            payload = {"error": "title must be a string"}
-            request._send_json(400, payload)
-            _record_api_route_usage(
-                request.subsystems,
-                path=path,
-                method="POST",
-                status_code=400,
-                request_body=body,
-                response_payload=payload,
-                headers=request.headers,
-            )
-            return
-
-        try:
-            conn, compile_index_snapshot = _load_compile_index_snapshot_for_request(request)
-        except Exception as exc:
-            from runtime.compile_index import CompileIndexAuthorityError
-
-            if isinstance(exc, CompileIndexAuthorityError):
-                payload = {
-                    "error": str(exc),
-                    "reason_code": exc.reason_code,
-                    "details": dict(getattr(exc, "details", {}) or {}),
-                }
-                request._send_json(
-                    409,
-                    payload,
-                )
-                _record_api_route_usage(
-                    request.subsystems,
-                    path=path,
-                    method="POST",
-                    status_code=409,
-                    request_body=body,
-                    response_payload=payload,
-                    headers=request.headers,
-                    conn=getattr(request.subsystems, "get_pg_conn", lambda: None)(),
-                )
-                return
-            raise
-        from runtime.compiler import compile_prose
-
-        result = compile_prose(
-            prose,
-            title=title,
-            enable_llm=True,
-            conn=conn,
-            compile_index_snapshot=compile_index_snapshot,
-        )
-        request._send_json(200, result)
-        _record_api_route_usage(
-            request.subsystems,
-            path=path,
-            method="POST",
-            status_code=200,
-            request_body=body,
-            response_payload=result,
-            headers=request.headers,
-            conn=conn,
-        )
-    except Exception as exc:
-        payload = {"error": str(exc)}
-        request._send_json(500, payload)
-        _record_api_route_usage(
-            request.subsystems,
-            path=path,
-            method="POST",
-            status_code=500,
-            request_body=body,
-            response_payload=payload,
-            headers=request.headers,
-        )
+    payload = _deprecated_surface_payload(
+        error="/api/refine-definition is gone. Re-bootstrap workflow state through /api/workflows/{workflow_id}/build/bootstrap.",
+        replacement="/api/workflows/{workflow_id}/build/bootstrap",
+    )
+    request._send_json(410, payload)
+    _record_api_route_usage(
+        request.subsystems,
+        path=path,
+        method="POST",
+        status_code=410,
+        request_body=body,
+        response_payload=payload,
+        headers=request.headers,
+    )
 
 
 def _handle_plan_post(request: Any, path: str) -> None:
@@ -1761,145 +1650,20 @@ def _handle_plan_post(request: Any, path: str) -> None:
         )
         return
 
-    try:
-        definition = body.get("definition")
-        build_graph = body.get("build_graph")
-        if not isinstance(definition, dict) and not isinstance(build_graph, dict):
-            payload = {"error": "definition or build_graph is required and must be an object"}
-            request._send_json(400, payload)
-            _record_api_route_usage(
-                request.subsystems,
-                path=path,
-                method="POST",
-                status_code=400,
-                request_body=body,
-                response_payload=payload,
-                headers=request.headers,
-            )
-            return
-        if isinstance(build_graph, dict):
-            definition = materialize_definition_from_build_graph(
-                definition if isinstance(definition, dict) else {},
-                build_graph=build_graph,
-            )
-        title = body.get("title")
-        if title is not None and not isinstance(title, str):
-            payload = {"error": "title must be a string"}
-            request._send_json(400, payload)
-            _record_api_route_usage(
-                request.subsystems,
-                path=path,
-                method="POST",
-                status_code=400,
-                request_body=body,
-                response_payload=payload,
-                headers=request.headers,
-            )
-            return
-
-        from runtime.build_planning_contract import (
-            build_candidate_resolution_manifest,
-            build_execution_manifest,
-            build_reviewable_plan,
-        )
-        from runtime.operating_model_planner import PlanningBlockedError, plan_definition
-
-        explicit_build_authority_state = any(
-            key in (definition or {})
-            for key in (
-                "binding_ledger",
-                "import_snapshots",
-                "authority_attachments",
-                "build_graph",
-                "build_issues",
-                "projection_status",
-            )
-        )
-        candidate_manifest = None
-        reviewable_plan = None
-        execution_manifest = None
-        workflow_id = _optional_text((definition or {}).get("workflow_id"))
-        if explicit_build_authority_state:
-            candidate_manifest = build_candidate_resolution_manifest(
-                definition=definition,
-                workflow_id=workflow_id,
-                conn=request.subsystems.get_pg_conn(),
-                compiled_spec=None,
-            )
-            reviewable_plan = build_reviewable_plan(
-                definition=definition,
-                workflow_id=workflow_id,
-                conn=request.subsystems.get_pg_conn(),
-                compiled_spec=None,
-                candidate_manifest=candidate_manifest,
-            )
-
-        try:
-            result = plan_definition(
-                definition,
-                title=title,
-                conn=request.subsystems.get_pg_conn(),
-                candidate_manifest=candidate_manifest,
-                reviewable_plan=reviewable_plan,
-            )
-        except PlanningBlockedError as exc:
-            payload = {
-                "error": str(exc),
-                "unresolved": exc.unresolved,
-                "candidate_resolution_manifest": candidate_manifest,
-                "reviewable_plan": reviewable_plan,
-                "execution_manifest": None,
-            }
-            request._send_json(400, payload)
-            _record_api_route_usage(
-                request.subsystems,
-                path=path,
-                method="POST",
-                status_code=400,
-                request_body=body,
-                response_payload=payload,
-                headers=request.headers,
-            )
-            return
-
-        if explicit_build_authority_state:
-            execution_manifest = build_execution_manifest(
-                definition=definition,
-                workflow_id=workflow_id,
-                conn=request.subsystems.get_pg_conn(),
-                compiled_spec=result.get("compiled_spec") if isinstance(result.get("compiled_spec"), dict) else None,
-                candidate_manifest=candidate_manifest,
-                reviewable_plan=reviewable_plan,
-            )
-        if candidate_manifest is not None:
-            result["candidate_resolution_manifest"] = candidate_manifest
-        if reviewable_plan is not None:
-            result["reviewable_plan"] = reviewable_plan
-        if execution_manifest is not None:
-            result["execution_manifest"] = execution_manifest
-
-        request._send_json(200, result)
-        _record_api_route_usage(
-            request.subsystems,
-            path=path,
-            method="POST",
-            status_code=200,
-            request_body=body,
-            response_payload=result,
-            headers=request.headers,
-        )
-    except Exception as exc:
-        payload = {"error": str(exc)}
-        request._send_json(500, payload)
-        _record_api_route_usage(
-            request.subsystems,
-            path=path,
-            method="POST",
-            status_code=500,
-            request_body=body,
-            response_payload=payload,
-            headers=request.headers,
-        )
+    payload = _deprecated_surface_payload(
+        error="/api/plan is gone. Harden reviewed workflow state through /api/workflows/{workflow_id}/build/harden.",
+        replacement="/api/workflows/{workflow_id}/build/harden",
+    )
+    request._send_json(410, payload)
+    _record_api_route_usage(
+        request.subsystems,
+        path=path,
+        method="POST",
+        status_code=410,
+        request_body=body,
+        response_payload=payload,
+        headers=request.headers,
+    )
 
 
 def _handle_commit_post(request: Any, path: str) -> None:
@@ -3689,6 +3453,7 @@ def _handle_build_stream(request: Any, path: str) -> None:
 
 
 QUERY_POST_ROUTES: list[RouteEntry] = [
+    (_exact("/query"), _handle_query_post),
     (_exact("/api/compile"), _handle_compile_post),
     (_exact("/api/refine-definition"), _handle_refine_definition_post),
     (_exact("/api/plan"), _handle_plan_post),
@@ -3771,7 +3536,6 @@ QUERY_DELETE_ROUTES: list[RouteEntry] = [
 ]
 
 QUERY_ROUTES: dict[str, object] = {
-    "/query": _handle_query,
     "/bugs": _handle_bugs,
     "/recall": _handle_recall,
     "/ingest": _handle_ingest,

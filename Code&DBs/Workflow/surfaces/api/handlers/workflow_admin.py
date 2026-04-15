@@ -76,7 +76,7 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         "/workflow-runs": "Run or dry-run a workflow spec",
         "/workflow-validate": "Validate a workflow spec without running",
         "/status": "Recent workflow status from receipts",
-        "/query": "Natural language query (routes to best subsystem)",
+        "/query": "Removed wrapper surface; use praxis workflow query/discover/recall/tools instead",
         "/bugs": "File, list, search, or resolve bugs",
         "/health": "Preflight probes + operator snapshot",
         "/recall": "Search the knowledge graph",

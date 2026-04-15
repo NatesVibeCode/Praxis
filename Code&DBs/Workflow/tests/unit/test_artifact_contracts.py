@@ -126,6 +126,20 @@ def test_build_execution_bundle_can_derive_tool_authority_from_execution_manifes
     assert "praxis_workflow_validate" in build_bundle["mcp_tool_names"]
 
 
+def test_build_execution_bundle_requires_manifest_authority_when_requested() -> None:
+    try:
+        build_execution_bundle(
+            job_label="builder.support",
+            prompt="Do whatever seems useful.",
+            task_type=None,
+            require_manifest_authority=True,
+        )
+    except ValueError as exc:
+        assert "ExecutionManifest authority" in str(exc)
+    else:
+        raise AssertionError("expected manifest-required bundle construction to fail closed")
+
+
 def test_evaluate_submission_acceptance_tracks_pending_and_passed_states() -> None:
     acceptance_contract = {
         "structural": {

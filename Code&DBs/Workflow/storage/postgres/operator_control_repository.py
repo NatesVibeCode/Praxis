@@ -629,6 +629,89 @@ class PostgresOperatorControlRepository:
             ) from exc
         return tuple(_decision_record_from_row(row) for row in rows)
 
+    async def list_operator_decisions(
+        self,
+        *,
+        decision_kind: str | None = None,
+        decision_source: str | None = None,
+        decision_scope_kind: str | None = None,
+        decision_scope_ref: str | None = None,
+        active_only: bool = True,
+        as_of=None,
+        limit: int = 100,
+    ) -> tuple[OperatorDecisionAuthorityRecord, ...]:
+        normalized_decision_kind = (
+            _require_text(decision_kind, field_name="decision_kind")
+            if decision_kind is not None
+            else ""
+        )
+        normalized_decision_source = (
+            _require_text(decision_source, field_name="decision_source")
+            if decision_source is not None
+            else ""
+        )
+        normalized_decision_scope_kind = (
+            _require_text(decision_scope_kind, field_name="decision_scope_kind")
+            if decision_scope_kind is not None
+            else ""
+        )
+        normalized_decision_scope_ref = (
+            _require_text(decision_scope_ref, field_name="decision_scope_ref")
+            if decision_scope_ref is not None
+            else ""
+        )
+        normalized_limit = max(1, min(int(limit), 500))
+        normalized_as_of = _normalize_as_of(as_of) if active_only else None
+        try:
+            rows = await self._conn.fetch(
+                """
+                SELECT
+                    operator_decision_id,
+                    decision_key,
+                    decision_kind,
+                    decision_status,
+                    title,
+                    rationale,
+                    decided_by,
+                    decision_source,
+                    effective_from,
+                    effective_to,
+                    decided_at,
+                    created_at,
+                    updated_at,
+                    decision_scope_kind,
+                    decision_scope_ref
+                FROM operator_decisions
+                WHERE ($1::text = '' OR decision_kind = $1)
+                  AND ($2::text = '' OR decision_source = $2)
+                  AND ($3::text = '' OR decision_scope_kind = $3)
+                  AND ($4::text = '' OR decision_scope_ref = $4)
+                  AND (
+                        NOT $5::boolean
+                        OR (
+                            effective_from <= $6
+                            AND (effective_to IS NULL OR effective_to > $6)
+                        )
+                  )
+                ORDER BY effective_from DESC, decided_at DESC, created_at DESC, operator_decision_id DESC
+                LIMIT $7
+                """,
+                normalized_decision_kind,
+                normalized_decision_source,
+                normalized_decision_scope_kind,
+                normalized_decision_scope_ref,
+                active_only,
+                normalized_as_of,
+                normalized_limit,
+            )
+        except asyncpg.PostgresError as exc:
+            raise OperatorControlRepositoryError(
+                "operator_control.read_failed",
+                "failed to list operator decision rows",
+                details={"sqlstate": getattr(exc, "sqlstate", None)},
+            ) from exc
+        return tuple(_decision_record_from_row(row) for row in rows)
+
     async def fetch_cutover_gate_records(
         self,
         *,

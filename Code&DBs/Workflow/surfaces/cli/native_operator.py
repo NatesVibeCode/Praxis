@@ -174,12 +174,41 @@ class NativePrimaryCutoverGateCommand:
     updated_at: datetime | None
 
 
+@dataclass(frozen=True, slots=True)
+class OperatorDecisionRecordCommand:
+    """Record one canonical operator decision row."""
+
+    decision_key: str
+    decision_kind: str
+    decision_status: str
+    title: str
+    rationale: str
+    decided_by: str
+    decision_source: str
+    decision_scope_kind: str | None
+    decision_scope_ref: str | None
+    effective_from: datetime | None
+    effective_to: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class OperatorDecisionListCommand:
+    """List effective operator decisions."""
+
+    decision_kind: str | None
+    decision_scope_kind: str | None
+    decision_scope_ref: str | None
+    as_of: datetime | None
+    limit: int
+
+
 def _usage() -> str:
     return (
         "usage: workflow native-operator "
         "<instance|health|db-health|bootstrap|db-bootstrap|smoke|inspect|"
         "status|graph-topology|graph-lineage|cockpit|route-disable|roadmap-write|"
-        "work-item-closeout|roadmap-view|provider-onboard|native-primary-cutover-gate> [args]"
+        "work-item-closeout|roadmap-view|provider-onboard|native-primary-cutover-gate|"
+        "operator-decision> [args]"
     )
 
 
@@ -198,7 +227,10 @@ def _help_text() -> str:
             "  workflow native-operator instance|health|db-health|bootstrap|db-bootstrap|smoke",
             "  workflow native-operator inspect|status|graph-topology|graph-lineage|cockpit",
             "  workflow native-operator route-disable|roadmap-write|work-item-closeout|roadmap-view",
-            "  workflow native-operator provider-onboard|native-primary-cutover-gate",
+            "  workflow native-operator provider-onboard|native-primary-cutover-gate|operator-decision",
+            "",
+            "Decision examples:",
+            "  workflow native-operator operator-decision list --kind architecture_policy",
             "",
             "Tip: start was removed; use `workflow native-operator instance` to read the native contract.",
         ]
@@ -515,6 +547,129 @@ def _parse_native_primary_cutover_gate(args: list[str]) -> NativePrimaryCutoverG
     )
 
 
+def _parse_operator_decision(args: list[str]) -> (
+    OperatorDecisionRecordCommand | OperatorDecisionListCommand
+):
+    if len(args) < 2:
+        raise ValueError(
+            "usage: workflow native-operator operator-decision <list|record> [args]"
+        )
+
+    action = args[1].strip().lower()
+    if action == "list":
+        decision_kind: str | None = None
+        decision_scope_kind: str | None = None
+        decision_scope_ref: str | None = None
+        as_of: datetime | None = None
+        limit = 100
+        index = 2
+        while index < len(args):
+            flag = args[index]
+            if index + 1 >= len(args):
+                raise ValueError(f"missing value for {flag}")
+            value = args[index + 1]
+            if flag == "--kind":
+                decision_kind = value
+            elif flag == "--scope-kind":
+                decision_scope_kind = value
+            elif flag == "--scope-ref":
+                decision_scope_ref = value
+            elif flag == "--as-of":
+                as_of = _parse_datetime(value, field_name="as_of")
+            elif flag == "--limit":
+                limit = int(value)
+            else:
+                raise ValueError(_usage())
+            index += 2
+        return OperatorDecisionListCommand(
+            decision_kind=decision_kind,
+            decision_scope_kind=decision_scope_kind,
+            decision_scope_ref=decision_scope_ref,
+            as_of=as_of,
+            limit=limit,
+        )
+
+    if action != "record":
+        raise ValueError(
+            "usage: workflow native-operator operator-decision <list|record> [args]"
+        )
+
+    decision_key: str | None = None
+    decision_kind: str | None = None
+    decision_status = "decided"
+    title: str | None = None
+    rationale: str | None = None
+    decided_by: str | None = None
+    decision_source: str | None = None
+    decision_scope_kind: str | None = None
+    decision_scope_ref: str | None = None
+    effective_from: datetime | None = None
+    effective_to: datetime | None = None
+    index = 2
+    while index < len(args):
+        flag = args[index]
+        if index + 1 >= len(args):
+            raise ValueError(f"missing value for {flag}")
+        value = args[index + 1]
+        if flag == "--decision-key":
+            decision_key = value
+        elif flag == "--kind":
+            decision_kind = value
+        elif flag == "--status":
+            decision_status = value
+        elif flag == "--title":
+            title = value
+        elif flag == "--rationale":
+            rationale = value
+        elif flag == "--decided-by":
+            decided_by = value
+        elif flag == "--decision-source":
+            decision_source = value
+        elif flag == "--scope-kind":
+            decision_scope_kind = value
+        elif flag == "--scope-ref":
+            decision_scope_ref = value
+        elif flag == "--effective-from":
+            effective_from = _parse_datetime(value, field_name="effective_from")
+        elif flag == "--effective-to":
+            effective_to = _parse_datetime(value, field_name="effective_to")
+        else:
+            raise ValueError(_usage())
+        index += 2
+
+    required = {
+        "--decision-key": decision_key,
+        "--kind": decision_kind,
+        "--title": title,
+        "--rationale": rationale,
+        "--decided-by": decided_by,
+        "--decision-source": decision_source,
+    }
+    missing = [flag for flag, value in required.items() if value is None or not value.strip()]
+    if missing:
+        raise ValueError(
+            "usage: workflow native-operator operator-decision record "
+            "--decision-key <key> --kind <decision_kind> --title <title> "
+            "--rationale <text> --decided-by <name> --decision-source <source> "
+            "[--status <status>] [--scope-kind <scope_kind>] [--scope-ref <scope_ref>] "
+            "[--effective-from <iso>] [--effective-to <iso>]"
+        )
+
+    return OperatorDecisionRecordCommand(
+        decision_key=decision_key.strip(),
+        decision_kind=decision_kind.strip(),
+        decision_status=decision_status.strip(),
+        title=title.strip(),
+        rationale=rationale.strip(),
+        decided_by=decided_by.strip(),
+        decision_source=decision_source.strip(),
+        decision_scope_kind=decision_scope_kind.strip() if decision_scope_kind else None,
+        decision_scope_ref=decision_scope_ref.strip() if decision_scope_ref else None,
+        effective_from=effective_from,
+        effective_to=effective_to,
+    )
+
+
 def _parse_work_item_closeout(args: list[str]) -> WorkItemCloseoutCommand:
     action = "preview"
     bug_ids: list[str] = []
@@ -559,6 +714,8 @@ def _parse(argv: Sequence[str]) -> (
     | RoadmapViewCommand
     | ProviderOnboardingCommand
     | NativePrimaryCutoverGateCommand
+    | OperatorDecisionRecordCommand
+    | OperatorDecisionListCommand
 ):
     args = list(argv)
     if not args:
@@ -597,6 +754,8 @@ def _parse(argv: Sequence[str]) -> (
         return _parse_provider_onboard(args)
     if command_name == "native-primary-cutover-gate":
         return _parse_native_primary_cutover_gate(args)
+    if command_name == "operator-decision":
+        return _parse_operator_decision(args)
     raise ValueError(_usage())
 
 
@@ -745,6 +904,38 @@ def main(
                 opened_at=command.opened_at,
                 created_at=command.created_at,
                 updated_at=command.updated_at,
+                env=source,
+            ),
+        )
+        return 0
+    if isinstance(command, OperatorDecisionRecordCommand):
+        _emit_json(
+            stdout,
+            operator_write.record_operator_decision(
+                decision_key=command.decision_key,
+                decision_kind=command.decision_kind,
+                decision_status=command.decision_status,
+                title=command.title,
+                rationale=command.rationale,
+                decided_by=command.decided_by,
+                decision_source=command.decision_source,
+                decision_scope_kind=command.decision_scope_kind,
+                decision_scope_ref=command.decision_scope_ref,
+                effective_from=command.effective_from,
+                effective_to=command.effective_to,
+                env=source,
+            ),
+        )
+        return 0
+    if isinstance(command, OperatorDecisionListCommand):
+        _emit_json(
+            stdout,
+            operator_write.list_operator_decisions(
+                decision_kind=command.decision_kind,
+                decision_scope_kind=command.decision_scope_kind,
+                decision_scope_ref=command.decision_scope_ref,
+                as_of=command.as_of,
+                limit=command.limit,
                 env=source,
             ),
         )

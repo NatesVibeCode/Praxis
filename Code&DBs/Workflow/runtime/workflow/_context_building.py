@@ -47,6 +47,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_EXECUTION_MANIFEST_REQUIRED_SOURCE_KINDS = frozenset({"workflow_trigger", "integration_invoke"})
+
 __all__ = [
     "_execution_model_messages",
     "_job_verify_refs",
@@ -172,6 +174,21 @@ def _execution_manifest_for_snapshot(
     except Exception:
         return None
     return None
+
+
+def _execution_source_kind(raw_snapshot: dict[str, object] | None) -> str | None:
+    snapshot = dict(raw_snapshot or {})
+    packet_provenance = snapshot.get("packet_provenance")
+    if isinstance(packet_provenance, dict):
+        value = str(packet_provenance.get("source_kind") or "").strip()
+        if value:
+            return value
+    value = str(snapshot.get("source_kind") or "").strip()
+    return value or None
+
+
+def _requires_reviewed_execution_manifest(raw_snapshot: dict[str, object] | None) -> bool:
+    return (_execution_source_kind(raw_snapshot) or "") in _EXECUTION_MANIFEST_REQUIRED_SOURCE_KINDS
 
 # ---------------------------------------------------------------------------
 # Extracted functions (lines ~260-1114 of unified.py)
@@ -510,6 +527,12 @@ def _build_job_execution_bundles(
         raw_snapshot=raw_snapshot,
         workflow_id=workflow_id,
     )
+    require_manifest_authority = _requires_reviewed_execution_manifest(raw_snapshot)
+    if require_manifest_authority and not isinstance(execution_manifest, dict):
+        raise RuntimeError(
+            "builder-originated workflow execution requires ExecutionManifest authority; "
+            "submission/runtime prompt fallback is not permitted",
+        )
     for index, job in enumerate(spec.jobs):
         label = str(job.get("label") or f"job_{index}")
         context_shard = execution_context_shards.get(label) or {}
@@ -560,6 +583,7 @@ def _build_job_execution_bundles(
             if isinstance(job.get("acceptance_contract"), dict)
             else None,
             execution_manifest=execution_manifest,
+            require_manifest_authority=require_manifest_authority,
         )
     return bundles
 
@@ -746,6 +770,12 @@ def _runtime_execution_bundle(
         raw_snapshot=snapshot,
         workflow_id=str(_workflow_run_envelope(run_row).get("workflow_id") or "").strip() or None,
     )
+    require_manifest_authority = _requires_reviewed_execution_manifest(snapshot)
+    if require_manifest_authority and not isinstance(execution_manifest, dict):
+        raise RuntimeError(
+            "builder-originated workflow execution requires ExecutionManifest authority; "
+            "runtime prompt fallback is not permitted",
+        )
     runtime_profile_ref = str(
         _workflow_run_envelope(run_row).get("runtime_profile_ref")
         or snapshot.get("runtime_profile_ref")
@@ -816,6 +846,7 @@ def _runtime_execution_bundle(
         if isinstance(source_job.get("acceptance_contract"), dict)
         else None,
         execution_manifest=execution_manifest,
+        require_manifest_authority=require_manifest_authority,
     )
 
 

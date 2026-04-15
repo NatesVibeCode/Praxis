@@ -31,6 +31,8 @@ def test_praxis_help_uses_canonical_command_name() -> None:
     completed = _run_launcher_help("praxis")
 
     assert "Usage: praxis <command> [service]" in completed.stdout
+    assert "workflow ...            Canonical execution, query, and operator authority" in completed.stdout
+    assert "db ...                  Schema authority plus SQL scaffolds" in completed.stdout
     assert "start [service...]" in completed.stdout
     assert "scheduler" in completed.stdout
     assert "Native launchd control is disabled." in completed.stdout
@@ -50,6 +52,20 @@ def test_praxis_workflow_passthrough_uses_workflow_frontdoor() -> None:
     assert completed.returncode == 0
     assert "Most used:" in completed.stdout
     assert "workflow tools list" in completed.stdout
+
+
+def test_praxis_db_passthrough_uses_praxis_root_frontdoor() -> None:
+    completed = subprocess.run(
+        [str(REPO_ROOT / "scripts" / "praxis"), "db", "--help"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert completed.returncode == 0
+    assert "usage: praxis db <status|plan|apply|describe|primitive|table|view> [args]" in completed.stdout
+    assert "praxis db primitive scaffold" in completed.stdout
 
 
 def test_praxis_workflow_alias_script_delegates_to_canonical_frontdoor() -> None:

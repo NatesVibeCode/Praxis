@@ -191,6 +191,50 @@ def tool_praxis_operator_write(params: dict) -> dict:
     )
 
 
+def tool_praxis_operator_decisions(params: dict) -> dict:
+    """Record or list canonical operator decisions through operator_decisions."""
+
+    action = str(params.get("action") or "list").strip().lower()
+    if action == "list":
+        as_of = params.get("as_of")
+        return operator_write.list_operator_decisions(
+            decision_kind=params.get("decision_kind"),
+            decision_scope_kind=params.get("decision_scope_kind"),
+            decision_scope_ref=params.get("decision_scope_ref"),
+            as_of=(
+                _parse_iso_datetime(as_of, field_name="as_of")
+                if as_of is not None
+                else None
+            ),
+            limit=int(params.get("limit", 100) or 100),
+        )
+    if action != "record":
+        return {"error": "Unknown action. Supported actions: list, record"}
+    effective_from = params.get("effective_from")
+    effective_to = params.get("effective_to")
+    return operator_write.record_operator_decision(
+        decision_key=str(params.get("decision_key") or ""),
+        decision_kind=str(params.get("decision_kind") or ""),
+        decision_status=str(params.get("decision_status") or "decided"),
+        title=str(params.get("title") or ""),
+        rationale=str(params.get("rationale") or ""),
+        decided_by=str(params.get("decided_by") or ""),
+        decision_source=str(params.get("decision_source") or ""),
+        decision_scope_kind=params.get("decision_scope_kind"),
+        decision_scope_ref=params.get("decision_scope_ref"),
+        effective_from=(
+            _parse_iso_datetime(effective_from, field_name="effective_from")
+            if effective_from is not None
+            else None
+        ),
+        effective_to=(
+            _parse_iso_datetime(effective_to, field_name="effective_to")
+            if effective_to is not None
+            else None
+        ),
+    )
+
+
 def tool_praxis_operator_native_primary_cutover_gate(params: dict) -> dict:
     """Admit one native primary cutover gate through operator-control persistence."""
 
@@ -209,6 +253,49 @@ def tool_praxis_operator_native_primary_cutover_gate(params: dict) -> dict:
         opened_at=params.get("opened_at"),
         created_at=params.get("created_at"),
         updated_at=params.get("updated_at"),
+    )
+
+
+def tool_praxis_operator_architecture_policy(params: dict) -> dict:
+    """Record one bounded architecture-policy decision through operator control."""
+
+    effective_from = params.get("effective_from")
+    effective_to = params.get("effective_to")
+    decided_at = params.get("decided_at")
+    created_at = params.get("created_at")
+    updated_at = params.get("updated_at")
+    return operator_write.record_architecture_policy_decision(
+        authority_domain=params.get("authority_domain", ""),
+        policy_slug=params.get("policy_slug", ""),
+        title=params.get("title", ""),
+        rationale=params.get("rationale", ""),
+        decided_by=params.get("decided_by", ""),
+        decision_source=params.get("decision_source", ""),
+        effective_from=(
+            _parse_iso_datetime(effective_from, field_name="effective_from")
+            if effective_from is not None
+            else None
+        ),
+        effective_to=(
+            _parse_iso_datetime(effective_to, field_name="effective_to")
+            if effective_to is not None
+            else None
+        ),
+        decided_at=(
+            _parse_iso_datetime(decided_at, field_name="decided_at")
+            if decided_at is not None
+            else None
+        ),
+        created_at=(
+            _parse_iso_datetime(created_at, field_name="created_at")
+            if created_at is not None
+            else None
+        ),
+        updated_at=(
+            _parse_iso_datetime(updated_at, field_name="updated_at")
+            if updated_at is not None
+            else None
+        ),
     )
 
 
@@ -537,6 +624,44 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
             },
         },
     ),
+    "praxis_operator_decisions": (
+        tool_praxis_operator_decisions,
+        {
+            "description": (
+                "List or record canonical operator decisions through the shared operator_decisions table.\n\n"
+                "USE WHEN: you need durable, queryable operator decisions such as architecture policy rows, "
+                "and you want them stored as first-class control authority instead of hidden in prose.\n\n"
+                "EXAMPLE: praxis_operator_decisions(action='list', decision_kind='architecture_policy')"
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["list", "record"],
+                        "default": "list",
+                    },
+                    "decision_key": {"type": "string"},
+                    "decision_kind": {"type": "string"},
+                    "decision_status": {"type": "string", "default": "decided"},
+                    "title": {"type": "string"},
+                    "rationale": {"type": "string"},
+                    "decided_by": {"type": "string"},
+                    "decision_source": {"type": "string"},
+                    "decision_scope_kind": {"type": "string"},
+                    "decision_scope_ref": {"type": "string"},
+                    "effective_from": {"type": "string"},
+                    "effective_to": {"type": "string"},
+                    "as_of": {"type": "string"},
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "default": 100,
+                    },
+                },
+            },
+        },
+    ),
     "praxis_operator_native_primary_cutover_gate": (
         tool_praxis_operator_native_primary_cutover_gate,
         {
@@ -587,6 +712,81 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "updated_at": {"type": "string", "description": "ISO-8601 datetime string"},
                 },
                 "required": ["decided_by", "decision_source", "rationale"],
+            },
+        },
+    ),
+    "praxis_operator_architecture_policy": (
+        tool_praxis_operator_architecture_policy,
+        {
+            "description": (
+                "Record a durable architecture-policy decision in operator authority.\n\n"
+                "USE WHEN: explicit operator or CTO guidance should become a typed, queryable "
+                "decision row instead of living only in chat, docs, or migration folklore.\n\n"
+                "EXAMPLE: praxis_operator_architecture_policy(\n"
+                "  authority_domain='decision_tables',\n"
+                "  policy_slug='db-native-authority',\n"
+                "  title='Decision tables are DB-native authority',\n"
+                "  decided_by='nate',\n"
+                "  decision_source='cto.guidance',\n"
+                "  rationale='Authority, durable state, and orchestration belong in DB primitives.'\n"
+                ")"
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "authority_domain": {
+                        "type": "string",
+                        "description": "Typed authority domain scope, for example decision_tables.",
+                    },
+                    "policy_slug": {
+                        "type": "string",
+                        "description": "Stable slug for the architecture policy inside the domain.",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Short title for the policy decision.",
+                    },
+                    "rationale": {
+                        "type": "string",
+                        "description": "Durable reason for the policy decision.",
+                    },
+                    "decided_by": {
+                        "type": "string",
+                        "description": "Principal or operator recording the decision.",
+                    },
+                    "decision_source": {
+                        "type": "string",
+                        "description": "Source artifact or authority lane for the decision.",
+                    },
+                    "effective_from": {
+                        "type": "string",
+                        "description": "Optional ISO-8601 datetime when the policy becomes effective.",
+                    },
+                    "effective_to": {
+                        "type": "string",
+                        "description": "Optional ISO-8601 datetime when the policy expires.",
+                    },
+                    "decided_at": {
+                        "type": "string",
+                        "description": "Optional ISO-8601 datetime for the decision timestamp.",
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "description": "Optional ISO-8601 datetime for the row creation timestamp.",
+                    },
+                    "updated_at": {
+                        "type": "string",
+                        "description": "Optional ISO-8601 datetime for the row update timestamp.",
+                    },
+                },
+                "required": [
+                    "authority_domain",
+                    "policy_slug",
+                    "title",
+                    "rationale",
+                    "decided_by",
+                    "decision_source",
+                ],
             },
         },
     ),

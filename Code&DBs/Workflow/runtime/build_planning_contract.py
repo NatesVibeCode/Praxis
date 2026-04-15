@@ -11,7 +11,8 @@ The source of truth stays where it already belongs:
 - review provenance in workflow_build_review_decisions
 
 This module is intentionally a projector. It does not introduce a second
-planner stack and it does not mutate workflow state.
+planner stack, it does not mutate workflow state, and it must not replace the
+decisions table with transient Python-only authority.
 """
 
 from __future__ import annotations

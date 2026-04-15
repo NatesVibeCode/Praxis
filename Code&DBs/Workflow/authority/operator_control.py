@@ -3,6 +3,11 @@
 This module defines validated operator decisions and cutover gates. It does not
 own raw SQL, connection management, or infer control state from markdown, shell
 history, or queue folklore.
+
+Cross-cutting architecture policy guidance belongs in `operator_decisions`
+under the typed `architecture_policy` decision kind. If the decision table
+shape needs cleanup, simplify or improve `operator_decisions`; do not create a
+parallel decision store that competes with it.
 """
 
 from __future__ import annotations
@@ -130,6 +135,10 @@ _OPERATOR_DECISION_SCOPE_POLICIES: dict[str, OperatorDecisionScopePolicy] = {
     "binding": OperatorDecisionScopePolicy(scope_mode="none"),
     "query": OperatorDecisionScopePolicy(scope_mode="none"),
     "operator_graph": OperatorDecisionScopePolicy(scope_mode="none"),
+    "architecture_policy": OperatorDecisionScopePolicy(
+        scope_mode="required",
+        allowed_scope_kinds=("authority_domain",),
+    ),
     "circuit_breaker_force_open": OperatorDecisionScopePolicy(
         scope_mode="required",
         allowed_scope_kinds=("provider",),
@@ -597,6 +606,9 @@ __all__ = [
     "OperatorControlAuthority",
     "OperatorControlRepositoryError",
     "OperatorDecisionAuthorityRecord",
+    "OperatorDecisionScopePolicy",
     "OperatorDecisionResolution",
     "load_operator_control_authority",
+    "normalize_operator_decision_record",
+    "operator_decision_scope_policy",
 ]

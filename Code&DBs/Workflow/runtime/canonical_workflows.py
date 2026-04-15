@@ -56,6 +56,40 @@ def _json_clone(value: Any) -> Any:
     return json.loads(json.dumps(value, default=str))
 
 
+def _normalized_execution_manifest(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    if "tool_allowlist" in value and "verify_refs" in value and "compiled_spec" in value:
+        return _json_clone(value)
+    tool_allowlist = value.get("tool_allowlist_json")
+    if not isinstance(tool_allowlist, dict):
+        return None
+    compiled_spec = value.get("compiled_spec_json")
+    policy_gates = value.get("policy_gates_json")
+    hardening_report = value.get("hardening_report_json")
+    return {
+        "execution_manifest_ref": _text(value.get("execution_manifest_ref")) or None,
+        "workflow_id": _text(value.get("workflow_id")) or None,
+        "definition_revision": _text(value.get("definition_revision")) or None,
+        "manifest_ref": _text(value.get("manifest_ref")) or None,
+        "review_group_ref": _text(value.get("review_group_ref")) or None,
+        "approved_bundle_refs": [
+            item
+            for item in (_json_clone(value.get("approved_bundle_refs_json")) if isinstance(value.get("approved_bundle_refs_json"), list) else [])
+            if _text(item)
+        ],
+        "tool_allowlist": _json_clone(tool_allowlist),
+        "verify_refs": [
+            item
+            for item in (_json_clone(value.get("verify_refs_json")) if isinstance(value.get("verify_refs_json"), list) else [])
+            if _text(item)
+        ],
+        "compiled_spec": _json_clone(compiled_spec) if isinstance(compiled_spec, dict) else {},
+        "policy_gates": _json_clone(policy_gates) if isinstance(policy_gates, dict) else {},
+        "hardening_report": _json_clone(hardening_report) if isinstance(hardening_report, dict) else {},
+    }
+
+
 def _latest_execution_manifest(
     conn: Any,
     *,
@@ -73,11 +107,12 @@ def _latest_execution_manifest(
     except Exception:
         return None
     try:
-        return load_latest_workflow_build_execution_manifest(
+        manifest = load_latest_workflow_build_execution_manifest(
             conn,
             workflow_id=normalized_workflow_id,
             definition_revision=normalized_definition_revision,
         )
+        return _normalized_execution_manifest(manifest)
     except Exception:
         return None
 
@@ -601,6 +636,27 @@ def mutate_workflow_build(
             label=_text(body.get("label")) or None,
             promote_to_state=bool(body.get("promote_to_state")),
         )
+    elif subpath == "bootstrap":
+        prose = _text(body.get("prose"))
+        if not prose:
+            raise WorkflowRuntimeBoundaryError("prose is required")
+        title = _text(body.get("title")) or _text(row.get("name")) or workflow_id
+        enable_llm_raw = body.get("enable_llm")
+        if enable_llm_raw is not None and not isinstance(enable_llm_raw, bool):
+            raise WorkflowRuntimeBoundaryError("enable_llm must be a boolean")
+        from runtime.compiler import compile_prose
+
+        compile_result = compile_prose(
+            prose,
+            title=title or None,
+            enable_llm=enable_llm_raw if isinstance(enable_llm_raw, bool) else None,
+            conn=conn,
+        )
+        compiled_definition = compile_result.get("definition")
+        if not isinstance(compiled_definition, dict):
+            raise WorkflowRuntimeBoundaryError("bootstrap did not produce a definition")
+        definition = _json_clone(compiled_definition)
+        definition["workflow_id"] = workflow_id
     elif subpath.startswith("attachments/") and subpath.endswith("/restore"):
         attachment_id = subpath[len("attachments/") : -len("/restore")].strip("/")
         if not attachment_id:
@@ -613,66 +669,15 @@ def mutate_workflow_build(
             attachment_id=attachment_id,
             attachment=attachment,
         )
-    elif subpath.startswith("bindings/") and subpath.endswith("/accept"):
-        binding_id = subpath[len("bindings/") : -len("/accept")].strip("/")
-        accepted_target = body.get("accepted_target")
-        if not binding_id or not isinstance(accepted_target, dict):
-            raise WorkflowRuntimeBoundaryError("accepted_target is required")
-        if current_definition_revision:
-            undo_receipt = build_review_decision_undo_receipt(
-                conn,
-                workflow_id=workflow_id,
-                definition_revision=current_definition_revision,
-                target_kind="binding",
-                target_ref=binding_id,
-                slot_ref=binding_id,
-            )
-        review_decision_payload = {
-            "target_kind": "binding",
-            "target_ref": binding_id,
-            "decision": "approve",
-            "candidate_ref": _text(accepted_target.get("target_ref")),
-            "candidate_payload": _json_clone(accepted_target),
-        }
-    elif subpath.startswith("bindings/") and subpath.endswith("/reject"):
-        binding_id = subpath[len("bindings/") : -len("/reject")].strip("/")
-        if not binding_id:
-            raise WorkflowRuntimeBoundaryError("binding id is required")
-        if current_definition_revision:
-            undo_receipt = build_review_decision_undo_receipt(
-                conn,
-                workflow_id=workflow_id,
-                definition_revision=current_definition_revision,
-                target_kind="binding",
-                target_ref=binding_id,
-                slot_ref=binding_id,
-            )
-        review_decision_payload = {
-            "target_kind": "binding",
-            "target_ref": binding_id,
-            "decision": "reject",
-        }
-    elif subpath.startswith("bindings/") and subpath.endswith("/replace"):
-        binding_id = subpath[len("bindings/") : -len("/replace")].strip("/")
-        accepted_target = body.get("accepted_target")
-        if not binding_id or not isinstance(accepted_target, dict):
-            raise WorkflowRuntimeBoundaryError("accepted_target is required")
-        if current_definition_revision:
-            undo_receipt = build_review_decision_undo_receipt(
-                conn,
-                workflow_id=workflow_id,
-                definition_revision=current_definition_revision,
-                target_kind="binding",
-                target_ref=binding_id,
-                slot_ref=binding_id,
-            )
-        review_decision_payload = {
-            "target_kind": "binding",
-            "target_ref": binding_id,
-            "decision": "approve",
-            "candidate_ref": _text(accepted_target.get("target_ref")),
-            "candidate_payload": _json_clone(accepted_target),
-        }
+    elif subpath.startswith("bindings/") and (
+        subpath.endswith("/accept")
+        or subpath.endswith("/reject")
+        or subpath.endswith("/replace")
+    ):
+        raise WorkflowRuntimeBoundaryError(
+            "Legacy binding approval aliases are gone. Use /api/workflows/{workflow_id}/build/review_decisions.",
+            status_code=410,
+        )
     elif subpath.startswith("bindings/") and subpath.endswith("/restore"):
         binding_id = subpath[len("bindings/") : -len("/restore")].strip("/")
         if not binding_id:
@@ -699,26 +704,10 @@ def mutate_workflow_build(
             freshness_ttl=int(body.get("freshness_ttl") or 3600),
         )
     elif subpath.startswith("imports/") and subpath.endswith("/admit"):
-        snapshot_id = subpath[len("imports/") : -len("/admit")].strip("/")
-        admitted_target = body.get("admitted_target")
-        if not snapshot_id or not isinstance(admitted_target, dict):
-            raise WorkflowRuntimeBoundaryError("admitted_target is required")
-        if current_definition_revision:
-            undo_receipt = build_review_decision_undo_receipt(
-                conn,
-                workflow_id=workflow_id,
-                definition_revision=current_definition_revision,
-                target_kind="import_snapshot",
-                target_ref=snapshot_id,
-                slot_ref=snapshot_id,
-            )
-        review_decision_payload = {
-            "target_kind": "import_snapshot",
-            "target_ref": snapshot_id,
-            "decision": "approve",
-            "candidate_ref": _text(admitted_target.get("target_ref")),
-            "candidate_payload": _json_clone(admitted_target),
-        }
+        raise WorkflowRuntimeBoundaryError(
+            "Legacy import admission aliases are gone. Use /api/workflows/{workflow_id}/build/review_decisions.",
+            status_code=410,
+        )
     elif subpath == "review_decisions":
         review_decision_payload = _normalize_build_review_decision_body(body)
         if current_definition_revision:
@@ -774,6 +763,23 @@ def mutate_workflow_build(
                 label=_text(body.get("label")) or None,
                 promote_to_state=bool(body.get("promote_to_state")),
             )
+    elif subpath == "harden":
+        candidate_definition = body.get("definition")
+        next_definition = (
+            _json_clone(candidate_definition)
+            if isinstance(candidate_definition, dict)
+            else _json_clone(definition)
+        )
+        build_graph = body.get("build_graph")
+        if build_graph is not None and not isinstance(build_graph, dict):
+            raise WorkflowRuntimeBoundaryError("build_graph must be an object")
+        if isinstance(build_graph, dict):
+            next_definition = materialize_definition_from_build_graph(
+                next_definition,
+                build_graph=build_graph,
+            )
+        next_definition["workflow_id"] = workflow_id
+        definition = next_definition
     elif subpath == "review_decisions/restore":
         restore_body = dict(body)
         restore_body["decision"] = _text(body.get("decision")) or "revoke"
@@ -903,7 +909,10 @@ def _rebuild_workflow_build(
         build_intent_brief,
         build_reviewable_plan,
     )
-    from runtime.operating_model_planner import PlanningBlockedError, plan_definition
+    from runtime.operating_model_planner import (
+        PlanningBlockedError,
+        harden_reviewed_definition,
+    )
 
     planning_notes: list[str] = []
     compiled_spec: dict[str, Any] | None = None
@@ -953,7 +962,7 @@ def _rebuild_workflow_build(
             planning_notes = list(dict.fromkeys([note for note in review_blockers if note]))
         else:
             try:
-                plan_result = plan_definition(
+                plan_result = harden_reviewed_definition(
                     reviewed_definition,
                     title=workflow_name,
                     conn=conn,
@@ -1030,7 +1039,7 @@ def trigger_workflow_manually(
     workflow_id: str,
     repo_root: Path,
 ) -> dict[str, Any]:
-    from runtime.operating_model_planner import current_compiled_spec, missing_execution_plan_message
+    from runtime.operating_model_planner import missing_execution_manifest_message
 
     normalized_workflow_id = _text(workflow_id)
     if not normalized_workflow_id:
@@ -1042,28 +1051,28 @@ def trigger_workflow_manually(
         raise WorkflowRuntimeBoundaryError(f"Workflow not found: {normalized_workflow_id}", status_code=404)
 
     definition_row = _parse_json_field(workflow_row.get("definition")) or {}
-    compiled_spec_row = _parse_json_field(workflow_row.get("compiled_spec"))
-    spec = current_compiled_spec(definition_row, compiled_spec_row)
-    if spec is None:
-        raise WorkflowRuntimeBoundaryError(missing_execution_plan_message(workflow_row.get("name")))
-
-    spec_to_submit = _json_clone(spec)
+    definition_revision = _text(definition_row.get("definition_revision"))
     execution_manifest = _latest_execution_manifest(
         pg,
         workflow_id=str(workflow_row["id"]),
-        definition_revision=_text(spec.get("definition_revision")),
+        definition_revision=definition_revision,
     )
-    if isinstance(execution_manifest, dict):
-        spec_to_submit["execution_manifest"] = _json_clone(execution_manifest)
-        spec_to_submit["execution_manifest_ref"] = _text(execution_manifest.get("execution_manifest_ref")) or None
+    if not isinstance(execution_manifest, dict):
+        raise WorkflowRuntimeBoundaryError(missing_execution_manifest_message(workflow_row.get("name")))
+    spec = execution_manifest.get("compiled_spec")
+    if not isinstance(spec, dict) or not _text(spec.get("definition_revision")):
+        raise WorkflowRuntimeBoundaryError(missing_execution_manifest_message(workflow_row.get("name")))
+
+    spec_to_submit = _json_clone(spec)
+    spec_to_submit["execution_manifest"] = _json_clone(execution_manifest)
+    spec_to_submit["execution_manifest_ref"] = _text(execution_manifest.get("execution_manifest_ref")) or None
     packet_provenance = {
         "source_kind": "workflow_trigger",
         "workflow_row": dict(workflow_row),
         "definition_row": definition_row,
         "compiled_spec_row": spec,
     }
-    if isinstance(execution_manifest, dict):
-        packet_provenance["execution_manifest"] = _json_clone(execution_manifest)
+    packet_provenance["execution_manifest"] = _json_clone(execution_manifest)
     spec_to_submit["packet_provenance"] = packet_provenance
     record_system_event(
         pg,

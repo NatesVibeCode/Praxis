@@ -1,4 +1,23 @@
-"""DB-backed review authority for workflow build planning."""
+"""DB-backed review authority for workflow build planning.
+
+Architectural decisions captured for implementers:
+
+- `workflow_build_review_decisions` is the durable authority for build-review
+  approvals, rejections, deferrals, and revocations. Python may project review
+  state from these rows, but it must not become a competing source of truth.
+- Cross-cutting architecture policy decisions about how decision tables should
+  be designed belong in `operator_decisions`, not in this table.
+- The table is append-only decision provenance, not a scratchpad for mutable
+  planner state. Build graphs, manifests, and UI projections can be rebuilt
+  from the current definition plus the latest decision rows.
+- Decision scope is revision-aware. Rows apply to a specific
+  `(workflow_id, definition_revision, target_kind, target_ref)` slice and do
+  not silently carry across definition changes.
+- Every decision row should preserve the explicit reason for the choice:
+  actor, approval mode, rationale, and candidate payload/ref where relevant.
+- Scripts and ad hoc helpers may inspect or backfill through authority seams,
+  but they are not substitutes for DB-native review authority.
+"""
 
 from __future__ import annotations
 

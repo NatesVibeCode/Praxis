@@ -101,3 +101,46 @@ def test_set_circuit_breaker_override_reset_marks_decision_inactive(monkeypatch)
     assert recorded.effective_to == fixed_now
     assert payload["circuit_breaker_override"]["override_state"] == "reset"
     assert payload["circuit_breaker_override"]["decision_status"] == "inactive"
+
+
+def test_record_architecture_policy_decision_uses_authority_domain_scope(monkeypatch) -> None:
+    repository = _FakeOperatorControlRepository()
+
+    async def _connect(_env=None):
+        return _FakeConn()
+
+    fixed_now = datetime(2026, 4, 15, 19, 45, tzinfo=timezone.utc)
+    monkeypatch.setattr(operator_write, "_now", lambda: fixed_now)
+
+    frontdoor = operator_write.OperatorControlFrontdoor(
+        connect_database=_connect,
+        operator_control_repository_factory=lambda _conn: repository,
+    )
+
+    payload = frontdoor.record_architecture_policy_decision(
+        authority_domain="decision_tables",
+        policy_slug="db-native-authority",
+        title="Decision tables are DB-native authority",
+        rationale="Authority and runtime coordination belong in durable DB primitives.",
+        decided_by="nate",
+        decision_source="cto.guidance",
+    )
+
+    recorded = repository.recorded
+    assert recorded is not None
+    assert (
+        recorded.operator_decision_id
+        == "operator_decision.architecture_policy.decision_tables.db_native_authority"
+    )
+    assert (
+        recorded.decision_key
+        == "architecture-policy::decision-tables::db-native-authority"
+    )
+    assert recorded.decision_kind == "architecture_policy"
+    assert recorded.decision_status == "decided"
+    assert recorded.decision_scope_kind == "authority_domain"
+    assert recorded.decision_scope_ref == "decision_tables"
+    assert recorded.effective_from == fixed_now
+    assert recorded.decided_at == fixed_now
+    assert payload["architecture_policy_decision"]["authority_domain"] == "decision_tables"
+    assert payload["architecture_policy_decision"]["policy_slug"] == "db-native-authority"

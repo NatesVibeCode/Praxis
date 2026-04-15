@@ -63,7 +63,10 @@ def test_workflow_migration_manifest_includes_provider_route_health_budget_migra
     assert "123_workflow_build_planning_state_registry.sql" in filenames
     assert "124_operator_decision_scope_authority.sql" in filenames
     assert "125_cursor_local_cli_provider_seed.sql" in filenames
-    assert filenames[-1] == "125_cursor_local_cli_provider_seed.sql"
+    assert "126_operator_decision_scope_policy.sql" in filenames
+    assert "127_operator_decision_architecture_policies.sql" in filenames
+    assert "128_operator_decision_embedding_architecture.sql" in filenames
+    assert filenames[-1] == "128_operator_decision_embedding_architecture.sql"
 
 
 def test_every_manifest_migration_has_expected_object_contract() -> None:
@@ -111,7 +114,7 @@ def test_platform_authority_migration_expected_objects_are_registered() -> None:
 def test_context_bundle_sandbox_profile_migration_expected_objects_are_registered() -> None:
     objects = workflow_migration_expected_objects("119_context_bundle_sandbox_profile_ref.sql")
     names = {item.object_name for item in objects}
-    assert "sandbox_profile_ref" in names
+    assert "context_bundles.sandbox_profile_ref" in names
     assert "context_bundles.context_bundles_sandbox_profile_ref_nonblank" in names
     assert "context_bundles_sandbox_profile_idx" in names
 
@@ -125,10 +128,10 @@ def test_workflow_build_review_proposal_request_migration_expected_objects_are_r
 def test_workflow_build_review_contract_field_migration_expected_objects_are_registered() -> None:
     objects = workflow_migration_expected_objects("122_workflow_build_review_contract_fields.sql")
     names = {item.object_name for item in objects}
-    assert "review_group_ref" in names
-    assert "slot_ref" in names
-    assert "authority_scope" in names
-    assert "supersedes_decision_ref" in names
+    assert "workflow_build_review_decisions.review_group_ref" in names
+    assert "workflow_build_review_decisions.slot_ref" in names
+    assert "workflow_build_review_decisions.authority_scope" in names
+    assert "workflow_build_review_decisions.supersedes_decision_ref" in names
     assert "workflow_build_review_decisions.workflow_build_review_decisions_supersedes_decision_ref_fkey" in names
     assert "idx_workflow_build_review_decisions_group_target" in names
 
@@ -165,8 +168,8 @@ def test_operator_decision_scope_authority_expected_objects_are_registered() -> 
     names = {item.object_name for item in objects}
     assert names.issuperset(
         {
-            "decision_scope_kind",
-            "decision_scope_ref",
+            "operator_decisions.decision_scope_kind",
+            "operator_decisions.decision_scope_ref",
             "operator_decisions.operator_decisions_scope_pair",
             "operator_decisions_scope_decided_idx",
         }
@@ -178,6 +181,29 @@ def test_cursor_local_cli_provider_seed_expected_objects_are_registered() -> Non
     names = {item.object_name for item in objects}
     assert "provider_cli_profiles" in names
     assert "provider_transport_admissions" in names
+
+
+def test_operator_decision_scope_policy_expected_objects_are_registered() -> None:
+    objects = workflow_migration_expected_objects("126_operator_decision_scope_policy.sql")
+    names = {item.object_name for item in objects}
+    assert "operator_decisions.operator_decisions_kind_scope_policy" in names
+
+
+def test_operator_decision_architecture_policy_expected_objects_are_registered() -> None:
+    objects = workflow_migration_expected_objects("127_operator_decision_architecture_policies.sql")
+    names = {item.object_name for item in objects}
+    assert names.issuperset(
+        {
+            "operator_decisions",
+            "operator_decisions.operator_decisions_kind_scope_policy",
+        }
+    )
+
+
+def test_operator_decision_embedding_architecture_expected_objects_are_registered() -> None:
+    objects = workflow_migration_expected_objects("128_operator_decision_embedding_architecture.sql")
+    names = {item.object_name for item in objects}
+    assert "operator_decisions" in names
 
 
 def test_provider_route_health_budget_expected_objects_are_registered() -> None:

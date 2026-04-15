@@ -457,6 +457,55 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             _example("Preview a roadmap item", {"action": "preview", "title": "Consolidate CLI frontdoors", "intent_brief": "one authority for operator CLI"}),
         ],
     ),
+    "praxis_operator_decisions": _tool(
+        surface="operator",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="List or record durable operator decisions such as architecture policy rows in the canonical operator_decisions table.",
+        when_not_to_use="Do not use it for roadmap item authoring or cutover-gate admission.",
+        risks={"default": "read", "actions": {"list": "read", "record": "write"}},
+        examples=[
+            _example(
+                "List current architecture policy decisions",
+                {"action": "list", "decision_kind": "architecture_policy"},
+            ),
+            _example(
+                "Record one architecture policy decision",
+                {
+                    "action": "record",
+                    "decision_key": "architecture-policy::decision-tables::db-native-authority",
+                    "decision_kind": "architecture_policy",
+                    "title": "Decision tables are DB-native authority",
+                    "rationale": "Keep control authority in Postgres.",
+                    "decided_by": "nate",
+                    "decision_source": "cto.guidance",
+                    "decision_scope_kind": "authority_domain",
+                    "decision_scope_ref": "decision_tables",
+                },
+            ),
+        ],
+    ),
+    "praxis_operator_architecture_policy": _tool(
+        surface="operator",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Record one typed architecture policy decision in operator_decisions when explicit guidance should become durable control authority.",
+        when_not_to_use="Do not use it for generic decision history reads; use praxis_operator_decisions for that.",
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "Record a decision-table architecture policy",
+                {
+                    "authority_domain": "decision_tables",
+                    "policy_slug": "db-native-authority",
+                    "title": "Decision tables are DB-native authority",
+                    "rationale": "Keep authority in Postgres.",
+                    "decided_by": "nate",
+                    "decision_source": "cto.guidance",
+                },
+            ),
+        ],
+    ),
     "praxis_operator_native_primary_cutover_gate": _tool(
         surface="operator",
         tier="advanced",

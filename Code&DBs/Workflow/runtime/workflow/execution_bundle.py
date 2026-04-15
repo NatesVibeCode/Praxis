@@ -281,7 +281,9 @@ def _orient_hint(
     label: str,
     write_scope: Sequence[str],
     read_scope: Sequence[str],
+    entrypoint_tool: str | None = None,
 ) -> dict[str, Any]:
+    normalized_entrypoint = str(entrypoint_tool or "praxis_query").strip() or "praxis_query"
     scope_hint = ", ".join(list(write_scope)[:3] or list(read_scope)[:3]) or "the declared scope"
     question = {
         "build": f"What exists already, what is the current status, and what repo surfaces matter for job {label} touching {scope_hint}?",
@@ -292,10 +294,10 @@ def _orient_hint(
         "architecture": f"What existing contracts, workflows, and graph surfaces matter for architecture job {label} touching {scope_hint}?",
     }.get(bucket, f"What status and existing system context matter for job {label} in {scope_hint}?")
     return {
-        "entrypoint_tool": "praxis_query",
+        "entrypoint_tool": normalized_entrypoint,
         "suggested_question": question,
         "notes": [
-            "Start with praxis_query before broader tool use.",
+            f"Start with {normalized_entrypoint} before broader tool use.",
             "Use only the admitted MCP tools and adapter tools listed in this bundle.",
             "Stay inside the declared read/write boundary and verification refs.",
         ],
@@ -330,15 +332,25 @@ def build_execution_bundle(
     authoring_contract: Mapping[str, Any] | None = None,
     acceptance_contract: Mapping[str, Any] | None = None,
     execution_manifest: Mapping[str, Any] | None = None,
+    require_manifest_authority: bool = False,
 ) -> dict[str, Any]:
     manifest_mcp_tools, manifest_allowed_tools, manifest_verify_refs = _execution_manifest_tool_authority(
         execution_manifest=execution_manifest,
         explicit_mcp_tools=_string_list(explicit_mcp_tools),
         explicit_allowed_tools=_string_list(allowed_tools),
     )
+    if require_manifest_authority and not (manifest_mcp_tools or manifest_allowed_tools or manifest_verify_refs):
+        raise ValueError(
+            "builder-originated workflow execution requires ExecutionManifest authority; "
+            "prompt/task bucket fallback is not permitted",
+        )
     normalized_task_type = (
         str(task_type or "").strip()
-        or ("approved_execution" if manifest_mcp_tools or manifest_allowed_tools else infer_task_type(prompt, label=job_label))
+        or (
+            "approved_execution"
+            if require_manifest_authority or manifest_mcp_tools or manifest_allowed_tools
+            else infer_task_type(prompt, label=job_label)
+        )
     )
     normalized_capabilities = _dedupe_strings(_string_list(capabilities))
     normalized_verify_refs = (
@@ -396,6 +408,21 @@ def build_execution_bundle(
             ],
         )
     )
+    orient_entrypoint = next(
+        (
+            tool_name
+            for tool_name in (
+                "praxis_query",
+                "praxis_status",
+                "praxis_integration",
+                "praxis_workflow_validate",
+                "praxis_get_submission",
+                "praxis_review_submission",
+            )
+            if tool_name in normalized_mcp_tools
+        ),
+        normalized_mcp_tools[0] if normalized_mcp_tools else "praxis_query",
+    )
     normalized_skill_refs = _dedupe_strings(
         [*_BUCKET_SKILLS.get(bucket, _BUCKET_SKILLS["general"]), *_string_list(explicit_skill_refs)],
     )
@@ -438,6 +465,7 @@ def build_execution_bundle(
             label=job_label,
             write_scope=normalized_write_scope,
             read_scope=normalized_resolved_read_scope or normalized_declared_read_scope,
+            entrypoint_tool=orient_entrypoint,
         ),
         "execution_manifest_ref": (
             str(execution_manifest.get("execution_manifest_ref") or "").strip()

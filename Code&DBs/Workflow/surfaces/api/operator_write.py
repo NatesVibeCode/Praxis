@@ -109,6 +109,50 @@ def _scope_fragment(value: str | None, *, fallback: str) -> str:
     return collapsed or fallback
 
 
+def _operator_decision_id_from_key(
+    *,
+    decision_kind: str,
+    decision_key: str,
+) -> str:
+    normalized_kind = _scope_fragment(decision_kind, fallback="decision").replace("-", "_")
+    normalized_key = _require_text(decision_key, field_name="decision_key")
+    raw_parts = [part.strip() for part in normalized_key.split("::") if part.strip()]
+    normalized_parts = [
+        _scope_fragment(part, fallback="segment").replace("-", "_")
+        for part in raw_parts
+    ]
+    kind_prefix = normalized_kind.replace("_", "-")
+    if normalized_parts and normalized_parts[0] == kind_prefix.replace("-", "_"):
+        normalized_parts = normalized_parts[1:]
+    if not normalized_parts:
+        normalized_parts = ("default",)
+    return ".".join(("operator_decision", normalized_kind, *normalized_parts))
+
+
+def _operator_decision_to_json(
+    decision: OperatorDecisionAuthorityRecord,
+) -> dict[str, Any]:
+    return {
+        "operator_decision_id": decision.operator_decision_id,
+        "decision_key": decision.decision_key,
+        "decision_kind": decision.decision_kind,
+        "decision_status": decision.decision_status,
+        "title": decision.title,
+        "rationale": decision.rationale,
+        "decided_by": decision.decided_by,
+        "decision_source": decision.decision_source,
+        "effective_from": decision.effective_from.isoformat(),
+        "effective_to": (
+            None if decision.effective_to is None else decision.effective_to.isoformat()
+        ),
+        "decided_at": decision.decided_at.isoformat(),
+        "created_at": decision.created_at.isoformat(),
+        "updated_at": decision.updated_at.isoformat(),
+        "decision_scope_kind": decision.decision_scope_kind,
+        "decision_scope_ref": decision.decision_scope_ref,
+    }
+
+
 def _coerce_text_sequence(
     value: object,
     *,
@@ -538,6 +582,111 @@ def _default_circuit_breaker_rationale(
     if override_state == "closed":
         return f"Operator forced circuit breaker CLOSED for {provider_slug}{until}"
     return f"Operator cleared manual circuit breaker override for {provider_slug}"
+
+
+def _normalize_authority_domain_scope_ref(value: object) -> str:
+    normalized = _require_text(value, field_name="authority_domain").lower()
+    tokens = re.findall(r"[a-z0-9]+", normalized)
+    if not tokens:
+        raise ValueError("authority_domain must contain at least one alphanumeric character")
+    return "_".join(tokens)
+
+
+def _normalize_architecture_policy_slug(value: object) -> str:
+    normalized = _require_text(value, field_name="policy_slug").lower()
+    tokens = re.findall(r"[a-z0-9]+", normalized)
+    if not tokens:
+        raise ValueError("policy_slug must contain at least one alphanumeric character")
+    return "-".join(tokens)
+
+
+def _architecture_policy_operator_decision_id(
+    authority_domain: str,
+    policy_slug: str,
+) -> str:
+    return (
+        "operator_decision.architecture_policy."
+        f"{authority_domain}."
+        f"{policy_slug.replace('-', '_')}"
+    )
+
+
+def _architecture_policy_decision_key(
+    authority_domain: str,
+    policy_slug: str,
+) -> str:
+    return (
+        "architecture-policy::"
+        f"{_scope_fragment(authority_domain, fallback='authority-domain')}::"
+        f"{policy_slug}"
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ArchitecturePolicyDecisionRecord:
+    operator_decision_id: str
+    decision_key: str
+    authority_domain: str
+    policy_slug: str
+    decision_kind: str
+    decision_status: str
+    title: str
+    rationale: str
+    decided_by: str
+    decision_source: str
+    effective_from: datetime
+    effective_to: datetime | None
+    decided_at: datetime
+    created_at: datetime
+    updated_at: datetime
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "operator_decision_id": self.operator_decision_id,
+            "decision_key": self.decision_key,
+            "authority_domain": self.authority_domain,
+            "policy_slug": self.policy_slug,
+            "decision_kind": self.decision_kind,
+            "decision_status": self.decision_status,
+            "title": self.title,
+            "rationale": self.rationale,
+            "decided_by": self.decided_by,
+            "decision_source": self.decision_source,
+            "effective_from": self.effective_from.isoformat(),
+            "effective_to": (
+                None if self.effective_to is None else self.effective_to.isoformat()
+            ),
+            "decided_at": self.decided_at.isoformat(),
+            "created_at": self.created_at.isoformat(),
+            "updated_at": self.updated_at.isoformat(),
+        }
+
+
+def _architecture_policy_record_from_decision(
+    decision: OperatorDecisionAuthorityRecord,
+) -> ArchitecturePolicyDecisionRecord:
+    parts = decision.decision_key.split("::")
+    policy_slug = parts[2] if len(parts) >= 3 and parts[2] else decision.decision_key
+    authority_domain = decision.decision_scope_ref or (
+        parts[1].replace("-", "_") if len(parts) >= 2 else decision.decision_key
+    )
+    return ArchitecturePolicyDecisionRecord(
+        operator_decision_id=decision.operator_decision_id,
+        decision_key=decision.decision_key,
+        authority_domain=authority_domain,
+        policy_slug=policy_slug,
+        decision_kind=decision.decision_kind,
+        decision_status=decision.decision_status,
+        title=decision.title,
+        rationale=decision.rationale,
+        decided_by=decision.decided_by,
+        decision_source=decision.decision_source,
+        effective_from=decision.effective_from,
+        effective_to=decision.effective_to,
+        decided_at=decision.decided_at,
+        created_at=decision.created_at,
+        updated_at=decision.updated_at,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -1820,6 +1969,149 @@ class OperatorControlFrontdoor:
         invalidate_circuit_breaker_override_cache()
         return _circuit_breaker_override_record_from_decision(persisted)
 
+    async def _record_architecture_policy_decision(
+        self,
+        *,
+        env: Mapping[str, str] | None,
+        authority_domain: str,
+        policy_slug: str,
+        title: str,
+        rationale: str,
+        decided_by: str,
+        decision_source: str,
+        effective_from: datetime | None,
+        effective_to: datetime | None,
+        decided_at: datetime | None,
+        created_at: datetime | None,
+        updated_at: datetime | None,
+    ) -> ArchitecturePolicyDecisionRecord:
+        normalized_authority_domain = _normalize_authority_domain_scope_ref(authority_domain)
+        normalized_policy_slug = _normalize_architecture_policy_slug(policy_slug)
+        normalized_title = _require_text(title, field_name="title")
+        normalized_rationale = _require_text(rationale, field_name="rationale")
+        normalized_decided_by = _require_text(decided_by, field_name="decided_by")
+        normalized_decision_source = _require_text(
+            decision_source,
+            field_name="decision_source",
+        )
+        normalized_effective_from = (
+            _now()
+            if effective_from is None
+            else _normalize_as_of(
+                effective_from,
+                error_type=ValueError,
+                reason_code="operator_control.invalid_effective_from",
+            )
+        )
+        normalized_effective_to = (
+            None
+            if effective_to is None
+            else _normalize_as_of(
+                effective_to,
+                error_type=ValueError,
+                reason_code="operator_control.invalid_effective_to",
+            )
+        )
+        if (
+            normalized_effective_to is not None
+            and normalized_effective_to <= normalized_effective_from
+        ):
+            raise ValueError("effective_to must be later than effective_from")
+        normalized_decided_at = (
+            normalized_effective_from
+            if decided_at is None
+            else _normalize_as_of(
+                decided_at,
+                error_type=ValueError,
+                reason_code="operator_control.invalid_decided_at",
+            )
+        )
+        normalized_created_at = (
+            normalized_effective_from
+            if created_at is None
+            else _normalize_as_of(
+                created_at,
+                error_type=ValueError,
+                reason_code="operator_control.invalid_created_at",
+            )
+        )
+        normalized_updated_at = (
+            _now()
+            if updated_at is None
+            else _normalize_as_of(
+                updated_at,
+                error_type=ValueError,
+                reason_code="operator_control.invalid_updated_at",
+            )
+        )
+        decision = OperatorDecisionAuthorityRecord(
+            operator_decision_id=_architecture_policy_operator_decision_id(
+                normalized_authority_domain,
+                normalized_policy_slug,
+            ),
+            decision_key=_architecture_policy_decision_key(
+                normalized_authority_domain,
+                normalized_policy_slug,
+            ),
+            decision_kind="architecture_policy",
+            decision_status="decided",
+            title=normalized_title,
+            rationale=normalized_rationale,
+            decided_by=normalized_decided_by,
+            decision_source=normalized_decision_source,
+            effective_from=normalized_effective_from,
+            effective_to=normalized_effective_to,
+            decided_at=normalized_decided_at,
+            created_at=normalized_created_at,
+            updated_at=normalized_updated_at,
+            decision_scope_kind="authority_domain",
+            decision_scope_ref=normalized_authority_domain,
+        )
+
+        conn = await self.connect_database(env)
+        try:
+            assert self.operator_control_repository_factory is not None
+            repository = self.operator_control_repository_factory(conn)
+            persisted = await repository.record_operator_decision(
+                operator_decision=decision,
+            )
+        finally:
+            await conn.close()
+
+        return _architecture_policy_record_from_decision(persisted)
+
+    async def record_architecture_policy_decision_async(
+        self,
+        *,
+        authority_domain: str,
+        policy_slug: str,
+        title: str,
+        rationale: str,
+        decided_by: str,
+        decision_source: str,
+        effective_from: datetime | None = None,
+        effective_to: datetime | None = None,
+        decided_at: datetime | None = None,
+        created_at: datetime | None = None,
+        updated_at: datetime | None = None,
+        env: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
+        record = await self._record_architecture_policy_decision(
+            env=env,
+            authority_domain=authority_domain,
+            policy_slug=policy_slug,
+            title=title,
+            rationale=rationale,
+            decided_by=decided_by,
+            decision_source=decision_source,
+            effective_from=effective_from,
+            effective_to=effective_to,
+            decided_at=decided_at,
+            created_at=created_at,
+            updated_at=updated_at,
+        )
+        return {"architecture_policy_decision": record.to_json()}
+
     async def set_circuit_breaker_override_async(
         self,
         *,
@@ -1937,6 +2229,170 @@ class OperatorControlFrontdoor:
             ),
         )
 
+    async def record_operator_decision_async(
+        self,
+        *,
+        decision_key: str,
+        decision_kind: str,
+        title: str,
+        rationale: str,
+        decided_by: str,
+        decision_source: str,
+        decision_status: str = "decided",
+        effective_from: datetime | None = None,
+        effective_to: datetime | None = None,
+        decision_scope_kind: str | None = None,
+        decision_scope_ref: str | None = None,
+        env: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
+        normalized_decision_key = _require_text(
+            decision_key,
+            field_name="decision_key",
+        )
+        normalized_decision_kind = _require_text(
+            decision_kind,
+            field_name="decision_kind",
+        )
+        normalized_effective_from = (
+            _now()
+            if effective_from is None
+            else _normalize_as_of(
+                effective_from,
+                error_type=ValueError,
+                reason_code="operator_control.invalid_effective_from",
+            )
+        )
+        normalized_effective_to = (
+            None
+            if effective_to is None
+            else _normalize_as_of(
+                effective_to,
+                error_type=ValueError,
+                reason_code="operator_control.invalid_effective_to",
+            )
+        )
+        if (
+            normalized_effective_to is not None
+            and normalized_effective_to < normalized_effective_from
+        ):
+            raise ValueError("effective_to must be later than or equal to effective_from")
+        now = _now()
+        decision = OperatorDecisionAuthorityRecord(
+            operator_decision_id=_operator_decision_id_from_key(
+                decision_kind=normalized_decision_kind,
+                decision_key=normalized_decision_key,
+            ),
+            decision_key=normalized_decision_key,
+            decision_kind=normalized_decision_kind,
+            decision_status=_require_text(
+                decision_status,
+                field_name="decision_status",
+            ),
+            title=_require_text(title, field_name="title"),
+            rationale=_require_text(rationale, field_name="rationale"),
+            decided_by=_require_text(decided_by, field_name="decided_by"),
+            decision_source=_require_text(
+                decision_source,
+                field_name="decision_source",
+            ),
+            effective_from=normalized_effective_from,
+            effective_to=normalized_effective_to,
+            decided_at=normalized_effective_from,
+            created_at=normalized_effective_from,
+            updated_at=now,
+            decision_scope_kind=_optional_text(
+                decision_scope_kind,
+                field_name="decision_scope_kind",
+            ),
+            decision_scope_ref=_optional_text(
+                decision_scope_ref,
+                field_name="decision_scope_ref",
+            ),
+        )
+
+        conn = await self.connect_database(env)
+        try:
+            assert self.operator_control_repository_factory is not None
+            repository = self.operator_control_repository_factory(conn)
+            persisted = await repository.record_operator_decision(
+                operator_decision=decision,
+            )
+        finally:
+            await conn.close()
+        return {"operator_decision": _operator_decision_to_json(persisted)}
+
+    async def list_operator_decisions_async(
+        self,
+        *,
+        as_of: datetime | None = None,
+        decision_kind: str | None = None,
+        decision_source: str | None = None,
+        decision_scope_kind: str | None = None,
+        decision_scope_ref: str | None = None,
+        active_only: bool = True,
+        limit: int = 100,
+        env: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
+        normalized_as_of = (
+            _now()
+            if as_of is None
+            else _normalize_as_of(
+                as_of,
+                error_type=ValueError,
+                reason_code="operator_control.invalid_as_of",
+            )
+        )
+        normalized_decision_kind = (
+            None if decision_kind is None else _require_text(decision_kind, field_name="decision_kind")
+        )
+        normalized_decision_source = (
+            None
+            if decision_source is None
+            else _require_text(decision_source, field_name="decision_source")
+        )
+        normalized_scope_kind = (
+            None
+            if decision_scope_kind is None
+            else _require_text(decision_scope_kind, field_name="decision_scope_kind")
+        )
+        normalized_scope_ref = (
+            None
+            if decision_scope_ref is None
+            else _require_text(decision_scope_ref, field_name="decision_scope_ref")
+        )
+        normalized_limit = max(1, int(limit or 100))
+
+        conn = await self.connect_database(env)
+        try:
+            assert self.operator_control_repository_factory is not None
+            repository = self.operator_control_repository_factory(conn)
+            rows = await repository.list_operator_decisions(
+                decision_kind=normalized_decision_kind,
+                decision_source=normalized_decision_source,
+                decision_scope_kind=normalized_scope_kind,
+                decision_scope_ref=normalized_scope_ref,
+                active_only=active_only,
+                as_of=normalized_as_of,
+                limit=normalized_limit,
+            )
+        finally:
+            await conn.close()
+        return {
+            "operator_decisions": [
+                _operator_decision_to_json(row)
+                for row in rows
+            ],
+            "as_of": normalized_as_of.isoformat(),
+            "filters": {
+                "decision_kind": normalized_decision_kind,
+                "decision_source": normalized_decision_source,
+                "decision_scope_kind": normalized_scope_kind,
+                "decision_scope_ref": normalized_scope_ref,
+                "active_only": active_only,
+                "limit": normalized_limit,
+            },
+        }
+
     def set_circuit_breaker_override(
         self,
         *,
@@ -1960,6 +2416,109 @@ class OperatorControlFrontdoor:
                 effective_from=effective_from,
                 decided_by=decided_by,
                 decision_source=decision_source,
+                env=env,
+            ),
+            message=(
+                "operator_control.async_boundary_required: "
+                "operator control sync entrypoints require a non-async call boundary"
+            ),
+        )
+
+    def record_operator_decision(
+        self,
+        *,
+        decision_key: str,
+        decision_kind: str,
+        title: str,
+        rationale: str,
+        decided_by: str,
+        decision_source: str,
+        decision_status: str = "decided",
+        effective_from: datetime | None = None,
+        effective_to: datetime | None = None,
+        decision_scope_kind: str | None = None,
+        decision_scope_ref: str | None = None,
+        env: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
+        return _run_async(
+            self.record_operator_decision_async(
+                decision_key=decision_key,
+                decision_kind=decision_kind,
+                title=title,
+                rationale=rationale,
+                decided_by=decided_by,
+                decision_source=decision_source,
+                decision_status=decision_status,
+                effective_from=effective_from,
+                effective_to=effective_to,
+                decision_scope_kind=decision_scope_kind,
+                decision_scope_ref=decision_scope_ref,
+                env=env,
+            ),
+            message=(
+                "operator_control.async_boundary_required: "
+                "operator control sync entrypoints require a non-async call boundary"
+            ),
+        )
+
+    def list_operator_decisions(
+        self,
+        *,
+        as_of: datetime | None = None,
+        decision_kind: str | None = None,
+        decision_source: str | None = None,
+        decision_scope_kind: str | None = None,
+        decision_scope_ref: str | None = None,
+        active_only: bool = True,
+        limit: int = 100,
+        env: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
+        return _run_async(
+            self.list_operator_decisions_async(
+                as_of=as_of,
+                decision_kind=decision_kind,
+                decision_source=decision_source,
+                decision_scope_kind=decision_scope_kind,
+                decision_scope_ref=decision_scope_ref,
+                active_only=active_only,
+                limit=limit,
+                env=env,
+            ),
+            message=(
+                "operator_control.async_boundary_required: "
+                "operator control sync entrypoints require a non-async call boundary"
+            ),
+        )
+
+    def record_architecture_policy_decision(
+        self,
+        *,
+        authority_domain: str,
+        policy_slug: str,
+        title: str,
+        rationale: str,
+        decided_by: str,
+        decision_source: str,
+        effective_from: datetime | None = None,
+        effective_to: datetime | None = None,
+        decided_at: datetime | None = None,
+        created_at: datetime | None = None,
+        updated_at: datetime | None = None,
+        env: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
+        return _run_async(
+            self.record_architecture_policy_decision_async(
+                authority_domain=authority_domain,
+                policy_slug=policy_slug,
+                title=title,
+                rationale=rationale,
+                decided_by=decided_by,
+                decision_source=decision_source,
+                effective_from=effective_from,
+                effective_to=effective_to,
+                decided_at=decided_at,
+                created_at=created_at,
+                updated_at=updated_at,
                 env=env,
             ),
             message=(
@@ -2320,6 +2879,122 @@ def set_circuit_breaker_override(
     )
 
 
+def record_operator_decision(
+    *,
+    decision_key: str,
+    decision_kind: str,
+    title: str,
+    rationale: str,
+    decided_by: str,
+    decision_source: str,
+    decision_status: str = "decided",
+    effective_from: datetime | None = None,
+    effective_to: datetime | None = None,
+    decision_scope_kind: str | None = None,
+    decision_scope_ref: str | None = None,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Record one canonical operator decision row through the default frontdoor."""
+
+    return OperatorControlFrontdoor().record_operator_decision(
+        decision_key=decision_key,
+        decision_kind=decision_kind,
+        title=title,
+        rationale=rationale,
+        decided_by=decided_by,
+        decision_source=decision_source,
+        decision_status=decision_status,
+        effective_from=effective_from,
+        effective_to=effective_to,
+        decision_scope_kind=decision_scope_kind,
+        decision_scope_ref=decision_scope_ref,
+        env=env,
+    )
+
+
+async def arecord_operator_decision(
+    *,
+    decision_key: str,
+    decision_kind: str,
+    title: str,
+    rationale: str,
+    decided_by: str,
+    decision_source: str,
+    decision_status: str = "decided",
+    effective_from: datetime | None = None,
+    effective_to: datetime | None = None,
+    decision_scope_kind: str | None = None,
+    decision_scope_ref: str | None = None,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Record one canonical operator decision row in async contexts."""
+
+    return await OperatorControlFrontdoor().record_operator_decision_async(
+        decision_key=decision_key,
+        decision_kind=decision_kind,
+        title=title,
+        rationale=rationale,
+        decided_by=decided_by,
+        decision_source=decision_source,
+        decision_status=decision_status,
+        effective_from=effective_from,
+        effective_to=effective_to,
+        decision_scope_kind=decision_scope_kind,
+        decision_scope_ref=decision_scope_ref,
+        env=env,
+    )
+
+
+def list_operator_decisions(
+    *,
+    as_of: datetime | None = None,
+    decision_kind: str | None = None,
+    decision_source: str | None = None,
+    decision_scope_kind: str | None = None,
+    decision_scope_ref: str | None = None,
+    active_only: bool = True,
+    limit: int = 100,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """List effective operator decisions through the default frontdoor."""
+
+    return OperatorControlFrontdoor().list_operator_decisions(
+        as_of=as_of,
+        decision_kind=decision_kind,
+        decision_source=decision_source,
+        decision_scope_kind=decision_scope_kind,
+        decision_scope_ref=decision_scope_ref,
+        active_only=active_only,
+        limit=limit,
+        env=env,
+    )
+
+
+async def alist_operator_decisions(
+    *,
+    as_of: datetime | None = None,
+    decision_kind: str | None = None,
+    decision_source: str | None = None,
+    decision_scope_kind: str | None = None,
+    decision_scope_ref: str | None = None,
+    active_only: bool = True,
+    limit: int = 100,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """List effective operator decisions in async contexts."""
+
+    return await OperatorControlFrontdoor().list_operator_decisions_async(
+        as_of=as_of,
+        decision_kind=decision_kind,
+        decision_source=decision_source,
+        decision_scope_kind=decision_scope_kind,
+        decision_scope_ref=decision_scope_ref,
+        active_only=active_only,
+        limit=limit,
+        env=env,
+    )
+
+
 async def aset_circuit_breaker_override(
     *,
     provider_slug: str,
@@ -2343,6 +3018,72 @@ async def aset_circuit_breaker_override(
         effective_from=effective_from,
         decided_by=decided_by,
         decision_source=decision_source,
+        env=env,
+    )
+
+
+def record_architecture_policy_decision(
+    *,
+    authority_domain: str,
+    policy_slug: str,
+    title: str,
+    rationale: str,
+    decided_by: str,
+    decision_source: str,
+    effective_from: datetime | None = None,
+    effective_to: datetime | None = None,
+    decided_at: datetime | None = None,
+    created_at: datetime | None = None,
+    updated_at: datetime | None = None,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Persist one durable architecture-policy decision through the default frontdoor."""
+
+    return OperatorControlFrontdoor().record_architecture_policy_decision(
+        authority_domain=authority_domain,
+        policy_slug=policy_slug,
+        title=title,
+        rationale=rationale,
+        decided_by=decided_by,
+        decision_source=decision_source,
+        effective_from=effective_from,
+        effective_to=effective_to,
+        decided_at=decided_at,
+        created_at=created_at,
+        updated_at=updated_at,
+        env=env,
+    )
+
+
+async def arecord_architecture_policy_decision(
+    *,
+    authority_domain: str,
+    policy_slug: str,
+    title: str,
+    rationale: str,
+    decided_by: str,
+    decision_source: str,
+    effective_from: datetime | None = None,
+    effective_to: datetime | None = None,
+    decided_at: datetime | None = None,
+    created_at: datetime | None = None,
+    updated_at: datetime | None = None,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Persist one durable architecture-policy decision in async contexts."""
+
+    return await OperatorControlFrontdoor().record_architecture_policy_decision_async(
+        authority_domain=authority_domain,
+        policy_slug=policy_slug,
+        title=title,
+        rationale=rationale,
+        decided_by=decided_by,
+        decision_source=decision_source,
+        effective_from=effective_from,
+        effective_to=effective_to,
+        decided_at=decided_at,
+        created_at=created_at,
+        updated_at=updated_at,
         env=env,
     )
 
@@ -2902,6 +3643,7 @@ def inspect_recurring_review_repair_flow(
 
 
 __all__ = [
+    "ArchitecturePolicyDecisionRecord",
     "NativeWorkflowFlowCatalog",
     "NativeWorkflowFlowError",
     "NativeWorkflowFlowFrontdoor",
@@ -2911,6 +3653,7 @@ __all__ = [
     "OperatorControlFrontdoor",
     "TaskRouteEligibilityRecord",
     "TaskRouteEligibilityWriteResult",
+    "arecord_architecture_policy_decision",
     "aset_circuit_breaker_override",
     "aadmit_native_primary_cutover_gate",
     "aroadmap_write",
@@ -2920,6 +3663,7 @@ __all__ = [
     "admit_native_primary_cutover_gate",
     "inspect_workflow_flows",
     "inspect_recurring_review_repair_flow",
+    "record_architecture_policy_decision",
     "roadmap_write",
     "reconcile_work_item_closeout",
     "record_work_item_workflow_binding",

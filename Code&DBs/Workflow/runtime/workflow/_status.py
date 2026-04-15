@@ -277,9 +277,12 @@ def _graph_job_rows_from_evidence(*, run_row: dict, run_id: str) -> list[dict]:
     latest_receipt_by_node: dict[str, object] = {}
     try:
         from receipts import ReceiptV1
+        from runtime._workflow_database import resolve_runtime_database_url
         from storage.postgres import PostgresEvidenceReader
 
-        reader = PostgresEvidenceReader()
+        reader = PostgresEvidenceReader(
+            database_url=resolve_runtime_database_url(required=True),
+        )
         for evidence_row in reader.evidence_timeline(run_id):
             record = evidence_row.record
             if (
