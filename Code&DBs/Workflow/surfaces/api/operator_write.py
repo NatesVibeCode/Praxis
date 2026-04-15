@@ -475,12 +475,34 @@ def _circuit_breaker_scope_label(provider_slug: str) -> str:
     return _scope_fragment(provider_slug, fallback="provider")
 
 
-def _circuit_breaker_operator_decision_id(provider_slug: str) -> str:
-    return f"operator-decision.circuit-breaker.{_circuit_breaker_scope_label(provider_slug)}"
+def _circuit_breaker_decision_timestamp(value: datetime) -> str:
+    return value.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
 
 
-def _circuit_breaker_decision_key(provider_slug: str) -> str:
-    return f"circuit-breaker::{_circuit_breaker_scope_label(provider_slug)}"
+def _circuit_breaker_operator_decision_id(
+    provider_slug: str,
+    *,
+    override_state: str,
+    effective_from: datetime,
+) -> str:
+    return (
+        "operator-decision.circuit-breaker."
+        f"{_circuit_breaker_scope_label(provider_slug)}."
+        f"{override_state}."
+        f"{_circuit_breaker_decision_timestamp(effective_from)}"
+    )
+
+
+def _circuit_breaker_decision_key(
+    provider_slug: str,
+    *,
+    effective_from: datetime,
+) -> str:
+    return (
+        "circuit-breaker::"
+        f"{_circuit_breaker_scope_label(provider_slug)}::"
+        f"{_circuit_breaker_decision_timestamp(effective_from)}"
+    )
 
 
 def _circuit_breaker_decision_kind(override_state: str) -> str:
@@ -562,11 +584,10 @@ def _circuit_breaker_override_record_from_decision(
     decision: OperatorDecisionAuthorityRecord,
 ) -> CircuitBreakerOverrideRecord:
     prefix = "circuit-breaker::"
-    provider_slug = (
-        decision.decision_key[len(prefix):]
-        if decision.decision_key.startswith(prefix)
-        else decision.decision_key
-    )
+    provider_slug = decision.decision_key
+    if decision.decision_key.startswith(prefix):
+        suffix = decision.decision_key[len(prefix):]
+        provider_slug = suffix.split("::", 1)[0]
     override_state = {
         "circuit_breaker_force_open": "open",
         "circuit_breaker_force_closed": "closed",
@@ -1759,8 +1780,13 @@ class OperatorControlFrontdoor:
         decision = OperatorDecisionAuthorityRecord(
             operator_decision_id=_circuit_breaker_operator_decision_id(
                 normalized_provider_slug,
+                override_state=normalized_override_state,
+                effective_from=normalized_effective_from,
             ),
-            decision_key=_circuit_breaker_decision_key(normalized_provider_slug),
+            decision_key=_circuit_breaker_decision_key(
+                normalized_provider_slug,
+                effective_from=normalized_effective_from,
+            ),
             decision_kind=_circuit_breaker_decision_kind(normalized_override_state),
             decision_status=(
                 "inactive" if normalized_override_state == "reset" else "active"

@@ -95,7 +95,8 @@ def _parse_manual_override(row: Any) -> ManualCircuitOverride | None:
     override_state = _override_state_from_kind(decision_kind)
     if override_state is None:
         return None
-    provider_slug = decision_key[len(_OVERRIDE_DECISION_PREFIX):].strip().lower()
+    suffix = decision_key[len(_OVERRIDE_DECISION_PREFIX):]
+    provider_slug = suffix.split("::", 1)[0].strip().lower()
     if not provider_slug:
         return None
     effective_from = row.get("effective_from")
@@ -439,8 +440,8 @@ class CircuitBreakerRegistry:
                 effective_to,
                 updated_at
             FROM operator_decisions
-            WHERE decision_status = 'active'
-              AND decision_kind IN (
+            WHERE decision_kind IN (
+                    'circuit_breaker_reset',
                     'circuit_breaker_force_open',
                     'circuit_breaker_force_closed'
               )
@@ -452,7 +453,9 @@ class CircuitBreakerRegistry:
         overrides: dict[str, ManualCircuitOverride] = {}
         for row in rows:
             override = _parse_manual_override(row)
-            if override is None or override.provider_slug in overrides:
+            if override is None:
+                continue
+            if override.provider_slug in overrides:
                 continue
             overrides[override.provider_slug] = override
         return overrides
