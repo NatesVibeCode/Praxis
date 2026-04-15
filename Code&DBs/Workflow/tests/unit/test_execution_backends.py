@@ -24,6 +24,21 @@ def _agent(**overrides):
     return SimpleNamespace(**values)
 
 
+def _provider_profile(
+    *,
+    api_protocol_family: str | None = None,
+    api_endpoint: str | None = None,
+    api_key_env_vars: tuple[str, ...] = (),
+    sandbox_env_overrides: dict[str, object] | None = None,
+):
+    return SimpleNamespace(
+        api_protocol_family=api_protocol_family,
+        api_endpoint=api_endpoint,
+        api_key_env_vars=api_key_env_vars,
+        sandbox_env_overrides=sandbox_env_overrides or {},
+    )
+
+
 def _sandbox_result(**overrides):
     values = {
         "exit_code": 0,
@@ -94,6 +109,53 @@ def test_execute_cli_routes_through_sandbox_runtime(monkeypatch, tmp_path) -> No
     assert result["artifact_refs"] == ["README.md"]
     assert result["workspace_snapshot_ref"] == "workspace_snapshot:test1234"
     assert result["workspace_snapshot_cache_hit"] is True
+
+
+def test_execute_cli_prefers_bundle_sandbox_profile_contract(monkeypatch, tmp_path) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeRuntime:
+        def execute_command(self, **kwargs):
+            captured.update(kwargs)
+            return _sandbox_result(
+                sandbox_provider="cloudflare_remote",
+                network_policy="disabled",
+            )
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(execution_backends, "SandboxRuntime", lambda: _FakeRuntime())
+    monkeypatch.setattr(
+        execution_backends,
+        "augment_cli_command_for_workflow_mcp",
+        lambda **kwargs: list(kwargs["command_parts"]),
+    )
+
+    result = execution_backends.execute_cli(
+        _agent(docker_image="agent-image:stale"),
+        "hello from stdin",
+        str(tmp_path),
+        execution_bundle={
+            "run_id": "run.alpha",
+            "job_label": "job.alpha",
+            "access_policy": {"write_scope": ["README.md"]},
+            "sandbox_profile": {
+                "sandbox_profile_ref": "sandbox_profile.praxis.default",
+                "sandbox_provider": "cloudflare_remote",
+                "docker_image": "registry/praxis@sha256:deadbeef",
+                "network_policy": "disabled",
+                "workspace_materialization": "copy",
+                "secret_allowlist": ["OPENAI_API_KEY"],
+                "auth_mount_policy": "none",
+            },
+        },
+    )
+
+    assert captured["provider_name"] == "cloudflare_remote"
+    assert captured["image"] == "registry/praxis@sha256:deadbeef"
+    assert captured["network_policy"] == "disabled"
+    assert captured["metadata"]["sandbox_profile_ref"] == "sandbox_profile.praxis.default"
+    assert result["sandbox_profile_ref"] == "sandbox_profile.praxis.default"
+    assert result["docker_image"] == "registry/praxis@sha256:deadbeef"
 
 
 def test_execute_cli_exports_ripgrep_config_path(monkeypatch, tmp_path) -> None:
@@ -280,6 +342,16 @@ def test_execute_api_routes_through_sandbox_runtime(monkeypatch, tmp_path) -> No
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setattr(execution_backends, "SandboxRuntime", lambda: _FakeRuntime())
+    monkeypatch.setattr(
+        "adapters.provider_registry.get_profile",
+        lambda provider_slug: _provider_profile(
+            api_protocol_family="anthropic_messages",
+            api_endpoint="https://api.anthropic.test/v1/messages",
+            api_key_env_vars=("ANTHROPIC_API_KEY",),
+        )
+        if provider_slug == "anthropic"
+        else None,
+    )
 
     result = execution_backends.execute_api(
         _agent(
@@ -327,6 +399,16 @@ def test_execute_api_uses_stable_adhoc_sandbox_identity(monkeypatch, tmp_path) -
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setattr(execution_backends, "SandboxRuntime", lambda: _FakeRuntime())
+    monkeypatch.setattr(
+        "adapters.provider_registry.get_profile",
+        lambda provider_slug: _provider_profile(
+            api_protocol_family="anthropic_messages",
+            api_endpoint="https://api.anthropic.test/v1/messages",
+            api_key_env_vars=("ANTHROPIC_API_KEY",),
+        )
+        if provider_slug == "anthropic"
+        else None,
+    )
 
     agent = _agent(
         provider="anthropic",
@@ -341,3 +423,63 @@ def test_execute_api_uses_stable_adhoc_sandbox_identity(monkeypatch, tmp_path) -
     assert captured_ids[0] == captured_ids[1]
     assert captured_ids[0] != captured_ids[2]
     assert all(value.startswith("sandbox_session:adhoc:") for value in captured_ids)
+
+
+def test_execute_api_prefers_bundle_sandbox_profile_contract(monkeypatch, tmp_path) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeRuntime:
+        def execute_command(self, **kwargs):
+            captured.update(kwargs)
+            return _sandbox_result(
+                stdout="api output",
+                execution_transport="api",
+                sandbox_provider="cloudflare_remote",
+                network_policy="disabled",
+            )
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setattr(execution_backends, "SandboxRuntime", lambda: _FakeRuntime())
+    monkeypatch.setattr(
+        "adapters.provider_registry.get_profile",
+        lambda provider_slug: _provider_profile(
+            api_protocol_family="anthropic_messages",
+            api_endpoint="https://api.anthropic.test/v1/messages",
+            api_key_env_vars=("ANTHROPIC_API_KEY",),
+        )
+        if provider_slug == "anthropic"
+        else None,
+    )
+
+    result = execution_backends.execute_api(
+        _agent(
+            provider="anthropic",
+            model="claude-haiku-4-5-20251001",
+            wrapper_command=None,
+            execution_transport="api",
+            docker_image="agent-image:stale",
+        ),
+        "hello from api",
+        workdir=str(tmp_path),
+        execution_bundle={
+            "run_id": "run.alpha",
+            "job_label": "job.api",
+            "access_policy": {"write_scope": ["api_output.json"]},
+            "sandbox_profile": {
+                "sandbox_profile_ref": "sandbox_profile.praxis.default",
+                "sandbox_provider": "cloudflare_remote",
+                "docker_image": "registry/praxis@sha256:deadbeef",
+                "network_policy": "disabled",
+                "workspace_materialization": "copy",
+                "secret_allowlist": ["ANTHROPIC_API_KEY"],
+                "auth_mount_policy": "none",
+            },
+        },
+    )
+
+    assert captured["provider_name"] == "cloudflare_remote"
+    assert captured["image"] == "registry/praxis@sha256:deadbeef"
+    assert captured["network_policy"] == "disabled"
+    assert captured["metadata"]["sandbox_profile_ref"] == "sandbox_profile.praxis.default"
+    assert result["sandbox_profile_ref"] == "sandbox_profile.praxis.default"
+    assert result["docker_image"] == "registry/praxis@sha256:deadbeef"

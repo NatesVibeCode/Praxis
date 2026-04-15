@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from adapters import provider_registry as provider_registry_mod
-from adapters import provider_transport as provider_transport_mod
+from adapters.provider_types import ProviderCLIProfile
 
 __all__ = [
     "ProviderOnboardingModelSpec",
@@ -694,13 +694,15 @@ def _utc_now():
     return datetime.now(timezone.utc)
 
 
-def _fallback_template(provider_slug: str) -> ProviderAuthorityTemplate | None:
-    profile = provider_registry_mod.get_profile(provider_slug)
-    if profile is None:
-        return None
+def _template_from_profile(
+    *,
+    provider_slug: str,
+    provider_name: str | None,
+    profile: ProviderCLIProfile,
+) -> ProviderAuthorityTemplate:
     return ProviderAuthorityTemplate(
         provider_slug=provider_slug,
-        provider_name=provider_slug.title(),
+        provider_name=(provider_name or provider_slug.title()),
         docs_url=None,
         benchmark_source_slug="artificial_analysis",
         default_context_window=_DEFAULT_CONTEXT_WINDOW,
@@ -749,6 +751,78 @@ def _fallback_template(provider_slug: str) -> ProviderAuthorityTemplate | None:
     )
 
 
+def _template_from_explicit_spec(
+    spec: ProviderOnboardingSpec,
+) -> ProviderAuthorityTemplate | None:
+    provider_slug = spec.provider_slug
+    provider_name = spec.provider_name or provider_slug.title()
+    default_model = spec.default_model or (spec.requested_models[0] if spec.requested_models else None)
+    adapter_economics = dict(spec.adapter_economics)
+    default_context_window = spec.default_context_window or _DEFAULT_CONTEXT_WINDOW
+
+    transports: dict[str, ProviderTransportAuthorityTemplate] = {}
+
+    if spec.selected_transport == "cli" or spec.binary_name:
+        if not spec.binary_name:
+            raise ValueError(
+                f"provider {provider_slug!r} has no DB authority row; "
+                "wizard payload must include provider.binary_name for cli onboarding"
+            )
+        prompt_mode = (spec.cli_prompt_mode or "").strip().lower() or "stdin"
+        transports["cli"] = ProviderTransportAuthorityTemplate(
+            transport="cli",
+            supported=True,
+            docs_url=spec.transport_docs_url,
+            binary_name=spec.binary_name,
+            base_flags=spec.base_flags,
+            output_format=spec.output_format or "json",
+            output_envelope_key=spec.output_envelope_key or "result",
+            default_timeout=int(spec.default_timeout or 300),
+            model_flag=spec.model_flag if spec.model_flag is not None else "--model",
+            system_prompt_flag=spec.system_prompt_flag,
+            json_schema_flag=spec.json_schema_flag,
+            forbidden_flags=spec.forbidden_flags,
+            aliases=spec.aliases,
+            default_model=default_model,
+            api_key_env_vars=spec.api_key_env_vars,
+            cli_prompt_modes=_normalize_unique([prompt_mode, "stdin", "argv"]),
+            prompt_probe_strategy="cli_headless_prompt",
+            default_context_window=default_context_window,
+        )
+
+    if spec.selected_transport == "api" or spec.api_endpoint or spec.api_protocol_family:
+        if not spec.api_endpoint or not spec.api_protocol_family:
+            raise ValueError(
+                f"provider {provider_slug!r} has no DB authority row; "
+                "wizard payload must include provider.api_endpoint and provider.api_protocol_family for api onboarding"
+            )
+        transports["api"] = ProviderTransportAuthorityTemplate(
+            transport="api",
+            supported=True,
+            docs_url=spec.transport_docs_url,
+            api_endpoint=spec.api_endpoint,
+            api_protocol_family=spec.api_protocol_family,
+            api_key_env_vars=spec.api_key_env_vars,
+            default_model=default_model,
+            discovery_strategy=_api_model_discovery_strategy_for(spec.api_protocol_family),
+            prompt_probe_strategy=_api_prompt_probe_strategy_for(spec.api_protocol_family),
+            default_context_window=default_context_window,
+        )
+
+    if not transports:
+        return None
+
+    return ProviderAuthorityTemplate(
+        provider_slug=provider_slug,
+        provider_name=provider_name,
+        docs_url=spec.provider_docs_url,
+        benchmark_source_slug=spec.benchmark_source_slug,
+        default_context_window=default_context_window,
+        adapter_economics=adapter_economics,
+        transports=transports,
+    )
+
+
 def _preferred_cli_prompt_mode(spec: ProviderOnboardingSpec) -> str:
     explicit = (spec.cli_prompt_mode or "").strip().lower()
     if explicit in _VALID_CLI_PROMPT_MODES:
@@ -760,11 +834,27 @@ def _preferred_cli_prompt_mode(spec: ProviderOnboardingSpec) -> str:
     return "stdin"
 
 
-def _provider_template(provider_slug: str) -> ProviderAuthorityTemplate:
-    fallback = _fallback_template(provider_slug)
-    if fallback is None:
-        raise ValueError(f"no onboarding authority template is registered for {provider_slug}")
-    return fallback
+def _provider_template(
+    provider_slug: str,
+    *,
+    explicit_spec: ProviderOnboardingSpec | None = None,
+) -> ProviderAuthorityTemplate:
+    profile = provider_registry_mod.get_profile(provider_slug)
+    if profile is not None:
+        provider_name = None if explicit_spec is None else explicit_spec.provider_name
+        return _template_from_profile(
+            provider_slug=provider_slug,
+            provider_name=provider_name,
+            profile=profile,
+        )
+    if explicit_spec is not None:
+        explicit_template = _template_from_explicit_spec(explicit_spec)
+        if explicit_template is not None:
+            return explicit_template
+    raise ValueError(
+        f"no onboarding authority template is registered for {provider_slug}; "
+        "seed provider_cli_profiles in Postgres or provide explicit transport fields in the wizard payload"
+    )
 
 
 def _resolve_spec(
@@ -777,7 +867,7 @@ def _resolve_spec(
 ]:
     from dataclasses import replace
 
-    template = _provider_template(spec.provider_slug)
+    template = _provider_template(spec.provider_slug, explicit_spec=spec)
     selected_transport = (spec.selected_transport or "").strip().lower()
     if not selected_transport:
         raise ValueError(

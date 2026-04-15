@@ -27,7 +27,7 @@ openai==2.24.0
 croniter==6.2.2
 psycopg2-binary==2.9.11
 
-# scopes: runtime
-# Embedding and analytics support
+# scopes: api_server,workflow_worker,runtime
+# Embedding and semantic retrieval support
 numpy==2.4.4
 sentence-transformers==5.3.0

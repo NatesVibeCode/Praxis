@@ -1,10 +1,29 @@
 {
   "schema_version": 1,
   "default_runtime_profile": "praxis",
+  "sandbox_profiles": {
+    "sandbox_profile.praxis.default": {
+      "sandbox_provider": "docker_local",
+      "docker_image": "praxis-worker:latest",
+      "docker_cpus": "2",
+      "docker_memory": "4g",
+      "network_policy": "provider_only",
+      "workspace_materialization": "copy",
+      "secret_allowlist": [
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "GOOGLE_API_KEY",
+        "GEMINI_API_KEY"
+      ],
+      "auth_mount_policy": "provider_scoped",
+      "timeout_profile": "default"
+    }
+  },
   "runtime_profiles": {
     "praxis": {
       "instance_name": "praxis",
       "workspace_ref": "praxis",
+      "sandbox_profile_ref": "sandbox_profile.praxis.default",
       "model_profile_id": "model_profile.praxis.default",
       "provider_policy_id": "provider_policy.praxis.default",
       "provider_name": "openai",

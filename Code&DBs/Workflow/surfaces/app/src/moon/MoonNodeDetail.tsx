@@ -649,17 +649,20 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
     setImportError(null);
     try {
       const request = {
-        admitted_target: {
+        target_kind: 'import_snapshot',
+        target_ref: snapshotId,
+        decision: 'approve',
+        candidate_payload: {
           target_ref: shape.target_ref || `#${snapshotId}`,
           label: shape.label || snapshotId,
           kind: shape.kind || 'type',
         },
       };
       if (onCommitAuthorityAction) {
-        await onCommitAuthorityAction(`imports/${snapshotId}/admit`, request, {
-          label: 'Admit import',
-          reason: `Admit ${String(shape.label || snapshotId)} into the build authority set.`,
-          outcome: `${String(shape.label || snapshotId)} is now admitted for downstream binding.`,
+        await onCommitAuthorityAction('review_decisions', request, {
+          label: 'Approve import candidate',
+          reason: `Approve ${String(shape.label || snapshotId)} as a reviewed import candidate.`,
+          outcome: `${String(shape.label || snapshotId)} is now explicitly approved for downstream binding.`,
           authority: 'build.import_snapshots',
           target: {
             kind: 'import',
@@ -669,7 +672,7 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
           changeSummary: ['Admitted target', String(shape.target_ref || shape.label || snapshotId)],
         });
       } else {
-        await onMutate(`imports/${snapshotId}/admit`, request);
+        await onMutate('review_decisions', request);
       }
     } catch (e: any) {
       setImportError(e.message || 'Failed to admit import');
@@ -1732,13 +1735,16 @@ function BindingCard({
     setError(null);
     try {
       const request = {
-        accepted_target: target,
+        target_kind: 'binding',
+        target_ref: binding.binding_id,
+        decision: 'approve',
+        candidate_payload: target,
         rationale: 'Accepted from Moon Build.',
       };
       if (onCommitAuthorityAction) {
         const targetLabel = target.enrichment?.integration_name || target.label || target.target_ref || 'selected target';
-        await onCommitAuthorityAction(`bindings/${binding.binding_id}/accept`, request, {
-          label: 'Accept binding',
+        await onCommitAuthorityAction('review_decisions', request, {
+          label: 'Approve binding',
           reason: `Connect ${binding.source_label || binding.binding_id} to ${targetLabel}.`,
           outcome: `${binding.source_label || binding.binding_id} now resolves through ${targetLabel}.`,
           authority: 'build.binding_ledger',
@@ -1750,7 +1756,7 @@ function BindingCard({
           changeSummary: ['Accepted target', targetLabel],
         });
       } else {
-        await onMutate(`bindings/${binding.binding_id}/accept`, request);
+        await onMutate('review_decisions', request);
       }
     } catch (e: any) {
       setError(e.message || 'Failed to accept');
@@ -1765,7 +1771,10 @@ function BindingCard({
     setError(null);
     try {
       const request = {
-        accepted_target: {
+        target_kind: 'binding',
+        target_ref: binding.binding_id,
+        decision: 'approve',
+        candidate_payload: {
           target_ref: replaceRef.trim(),
           label: replaceRef.trim(),
           kind: 'custom',
@@ -1773,8 +1782,8 @@ function BindingCard({
         rationale: 'Replaced from Moon Build.',
       };
       if (onCommitAuthorityAction) {
-        await onCommitAuthorityAction(`bindings/${binding.binding_id}/replace`, request, {
-          label: 'Replace binding',
+        await onCommitAuthorityAction('review_decisions', request, {
+          label: 'Approve replacement binding',
           reason: `Replace ${binding.source_label || binding.binding_id} with ${replaceRef.trim()}.`,
           outcome: `${binding.source_label || binding.binding_id} now resolves through ${replaceRef.trim()}.`,
           authority: 'build.binding_ledger',
@@ -1786,7 +1795,7 @@ function BindingCard({
           changeSummary: ['Replacement target', replaceRef.trim()],
         });
       } else {
-        await onMutate(`bindings/${binding.binding_id}/replace`, request);
+        await onMutate('review_decisions', request);
       }
       setShowReplace(false);
       setReplaceRef('');
@@ -1802,11 +1811,14 @@ function BindingCard({
     setError(null);
     try {
       const request = {
+        target_kind: 'binding',
+        target_ref: binding.binding_id,
+        decision: 'reject',
         rationale: 'Rejected from Moon Build.',
       };
       if (onCommitAuthorityAction) {
-        await onCommitAuthorityAction(`bindings/${binding.binding_id}/reject`, request, {
-          label: 'Reject binding',
+        await onCommitAuthorityAction('review_decisions', request, {
+          label: 'Reject binding candidate',
           reason: `Mark ${binding.source_label || binding.binding_id} as intentionally skipped.`,
           outcome: `${binding.source_label || binding.binding_id} is now marked as rejected.`,
           authority: 'build.binding_ledger',
@@ -1818,7 +1830,7 @@ function BindingCard({
           changeSummary: ['Binding state', 'Rejected'],
         });
       } else {
-        await onMutate(`bindings/${binding.binding_id}/reject`, request);
+        await onMutate('review_decisions', request);
       }
     } catch (e: any) {
       setError(e.message || 'Failed to reject');

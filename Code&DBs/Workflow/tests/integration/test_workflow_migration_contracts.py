@@ -48,7 +48,13 @@ def test_workflow_migration_manifest_includes_provider_route_health_budget_migra
     assert "096_workflow_submission_acceptance.sql" in filenames
     assert "100_adapter_config_authority.sql" in filenames
     assert "106_acceptance_status_index.sql" in filenames
-    assert filenames[-1] == "106_acceptance_status_index.sql"
+    assert "111_cursor_cli_provider_seed.sql" in filenames
+    assert "112_sandbox_profile_authority.sql" in filenames
+    assert "113_sandbox_cleanup_reconciliation.sql" in filenames
+    assert "114_workflow_build_review_decisions.sql" in filenames
+    assert "115_surface_catalog_registry.sql" in filenames
+    assert "116_surface_catalog_source_policy_registry.sql" in filenames
+    assert filenames[-1] == "116_surface_catalog_source_policy_registry.sql"
 
 
 def test_every_manifest_migration_has_expected_object_contract() -> None:
@@ -179,6 +185,36 @@ def test_compile_artifact_reuse_key_expected_objects_are_registered() -> None:
     objects = workflow_migration_expected_objects("070_compile_artifact_reuse_keys.sql")
     names = {item.object_name for item in objects}
     assert "compile_artifacts_kind_input_fingerprint_idx" in names
+
+
+def test_surface_catalog_registry_expected_objects_are_registered() -> None:
+    objects = workflow_migration_expected_objects("115_surface_catalog_registry.sql")
+    names = {item.object_name for item in objects}
+    assert "surface_catalog_registry" in names
+    assert "surface_catalog_registry_surface_enabled_order_idx" in names
+    assert "surface_catalog_registry_surface_tier_idx" in names
+
+
+def test_surface_catalog_source_policy_registry_expected_objects_are_registered() -> None:
+    objects = workflow_migration_expected_objects("116_surface_catalog_source_policy_registry.sql")
+    names = {item.object_name for item in objects}
+    assert "surface_catalog_source_policy_registry" in names
+    assert "surface_catalog_source_policy_registry_surface_enabled_idx" in names
+    assert "surface_catalog_source_policy_registry.surface_catalog_source_policy_registry_surface_source_kind_key" in names
+
+
+def test_sandbox_cleanup_reconciliation_expected_objects_are_registered() -> None:
+    objects = workflow_migration_expected_objects("113_sandbox_cleanup_reconciliation.sql")
+    names = {item.object_name for item in objects}
+    assert "sandbox_sessions.cleanup_status" in names
+    assert "sandbox_sessions.cleanup_requested_at" in names
+    assert "sandbox_sessions.cleanup_attempted_at" in names
+    assert "sandbox_sessions.cleanup_completed_at" in names
+    assert "sandbox_sessions.cleanup_attempt_count" in names
+    assert "sandbox_sessions.cleanup_last_error" in names
+    assert "sandbox_sessions.cleanup_outcome" in names
+    assert "sandbox_sessions.ck_sandbox_sessions_cleanup_status" in names
+    assert "sandbox_sessions_cleanup_due_idx" in names
 
 
 def test_repo_snapshot_runtime_breadth_repair_expected_objects_are_registered() -> None:
@@ -333,6 +369,15 @@ def test_notify_and_provider_transport_migration_expected_objects_are_registered
     assert "provider_transport_admissions" in transport_names
     assert "provider_transport_probe_receipts" in transport_names
     assert "provider_transport_probe_receipts_decision_idx" in transport_names
+
+    cursor_seed_objects = workflow_migration_expected_objects("111_cursor_cli_provider_seed.sql")
+    cursor_seed_names = {item.object_name for item in cursor_seed_objects}
+    assert "provider_cli_profiles" in cursor_seed_names
+    assert "provider_transport_admissions" in cursor_seed_names
+    cursor_seed_sql = workflow_migration_sql_text("111_cursor_cli_provider_seed.sql")
+    assert "'cursor'" in cursor_seed_sql
+    assert "'cursor-agent'" in cursor_seed_sql
+    assert "'provider_transport_admission.cursor.cli_llm'" in cursor_seed_sql
 
 
 def test_stale_postgres_completion_prune_migration_is_resolvable_and_targeted() -> None:

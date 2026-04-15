@@ -59,6 +59,7 @@ def _repo_local_resolver() -> RegistryResolver:
                     runtime_profile_ref=runtime_profile_ref,
                     model_profile_id="model.alpha",
                     provider_policy_id="provider_policy.alpha",
+                    sandbox_profile_ref=runtime_profile_ref,
                 ),
             ),
         },

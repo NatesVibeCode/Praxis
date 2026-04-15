@@ -1,6 +1,10 @@
 """Tools: praxis_recall, praxis_ingest, praxis_graph."""
 from __future__ import annotations
 
+from memory.multimodal_ingest import (
+    SUPPORTED_MULTIMODAL_SOURCE_TYPES,
+    ingest_multimodal_to_knowledge_graph,
+)
 from typing import Any
 
 from ..subsystems import _subs
@@ -108,6 +112,27 @@ def tool_praxis_ingest(params: dict) -> dict:
 
     try:
         kg = _subs.get_knowledge_graph()
+        source_type = str(params.get("source_type") or kind or "").strip().lower()
+        if source_type in SUPPORTED_MULTIMODAL_SOURCE_TYPES:
+            multimodal = ingest_multimodal_to_knowledge_graph(
+                kg,
+                content=content,
+                source=source,
+                source_type=source_type,
+            )
+            graph_result = multimodal["graph_result"]
+            return {
+                "accepted": graph_result.accepted,
+                "entities_created": graph_result.entities_created,
+                "edges_created": graph_result.edges_created,
+                "duplicates_skipped": graph_result.duplicates_skipped,
+                "errors": list(graph_result.errors),
+                "multimodal": {
+                    "source_type": multimodal["source_type"],
+                    "staging_receipt": _serialize(multimodal["staging_receipt"]),
+                },
+            }
+
         result = kg.ingest(kind=kind, content=content, source=source)
         return {
             "accepted": result.accepted,
@@ -258,6 +283,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "  praxis_ingest(kind='conversation', content='User decided to use Postgres for all state', source='session/2026-04-07')\n\n"
                 "KINDS: 'document' (reference docs, catalogs), 'build_event' (CI/build results), "
                 "'extraction' (structured data from code analysis), 'conversation' (session decisions), "
+                "'meeting_transcript' (speaker turns / transcript action items), "
                 "'import' (bulk data import)."
             ),
             "inputSchema": {
@@ -266,10 +292,27 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "kind": {
                         "type": "string",
                         "description": "Content kind.",
-                        "enum": ["document", "build_event", "extraction", "conversation", "import"],
+                        "enum": [
+                            "document",
+                            "build_event",
+                            "extraction",
+                            "conversation",
+                            "meeting_transcript",
+                            "import",
+                        ],
                     },
                     "content": {"type": "string", "description": "Content to ingest."},
                     "source": {"type": "string", "description": "Source identifier."},
+                    "source_type": {
+                        "type": "string",
+                        "description": "Optional multimodal source type to route through the transcript-aware ingest pipeline.",
+                        "enum": [
+                            "meeting_transcript",
+                            "crm_export",
+                            "profile_document",
+                            "generic_structured",
+                        ],
+                    },
                 },
                 "required": ["kind", "content", "source"],
             },

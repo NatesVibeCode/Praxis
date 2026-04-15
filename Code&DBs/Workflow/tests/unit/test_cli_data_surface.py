@@ -29,6 +29,7 @@ def test_data_help_is_available() -> None:
     assert "workflow data checkpoint --job-file <job.json>" in rendered
     assert "workflow data approve --job-file <job.json>" in rendered
     assert "workflow data apply --job-file <job.json>" in rendered
+    assert "--checkpoint-manifest-id <id>" in rendered
     assert "--plan-manifest-id <id>" in rendered
     assert "--approval-manifest-id <id>" in rendered
     assert "workflow data approve --plan-manifest-id plan_abc123" in rendered
@@ -165,6 +166,42 @@ def test_data_checkpoint_alias_uses_catalog_backed_runner(monkeypatch: pytest.Mo
             "keys": ["id"],
             "cursor_field": "updated_at",
         },
+    }
+
+
+def test_data_replay_alias_supports_checkpoint_manifest_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _run_cli_tool(tool_name: str, params: dict[str, object], *, workflow_token: str = ""):
+        captured["tool_name"] = tool_name
+        captured["params"] = dict(params)
+        return 0, {"ok": True, "record_count": 1, "records_preview": [{"id": "3"}], "records_truncated": False}
+
+    monkeypatch.setattr(data_commands, "run_cli_tool", _run_cli_tool)
+    stdout = StringIO()
+
+    assert (
+        workflow_cli_main(
+            [
+                "data",
+                "replay",
+                "--checkpoint-manifest-id",
+                "checkpoint_xyz789",
+                "--input-file",
+                "artifacts/data/events.json",
+                "--cursor-field",
+                "updated_at",
+            ],
+            stdout=stdout,
+        )
+        == 0
+    )
+    assert captured["tool_name"] == "praxis_data"
+    assert captured["params"] == {
+        "action": "replay",
+        "checkpoint_manifest_id": "checkpoint_xyz789",
+        "input_path": "artifacts/data/events.json",
+        "cursor_field": "updated_at",
     }
 
 
@@ -409,8 +446,9 @@ def test_mcp_data_tool_resolves_manifest_ids_before_dispatch(monkeypatch: pytest
     )
 
     assert captured["kwargs"]["default_operation"] == "apply"
-    assert captured["job"]["plan"] == {"create": [], "update": [], "delete": [], "noop": [], "conflicts": []}
-    assert captured["job"]["approval"] == {"approved_by": "ops", "approval_reason": "Reviewed diff and counts"}
+    assert captured["kwargs"]["pg_conn"].__class__.__name__ == "_FakePg"
+    assert captured["job"]["plan_manifest_id"] == "plan_abc123"
+    assert captured["job"]["approval_manifest_id"] == "approval_def456"
     assert result["plan_manifest_id"] == "plan_abc123"
     assert result["approval_manifest_id"] == "approval_def456"
     assert result["plan_manifest"]["manifest_id"] == "plan_abc123"

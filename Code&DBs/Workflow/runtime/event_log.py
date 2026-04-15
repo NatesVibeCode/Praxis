@@ -33,6 +33,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Generator
 
+from ._workflow_database import resolve_runtime_database_url
+
 if TYPE_CHECKING:
     from storage.postgres.connection import SyncPostgresConnection
 
@@ -55,6 +57,7 @@ EVENT_COMPILATION = "compilation"
 EVENT_COMMIT = "commit"
 EVENT_REFINEMENT = "refinement"
 EVENT_PLANNING = "planning"
+EVENT_REVIEW_DECISION = "review_decision"
 
 # Job lifecycle event types
 EVENT_JOB_CLAIMED = "job_claimed"
@@ -272,7 +275,7 @@ def _start_channel_wakeup_listener(
 ) -> _ChannelWakeupListener | None:
     """Start a LISTEN wakeup helper for the requested channel when possible."""
 
-    database_url = os.environ.get("WORKFLOW_DATABASE_URL", "").strip()
+    database_url = str(resolve_runtime_database_url(required=False) or "").strip()
     if not database_url:
         return None
 

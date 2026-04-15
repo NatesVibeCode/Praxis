@@ -47,10 +47,10 @@ The source migration is:
 Prefer the bug tracker authority surface:
 
 ```text
-workflow bugs list
-workflow bugs search "<title>"
-workflow tools describe praxis_bugs
-workflow tools call praxis_bugs --input-json '{...}' --yes
+praxis workflow bugs list
+praxis workflow bugs search "<title>"
+praxis workflow tools describe praxis_bugs
+praxis workflow tools call praxis_bugs --input-json '{...}' --yes
 ```
 
 Relevant implementation files:
@@ -60,7 +60,7 @@ Relevant implementation files:
 
 ## File Action Mapping
 
-`workflow tools call praxis_bugs --input-json '{"action":"file",...}'` maps to `BugTracker.file_bug(...)`.
+`praxis workflow tools call praxis_bugs --input-json '{"action":"file",...}'` maps to `BugTracker.file_bug(...)`.
 `praxis_bugs(action="file", ...)` maps to the same filing path when you are using the MCP surface directly.
 
 Important behavior:
@@ -87,7 +87,7 @@ Useful inputs:
 
 ## Evidence Contract
 
-`workflow tools call praxis_bugs --input-json '{"action":"attach_evidence",...}'` maps to `BugTracker.link_evidence(...)`.
+`praxis workflow tools call praxis_bugs --input-json '{"action":"attach_evidence",...}'` maps to `BugTracker.link_evidence(...)`.
 
 Allowed evidence kinds:
 
@@ -111,7 +111,7 @@ Validation is strict:
 
 ## Resolution Contract
 
-`workflow tools call praxis_bugs --input-json '{"action":"resolve",...}'` only allows terminal statuses:
+`praxis workflow tools call praxis_bugs --input-json '{"action":"resolve",...}'` only allows terminal statuses:
 
 - `FIXED`
 - `WONT_FIX`

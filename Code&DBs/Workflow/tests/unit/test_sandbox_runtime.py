@@ -13,6 +13,7 @@ from runtime.sandbox_runtime import (
     ArtifactReceipt,
     CloudflareRemoteSandboxProvider,
     DockerLocalSandboxProvider,
+    SandboxExecRequest,
     SandboxExecutionResult,
     SandboxRuntime,
     SandboxSession,
@@ -169,6 +170,151 @@ def test_cli_auth_volume_flags_limit_mounts_to_selected_provider(monkeypatch) ->
     ]
 
 
+def test_docker_local_exec_prefers_metadata_resource_limits(monkeypatch, tmp_path) -> None:
+    captured: dict[str, object] = {}
+
+    class _NoopThread:
+        def __init__(self, *args, **kwargs):
+            del args, kwargs
+
+        def start(self) -> None:
+            return None
+
+        def join(self, timeout=None) -> None:
+            del timeout
+            return None
+
+    class _FakePopen:
+        def __init__(self, cmd, **kwargs):
+            captured["cmd"] = cmd
+            captured["popen_kwargs"] = kwargs
+            self.returncode = 0
+
+        def communicate(self, input=None, timeout=None):
+            captured["stdin"] = input
+            captured["timeout"] = timeout
+            return ("ok", "")
+
+    monkeypatch.setattr(
+        sandbox_runtime,
+        "resolve_docker_image",
+        lambda requested_image, image_exists: (
+            requested_image or "praxis-worker:test",
+            {"source": "requested"},
+        ),
+    )
+    monkeypatch.setattr(sandbox_runtime, "_docker_image_available", lambda image: True)
+    monkeypatch.setattr(sandbox_runtime.threading, "Thread", _NoopThread)
+    monkeypatch.setattr(sandbox_runtime.subprocess, "Popen", _FakePopen)
+
+    provider = DockerLocalSandboxProvider()
+    session = SandboxSession(
+        sandbox_session_id="sandbox_session:run.alpha:job.alpha",
+        sandbox_group_id="group:run.alpha",
+        provider="docker_local",
+        provider_session_id="provider-session",
+        workspace_root=str(tmp_path),
+        network_policy="provider_only",
+        workspace_materialization="copy",
+        metadata={
+            "docker_memory": "8g",
+            "docker_cpus": "6",
+            "provider_slug": "openai",
+            "auth_mount_policy": "provider_scoped",
+        },
+    )
+
+    provider.exec(
+        session,
+        SandboxExecRequest(
+            command="echo hi",
+            stdin_text="payload",
+            env={"OPENAI_API_KEY": "test-key"},
+            timeout_seconds=15,
+            execution_transport="cli",
+            image="praxis-worker:test",
+        ),
+    )
+
+    docker_cmd = captured["cmd"]
+    assert "--memory" in docker_cmd
+    assert docker_cmd[docker_cmd.index("--memory") + 1] == "8g"
+    assert "--cpus" in docker_cmd
+    assert docker_cmd[docker_cmd.index("--cpus") + 1] == "6"
+
+
+def test_docker_local_exec_skips_auth_mounts_when_policy_is_none(monkeypatch, tmp_path) -> None:
+    captured: dict[str, object] = {}
+
+    class _NoopThread:
+        def __init__(self, *args, **kwargs):
+            del args, kwargs
+
+        def start(self) -> None:
+            return None
+
+        def join(self, timeout=None) -> None:
+            del timeout
+            return None
+
+    class _FakePopen:
+        def __init__(self, cmd, **kwargs):
+            captured["cmd"] = cmd
+            self.returncode = 0
+
+        def communicate(self, input=None, timeout=None):
+            del input, timeout
+            return ("ok", "")
+
+    monkeypatch.setattr(
+        sandbox_runtime,
+        "resolve_docker_image",
+        lambda requested_image, image_exists: (
+            requested_image or "praxis-worker:test",
+            {"source": "requested"},
+        ),
+    )
+    monkeypatch.setattr(sandbox_runtime, "_docker_image_available", lambda image: True)
+    monkeypatch.setattr(sandbox_runtime.threading, "Thread", _NoopThread)
+    monkeypatch.setattr(sandbox_runtime.subprocess, "Popen", _FakePopen)
+    monkeypatch.setattr(
+        sandbox_runtime,
+        "_cli_auth_volume_flags",
+        lambda provider_slug=None: ["-v", f"/host/{provider_slug or 'all'}:/container/auth:ro"],
+    )
+
+    provider = DockerLocalSandboxProvider()
+    session = SandboxSession(
+        sandbox_session_id="sandbox_session:run.alpha:job.alpha",
+        sandbox_group_id="group:run.alpha",
+        provider="docker_local",
+        provider_session_id="provider-session",
+        workspace_root=str(tmp_path),
+        network_policy="provider_only",
+        workspace_materialization="copy",
+        metadata={
+            "provider_slug": "openai",
+            "auth_mount_policy": "none",
+        },
+    )
+
+    provider.exec(
+        session,
+        SandboxExecRequest(
+            command="echo hi",
+            stdin_text="payload",
+            env={"OPENAI_API_KEY": "test-key"},
+            timeout_seconds=15,
+            execution_transport="cli",
+            image="praxis-worker:test",
+        ),
+    )
+
+    docker_cmd = captured["cmd"]
+    assert "/host/openai:/container/auth:ro" not in docker_cmd
+    assert "/host/all:/container/auth:ro" not in docker_cmd
+
+
 
 
 def test_sandbox_runtime_runs_provider_contract_and_persists_artifacts(tmp_path) -> None:
@@ -291,63 +437,6 @@ def test_workspace_snapshot_ref_is_content_addressed(tmp_path) -> None:
     changed_ref = sandbox_runtime._workspace_snapshot_ref(str(second_root))
 
     assert changed_ref != first_ref
-
-
-def test_cleanup_stale_ephemeral_sandbox_roots_removes_only_old_sandbox_dirs(tmp_path) -> None:
-    root = tmp_path / "temp"
-    root.mkdir()
-    old_dir = root / "praxis-docker-sandbox-old"
-    fresh_dir = root / "praxis-cloudflare-sandbox-fresh"
-    unrelated_dir = root / "not-a-sandbox"
-    (old_dir / "workspace").mkdir(parents=True)
-    (fresh_dir / "workspace").mkdir(parents=True)
-    unrelated_dir.mkdir()
-    (old_dir / "workspace" / "stale.txt").write_text("stale", encoding="utf-8")
-    (fresh_dir / "workspace" / "fresh.txt").write_text("fresh", encoding="utf-8")
-    now = 100_000.0
-    os.utime(old_dir, (now - 7_200, now - 7_200))
-    os.utime(fresh_dir, (now - 60, now - 60))
-
-    receipt = sandbox_runtime.cleanup_stale_ephemeral_sandbox_roots(
-        root_dir=str(root),
-        max_age_seconds=3_600,
-        now=now,
-    )
-
-    assert receipt.removed_paths == (str(old_dir.resolve()),)
-    assert str(fresh_dir.resolve()) in receipt.skipped_paths
-    assert str(unrelated_dir.resolve()) not in receipt.scanned_paths
-    assert not old_dir.exists()
-    assert fresh_dir.exists()
-    assert unrelated_dir.exists()
-
-
-def test_cleanup_stale_ephemeral_sandbox_roots_reports_delete_failures(monkeypatch, tmp_path) -> None:
-    root = tmp_path / "temp"
-    root.mkdir()
-    stubborn_dir = root / "praxis-docker-sandbox-stubborn"
-    (stubborn_dir / "workspace").mkdir(parents=True)
-    now = 100_000.0
-    os.utime(stubborn_dir, (now - 7_200, now - 7_200))
-    real_rmtree = sandbox_runtime.shutil.rmtree
-
-    def _fake_rmtree(path, *args, **kwargs):
-        target = Path(path)
-        if target == stubborn_dir:
-            raise OSError("boom")
-        return real_rmtree(path, *args, **kwargs)
-
-    monkeypatch.setattr(sandbox_runtime.shutil, "rmtree", _fake_rmtree)
-
-    receipt = sandbox_runtime.cleanup_stale_ephemeral_sandbox_roots(
-        root_dir=str(root),
-        max_age_seconds=3_600,
-        now=now,
-    )
-
-    assert receipt.removed_paths == ()
-    assert receipt.failed_paths == ((str(stubborn_dir.resolve()), "boom"),)
-    assert stubborn_dir.exists()
 
 
 def test_derive_sandbox_identity_is_deterministic_for_matching_adhoc_requests(tmp_path) -> None:

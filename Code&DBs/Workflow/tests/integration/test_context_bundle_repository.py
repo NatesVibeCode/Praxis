@@ -215,6 +215,7 @@ async def _prepare_context_bundle_authority(
             runtime_profile_ref=runtime_profile_ref,
             model_profile_id="model_profile.alpha",
             provider_policy_id="provider_policy.alpha",
+            sandbox_profile_ref=runtime_profile_ref,
         )
 
         registry_repository = PostgresRegistryAuthorityRepository(conn)

@@ -29,9 +29,6 @@ _DOCKER_MEMORY_ENV = "PRAXIS_DOCKER_MEMORY"
 _DOCKER_CPUS_ENV = "PRAXIS_DOCKER_CPUS"
 _CLI_AUTH_HOME_ENV = "PRAXIS_CLI_AUTH_HOME"
 _SNAPSHOT_CACHE_ROOT_ENV = "PRAXIS_SANDBOX_SNAPSHOT_CACHE_DIR"
-_SANDBOX_JANITOR_MAX_AGE_ENV = "PRAXIS_SANDBOX_JANITOR_MAX_AGE_SECONDS"
-_DEFAULT_SANDBOX_JANITOR_MAX_AGE_SECONDS = 6 * 60 * 60
-_SANDBOX_TEMP_DIR_PREFIXES = ("praxis-docker-sandbox-", "praxis-cloudflare-sandbox-")
 
 
 def _parse_docker_mem_str(mem_str: str) -> int:
@@ -266,18 +263,6 @@ class TeardownReceipt:
 
 
 @dataclass(frozen=True, slots=True)
-class SandboxTempCleanupReceipt:
-    """Result of janitorial cleanup for stale local sandbox temp roots."""
-
-    root_dir: str
-    max_age_seconds: int
-    scanned_paths: tuple[str, ...]
-    removed_paths: tuple[str, ...]
-    skipped_paths: tuple[str, ...]
-    failed_paths: tuple[tuple[str, str], ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
 class SandboxExecRequest:
     """One command execution within an existing sandbox session."""
 
@@ -366,77 +351,6 @@ def _docker_available() -> bool:
     return result.returncode == 0
 
 
-def _sandbox_temp_root() -> str:
-    return os.path.realpath(tempfile.gettempdir())
-
-
-def _sandbox_janitor_max_age_seconds() -> int:
-    raw = os.environ.get(_SANDBOX_JANITOR_MAX_AGE_ENV, "").strip()
-    if not raw:
-        return _DEFAULT_SANDBOX_JANITOR_MAX_AGE_SECONDS
-    try:
-        return max(300, int(raw))
-    except ValueError:
-        return _DEFAULT_SANDBOX_JANITOR_MAX_AGE_SECONDS
-
-
-def list_ephemeral_sandbox_roots(*, root_dir: str | None = None) -> tuple[str, ...]:
-    root = Path(root_dir or _sandbox_temp_root())
-    if not root.exists():
-        return ()
-    candidates: list[str] = []
-    for prefix in _SANDBOX_TEMP_DIR_PREFIXES:
-        for path in root.glob(f"{prefix}*"):
-            if path.is_dir():
-                candidates.append(str(path.resolve()))
-    return tuple(sorted(dict.fromkeys(candidates)))
-
-
-def cleanup_stale_ephemeral_sandbox_roots(
-    *,
-    root_dir: str | None = None,
-    max_age_seconds: int | None = None,
-    now: float | None = None,
-) -> SandboxTempCleanupReceipt:
-    root = os.path.realpath(root_dir or _sandbox_temp_root())
-    threshold = max(300, int(max_age_seconds or _sandbox_janitor_max_age_seconds()))
-    current_time = time.time() if now is None else float(now)
-    scanned_paths = list_ephemeral_sandbox_roots(root_dir=root)
-    removed_paths: list[str] = []
-    skipped_paths: list[str] = []
-    failed_paths: list[tuple[str, str]] = []
-
-    for raw_path in scanned_paths:
-        path = Path(raw_path)
-        try:
-            age_seconds = max(0.0, current_time - path.stat().st_mtime)
-        except FileNotFoundError:
-            continue
-        except OSError as exc:
-            failed_paths.append((raw_path, str(exc)))
-            continue
-        if age_seconds < threshold:
-            skipped_paths.append(raw_path)
-            continue
-        try:
-            shutil.rmtree(path)
-            removed_paths.append(raw_path)
-        except FileNotFoundError:
-            continue
-        except OSError as exc:
-            failed_paths.append((raw_path, str(exc)))
-
-    return SandboxTempCleanupReceipt(
-        root_dir=root,
-        max_age_seconds=threshold,
-        scanned_paths=tuple(scanned_paths),
-        removed_paths=tuple(removed_paths),
-        skipped_paths=tuple(skipped_paths),
-        failed_paths=tuple(failed_paths),
-    )
-
-
-
 def _docker_image_available(image: str) -> bool:
     try:
         result = subprocess.run(
@@ -457,11 +371,19 @@ def _docker_image() -> str:
     return image
 
 
-def _docker_memory() -> str:
+def _docker_memory(metadata: Mapping[str, Any] | None = None) -> str:
+    if isinstance(metadata, Mapping):
+        configured = str(metadata.get("docker_memory") or "").strip()
+        if configured:
+            return configured
     return os.environ.get(_DOCKER_MEMORY_ENV, "4g")
 
 
-def _docker_cpus() -> str:
+def _docker_cpus(metadata: Mapping[str, Any] | None = None) -> str:
+    if isinstance(metadata, Mapping):
+        configured = str(metadata.get("docker_cpus") or "").strip()
+        if configured:
+            return configured
     return os.environ.get(_DOCKER_CPUS_ENV, "2")
 
 
@@ -730,17 +652,24 @@ class DockerLocalSandboxProvider:
             "-i",
             "--name", container_name,
             "--memory",
-            _docker_memory(),
+            _docker_memory(session.metadata),
             "--cpus",
-            _docker_cpus(),
+            _docker_cpus(session.metadata),
             "--workdir",
             "/workspace",
             "-v",
             f"{session.workspace_root}:/workspace",
         ]
-        docker_cmd.extend(
-            _cli_auth_volume_flags(provider_slug=_provider_slug(session.metadata))
-        )
+        auth_mount_policy = str(session.metadata.get("auth_mount_policy") or "provider_scoped").strip().lower()
+        if auth_mount_policy != "none":
+            provider_slug = (
+                _provider_slug(session.metadata)
+                if auth_mount_policy == "provider_scoped"
+                else None
+            )
+            docker_cmd.extend(
+                _cli_auth_volume_flags(provider_slug=provider_slug)
+            )
         for key, value in sorted(request.env.items()):
             docker_cmd.extend(["-e", f"{key}={value}"])
         if session.network_policy == "disabled":

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from runtime.workflow import mcp_session
 
 
@@ -43,3 +45,15 @@ def test_verify_workflow_mcp_session_token_rejects_expired_token(monkeypatch) ->
         assert exc.reason_code == "workflow_mcp.token_expired"
     else:  # pragma: no cover - defensive
         raise AssertionError("Expected expired workflow MCP token to fail closed")
+
+
+def test_mint_workflow_mcp_session_token_requires_explicit_signing_secret(monkeypatch) -> None:
+    monkeypatch.delenv("PRAXIS_WORKFLOW_MCP_SIGNING_SECRET", raising=False)
+
+    with pytest.raises(mcp_session.WorkflowMcpSessionError, match="PRAXIS_WORKFLOW_MCP_SIGNING_SECRET"):
+        mcp_session.mint_workflow_mcp_session_token(
+            run_id="run.alpha",
+            workflow_id="workflow.alpha",
+            job_label="job-alpha",
+            allowed_tools=["praxis_context_shard"],
+        )

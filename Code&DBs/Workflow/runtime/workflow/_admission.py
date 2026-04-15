@@ -6,7 +6,6 @@ import concurrent.futures
 import hashlib
 import json
 import logging
-import os
 import time
 import uuid
 from contextlib import nullcontext
@@ -27,6 +26,7 @@ from registry.native_runtime_profile_sync import resolve_native_runtime_profile_
 from runtime.execution_strategy import StepCompiler
 from runtime.idempotency import canonical_hash, check_idempotency, record_idempotency
 from runtime.intake import WorkflowIntakePlanner
+from runtime._workflow_database import resolve_runtime_database_url
 from runtime.native_authority import default_native_authority_refs
 from runtime.persistent_evidence import PostgresEvidenceWriter
 from runtime.workflow._workflow_execution import WorkflowExecutionContext, execute_workflow_request
@@ -60,6 +60,7 @@ from ._context_building import (
 from runtime.compile_artifacts import CompileArtifactError, CompileArtifactStore
 from runtime.workflow.job_runtime_context import persist_workflow_job_runtime_contexts
 from runtime.workflow.submission_capture import WorkflowSubmissionServiceError
+from storage.postgres.validators import PostgresConfigurationError
 
 if TYPE_CHECKING:
     from storage.postgres.connection import SyncPostgresConnection
@@ -238,6 +239,7 @@ def _graph_registry_for_request(request: WorkflowRequest) -> RegistryResolver:
                     runtime_profile_ref=runtime_profile_ref,
                     model_profile_id=config.model_profile_id,
                     provider_policy_id=config.provider_policy_id,
+                    sandbox_profile_ref=config.sandbox_profile_ref,
                 ),
             ],
         },
@@ -414,11 +416,12 @@ def _submit_graph_workflow_inline(
             "error": intake_outcome.validation_result.reason_code,
         }
 
-    database_url = os.environ.get("WORKFLOW_DATABASE_URL")
-    if not database_url:
+    try:
+        database_url = resolve_runtime_database_url(required=True)
+    except PostgresConfigurationError as exc:
         raise RuntimeError(
             "graph-capable workflow submission requires WORKFLOW_DATABASE_URL for durable runtime execution",
-        )
+        ) from exc
     evidence_writer = PostgresEvidenceWriter(database_url=database_url)
     context = WorkflowExecutionContext(
         provider_slug=default_provider_slug(),
@@ -717,10 +720,12 @@ def _do_submit_workflow(
             }
             if isinstance(raw_execution_bundles, dict)
             else _build_job_execution_bundles(
+                conn=conn,
                 spec=spec,
                 execution_context_shards=execution_context_shards,
                 run_id=run_id,
                 workflow_id=authority["workflow_id"],
+                runtime_profile_ref=_runtime_profile_ref_from_spec(spec),
             )
         )
         execution_bundles = {

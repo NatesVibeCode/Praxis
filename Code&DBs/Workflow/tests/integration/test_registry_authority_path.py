@@ -112,6 +112,7 @@ async def _exercise_registry_authority_path() -> None:
             runtime_profile_ref=runtime_profile_ref,
             model_profile_id=f"model.{suffix}",
             provider_policy_id=f"provider_policy.{suffix}",
+            sandbox_profile_ref=runtime_profile_ref,
         )
 
         repository = PostgresRegistryAuthorityRepository(conn)
@@ -163,6 +164,10 @@ async def _exercise_registry_authority_path() -> None:
         assert (
             valid_outcome.authority_context.bundle_payload["runtime_profile"]["provider_policy_id"]
             == runtime_profile_record.provider_policy_id
+        )
+        assert (
+            valid_outcome.authority_context.bundle_payload["runtime_profile"]["sandbox_profile_ref"]
+            == runtime_profile_record.sandbox_profile_ref
         )
 
         missing_profile_outcome = planner.plan(

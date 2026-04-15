@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import itertools
 import json
-import os
 import time
 import uuid
 from dataclasses import dataclass
@@ -20,6 +19,7 @@ from runtime.receipt_provenance import (
     extract_write_paths,
 )
 from runtime.execution_transport import resolve_execution_transport
+from runtime._workflow_database import resolve_runtime_database_url
 from runtime.workflow.receipt_writer import prepare_output_artifact
 from runtime.workflow.execution_backends import execute_api as execute_api_in_sandbox
 from runtime.workflow_spec import WorkflowSpec, WorkflowSpecError
@@ -690,7 +690,8 @@ class WorkflowRunner:
 
         # Only show DB info if scope touches DB, memory, or runtime
         if touches_db or touches_memory or touches_runtime:
-            lines.append(f"DATABASE: {os.environ['WORKFLOW_DATABASE_URL']}")
+            database_url = str(resolve_runtime_database_url(required=False) or "unavailable")
+            lines.append(f"DATABASE: {database_url}")
             if touches_vectors:
                 lines.append("  - Semantic vector retrieval enabled (384-dim embeddings via all-MiniLM-L6-v2)")
             lines.append("  - All subsystems use SyncPostgresConnection")

@@ -38,7 +38,13 @@
     "095_model_profile_auto_seed_trigger.sql",
     "096_workflow_submission_acceptance.sql",
     "100_adapter_config_authority.sql",
-    "106_acceptance_status_index.sql"
+    "106_acceptance_status_index.sql",
+    "111_cursor_cli_provider_seed.sql",
+    "112_sandbox_profile_authority.sql",
+    "113_sandbox_cleanup_reconciliation.sql",
+    "114_workflow_build_review_decisions.sql",
+    "115_surface_catalog_registry.sql",
+    "116_native_runtime_registry_authority.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -1502,6 +1508,102 @@
         "object_type": "index",
         "object_name": "idx_wjs_acceptance_status"
       }
+    ],
+    "111_cursor_cli_provider_seed.sql": [
+      {
+        "object_type": "table",
+        "object_name": "provider_cli_profiles"
+      },
+      {
+        "object_type": "table",
+        "object_name": "provider_transport_admissions"
+      }
+    ],
+    "112_sandbox_profile_authority.sql": [
+      {
+        "object_type": "table",
+        "object_name": "registry_sandbox_profile_authority"
+      },
+      {
+        "object_type": "column",
+        "object_name": "registry_runtime_profile_authority.sandbox_profile_ref"
+      }
+    ],
+    "113_sandbox_cleanup_reconciliation.sql": [
+      {
+        "object_type": "column",
+        "object_name": "sandbox_sessions.cleanup_status"
+      },
+      {
+        "object_type": "column",
+        "object_name": "sandbox_sessions.cleanup_requested_at"
+      },
+      {
+        "object_type": "column",
+        "object_name": "sandbox_sessions.cleanup_attempted_at"
+      },
+      {
+        "object_type": "column",
+        "object_name": "sandbox_sessions.cleanup_completed_at"
+      },
+      {
+        "object_type": "column",
+        "object_name": "sandbox_sessions.cleanup_attempt_count"
+      },
+      {
+        "object_type": "column",
+        "object_name": "sandbox_sessions.cleanup_last_error"
+      },
+      {
+        "object_type": "column",
+        "object_name": "sandbox_sessions.cleanup_outcome"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "sandbox_sessions.ck_sandbox_sessions_cleanup_status"
+      },
+      {
+        "object_type": "index",
+        "object_name": "sandbox_sessions_cleanup_due_idx"
+      }
+    ],
+    "114_workflow_build_review_decisions.sql": [
+      {
+        "object_type": "table",
+        "object_name": "workflow_build_review_decisions"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_workflow_build_review_decisions_workflow_revision_target"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_workflow_build_review_decisions_workflow_decided_at"
+      }
+    ],
+    "115_surface_catalog_registry.sql": [
+      {
+        "object_type": "table",
+        "object_name": "surface_catalog_registry"
+      },
+      {
+        "object_type": "index",
+        "object_name": "surface_catalog_registry_surface_enabled_order_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "surface_catalog_registry_surface_tier_idx"
+      }
+    ],
+    "116_native_runtime_registry_authority.sql": [
+      {
+        "object_type": "table",
+        "object_name": "registry_native_runtime_profile_authority"
+      },
+      {
+        "object_type": "table",
+        "object_name": "registry_native_runtime_defaults"
+      }
     ]
   },
   "policy_buckets": {
@@ -1544,7 +1646,13 @@
       "095_model_profile_auto_seed_trigger.sql",
       "096_workflow_submission_acceptance.sql",
       "100_adapter_config_authority.sql",
-      "106_acceptance_status_index.sql"
+      "106_acceptance_status_index.sql",
+      "111_cursor_cli_provider_seed.sql",
+      "112_sandbox_profile_authority.sql",
+      "113_sandbox_cleanup_reconciliation.sql",
+      "114_workflow_build_review_decisions.sql",
+      "115_surface_catalog_registry.sql",
+      "116_native_runtime_registry_authority.sql"
     ],
     "bootstrap_only": [
       "012_execution_leases.sql",

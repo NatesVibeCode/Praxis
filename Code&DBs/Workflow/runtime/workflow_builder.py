@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
@@ -32,7 +32,9 @@ def _unique_id() -> str:
 
 _DEFAULT_WORKSPACE, _DEFAULT_RUNTIME_PROFILE = default_native_authority_refs()
 
-_DEFAULT_LLM_ADAPTER = default_llm_adapter_type()
+
+def _default_llm_adapter() -> str:
+    return default_llm_adapter_type()
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,7 +85,7 @@ class WorkflowStep:
 
     name: str
     prompt: str
-    adapter_type: str = _DEFAULT_LLM_ADAPTER
+    adapter_type: str = field(default_factory=_default_llm_adapter)
     provider_slug: str | None = None
     model_slug: str | None = None
     tier: str | None = None

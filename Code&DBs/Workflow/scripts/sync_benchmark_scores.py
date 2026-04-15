@@ -21,6 +21,7 @@ import os
 import sys
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 WORKFLOW_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(WORKFLOW_ROOT))
@@ -44,6 +45,27 @@ _HIGHER_IS_BETTER: dict[str, bool] = {
 }
 
 _BENCHMARK_NAME_PREFIX = "market_blend"
+
+
+def _normalize_database_url(url: str) -> str:
+    text = str(url or "").strip()
+    if not text:
+        raise SystemExit("--database-url is required (or set WORKFLOW_DATABASE_URL)")
+    if not text.startswith(("postgresql://", "postgres://")):
+        raise SystemExit("WORKFLOW_DATABASE_URL must use a postgres:// or postgresql:// DSN")
+
+    parsed = urlsplit(text)
+    if parsed.username or parsed.scheme not in {"postgresql", "postgres"}:
+        return text
+
+    hostname = parsed.hostname or "localhost"
+    netloc = "postgres"
+    if parsed.password:
+        netloc += f":{parsed.password}"
+    netloc += f"@{hostname}"
+    if parsed.port is not None:
+        netloc += f":{parsed.port}"
+    return urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
 
 
 def _extract_common_metrics(benchmark_profile: Any) -> dict[str, float]:
@@ -244,7 +266,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--database-url",
-        default=os.environ["WORKFLOW_DATABASE_URL"],
+        default=os.environ.get("WORKFLOW_DATABASE_URL"),
     )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--verbose", "-v", action="store_true")
@@ -253,6 +275,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 async def _main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
+    raw_database_url = str(args.database_url or "").strip()
+    args.database_url = _normalize_database_url(raw_database_url)
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(levelname)s %(message)s",

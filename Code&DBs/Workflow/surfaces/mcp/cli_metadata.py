@@ -308,6 +308,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         risks={"default": "write"},
         examples=[
             _example("Ingest a document", {"kind": "document", "source": "catalog/runtime", "content": "# Runtime catalog"}),
+            _example("Ingest a transcript", {"kind": "meeting_transcript", "source": "meeting/2026-04-07", "content": "Alice: TODO review PR"}),
         ],
     ),
     "praxis_integration": _tool(

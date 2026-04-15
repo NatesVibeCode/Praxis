@@ -89,6 +89,7 @@ def _registry(request_payload: dict[str, object]) -> RegistryResolver:
                     runtime_profile_ref=runtime_profile_ref,
                     model_profile_id="model.native-self-hosted-smoke",
                     provider_policy_id="provider.native-self-hosted-smoke",
+                    sandbox_profile_ref=runtime_profile_ref,
                 ),
             ),
         },

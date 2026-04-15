@@ -17,9 +17,9 @@ Legacy internal skill id: `praxis-bug-logging`
 
 Primary references:
 
-- `AGENTS.md`
 - `.claude/CLAUDE.md`
-- `Code&DBs/Databases/migrations/workflow/009_bug_and_roadmap_authority.sql`
+- `docs/ARCHITECTURE.md`
+- `Code&DBs/Databases/migrations/workflow/`
 - `Code&DBs/Workflow/runtime/bug_tracker.py`
 - `Code&DBs/Workflow/surfaces/mcp/tools/bugs.py`
 - `references/bug-authority.md`
@@ -28,9 +28,9 @@ Use this skill when a user wants to log a bug correctly, inspect whether a bug a
 
 Operator surface:
 
-- inspect via `workflow bugs ...`
-- inspect schema/help via `workflow tools describe praxis_bugs`
-- mutate via `workflow tools call praxis_bugs --input-json '{...}' --yes`
+- inspect via `praxis workflow bugs ...`
+- inspect schema/help via `praxis workflow tools describe praxis_bugs`
+- mutate via `praxis workflow tools call praxis_bugs --input-json '{...}' --yes`
 
 ## Mission
 
@@ -54,7 +54,7 @@ Keep bug state under one obvious authority:
 ### 1. Inspect Before Filing
 
 - Search or list first to avoid duplicate noise.
-- Start with `workflow bugs search "<title>"` or `workflow bugs list --severity P1`.
+- Start with `praxis workflow bugs search "<title>"` or `praxis workflow bugs list --severity P1`.
 
 ### 2. Classify The Bug
 
@@ -77,7 +77,7 @@ Use provenance fields only when they can be verified:
 Prefer:
 
 ```text
-workflow tools call praxis_bugs --input-json '{"action":"file","title":"...","severity":"P1","category":"RUNTIME","description":"...","filed_by":"...","source_kind":"..."}' --yes
+praxis workflow tools call praxis_bugs --input-json '{"action":"file","title":"...","severity":"P1","category":"RUNTIME","description":"...","filed_by":"...","source_kind":"..."}' --yes
 ```
 
 Do not:
@@ -100,7 +100,7 @@ Front-load the description with the actual failure, impact, and blocker so the a
 After filing, attach authoritative evidence with:
 
 ```text
-workflow tools call praxis_bugs --input-json '{"action":"attach_evidence","bug_id":"BUG-...","evidence_kind":"receipt","evidence_ref":"receipt-...","evidence_role":"observed_in"}' --yes
+praxis workflow tools call praxis_bugs --input-json '{"action":"attach_evidence","bug_id":"BUG-...","evidence_kind":"receipt","evidence_ref":"receipt-...","evidence_role":"observed_in"}' --yes
 ```
 
 Canonical evidence kinds:
@@ -133,7 +133,7 @@ Only resolve with terminal statuses:
 Prefer:
 
 ```text
-workflow tools call praxis_bugs --input-json '{"action":"resolve","bug_id":"BUG-...","status":"FIXED"}' --yes
+praxis workflow tools call praxis_bugs --input-json '{"action":"resolve","bug_id":"BUG-...","status":"FIXED"}' --yes
 ```
 
 Before resolving `FIXED`:

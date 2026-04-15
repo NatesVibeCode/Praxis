@@ -341,27 +341,26 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
     return true;
   }), [runMutation, workflowId]);
 
-  const buildGraphUndoDescriptor = useCallback((previousPayload: BuildPayload | null): UiActionUndoDescriptor => {
-    const steps: UiActionUndoDescriptor[] = [];
-    if (workflowId) {
-      const previousGraph = previousPayload?.build_graph;
-      steps.push({
-        kind: 'workflow.buildMutation',
-        workflowId,
-        subpath: 'build_graph',
-        body: {
-          nodes: previousGraph?.nodes || [],
-          edges: previousGraph?.edges || [],
-        },
-      });
+  const buildMutationUndoDescriptor = useCallback((nextPayload: BuildPayload | null): UiActionUndoDescriptor | null => {
+    if (!Array.isArray(nextPayload?.undo_receipt?.steps) || !nextPayload?.undo_receipt?.workflow_id) {
+      return null;
     }
-    steps.push({
-      kind: 'moon.payload.restore',
-      scope: moonUndoScope,
-      payload: previousPayload,
-    });
-    return steps.length === 1 ? steps[0] : { kind: 'sequence', steps };
-  }, [moonUndoScope, workflowId]);
+    return {
+      kind: 'sequence',
+      steps: nextPayload.undo_receipt.steps.map((step) => ({
+        kind: 'workflow.buildMutation' as const,
+        workflowId: nextPayload.undo_receipt!.workflow_id,
+        subpath: step.subpath,
+        body: step.body,
+      })),
+    } satisfies UiActionUndoDescriptor;
+  }, []);
+
+  const buildDraftGraphUndoDescriptor = useCallback((previousPayload: BuildPayload | null): UiActionUndoDescriptor => ({
+    kind: 'moon.payload.restore',
+    scope: moonUndoScope,
+    payload: previousPayload,
+  }), [moonUndoScope]);
 
   const updateBuildGraph = useCallback(async (graph: NonNullable<BuildPayload['build_graph']>) => {
     if (!payload) return;
@@ -408,6 +407,7 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
   }) => {
     const previousPayload = payload ? structuredClone(payload) as BuildPayload : null;
     const nextPayload = details.nextPayload ? structuredClone(details.nextPayload) as BuildPayload : null;
+    let undoDescriptor: UiActionUndoDescriptor | null = null;
     const entry = await runUiAction({
       surface: 'moon',
       undoScope: moonUndoScope,
@@ -419,10 +419,19 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
       target: details.target ?? null,
       changeSummary: details.changeSummary,
       apply: async () => {
-        await applyGraphPayload(nextPayload);
+        if (workflowId) {
+          const persistedPayload = await runMutation('build_graph', {
+            nodes: nextPayload?.build_graph?.nodes || [],
+            edges: nextPayload?.build_graph?.edges || [],
+          });
+          undoDescriptor = buildMutationUndoDescriptor(persistedPayload ?? null);
+        } else {
+          await applyGraphPayload(nextPayload);
+          undoDescriptor = buildDraftGraphUndoDescriptor(previousPayload);
+        }
         details.afterApply?.();
       },
-      undoDescriptor: buildGraphUndoDescriptor(previousPayload),
+      buildUndoDescriptor: () => undoDescriptor,
       onUndone: details.afterUndo,
     });
     show(`${details.label}: ${details.outcome}`, 'info', {
@@ -431,7 +440,7 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
       onAction: () => handleUndoAction(entry.id, details.label),
     });
     return entry;
-  }, [applyGraphPayload, buildGraphUndoDescriptor, handleUndoAction, moonUndoScope, payload, show]);
+  }, [applyGraphPayload, buildDraftGraphUndoDescriptor, buildMutationUndoDescriptor, handleUndoAction, moonUndoScope, payload, runMutation, show, workflowId]);
 
   const commitMoonAuthorityAction = useCallback(async (details: {
     subpath: string;
@@ -457,17 +466,7 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
       changeSummary: details.changeSummary,
       apply: async () => {
         const nextPayload = await runMutation(details.subpath, details.body);
-        undoDescriptor = Array.isArray(nextPayload?.undo_receipt?.steps) && nextPayload?.undo_receipt?.workflow_id
-          ? ({
-              kind: 'sequence',
-              steps: nextPayload.undo_receipt.steps.map((step) => ({
-                kind: 'workflow.buildMutation' as const,
-                workflowId: nextPayload.undo_receipt!.workflow_id,
-                subpath: step.subpath,
-                body: step.body,
-              })),
-            } satisfies UiActionUndoDescriptor)
-          : null;
+        undoDescriptor = buildMutationUndoDescriptor(nextPayload ?? null);
         details.afterApply?.();
       },
       buildUndoDescriptor: () => undoDescriptor,
@@ -481,7 +480,7 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
       return;
     }
     show(`${details.label}: ${details.outcome}`, 'success');
-  }, [handleUndoAction, moonUndoScope, runMutation, show]);
+  }, [buildMutationUndoDescriptor, handleUndoAction, moonUndoScope, runMutation, show]);
 
   // Auto-advance active node:
   // - after compile (advanceQueued=true)

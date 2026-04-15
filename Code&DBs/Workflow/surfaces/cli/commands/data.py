@@ -61,10 +61,11 @@ def _data_help_text() -> str:
             "  --repairs-file <path>       Repair patch JSON object",
             "  --backfill-file <path>      Backfill rules JSON object",
             "  --redactions-file <path>    Redaction rules JSON object",
-            "  --checkpoint-file <path>    Checkpoint JSON object or prior receipt",
-            "  --plan-file <path>          Plan JSON object or prior receipt",
+            "  --checkpoint-file <path>    Checkpoint export or prior receipt (import compatibility only)",
+            "  --checkpoint-manifest-id <id> Load a checkpoint from the control-plane registry",
+            "  --plan-file <path>          Plan export or prior receipt (import compatibility only)",
             "  --plan-manifest-id <id>     Load a plan from the control-plane registry",
-            "  --approval-file <path>      Approval JSON object or prior receipt",
+            "  --approval-file <path>      Approval export or prior receipt (import compatibility only)",
             "  --approval-manifest-id <id> Load an approval from the control-plane registry",
             "  --schema-file <path>        Validation schema JSON object",
             "  --checks-file <path>        Validation checks JSON array",
@@ -107,6 +108,7 @@ def _data_help_text() -> str:
             "  workflow data aggregate --job-file config/data/aggregate_orders.json --json",
             "  workflow data checkpoint --job-file config/data/checkpoint_events.json --json",
             "  workflow data replay --job-file config/data/replay_events.json --json",
+            "  workflow data replay --checkpoint-manifest-id checkpoint_xyz789 --input-file artifacts/data/events.json --cursor-field updated_at --json",
             "  workflow data approve --job-file config/data/approve_users.json --yes",
             "  workflow data apply --job-file config/data/apply_users.json --yes",
             "  workflow data approve --plan-manifest-id plan_abc123 --approved-by ops --approval-reason 'Reviewed diff' --yes",
@@ -246,17 +248,19 @@ def _render_data_payload(action: str, payload: dict[str, Any], *, stdout: TextIO
 
     if action == "checkpoint" and isinstance(payload.get("checkpoint"), dict):
         checkpoint = dict(payload["checkpoint"])
-        stdout.write(
+        line = (
             f"rows: {checkpoint.get('row_count', 0)} "
             f"hash={checkpoint.get('content_hash', '')[:12]}"
         )
         if checkpoint.get("cursor_field"):
-            stdout.write(
+            line += (
                 f" cursor={checkpoint.get('cursor_field')} "
-                f"watermark={checkpoint.get('watermark')}\n"
+                f"watermark={checkpoint.get('watermark')}"
             )
-        else:
-            stdout.write("\n")
+        checkpoint_manifest_id = str(payload.get("checkpoint_manifest_id") or "").strip()
+        if checkpoint_manifest_id:
+            line += f" checkpoint_manifest={checkpoint_manifest_id}"
+        stdout.write(line + "\n")
         return
 
     if action == "approve" and isinstance(payload.get("approval"), dict):
@@ -418,6 +422,9 @@ def _data_command(args: list[str], *, stdout: TextIO) -> int:
             i += 2
         elif token == "--checkpoint-file" and i + 1 < len(args):
             payload["checkpoint_path"] = args[i + 1]
+            i += 2
+        elif token == "--checkpoint-manifest-id" and i + 1 < len(args):
+            payload["checkpoint_manifest_id"] = args[i + 1]
             i += 2
         elif token == "--plan-file" and i + 1 < len(args):
             payload["plan_path"] = args[i + 1]

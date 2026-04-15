@@ -11,7 +11,7 @@ import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from adapters.task_profiles import infer_task_type, merge_allowed_tools, seed_profile
+from adapters.task_profiles import infer_task_type, merge_allowed_tools, try_resolve_profile
 from surfaces.mcp.catalog import canonical_tool_name, get_tool_catalog
 from .artifact_contracts import (
     normalize_acceptance_contract,
@@ -290,6 +290,8 @@ def build_execution_bundle(
     context_sections: Sequence[Mapping[str, Any]] | None = None,
     run_id: str | None = None,
     workflow_id: str | None = None,
+    sandbox_profile_ref: str | None = None,
+    sandbox_profile: Mapping[str, Any] | None = None,
     submission_required: bool | None = None,
     downstream_labels: Sequence[str] | None = None,
     output_schema: Mapping[str, Any] | None = None,
@@ -304,9 +306,15 @@ def build_execution_bundle(
         capabilities=normalized_capabilities,
         verify_refs=normalized_verify_refs,
     )
-    profile = seed_profile(_profile_task_type(normalized_task_type))
+    profile = try_resolve_profile(_profile_task_type(normalized_task_type))
     normalized_allowed_tools = _dedupe_strings(
-        [canonical_tool_name(tool) for tool in merge_allowed_tools(profile.allowed_tools, _string_list(allowed_tools))]
+        [
+            canonical_tool_name(tool)
+            for tool in merge_allowed_tools(
+                profile.allowed_tools if profile is not None else (),
+                _string_list(allowed_tools),
+            )
+        ]
     )
     completion_contract = _completion_contract(
         task_type=normalized_task_type,
@@ -353,6 +361,12 @@ def build_execution_bundle(
         "bundle_version": 1,
         "run_id": str(run_id or "").strip() or None,
         "workflow_id": str(workflow_id or "").strip() or None,
+        "sandbox_profile_ref": str(sandbox_profile_ref or "").strip() or None,
+        "sandbox_profile": (
+            json.loads(json.dumps(dict(sandbox_profile), sort_keys=True, default=str))
+            if isinstance(sandbox_profile, Mapping) and sandbox_profile
+            else None
+        ),
         "job_label": job_label,
         "task_type": normalized_task_type,
         "tool_bucket": bucket,
@@ -400,6 +414,9 @@ def render_execution_bundle(bundle: Mapping[str, Any] | None) -> str:
         value = str(bundle.get(field_name) or "").strip()
         if value:
             parts.append(f"{field_name}: {value}")
+    sandbox_profile_ref = str(bundle.get("sandbox_profile_ref") or "").strip()
+    if sandbox_profile_ref:
+        parts.append(f"sandbox_profile_ref: {sandbox_profile_ref}")
 
     allowed_tools = _string_list(bundle.get("allowed_tools"))
     if allowed_tools:

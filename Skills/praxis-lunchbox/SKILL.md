@@ -17,8 +17,9 @@ Legacy internal skill id: `praxis-lunchbox`
 
 Primary references:
 
-- `AGENTS.md`
+- `.claude/CLAUDE.md`
 - `README.md`
+- `docs/ARCHITECTURE.md`
 - `Code&DBs/Workflow/PUBLIC_NAMING.md`
 - the contract, spec, queue file, or implementation slice that defines the targeted work unit
 
@@ -41,12 +42,12 @@ Turn the next piece of work into a packet that a builder can execute without amb
 If the packet uses repo workflow surfaces, write it so the builder:
 
 - validates workflow specs before launch
-- treats `workflow run <spec.json>` as async enqueue only
+- treats `praxis workflow run <spec.json>` as async enqueue only
 - records `run_id` as the tracking handle
-- expects live status from a separate `workflow run-status <run_id>` call, not from the launch call
+- expects live status from a separate `praxis workflow run-status <run_id>` call, not from the launch call
 - checks `health.likely_failed`, `health.signals`, and `health.resource_telemetry` before deciding a run is stuck
-- references `workflow tools describe <tool>` when a packet depends on an exact tool schema
-- uses the curated aliases (`workflow query`, `workflow discover`, `workflow recall`, `workflow health`, `workflow bugs`) when they reduce ambiguity for an operator
+- references `praxis workflow tools describe <tool>` when a packet depends on an exact tool schema
+- uses the curated aliases (`praxis workflow query`, `praxis workflow discover`, `praxis workflow recall`, `praxis workflow health`, `praxis workflow bugs`) when they reduce ambiguity for an operator
 
 ## Required Fields
 

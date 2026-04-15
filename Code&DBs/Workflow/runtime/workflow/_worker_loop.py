@@ -7,7 +7,6 @@ plus the LISTEN/NOTIFY background listener for instant wakeups.
 from __future__ import annotations
 
 import logging
-import os
 import threading
 import time
 import uuid
@@ -17,7 +16,9 @@ from typing import TYPE_CHECKING
 from ._claiming import claim_one, complete_job, reap_stale_claims, reap_stale_runs
 from ._execution_core import execute_job
 from runtime.execution_transport import resolve_execution_transport
+from runtime._workflow_database import resolve_runtime_database_url
 from runtime.self_healing import normalize_failure_code
+from storage.postgres.validators import PostgresConfigurationError
 
 if TYPE_CHECKING:
     from storage.postgres.connection import SyncPostgresConnection
@@ -132,9 +133,12 @@ def run_worker_loop(
     _start_embedding_prewarm_for_worker()
 
     notification_wakeup = threading.Event()
-    database_url = os.environ.get("WORKFLOW_DATABASE_URL")
-    if not database_url:
-        raise RuntimeError("WORKFLOW_DATABASE_URL is required for workflow LISTEN/NOTIFY wakeups")
+    try:
+        database_url = resolve_runtime_database_url(required=True)
+    except PostgresConfigurationError as exc:
+        raise RuntimeError(
+            "WORKFLOW_DATABASE_URL is required for workflow LISTEN/NOTIFY wakeups"
+        ) from exc
     notification_listener = _WorkerNotificationListener(
         database_url=database_url,
         channels=("job_ready", "run_complete", "system_event"),

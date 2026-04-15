@@ -5,6 +5,14 @@ import json
 from pathlib import Path
 from typing import Any
 
+from runtime.control_plane_manifests import (
+    CONTROL_MANIFEST_FAMILY as _CONTROL_MANIFEST_FAMILY,
+    CONTROL_MANIFEST_KIND as _CONTROL_MANIFEST_KIND,
+    DATA_APPROVAL_MANIFEST_TYPE as _CONTROL_APPROVAL_MANIFEST_TYPE,
+    DATA_CHECKPOINT_MANIFEST_TYPE as _CONTROL_CHECKPOINT_MANIFEST_TYPE,
+    DATA_PLAN_MANIFEST_TYPE as _CONTROL_PLAN_MANIFEST_TYPE,
+    load_control_plane_manifest as _load_control_plane_manifest_record,
+)
 from runtime.data_plane import (
     DataRuntimeBoundaryError,
     build_data_workflow_spec,
@@ -12,12 +20,6 @@ from runtime.data_plane import (
     write_workflow_spec,
 )
 from ..subsystems import REPO_ROOT, _subs
-
-
-_CONTROL_MANIFEST_KIND = "praxis_control_manifest"
-_CONTROL_MANIFEST_FAMILY = "control_plane"
-_CONTROL_PLAN_MANIFEST_TYPE = "data_plan"
-_CONTROL_APPROVAL_MANIFEST_TYPE = "data_approval"
 
 
 def _text(value: Any) -> str:
@@ -59,10 +61,14 @@ def _manifest_ref(row: dict[str, Any]) -> dict[str, Any]:
                 "manifest_family": family,
             },
         )
-    if manifest_type not in {_CONTROL_PLAN_MANIFEST_TYPE, _CONTROL_APPROVAL_MANIFEST_TYPE}:
+    if manifest_type not in {
+        _CONTROL_PLAN_MANIFEST_TYPE,
+        _CONTROL_APPROVAL_MANIFEST_TYPE,
+        _CONTROL_CHECKPOINT_MANIFEST_TYPE,
+    }:
         raise DataRuntimeBoundaryError(
             "data.manifest.invalid_type",
-            "manifest_id must reference a data plan or data approval manifest",
+            "manifest_id must reference a data plan, data approval, or data checkpoint manifest",
             details={
                 "manifest_id": str(row.get("id") or ""),
                 "manifest_type": manifest_type,
@@ -89,16 +95,14 @@ def _load_control_manifest(manifest_id: str) -> dict[str, Any]:
             "manifest_id requires a Postgres connection",
             details={"manifest_id": manifest_id},
         )
-    row = pg.fetchrow(
-        "SELECT id, name, description, manifest, status, updated_at FROM app_manifests WHERE id = $1",
-        manifest_id,
-    )
-    if row is None:
+    try:
+        row = _load_control_plane_manifest_record(pg, manifest_id=manifest_id)
+    except Exception as exc:
         raise DataRuntimeBoundaryError(
-            "data.manifest.not_found",
-            f"manifest not found: {manifest_id}",
-            details={"manifest_id": manifest_id},
-        )
+            getattr(exc, "reason_code", "data.manifest.not_found"),
+            str(exc),
+            details=getattr(exc, "details", {"manifest_id": manifest_id}),
+        ) from exc
     return _manifest_ref(dict(row))
 
 
@@ -127,20 +131,22 @@ def _resolve_manifest_backed_inputs(
     job: dict[str, Any],
     *,
     action: str,
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
     plan_ref: dict[str, Any] = {}
     approval_ref: dict[str, Any] = {}
+    checkpoint_ref: dict[str, Any] = {}
     plan_manifest_id = _text(job.pop("plan_manifest_id", None))
     approval_manifest_id = _text(job.pop("approval_manifest_id", None))
+    checkpoint_manifest_id = _text(job.pop("checkpoint_manifest_id", None))
 
-    if action not in {"approve", "apply"}:
-        if plan_manifest_id or approval_manifest_id:
+    if action not in {"approve", "apply", "replay", "sync"}:
+        if plan_manifest_id or approval_manifest_id or checkpoint_manifest_id:
             raise DataRuntimeBoundaryError(
                 "data.manifest.unsupported_action",
-                "manifest ids are only supported for approve and apply",
+                "manifest ids are only supported for approve, apply, replay, and sync",
                 details={"action": action},
             )
-        return job, plan_ref, approval_ref
+        return job, plan_ref, approval_ref, checkpoint_ref
 
     if plan_manifest_id:
         plan_ref = _load_control_manifest(plan_manifest_id)
@@ -150,7 +156,7 @@ def _resolve_manifest_backed_inputs(
                 "plan_manifest_id must reference a data plan manifest",
                 details={"manifest_id": plan_manifest_id},
             )
-        job["plan"] = _control_manifest_body(plan_ref, body_field="plan")
+        job["plan_manifest_id"] = plan_manifest_id
 
     if action == "apply" and approval_manifest_id:
         approval_ref = _load_control_manifest(approval_manifest_id)
@@ -160,9 +166,19 @@ def _resolve_manifest_backed_inputs(
                 "approval_manifest_id must reference a data approval manifest",
                 details={"manifest_id": approval_manifest_id},
             )
-        job["approval"] = _control_manifest_body(approval_ref, body_field="approval")
+        job["approval_manifest_id"] = approval_manifest_id
 
-    return job, plan_ref, approval_ref
+    if action in {"replay", "sync"} and checkpoint_manifest_id:
+        checkpoint_ref = _load_control_manifest(checkpoint_manifest_id)
+        if _text(checkpoint_ref.get("manifest_type")) != _CONTROL_CHECKPOINT_MANIFEST_TYPE:
+            raise DataRuntimeBoundaryError(
+                "data.manifest.expected_checkpoint",
+                "checkpoint_manifest_id must reference a data checkpoint manifest",
+                details={"manifest_id": checkpoint_manifest_id},
+            )
+        job["checkpoint_manifest_id"] = checkpoint_manifest_id
+
+    return job, plan_ref, approval_ref, checkpoint_ref
 
 
 def _tool_workspace_root(params: dict[str, Any]) -> Path:
@@ -257,12 +273,13 @@ def tool_praxis_data(params: dict[str, Any]) -> dict[str, Any]:
             }
 
         job = _job_payload(params)
-        job, plan_ref, approval_ref = _resolve_manifest_backed_inputs(job, action=action)
+        job, plan_ref, approval_ref, checkpoint_ref = _resolve_manifest_backed_inputs(job, action=action)
         default_operation = None if action == "run" else action
         result = execute_data_job(
             job,
             default_operation=default_operation,
             workspace_root=workspace_root,
+            pg_conn=_subs.get_pg_conn(),
             dry_run=bool(params.get("dry_run", False)),
         )
         if plan_ref:
@@ -277,6 +294,13 @@ def tool_praxis_data(params: dict[str, Any]) -> dict[str, Any]:
             result["approval_manifest"] = {
                 key: value
                 for key, value in approval_ref.items()
+                if key != "manifest"
+            }
+        if checkpoint_ref:
+            result["checkpoint_manifest_id"] = checkpoint_ref.get("manifest_id")
+            result["checkpoint_manifest"] = {
+                key: value
+                for key, value in checkpoint_ref.items()
                 if key != "manifest"
             }
         return result
@@ -319,7 +343,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "  Checkpoint state:  praxis_data(action='checkpoint', input_path='events.json', "
                 "keys=['id'], cursor_field='updated_at')\n"
                 "  Replay window:     praxis_data(action='replay', input_path='events.json', "
-                "cursor_field='updated_at', checkpoint_path='artifacts/data/events.checkpoint.json')\n"
+                "cursor_field='updated_at', checkpoint_manifest_id='checkpoint_xyz789')\n"
                 "  Approve plan:      praxis_data(action='approve', plan_manifest_id='plan_abc123', "
                 "approved_by='ops', approval_reason='Reviewed diff and counts')\n"
                 "  Apply plan:        praxis_data(action='apply', plan_manifest_id='plan_abc123', "
@@ -400,6 +424,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "redactions": {"type": "object"},
                     "checkpoint": {"type": "object"},
                     "checkpoint_path": {"type": "string"},
+                    "checkpoint_manifest_id": {"type": "string"},
                     "plan": {"type": "object"},
                     "plan_path": {"type": "string"},
                     "plan_manifest_id": {"type": "string"},

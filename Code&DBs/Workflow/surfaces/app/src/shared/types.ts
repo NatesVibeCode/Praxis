@@ -233,6 +233,7 @@ export interface BuildPayload {
     workflows?: string[];
   };
   undo_receipt?: BuildUndoReceipt | null;
+  mutation_event_id?: number | null;
 }
 
 // Service bus event types

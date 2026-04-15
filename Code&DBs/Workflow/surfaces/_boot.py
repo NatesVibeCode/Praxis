@@ -6,10 +6,11 @@ sync).  Call ``boot()`` once at surface startup.
 """
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 from typing import Any
+
+from ._workflow_database import workflow_database_env_for_repo
 
 
 def ensure_workflow_on_path(workflow_root: Path) -> None:
@@ -21,6 +22,7 @@ def ensure_workflow_on_path(workflow_root: Path) -> None:
 
 def create_pg_conn(
     *,
+    repo_root: Path | None = None,
     workflow_root: Path | None = None,
     env: dict[str, str] | None = None,
 ) -> Any:
@@ -29,13 +31,12 @@ def create_pg_conn(
         ensure_workflow_on_path(workflow_root)
 
     if env is None:
-        database_url = os.environ.get("WORKFLOW_DATABASE_URL", "").strip()
-        if not database_url:
-            raise RuntimeError("WORKFLOW_DATABASE_URL must be set")
-        env = {
-            "WORKFLOW_DATABASE_URL": database_url,
-            "PATH": os.environ.get("PATH", ""),
-        }
+        resolved_repo_root = repo_root
+        if resolved_repo_root is None:
+            if workflow_root is None:
+                raise RuntimeError("create_pg_conn requires repo_root or workflow_root when env is omitted")
+            resolved_repo_root = workflow_root.parents[2]
+        env = workflow_database_env_for_repo(resolved_repo_root)
 
     from storage.postgres import ensure_postgres_available
 

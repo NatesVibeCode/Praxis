@@ -13,6 +13,7 @@ from enum import Enum
 from typing import Any
 
 from storage.postgres import SyncPostgresConnection, ensure_postgres_available
+from memory.types import EntityType, RelationType
 
 
 class PostureMode(Enum):
@@ -30,6 +31,11 @@ class IngestSource(Enum):
     CRM_EXPORT = "crm_export"
     PROFILE_DOCUMENT = "profile_document"
     GENERIC_STRUCTURED = "generic_structured"
+
+
+SUPPORTED_MULTIMODAL_SOURCE_TYPES = frozenset(
+    source.value for source in IngestSource
+)
 
 
 @dataclass(frozen=True)
@@ -236,3 +242,150 @@ class MultimodalIngester:
         if self._engine is None:
             self._engine = PostgresMultimodalIngestStore()
         return self._engine
+
+
+def _normalize_source_type(source_type: IngestSource | str) -> IngestSource:
+    if isinstance(source_type, IngestSource):
+        return source_type
+    return IngestSource(str(source_type).strip().lower())
+
+
+def _classification_name(kind: str, item: dict[str, Any], *, index: int) -> str:
+    speaker = str(item.get("speaker") or "").strip()
+    if kind in {"action_item", "decision"}:
+        text = str(item.get("text") or "").strip()
+        prefix = f"{speaker}: " if speaker else ""
+        return f"{prefix}{text or kind.replace('_', ' ')}"[:160]
+    if kind == "person":
+        name = str(item.get("name") or speaker or "").strip()
+        if name:
+            return name[:160]
+    if kind == "structured":
+        name = str(item.get("name") or "").strip()
+        if name:
+            return name[:160]
+    text = str(item.get("text") or item.get("content") or "").strip()
+    if text:
+        return text[:160]
+    return f"{kind or 'multimodal'}:{index + 1}"
+
+
+def build_multimodal_extraction_payload(
+    content: str,
+    *,
+    source: str,
+    source_type: IngestSource | str,
+    classifications: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Convert multimodal classifications into a graph-ingest extraction payload."""
+    normalized_source_type = _normalize_source_type(source_type)
+    ingester = MultimodalIngester()
+    classified = (
+        classifications
+        if classifications is not None
+        else ingester.classify(content, normalized_source_type)
+    )
+
+    now_root = {
+        "id": f"mmi:{uuid.uuid4().hex[:12]}",
+        "entity_type": EntityType.document.value,
+        "name": f"{normalized_source_type.value}:{source or 'multimodal_ingest'}",
+        "content": content,
+        "metadata": {
+            "source_type": normalized_source_type.value,
+            "classification_count": len(classified),
+            "multimodal": True,
+        },
+    }
+
+    entities: list[dict[str, Any]] = [now_root]
+    edges: list[dict[str, Any]] = []
+
+    relation = RelationType.derived_from.value
+    for index, item in enumerate(classified):
+        kind = str(item.get("type") or "").strip().lower()
+        entity_type = _classification_entity_type(kind)
+        entity_id = f"mmi:{uuid.uuid4().hex[:12]}"
+        text = str(item.get("text") or item.get("content") or "").strip()
+        name = _classification_name(kind, item, index=index)
+        metadata = {
+            "source_type": normalized_source_type.value,
+            "classification_kind": kind or "unknown",
+        }
+        speaker = str(item.get("speaker") or "").strip()
+        if speaker:
+            metadata["speaker"] = speaker
+        if item.get("organization") is not None:
+            metadata["organization"] = str(item.get("organization"))
+        if item.get("name") is not None and kind == "person":
+            metadata["person_name"] = str(item.get("name"))
+
+        entities.append(
+            {
+                "id": entity_id,
+                "entity_type": entity_type.value,
+                "name": name,
+                "content": text or json.dumps(item, sort_keys=True, default=str),
+                "metadata": metadata,
+            }
+        )
+        edges.append(
+            {
+                "source_id": entity_id,
+                "target_id": now_root["id"],
+                "relation_type": relation,
+                "weight": 1.0,
+                "metadata": {
+                    "source_type": normalized_source_type.value,
+                    "classification_kind": kind or "unknown",
+                },
+            }
+        )
+
+    return {"entities": entities, "edges": edges}
+
+
+def ingest_multimodal_to_knowledge_graph(
+    kg: Any,
+    *,
+    content: str,
+    source: str,
+    source_type: IngestSource | str,
+    posture: PostureMode = PostureMode.OPERATE,
+) -> dict[str, Any]:
+    """Write multimodal content into staging and the knowledge graph."""
+    normalized_source_type = _normalize_source_type(source_type)
+    ingester = MultimodalIngester()
+    staging_receipt = ingester.ingest(
+        MultimodalPayload(
+            source_type=normalized_source_type,
+            content=content,
+            metadata={"source": source},
+            posture=posture,
+        )
+    )
+    extraction = build_multimodal_extraction_payload(
+        content,
+        source=source,
+        source_type=normalized_source_type,
+    )
+    graph_result = kg.ingest(
+        kind="extraction",
+        content=json.dumps(extraction, default=str),
+        source=source,
+    )
+    return {
+        "source_type": normalized_source_type.value,
+        "staging_receipt": staging_receipt,
+        "graph_result": graph_result,
+    }
+
+
+def _classification_entity_type(kind: str) -> EntityType:
+    if kind == "action_item":
+        return EntityType.action
+    if kind == "decision":
+        return EntityType.decision
+    if kind == "person":
+        return EntityType.person
+    return EntityType.document

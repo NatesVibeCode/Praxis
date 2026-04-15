@@ -9,6 +9,10 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import os
+from pathlib import Path
+import shutil
+import tempfile
 from typing import TYPE_CHECKING, Any, Optional
 
 from runtime.embedding_service import (
@@ -41,6 +45,13 @@ _DEFAULT_REPAIR_THRESHOLDS = {
     "exact_duplicate_entities": 100,
 }
 
+_DEFAULT_SANDBOX_CLEANUP_BATCH_LIMIT = 25
+_DEFAULT_SANDBOX_CLEANUP_CLAIM_TIMEOUT_SECONDS = 15 * 60
+_LOCAL_EPHEMERAL_SANDBOX_ROOT_PREFIXES = (
+    "praxis-docker-sandbox-",
+    "praxis-cloudflare-sandbox-",
+)
+
 
 @dataclass(frozen=True)
 class MaintenanceIntent:
@@ -65,6 +76,23 @@ class MaintenanceRunResult:
     enqueued: int
     findings: tuple[str, ...]
     errors: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class SandboxCleanupTarget:
+    sandbox_session_id: str
+    sandbox_root: str
+    cleanup_attempt_count: int
+    closed_at: datetime | None
+    expires_at: datetime | None
+
+
+@dataclass(frozen=True)
+class SandboxCleanupResult:
+    status: str
+    reason: str
+    cleanup_root: str | None
+    error_message: str | None = None
 
 
 class DatabaseMaintenanceProcessor:
@@ -318,6 +346,8 @@ class DatabaseMaintenanceProcessor:
             return self._process_embed_constraint(intent)
         if intent.intent_kind == "embed_friction_event":
             return self._process_embed_friction_event(intent)
+        if intent.intent_kind == "reconcile_sandbox_session_cleanup":
+            return self._process_reconcile_sandbox_session_cleanup(intent)
         return {
             "status": "skipped",
             "message": f"unsupported_intent:{intent.intent_kind}",
@@ -775,6 +805,131 @@ class DatabaseMaintenanceProcessor:
                 "deleted_pending_intents": deleted_pending_intents,
                 "groups": repaired_groups,
             },
+        }
+
+    def _process_reconcile_sandbox_session_cleanup(
+        self,
+        intent: MaintenanceIntent,
+    ) -> dict[str, Any]:
+        if not self._table_exists("sandbox_sessions"):
+            return {
+                "status": "skipped",
+                "message": "sandbox_cleanup_unavailable",
+                "outcome": {"reason": "sandbox_sessions_missing"},
+            }
+
+        policy = self._fetch_policy(
+            intent.policy_key or "sandbox_session.cleanup_reconcile"
+        )
+        config = policy.get("config", {})
+        batch_limit = max(
+            1,
+            int(config.get("batch_limit") or _DEFAULT_SANDBOX_CLEANUP_BATCH_LIMIT),
+        )
+        claim_timeout_seconds = max(
+            60,
+            int(
+                config.get("claim_timeout_seconds")
+                or _DEFAULT_SANDBOX_CLEANUP_CLAIM_TIMEOUT_SECONDS
+            ),
+        )
+
+        expired_closed = self._mark_expired_sandbox_sessions_closed()
+        targets = self._claim_due_sandbox_cleanup_sessions(
+            limit=batch_limit,
+            claim_timeout_seconds=claim_timeout_seconds,
+        )
+        if not targets:
+            outcome = {
+                "reason": "sandbox_cleanup_none_due",
+                "expired_closed": expired_closed,
+                "claimed": 0,
+                "batch_limit": batch_limit,
+                "claim_timeout_seconds": claim_timeout_seconds,
+            }
+            self._emit_system_event(
+                event_type="maintenance.sandbox_cleanup.skipped",
+                source_id=intent.subject_id or str(intent.intent_id),
+                source_type="maintenance_intent",
+                payload=outcome,
+            )
+            return {
+                "status": "skipped",
+                "message": "sandbox_cleanup_none_due",
+                "outcome": outcome,
+            }
+
+        removed_count = 0
+        absent_count = 0
+        skipped_count = 0
+        failed_count = 0
+        processed_ids: list[str] = []
+
+        for target in targets:
+            processed_ids.append(target.sandbox_session_id)
+            result = self._cleanup_local_sandbox_root(target.sandbox_root)
+            outcome = {
+                "reason": result.reason,
+                "cleanup_root": result.cleanup_root,
+                "sandbox_root": target.sandbox_root,
+                "cleanup_attempt_count": target.cleanup_attempt_count,
+            }
+            if result.status == "completed":
+                if result.reason == "removed":
+                    removed_count += 1
+                else:
+                    absent_count += 1
+                self._record_sandbox_cleanup_result(
+                    target.sandbox_session_id,
+                    status="completed",
+                    outcome=outcome,
+                )
+                continue
+            if result.status == "skipped":
+                skipped_count += 1
+                self._record_sandbox_cleanup_result(
+                    target.sandbox_session_id,
+                    status="skipped",
+                    outcome=outcome,
+                )
+                continue
+
+            failed_count += 1
+            assert result.error_message is not None
+            self._record_sandbox_cleanup_result(
+                target.sandbox_session_id,
+                status="failed",
+                outcome=outcome,
+                error_message=result.error_message,
+            )
+
+        outcome = {
+            "expired_closed": expired_closed,
+            "claimed": len(targets),
+            "removed_count": removed_count,
+            "already_absent_count": absent_count,
+            "skipped_count": skipped_count,
+            "failed_count": failed_count,
+            "batch_limit": batch_limit,
+            "claim_timeout_seconds": claim_timeout_seconds,
+            "sandbox_session_ids": processed_ids,
+        }
+        self._emit_system_event(
+            event_type="maintenance.sandbox_cleanup.reconciled",
+            source_id=intent.subject_id or str(intent.intent_id),
+            source_type="maintenance_intent",
+            payload=outcome,
+        )
+        return {
+            "status": "completed",
+            "message": (
+                "sandbox_cleanup:"
+                f"removed={removed_count}:"
+                f"already_absent={absent_count}:"
+                f"skipped={skipped_count}:"
+                f"failed={failed_count}"
+            ),
+            "outcome": outcome,
         }
 
     def _process_embed_constraint(self, intent: MaintenanceIntent) -> dict[str, Any]:
@@ -1237,6 +1392,95 @@ class DatabaseMaintenanceProcessor:
             json.dumps(outcome or {}),
         )
 
+    def _mark_expired_sandbox_sessions_closed(self) -> int:
+        row = self._conn.fetchrow(
+            """
+            WITH updated AS (
+                UPDATE sandbox_sessions
+                SET closed_at = expires_at,
+                    closed_reason_code = COALESCE(closed_reason_code, 'sandbox.expired')
+                WHERE closed_at IS NULL
+                  AND expires_at <= now()
+                RETURNING 1
+            )
+            SELECT COUNT(*) AS total
+            FROM updated
+            """
+        )
+        return 0 if row is None else int(row["total"] or 0)
+
+    def _claim_due_sandbox_cleanup_sessions(
+        self,
+        *,
+        limit: int,
+        claim_timeout_seconds: int,
+    ) -> list[SandboxCleanupTarget]:
+        rows = self._conn.execute(
+            """
+            WITH picked AS (
+                SELECT sandbox_session_id
+                FROM sandbox_sessions
+                WHERE closed_at IS NOT NULL
+                  AND cleanup_completed_at IS NULL
+                  AND (
+                        cleanup_status IS NULL
+                     OR cleanup_status IN ('pending', 'failed')
+                     OR (
+                            cleanup_status = 'in_progress'
+                        AND cleanup_attempted_at <= now() - make_interval(secs => $1)
+                     )
+                  )
+                ORDER BY COALESCE(closed_at, expires_at) ASC, sandbox_session_id ASC
+                LIMIT $2
+                FOR UPDATE SKIP LOCKED
+            )
+            UPDATE sandbox_sessions AS sessions
+            SET cleanup_status = 'in_progress',
+                cleanup_requested_at = COALESCE(sessions.cleanup_requested_at, now()),
+                cleanup_attempted_at = now(),
+                cleanup_attempt_count = COALESCE(sessions.cleanup_attempt_count, 0) + 1,
+                cleanup_last_error = NULL,
+                cleanup_outcome = '{}'::jsonb
+            FROM picked
+            WHERE sessions.sandbox_session_id = picked.sandbox_session_id
+            RETURNING sessions.sandbox_session_id,
+                      sessions.sandbox_root,
+                      sessions.cleanup_attempt_count,
+                      sessions.closed_at,
+                      sessions.expires_at
+            """,
+            claim_timeout_seconds,
+            limit,
+        )
+        return [self._row_to_sandbox_cleanup_target(row) for row in rows]
+
+    def _record_sandbox_cleanup_result(
+        self,
+        sandbox_session_id: str,
+        *,
+        status: str,
+        outcome: dict[str, Any],
+        error_message: str | None = None,
+    ) -> None:
+        if status not in {"completed", "failed", "skipped"}:
+            raise RuntimeError(f"invalid sandbox cleanup status: {status}")
+        completed = status in {"completed", "skipped"}
+        self._conn.execute(
+            """
+            UPDATE sandbox_sessions
+            SET cleanup_status = $2,
+                cleanup_completed_at = CASE WHEN $3 THEN now() ELSE NULL END,
+                cleanup_last_error = $4,
+                cleanup_outcome = $5::jsonb
+            WHERE sandbox_session_id = $1
+            """,
+            sandbox_session_id,
+            status,
+            completed,
+            error_message,
+            json.dumps(outcome or {}),
+        )
+
     def _retry_or_fail(self, intent: MaintenanceIntent, error_message: str) -> None:
         if intent.attempt_count >= intent.max_attempts:
             self._conn.execute(
@@ -1300,6 +1544,77 @@ class DatabaseMaintenanceProcessor:
             max_attempts,
             policy_key,
         )
+
+    def _row_to_sandbox_cleanup_target(self, row: Any) -> SandboxCleanupTarget:
+        return SandboxCleanupTarget(
+            sandbox_session_id=str(row["sandbox_session_id"]),
+            sandbox_root=str(row["sandbox_root"] or ""),
+            cleanup_attempt_count=int(row["cleanup_attempt_count"] or 0),
+            closed_at=row.get("closed_at"),
+            expires_at=row.get("expires_at"),
+        )
+
+    def _cleanup_local_sandbox_root(self, sandbox_root: str) -> SandboxCleanupResult:
+        cleanup_root = self._resolve_local_ephemeral_cleanup_root(sandbox_root)
+        if cleanup_root is None:
+            return SandboxCleanupResult(
+                status="skipped",
+                reason="unsupported_sandbox_root",
+                cleanup_root=None,
+            )
+
+        path = Path(cleanup_root)
+        if not path.exists():
+            return SandboxCleanupResult(
+                status="completed",
+                reason="already_absent",
+                cleanup_root=cleanup_root,
+            )
+        if not path.is_dir():
+            return SandboxCleanupResult(
+                status="skipped",
+                reason="unsupported_sandbox_root",
+                cleanup_root=cleanup_root,
+            )
+        try:
+            shutil.rmtree(path)
+        except FileNotFoundError:
+            return SandboxCleanupResult(
+                status="completed",
+                reason="already_absent",
+                cleanup_root=cleanup_root,
+            )
+        except OSError as exc:
+            return SandboxCleanupResult(
+                status="failed",
+                reason="delete_failed",
+                cleanup_root=cleanup_root,
+                error_message=str(exc),
+            )
+        return SandboxCleanupResult(
+            status="completed",
+            reason="removed",
+            cleanup_root=cleanup_root,
+        )
+
+    def _resolve_local_ephemeral_cleanup_root(self, sandbox_root: str) -> str | None:
+        raw_root = str(sandbox_root or "").strip()
+        if not raw_root:
+            return None
+        resolved_root = Path(os.path.realpath(raw_root))
+        temp_root = Path(os.path.realpath(tempfile.gettempdir()))
+        candidates = [resolved_root]
+        if resolved_root.name == "workspace":
+            candidates.append(resolved_root.parent)
+        for candidate in candidates:
+            if candidate.parent != temp_root:
+                continue
+            if any(
+                candidate.name.startswith(prefix)
+                for prefix in _LOCAL_EPHEMERAL_SANDBOX_ROOT_PREFIXES
+            ):
+                return str(candidate)
+        return None
 
     def _fetch_policy(self, policy_key: str) -> dict[str, Any]:
         row = self._conn.fetchrow(

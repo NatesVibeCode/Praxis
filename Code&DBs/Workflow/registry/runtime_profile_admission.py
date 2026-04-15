@@ -22,9 +22,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from .native_runtime_profile_sync import (
-    NativeRuntimeProfileSyncError,
     is_native_runtime_profile_ref,
-    sync_native_runtime_profile_authority,
 )
 
 if TYPE_CHECKING:
@@ -217,16 +215,6 @@ def load_admitted_runtime_profile_candidates(
         field_name="runtime_profile_ref",
     )
     normalized_as_of = _normalize_as_of(as_of)
-    if is_native_runtime_profile_ref(normalized_runtime_profile_ref):
-        try:
-            sync_native_runtime_profile_authority(conn, prune=False)
-            normalized_as_of = _normalize_as_of(None)
-        except NativeRuntimeProfileSyncError as exc:
-            raise RuntimeProfileAdmissionError(
-                "routing.native_profile_sync_failed",
-                str(exc),
-                details={"runtime_profile_ref": normalized_runtime_profile_ref},
-            ) from exc
 
     profile_rows = conn.execute(
         """

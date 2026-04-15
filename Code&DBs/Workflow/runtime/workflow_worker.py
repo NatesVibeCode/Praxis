@@ -11,28 +11,56 @@ import logging
 import os
 import sys
 
+from runtime.dependency_contract import require_runtime_dependencies
+
 _log = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# __main__ — run as standalone process (launchd / CLI)
-# ---------------------------------------------------------------------------
 
-if __name__ == "__main__":
+def _repo_root_from_runtime_file(file_path: str) -> str:
+    """Resolve the Praxis workspace root from this runtime entrypoint."""
+
+    here = os.path.abspath(file_path)
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(here))))
+
+
+def _build_worker_connection():
+    from storage.postgres.connection import SyncPostgresConnection, get_workflow_pool
+
+    pool = get_workflow_pool()
+    return SyncPostgresConnection(pool)
+
+
+def _run_worker_loop(conn, repo_root: str, *, poll_interval: float = 2.0) -> None:
+    from runtime.workflow.unified import run_worker_loop
+
+    run_worker_loop(conn, repo_root, poll_interval=poll_interval)
+
+
+def start_worker(*, poll_interval: float = 2.0, file_path: str | None = None) -> None:
+    """Start the unified workflow worker with an explicit dependency contract."""
+
+    report = require_runtime_dependencies(scope="workflow_worker")
+    conn = _build_worker_connection()
+    repo_root = _repo_root_from_runtime_file(file_path or __file__)
+    _log.info(
+        "Starting unified workflow worker (pid=%d, repo=%s, manifest=%s)",
+        os.getpid(),
+        repo_root,
+        report["manifest_path"],
+    )
+    _run_worker_loop(conn, repo_root, poll_interval=poll_interval)
+
+
+def main(argv: list[str] | None = None) -> int:
+    del argv
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         stream=sys.stderr,
     )
+    start_worker()
+    return 0
 
-    from storage.postgres.connection import SyncPostgresConnection, get_workflow_pool
-    from runtime.workflow.unified import run_worker_loop
 
-    pool = get_workflow_pool()
-    conn = SyncPostgresConnection(pool)
-    # __file__ = .../Code&DBs/Workflow/runtime/workflow_worker.py
-    # repo root = .../Praxis (3 levels up from runtime/)
-    _here = os.path.abspath(__file__)
-    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(_here))))
-
-    _log.info("Starting unified workflow worker (pid=%d, repo=%s)", os.getpid(), repo_root)
-    run_worker_loop(conn, repo_root, poll_interval=2.0)
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

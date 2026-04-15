@@ -268,14 +268,21 @@ def test_startup_wiring_can_skip_heartbeat_background(monkeypatch) -> None:
     assert _FakeThread.instances == []
 
 
-def test_postgres_env_requires_explicit_authority_when_env_missing(monkeypatch) -> None:
+def test_postgres_env_requires_explicit_authority_when_env_missing(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
     monkeypatch.delenv("WORKFLOW_DATABASE_URL", raising=False)
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
 
     subs = _DefaultDatabaseUrlSubsystems()
+    subs._repo_root = tmp_path
 
-    with pytest.raises(RuntimeError, match="WORKFLOW_DATABASE_URL must be set"):
+    with pytest.raises(PostgresConfigurationError) as exc_info:
         subs._postgres_env()
+
+    assert exc_info.value.reason_code == "postgres.config_missing"
+    assert str(tmp_path / ".env") in str(exc_info.value)
 
 
 def test_mcp_workflow_database_env_requires_explicit_authority(monkeypatch, tmp_path: Path) -> None:

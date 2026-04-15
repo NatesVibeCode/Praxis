@@ -2,7 +2,7 @@
 
 This module owns the repo-local instance contract for native workflow operations:
 
-- one checked-in runtime profile config is the authority
+- Postgres native-runtime authority is the canonical source of truth
 - receipts, topology, and workdir boundaries stay inside the repo
 - environment values may assert the contract but do not invent fallback state
 """
@@ -12,12 +12,16 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import partial
-import json
 import os
 from pathlib import Path
 from typing import Any, Final
 
+from registry.native_runtime_profile_sync import (
+    NativeRuntimeProfileSyncError,
+    resolve_native_runtime_profile_config,
+)
 from runtime._helpers import _fail as _shared_fail
+from storage.postgres import PostgresConfigurationError, ensure_postgres_available
 
 PRAXIS_INSTANCE_NAME_ENV: Final[str] = "PRAXIS_INSTANCE_NAME"
 PRAXIS_RECEIPTS_DIR_ENV: Final[str] = "PRAXIS_RECEIPTS_DIR"
@@ -26,7 +30,6 @@ PRAXIS_RUNTIME_PROFILES_CONFIG_ENV: Final[str] = "PRAXIS_RUNTIME_PROFILES_CONFIG
 PRAXIS_TOPOLOGY_DIR_ENV: Final[str] = "PRAXIS_TOPOLOGY_DIR"
 _CONFIG_FILENAME: Final[str] = "runtime_profiles.json"
 _CONFIG_DIRNAME: Final[str] = "config"
-_SCHEMA_VERSION: Final[int] = 1
 
 
 class NativeInstanceResolutionError(RuntimeError):
@@ -79,21 +82,6 @@ def _default_config_path() -> Path:
 _fail = partial(_shared_fail, error_type=NativeInstanceResolutionError)
 
 
-def _require_mapping(
-    value: object,
-    *,
-    field_name: str,
-    reason_code: str,
-) -> Mapping[str, object]:
-    if not isinstance(value, Mapping):
-        raise _fail(
-            reason_code,
-            f"{field_name} must be a JSON object",
-            details={"field": field_name, "value_type": type(value).__name__},
-        )
-    return value
-
-
 def _require_text(
     value: object,
     *,
@@ -109,29 +97,15 @@ def _require_text(
     return value.strip()
 
 
-def _require_integer(
-    value: object,
-    *,
-    field_name: str,
-    reason_code: str,
-) -> int:
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise _fail(
-            reason_code,
-            f"{field_name} must be an integer",
-            details={"field": field_name, "value_type": type(value).__name__},
-        )
-    return value
-
-
 def _resolve_config_path(
     *,
     config_path: str | Path | None,
     env: Mapping[str, str],
 ) -> Path:
+    canonical_path = _default_config_path().resolve()
     raw_path = config_path if config_path is not None else env.get(
         PRAXIS_RUNTIME_PROFILES_CONFIG_ENV,
-        str(_default_config_path()),
+        str(canonical_path),
     )
     if not isinstance(raw_path, (str, Path)):
         raise _fail(
@@ -146,158 +120,16 @@ def _resolve_config_path(
             "runtime profiles config path must be non-empty",
             details={"environment_variable": PRAXIS_RUNTIME_PROFILES_CONFIG_ENV},
         )
-
-    path = Path(raw_text).expanduser()
-    if not path.is_absolute():
-        path = _repo_root() / path
-    resolved_path = path.resolve()
-    if not resolved_path.exists():
-        raise _fail(
-            "native_instance.config_missing",
-            "runtime profiles config file does not exist",
-            details={"path": str(resolved_path)},
-        )
-    if resolved_path.name != _CONFIG_FILENAME or resolved_path.parent.name != _CONFIG_DIRNAME:
+    asserted_path = Path(raw_text).expanduser()
+    if not asserted_path.is_absolute():
+        asserted_path = (_repo_root() / asserted_path).resolve()
+    if asserted_path != canonical_path:
         raise _fail(
             "native_instance.config_boundary",
             "runtime profiles config must be the canonical config/runtime_profiles.json file",
-            details={"path": str(resolved_path)},
+            details={"path": str(asserted_path), "expected": str(canonical_path)},
         )
-    return resolved_path
-
-
-def _config_repo_root(config_path: Path) -> Path:
-    repo_root = config_path.parent.parent.resolve()
-    if not repo_root.exists() or not repo_root.is_dir():
-        raise _fail(
-            "native_instance.boundary_violation",
-            "runtime profiles config must live inside an existing repo root",
-            details={"config_path": str(config_path), "repo_root": str(repo_root)},
-        )
-    return repo_root
-
-
-def _load_runtime_profiles(config_path: Path) -> Mapping[str, object]:
-    try:
-        payload = json.loads(config_path.read_text(encoding="utf-8"))
-    except OSError as exc:
-        raise _fail(
-            "native_instance.config_unreadable",
-            "failed to read runtime profiles config",
-            details={"path": str(config_path)},
-        ) from exc
-    except json.JSONDecodeError as exc:
-        raise _fail(
-            "native_instance.config_invalid",
-            "runtime profiles config must contain valid JSON",
-            details={"path": str(config_path), "lineno": exc.lineno, "colno": exc.colno},
-        ) from exc
-    return _require_mapping(
-        payload,
-        field_name="runtime_profiles_document",
-        reason_code="native_instance.config_invalid",
-    )
-
-
-def _require_schema_version(document: Mapping[str, object]) -> None:
-    schema_version = _require_integer(
-        document.get("schema_version"),
-        field_name="schema_version",
-        reason_code="native_instance.config_invalid",
-    )
-    if schema_version != _SCHEMA_VERSION:
-        raise _fail(
-            "native_instance.config_invalid",
-            "runtime profiles config schema_version is not supported",
-            details={
-                "field": "schema_version",
-                "expected": _SCHEMA_VERSION,
-                "actual": schema_version,
-            },
-        )
-
-
-def _default_runtime_profile_ref(document: Mapping[str, object]) -> str:
-    if "default_profile" in document:
-        raise _fail(
-            "native_instance.config_invalid",
-            "runtime profiles config must use default_runtime_profile; default_profile is not supported",
-            details={"field": "default_profile"},
-        )
-    field_name = "default_runtime_profile"
-    return _require_text(
-        document.get(field_name),
-        field_name=field_name,
-        reason_code="native_instance.config_invalid",
-    )
-
-
-def _resolve_profile_payload(
-    document: Mapping[str, object],
-    *,
-    runtime_profile_ref: str,
-    config_path: Path,
-) -> tuple[Mapping[str, object], str]:
-    if "profiles" in document:
-        raise _fail(
-            "native_instance.config_invalid",
-            "runtime profiles config must use runtime_profiles; profiles is not supported",
-            details={"field": "profiles"},
-        )
-
-    runtime_profiles = _require_mapping(
-        document.get("runtime_profiles"),
-        field_name="runtime_profiles",
-        reason_code="native_instance.config_invalid",
-    )
-    profile_payload = runtime_profiles.get(runtime_profile_ref)
-    if profile_payload is None:
-        raise _fail(
-            "native_instance.profile_unknown",
-            "runtime profile is not defined in the repo-local config",
-            details={
-                "runtime_profile_ref": runtime_profile_ref,
-                "config_path": str(config_path),
-            },
-        )
-    return (
-        _require_mapping(
-            profile_payload,
-            field_name=f"runtime_profiles.{runtime_profile_ref}",
-            reason_code="native_instance.profile_invalid",
-        ),
-        f"runtime_profiles.{runtime_profile_ref}",
-    )
-
-
-def _resolve_repo_path(
-    raw_value: object,
-    *,
-    field_name: str,
-    repo_root: Path,
-) -> Path:
-    path_text = _require_text(
-        raw_value,
-        field_name=field_name,
-        reason_code="native_instance.profile_invalid",
-    )
-    path = Path(path_text).expanduser()
-    if not path.is_absolute():
-        path = repo_root / path
-    resolved_path = path.resolve()
-    try:
-        resolved_path.relative_to(repo_root)
-    except ValueError as exc:
-        raise _fail(
-            "native_instance.boundary_violation",
-            f"{field_name} must stay inside the workflow repo boundary",
-            details={
-                "field": field_name,
-                "path": str(resolved_path),
-                "repo_root": str(repo_root),
-            },
-        ) from exc
-    return resolved_path
+    return canonical_path
 
 
 def _assert_existing_directory(path: Path, *, field_name: str) -> None:
@@ -307,6 +139,21 @@ def _assert_existing_directory(path: Path, *, field_name: str) -> None:
             f"{field_name} must point at an existing directory",
             details={"field": field_name, "path": str(path)},
         )
+
+
+def _assert_under_repo(path: Path, *, repo_root: Path, field_name: str) -> None:
+    try:
+        path.relative_to(repo_root)
+    except ValueError as exc:
+        raise _fail(
+            "native_instance.boundary_violation",
+            f"{field_name} must stay inside the workflow repo boundary",
+            details={
+                "field": field_name,
+                "path": str(path),
+                "repo_root": str(repo_root),
+            },
+        ) from exc
 
 
 def _assert_expected_text(
@@ -357,72 +204,63 @@ def resolve_native_instance(
     env: Mapping[str, str] | None = None,
     config_path: str | Path | None = None,
 ) -> NativeWorkflowInstance:
-    """Resolve the checked-in repo-local native workflow instance contract."""
+    """Resolve the DB-native repo-local workflow instance contract."""
 
     source = env if env is not None else os.environ
     resolved_config_path = _resolve_config_path(config_path=config_path, env=source)
-    config_repo_root = _config_repo_root(resolved_config_path)
-    document = _load_runtime_profiles(resolved_config_path)
-    _require_schema_version(document)
+    try:
+        conn = ensure_postgres_available(env=source)
+    except PostgresConfigurationError as exc:
+        raise _fail(
+            "native_instance.authority_unavailable",
+            "native instance authority requires explicit Postgres access",
+            details={
+                "reason_code": exc.reason_code,
+                "message": str(exc),
+            },
+        ) from exc
 
-    default_runtime_profile = _default_runtime_profile_ref(document)
-    _assert_expected_text(
-        source,
-        env_name=PRAXIS_RUNTIME_PROFILE_ENV,
-        actual_value=default_runtime_profile,
-    )
-    runtime_profile_ref = default_runtime_profile
+    try:
+        config = resolve_native_runtime_profile_config(conn=conn)
+    except NativeRuntimeProfileSyncError as exc:
+        raise _fail(
+            "native_instance.profile_unknown",
+            "native runtime profile authority is missing or invalid",
+            details={"message": str(exc)},
+        ) from exc
 
-    profile, profile_field_prefix = _resolve_profile_payload(
-        document,
-        runtime_profile_ref=runtime_profile_ref,
-        config_path=resolved_config_path,
-    )
+    repo_root = Path(config.repo_root).resolve()
+    workdir = Path(config.workdir).resolve()
+    receipts_dir = Path(config.receipts_dir).resolve()
+    topology_dir = Path(config.topology_dir).resolve()
+    actual_repo_root = _repo_root().resolve()
 
-    repo_root = _resolve_repo_path(
-        profile.get("repo_root"),
-        field_name=f"{profile_field_prefix}.repo_root",
-        repo_root=config_repo_root,
-    )
-    if repo_root != config_repo_root:
+    if repo_root != actual_repo_root:
         raise _fail(
             "native_instance.boundary_violation",
-            "repo-local runtime profile must resolve back to this workflow repo root",
+            "repo-local native runtime profile must resolve back to this workflow repo root",
             details={
-                "runtime_profile_ref": runtime_profile_ref,
+                "runtime_profile_ref": config.runtime_profile_ref,
                 "repo_root": str(repo_root),
-                "config_repo_root": str(config_repo_root),
+                "config_repo_root": str(actual_repo_root),
             },
         )
 
-    workdir = _resolve_repo_path(
-        profile.get("workdir"),
-        field_name=f"{profile_field_prefix}.workdir",
-        repo_root=repo_root,
-    )
     _assert_existing_directory(repo_root, field_name="repo_root")
     _assert_existing_directory(workdir, field_name="workdir")
-
-    receipts_dir = _resolve_repo_path(
-        profile.get("receipts_dir"),
-        field_name=f"{profile_field_prefix}.receipts_dir",
-        repo_root=repo_root,
-    )
-    topology_dir = _resolve_repo_path(
-        profile.get("topology_dir"),
-        field_name=f"{profile_field_prefix}.topology_dir",
-        repo_root=repo_root,
-    )
-    instance_name = _require_text(
-        profile.get("instance_name"),
-        field_name=f"{profile_field_prefix}.instance_name",
-        reason_code="native_instance.profile_invalid",
-    )
+    _assert_under_repo(workdir, repo_root=repo_root, field_name="workdir")
+    _assert_under_repo(receipts_dir, repo_root=repo_root, field_name="receipts_dir")
+    _assert_under_repo(topology_dir, repo_root=repo_root, field_name="topology_dir")
 
     _assert_expected_text(
         source,
+        env_name=PRAXIS_RUNTIME_PROFILE_ENV,
+        actual_value=config.runtime_profile_ref,
+    )
+    _assert_expected_text(
+        source,
         env_name=PRAXIS_INSTANCE_NAME_ENV,
-        actual_value=instance_name,
+        actual_value=config.instance_name,
     )
     _assert_expected_path(
         source,
@@ -436,8 +274,8 @@ def resolve_native_instance(
     )
 
     return NativeWorkflowInstance(
-        instance_name=instance_name,
-        runtime_profile_ref=runtime_profile_ref,
+        instance_name=config.instance_name,
+        runtime_profile_ref=config.runtime_profile_ref,
         repo_root=str(repo_root),
         workdir=str(workdir),
         receipts_dir=str(receipts_dir),

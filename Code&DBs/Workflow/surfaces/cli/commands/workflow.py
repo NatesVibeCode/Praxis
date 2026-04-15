@@ -9,6 +9,7 @@ import tempfile
 from types import SimpleNamespace
 from typing import TextIO
 
+from runtime._workflow_database import resolve_runtime_database_url
 from surfaces.cli.mcp_tools import load_json_file, print_json, run_cli_tool
 from surfaces.cli import workflow_cli
 from runtime.spec_compiler import compile_prompt_launch_spec
@@ -992,7 +993,7 @@ def _debate_command(args: list[str], *, stdout: TextIO) -> int:
     try:
         metrics_conn = ensure_postgres_available(
             env={
-                "WORKFLOW_DATABASE_URL": os.environ["WORKFLOW_DATABASE_URL"]
+                "WORKFLOW_DATABASE_URL": resolve_runtime_database_url(required=True)
             }
         )
     except Exception:

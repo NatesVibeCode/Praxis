@@ -1075,22 +1075,33 @@ def _load_workflow_build_row(pg: Any, workflow_id: str) -> dict[str, Any]:
 def _workflow_build_payload(
     row: dict[str, Any],
     *,
+    conn: Any | None = None,
     definition: dict[str, Any] | None = None,
     compiled_spec: dict[str, Any] | None = None,
     build_bundle: dict[str, Any] | None = None,
     planning_notes: list[str] | None = None,
     undo_receipt: dict[str, Any] | None = None,
+    mutation_event_id: int | None = None,
 ) -> dict[str, Any]:
     effective_definition = _parse_json_field(definition if definition is not None else row.get("definition")) or {}
     effective_compiled_spec = _parse_json_field(compiled_spec if compiled_spec is not None else row.get("compiled_spec"))
     if not isinstance(build_bundle, dict):
         from runtime.build_authority import build_authority_bundle
+        from runtime.build_review_decisions import materialize_reviewed_build_definition
         from runtime.operating_model_planner import current_compiled_spec
 
         current_plan = current_compiled_spec(effective_definition, effective_compiled_spec)
-        from runtime.build_authority import apply_authority_bundle
+        if conn is not None:
+            effective_definition, _ = materialize_reviewed_build_definition(
+                conn,
+                workflow_id=_text(row.get("id")),
+                definition=effective_definition,
+                compiled_spec=current_plan,
+            )
+        else:
+            from runtime.build_authority import apply_authority_bundle
 
-        effective_definition = apply_authority_bundle(effective_definition, compiled_spec=current_plan)
+            effective_definition = apply_authority_bundle(effective_definition, compiled_spec=current_plan)
         effective_compiled_spec = current_plan
         build_bundle = build_authority_bundle(effective_definition, compiled_spec=current_plan)
     blocking_issues = [
@@ -1119,6 +1130,7 @@ def _workflow_build_payload(
         "projection_status": build_bundle.get("projection_status") or {},
         "compiled_spec_projection": build_bundle.get("compiled_spec_projection"),
         "undo_receipt": undo_receipt,
+        "mutation_event_id": mutation_event_id,
     }
 
 
@@ -1901,7 +1913,7 @@ def _handle_workflow_build_get(request: Any, path: str) -> None:
             return
         pg = request.subsystems.get_pg_conn()
         row = _load_workflow_build_row(pg, workflow_id)
-        request._send_json(200, _workflow_build_payload(row))
+        request._send_json(200, _workflow_build_payload(row, conn=pg))
     except _ClientError as exc:
         message = str(exc)
         status = 404 if message.startswith("Workflow not found:") else 400
@@ -1929,11 +1941,13 @@ def _handle_workflow_build_post(request: Any, path: str) -> None:
             200,
             _workflow_build_payload(
                 result["row"],
+                conn=request.subsystems.get_pg_conn(),
                 definition=result["definition"],
                 compiled_spec=result["compiled_spec"],
                 build_bundle=result["build_bundle"],
                 planning_notes=result["planning_notes"],
                 undo_receipt=result.get("undo_receipt"),
+                mutation_event_id=result.get("mutation_event_id"),
             ),
         )
     except WorkflowRuntimeBoundaryError as exc:

@@ -7,6 +7,10 @@ import logging
 import os
 from typing import TYPE_CHECKING
 
+from registry.sandbox_profile_authority import (
+    load_runtime_sandbox_profile_authority,
+    sandbox_profile_execution_payload,
+)
 from ._shared import (
     _json_loads_maybe,
     _json_safe,
@@ -76,6 +80,21 @@ __all__ = [
 # Internal helpers (dependencies defined outside the extraction range but
 # needed by the extracted functions).
 # ---------------------------------------------------------------------------
+
+
+def _runtime_profile_sandbox_payload(
+    conn: SyncPostgresConnection,
+    *,
+    runtime_profile_ref: str | None,
+) -> dict[str, object] | None:
+    normalized_runtime_profile_ref = str(runtime_profile_ref or "").strip()
+    if not normalized_runtime_profile_ref:
+        return None
+    record = load_runtime_sandbox_profile_authority(
+        conn,
+        runtime_profile_ref=normalized_runtime_profile_ref,
+    )
+    return sandbox_profile_execution_payload(record)
 
 # ---------------------------------------------------------------------------
 # Extracted functions (lines ~260-1114 of unified.py)
@@ -395,10 +414,12 @@ def _build_job_execution_context_shards(
 
 def _build_job_execution_bundles(
     *,
+    conn: SyncPostgresConnection,
     spec,
     execution_context_shards: dict[str, dict[str, object]],
     run_id: str | None = None,
     workflow_id: str | None = None,
+    runtime_profile_ref: str | None = None,
 ) -> dict[str, dict[str, object]]:
     downstream_by_label: dict[str, list[str]] = {}
     for index, job in enumerate(spec.jobs):
@@ -409,9 +430,19 @@ def _build_job_execution_bundles(
     for index, job in enumerate(spec.jobs):
         label = str(job.get("label") or f"job_{index}")
         context_shard = execution_context_shards.get(label) or {}
+        sandbox_profile = _runtime_profile_sandbox_payload(
+            conn,
+            runtime_profile_ref=runtime_profile_ref or getattr(spec, "runtime_profile_ref", None),
+        )
         bundles[label] = build_execution_bundle(
             run_id=run_id,
             workflow_id=workflow_id,
+            sandbox_profile_ref=(
+                None
+                if not isinstance(sandbox_profile, dict)
+                else str(sandbox_profile.get("sandbox_profile_ref") or "").strip() or None
+            ),
+            sandbox_profile=sandbox_profile,
             job_label=label,
             prompt=str(job.get("prompt") or ""),
             task_type=str(job.get("task_type") or getattr(job.get("_route_plan"), "task_type", "") or job.get("route_task_type") or "").strip() or None,
@@ -626,6 +657,15 @@ def _runtime_execution_bundle(
         else []
     )
     snapshot = _json_loads_maybe(_workflow_run_envelope(run_row).get("spec_snapshot"), {}) or {}
+    runtime_profile_ref = str(
+        _workflow_run_envelope(run_row).get("runtime_profile_ref")
+        or snapshot.get("runtime_profile_ref")
+        or ""
+    ).strip()
+    sandbox_profile = _runtime_profile_sandbox_payload(
+        conn,
+        runtime_profile_ref=runtime_profile_ref or None,
+    )
     snapshot_jobs = snapshot.get("jobs") if isinstance(snapshot.get("jobs"), list) else []
     downstream_labels: list[str] = []
     current_label = str(source_job.get("label") or job.get("label") or "").strip()
@@ -649,6 +689,12 @@ def _runtime_execution_bundle(
     return build_execution_bundle(
         run_id=str(run_row.get("run_id") or "").strip() or None,
         workflow_id=str(_workflow_run_envelope(run_row).get("workflow_id") or "").strip() or None,
+        sandbox_profile_ref=(
+            None
+            if not isinstance(sandbox_profile, dict)
+            else str(sandbox_profile.get("sandbox_profile_ref") or "").strip() or None
+        ),
+        sandbox_profile=sandbox_profile,
         job_label=str(source_job.get("label") or job.get("label") or "").strip() or "job",
         prompt=str(source_job.get("prompt") or job.get("prompt") or ""),
         task_type=str(source_job.get("task_type") or job.get("task_type") or job.get("route_task_type") or "").strip() or None,
@@ -799,10 +845,12 @@ def _build_execution_packet(
         provenance=provenance,
     )
     execution_bundles = _build_job_execution_bundles(
+        conn=conn,
         spec=spec,
         execution_context_shards=execution_context_shards,
         run_id=run_id,
         workflow_id=workflow_id,
+        runtime_profile_ref=str(raw_snapshot.get("runtime_profile_ref") or "").strip() or None,
     )
 
     model_messages: list[dict[str, object]] = []

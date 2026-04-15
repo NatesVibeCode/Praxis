@@ -44,10 +44,13 @@ from core.data_ops import (
 from runtime.control_plane_manifests import (
     ControlPlaneManifestBoundaryError,
     DATA_APPROVAL_MANIFEST_TYPE,
+    DATA_CHECKPOINT_MANIFEST_TYPE,
     DATA_PLAN_MANIFEST_TYPE,
     create_data_approval_manifest,
+    create_data_checkpoint_manifest,
     create_data_plan_manifest,
     extract_approval_payload,
+    extract_checkpoint_payload,
     extract_plan_payload,
     load_control_plane_manifest,
     transition_data_plan_status,
@@ -203,9 +206,23 @@ def _load_records(source: dict[str, Any], *, workspace_root: Path) -> tuple[list
     return records, {"kind": "file", "path": str(input_path), "format": fmt}
 
 
-def _load_checkpoint(source: dict[str, Any], *, workspace_root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
+def _load_checkpoint(
+    source: dict[str, Any],
+    *,
+    workspace_root: Path,
+    pg_conn: Any | None = None,
+    require_registry: bool = False,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     if not source:
         return {}, {}
+    manifest_id = _checkpoint_manifest_id_from_source(source)
+    if manifest_id:
+        record = _load_control_manifest_record(
+            manifest_id=manifest_id,
+            expected_type=DATA_CHECKPOINT_MANIFEST_TYPE,
+            pg_conn=pg_conn,
+        )
+        return extract_checkpoint_payload(record), _control_manifest_authority(record)
     if "path" in source:
         checkpoint_path = _resolve_path(workspace_root, str(source["path"]), field_name="checkpoint_path")
         if not checkpoint_path.is_file():
@@ -214,6 +231,14 @@ def _load_checkpoint(source: dict[str, Any], *, workspace_root: Path) -> tuple[d
                 f"checkpoint file does not exist: {checkpoint_path}",
             )
         payload = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+        manifest_id = str(payload.get("checkpoint_manifest_id") or payload.get("manifest_id") or "").strip()
+        if manifest_id:
+            record = _load_control_manifest_record(
+                manifest_id=manifest_id,
+                expected_type=DATA_CHECKPOINT_MANIFEST_TYPE,
+                pg_conn=pg_conn,
+            )
+            return extract_checkpoint_payload(record), _control_manifest_authority(record)
         if isinstance(payload, dict) and isinstance(payload.get("checkpoint"), dict):
             payload = payload["checkpoint"]
         if not isinstance(payload, dict):
@@ -221,7 +246,17 @@ def _load_checkpoint(source: dict[str, Any], *, workspace_root: Path) -> tuple[d
                 "data.checkpoint.invalid",
                 "checkpoint payload must be a JSON object",
             )
+        if require_registry:
+            raise DataRuntimeBoundaryError(
+                "data.checkpoint.registry_required",
+                "checkpoint authority must come from the Postgres registry; pass checkpoint_manifest_id or a receipt/export that includes it",
+            )
         return _json_clone(payload), {"kind": "file", "path": str(checkpoint_path), "format": "json"}
+    if require_registry:
+        raise DataRuntimeBoundaryError(
+            "data.checkpoint.registry_required",
+            "checkpoint authority must come from the Postgres registry; pass checkpoint_manifest_id",
+        )
     return _json_clone(source), {"kind": "inline_checkpoint"}
 
 
@@ -235,6 +270,16 @@ def _control_manifest_authority(record: dict[str, Any]) -> dict[str, Any]:
         "status": str(record.get("status") or manifest.get("status") or ""),
         "version": int(record.get("version") or 1),
     }
+
+
+def _require_registry_backend(*, operation: str, pg_conn: Any | None) -> Any:
+    if pg_conn is None:
+        raise DataRuntimeBoundaryError(
+            "data.control_manifest.backend_unavailable",
+            f"{operation} requires a Postgres-backed registry",
+            details={"operation": operation},
+        )
+    return pg_conn
 
 
 def _load_control_manifest_record(
@@ -265,6 +310,10 @@ def _plan_manifest_id_from_source(source: dict[str, Any]) -> str:
 
 def _approval_manifest_id_from_source(source: dict[str, Any]) -> str:
     return str(source.get("manifest_id") or source.get("approval_manifest_id") or "").strip()
+
+
+def _checkpoint_manifest_id_from_source(source: dict[str, Any]) -> str:
+    return str(source.get("manifest_id") or source.get("checkpoint_manifest_id") or "").strip()
 
 
 def _load_plan(
@@ -326,6 +375,7 @@ def _load_approval(
     *,
     workspace_root: Path,
     pg_conn: Any | None,
+    require_manifest: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     if not source:
         return {}, {}
@@ -360,6 +410,11 @@ def _load_approval(
                 "data.approval.invalid",
                 "approval payload must be a JSON object",
             )
+        if require_manifest:
+            raise DataRuntimeBoundaryError(
+                "data.approval.registry_required",
+                "approval authority must come from the Postgres registry; pass approval_manifest_id or a receipt/export that includes it",
+            )
         return _json_clone(payload), {"kind": "file", "path": str(approval_path), "format": "json"}
     payload = dict(source)
     manifest_id = _approval_manifest_id_from_source(payload)
@@ -372,6 +427,11 @@ def _load_approval(
         return extract_approval_payload(record), _control_manifest_authority(record)
     if isinstance(payload.get("approval"), dict):
         payload = dict(payload["approval"])
+    if require_manifest:
+        raise DataRuntimeBoundaryError(
+            "data.approval.registry_required",
+            "approval authority must come from the Postgres registry; pass approval_manifest_id",
+        )
     return _json_clone(payload), {"kind": "inline_approval"}
 
 
@@ -589,6 +649,21 @@ def _persist_data_job_receipt(
             "errors": _json_clone(errors),
             "executed_at": receipt.get("executed_at"),
             "job_digest": receipt.get("job_digest"),
+            **(
+                {"checkpoint_manifest_id": receipt.get("checkpoint_manifest_id")}
+                if receipt.get("checkpoint_manifest_id")
+                else {}
+            ),
+            **(
+                {"plan_manifest_id": receipt.get("plan_manifest_id")}
+                if receipt.get("plan_manifest_id")
+                else {}
+            ),
+            **(
+                {"approval_manifest_id": receipt.get("approval_manifest_id")}
+                if receipt.get("approval_manifest_id")
+                else {}
+            ),
         },
         "artifacts": {
             **({"output": _json_clone(receipt.get("output"))} if receipt.get("output") else {}),
@@ -689,8 +764,31 @@ def execute_data_job(
             keys=list(job["keys"]),
             cursor_field=job.get("cursor_field"),
         )
+        if pg_conn is not None:
+            try:
+                checkpoint_manifest_record = create_data_checkpoint_manifest(
+                    pg_conn,
+                    checkpoint=dict(result["checkpoint"]),
+                    job=job,
+                    workspace_root=str(workspace),
+                    workspace_ref=job.get("workspace_ref"),
+                    scope_ref=job.get("scope_ref"),
+                    name=f"{job['job_name']} checkpoint {str(result['checkpoint'].get('content_hash') or '')[:12]}",
+                    description=f"Deterministic checkpoint for {job['job_name']}",
+                    created_by="praxis_data",
+                    status="active",
+                )
+                checkpoint_authority = _control_manifest_authority(checkpoint_manifest_record)
+                result["checkpoint_manifest_id"] = str(checkpoint_manifest_record["id"])
+            except ControlPlaneManifestBoundaryError as exc:
+                _raise_control_manifest_boundary(exc)
     elif job["operation"] == "replay":
-        checkpoint_payload, checkpoint_authority = _load_checkpoint(job["checkpoint"], workspace_root=workspace)
+        checkpoint_payload, checkpoint_authority = _load_checkpoint(
+            job["checkpoint"],
+            workspace_root=workspace,
+            pg_conn=pg_conn,
+            require_registry=True,
+        )
         result = replay_records(
             source_records,
             cursor_field=str(job.get("cursor_field") or checkpoint_payload.get("cursor_field") or ""),
@@ -698,9 +796,10 @@ def execute_data_job(
             before=job.get("before"),
         )
     elif job["operation"] == "approve":
+        pg_conn = _require_registry_backend(operation="approve", pg_conn=pg_conn)
         plan_payload, plan_authority = _load_plan(job["plan"], workspace_root=workspace, pg_conn=pg_conn)
         plan_manifest_id = str(plan_authority.get("manifest_id") or "").strip() if plan_authority else ""
-        if pg_conn is not None and not plan_manifest_id:
+        if not plan_manifest_id:
             try:
                 plan_manifest_record = create_data_plan_manifest(
                     pg_conn,
@@ -725,40 +824,39 @@ def execute_data_job(
             approved_by=str(job.get("approved_by") or ""),
             approval_reason=str(job.get("approval_reason") or ""),
         )
-        if pg_conn is not None and plan_manifest_id:
-            try:
-                approval_manifest_record = create_data_approval_manifest(
-                    pg_conn,
-                    plan_manifest_id=plan_manifest_id,
-                    plan=plan_payload,
-                    approved_by=str(approval_manifest["approved_by"]),
-                    approval_reason=str(approval_manifest["approval_reason"]),
-                    approved_at=str(approval_manifest["approved_at"]),
-                    workspace_ref=job.get("workspace_ref"),
-                    scope_ref=job.get("scope_ref"),
-                    name=_approval_manifest_name(job, digest=str(approval_manifest["plan_digest"])),
-                    description=f"Deterministic approval for {job['job_name']}",
-                    created_by=str(job.get("approved_by") or "praxis_data"),
-                    status="approved",
-                )
-                transition_data_plan_status(
-                    pg_conn,
-                    manifest_id=plan_manifest_id,
-                    to_status="approved",
-                    changed_by=str(job.get("approved_by") or "praxis_data"),
-                    change_description="Approved data plan",
-                )
-                plan_authority = {
-                    **(plan_authority or {}),
-                    "kind": "manifest",
-                    "manifest_id": plan_manifest_id,
-                    "manifest_family": "control_plane",
-                    "manifest_type": DATA_PLAN_MANIFEST_TYPE,
-                    "status": "approved",
-                }
-                approval_authority = _control_manifest_authority(approval_manifest_record)
-            except ControlPlaneManifestBoundaryError as exc:
-                _raise_control_manifest_boundary(exc)
+        try:
+            approval_manifest_record = create_data_approval_manifest(
+                pg_conn,
+                plan_manifest_id=plan_manifest_id,
+                plan=plan_payload,
+                approved_by=str(approval_manifest["approved_by"]),
+                approval_reason=str(approval_manifest["approval_reason"]),
+                approved_at=str(approval_manifest["approved_at"]),
+                workspace_ref=job.get("workspace_ref"),
+                scope_ref=job.get("scope_ref"),
+                name=_approval_manifest_name(job, digest=str(approval_manifest["plan_digest"])),
+                description=f"Deterministic approval for {job['job_name']}",
+                created_by=str(job.get("approved_by") or "praxis_data"),
+                status="approved",
+            )
+            transition_data_plan_status(
+                pg_conn,
+                manifest_id=plan_manifest_id,
+                to_status="approved",
+                changed_by=str(job.get("approved_by") or "praxis_data"),
+                change_description="Approved data plan",
+            )
+            plan_authority = {
+                **(plan_authority or {}),
+                "kind": "manifest",
+                "manifest_id": plan_manifest_id,
+                "manifest_family": "control_plane",
+                "manifest_type": DATA_PLAN_MANIFEST_TYPE,
+                "status": "approved",
+            }
+            approval_authority = _control_manifest_authority(approval_manifest_record)
+        except ControlPlaneManifestBoundaryError as exc:
+            _raise_control_manifest_boundary(exc)
         result = {
             "approval": approval_manifest,
             "plan": _json_clone(plan_payload),
@@ -772,8 +870,31 @@ def execute_data_job(
             },
         }
     elif job["operation"] == "apply":
-        plan_payload, plan_authority = _load_plan(job["plan"], workspace_root=workspace, pg_conn=pg_conn)
-        approval_payload, approval_authority = _load_approval(job["approval"], workspace_root=workspace, pg_conn=pg_conn)
+        pg_conn = _require_registry_backend(operation="apply", pg_conn=pg_conn)
+        approval_payload, approval_authority = _load_approval(
+            job["approval"],
+            workspace_root=workspace,
+            pg_conn=pg_conn,
+            require_manifest=True,
+        )
+        plan_payload: dict[str, Any]
+        plan_authority = None
+        if job.get("plan"):
+            plan_payload, plan_authority = _load_plan(job["plan"], workspace_root=workspace, pg_conn=pg_conn)
+        else:
+            plan_manifest_id = str(approval_payload.get("plan_manifest_id") or "").strip()
+            if not plan_manifest_id:
+                raise DataRuntimeBoundaryError(
+                    "data.plan.registry_required",
+                    "apply requires a registry-backed plan via plan_manifest_id or approval_manifest_id",
+                )
+            record = _load_control_manifest_record(
+                manifest_id=plan_manifest_id,
+                expected_type=DATA_PLAN_MANIFEST_TYPE,
+                pg_conn=pg_conn,
+            )
+            plan_payload = extract_plan_payload(record)
+            plan_authority = _control_manifest_authority(record)
         secondary_records, secondary_authority = _load_records(job["secondary_input"], workspace_root=workspace)
         result = apply_plan_records(
             secondary_records,
@@ -787,7 +908,7 @@ def execute_data_job(
             or ""
         ).strip()
         approval_manifest_id = str((approval_authority or {}).get("manifest_id") or "").strip()
-        if pg_conn is not None and plan_manifest_id:
+        if plan_manifest_id:
             try:
                 transition_data_plan_status(
                     pg_conn,
@@ -903,7 +1024,12 @@ def execute_data_job(
         secondary_records, secondary_authority = _load_records(job["secondary_input"], workspace_root=workspace)
         checkpoint_payload = {}
         if job.get("checkpoint"):
-            checkpoint_payload, checkpoint_authority = _load_checkpoint(job["checkpoint"], workspace_root=workspace)
+            checkpoint_payload, checkpoint_authority = _load_checkpoint(
+                job["checkpoint"],
+                workspace_root=workspace,
+                pg_conn=pg_conn,
+                require_registry=True,
+            )
         result = sync_records(
             source_records,
             secondary_records,
@@ -982,6 +1108,8 @@ def execute_data_job(
         receipt["partitions_preview"] = _partition_preview(result["partitions"])
     if "checkpoint" in result:
         receipt["checkpoint"] = _json_clone(result["checkpoint"])
+    if "checkpoint_manifest_id" in result:
+        receipt["checkpoint_manifest_id"] = str(result["checkpoint_manifest_id"])
     if "replay_window" in result:
         receipt["replay_window"] = _json_clone(result["replay_window"])
     if "batch_manifest" in result:

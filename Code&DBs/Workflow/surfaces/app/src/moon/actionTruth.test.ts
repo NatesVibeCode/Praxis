@@ -18,6 +18,7 @@ describe('actionTruth', () => {
         status: 'ready',
         dropKind: 'node',
         actionValue: 'trigger',
+        source: 'surface_registry',
       },
       {
         id: 'gather-docs',
@@ -27,6 +28,7 @@ describe('actionTruth', () => {
         status: 'ready',
         dropKind: 'node',
         actionValue: 'auto/research',
+        source: 'surface_registry',
       },
       {
         id: 'ctrl-branch',
@@ -36,6 +38,7 @@ describe('actionTruth', () => {
         status: 'ready',
         dropKind: 'edge',
         gateFamily: 'conditional',
+        source: 'surface_registry',
       },
       {
         id: 'ctrl-approval',
@@ -45,6 +48,7 @@ describe('actionTruth', () => {
         status: 'ready',
         dropKind: 'edge',
         gateFamily: 'approval',
+        source: 'surface_registry',
       },
       {
         id: 'ctrl-validation',
@@ -54,6 +58,7 @@ describe('actionTruth', () => {
         status: 'ready',
         dropKind: 'edge',
         gateFamily: 'validation',
+        source: 'surface_registry',
       },
       {
         id: 'integration-slack-send',

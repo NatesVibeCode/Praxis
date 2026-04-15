@@ -27,10 +27,6 @@ heartbeat_runner = _import_module(
     "runtime.heartbeat_runner",
     _WORKFLOW_ROOT / "runtime" / "heartbeat_runner.py",
 )
-sandbox_runtime = _import_module(
-    "runtime.sandbox_runtime",
-    _WORKFLOW_ROOT / "runtime" / "sandbox_runtime.py",
-)
 
 
 class _Conn:
@@ -165,7 +161,6 @@ def test_build_modules_include_orchestrator_when_conn(tmp_path, monkeypatch):
     assert "relationship_integrity_scanner" in module_names
     assert "schema_consistency_scanner" in module_names
     assert "content_quality_scanner" in module_names
-    assert "sandbox_temp_cleanup" in module_names
 
 
 def test_build_modules_include_rate_limit_prober_when_conn(tmp_path, monkeypatch):
@@ -207,41 +202,6 @@ def test_system_events_cleanup_skips_missing_function():
     assert result.module_name == "system_events_cleanup"
     assert result.ok is True
     assert not any("cleanup_system_events(30)" in query for query, _ in conn.calls)
-
-
-def test_sandbox_temp_cleanup_module_returns_ok_when_cleanup_succeeds(monkeypatch):
-    monkeypatch.setattr(
-        sandbox_runtime,
-        "cleanup_stale_ephemeral_sandbox_roots",
-        lambda max_age_seconds=None: types.SimpleNamespace(
-            root_dir="/tmp",
-            removed_paths=("/tmp/praxis-docker-sandbox-old",),
-            failed_paths=(),
-        ),
-    )
-
-    result = heartbeat_runner.SandboxTempCleanupModule().run()
-
-    assert result.module_name == "sandbox_temp_cleanup"
-    assert result.ok is True
-
-
-def test_sandbox_temp_cleanup_module_returns_fail_when_cleanup_reports_errors(monkeypatch):
-    monkeypatch.setattr(
-        sandbox_runtime,
-        "cleanup_stale_ephemeral_sandbox_roots",
-        lambda max_age_seconds=None: types.SimpleNamespace(
-            root_dir="/tmp",
-            removed_paths=(),
-            failed_paths=(("/tmp/praxis-docker-sandbox-old", "permission denied"),),
-        ),
-    )
-
-    result = heartbeat_runner.SandboxTempCleanupModule().run()
-
-    assert result.module_name == "sandbox_temp_cleanup"
-    assert result.ok is False
-    assert "failed to remove 1 stale sandbox roots" == result.error
 
 
 def test_database_maintenance_module_drains_multiple_batches(monkeypatch):

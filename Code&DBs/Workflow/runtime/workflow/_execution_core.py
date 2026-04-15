@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import subprocess
 import tempfile
 import time
@@ -32,6 +31,7 @@ from ._context_building import (
 )
 from runtime.receipt_store import proof_metrics
 from runtime.scope_resolver import resolve_scope
+from runtime._workflow_database import resolve_runtime_database_url
 from runtime.execution_transport import resolve_execution_transport
 from runtime.workflow.execution_backends import (
     execute_api as _execution_backends_execute_api,
@@ -444,7 +444,13 @@ def execute_job(
                     _pmc_level = str(_pmc_rc.get("default") or "").strip()
                     if _pmc_level and _pmc_level != "none":
                         _reasoning_effort = _pmc_level
-            result = _execute_api(agent_config, full_prompt, repo_root, reasoning_effort=_reasoning_effort)
+            result = _execute_api(
+                agent_config,
+                full_prompt,
+                repo_root,
+                execution_bundle=execution_bundle,
+                reasoning_effort=_reasoning_effort,
+            )
         else:
             raise NotImplementedError("Unsupported execution transport")
     except Exception as exc:
@@ -638,9 +644,21 @@ def _execute_cli(agent_config, prompt: str, workdir: str, execution_bundle: dict
     )
 
 
-def _execute_api(agent_config, prompt: str, workdir: str, reasoning_effort: str | None = None) -> dict:
+def _execute_api(
+    agent_config,
+    prompt: str,
+    workdir: str,
+    execution_bundle: dict[str, object] | None = None,
+    reasoning_effort: str | None = None,
+) -> dict:
     """Compatibility wrapper for transport-backed execution backends."""
-    return _execution_backends_execute_api(agent_config, prompt, workdir=workdir, reasoning_effort=reasoning_effort)
+    return _execution_backends_execute_api(
+        agent_config,
+        prompt,
+        workdir=workdir,
+        execution_bundle=execution_bundle,
+        reasoning_effort=reasoning_effort,
+    )
 
 
     # _classify_error removed — use classify_failure_from_stderr() from
@@ -649,7 +667,10 @@ def _execute_api(agent_config, prompt: str, workdir: str, reasoning_effort: str 
 
 def _build_platform_context(repo_root: str) -> str:
     """Minimal platform context injected into prompts."""
-    database_url = os.environ.get("WORKFLOW_DATABASE_URL", "unavailable")
+    try:
+        database_url = str(resolve_runtime_database_url(required=False) or "unavailable")
+    except Exception:
+        database_url = "unavailable"
     return f"""--- PLATFORM CONTEXT ---
 Host repo root (persistence/output authority): {repo_root}
 Command workspace: sandboxed workflow execution typically runs inside a hydrated workspace such as /workspace.

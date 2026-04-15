@@ -93,6 +93,7 @@ def _runtime_profile_record(*, runtime_profile_ref: str) -> RuntimeProfileAuthor
         runtime_profile_ref=runtime_profile_ref,
         model_profile_id=f"model_profile.{runtime_profile_ref}.default",
         provider_policy_id=f"provider_policy.{runtime_profile_ref}.default",
+        sandbox_profile_ref=runtime_profile_ref,
     )
 def test_native_self_hosted_smoke_proves_repo_local_authority_and_durable_graph_evidence(
     monkeypatch: pytest.MonkeyPatch,

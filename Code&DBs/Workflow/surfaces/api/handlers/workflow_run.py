@@ -11,6 +11,7 @@ import traceback
 import uuid
 from typing import Any
 
+from storage.postgres import PostgresConfigurationError
 from runtime.canonical_checkpoints import (
     AuthorityCheckpointBoundaryError,
     request_authority_checkpoint,
@@ -38,6 +39,7 @@ from ._shared import (
     _read_json_body,
     _serialize,
 )
+from surfaces._workflow_database import workflow_database_env_for_repo
 
 
 def _workflow_spec_mod():
@@ -1381,7 +1383,10 @@ def _handle_workflow_stream(request: Any, path: str) -> None:
         count = 0
 
         wakeup = threading.Event()
-        database_url = os.environ.get("WORKFLOW_DATABASE_URL", "")
+        try:
+            database_url = workflow_database_env_for_repo(REPO_ROOT)["WORKFLOW_DATABASE_URL"]
+        except PostgresConfigurationError:
+            database_url = ""
         listener = _RunWakeupListener(database_url, wakeup) if database_url else None
         if listener is not None:
             listener.start()

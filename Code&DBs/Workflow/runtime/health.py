@@ -19,13 +19,14 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from storage.postgres.connection import resolve_workflow_database_url
+from storage.postgres.validators import PostgresConfigurationError
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_API_HOST = "127.0.0.1"
 _DEFAULT_API_PORT = 8420
 _DEFAULT_CONNECT_TIMEOUT = 5.0
 _DEFAULT_API_TIMEOUT = 2.0
-_DEFAULT_REPO_LOCAL_DATABASE_URL = os.environ["WORKFLOW_DATABASE_URL"]
 
 
 class HealthStatus(enum.Enum):
@@ -79,10 +80,15 @@ def _check_status(check: PreflightCheck) -> str:
 
 
 def _resolve_database_url(database_url: str | None) -> str | None:
-    resolved = database_url or os.environ.get("WORKFLOW_DATABASE_URL")
-    if resolved:
-        return resolved
-    return _DEFAULT_REPO_LOCAL_DATABASE_URL
+    if database_url:
+        try:
+            return resolve_workflow_database_url(env={"WORKFLOW_DATABASE_URL": database_url})
+        except PostgresConfigurationError:
+            return None
+    try:
+        return resolve_workflow_database_url()
+    except PostgresConfigurationError:
+        return None
 
 
 def _asyncpg_module():
@@ -170,9 +176,9 @@ def _sync_lane_admission(
         import asyncpg
         from adapters.provider_registry import reload_from_db
 
-        db_url = os.environ.get(
-            "WORKFLOW_DATABASE_URL", _DEFAULT_REPO_LOCAL_DATABASE_URL
-        )
+        db_url = _resolve_database_url(None)
+        if not db_url:
+            return
 
         async def _update():
             conn = await asyncpg.connect(db_url)

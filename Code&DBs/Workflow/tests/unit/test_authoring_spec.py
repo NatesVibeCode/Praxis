@@ -9,12 +9,43 @@ import pytest
 # Ensure the DB loader doesn't block tests
 os.environ.setdefault("WORKFLOW_DATABASE_URL", "")
 
+from adapters.task_profiles import TaskProfile
+
 from runtime.workflow_spec import (
     WorkflowSpec,
     WorkflowSpecError,
     _is_new_authoring_format,
     validate_authoring_spec,
 )
+
+
+def _profile_for(task_type: str) -> TaskProfile | None:
+    profiles = {
+        "code_generation": TaskProfile(
+            task_type="code_generation",
+            allowed_tools=("Read", "Edit", "Write", "Bash"),
+            default_tier="mid",
+            file_attach=False,
+            system_prompt_hint="Write clean, tested code.",
+            default_scope_read=("src/", "lib/", "tests/"),
+            default_scope_write=("src/", "tests/"),
+        ),
+        "code_review": TaskProfile(
+            task_type="code_review",
+            allowed_tools=("Read", "Grep", "Glob"),
+            default_tier="mid",
+            file_attach=False,
+            system_prompt_hint="Review code for issues. Be specific.",
+            default_scope_read=("src/", "lib/", "tests/"),
+            default_scope_write=(),
+        ),
+    }
+    return profiles.get(task_type)
+
+
+@pytest.fixture(autouse=True)
+def _task_profile_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("adapters.task_profiles.try_resolve_profile", _profile_for)
 
 
 def _write_spec(spec: dict) -> str:

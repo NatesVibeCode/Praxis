@@ -95,6 +95,7 @@ def _shared_test_conn() -> SyncPostgresConnection:
 _maintenance = _direct_load("runtime.database_maintenance", "database_maintenance.py")
 DatabaseMaintenanceProcessor = _maintenance.DatabaseMaintenanceProcessor
 MaintenanceIntent = _maintenance.MaintenanceIntent
+SandboxCleanupTarget = _maintenance.SandboxCleanupTarget
 
 
 class _FakeEmbedder:
@@ -178,23 +179,224 @@ def test_execute_intent_routes_start_and_dispatch_maintenance_intents(
         seen.append(intent.intent_kind)
         return {"status": "completed", "message": "repair-handler", "outcome": {}}
 
+    def _fake_sandbox_cleanup(intent: MaintenanceIntent) -> dict[str, object]:
+        seen.append(intent.intent_kind)
+        return {"status": "completed", "message": "sandbox-cleanup-handler", "outcome": {}}
+
     monkeypatch.setattr(processor, "_process_start_maintenance_review", _fake_review)
     monkeypatch.setattr(processor, "_process_start_maintenance_repair", _fake_repair)
+    monkeypatch.setattr(
+        processor,
+        "_process_reconcile_sandbox_session_cleanup",
+        _fake_sandbox_cleanup,
+    )
 
     start_review = MaintenanceIntent(1, "start_maintenance_review", "system", "policy:review", None, "f1", 100, {}, 0, 3)
     dispatch_review = MaintenanceIntent(2, "dispatch_maintenance_review", "system", "policy:review", None, "f2", 100, {}, 0, 3)
     start_repair = MaintenanceIntent(3, "start_maintenance_repair", "system", "policy:repair", None, "f3", 100, {}, 0, 3)
     dispatch_repair = MaintenanceIntent(4, "dispatch_maintenance_repair", "system", "policy:repair", None, "f4", 100, {}, 0, 3)
+    sandbox_cleanup = MaintenanceIntent(5, "reconcile_sandbox_session_cleanup", "sandbox_session", "policy:sandbox", None, "f5", 100, {}, 0, 3)
 
     assert processor._execute_intent(start_review)["message"] == "review-handler"
     assert processor._execute_intent(dispatch_review)["message"] == "review-handler"
     assert processor._execute_intent(start_repair)["message"] == "repair-handler"
     assert processor._execute_intent(dispatch_repair)["message"] == "repair-handler"
+    assert processor._execute_intent(sandbox_cleanup)["message"] == "sandbox-cleanup-handler"
     assert seen == [
         "start_maintenance_review",
         "dispatch_maintenance_review",
         "start_maintenance_repair",
         "dispatch_maintenance_repair",
+        "reconcile_sandbox_session_cleanup",
+    ]
+
+
+def test_reconcile_sandbox_session_cleanup_removes_claimed_local_root(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    processor = DatabaseMaintenanceProcessor(_AvailabilityConn(), embedder=None)
+    temp_root = tmp_path / "temp"
+    temp_root.mkdir()
+    sandbox_root = temp_root / "praxis-docker-sandbox-alpha"
+    (sandbox_root / "workspace").mkdir(parents=True)
+    (sandbox_root / "workspace" / "stale.txt").write_text("stale", encoding="utf-8")
+    recorded: list[tuple[str, str, dict[str, object], str | None]] = []
+    events: list[dict[str, object]] = []
+
+    monkeypatch.setattr(_maintenance.tempfile, "gettempdir", lambda: str(temp_root))
+    monkeypatch.setattr(processor, "_table_exists", lambda table_name: table_name == "sandbox_sessions")
+    monkeypatch.setattr(
+        processor,
+        "_fetch_policy",
+        lambda policy_key: {
+            "policy_key": policy_key,
+            "config": {"batch_limit": 10, "claim_timeout_seconds": 600},
+        },
+    )
+    monkeypatch.setattr(processor, "_mark_expired_sandbox_sessions_closed", lambda: 2)
+    monkeypatch.setattr(
+        processor,
+        "_claim_due_sandbox_cleanup_sessions",
+        lambda *, limit, claim_timeout_seconds: [
+            SandboxCleanupTarget(
+                sandbox_session_id="sandbox-session-1",
+                sandbox_root=str(sandbox_root / "workspace"),
+                cleanup_attempt_count=1,
+                closed_at=None,
+                expires_at=None,
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        processor,
+        "_record_sandbox_cleanup_result",
+        lambda sandbox_session_id, *, status, outcome, error_message=None: recorded.append(
+            (sandbox_session_id, status, outcome, error_message)
+        ),
+    )
+    monkeypatch.setattr(
+        processor,
+        "_emit_system_event",
+        lambda **kwargs: events.append(kwargs),
+    )
+
+    outcome = processor._process_reconcile_sandbox_session_cleanup(
+        MaintenanceIntent(
+            intent_id=50,
+            intent_kind="reconcile_sandbox_session_cleanup",
+            subject_kind="sandbox_session",
+            subject_id="policy:sandbox",
+            policy_key="sandbox_session.cleanup_reconcile",
+            fingerprint="sandbox-cleanup:test",
+            priority=100,
+            payload={},
+            attempt_count=0,
+            max_attempts=5,
+        )
+    )
+
+    assert outcome["status"] == "completed"
+    assert outcome["message"] == "sandbox_cleanup:removed=1:already_absent=0:skipped=0:failed=0"
+    assert not sandbox_root.exists()
+    assert recorded == [
+        (
+            "sandbox-session-1",
+            "completed",
+            {
+                "reason": "removed",
+                "cleanup_root": str(sandbox_root),
+                "sandbox_root": str(sandbox_root / "workspace"),
+                "cleanup_attempt_count": 1,
+            },
+            None,
+        )
+    ]
+    assert events and events[-1]["event_type"] == "maintenance.sandbox_cleanup.reconciled"
+    assert events[-1]["payload"]["removed_count"] == 1
+    assert events[-1]["payload"]["expired_closed"] == 2
+
+
+def test_reconcile_sandbox_session_cleanup_records_skips_and_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    processor = DatabaseMaintenanceProcessor(_AvailabilityConn(), embedder=None)
+    temp_root = tmp_path / "temp"
+    temp_root.mkdir()
+    stubborn_root = temp_root / "praxis-docker-sandbox-stubborn"
+    stubborn_root.mkdir()
+    recorded: list[tuple[str, str, dict[str, object], str | None]] = []
+
+    monkeypatch.setattr(_maintenance.tempfile, "gettempdir", lambda: str(temp_root))
+    monkeypatch.setattr(processor, "_table_exists", lambda table_name: table_name == "sandbox_sessions")
+    monkeypatch.setattr(
+        processor,
+        "_fetch_policy",
+        lambda policy_key: {
+            "policy_key": policy_key,
+            "config": {"batch_limit": 10, "claim_timeout_seconds": 600},
+        },
+    )
+    monkeypatch.setattr(processor, "_mark_expired_sandbox_sessions_closed", lambda: 0)
+    monkeypatch.setattr(
+        processor,
+        "_claim_due_sandbox_cleanup_sessions",
+        lambda *, limit, claim_timeout_seconds: [
+            SandboxCleanupTarget(
+                sandbox_session_id="sandbox-session-skip",
+                sandbox_root=str(tmp_path / "outside-sandbox-root"),
+                cleanup_attempt_count=2,
+                closed_at=None,
+                expires_at=None,
+            ),
+            SandboxCleanupTarget(
+                sandbox_session_id="sandbox-session-fail",
+                sandbox_root=str(stubborn_root),
+                cleanup_attempt_count=3,
+                closed_at=None,
+                expires_at=None,
+            ),
+        ],
+    )
+    monkeypatch.setattr(
+        processor,
+        "_record_sandbox_cleanup_result",
+        lambda sandbox_session_id, *, status, outcome, error_message=None: recorded.append(
+            (sandbox_session_id, status, outcome, error_message)
+        ),
+    )
+    real_rmtree = _maintenance.shutil.rmtree
+
+    def _fake_rmtree(path, *args, **kwargs):
+        target = Path(path)
+        if target == stubborn_root:
+            raise OSError("permission denied")
+        return real_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(_maintenance.shutil, "rmtree", _fake_rmtree)
+
+    outcome = processor._process_reconcile_sandbox_session_cleanup(
+        MaintenanceIntent(
+            intent_id=51,
+            intent_kind="reconcile_sandbox_session_cleanup",
+            subject_kind="sandbox_session",
+            subject_id="policy:sandbox",
+            policy_key="sandbox_session.cleanup_reconcile",
+            fingerprint="sandbox-cleanup:test-failure",
+            priority=100,
+            payload={},
+            attempt_count=0,
+            max_attempts=5,
+        )
+    )
+
+    assert outcome["status"] == "completed"
+    assert outcome["message"] == "sandbox_cleanup:removed=0:already_absent=0:skipped=1:failed=1"
+    assert stubborn_root.exists()
+    assert recorded == [
+        (
+            "sandbox-session-skip",
+            "skipped",
+            {
+                "reason": "unsupported_sandbox_root",
+                "cleanup_root": None,
+                "sandbox_root": str(tmp_path / "outside-sandbox-root"),
+                "cleanup_attempt_count": 2,
+            },
+            None,
+        ),
+        (
+            "sandbox-session-fail",
+            "failed",
+            {
+                "reason": "delete_failed",
+                "cleanup_root": str(stubborn_root),
+                "sandbox_root": str(stubborn_root),
+                "cleanup_attempt_count": 3,
+            },
+            "permission denied",
+        ),
     ]
 
 

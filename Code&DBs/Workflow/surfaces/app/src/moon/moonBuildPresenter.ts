@@ -77,7 +77,6 @@ export interface OrbitEdge {
 }
 
 export interface DockContent {
-  actionOptions: { label: string; value: string }[];
   contextAttachments: AuthorityAttachment[];
   connectBindings: BindingLedgerEntry[];
   imports: ImportSnapshot[];
@@ -428,16 +427,7 @@ export function presentBuild(
     const bindings = (payload.binding_ledger || []).filter(b => bindingIds.has(b.binding_id));
     const imports = (payload.import_snapshots || []).filter(s => s.node_id === selectedNodeId);
 
-    const actionOptions = [
-      { label: 'Research', value: 'auto/research' },
-      { label: 'Build', value: 'auto/build' },
-      { label: 'Review', value: 'auto/review' },
-      { label: 'Gate', value: 'gate' },
-      { label: 'Trigger', value: 'trigger' },
-      { label: 'Notify', value: 'notify' },
-    ];
-
-    dockContent = { actionOptions, contextAttachments: attachments, connectBindings: bindings, imports };
+    dockContent = { contextAttachments: attachments, connectBindings: bindings, imports };
   }
 
   // Release

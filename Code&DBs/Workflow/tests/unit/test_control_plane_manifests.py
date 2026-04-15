@@ -98,6 +98,50 @@ def test_create_data_approval_manifest_links_to_parent_plan_manifest() -> None:
     assert row["parent_manifest_id"] == "plan_manifest_123"
 
 
+def test_create_data_checkpoint_manifest_shapes_control_manifest() -> None:
+    with patch.object(control_plane_manifests, "create_app_manifest") as create_mock, patch.object(
+        control_plane_manifests,
+        "record_app_manifest_history",
+    ) as history_mock, patch.object(
+        control_plane_manifests,
+        "bootstrap_control_manifest_head_schema",
+    ), patch.object(
+        control_plane_manifests,
+        "load_control_manifest_head_record",
+        return_value=None,
+    ), patch.object(
+        control_plane_manifests,
+        "upsert_control_manifest_head",
+        return_value={
+            "manifest_id": "data-checkpoint-123",
+            "head_status": "active",
+            "recorded_at": "2026-04-15T12:00:00+00:00",
+        },
+    ):
+        row = control_plane_manifests.create_data_checkpoint_manifest(
+            object(),
+            checkpoint={
+                "row_count": 2,
+                "field_count": 2,
+                "content_hash": "abc123",
+                "cursor_field": "updated_at",
+                "watermark": "2025-01-02T00:00:00Z",
+            },
+            job={"operation": "checkpoint", "job_name": "events-checkpoint"},
+            workspace_root="/tmp/workspace",
+        )
+
+    create_mock.assert_called_once()
+    history_mock.assert_called_once()
+    manifest = create_mock.call_args.kwargs["manifest"]
+    assert manifest["manifest_type"] == "data_checkpoint"
+    assert manifest["status"] == "active"
+    assert manifest["workspace_ref"] == "workspace_root:/tmp/workspace"
+    assert manifest["scope_ref"] == "data_job:events-checkpoint"
+    assert manifest["checkpoint"]["content_hash"] == "abc123"
+    assert row["is_current_head"] is True
+
+
 def test_load_control_plane_manifest_rejects_wrong_kind() -> None:
     with patch.object(
         control_plane_manifests,

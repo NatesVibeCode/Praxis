@@ -15,7 +15,6 @@ _TOKEN_VERSION = 1
 _TOKEN_AUDIENCE = "workflow-mcp"
 _SIGNING_SECRET_ENV = "PRAXIS_WORKFLOW_MCP_SIGNING_SECRET"
 _TOKEN_TTL_ENV = "PRAXIS_WORKFLOW_MCP_TOKEN_TTL_SECONDS"
-_WORKFLOW_DATABASE_URL_ENV = "WORKFLOW_DATABASE_URL"
 
 
 class WorkflowMcpSessionError(RuntimeError):
@@ -34,11 +33,12 @@ def _urlsafe_b64decode(data: str) -> bytes:
 
 
 def _signing_secret() -> bytes:
-    secret_seed = (
-        str(os.environ.get(_SIGNING_SECRET_ENV, "")).strip()
-        or str(os.environ.get(_WORKFLOW_DATABASE_URL_ENV, "")).strip()
-        or "dag-workflow-local-dev"
-    )
+    secret_seed = str(os.environ.get(_SIGNING_SECRET_ENV, "")).strip()
+    if not secret_seed:
+        raise WorkflowMcpSessionError(
+            "workflow_mcp.signing_secret_missing",
+            f"{_SIGNING_SECRET_ENV} is required for workflow MCP session tokens",
+        )
     return hashlib.sha256(secret_seed.encode("utf-8")).digest()
 
 
@@ -200,4 +200,3 @@ def advance_session_cursor(conn: Any, session_token: str, event_id: int) -> None
         session_id,
         event_id,
     )
-

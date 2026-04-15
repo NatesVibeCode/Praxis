@@ -78,6 +78,10 @@ class TestPostgresProbe:
         result = probe.check()
         assert result.passed is False
 
+    def test_internal_database_resolution_fails_closed_without_authority(self, monkeypatch):
+        monkeypatch.delenv("WORKFLOW_DATABASE_URL", raising=False)
+        assert _mod._resolve_database_url(None) is None
+
 
 # ---- DiskSpaceProbe -------------------------------------------------------
 
@@ -251,8 +255,9 @@ class TestQueueAdmissionGate:
 
     def test_helper_uses_gate_defaults(self):
         fake_psycopg2 = _FakePsycopg2((3,))
-        with patch.object(_mod, "_psycopg2_module", return_value=fake_psycopg2):
-            decision = queue_admission_check(job_count=1, critical_threshold=10)
+        with patch.dict(os.environ, {"WORKFLOW_DATABASE_URL": "postgresql://example/db"}, clear=False):
+            with patch.object(_mod, "_psycopg2_module", return_value=fake_psycopg2):
+                decision = queue_admission_check(job_count=1, critical_threshold=10)
 
         assert decision.admitted is True
         assert decision.queue_depth == 3

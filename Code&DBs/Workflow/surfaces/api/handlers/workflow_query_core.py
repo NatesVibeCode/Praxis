@@ -503,6 +503,31 @@ def handle_ingest(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
 
     try:
         kg = subs.get_knowledge_graph()
+        source_type = str(body.get("source_type") or kind or "").strip().lower()
+        from memory.multimodal_ingest import (
+            SUPPORTED_MULTIMODAL_SOURCE_TYPES,
+            ingest_multimodal_to_knowledge_graph,
+        )
+        if source_type in SUPPORTED_MULTIMODAL_SOURCE_TYPES:
+
+            multimodal = ingest_multimodal_to_knowledge_graph(
+                kg,
+                content=content,
+                source=source,
+                source_type=source_type,
+            )
+            graph_result = multimodal["graph_result"]
+            return {
+                "accepted": graph_result.accepted,
+                "entities_created": graph_result.entities_created,
+                "edges_created": graph_result.edges_created,
+                "duplicates_skipped": graph_result.duplicates_skipped,
+                "errors": list(graph_result.errors),
+                "multimodal": {
+                    "source_type": multimodal["source_type"],
+                    "staging_receipt": _serialize(multimodal["staging_receipt"]),
+                },
+            }
         result = kg.ingest(kind=kind, content=content, source=source)
         return {
             "accepted": result.accepted,

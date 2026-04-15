@@ -12,7 +12,6 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 import json
-import os
 import sys
 import threading
 from collections.abc import AsyncIterator, Mapping
@@ -24,6 +23,7 @@ import asyncpg
 
 from storage.postgres import PostgresWorkflowMetricsRepository
 
+from ._workflow_database import resolve_runtime_database_url
 from .failure_projection import project_failure_classification
 
 if TYPE_CHECKING:
@@ -219,7 +219,7 @@ class WorkflowMetricsView:
         Args:
             db_url: Postgres connection URL. If None, reads WORKFLOW_DATABASE_URL.
         """
-        self._db_url = db_url or os.environ.get("WORKFLOW_DATABASE_URL")
+        self._db_url = resolve_runtime_database_url(db_url, required=False)
         self._schema_initialized = False
 
     async def _get_connection(self) -> asyncpg.Connection:

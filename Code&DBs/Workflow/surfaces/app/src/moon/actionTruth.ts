@@ -45,26 +45,6 @@ const RUNTIME_NODE_ROUTES = new Set([
   '@webhook/post',
   '@workflow/invoke',
 ]);
-const MOON_SURFACE_ITEM_IDS = new Set([
-  'trigger-manual',
-  'trigger-webhook',
-  'trigger-schedule',
-  'gather-research',
-  'gather-docs',
-  'think-classify',
-  'think-draft',
-  'think-fan-out',
-  'think-fan-out-legacy',
-  'act-notify',
-  'act-webhook-out',
-  'act-invoke',
-  'ctrl-approval',
-  'ctrl-review',
-  'ctrl-validation',
-  'ctrl-branch',
-  'ctrl-retry',
-  'ctrl-on-failure',
-]);
 const VALID_TRUTH_CATEGORIES = new Set<CatalogTruthCategory>(['runtime', 'persisted', 'alias', 'partial', 'coming_soon']);
 const VALID_SURFACE_TIERS = new Set<CatalogSurfaceTier>(['primary', 'advanced', 'hidden']);
 
@@ -335,7 +315,7 @@ export function getCatalogSurfacePolicy(item: CatalogItem): CatalogSurfacePolicy
 }
 
 export function isMoonSurfaceAuthorityItem(item: CatalogItem): boolean {
-  return MOON_SURFACE_ITEM_IDS.has(item.id);
+  return item.source === 'surface_registry';
 }
 
 export function summarizeCatalogTruth(items: CatalogItem[]): CatalogTruthSummary {

@@ -56,6 +56,7 @@ class _RecordingPg:
         workflow_run_rows: list[dict[str, Any]] | None = None,
         trigger_rows: list[dict[str, Any]] | None = None,
         packet_query_rows: dict[str, dict[str, Any]] | None = None,
+        build_review_decision_rows: list[dict[str, Any]] | None = None,
     ) -> None:
         self.reference_rows = reference_rows or []
         self.integration_rows = integration_rows or []
@@ -94,10 +95,27 @@ class _RecordingPg:
         self.workflow_run_rows = workflow_run_rows or []
         self.trigger_rows = trigger_rows or []
         self.packet_query_rows = packet_query_rows or {}
+        self.build_review_decision_rows = build_review_decision_rows or []
         self.executed: list[tuple[str, tuple[Any, ...]]] = []
+        self.event_log_rows: list[dict[str, Any]] = []
 
     def execute(self, query: str, *params: Any) -> list[dict[str, Any]]:
         self.executed.append((query, params))
+        stripped = query.strip()
+        if stripped.startswith("INSERT INTO event_log"):
+            row = {
+                "id": len(self.event_log_rows) + 1,
+                "channel": params[0],
+                "event_type": params[1],
+                "entity_id": params[2],
+                "entity_kind": params[3],
+                "payload": json.loads(params[4]) if isinstance(params[4], str) else params[4],
+                "emitted_by": params[5],
+            }
+            self.event_log_rows.append(row)
+            return [{"id": row["id"]}]
+        if stripped.startswith("SELECT pg_notify"):
+            return []
         if "FROM reference_catalog" in query:
             return self.reference_rows
         if "FROM integration_registry" in query:
@@ -352,6 +370,32 @@ class _RecordingPg:
                 if workflow.get("name") == workflow_name:
                     return [workflow]
             return []
+        if "FROM workflow_build_review_decisions" in query and "SELECT DISTINCT ON (target_kind, target_ref)" in query:
+            workflow_id = str(params[0])
+            definition_revision = str(params[1])
+            filtered = [
+                row
+                for row in self.build_review_decision_rows
+                if str(row.get("workflow_id")) == workflow_id
+                and str(row.get("definition_revision")) == definition_revision
+            ]
+            latest: dict[tuple[str, str], dict[str, Any]] = {}
+            for row in filtered:
+                key = (str(row.get("target_kind")), str(row.get("target_ref")))
+                current = latest.get(key)
+                row_key = (
+                    str(row.get("decided_at") or ""),
+                    str(row.get("created_at") or ""),
+                    str(row.get("review_decision_id") or ""),
+                )
+                current_key = (
+                    str(current.get("decided_at") or ""),
+                    str(current.get("created_at") or ""),
+                    str(current.get("review_decision_id") or ""),
+                ) if current else None
+                if current is None or row_key > current_key:
+                    latest[key] = row
+            return list(latest.values())
         return []
 
     def fetchrow(self, query: str, *params: Any) -> dict[str, Any] | None:
@@ -419,6 +463,27 @@ class _RecordingPg:
             self.trigger_rows.append(row)
             self.executed.append((query, params))
             return row
+        if stripped.startswith("INSERT INTO workflow_build_review_decisions"):
+            row = {
+                "review_decision_id": params[0],
+                "workflow_id": params[1],
+                "definition_revision": params[2],
+                "target_kind": params[3],
+                "target_ref": params[4],
+                "decision": params[5],
+                "actor_type": params[6],
+                "actor_ref": params[7],
+                "approval_mode": params[8],
+                "rationale": params[9],
+                "source_subpath": params[10],
+                "candidate_ref": params[11],
+                "candidate_payload": json.loads(params[12]) if params[12] is not None else None,
+                "decided_at": params[13],
+                "created_at": params[13],
+            }
+            self.build_review_decision_rows.append(row)
+            self.executed.append((query, params))
+            return row
         if stripped.startswith("UPDATE workflow_triggers"):
             trigger_id = str(params[0])
             row = next((item for item in self.trigger_rows if str(item.get("id")) == trigger_id), None)
@@ -447,6 +512,29 @@ class _RecordingPg:
                 for item in self.trigger_rows
             ]
             return updated
+        if "FROM workflow_build_review_decisions" in stripped and "LIMIT 1" in stripped:
+            workflow_id = str(params[0])
+            definition_revision = str(params[1])
+            target_kind = str(params[2])
+            target_ref = str(params[3])
+            rows = [
+                row
+                for row in self.build_review_decision_rows
+                if str(row.get("workflow_id")) == workflow_id
+                and str(row.get("definition_revision")) == definition_revision
+                and str(row.get("target_kind")) == target_kind
+                and str(row.get("target_ref")) == target_ref
+            ]
+            rows.sort(
+                key=lambda row: (
+                    str(row.get("decided_at") or ""),
+                    str(row.get("created_at") or ""),
+                    str(row.get("review_decision_id") or ""),
+                ),
+                reverse=True,
+            )
+            self.executed.append((query, params))
+            return rows[0] if rows else None
         rows = self.execute(query, *params)
         return rows[0] if rows else None
 
@@ -1391,6 +1479,32 @@ def test_handle_plan_post_stamps_definition_revision_into_compiled_spec() -> Non
                 "config": {"route": "auto/review"},
             }
         ],
+        "binding_ledger": [
+            {
+                "binding_id": "binding:ref-001",
+                "source_kind": "reference",
+                "source_label": "triage-agent",
+                "source_span": None,
+                "source_node_ids": ["step-001"],
+                "state": "accepted",
+                "candidate_targets": [
+                    {
+                        "target_ref": "task_type_routing:auto/review",
+                        "label": "Auto Review",
+                        "kind": "agent",
+                    }
+                ],
+                "accepted_target": {
+                    "target_ref": "task_type_routing:auto/review",
+                    "label": "Auto Review",
+                    "kind": "agent",
+                },
+                "rationale": "Accepted in build workspace.",
+                "created_at": "2026-04-15T10:00:00+00:00",
+                "updated_at": "2026-04-15T10:01:00+00:00",
+                "freshness": None,
+            }
+        ],
         "capabilities": [],
         "authority": "",
         "sla": {},
@@ -1485,7 +1599,7 @@ def test_handle_plan_post_accepts_build_graph_without_browser_projection() -> No
     assert request.sent is not None
     status, payload = request.sent
     assert status == 200
-    assert payload["compiled_spec"]["definition_revision"].startswith("def_graph_")
+    assert payload["compiled_spec"]["definition_revision"].startswith("def_")
     assert payload["compiled_spec"]["jobs"][0]["agent"] == "integration/webhook/post"
     assert payload["compiled_spec"]["triggers"] == [
         {
@@ -1660,7 +1774,7 @@ def test_handle_workflow_build_get_surfaces_trigger_projection() -> None:
     assert request.sent is not None
     status, payload = request.sent
     assert status == 200
-    assert payload["build_state"] == "ready"
+    assert payload["build_state"] == "blocked"
     trigger_nodes = [node for node in payload["build_graph"]["nodes"] if node.get("route") == "trigger"]
     assert trigger_nodes
     assert trigger_nodes[0]["summary"] == "Start when a new support email arrives."
@@ -1670,6 +1784,8 @@ def test_handle_workflow_build_get_surfaces_trigger_projection() -> None:
         "source_ref": "@gmail/search",
         "filter": {"mailbox": "support"},
     }
+    assert payload["binding_ledger"][0]["state"] == "suggested"
+    assert payload["binding_ledger"][0]["accepted_target"] is None
     assert payload["compiled_spec_projection"]["graph_id"] == payload["build_graph"]["graph_id"]
     assert payload["compiled_spec_projection"]["compiled_spec"]["triggers"] == [
         {
@@ -1679,6 +1795,111 @@ def test_handle_workflow_build_get_surfaces_trigger_projection() -> None:
             "source_ref": "@gmail/search",
         }
     ]
+
+
+def test_handle_workflow_build_get_overlays_db_review_decisions_over_definition_shadow() -> None:
+    workflow_row = {
+        "id": "wf_build_review_overlay",
+        "name": "Support Intake",
+        "description": "Compile support intake",
+        "definition": {
+            "type": "operating_model",
+            "source_prose": "triage-agent reviews the support inbox.",
+            "compiled_prose": "triage-agent reviews the support inbox.",
+            "narrative_blocks": [],
+            "references": [
+                {
+                    "id": "ref-001",
+                    "type": "integration",
+                    "slug": "triage-agent",
+                    "raw": "triage-agent",
+                    "resolved": True,
+                    "resolved_to": "task_type_routing:auto/review",
+                }
+            ],
+            "capabilities": [],
+            "authority": "",
+            "sla": {},
+            "trigger_intent": [],
+            "draft_flow": [
+                {
+                    "id": "step-001",
+                    "title": "Review support inbox",
+                    "summary": "triage-agent reviews the support inbox.",
+                    "source_block_ids": [],
+                    "reference_slugs": ["triage-agent"],
+                    "depends_on": [],
+                    "order": 1,
+                }
+            ],
+            "binding_ledger": [
+                {
+                    "binding_id": "binding:ref-001",
+                    "source_kind": "reference",
+                    "source_label": "triage-agent",
+                    "source_span": None,
+                    "source_node_ids": ["step-001"],
+                    "state": "captured",
+                    "candidate_targets": [
+                        {
+                            "target_ref": "task_type_routing:auto/review",
+                            "label": "Auto Review",
+                            "kind": "agent",
+                        }
+                    ],
+                    "accepted_target": None,
+                    "rationale": "Needs an accepted authority target before planning can run cleanly.",
+                    "created_at": "2026-04-09T19:00:00+00:00",
+                    "updated_at": "2026-04-09T19:00:00+00:00",
+                    "freshness": None,
+                }
+            ],
+            "definition_revision": "def_build_review_overlay",
+        },
+        "compiled_spec": None,
+        "version": 1,
+        "updated_at": "2026-04-09T19:00:00Z",
+    }
+    pg = _RecordingPg(
+        workflow_rows={"wf_build_review_overlay": workflow_row},
+        build_review_decision_rows=[
+            {
+                "review_decision_id": "wbrd_001",
+                "workflow_id": "wf_build_review_overlay",
+                "definition_revision": "def_build_review_overlay",
+                "target_kind": "binding",
+                "target_ref": "binding:ref-001",
+                "decision": "approve",
+                "actor_type": "human",
+                "actor_ref": "build_workspace",
+                "approval_mode": "manual",
+                "rationale": "Approved explicitly.",
+                "source_subpath": "bindings/binding:ref-001/accept",
+                "candidate_ref": "task_type_routing:auto/review",
+                "candidate_payload": {
+                    "target_ref": "task_type_routing:auto/review",
+                    "label": "Auto Review",
+                    "kind": "agent",
+                },
+                "decided_at": "2026-04-09T19:05:00Z",
+                "created_at": "2026-04-09T19:05:00Z",
+            }
+        ],
+    )
+    request = _RequestStub(
+        subsystems=SimpleNamespace(get_pg_conn=lambda: pg),
+        path="/api/workflows/wf_build_review_overlay/build",
+    )
+
+    workflow_query._handle_workflow_build_get(request, "/api/workflows/wf_build_review_overlay/build")
+
+    assert request.sent is not None
+    status, payload = request.sent
+    assert status == 200
+    binding = next(entry for entry in payload["binding_ledger"] if entry["binding_id"] == "binding:ref-001")
+    assert binding["state"] == "accepted"
+    assert binding["accepted_target"]["target_ref"] == "task_type_routing:auto/review"
+    assert payload["build_state"] == "ready"
 
 
 def test_handle_workflow_build_post_persists_attachment_and_replans() -> None:
@@ -1754,6 +1975,7 @@ def test_handle_workflow_build_post_persists_attachment_and_replans() -> None:
     assert status == 200
     assert payload["workflow"]["id"] == "wf_build_mutation"
     assert payload["authority_attachments"][0]["authority_ref"] == "@gmail/search"
+    assert payload["mutation_event_id"] == 1
     assert payload["undo_receipt"] == {
         "workflow_id": "wf_build_mutation",
         "steps": [
@@ -1763,9 +1985,23 @@ def test_handle_workflow_build_post_persists_attachment_and_replans() -> None:
             }
         ],
     }
-    assert payload["compiled_spec"]["jobs"][0]["source_step_id"] == "step-001"
-    assert payload["compiled_spec_projection"]["graph_id"] == payload["build_graph"]["graph_id"]
-    assert payload["compiled_spec_projection"]["compiled_spec"]["jobs"][0]["source_node_id"] == "step-001"
+    mutation_event = next(row for row in pg.event_log_rows if row["emitted_by"] == "mutate_workflow_build")
+    assert mutation_event == {
+        "id": 1,
+        "channel": "build_state",
+        "event_type": "mutation",
+        "entity_id": "wf_build_mutation",
+        "entity_kind": "workflow",
+        "payload": {
+            "subpath": "attachments",
+            "undo_receipt": payload["undo_receipt"],
+        },
+        "emitted_by": "mutate_workflow_build",
+    }
+    assert payload["build_state"] == "blocked"
+    assert payload["compiled_spec"] is None
+    assert payload["compiled_spec_projection"] is None
+    assert payload["binding_ledger"][0]["state"] == "suggested"
     persisted_definition = pg.workflow_rows["wf_build_mutation"]["definition"]
     assert persisted_definition["authority_attachments"][0]["authority_ref"] == "@gmail/search"
 
@@ -1848,36 +2084,44 @@ def test_handle_workflow_build_post_accept_binding_emits_restore_receipt() -> No
     assert status == 200
     accepted = next(entry for entry in payload["binding_ledger"] if entry["binding_id"] == binding_id)
     assert accepted["state"] == "accepted"
+    review_event = next(
+        params
+        for query, params in pg.executed
+        if "INSERT INTO event_log" in query and params[1] == "review_decision"
+    )
+    review_row = next(
+        params
+        for query, params in pg.executed
+        if "INSERT INTO workflow_build_review_decisions" in query
+    )
+    review_payload = json.loads(review_event[4])
+    assert review_payload["target_kind"] == "binding"
+    assert review_payload["target_ref"] == binding_id
+    assert review_payload["decision"] == "approve"
+    assert review_payload["candidate_ref"] == "task_type_routing:auto/review"
+    assert review_payload["actor_type"] == "human"
+    assert review_row[3] == "binding"
+    assert review_row[4] == binding_id
+    assert review_row[5] == "approve"
     assert payload["undo_receipt"] == {
         "workflow_id": "wf_build_binding_accept",
         "steps": [
             {
-                "subpath": f"bindings/{binding_id}/restore",
+                "subpath": "review_decisions/restore",
                 "body": {
-                    "binding": {
-                        "binding_id": binding_id,
-                        "source_kind": "reference",
-                        "source_label": "triage-agent",
-                        "source_span": None,
-                        "source_node_ids": ["step-001"],
-                        "state": "captured",
-                        "candidate_targets": [
-                            {
-                                "target_ref": "task_type_routing:auto/review",
-                                "label": "Auto Review",
-                                "kind": "agent",
-                            }
-                        ],
-                        "accepted_target": None,
-                        "rationale": "Needs an accepted authority target before planning can run cleanly.",
-                        "created_at": "2026-04-09T19:00:00+00:00",
-                        "updated_at": "2026-04-09T19:00:00+00:00",
-                        "freshness": None,
-                    }
+                    "target_kind": "binding",
+                    "target_ref": binding_id,
+                    "decision": "revoke",
+                    "approval_mode": "undo_restore",
+                    "rationale": "Undo restore to the prior unapproved build-review state.",
                 },
             }
         ],
     }
+    persisted_definition = pg.workflow_rows["wf_build_binding_accept"]["definition"]
+    persisted_binding = next(entry for entry in persisted_definition["binding_ledger"] if entry["binding_id"] == binding_id)
+    assert persisted_binding["accepted_target"] is None
+    assert persisted_binding["state"] == "suggested"
 
 
 def test_handle_workflow_build_post_restores_attachment_record() -> None:
@@ -1941,6 +2185,103 @@ def test_handle_workflow_build_post_restores_attachment_record() -> None:
     assert payload["authority_attachments"] == []
     persisted_definition = pg.workflow_rows["wf_build_attachment_restore"]["definition"]
     assert persisted_definition["authority_attachments"] == []
+
+
+def test_handle_workflow_build_post_review_restore_revokes_binding_approval() -> None:
+    binding_id = "binding:ref-001"
+    workflow_row = {
+        "id": "wf_build_review_restore",
+        "name": "Support Intake",
+        "description": "Compile support intake",
+        "definition": {
+            "type": "operating_model",
+            "source_prose": "triage-agent reviews the support inbox.",
+            "compiled_prose": "triage-agent reviews the support inbox.",
+            "narrative_blocks": [],
+            "references": [
+                {
+                    "id": "ref-001",
+                    "type": "integration",
+                    "slug": "triage-agent",
+                    "raw": "triage-agent",
+                    "resolved": True,
+                    "resolved_to": "task_type_routing:auto/review",
+                }
+            ],
+            "capabilities": [],
+            "authority": "",
+            "sla": {},
+            "trigger_intent": [],
+            "draft_flow": [
+                {
+                    "id": "step-001",
+                    "title": "Review support inbox",
+                    "summary": "triage-agent reviews the support inbox.",
+                    "source_block_ids": [],
+                    "reference_slugs": ["triage-agent"],
+                    "depends_on": [],
+                    "order": 1,
+                }
+            ],
+            "definition_revision": "def_build_review_restore",
+        },
+        "compiled_spec": None,
+        "version": 1,
+        "updated_at": "2026-04-09T19:00:00Z",
+    }
+    pg = _MutableWorkflowPg(
+        workflow_rows={"wf_build_review_restore": workflow_row},
+        build_review_decision_rows=[
+            {
+                "review_decision_id": "wbrd_approve",
+                "workflow_id": "wf_build_review_restore",
+                "definition_revision": "def_build_review_restore",
+                "target_kind": "binding",
+                "target_ref": binding_id,
+                "decision": "approve",
+                "actor_type": "human",
+                "actor_ref": "build_workspace",
+                "approval_mode": "manual",
+                "rationale": "Approved explicitly.",
+                "source_subpath": f"bindings/{binding_id}/accept",
+                "candidate_ref": "task_type_routing:auto/review",
+                "candidate_payload": {
+                    "target_ref": "task_type_routing:auto/review",
+                    "label": "Auto Review",
+                    "kind": "agent",
+                },
+                "decided_at": "2026-04-09T19:05:00Z",
+                "created_at": "2026-04-09T19:05:00Z",
+            }
+        ],
+    )
+    request = _RequestStub(
+        {
+            "target_kind": "binding",
+            "target_ref": binding_id,
+            "decision": "revoke",
+            "approval_mode": "undo_restore",
+            "rationale": "Undo restore to the prior unapproved build-review state.",
+        },
+        subsystems=SimpleNamespace(get_pg_conn=lambda: pg),
+        path="/api/workflows/wf_build_review_restore/build/review_decisions/restore",
+    )
+
+    workflow_query._handle_workflow_build_post(
+        request,
+        "/api/workflows/wf_build_review_restore/build/review_decisions/restore",
+    )
+
+    assert request.sent is not None
+    status, payload = request.sent
+    assert status == 200
+    binding = next(entry for entry in payload["binding_ledger"] if entry["binding_id"] == binding_id)
+    assert binding["state"] == "suggested"
+    assert binding["accepted_target"] is None
+    assert payload["build_state"] == "blocked"
+    review_row = pg.build_review_decision_rows[-1]
+    assert review_row["decision"] == "revoke"
+    assert review_row["target_ref"] == binding_id
 
 
 def test_handle_workflow_build_post_restores_binding_record() -> None:
@@ -2234,15 +2575,40 @@ def test_handle_workflow_build_post_admit_import_emits_restore_receipt() -> None
     status, payload = request.sent
     assert status == 200
     assert payload["import_snapshots"][0]["approval_state"] == "admitted"
+    review_event = next(
+        params
+        for query, params in pg.executed
+        if "INSERT INTO event_log" in query and params[1] == "review_decision"
+    )
+    review_row = next(
+        params
+        for query, params in pg.executed
+        if "INSERT INTO workflow_build_review_decisions" in query
+    )
+    review_payload = json.loads(review_event[4])
+    assert review_payload["target_kind"] == "import_snapshot"
+    assert review_payload["target_ref"] == snapshot_id
+    assert review_payload["decision"] == "approve"
+    assert review_payload["candidate_ref"] == "#escalation-policy"
+    assert review_row[3] == "import_snapshot"
+    assert review_row[4] == snapshot_id
     assert payload["undo_receipt"] == {
         "workflow_id": "wf_build_import_admit",
         "steps": [
             {
-                "subpath": f"imports/{snapshot_id}/restore",
-                "body": {"snapshot": staged_snapshot},
+                "subpath": "review_decisions/restore",
+                "body": {
+                    "target_kind": "import_snapshot",
+                    "target_ref": snapshot_id,
+                    "decision": "revoke",
+                    "approval_mode": "undo_restore",
+                    "rationale": "Undo restore to the prior unapproved build-review state.",
+                },
             }
         ],
     }
+    persisted_definition = pg.workflow_rows["wf_build_import_admit"]["definition"]
+    assert persisted_definition["import_snapshots"][0]["approval_state"] == "staged"
 
 
 def test_handle_workflow_build_post_wires_on_failure_edge_gate_into_compiled_spec() -> None:
@@ -3151,6 +3517,7 @@ def test_handle_workflow_build_post_materializes_import_and_attachment() -> None
     assert payload["authority_attachments"][0]["authority_ref"] == "#escalation-policy"
     assert payload["import_snapshots"][0]["approval_state"] == "admitted"
     assert payload["import_snapshots"][0]["admitted_targets"][0]["target_ref"] == "#escalation-policy"
+    assert payload["mutation_event_id"] == 2
     assert payload["undo_receipt"] == {
         "workflow_id": "wf_build_materialize",
         "steps": [
@@ -3162,12 +3529,40 @@ def test_handle_workflow_build_post_materializes_import_and_attachment() -> None
                 "subpath": f"imports/{payload['import_snapshots'][0]['snapshot_id']}/restore",
                 "body": {"snapshot": None},
             },
+            {
+                "subpath": "review_decisions/restore",
+                "body": {
+                    "target_kind": "import_snapshot",
+                    "target_ref": payload["import_snapshots"][0]["snapshot_id"],
+                    "decision": "revoke",
+                    "approval_mode": "undo_restore",
+                    "rationale": "Undo restore to the prior unapproved build-review state.",
+                },
+            },
         ],
     }
-    assert payload["compiled_spec_projection"]["compiled_spec"]["jobs"][0]["source_node_id"] == "step-001"
+    mutation_event = next(row for row in pg.event_log_rows if row["emitted_by"] == "mutate_workflow_build")
+    assert mutation_event == {
+        "id": 2,
+        "channel": "build_state",
+        "event_type": "mutation",
+        "entity_id": "wf_build_materialize",
+        "entity_kind": "workflow",
+        "payload": {
+            "subpath": "materialize-here",
+            "undo_receipt": payload["undo_receipt"],
+        },
+        "emitted_by": "mutate_workflow_build",
+    }
+    assert payload["build_state"] == "blocked"
+    assert payload["compiled_spec"] is None
+    assert payload["compiled_spec_projection"] is None
+    binding = next(entry for entry in payload["binding_ledger"] if entry["binding_id"].startswith("binding:import:"))
+    assert binding["state"] == "suggested"
+    assert binding["accepted_target"] is None
     persisted_definition = pg.workflow_rows["wf_build_materialize"]["definition"]
     assert persisted_definition["authority_attachments"][0]["authority_ref"] == "#escalation-policy"
-    assert persisted_definition["import_snapshots"][0]["approval_state"] == "admitted"
+    assert persisted_definition["import_snapshots"][0]["approval_state"] == "staged"
 
 
 def test_handle_workflow_build_post_materialize_here_is_idempotent_for_admitted_targets() -> None:
@@ -3255,6 +3650,103 @@ def test_handle_workflow_build_post_materialize_here_is_idempotent_for_admitted_
     ]
     assert len(payload["authority_attachments"]) == 1
     assert payload["authority_attachments"][0]["authority_ref"] == "#escalation-policy"
+
+
+def test_handle_workflow_build_post_build_graph_emits_db_backed_restore_receipt() -> None:
+    workflow_row = {
+        "id": "wf_build_graph_receipt",
+        "name": "Support Intake",
+        "description": "Compile support intake",
+        "definition": {
+            "type": "operating_model",
+            "source_prose": "triage-agent reviews the support inbox.",
+            "compiled_prose": "triage-agent reviews the support inbox.",
+            "narrative_blocks": [],
+            "references": [],
+            "capabilities": [],
+            "authority": "",
+            "sla": {},
+            "trigger_intent": [],
+            "draft_flow": [
+                {
+                    "id": "step-001",
+                    "title": "Review support inbox",
+                    "summary": "triage-agent reviews the support inbox.",
+                    "source_block_ids": [],
+                    "depends_on": [],
+                    "order": 1,
+                }
+            ],
+            "definition_revision": "def_build_graph_receipt",
+        },
+        "compiled_spec": None,
+        "version": 1,
+        "updated_at": "2026-04-09T19:00:00Z",
+    }
+    pg = _MutableWorkflowPg(workflow_rows={"wf_build_graph_receipt": workflow_row})
+    request = _RequestStub(
+        {
+            "nodes": [
+                {
+                    "node_id": "step-001",
+                    "kind": "step",
+                    "title": "Review support inbox",
+                    "summary": "triage-agent reviews the support inbox.",
+                    "route": "task_type_routing:auto/review",
+                    "status": "ready",
+                    "integration_args": {},
+                },
+                {
+                    "node_id": "step-002",
+                    "kind": "step",
+                    "title": "Escalate",
+                    "summary": "Escalate the inbox to a human.",
+                    "route": "",
+                    "status": "",
+                    "integration_args": {},
+                },
+            ],
+            "edges": [
+                {
+                    "edge_id": "edge-step-001-step-002",
+                    "kind": "sequence",
+                    "from_node_id": "step-001",
+                    "to_node_id": "step-002",
+                }
+            ],
+        },
+        subsystems=SimpleNamespace(get_pg_conn=lambda: pg),
+        path="/api/workflows/wf_build_graph_receipt/build/build_graph",
+    )
+
+    workflow_query._handle_workflow_build_post(
+        request,
+        "/api/workflows/wf_build_graph_receipt/build/build_graph",
+    )
+
+    assert request.sent is not None
+    status, payload = request.sent
+    assert status == 200
+    assert payload["mutation_event_id"] == 1
+    assert payload["undo_receipt"] is not None
+    assert payload["undo_receipt"]["workflow_id"] == "wf_build_graph_receipt"
+    assert payload["undo_receipt"]["steps"][0]["subpath"] == "build_graph"
+    assert isinstance(payload["undo_receipt"]["steps"][0]["body"]["nodes"], list)
+    assert isinstance(payload["undo_receipt"]["steps"][0]["body"]["edges"], list)
+    assert payload["undo_receipt"]["steps"][0]["body"]["nodes"][0]["node_id"] == "step-001"
+    mutation_event = next(row for row in pg.event_log_rows if row["emitted_by"] == "mutate_workflow_build")
+    assert mutation_event == {
+        "id": 1,
+        "channel": "build_state",
+        "event_type": "mutation",
+        "entity_id": "wf_build_graph_receipt",
+        "entity_kind": "workflow",
+        "payload": {
+            "subpath": "build_graph",
+            "undo_receipt": payload["undo_receipt"],
+        },
+        "emitted_by": "mutate_workflow_build",
+    }
 
 
 def test_handle_commit_post_delegates_to_runtime_owner() -> None:
@@ -4334,7 +4826,7 @@ def test_handle_workflows_post_creates_graph_backed_workflow_without_browser_def
     workflow = payload["workflow"]
     assert workflow["name"] == "Graph Save"
     assert workflow["has_spec"] is False
-    assert workflow["definition"]["definition_revision"].startswith("def_graph_")
+    assert workflow["definition"]["definition_revision"].startswith("def_")
     assert workflow["definition"]["trigger_intent"] == [
         {
             "id": "trigger-001",

@@ -21,7 +21,6 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from adapters.provider_registry import default_llm_adapter_type, default_provider_slug
 from runtime.workflow_graph_compiler import (
     GraphWorkflowCompileError,
     compile_graph_workflow_request,
@@ -116,7 +115,7 @@ class WorkflowSpec:
 
     @classmethod
     def _load_new_format(cls, raw: dict[str, Any]) -> "WorkflowSpec":
-        from adapters.task_profiles import seed_profile
+        from adapters.task_profiles import try_resolve_profile
         from runtime.prompt_generation import generate_job_prompt
 
         normalized = dict(raw)
@@ -131,7 +130,7 @@ class WorkflowSpec:
         anti_requirements = _as_string_list(normalized.get("anti_requirements"))
         verify_refs = _as_string_list(normalized.get("verify_refs"))
 
-        profile = seed_profile(task_type)
+        profile = try_resolve_profile(task_type)
 
         # --- build job list ---
         if "jobs" in normalized:
@@ -156,17 +155,17 @@ class WorkflowSpec:
         for index, job in enumerate(jobs):
             # Inherit task_type from spec unless overridden
             job_task_type = str(job.get("task_type") or task_type).strip()
-            job_profile = seed_profile(job_task_type) if job_task_type != task_type else profile
+            job_profile = try_resolve_profile(job_task_type) if job_task_type != task_type else profile
 
             # Contract inheritance: full replace, not merge.
             # If task_type overridden without contract override, try profile defaults first.
             if "authoring_contract" not in job:
-                if job.get("task_type") and job_profile.default_authoring_contract:
+                if job.get("task_type") and job_profile is not None and job_profile.default_authoring_contract:
                     job["authoring_contract"] = job_profile.default_authoring_contract
                 else:
                     job["authoring_contract"] = authoring_contract
             if "acceptance_contract" not in job:
-                if job.get("task_type") and job_profile.default_acceptance_contract:
+                if job.get("task_type") and job_profile is not None and job_profile.default_acceptance_contract:
                     job["acceptance_contract"] = job_profile.default_acceptance_contract
                 else:
                     job["acceptance_contract"] = acceptance_contract
@@ -175,9 +174,9 @@ class WorkflowSpec:
             scope = job.get("scope") or {}
             if not isinstance(scope, dict):
                 scope = {}
-            if "read" not in scope and job_profile.default_scope_read:
+            if "read" not in scope and job_profile is not None and job_profile.default_scope_read:
                 scope["read"] = list(job_profile.default_scope_read)
-            if "write" not in scope and job_profile.default_scope_write:
+            if "write" not in scope and job_profile is not None and job_profile.default_scope_write:
                 scope["write"] = list(job_profile.default_scope_write)
             if scope:
                 job["scope"] = scope
@@ -192,7 +191,7 @@ class WorkflowSpec:
                 scope_read=scope.get("read"),
                 scope_write=scope.get("write"),
                 verify_refs=_as_string_list(job.get("verify_refs")) or verify_refs,
-                system_prompt_hint=job_profile.system_prompt_hint,
+                system_prompt_hint=job_profile.system_prompt_hint if job_profile is not None else "",
             )
 
             # Auto-generate label
@@ -203,7 +202,7 @@ class WorkflowSpec:
             job.setdefault("agent", normalized.get("agent", "auto/build"))
             if "prefer_cost" not in job and "prefer_cost" in normalized:
                 job["prefer_cost"] = normalized["prefer_cost"]
-            if "system_prompt" not in job and job_profile.system_prompt_hint:
+            if "system_prompt" not in job and job_profile is not None and job_profile.system_prompt_hint:
                 job["system_prompt"] = job_profile.system_prompt_hint
 
         # --- ordering ---
@@ -958,42 +957,45 @@ def _validate_batch(raw: dict[str, Any]) -> tuple[bool, list[str]]:
 def _raw_to_runtime_workflow_spec(raw: dict[str, Any]) -> "RuntimeWorkflowSpec":
     from .workflow import WorkflowSpec as RuntimeWorkflowSpec
 
-    return RuntimeWorkflowSpec(
-        prompt=raw["prompt"],
-        provider_slug=raw.get("provider_slug", default_provider_slug()),
-        model_slug=raw.get("model_slug"),
-        tier=raw.get("tier"),
-        adapter_type=raw.get("adapter_type", default_llm_adapter_type()),
-        timeout=int(raw.get("timeout", 300)),
-        workdir=raw.get("workdir"),
-        max_tokens=int(raw.get("max_tokens", 4096)),
-        temperature=float(raw.get("temperature", 0.0)),
-        label=raw.get("label"),
-        workspace_ref=raw.get("workspace_ref"),
-        runtime_profile_ref=raw.get("runtime_profile_ref"),
-        system_prompt=raw.get("system_prompt"),
-        context_sections=raw.get("context_sections"),
-        max_retries=int(raw.get("max_retries", 0)),
-        scope_read=raw.get("scope_read"),
-        scope_write=raw.get("scope_write"),
-        allowed_tools=raw.get("allowed_tools"),
-        verify_refs=raw.get("verify_refs"),
-        definition_revision=raw.get("definition_revision"),
-        plan_revision=raw.get("plan_revision"),
-        packet_provenance=raw.get("packet_provenance"),
-        output_schema=raw.get("output_schema"),
-        authoring_contract=raw.get("authoring_contract"),
-        acceptance_contract=raw.get("acceptance_contract"),
-        persist=bool(raw.get("persist", False)),
-        use_cache=bool(raw.get("use_cache", False)),
-        capabilities=raw.get("capabilities"),
-        task_type=raw.get("task_type"),
-        prefer_cost=bool(raw.get("prefer_cost", False)),
-        submission_required=raw.get("submission_required"),
-        skip_auto_review=bool(raw.get("skip_auto_review", False)),
-        reviews_workflow_id=raw.get("reviews_workflow_id"),
-        review_target_modules=raw.get("review_target_modules"),
-    )
+    kwargs: dict[str, Any] = {
+        "prompt": raw["prompt"],
+        "model_slug": raw.get("model_slug"),
+        "tier": raw.get("tier"),
+        "timeout": int(raw.get("timeout", 300)),
+        "workdir": raw.get("workdir"),
+        "max_tokens": int(raw.get("max_tokens", 4096)),
+        "temperature": float(raw.get("temperature", 0.0)),
+        "label": raw.get("label"),
+        "workspace_ref": raw.get("workspace_ref"),
+        "runtime_profile_ref": raw.get("runtime_profile_ref"),
+        "system_prompt": raw.get("system_prompt"),
+        "context_sections": raw.get("context_sections"),
+        "max_retries": int(raw.get("max_retries", 0)),
+        "scope_read": raw.get("scope_read"),
+        "scope_write": raw.get("scope_write"),
+        "allowed_tools": raw.get("allowed_tools"),
+        "verify_refs": raw.get("verify_refs"),
+        "definition_revision": raw.get("definition_revision"),
+        "plan_revision": raw.get("plan_revision"),
+        "packet_provenance": raw.get("packet_provenance"),
+        "output_schema": raw.get("output_schema"),
+        "authoring_contract": raw.get("authoring_contract"),
+        "acceptance_contract": raw.get("acceptance_contract"),
+        "persist": bool(raw.get("persist", False)),
+        "use_cache": bool(raw.get("use_cache", False)),
+        "capabilities": raw.get("capabilities"),
+        "task_type": raw.get("task_type"),
+        "prefer_cost": bool(raw.get("prefer_cost", False)),
+        "submission_required": raw.get("submission_required"),
+        "skip_auto_review": bool(raw.get("skip_auto_review", False)),
+        "reviews_workflow_id": raw.get("reviews_workflow_id"),
+        "review_target_modules": raw.get("review_target_modules"),
+    }
+    if "provider_slug" in raw:
+        kwargs["provider_slug"] = raw.get("provider_slug")
+    if "adapter_type" in raw:
+        kwargs["adapter_type"] = raw.get("adapter_type")
+    return RuntimeWorkflowSpec(**kwargs)
 
 
 def is_batch_spec(raw: dict[str, Any]) -> bool:

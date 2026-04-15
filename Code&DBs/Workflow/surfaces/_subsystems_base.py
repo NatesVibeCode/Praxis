@@ -12,12 +12,12 @@ import os
 import sys
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
 
 from storage.postgres import PostgresConfigurationError
 
 from ._boot import create_pg_conn, ensure_workflow_on_path, sync_registries
 from ._lifecycle import LifecycleManager
+from ._workflow_database import workflow_database_env_for_repo
 
 
 class _BaseSubsystems:
@@ -78,28 +78,8 @@ class _BaseSubsystems:
         os.makedirs(path, exist_ok=True)
         return str(path)
 
-    def _normalize_postgres_url(self, database_url: str) -> str:
-        parsed = urlsplit(database_url)
-        if parsed.username or parsed.scheme not in {"postgresql", "postgres"}:
-            return database_url
-        hostname = parsed.hostname or "localhost"
-        netloc = "postgres"
-        if parsed.password:
-            netloc += f":{parsed.password}"
-        netloc += f"@{hostname}"
-        if parsed.port is not None:
-            netloc += f":{parsed.port}"
-        return urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
-
     def _postgres_env(self) -> dict[str, str]:
-        database_url = os.environ.get("WORKFLOW_DATABASE_URL", "").strip()
-        if not database_url:
-            raise RuntimeError("WORKFLOW_DATABASE_URL must be set for subsystem Postgres access")
-        database_url = self._normalize_postgres_url(database_url)
-        return {
-            "WORKFLOW_DATABASE_URL": database_url,
-            "PATH": os.environ.get("PATH", ""),
-        }
+        return workflow_database_env_for_repo(self._repo_root)
 
     def _handle_reference_catalog_sync_error(self, exc: Exception) -> None:
         del exc
@@ -151,7 +131,11 @@ class _BaseSubsystems:
     def get_pg_conn(self):
         if self._pg_conn is None:
             self._ensure_workflow_root_on_path()
-            self._pg_conn = create_pg_conn(env=self._postgres_env())
+            self._pg_conn = create_pg_conn(
+                repo_root=self._repo_root,
+                workflow_root=self._workflow_root,
+                env=self._postgres_env(),
+            )
             sync_registries(self._pg_conn)
         return self._pg_conn
 

@@ -13,6 +13,7 @@ import json
 import os
 from typing import Any
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 import asyncpg
@@ -78,6 +79,27 @@ async def db_connect(database_url: str) -> asyncpg.Connection:
     return await asyncpg.connect(database_url)
 
 
+def _normalize_database_url(url: str) -> str:
+    text = str(url or "").strip()
+    if not text:
+        raise SystemExit("--database-url is required (or set WORKFLOW_DATABASE_URL)")
+    if not text.startswith(("postgresql://", "postgres://")):
+        raise SystemExit("WORKFLOW_DATABASE_URL must use a postgres:// or postgresql:// DSN")
+
+    parsed = urlsplit(text)
+    if parsed.username or parsed.scheme not in {"postgresql", "postgres"}:
+        return text
+
+    hostname = parsed.hostname or "localhost"
+    netloc = "postgres"
+    if parsed.password:
+        netloc += f":{parsed.password}"
+    netloc += f"@{hostname}"
+    if parsed.port is not None:
+        netloc += f":{parsed.port}"
+    return urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
+
+
 # ---------------------------------------------------------------------------
 # CLI helpers
 # ---------------------------------------------------------------------------
@@ -86,7 +108,7 @@ def add_database_url_arg(parser: argparse.ArgumentParser) -> None:
     """Add ``--database-url`` (defaults to ``WORKFLOW_DATABASE_URL``)."""
     parser.add_argument(
         "--database-url",
-        default=os.environ.get("WORKFLOW_DATABASE_URL"),
+        default=None,
         help="Postgres DSN. Defaults to WORKFLOW_DATABASE_URL.",
     )
 
@@ -104,8 +126,10 @@ def require_database_url(args: argparse.Namespace) -> str:
     """Return the database URL or exit with a clear message."""
     url = getattr(args, "database_url", None)
     if not isinstance(url, str) or not url.strip():
+        url = os.environ.get("WORKFLOW_DATABASE_URL")
+    if not isinstance(url, str) or not url.strip():
         raise SystemExit("--database-url is required (or set WORKFLOW_DATABASE_URL)")
-    return url.strip()
+    return _normalize_database_url(url)
 
 
 # ---------------------------------------------------------------------------

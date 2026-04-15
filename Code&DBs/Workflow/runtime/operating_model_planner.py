@@ -95,6 +95,20 @@ def unresolved_reference_slugs(definition: Any) -> list[str]:
     return sorted(set(unresolved))
 
 
+def _has_explicit_build_authority_state(definition: dict[str, Any]) -> bool:
+    return any(
+        key in definition
+        for key in (
+            "binding_ledger",
+            "import_snapshots",
+            "authority_attachments",
+            "build_graph",
+            "build_issues",
+            "projection_status",
+        )
+    )
+
+
 def plan_definition(
     definition: dict[str, Any],
     *,
@@ -109,15 +123,16 @@ def plan_definition(
     if unresolved:
         raise PlanningBlockedError(unresolved)
 
-    authority_bundle = build_authority_bundle(definition)
-    projection_status = authority_bundle.get("projection_status") if isinstance(authority_bundle, dict) else {}
-    if _as_text((projection_status or {}).get("state")) == "blocked":
-        blocking_labels = [
-            _as_text(issue.get("label")) or _as_text(issue.get("issue_id"))
-            for issue in authority_bundle.get("build_issues", [])
-            if isinstance(issue, dict) and _as_text(issue.get("severity")) == "blocking"
-        ]
-        raise PlanningBlockedError([label for label in blocking_labels if label])
+    if _has_explicit_build_authority_state(definition):
+        authority_bundle = build_authority_bundle(definition)
+        projection_status = authority_bundle.get("projection_status") if isinstance(authority_bundle, dict) else {}
+        if _as_text((projection_status or {}).get("state")) == "blocked":
+            blocking_labels = [
+                _as_text(issue.get("label")) or _as_text(issue.get("issue_id"))
+                for issue in authority_bundle.get("build_issues", [])
+                if isinstance(issue, dict) and _as_text(issue.get("severity")) == "blocking"
+            ]
+            raise PlanningBlockedError([label for label in blocking_labels if label])
 
     compiled_prose = _as_text(definition.get("compiled_prose"))
     source_prose = _as_text(definition.get("source_prose"))

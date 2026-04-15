@@ -21,22 +21,35 @@ class _FakeConn:
         return []
 
 
+def _config(**overrides) -> NativeRuntimeProfileConfig:
+    values = {
+        "runtime_profile_ref": "praxis",
+        "workspace_ref": "praxis",
+        "sandbox_profile_ref": "sandbox_profile.praxis.default",
+        "model_profile_id": "model_profile.praxis.default",
+        "provider_policy_id": "provider_policy.praxis.default",
+        "provider_name": "openai",
+        "provider_names": ("openai",),
+        "allowed_models": ("gpt-5.4",),
+        "repo_root": ".",
+        "workdir": ".",
+        "instance_name": "praxis",
+        "receipts_dir": "./artifacts/runtime_receipts",
+        "topology_dir": "./artifacts/runtime_topology",
+    }
+    values.update(overrides)
+    return NativeRuntimeProfileConfig(**values)
+
+
 def test_upsert_profile_authority_rows_sync_writes_multi_provider_authority_refs() -> None:
     conn = _FakeConn()
-    config = NativeRuntimeProfileConfig(
-        runtime_profile_ref="praxis",
-        workspace_ref="praxis",
-        model_profile_id="model_profile.praxis.default",
-        provider_policy_id="provider_policy.praxis.default",
-        provider_name="openai",
+    config = _config(
         provider_names=("openai", "anthropic", "google"),
         allowed_models=(
             "gpt-5.4",
             "claude-opus-4-6",
             "gemini-2.0-flash",
         ),
-        repo_root=".",
-        workdir=".",
     )
     candidates = (
         SimpleNamespace(provider_ref="provider.openai", provider_name="openai"),
@@ -67,7 +80,11 @@ def test_effective_provider_policy_name_defers_to_provider_refs_when_present() -
     )
 
 
-def test_native_transport_ready_degraded_candidate_is_admitted_for_native_profile() -> None:
+def test_native_transport_ready_degraded_candidate_is_admitted_for_native_profile(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "registry.runtime_profile_admission.is_native_runtime_profile_ref",
+        lambda runtime_profile_ref: runtime_profile_ref == "praxis",
+    )
     assert _candidate_is_admitted_for_runtime_profile(
         runtime_profile_ref="praxis",
         eligibility_status="rejected",
@@ -84,17 +101,7 @@ def test_native_transport_ready_degraded_candidate_is_admitted_for_native_profil
 
 def test_latest_budget_window_sync_synthesizes_default_when_missing() -> None:
     conn = _FakeConn()
-    config = NativeRuntimeProfileConfig(
-        runtime_profile_ref="praxis",
-        workspace_ref="praxis",
-        model_profile_id="model_profile.praxis.default",
-        provider_policy_id="provider_policy.praxis.default",
-        provider_name="openai",
-        provider_names=("openai",),
-        allowed_models=("gpt-5.4",),
-        repo_root=".",
-        workdir=".",
-    )
+    config = _config()
     candidates = (
         SimpleNamespace(provider_ref="provider.openai", provider_name="openai"),
     )
@@ -110,17 +117,7 @@ def test_latest_budget_window_sync_synthesizes_default_when_missing() -> None:
 
 
 def test_default_live_budget_window_falls_back_to_provider_name() -> None:
-    config = NativeRuntimeProfileConfig(
-        runtime_profile_ref="praxis",
-        workspace_ref="praxis",
-        model_profile_id="model_profile.praxis.default",
-        provider_policy_id="provider_policy.praxis.default",
-        provider_name="openai",
-        provider_names=("openai",),
-        allowed_models=("gpt-5.4",),
-        repo_root=".",
-        workdir=".",
-    )
+    config = _config()
 
     budget = _default_live_budget_window(config)
 

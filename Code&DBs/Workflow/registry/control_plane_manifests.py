@@ -27,6 +27,7 @@ CONTROL_MANIFEST_KIND = "praxis_control_manifest"
 CONTROL_MANIFEST_FAMILY = "control_plane"
 DATA_PLAN_MANIFEST_TYPE = "data_plan"
 DATA_APPROVAL_MANIFEST_TYPE = "data_approval"
+DATA_CHECKPOINT_MANIFEST_TYPE = "data_checkpoint"
 CONTROL_MANIFEST_SCHEMA_VERSION = 1
 
 _PLAN_STATUSES = frozenset(
@@ -47,6 +48,14 @@ _APPROVAL_STATUSES = frozenset(
         "expired",
     }
 )
+_CHECKPOINT_STATUSES = frozenset(
+    {
+        "active",
+        "superseded",
+        "revoked",
+        "expired",
+    }
+)
 _PLAN_TRANSITIONS = {
     "draft": frozenset({"approved", "superseded", "revoked", "expired"}),
     "approved": frozenset({"applied", "superseded", "revoked", "expired"}),
@@ -57,6 +66,12 @@ _PLAN_TRANSITIONS = {
 }
 _APPROVAL_TRANSITIONS = {
     "approved": frozenset({"superseded", "revoked", "expired"}),
+    "superseded": frozenset({"revoked", "expired"}),
+    "revoked": frozenset(),
+    "expired": frozenset(),
+}
+_CHECKPOINT_TRANSITIONS = {
+    "active": frozenset({"superseded", "revoked", "expired"}),
     "superseded": frozenset({"revoked", "expired"}),
     "revoked": frozenset(),
     "expired": frozenset(),
@@ -149,8 +164,10 @@ def _status_rules(manifest_type: str) -> tuple[frozenset[str], dict[str, frozens
         return _PLAN_STATUSES, _PLAN_TRANSITIONS
     if manifest_type == DATA_APPROVAL_MANIFEST_TYPE:
         return _APPROVAL_STATUSES, _APPROVAL_TRANSITIONS
+    if manifest_type == DATA_CHECKPOINT_MANIFEST_TYPE:
+        return _CHECKPOINT_STATUSES, _CHECKPOINT_TRANSITIONS
     raise ControlPlaneManifestBoundaryError(
-        "manifest type must be data_plan or data_approval",
+        "manifest type must be data_plan, data_approval, or data_checkpoint",
         reason_code="control_manifest.invalid_type",
         details={"manifest_type": manifest_type},
     )
@@ -358,6 +375,32 @@ def _approval_manifest_payload(
         "approved_at": approved_at,
         "approval": approval,
     }
+
+
+def _checkpoint_manifest_payload(
+    *,
+    checkpoint: dict[str, Any],
+    job: dict[str, Any] | None,
+    workspace_root: str | None,
+    workspace_ref: str,
+    scope_ref: str,
+    status: str,
+) -> dict[str, Any]:
+    payload = {
+        "kind": CONTROL_MANIFEST_KIND,
+        "manifest_family": CONTROL_MANIFEST_FAMILY,
+        "manifest_type": DATA_CHECKPOINT_MANIFEST_TYPE,
+        "schema_version": CONTROL_MANIFEST_SCHEMA_VERSION,
+        "workspace_ref": workspace_ref,
+        "scope_ref": scope_ref,
+        "status": status,
+        "checkpoint": _json_clone(checkpoint),
+    }
+    if job:
+        payload["job"] = _json_clone(job)
+    if workspace_root:
+        payload["workspace_root"] = str(workspace_root)
+    return payload
 
 
 def _persist_manifest_revision(
@@ -731,6 +774,87 @@ def create_data_approval_manifest(
     )
 
 
+def create_data_checkpoint_manifest(
+    conn: Any,
+    *,
+    checkpoint: dict[str, Any],
+    job: dict[str, Any] | None = None,
+    workspace_root: str | None = None,
+    workspace_ref: str | None = None,
+    scope_ref: str | None = None,
+    name: str | None = None,
+    description: str = "",
+    manifest_id: str | None = None,
+    created_by: str = "praxis_data",
+    status: str = "active",
+) -> dict[str, Any]:
+    normalized_checkpoint = _json_clone(dict(checkpoint or {}))
+    if not normalized_checkpoint:
+        raise ControlPlaneManifestBoundaryError(
+            "checkpoint manifest requires a non-empty checkpoint",
+            reason_code="control_manifest.checkpoint_required",
+        )
+    normalized_status = _normalize_status(status, field_name="status", allowed=_CHECKPOINT_STATUSES)
+    resolved_workspace_ref, resolved_scope_ref = _resolve_scope_refs(
+        manifest_type=DATA_CHECKPOINT_MANIFEST_TYPE,
+        workspace_root=workspace_root,
+        workspace_ref=workspace_ref,
+        scope_ref=scope_ref,
+        job=job,
+    )
+    payload = _checkpoint_manifest_payload(
+        checkpoint=normalized_checkpoint,
+        job=job,
+        workspace_root=workspace_root,
+        workspace_ref=resolved_workspace_ref,
+        scope_ref=resolved_scope_ref,
+        status=normalized_status,
+    )
+    normalized_manifest_id = _text(manifest_id) or _manifest_id("data-checkpoint")
+    checkpoint_hash = _text(normalized_checkpoint.get("content_hash"))
+    normalized_name = _text(name) or f"Data Checkpoint {(checkpoint_hash or normalized_manifest_id)[:12]}"
+    normalized_description = (
+        str(description or "").strip() or f"Deterministic checkpoint for {resolved_scope_ref}"
+    )
+    try:
+        create_app_manifest(
+            conn,
+            manifest_id=normalized_manifest_id,
+            name=normalized_name,
+            description=normalized_description,
+            manifest=payload,
+            created_by=created_by,
+            intent_history=[f"data_checkpoint:{(checkpoint_hash or normalized_manifest_id)[:12]}"],
+            version=1,
+            status=normalized_status,
+        )
+        record_app_manifest_history(
+            conn,
+            manifest_id=normalized_manifest_id,
+            version=1,
+            manifest_snapshot=payload,
+            change_description="Created data checkpoint manifest",
+            changed_by=created_by,
+        )
+    except PostgresWriteError as exc:
+        _raise_storage_boundary(exc)
+    row = {
+        "id": normalized_manifest_id,
+        "name": normalized_name,
+        "description": normalized_description,
+        "version": 1,
+        "status": normalized_status,
+        "parent_manifest_id": None,
+        "manifest": payload,
+    }
+    return _adopt_control_manifest_head(
+        conn,
+        row=row,
+        changed_by=created_by,
+        change_description="Created data checkpoint manifest",
+    )
+
+
 def load_control_plane_manifest(
     conn: Any,
     *,
@@ -867,6 +991,20 @@ def extract_approval_payload(record_or_manifest: Any) -> dict[str, Any]:
     return payload
 
 
+def extract_checkpoint_payload(record_or_manifest: Any) -> dict[str, Any]:
+    if isinstance(record_or_manifest, dict) and isinstance(record_or_manifest.get("manifest"), dict):
+        manifest = _coerce_control_manifest(record_or_manifest["manifest"], expected_type=DATA_CHECKPOINT_MANIFEST_TYPE)
+    else:
+        manifest = _coerce_control_manifest(record_or_manifest, expected_type=DATA_CHECKPOINT_MANIFEST_TYPE)
+    checkpoint = manifest.get("checkpoint")
+    if not isinstance(checkpoint, dict):
+        raise ControlPlaneManifestBoundaryError(
+            "data checkpoint manifest must contain a checkpoint object",
+            reason_code="control_manifest.checkpoint_missing",
+        )
+    return _json_clone(checkpoint)
+
+
 def transition_control_manifest_status(
     conn: Any,
     *,
@@ -911,10 +1049,13 @@ __all__ = [
     "CONTROL_MANIFEST_SCHEMA_VERSION",
     "ControlPlaneManifestBoundaryError",
     "DATA_APPROVAL_MANIFEST_TYPE",
+    "DATA_CHECKPOINT_MANIFEST_TYPE",
     "DATA_PLAN_MANIFEST_TYPE",
     "create_data_approval_manifest",
+    "create_data_checkpoint_manifest",
     "create_data_plan_manifest",
     "extract_approval_payload",
+    "extract_checkpoint_payload",
     "extract_plan_payload",
     "list_control_manifest_heads",
     "list_control_manifest_history",

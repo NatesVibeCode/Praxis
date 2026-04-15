@@ -114,7 +114,7 @@ class CompiledSpec:
     timeout: int = 300
     max_tokens: int = 4096
     temperature: float = 0.0
-    provider_slug: str = field(default_factory=_default_provider_slug)
+    provider_slug: str | None = None
     model_slug: str | None = None
     adapter_type: str = field(default_factory=_default_llm_adapter)
     workspace_ref: str = _DEFAULT_WORKSPACE_REF

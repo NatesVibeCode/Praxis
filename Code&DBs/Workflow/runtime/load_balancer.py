@@ -59,6 +59,7 @@ from storage.postgres.provider_concurrency_repository import (
     DEFAULT_PROVIDER_COST_WEIGHT,
     PostgresProviderConcurrencyRepository,
 )
+from ._workflow_database import resolve_runtime_database_url
 
 _log = logging.getLogger(__name__)
 
@@ -101,7 +102,7 @@ class ProviderConcurrencyLimit:
 
 
 def _get_database_url() -> str | None:
-    return os.environ.get("WORKFLOW_DATABASE_URL")
+    return resolve_runtime_database_url(required=False)
 
 
 class ProviderConcurrencyRepository(Protocol):

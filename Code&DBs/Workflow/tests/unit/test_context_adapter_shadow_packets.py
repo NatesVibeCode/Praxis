@@ -255,6 +255,7 @@ def _registry() -> RegistryResolver:
                     runtime_profile_ref="runtime_profile.alpha",
                     model_profile_id="model_profile.alpha",
                     provider_policy_id="provider_policy.alpha",
+                    sandbox_profile_ref="runtime_profile.alpha",
                 )
             ],
         },

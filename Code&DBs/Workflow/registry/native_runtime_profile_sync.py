@@ -1,10 +1,9 @@
-"""Sync repo-native runtime profile authority into Postgres.
+"""Sync DB-native runtime profile authority into derived routing rows.
 
-The checked-in ``config/runtime_profiles.json`` file is the native authority
-front door for default runtime/workspace refs. This module projects those
-native refs into durable Postgres rows while sourcing live provider/model
-health from the heartbeat-owned routing tables instead of freezing ephemeral
-``model_profile.*`` / ``provider_policy.*`` ids in config.
+Postgres is the canonical authority for repo-local native runtime defaults and
+profile metadata. This module reads the DB-native authority rows, then projects
+derived provider/model routing state from live provider catalogs and heartbeat
+tables without mutating the authority rows on read.
 """
 
 from __future__ import annotations
@@ -18,8 +17,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from adapters.provider_registry import default_llm_adapter_type, get_profile, supports_adapter
+from storage.postgres import PostgresConfigurationError, ensure_postgres_available
 
-from .domain import RuntimeProfileAuthorityRecord, WorkspaceAuthorityRecord
+from .domain import (
+    RuntimeProfileAuthorityRecord,
+    SandboxProfileAuthorityRecord,
+    WorkspaceAuthorityRecord,
+)
 
 if TYPE_CHECKING:
     import asyncpg
@@ -30,10 +34,14 @@ class NativeRuntimeProfileSyncError(RuntimeError):
     """Raised when repo-local runtime profiles cannot be synced safely."""
 
 
+_DEFAULT_NATIVE_AUTHORITY_KEY = "default"
+
+
 @dataclass(frozen=True, slots=True)
 class NativeRuntimeProfileConfig:
     runtime_profile_ref: str
     workspace_ref: str
+    sandbox_profile_ref: str
     model_profile_id: str
     provider_policy_id: str
     provider_name: str
@@ -41,6 +49,9 @@ class NativeRuntimeProfileConfig:
     allowed_models: tuple[str, ...]
     repo_root: str
     workdir: str
+    instance_name: str
+    receipts_dir: str
+    topology_dir: str
 
     def workspace_record(self) -> WorkspaceAuthorityRecord:
         return WorkspaceAuthorityRecord(
@@ -54,6 +65,35 @@ class NativeRuntimeProfileConfig:
             runtime_profile_ref=self.runtime_profile_ref,
             model_profile_id=self.model_profile_id,
             provider_policy_id=self.provider_policy_id,
+            sandbox_profile_ref=self.sandbox_profile_ref,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class NativeSandboxProfileConfig:
+    sandbox_profile_ref: str
+    sandbox_provider: str
+    docker_image: str | None
+    docker_cpus: str | None
+    docker_memory: str | None
+    network_policy: str
+    workspace_materialization: str
+    secret_allowlist: tuple[str, ...]
+    auth_mount_policy: str
+    timeout_profile: str
+
+    def authority_record(self) -> SandboxProfileAuthorityRecord:
+        return SandboxProfileAuthorityRecord(
+            sandbox_profile_ref=self.sandbox_profile_ref,
+            sandbox_provider=self.sandbox_provider,
+            docker_image=self.docker_image,
+            docker_cpus=self.docker_cpus,
+            docker_memory=self.docker_memory,
+            network_policy=self.network_policy,
+            workspace_materialization=self.workspace_materialization,
+            secret_allowlist=self.secret_allowlist,
+            auth_mount_policy=self.auth_mount_policy,
+            timeout_profile=self.timeout_profile,
         )
 
 
@@ -153,10 +193,6 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
-def _config_path() -> Path:
-    return _repo_root() / "config" / "runtime_profiles.json"
-
-
 def _require_text(value: object, *, field_name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise NativeRuntimeProfileSyncError(f"{field_name} must be a non-empty string")
@@ -172,6 +208,22 @@ def _require_string_list(value: object, *, field_name: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(normalized))
 
 
+def _optional_string_list(value: object) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise NativeRuntimeProfileSyncError("secret_allowlist must be an array when present")
+    normalized: list[str] = []
+    for index, raw in enumerate(value):
+        normalized.append(_require_text(raw, field_name=f"secret_allowlist[{index}]"))
+    return tuple(dict.fromkeys(normalized))
+
+
+def _optional_text(value: object) -> str | None:
+    text = str(value or "").strip()
+    return text or None
+
+
 def _resolve_repo_path(raw_value: object, *, field_name: str) -> str:
     raw_text = _require_text(raw_value, field_name=field_name)
     candidate = Path(raw_text)
@@ -180,117 +232,357 @@ def _resolve_repo_path(raw_value: object, *, field_name: str) -> str:
     return str(candidate)
 
 
-def _load_runtime_profiles_document() -> dict[str, Any]:
-    path = _config_path()
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except OSError as exc:
-        raise NativeRuntimeProfileSyncError(
-            f"failed to read native runtime profile config: {path}",
-        ) from exc
-    except json.JSONDecodeError as exc:
-        raise NativeRuntimeProfileSyncError(
-            f"runtime profile config is not valid JSON: {path} ({exc.lineno}:{exc.colno})",
-        ) from exc
-    if not isinstance(payload, dict):
-        raise NativeRuntimeProfileSyncError("runtime profile config must be a JSON object")
-    return payload
+def _resolve_repo_relative_path(
+    raw_value: object,
+    *,
+    field_name: str,
+    base: Path,
+) -> str:
+    raw_text = _require_text(raw_value, field_name=field_name)
+    candidate = Path(raw_text).expanduser()
+    if not candidate.is_absolute():
+        candidate = (base / candidate).resolve()
+    return str(candidate)
 
 
-def load_native_runtime_profile_configs() -> tuple[NativeRuntimeProfileConfig, ...]:
-    payload = _load_runtime_profiles_document()
-    runtime_profiles = payload.get("runtime_profiles")
-    if not isinstance(runtime_profiles, dict) or not runtime_profiles:
-        raise NativeRuntimeProfileSyncError("runtime_profiles config must define at least one profile")
-
-    configs: list[NativeRuntimeProfileConfig] = []
-    for runtime_profile_ref, profile in runtime_profiles.items():
-        if not isinstance(profile, dict):
+def _json_text_array(value: object, *, field_name: str) -> tuple[str, ...]:
+    parsed = value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError as exc:
             raise NativeRuntimeProfileSyncError(
-                f"runtime_profiles.{runtime_profile_ref} must be a JSON object",
-            )
-        primary_provider_name = _require_text(
-            profile.get("provider_name"),
-            field_name=f"{runtime_profile_ref}.provider_name",
+                f"{field_name} must decode to a JSON array",
+            ) from exc
+    if not isinstance(parsed, list):
+        raise NativeRuntimeProfileSyncError(f"{field_name} must be a JSON array")
+    normalized: list[str] = []
+    for index, raw in enumerate(parsed):
+        normalized.append(_require_text(raw, field_name=f"{field_name}[{index}]"))
+    if not normalized:
+        raise NativeRuntimeProfileSyncError(f"{field_name} must contain at least one entry")
+    return tuple(dict.fromkeys(normalized))
+
+
+def _default_sync_conn():
+    try:
+        return ensure_postgres_available()
+    except PostgresConfigurationError as exc:
+        raise NativeRuntimeProfileSyncError(
+            f"native runtime authority unavailable: {exc.reason_code}",
+        ) from exc
+
+
+def _default_sandbox_profile_ref(runtime_profile_ref: str) -> str:
+    return f"sandbox_profile.{runtime_profile_ref}.default"
+
+
+def _fetch_native_sandbox_rows_sync(
+    conn: "SyncPostgresConnection",
+) -> list[object]:
+    return conn.execute(
+        """
+        SELECT DISTINCT
+               sandbox.sandbox_profile_ref,
+               sandbox.sandbox_provider,
+               sandbox.docker_image,
+               sandbox.docker_cpus,
+               sandbox.docker_memory,
+               sandbox.network_policy,
+               sandbox.workspace_materialization,
+               sandbox.secret_allowlist,
+               sandbox.auth_mount_policy,
+               sandbox.timeout_profile
+        FROM registry_native_runtime_profile_authority native
+        JOIN registry_runtime_profile_authority runtime
+          ON runtime.runtime_profile_ref = native.runtime_profile_ref
+        JOIN registry_sandbox_profile_authority sandbox
+          ON sandbox.sandbox_profile_ref = runtime.sandbox_profile_ref
+        ORDER BY sandbox.sandbox_profile_ref
+        """
+    )
+
+
+async def _fetch_native_sandbox_rows_async(
+    conn: "asyncpg.Connection",
+) -> list[object]:
+    return await conn.fetch(
+        """
+        SELECT DISTINCT
+               sandbox.sandbox_profile_ref,
+               sandbox.sandbox_provider,
+               sandbox.docker_image,
+               sandbox.docker_cpus,
+               sandbox.docker_memory,
+               sandbox.network_policy,
+               sandbox.workspace_materialization,
+               sandbox.secret_allowlist,
+               sandbox.auth_mount_policy,
+               sandbox.timeout_profile
+        FROM registry_native_runtime_profile_authority native
+        JOIN registry_runtime_profile_authority runtime
+          ON runtime.runtime_profile_ref = native.runtime_profile_ref
+        JOIN registry_sandbox_profile_authority sandbox
+          ON sandbox.sandbox_profile_ref = runtime.sandbox_profile_ref
+        ORDER BY sandbox.sandbox_profile_ref
+        """
+    )
+
+
+def _sandbox_configs_from_rows(rows: list[object]) -> tuple[NativeSandboxProfileConfig, ...]:
+    if not rows:
+        raise NativeRuntimeProfileSyncError(
+            "registry_sandbox_profile_authority must define at least one native sandbox profile",
         )
-        raw_provider_names = profile.get("provider_names")
-        provider_names = (
-            _require_string_list(
-                raw_provider_names,
-                field_name=f"{runtime_profile_ref}.provider_names",
-            )
-            if raw_provider_names is not None
-            else (primary_provider_name,)
-        )
-        if primary_provider_name not in provider_names:
-            provider_names = (primary_provider_name, *provider_names)
+    configs: list[NativeSandboxProfileConfig] = []
+    for row in rows:
         configs.append(
-            NativeRuntimeProfileConfig(
-                runtime_profile_ref=_require_text(
-                    runtime_profile_ref,
-                    field_name="runtime_profile_ref",
+            NativeSandboxProfileConfig(
+                sandbox_profile_ref=_require_text(
+                    row["sandbox_profile_ref"],
+                    field_name="sandbox_profile_ref",
                 ),
-                workspace_ref=_require_text(
-                    profile.get("workspace_ref", runtime_profile_ref),
-                    field_name=f"{runtime_profile_ref}.workspace_ref",
+                sandbox_provider=_require_text(
+                    row["sandbox_provider"],
+                    field_name="sandbox_provider",
                 ),
-                model_profile_id=_require_text(
-                    profile.get("model_profile_id"),
-                    field_name=f"{runtime_profile_ref}.model_profile_id",
+                docker_image=_optional_text(row.get("docker_image")),
+                docker_cpus=_optional_text(row.get("docker_cpus")),
+                docker_memory=_optional_text(row.get("docker_memory")),
+                network_policy=_require_text(
+                    row["network_policy"],
+                    field_name="network_policy",
                 ),
-                provider_policy_id=_require_text(
-                    profile.get("provider_policy_id"),
-                    field_name=f"{runtime_profile_ref}.provider_policy_id",
+                workspace_materialization=_require_text(
+                    row["workspace_materialization"],
+                    field_name="workspace_materialization",
                 ),
-                provider_name=primary_provider_name,
-                provider_names=provider_names,
-                allowed_models=_require_string_list(
-                    profile.get("allowed_models"),
-                    field_name=f"{runtime_profile_ref}.allowed_models",
+                secret_allowlist=_optional_string_list(row.get("secret_allowlist")),
+                auth_mount_policy=_require_text(
+                    row["auth_mount_policy"],
+                    field_name="auth_mount_policy",
                 ),
-                repo_root=_resolve_repo_path(
-                    profile.get("repo_root", "."),
-                    field_name=f"{runtime_profile_ref}.repo_root",
-                ),
-                workdir=_resolve_repo_path(
-                    profile.get("workdir", "."),
-                    field_name=f"{runtime_profile_ref}.workdir",
+                timeout_profile=_require_text(
+                    row["timeout_profile"],
+                    field_name="timeout_profile",
                 ),
             )
         )
     return tuple(configs)
 
 
-def default_native_runtime_profile_ref() -> str:
-    payload = _load_runtime_profiles_document()
-    return _require_text(
-        payload.get("default_runtime_profile"),
-        field_name="default_runtime_profile",
+def load_native_sandbox_profile_configs(
+    conn: "SyncPostgresConnection | None" = None,
+) -> tuple[NativeSandboxProfileConfig, ...]:
+    target_conn = conn or _default_sync_conn()
+    return _sandbox_configs_from_rows(_fetch_native_sandbox_rows_sync(target_conn))
+
+
+def _fetch_native_runtime_profile_rows_sync(
+    conn: "SyncPostgresConnection",
+) -> list[object]:
+    return conn.execute(
+        """
+        SELECT native.runtime_profile_ref,
+               native.workspace_ref,
+               native.instance_name,
+               native.provider_name,
+               native.provider_names,
+               native.allowed_models,
+               native.receipts_dir,
+               native.topology_dir,
+               workspace.repo_root,
+               workspace.workdir,
+               runtime.model_profile_id,
+               runtime.provider_policy_id,
+               runtime.sandbox_profile_ref
+        FROM registry_native_runtime_profile_authority native
+        JOIN registry_workspace_authority workspace
+          ON workspace.workspace_ref = native.workspace_ref
+        JOIN registry_runtime_profile_authority runtime
+          ON runtime.runtime_profile_ref = native.runtime_profile_ref
+        ORDER BY native.runtime_profile_ref
+        """
     )
+
+
+async def _fetch_native_runtime_profile_rows_async(
+    conn: "asyncpg.Connection",
+) -> list[object]:
+    return await conn.fetch(
+        """
+        SELECT native.runtime_profile_ref,
+               native.workspace_ref,
+               native.instance_name,
+               native.provider_name,
+               native.provider_names,
+               native.allowed_models,
+               native.receipts_dir,
+               native.topology_dir,
+               workspace.repo_root,
+               workspace.workdir,
+               runtime.model_profile_id,
+               runtime.provider_policy_id,
+               runtime.sandbox_profile_ref
+        FROM registry_native_runtime_profile_authority native
+        JOIN registry_workspace_authority workspace
+          ON workspace.workspace_ref = native.workspace_ref
+        JOIN registry_runtime_profile_authority runtime
+          ON runtime.runtime_profile_ref = native.runtime_profile_ref
+        ORDER BY native.runtime_profile_ref
+        """
+    )
+
+
+def _native_runtime_configs_from_rows(rows: list[object]) -> tuple[NativeRuntimeProfileConfig, ...]:
+    if not rows:
+        raise NativeRuntimeProfileSyncError(
+            "registry_native_runtime_profile_authority must define at least one native runtime profile",
+        )
+    local_repo_root = _repo_root()
+    configs: list[NativeRuntimeProfileConfig] = []
+    for row in rows:
+        runtime_profile_ref = _require_text(
+            row["runtime_profile_ref"],
+            field_name="runtime_profile_ref",
+        )
+        primary_provider_name = _require_text(
+            row["provider_name"],
+            field_name=f"{runtime_profile_ref}.provider_name",
+        )
+        provider_names = _json_text_array(
+            row["provider_names"],
+            field_name=f"{runtime_profile_ref}.provider_names",
+        )
+        if primary_provider_name not in provider_names:
+            provider_names = (primary_provider_name, *provider_names)
+        repo_root = _resolve_repo_relative_path(
+            row["repo_root"],
+            field_name=f"{runtime_profile_ref}.repo_root",
+            base=local_repo_root,
+        )
+        workdir = _resolve_repo_relative_path(
+            row["workdir"],
+            field_name=f"{runtime_profile_ref}.workdir",
+            base=Path(repo_root),
+        )
+        configs.append(
+            NativeRuntimeProfileConfig(
+                runtime_profile_ref=runtime_profile_ref,
+                workspace_ref=_require_text(
+                    row["workspace_ref"],
+                    field_name=f"{runtime_profile_ref}.workspace_ref",
+                ),
+                sandbox_profile_ref=_require_text(
+                    row["sandbox_profile_ref"],
+                    field_name=f"{runtime_profile_ref}.sandbox_profile_ref",
+                ),
+                model_profile_id=_require_text(
+                    row["model_profile_id"],
+                    field_name=f"{runtime_profile_ref}.model_profile_id",
+                ),
+                provider_policy_id=_require_text(
+                    row["provider_policy_id"],
+                    field_name=f"{runtime_profile_ref}.provider_policy_id",
+                ),
+                provider_name=primary_provider_name,
+                provider_names=provider_names,
+                allowed_models=_json_text_array(
+                    row["allowed_models"],
+                    field_name=f"{runtime_profile_ref}.allowed_models",
+                ),
+                repo_root=repo_root,
+                workdir=workdir,
+                instance_name=_require_text(
+                    row["instance_name"],
+                    field_name=f"{runtime_profile_ref}.instance_name",
+                ),
+                receipts_dir=_resolve_repo_relative_path(
+                    row["receipts_dir"],
+                    field_name=f"{runtime_profile_ref}.receipts_dir",
+                    base=Path(repo_root),
+                ),
+                topology_dir=_resolve_repo_relative_path(
+                    row["topology_dir"],
+                    field_name=f"{runtime_profile_ref}.topology_dir",
+                    base=Path(repo_root),
+                ),
+            )
+        )
+    return tuple(configs)
+
+
+def load_native_runtime_profile_configs(
+    conn: "SyncPostgresConnection | None" = None,
+) -> tuple[NativeRuntimeProfileConfig, ...]:
+    target_conn = conn or _default_sync_conn()
+    return _native_runtime_configs_from_rows(
+        _fetch_native_runtime_profile_rows_sync(target_conn),
+    )
+
+
+def default_native_runtime_profile_ref(
+    conn: "SyncPostgresConnection | None" = None,
+) -> str:
+    target_conn = conn or _default_sync_conn()
+    rows = target_conn.execute(
+        """
+        SELECT runtime_profile_ref
+        FROM registry_native_runtime_defaults
+        WHERE authority_key = $1
+        LIMIT 1
+        """,
+        _DEFAULT_NATIVE_AUTHORITY_KEY,
+    )
+    if not rows:
+        raise NativeRuntimeProfileSyncError(
+            "registry_native_runtime_defaults does not declare a default runtime profile",
+        )
+    return _require_text(rows[0]["runtime_profile_ref"], field_name="default_runtime_profile")
 
 
 def resolve_native_runtime_profile_config(
     runtime_profile_ref: str | None = None,
+    conn: "SyncPostgresConnection | None" = None,
 ) -> NativeRuntimeProfileConfig:
-    target_ref = runtime_profile_ref or default_native_runtime_profile_ref()
-    for config in load_native_runtime_profile_configs():
+    target_conn = conn or _default_sync_conn()
+    target_ref = runtime_profile_ref or default_native_runtime_profile_ref(target_conn)
+    for config in load_native_runtime_profile_configs(target_conn):
         if config.runtime_profile_ref == target_ref:
             return config
     raise NativeRuntimeProfileSyncError(
-        f"runtime profile {target_ref!r} is not defined in { _config_path() }",
+        f"registry_native_runtime_profile_authority does not define runtime profile {target_ref!r}",
     )
 
 
-def default_native_workspace_ref() -> str:
-    return resolve_native_runtime_profile_config().workspace_ref
+def default_native_workspace_ref(
+    conn: "SyncPostgresConnection | None" = None,
+) -> str:
+    return resolve_native_runtime_profile_config(conn=conn).workspace_ref
 
 
-def is_native_runtime_profile_ref(runtime_profile_ref: str) -> bool:
+def is_native_runtime_profile_ref(
+    runtime_profile_ref: str,
+    conn: "SyncPostgresConnection | None" = None,
+) -> bool:
     try:
-        resolve_native_runtime_profile_config(runtime_profile_ref)
+        normalized_ref = _require_text(
+            runtime_profile_ref,
+            field_name="runtime_profile_ref",
+        )
     except NativeRuntimeProfileSyncError:
         return False
-    return True
+    target_conn = conn or _default_sync_conn()
+    rows = target_conn.execute(
+        """
+        SELECT 1
+        FROM registry_native_runtime_profile_authority
+        WHERE runtime_profile_ref = $1
+        LIMIT 1
+        """,
+        normalized_ref,
+    )
+    return bool(rows)
 
 
 def _slug_token(value: str) -> str:
@@ -1199,9 +1491,8 @@ def sync_native_runtime_profile_authority(
     *,
     prune: bool = False,
 ) -> tuple[str, ...]:
-    configs = load_native_runtime_profile_configs()
+    configs = load_native_runtime_profile_configs(conn)
     for config in configs:
-        _upsert_workspace_authority_sync(conn, config)
         candidates = _live_candidates_sync(conn, config)
         _upsert_profile_authority_rows_sync(conn, config, candidates)
         budget = _latest_budget_window_sync(conn, config, candidates=candidates)
@@ -1209,36 +1500,9 @@ def sync_native_runtime_profile_authority(
         _sync_candidate_bindings_sync(conn, config, candidates)
         _sync_budget_window_sync(conn, config, budget)
         _sync_route_states_sync(conn, config, candidates, live_states)
-        record = config.runtime_profile_record()
-        conn.execute(
-            """
-            INSERT INTO registry_runtime_profile_authority (
-                runtime_profile_ref,
-                model_profile_id,
-                provider_policy_id,
-                recorded_at
-            ) VALUES ($1, $2, $3, now())
-            ON CONFLICT (runtime_profile_ref) DO UPDATE
-            SET model_profile_id = EXCLUDED.model_profile_id,
-                provider_policy_id = EXCLUDED.provider_policy_id,
-                recorded_at = now()
-            """,
-            record.runtime_profile_ref,
-            record.model_profile_id,
-            record.provider_policy_id,
-        )
 
     refs = [config.runtime_profile_ref for config in configs]
-    if prune:
-        conn.execute(
-            """
-            DELETE FROM registry_runtime_profile_authority
-            WHERE runtime_profile_ref = ANY($1::text[])
-              AND NOT (runtime_profile_ref = ANY($2::text[]))
-            """,
-            refs,
-            refs,
-        )
+    del prune
     return tuple(refs)
 
 
@@ -1247,9 +1511,10 @@ async def sync_native_runtime_profile_authority_async(
     *,
     prune: bool = False,
 ) -> tuple[str, ...]:
-    configs = load_native_runtime_profile_configs()
+    configs = _native_runtime_configs_from_rows(
+        await _fetch_native_runtime_profile_rows_async(conn),
+    )
     for config in configs:
-        await _upsert_workspace_authority_async(conn, config)
         candidates = await _live_candidates_async(conn, config)
         await _upsert_profile_authority_rows_async(conn, config, candidates)
         budget = await _latest_budget_window_async(conn, config, candidates=candidates)
@@ -1257,45 +1522,20 @@ async def sync_native_runtime_profile_authority_async(
         await _sync_candidate_bindings_async(conn, config, candidates)
         await _sync_budget_window_async(conn, config, budget)
         await _sync_route_states_async(conn, config, candidates, live_states)
-        record = config.runtime_profile_record()
-        await conn.execute(
-            """
-            INSERT INTO registry_runtime_profile_authority (
-                runtime_profile_ref,
-                model_profile_id,
-                provider_policy_id,
-                recorded_at
-            ) VALUES ($1, $2, $3, now())
-            ON CONFLICT (runtime_profile_ref) DO UPDATE
-            SET model_profile_id = EXCLUDED.model_profile_id,
-                provider_policy_id = EXCLUDED.provider_policy_id,
-                recorded_at = now()
-            """,
-            record.runtime_profile_ref,
-            record.model_profile_id,
-            record.provider_policy_id,
-        )
 
     refs = [config.runtime_profile_ref for config in configs]
-    if prune:
-        await conn.execute(
-            """
-            DELETE FROM registry_runtime_profile_authority
-            WHERE runtime_profile_ref = ANY($1::text[])
-              AND NOT (runtime_profile_ref = ANY($2::text[]))
-            """,
-            refs,
-            refs,
-        )
+    del prune
     return tuple(refs)
 
 
 __all__ = [
     "NativeRuntimeProfileConfig",
+    "NativeSandboxProfileConfig",
     "NativeRuntimeProfileSyncError",
     "default_native_runtime_profile_ref",
     "default_native_workspace_ref",
     "is_native_runtime_profile_ref",
+    "load_native_sandbox_profile_configs",
     "load_native_runtime_profile_configs",
     "resolve_native_runtime_profile_config",
     "sync_native_runtime_profile_authority",

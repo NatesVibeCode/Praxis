@@ -130,6 +130,14 @@ def _build_execution_env(
     }
     policy = getattr(agent_config, "sandbox_policy", None)
     secret_allowlist = tuple(getattr(policy, "secret_allowlist", ()) or ())
+    bundle_sandbox_profile = _sandbox_profile_from_bundle(execution_bundle)
+    if isinstance(bundle_sandbox_profile, dict):
+        bundle_allowlist = bundle_sandbox_profile.get("secret_allowlist")
+        if isinstance(bundle_allowlist, list):
+            secret_allowlist = tuple(
+                list(secret_allowlist)
+                + [str(name).strip() for name in bundle_allowlist if str(name).strip()]
+            )
     export_names.update(str(name).strip() for name in secret_allowlist if str(name).strip())
     for key_name in sorted(export_names):
         _load_env_secret_from_keychain(env, key_name)
@@ -175,12 +183,59 @@ def _build_execution_env(
     return sandbox_env
 
 
-def _sandbox_policy_value(agent_config, field_name: str, default: str) -> str:
+def _sandbox_profile_from_bundle(
+    execution_bundle: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not isinstance(execution_bundle, dict):
+        return None
+    value = execution_bundle.get("sandbox_profile")
+    return dict(value) if isinstance(value, dict) else None
+
+
+def _sandbox_provider_for_execution(
+    agent_config,
+    execution_bundle: dict[str, Any] | None,
+) -> str:
+    bundle_profile = _sandbox_profile_from_bundle(execution_bundle)
+    if isinstance(bundle_profile, dict):
+        explicit = str(bundle_profile.get("sandbox_provider") or "").strip()
+        if explicit:
+            return explicit
+    return resolve_execution_transport(agent_config).sandbox_provider
+
+
+def _sandbox_policy_value(
+    agent_config,
+    field_name: str,
+    default: str,
+    *,
+    execution_bundle: dict[str, Any] | None = None,
+) -> str:
+    bundle_profile = _sandbox_profile_from_bundle(execution_bundle)
+    if isinstance(bundle_profile, dict):
+        value = str(bundle_profile.get(field_name) or "").strip()
+        if value:
+            return value
     policy = getattr(agent_config, "sandbox_policy", None)
     if policy is None:
         return default
     value = getattr(policy, field_name, default)
     return str(value or default).strip() or default
+
+
+def _sandbox_image(
+    agent_config,
+    *,
+    execution_bundle: dict[str, Any] | None,
+) -> str | None:
+    bundle_profile = _sandbox_profile_from_bundle(execution_bundle)
+    if isinstance(bundle_profile, dict):
+        explicit = str(bundle_profile.get("docker_image") or "").strip()
+        if explicit:
+            return explicit
+    image = getattr(agent_config, "docker_image", None)
+    normalized = str(image or "").strip()
+    return normalized or None
 
 
 def _parse_llm_output(stdout: str) -> tuple[str, dict[str, Any]]:
@@ -378,21 +433,29 @@ def execute_cli(
         provider_slug=provider_slug,
         command_parts=cmd,
         execution_bundle=execution_bundle,
-        prefer_docker=resolve_execution_transport(agent_config).sandbox_provider == "docker_local",
+        prefer_docker=_sandbox_provider_for_execution(agent_config, execution_bundle) == "docker_local",
     )
     timeout = int(getattr(agent_config, "timeout_seconds", 900) or 900)
-    contract = resolve_execution_transport(agent_config)
     network_policy = _sandbox_policy_value(
         agent_config,
         "network_policy",
         "provider_only"
         if _env_flag_enabled(_WORKFLOW_MODEL_NETWORK_ENV, default=True)
         else "disabled",
+        execution_bundle=execution_bundle,
     )
     workspace_materialization = _sandbox_policy_value(
         agent_config,
         "workspace_materialization",
         "copy",
+        execution_bundle=execution_bundle,
+    )
+    sandbox_provider = _sandbox_provider_for_execution(agent_config, execution_bundle)
+    sandbox_profile = _sandbox_profile_from_bundle(execution_bundle)
+    sandbox_profile_ref = (
+        str((sandbox_profile or {}).get("sandbox_profile_ref") or "").strip()
+        if isinstance(sandbox_profile, dict)
+        else ""
     )
     sandbox_session_id, sandbox_group_id = derive_sandbox_identity(
         workdir=workdir,
@@ -405,12 +468,15 @@ def execute_cli(
             "stdin_text": stdin_text,
             "network_policy": network_policy,
             "workspace_materialization": workspace_materialization,
+            "sandbox_provider": sandbox_provider,
+            "sandbox_profile_ref": sandbox_profile_ref,
+            "docker_image": _sandbox_image(agent_config, execution_bundle=execution_bundle),
         },
     )
 
     try:
         result = SandboxRuntime().execute_command(
-            provider_name=contract.sandbox_provider,
+            provider_name=sandbox_provider,
             sandbox_session_id=sandbox_session_id,
             sandbox_group_id=sandbox_group_id,
             workdir=workdir,
@@ -421,8 +487,12 @@ def execute_cli(
             network_policy=network_policy,
             workspace_materialization=workspace_materialization,
             execution_transport="cli",
-            image=getattr(agent_config, "docker_image", None),
-            metadata={"provider_slug": provider_slug, "execution_bundle": execution_bundle or {}},
+            image=_sandbox_image(agent_config, execution_bundle=execution_bundle),
+            metadata={
+                "provider_slug": provider_slug,
+                "execution_bundle": execution_bundle or {},
+                **(dict(sandbox_profile or {}) if isinstance(sandbox_profile, dict) else {}),
+            },
             artifact_store=artifact_store,
         )
     except RuntimeError as exc:
@@ -442,7 +512,15 @@ def execute_cli(
             "error_code": "setup_failure",
         }
 
-    return _result_payload(result, timeout=timeout, parse_json_output=True)
+    payload = _result_payload(result, timeout=timeout, parse_json_output=True)
+    if sandbox_profile_ref:
+        payload["sandbox_profile_ref"] = sandbox_profile_ref
+    if isinstance(sandbox_profile, dict):
+        payload["workspace_materialization"] = workspace_materialization
+        docker_image = _sandbox_image(agent_config, execution_bundle=execution_bundle)
+        if docker_image:
+            payload["docker_image"] = docker_image
+    return payload
 
 
 def execute_api(
@@ -484,11 +562,24 @@ def execute_api(
     _reasoning_flag = (
         f"--reasoning-effort {shlex.quote(reasoning_effort)}" if reasoning_effort else ""
     )
-    network_policy = _sandbox_policy_value(agent_config, "network_policy", "provider_only")
+    network_policy = _sandbox_policy_value(
+        agent_config,
+        "network_policy",
+        "provider_only",
+        execution_bundle=execution_bundle,
+    )
     workspace_materialization = _sandbox_policy_value(
         agent_config,
         "workspace_materialization",
         "copy",
+        execution_bundle=execution_bundle,
+    )
+    sandbox_provider = _sandbox_provider_for_execution(agent_config, execution_bundle)
+    sandbox_profile = _sandbox_profile_from_bundle(execution_bundle)
+    sandbox_profile_ref = (
+        str((sandbox_profile or {}).get("sandbox_profile_ref") or "").strip()
+        if isinstance(sandbox_profile, dict)
+        else ""
     )
     command = (
         "python3 -m runtime.api_transport_worker "
@@ -513,11 +604,14 @@ def execute_api(
             "workspace_materialization": workspace_materialization,
             "max_output_tokens": max_output_tokens,
             "reasoning_effort": reasoning_effort,
+            "sandbox_provider": sandbox_provider,
+            "sandbox_profile_ref": sandbox_profile_ref,
+            "docker_image": _sandbox_image(agent_config, execution_bundle=execution_bundle),
         },
     )
     try:
         result = SandboxRuntime().execute_command(
-            provider_name=contract.sandbox_provider,
+            provider_name=sandbox_provider,
             sandbox_session_id=sandbox_session_id,
             sandbox_group_id=sandbox_group_id,
             workdir=resolved_workdir,
@@ -528,10 +622,12 @@ def execute_api(
             network_policy=network_policy,
             workspace_materialization=workspace_materialization,
             execution_transport="api",
+            image=_sandbox_image(agent_config, execution_bundle=execution_bundle),
             metadata={
                 "provider_slug": provider_slug,
                 "model_slug": model_slug,
                 "execution_bundle": execution_bundle or {},
+                **(dict(sandbox_profile or {}) if isinstance(sandbox_profile, dict) else {}),
             },
             artifact_store=artifact_store,
         )
@@ -553,6 +649,13 @@ def execute_api(
         }
 
     payload = _result_payload(result, timeout=timeout, parse_json_output=True)
+    if sandbox_profile_ref:
+        payload["sandbox_profile_ref"] = sandbox_profile_ref
+    if isinstance(sandbox_profile, dict):
+        payload["workspace_materialization"] = workspace_materialization
+        docker_image = _sandbox_image(agent_config, execution_bundle=execution_bundle)
+        if docker_image:
+            payload["docker_image"] = docker_image
     if payload["status"] == "failed" and not payload["error_code"] and not payload["stdout"]:
         payload["error_code"] = "api_transport_failed"
     return payload

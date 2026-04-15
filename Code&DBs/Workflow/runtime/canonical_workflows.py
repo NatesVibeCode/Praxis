@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import hashlib
 import os
 from pathlib import Path
 import tempfile
@@ -23,6 +22,13 @@ from storage.postgres.workflow_runtime_repository import (
     upsert_workflow_trigger_record,
 )
 from runtime.edge_release import edge_gate_entry_from_edge
+from runtime.build_authority import recompute_definition_revision
+from runtime.build_review_decisions import (
+    build_review_decision_undo_receipt,
+    materialize_reviewed_build_definition,
+    record_build_review_decision,
+    scrub_review_state_for_persistence,
+)
 
 
 class WorkflowRuntimeBoundaryError(RuntimeError):
@@ -55,24 +61,13 @@ _TRIGGER_MANUAL_ROUTE = "trigger"
 _TRIGGER_SCHEDULE_ROUTE = "trigger/schedule"
 _TRIGGER_WEBHOOK_ROUTE = "trigger/webhook"
 _WEBHOOK_TRIGGER_EVENT_TYPE = "db.webhook_events.insert"
-
-
-def _build_graph_definition_revision(build_graph: dict[str, Any]) -> str:
-    explicit_revision = _text(build_graph.get("definition_revision"))
-    if explicit_revision:
-        return explicit_revision
-    fingerprint = hashlib.sha1(
-        json.dumps(
-            {
-                "nodes": build_graph.get("nodes") if isinstance(build_graph.get("nodes"), list) else [],
-                "edges": build_graph.get("edges") if isinstance(build_graph.get("edges"), list) else [],
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-            default=str,
-        ).encode("utf-8")
-    ).hexdigest()
-    return f"def_graph_{fingerprint[:12]}"
+_BUILD_REVIEW_DECISIONS = {"approve", "reject", "defer", "widen", "revoke"}
+_BUILD_REVIEW_TARGET_KINDS = {
+    "binding",
+    "import_snapshot",
+    "capability_bundle",
+    "workflow_shape",
+}
 
 
 def _is_trigger_route(route: str) -> bool:
@@ -81,6 +76,39 @@ def _is_trigger_route(route: str) -> bool:
         _TRIGGER_MANUAL_ROUTE,
         _TRIGGER_SCHEDULE_ROUTE,
         _TRIGGER_WEBHOOK_ROUTE,
+    }
+
+
+def _normalize_build_review_decision_body(body: dict[str, Any]) -> dict[str, Any]:
+    target_kind = _text(body.get("target_kind"))
+    target_ref = _text(body.get("target_ref"))
+    decision = _text(body.get("decision")).lower()
+    if target_kind not in _BUILD_REVIEW_TARGET_KINDS:
+        raise WorkflowRuntimeBoundaryError("target_kind must be a supported build review target")
+    if not target_ref:
+        raise WorkflowRuntimeBoundaryError("target_ref is required")
+    if decision not in _BUILD_REVIEW_DECISIONS:
+        raise WorkflowRuntimeBoundaryError("decision must be approve, reject, defer, widen, or revoke")
+
+    candidate_payload = (
+        _json_clone(body.get("candidate_payload"))
+        if isinstance(body.get("candidate_payload"), dict)
+        else None
+    )
+    candidate_ref = _text(body.get("candidate_ref"))
+    if not candidate_ref and isinstance(candidate_payload, dict):
+        candidate_ref = _text(candidate_payload.get("target_ref"))
+    if decision == "approve" and target_kind in {"binding", "import_snapshot"}:
+        if candidate_payload is None and not candidate_ref:
+            raise WorkflowRuntimeBoundaryError(
+                "candidate_payload or candidate_ref is required for approve decisions"
+            )
+    return {
+        "target_kind": target_kind,
+        "target_ref": target_ref,
+        "decision": decision,
+        "candidate_ref": candidate_ref or None,
+        "candidate_payload": candidate_payload,
     }
 
 
@@ -151,11 +179,6 @@ def materialize_definition_from_build_graph(
     build_graph: dict[str, Any],
 ) -> dict[str, Any]:
     base_definition = _json_clone(definition) if isinstance(definition, dict) else {}
-    base_definition["definition_revision"] = (
-        _text(build_graph.get("definition_revision"))
-        or _text(base_definition.get("definition_revision"))
-        or _build_graph_definition_revision(build_graph)
-    )
     nodes = build_graph.get("nodes") if isinstance(build_graph.get("nodes"), list) else []
     edges = build_graph.get("edges") if isinstance(build_graph.get("edges"), list) else []
     node_routes = {
@@ -253,7 +276,7 @@ def materialize_definition_from_build_graph(
         if gate_entry is not None:
             edge_gates.append(gate_entry)
     base_definition["execution_setup"]["edge_gates"] = edge_gates
-    return base_definition
+    return recompute_definition_revision(base_definition)
 
 
 def commit_workflow(
@@ -506,26 +529,26 @@ def mutate_workflow_build(
     body: dict[str, Any],
 ) -> dict[str, Any]:
     from runtime.build_authority import (
-        admit_import_snapshot,
         attach_authority,
         build_mutation_undo_receipt,
         restore_attachment,
         restore_binding,
         restore_import_snapshot,
         stage_import_snapshot,
-        upsert_binding,
     )
 
     row = load_workflow_record(conn, workflow_id=workflow_id)
     if row is None:
         raise WorkflowRuntimeBoundaryError(f"Workflow not found: {workflow_id}", status_code=404)
     definition = _parse_json_field(row.get("definition")) or {}
+    current_definition_revision = _text(definition.get("definition_revision"))
     undo_receipt = build_mutation_undo_receipt(
         definition,
         workflow_id=workflow_id,
         subpath=subpath,
         body=body,
     )
+    review_decision_payload: dict[str, Any] | None = None
 
     if subpath == "attachments":
         node_id = _text(body.get("node_id"))
@@ -560,37 +583,58 @@ def mutate_workflow_build(
         accepted_target = body.get("accepted_target")
         if not binding_id or not isinstance(accepted_target, dict):
             raise WorkflowRuntimeBoundaryError("accepted_target is required")
-        definition = upsert_binding(
-            definition,
-            binding_id=binding_id,
-            state="accepted",
-            accepted_target=accepted_target,
-            candidate_targets=body.get("candidate_targets") if isinstance(body.get("candidate_targets"), list) else None,
-            rationale=_text(body.get("rationale")) or "Accepted in build workspace.",
-        )
+        if current_definition_revision:
+            undo_receipt = build_review_decision_undo_receipt(
+                conn,
+                workflow_id=workflow_id,
+                definition_revision=current_definition_revision,
+                target_kind="binding",
+                target_ref=binding_id,
+            )
+        review_decision_payload = {
+            "target_kind": "binding",
+            "target_ref": binding_id,
+            "decision": "approve",
+            "candidate_ref": _text(accepted_target.get("target_ref")),
+            "candidate_payload": _json_clone(accepted_target),
+        }
     elif subpath.startswith("bindings/") and subpath.endswith("/reject"):
         binding_id = subpath[len("bindings/") : -len("/reject")].strip("/")
         if not binding_id:
             raise WorkflowRuntimeBoundaryError("binding id is required")
-        definition = upsert_binding(
-            definition,
-            binding_id=binding_id,
-            state="rejected",
-            rationale=_text(body.get("rationale")) or "Rejected in build workspace.",
-        )
+        if current_definition_revision:
+            undo_receipt = build_review_decision_undo_receipt(
+                conn,
+                workflow_id=workflow_id,
+                definition_revision=current_definition_revision,
+                target_kind="binding",
+                target_ref=binding_id,
+            )
+        review_decision_payload = {
+            "target_kind": "binding",
+            "target_ref": binding_id,
+            "decision": "reject",
+        }
     elif subpath.startswith("bindings/") and subpath.endswith("/replace"):
         binding_id = subpath[len("bindings/") : -len("/replace")].strip("/")
         accepted_target = body.get("accepted_target")
         if not binding_id or not isinstance(accepted_target, dict):
             raise WorkflowRuntimeBoundaryError("accepted_target is required")
-        definition = upsert_binding(
-            definition,
-            binding_id=binding_id,
-            state="accepted",
-            accepted_target=accepted_target,
-            candidate_targets=body.get("candidate_targets") if isinstance(body.get("candidate_targets"), list) else None,
-            rationale=_text(body.get("rationale")) or "Replaced in build workspace.",
-        )
+        if current_definition_revision:
+            undo_receipt = build_review_decision_undo_receipt(
+                conn,
+                workflow_id=workflow_id,
+                definition_revision=current_definition_revision,
+                target_kind="binding",
+                target_ref=binding_id,
+            )
+        review_decision_payload = {
+            "target_kind": "binding",
+            "target_ref": binding_id,
+            "decision": "approve",
+            "candidate_ref": _text(accepted_target.get("target_ref")),
+            "candidate_payload": _json_clone(accepted_target),
+        }
     elif subpath.startswith("bindings/") and subpath.endswith("/restore"):
         binding_id = subpath[len("bindings/") : -len("/restore")].strip("/")
         if not binding_id:
@@ -621,11 +665,31 @@ def mutate_workflow_build(
         admitted_target = body.get("admitted_target")
         if not snapshot_id or not isinstance(admitted_target, dict):
             raise WorkflowRuntimeBoundaryError("admitted_target is required")
-        definition = admit_import_snapshot(
-            definition,
-            snapshot_id=snapshot_id,
-            admitted_target=admitted_target,
-        )
+        if current_definition_revision:
+            undo_receipt = build_review_decision_undo_receipt(
+                conn,
+                workflow_id=workflow_id,
+                definition_revision=current_definition_revision,
+                target_kind="import_snapshot",
+                target_ref=snapshot_id,
+            )
+        review_decision_payload = {
+            "target_kind": "import_snapshot",
+            "target_ref": snapshot_id,
+            "decision": "approve",
+            "candidate_ref": _text(admitted_target.get("target_ref")),
+            "candidate_payload": _json_clone(admitted_target),
+        }
+    elif subpath == "review_decisions":
+        review_decision_payload = _normalize_build_review_decision_body(body)
+        if current_definition_revision:
+            undo_receipt = build_review_decision_undo_receipt(
+                conn,
+                workflow_id=workflow_id,
+                definition_revision=current_definition_revision,
+                target_kind=review_decision_payload["target_kind"],
+                target_ref=review_decision_payload["target_ref"],
+            )
     elif subpath.startswith("imports/") and subpath.endswith("/restore"):
         snapshot_id = subpath[len("imports/") : -len("/restore")].strip("/")
         if not snapshot_id:
@@ -644,7 +708,6 @@ def mutate_workflow_build(
             raise WorkflowRuntimeBoundaryError("node_id is required")
         source_locator = _text(body.get("source_locator"))
         snapshot_id = _text(body.get("snapshot_id"))
-        admitted_target = body.get("admitted_target") if isinstance(body.get("admitted_target"), dict) else None
         if source_locator:
             definition = stage_import_snapshot(
                 definition,
@@ -659,14 +722,8 @@ def mutate_workflow_build(
                 snapshots = definition.get("import_snapshots") if isinstance(definition.get("import_snapshots"), list) else []
                 if snapshots:
                     snapshot_id = _text(snapshots[-1].get("snapshot_id"))
-        if snapshot_id and admitted_target is not None:
-            definition = admit_import_snapshot(
-                definition,
-                snapshot_id=snapshot_id,
-                admitted_target=admitted_target,
-            )
         authority_kind = _text(body.get("authority_kind"))
-        authority_ref = _text(body.get("authority_ref")) or _text((admitted_target or {}).get("target_ref"))
+        authority_ref = _text(body.get("authority_ref"))
         if authority_kind and authority_ref:
             definition = attach_authority(
                 definition,
@@ -674,9 +731,14 @@ def mutate_workflow_build(
                 authority_kind=authority_kind,
                 authority_ref=authority_ref,
                 role=_text(body.get("role")) or "input",
-                label=_text(body.get("label")) or _text((admitted_target or {}).get("label")) or None,
+                label=_text(body.get("label")) or None,
                 promote_to_state=bool(body.get("promote_to_state")),
             )
+    elif subpath == "review_decisions/restore":
+        restore_body = dict(body)
+        restore_body["decision"] = _text(body.get("decision")) or "revoke"
+        review_decision_payload = _normalize_build_review_decision_body(restore_body)
+        undo_receipt = None
     elif subpath == "build_graph":
         definition = materialize_definition_from_build_graph(
             definition,
@@ -691,8 +753,29 @@ def mutate_workflow_build(
             status_code=404,
         )
 
-    hydrated_definition, compiled_spec, build_bundle, planning_notes = _rebuild_workflow_build(
+    if review_decision_payload is not None:
+        updated_definition_revision = _text(definition.get("definition_revision")) or current_definition_revision
+        if not updated_definition_revision:
+            raise WorkflowRuntimeBoundaryError("definition_revision is required for build review decisions")
+        record_build_review_decision(
+            conn,
+            workflow_id=workflow_id,
+            definition_revision=updated_definition_revision,
+            target_kind=review_decision_payload["target_kind"],
+            target_ref=review_decision_payload["target_ref"],
+            decision=review_decision_payload["decision"],
+            candidate_ref=review_decision_payload.get("candidate_ref"),
+            candidate_payload=review_decision_payload.get("candidate_payload"),
+            actor_type=_text(body.get("review_actor_type")) or None,
+            actor_ref=_text(body.get("review_actor_ref")) or None,
+            approval_mode=_text(body.get("approval_mode")) or None,
+            rationale=_text(body.get("rationale")) or None,
+            source_subpath=subpath,
+        )
+
+    hydrated_definition, durable_definition, compiled_spec, build_bundle, planning_notes = _rebuild_workflow_build(
         definition,
+        workflow_id=workflow_id,
         workflow_name=_text(row.get("name")) or workflow_id,
         conn=conn,
     )
@@ -701,7 +784,7 @@ def mutate_workflow_build(
         workflow_id=workflow_id,
         workflow_name=_text(row.get("name")) or workflow_id,
         existing_description=_text(row.get("description")) or None,
-        definition=hydrated_definition,
+        definition=durable_definition,
         compiled_spec=compiled_spec,
     )
     reconcile_workflow_triggers(
@@ -712,16 +795,18 @@ def mutate_workflow_build(
 
     # Emit to the service bus
     from runtime.event_log import emit, CHANNEL_BUILD_STATE, EVENT_MUTATION
-    emit(
+    event_payload = {"subpath": subpath}
+    if undo_receipt is not None:
+        event_payload["undo_receipt"] = _json_clone(undo_receipt)
+    mutation_event_id = emit(
         conn,
         channel=CHANNEL_BUILD_STATE,
         event_type=EVENT_MUTATION,
         entity_id=workflow_id,
         entity_kind="workflow",
-        payload={"subpath": subpath},
+        payload=event_payload,
         emitted_by="mutate_workflow_build",
     )
-
     return {
         "row": persisted_row,
         "definition": hydrated_definition,
@@ -729,24 +814,31 @@ def mutate_workflow_build(
         "build_bundle": build_bundle,
         "planning_notes": planning_notes,
         "undo_receipt": undo_receipt,
+        "mutation_event_id": mutation_event_id,
     }
 
 
 def _rebuild_workflow_build(
     definition: dict[str, Any],
     *,
+    workflow_id: str,
     workflow_name: str,
     conn: Any,
-) -> tuple[dict[str, Any], dict[str, Any] | None, dict[str, Any], list[str]]:
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any] | None, dict[str, Any], list[str]]:
     from runtime.build_authority import apply_authority_bundle, build_authority_bundle
     from runtime.operating_model_planner import PlanningBlockedError, plan_definition
 
     planning_notes: list[str] = []
     compiled_spec: dict[str, Any] | None = None
-    bundle = build_authority_bundle(definition)
+    reviewed_definition, has_db_review_state = materialize_reviewed_build_definition(
+        conn,
+        workflow_id=workflow_id,
+        definition=definition,
+    )
+    bundle = build_authority_bundle(reviewed_definition)
     if _text(bundle.get("projection_status", {}).get("state")) == "ready":
         try:
-            plan_result = plan_definition(definition, title=workflow_name, conn=conn)
+            plan_result = plan_definition(reviewed_definition, title=workflow_name, conn=conn)
             candidate_spec = plan_result.get("compiled_spec")
             if isinstance(candidate_spec, dict):
                 compiled_spec = candidate_spec
@@ -757,9 +849,14 @@ def _rebuild_workflow_build(
             ]
         except PlanningBlockedError as exc:
             planning_notes = [str(exc)]
-    hydrated_definition = apply_authority_bundle(definition, compiled_spec=compiled_spec)
+    hydrated_definition = apply_authority_bundle(reviewed_definition, compiled_spec=compiled_spec)
     bundle = build_authority_bundle(hydrated_definition, compiled_spec=compiled_spec)
-    return hydrated_definition, compiled_spec, bundle, planning_notes
+    durable_definition = (
+        scrub_review_state_for_persistence(hydrated_definition)
+        if has_db_review_state
+        else hydrated_definition
+    )
+    return hydrated_definition, durable_definition, compiled_spec, bundle, planning_notes
 
 
 def delete_workflow(

@@ -32,6 +32,18 @@ def test_normalize_data_job_accepts_plan_and_approval_manifest_ids() -> None:
     assert job["approval"]["manifest_id"] == "approval_manifest_123"
 
 
+def test_normalize_data_job_accepts_checkpoint_manifest_id() -> None:
+    job = normalize_data_job(
+        {
+            "operation": "replay",
+            "records": [{"id": "1", "updated_at": "2025-01-01T00:00:00Z"}],
+            "checkpoint_manifest_id": "checkpoint_manifest_123",
+        }
+    )
+
+    assert job["checkpoint"]["manifest_id"] == "checkpoint_manifest_123"
+
+
 def test_execute_data_job_normalizes_inline_records() -> None:
     receipt = execute_data_job(
         {
@@ -280,88 +292,109 @@ def test_execute_data_job_repairs_and_backfills_inline_records() -> None:
 
 def test_execute_data_job_checkpoint_and_replay_records(tmp_path: Path) -> None:
     checkpoint_path = tmp_path / "artifacts" / "data" / "events.checkpoint.json"
-    checkpoint_receipt = execute_data_job(
-        {
-            "operation": "checkpoint",
-            "records": [
-                {"id": "1", "updated_at": "2025-01-01T00:00:00Z"},
-                {"id": "2", "updated_at": "2025-01-02T00:00:00Z"},
-            ],
-            "keys": ["id"],
-            "cursor_field": "updated_at",
-            "output_path": str(checkpoint_path.relative_to(tmp_path)),
+    with patch.object(
+        data_plane,
+        "create_data_checkpoint_manifest",
+        return_value={
+            "id": "checkpoint_manifest_123",
+            "version": 1,
+            "status": "active",
+            "manifest": {
+                "kind": "praxis_control_manifest",
+                "manifest_family": "control_plane",
+                "manifest_type": "data_checkpoint",
+                "status": "active",
+            },
         },
-        workspace_root=tmp_path,
-    )
-
-    assert checkpoint_receipt["ok"] is True
-    assert checkpoint_receipt["checkpoint"]["watermark"] == "2025-01-02T00:00:00Z"
-    assert checkpoint_receipt["output"]["path"] == str(checkpoint_path)
-
-    replay_receipt = execute_data_job(
-        {
-            "operation": "replay",
-            "records": [
-                {"id": "1", "updated_at": "2025-01-01T00:00:00Z"},
-                {"id": "2", "updated_at": "2025-01-02T00:00:00Z"},
-                {"id": "3", "updated_at": "2025-01-03T00:00:00Z"},
-            ],
-            "cursor_field": "updated_at",
-            "checkpoint_path": str(checkpoint_path.relative_to(tmp_path)),
+    ) as create_checkpoint_mock, patch.object(
+        data_plane,
+        "load_control_plane_manifest",
+        return_value={
+            "id": "checkpoint_manifest_123",
+            "version": 1,
+            "status": "active",
+            "manifest": {
+                "kind": "praxis_control_manifest",
+                "manifest_family": "control_plane",
+                "manifest_type": "data_checkpoint",
+                "status": "active",
+                "checkpoint": {
+                    "row_count": 2,
+                    "field_count": 2,
+                    "content_hash": "abc123",
+                    "key_fields": ["id"],
+                    "cursor_field": "updated_at",
+                    "cursor_min": "2025-01-01T00:00:00Z",
+                    "cursor_max": "2025-01-02T00:00:00Z",
+                    "watermark": "2025-01-02T00:00:00Z",
+                },
+            },
         },
-        workspace_root=tmp_path,
-    )
+    ):
+        checkpoint_receipt = execute_data_job(
+            {
+                "operation": "checkpoint",
+                "records": [
+                    {"id": "1", "updated_at": "2025-01-01T00:00:00Z"},
+                    {"id": "2", "updated_at": "2025-01-02T00:00:00Z"},
+                ],
+                "keys": ["id"],
+                "cursor_field": "updated_at",
+                "output_path": str(checkpoint_path.relative_to(tmp_path)),
+            },
+            workspace_root=tmp_path,
+            pg_conn=object(),
+        )
 
-    assert replay_receipt["ok"] is True
-    assert replay_receipt["replay_window"]["after"] == "2025-01-02T00:00:00Z"
-    assert [row["id"] for row in replay_receipt["records"]] == ["3"]
+        assert checkpoint_receipt["ok"] is True
+        assert checkpoint_receipt["checkpoint"]["watermark"] == "2025-01-02T00:00:00Z"
+        assert checkpoint_receipt["checkpoint_manifest_id"] == "checkpoint_manifest_123"
+        assert checkpoint_receipt["output"]["path"] == str(checkpoint_path)
+        create_checkpoint_mock.assert_called_once()
+
+        replay_receipt = execute_data_job(
+            {
+                "operation": "replay",
+                "records": [
+                    {"id": "1", "updated_at": "2025-01-01T00:00:00Z"},
+                    {"id": "2", "updated_at": "2025-01-02T00:00:00Z"},
+                    {"id": "3", "updated_at": "2025-01-03T00:00:00Z"},
+                ],
+                "cursor_field": "updated_at",
+                "checkpoint_manifest_id": "checkpoint_manifest_123",
+            },
+            workspace_root=tmp_path,
+            pg_conn=object(),
+        )
+
+        assert replay_receipt["ok"] is True
+        assert replay_receipt["checkpoint_authority"]["manifest_id"] == "checkpoint_manifest_123"
+        assert replay_receipt["replay_window"]["after"] == "2025-01-02T00:00:00Z"
+        assert [row["id"] for row in replay_receipt["records"]] == ["3"]
 
 
-def test_execute_data_job_approves_and_applies_plan() -> None:
-    reconcile_receipt = execute_data_job(
-        {
-            "operation": "reconcile",
-            "records": [
-                {"id": "1", "email": "alice@example.com"},
-                {"id": "2", "email": "bob@example.com"},
-            ],
-            "secondary_records": [
-                {"id": "1", "email": "alice@old.example.com"},
-            ],
-            "keys": ["id"],
-        }
-    )
+def test_execute_data_job_approve_requires_registry_backend() -> None:
+    with pytest.raises(data_plane.DataRuntimeBoundaryError, match="Postgres-backed registry"):
+        execute_data_job(
+            {
+                "operation": "approve",
+                "plan": {"create": [], "update": [], "delete": [], "noop": [], "conflicts": []},
+                "approved_by": "ops",
+                "approval_reason": "Reviewed diff and counts",
+            }
+        )
 
-    approval_receipt = execute_data_job(
-        {
-            "operation": "approve",
-            "plan": reconcile_receipt["plan"],
-            "approved_by": "ops",
-            "approval_reason": "Reviewed diff and counts",
-        }
-    )
 
-    assert approval_receipt["ok"] is True
-    assert approval_receipt["approval"]["approved_by"] == "ops"
-    assert approval_receipt["plan_digest"] == reconcile_receipt["plan_digest"]
-
-    apply_receipt = execute_data_job(
-        {
-            "operation": "apply",
-            "plan": reconcile_receipt["plan"],
-            "approval": approval_receipt["approval"],
-            "secondary_records": [
-                {"id": "1", "email": "alice@old.example.com"},
-            ],
-            "keys": ["id"],
-        }
-    )
-
-    assert apply_receipt["ok"] is True
-    assert apply_receipt["stats"]["applied_create_count"] == 1
-    assert apply_receipt["stats"]["applied_update_count"] == 1
-    assert [row["id"] for row in apply_receipt["records"]] == ["1", "2"]
-    assert apply_receipt["records"][0]["email"] == "alice@example.com"
+def test_execute_data_job_apply_requires_registry_backend() -> None:
+    with pytest.raises(data_plane.DataRuntimeBoundaryError, match="Postgres-backed registry"):
+        execute_data_job(
+            {
+                "operation": "apply",
+                "approval_manifest_id": "approval_manifest_123",
+                "secondary_records": [{"id": "1", "email": "alice@old.example.com"}],
+                "keys": ["id"],
+            }
+        )
 
 
 def test_execute_data_job_approves_and_applies_manifest_backed_plan() -> None:
@@ -449,7 +482,6 @@ def test_execute_data_job_approves_and_applies_manifest_backed_plan() -> None:
         apply_receipt = execute_data_job(
             {
                 "operation": "apply",
-                "plan_manifest_id": "plan_manifest_123",
                 "approval_manifest_id": "approval_manifest_123",
                 "secondary_records": [{"id": "1", "email": "alice@old.example.com"}],
                 "keys": ["id"],
@@ -551,50 +583,93 @@ def test_execute_data_job_splits_records_and_writes_partition_outputs(tmp_path: 
 
 def test_execute_data_job_runs_checkpointed_batch_sync(tmp_path: Path) -> None:
     checkpoint_path = tmp_path / "artifacts" / "data" / "source.checkpoint.json"
-    checkpoint_receipt = execute_data_job(
-        {
-            "operation": "checkpoint",
-            "records": [
-                {"id": "1", "updated_at": "2025-01-01T00:00:00Z"},
-                {"id": "2", "updated_at": "2025-01-02T00:00:00Z"},
-            ],
-            "keys": ["id"],
-            "cursor_field": "updated_at",
-            "output_path": str(checkpoint_path.relative_to(tmp_path)),
+    with patch.object(
+        data_plane,
+        "create_data_checkpoint_manifest",
+        return_value={
+            "id": "checkpoint_manifest_123",
+            "version": 1,
+            "status": "active",
+            "manifest": {
+                "kind": "praxis_control_manifest",
+                "manifest_family": "control_plane",
+                "manifest_type": "data_checkpoint",
+                "status": "active",
+            },
         },
-        workspace_root=tmp_path,
-    )
-
-    assert checkpoint_receipt["ok"] is True
-
-    sync_receipt = execute_data_job(
-        {
-            "operation": "sync",
-            "records": [
-                {"id": "1", "email": "alice@example.com", "updated_at": "2025-01-01T00:00:00Z"},
-                {"id": "2", "email": "bob@example.com", "updated_at": "2025-01-02T00:00:00Z"},
-                {"id": "3", "email": "carol@example.com", "updated_at": "2025-01-03T00:00:00Z"},
-            ],
-            "secondary_records": [
-                {"id": "1", "email": "alice@old.example.com", "updated_at": "2024-12-31T00:00:00Z"},
-                {"id": "2", "email": "bob@old.example.com", "updated_at": "2024-12-31T00:00:00Z"},
-            ],
-            "keys": ["id"],
-            "sync_mode": "upsert",
-            "cursor_field": "updated_at",
-            "checkpoint_path": str(checkpoint_path.relative_to(tmp_path)),
-            "batch_size": 1,
+    ), patch.object(
+        data_plane,
+        "load_control_plane_manifest",
+        return_value={
+            "id": "checkpoint_manifest_123",
+            "version": 1,
+            "status": "active",
+            "manifest": {
+                "kind": "praxis_control_manifest",
+                "manifest_family": "control_plane",
+                "manifest_type": "data_checkpoint",
+                "status": "active",
+                "checkpoint": {
+                    "row_count": 2,
+                    "field_count": 2,
+                    "content_hash": "abc123",
+                    "key_fields": ["id"],
+                    "cursor_field": "updated_at",
+                    "cursor_min": "2025-01-01T00:00:00Z",
+                    "cursor_max": "2025-01-02T00:00:00Z",
+                    "watermark": "2025-01-02T00:00:00Z",
+                },
+            },
         },
-        workspace_root=tmp_path,
-    )
+    ):
+        checkpoint_receipt = execute_data_job(
+            {
+                "operation": "checkpoint",
+                "records": [
+                    {"id": "1", "updated_at": "2025-01-01T00:00:00Z"},
+                    {"id": "2", "updated_at": "2025-01-02T00:00:00Z"},
+                ],
+                "keys": ["id"],
+                "cursor_field": "updated_at",
+                "output_path": str(checkpoint_path.relative_to(tmp_path)),
+            },
+            workspace_root=tmp_path,
+            pg_conn=object(),
+        )
 
-    assert sync_receipt["ok"] is True
-    assert sync_receipt["stats"]["batch_count"] == 1
-    assert sync_receipt["replay_window"]["after"] == "2025-01-02T00:00:00Z"
-    assert sync_receipt["checkpoint"]["watermark"] == "2025-01-03T00:00:00Z"
-    assert [row["id"] for row in sync_receipt["records"]] == ["1", "2", "3"]
-    assert sync_receipt["records"][0]["email"] == "alice@old.example.com"
-    assert sync_receipt["records"][2]["email"] == "carol@example.com"
+        assert checkpoint_receipt["ok"] is True
+        assert checkpoint_receipt["checkpoint_manifest_id"] == "checkpoint_manifest_123"
+
+        sync_receipt = execute_data_job(
+            {
+                "operation": "sync",
+                "records": [
+                    {"id": "1", "email": "alice@example.com", "updated_at": "2025-01-01T00:00:00Z"},
+                    {"id": "2", "email": "bob@example.com", "updated_at": "2025-01-02T00:00:00Z"},
+                    {"id": "3", "email": "carol@example.com", "updated_at": "2025-01-03T00:00:00Z"},
+                ],
+                "secondary_records": [
+                    {"id": "1", "email": "alice@old.example.com", "updated_at": "2024-12-31T00:00:00Z"},
+                    {"id": "2", "email": "bob@old.example.com", "updated_at": "2024-12-31T00:00:00Z"},
+                ],
+                "keys": ["id"],
+                "sync_mode": "upsert",
+                "cursor_field": "updated_at",
+                "checkpoint_manifest_id": "checkpoint_manifest_123",
+                "batch_size": 1,
+            },
+            workspace_root=tmp_path,
+            pg_conn=object(),
+        )
+
+        assert sync_receipt["ok"] is True
+        assert sync_receipt["checkpoint_authority"]["manifest_id"] == "checkpoint_manifest_123"
+        assert sync_receipt["stats"]["batch_count"] == 1
+        assert sync_receipt["replay_window"]["after"] == "2025-01-02T00:00:00Z"
+        assert sync_receipt["checkpoint"]["watermark"] == "2025-01-03T00:00:00Z"
+        assert [row["id"] for row in sync_receipt["records"]] == ["1", "2", "3"]
+        assert sync_receipt["records"][0]["email"] == "alice@old.example.com"
+        assert sync_receipt["records"][2]["email"] == "carol@example.com"
 
 
 def test_execute_data_job_routes_dead_letter_rows() -> None:

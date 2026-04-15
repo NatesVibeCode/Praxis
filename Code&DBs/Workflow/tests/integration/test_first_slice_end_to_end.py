@@ -128,6 +128,7 @@ def _resolver(*, suffix: str) -> RegistryResolver:
                     runtime_profile_ref=runtime_profile_ref,
                     model_profile_id=f"model.{suffix}",
                     provider_policy_id=f"provider_policy.{suffix}",
+                    sandbox_profile_ref=runtime_profile_ref,
                 ),
             ),
         },

@@ -147,6 +147,7 @@ describe('useLiveRunSnapshot', () => {
       ...recent,
       total_duration_ms: 0,
       jobs: [],
+      health: null,
     });
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/runs/run-2');
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/runs/recent?limit=100');

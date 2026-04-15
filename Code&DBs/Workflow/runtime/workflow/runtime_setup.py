@@ -7,7 +7,6 @@ focus on execution flow instead of building every dependency inline.
 from __future__ import annotations
 
 import json
-import os
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -17,10 +16,12 @@ from adapters import AdapterRegistry, CLILLMAdapter, LLMTaskAdapter
 from contracts.domain import WorkflowEdgeContract, WorkflowNodeContract, WorkflowRequest
 from runtime.domain import AtomicEvidenceWriter
 from runtime.native_authority import default_native_authority_refs
+from runtime._workflow_database import resolve_runtime_database_url
 from registry.domain import RegistryResolver, RuntimeProfileAuthorityRecord, WorkspaceAuthorityRecord
 from registry.native_runtime_profile_sync import (
     resolve_native_runtime_profile_config,
 )
+from storage.postgres.validators import PostgresConfigurationError
 
 if TYPE_CHECKING:
     from .orchestrator import WorkflowSpec
@@ -222,6 +223,7 @@ def _build_registry(spec: "WorkflowSpec") -> RegistryResolver:
                     runtime_profile_ref=runtime_profile_ref,
                     model_profile_id=config.model_profile_id,
                     provider_policy_id=config.provider_policy_id,
+                    sandbox_profile_ref=config.sandbox_profile_ref,
                 ),
             ],
         },
@@ -317,11 +319,12 @@ def _build_evidence_writer(spec: "WorkflowSpec") -> AtomicEvidenceWriter:
     """Build the canonical workflow evidence writer."""
 
     del spec
-    database_url = os.environ.get("WORKFLOW_DATABASE_URL")
-    if not database_url:
+    try:
+        database_url = resolve_runtime_database_url(required=True)
+    except PostgresConfigurationError as exc:
         raise RuntimeError(
             "WORKFLOW_DATABASE_URL is required; in-memory evidence fallback has been removed."
-        )
+        ) from exc
     from ..persistent_evidence import PostgresEvidenceWriter
 
     return PostgresEvidenceWriter(database_url=database_url)

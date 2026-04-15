@@ -116,18 +116,37 @@ def test_default_manifest_exposes_the_api_server_subset(monkeypatch) -> None:
         scope="api_server",
         manifest_path=manifest,
     )
+    worker_report = dependency_contract.dependency_truth_report(
+        scope="workflow_worker",
+        manifest_path=manifest,
+    )
     runtime_report = dependency_contract.dependency_truth_report(
         scope="runtime",
         manifest_path=manifest,
     )
 
     assert api_report["ok"] is True
-    assert api_report["required_count"] == 4
+    assert api_report["required_count"] == 6
     assert [pkg["distribution"] for pkg in api_report["packages"]] == [
         "asyncpg",
         "pydantic",
         "fastapi",
         "uvicorn",
+        "numpy",
+        "sentence-transformers",
+    ]
+    assert worker_report["ok"] is True
+    assert worker_report["required_count"] == 9
+    assert [pkg["distribution"] for pkg in worker_report["packages"]] == [
+        "asyncpg",
+        "pydantic",
+        "anthropic",
+        "google-genai",
+        "openai",
+        "croniter",
+        "psycopg2-binary",
+        "numpy",
+        "sentence-transformers",
     ]
     assert runtime_report["ok"] is True
     assert runtime_report["required_count"] == 11

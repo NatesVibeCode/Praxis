@@ -5,7 +5,7 @@ from io import StringIO
 from types import SimpleNamespace
 
 import pytest
-from adapters import provider_transport
+from adapters.provider_types import ProviderCLIProfile
 
 from registry import provider_onboarding
 from surfaces.api.handlers import workflow_admin
@@ -86,15 +86,45 @@ def _cursor_cli_spec() -> provider_onboarding.ProviderOnboardingSpec:
     )
 
 
-def _builtin_profile(provider_slug: str):
-    return next(
-        (
-            profile
-            for profile in provider_transport.BUILTIN_PROVIDER_PROFILES
-            if profile.provider_slug == provider_slug
+def _seed_profile(provider_slug: str) -> ProviderCLIProfile | None:
+    profiles = {
+        "openai": ProviderCLIProfile(
+            provider_slug="openai",
+            binary="codex",
+            default_model="gpt-4.1",
+            api_endpoint="https://api.openai.com/v1/chat/completions",
+            api_protocol_family="openai_chat_completions",
+            api_key_env_vars=("OPENAI_API_KEY",),
+            adapter_economics={
+                "cli_llm": {"billing_mode": "subscription_included"},
+                "llm_task": {"billing_mode": "metered_api"},
+            },
+            prompt_mode="stdin",
+            base_flags=("exec", "-", "--json"),
+            model_flag="--model",
+            output_format="ndjson",
+            output_envelope_key="text",
+            forbidden_flags=("--full-auto",),
+            default_timeout=300,
         ),
-        None,
-    )
+        "cursor": ProviderCLIProfile(
+            provider_slug="cursor",
+            binary="cursor-agent",
+            default_model="composer-2",
+            api_key_env_vars=("CURSOR_API_KEY",),
+            adapter_economics={
+                "cli_llm": {"billing_mode": "subscription_included"},
+            },
+            prompt_mode="argv",
+            base_flags=("--trust", "-p", "--output-format", "json", "--sandbox", "disabled"),
+            model_flag="--model",
+            output_format="json",
+            output_envelope_key="result",
+            forbidden_flags=("--cloud", "--force", "-f", "--yolo", "--workspace", "-w", "--worktree"),
+            default_timeout=900,
+        ),
+    }
+    return profiles.get(provider_slug)
 
 
 @pytest.fixture(autouse=True)
@@ -102,7 +132,7 @@ def _provider_registry_seed_fixture(monkeypatch):
     monkeypatch.setattr(
         provider_onboarding.provider_registry_mod,
         "get_profile",
-        lambda provider_slug: _builtin_profile(provider_slug),
+        lambda provider_slug: _seed_profile(provider_slug),
     )
 
 
@@ -688,11 +718,8 @@ def test_provider_onboarding_provisions_cli_registry_rows_when_capacity_probe_fa
 
 
 def test_cursor_template_exposes_local_cli_contract(monkeypatch) -> None:
-    cursor_profile = next(
-        profile
-        for profile in provider_transport.BUILTIN_PROVIDER_PROFILES
-        if profile.provider_slug == "cursor"
-    )
+    cursor_profile = _seed_profile("cursor")
+    assert cursor_profile is not None
     monkeypatch.setattr(provider_onboarding.provider_registry_mod, "get_profile", lambda _slug: cursor_profile)
 
     template = provider_onboarding._provider_template("cursor")
@@ -719,8 +746,38 @@ def test_cursor_template_exposes_local_cli_contract(monkeypatch) -> None:
 def test_cursor_template_requires_explicit_registry_profile(monkeypatch) -> None:
     monkeypatch.setattr(provider_onboarding.provider_registry_mod, "get_profile", lambda _slug: None)
 
-    with pytest.raises(ValueError, match="no onboarding authority template is registered for cursor"):
+    with pytest.raises(ValueError, match="seed provider_cli_profiles in Postgres or provide explicit transport fields"):
         provider_onboarding._provider_template("cursor")
+
+
+def test_provider_template_can_be_derived_from_explicit_cli_wizard_payload(monkeypatch) -> None:
+    monkeypatch.setattr(provider_onboarding.provider_registry_mod, "get_profile", lambda _slug: None)
+
+    spec = provider_onboarding.ProviderOnboardingSpec(
+        provider_slug="cursor",
+        provider_name="Cursor",
+        selected_transport="cli",
+        binary_name="cursor-agent",
+        base_flags=("--trust", "-p", "--output-format", "json"),
+        output_format="json",
+        output_envelope_key="result",
+        default_timeout=900,
+        model_flag="--model",
+        forbidden_flags=("--cloud",),
+        default_model="composer-2",
+        requested_models=("composer-2",),
+        api_key_env_vars=("CURSOR_API_KEY",),
+        cli_prompt_mode="argv",
+        adapter_economics={"cli_llm": {"billing_mode": "subscription_included"}},
+    )
+
+    template = provider_onboarding._provider_template("cursor", explicit_spec=spec)
+
+    assert template.provider_slug == "cursor"
+    assert template.provider_name == "Cursor"
+    assert template.transports["cli"].binary_name == "cursor-agent"
+    assert template.transports["cli"].cli_prompt_modes == ("argv", "stdin")
+    assert "api" not in template.transports
 
 
 def test_native_operator_provider_onboard_cli_uses_shared_wizard(monkeypatch) -> None:

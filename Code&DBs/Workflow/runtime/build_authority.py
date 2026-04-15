@@ -258,10 +258,14 @@ def _compile_derived_binding_entries(definition: dict[str, Any]) -> list[dict[st
                 "source_label": _as_text(reference.get("raw")) or slug,
                 "source_span": list(reference.get("span")) if isinstance(reference.get("span"), list) else None,
                 "source_node_ids": source_nodes,
-                "state": "accepted" if resolved_to else "captured",
+                "state": "suggested" if resolved_to else "captured",
                 "candidate_targets": candidate_targets,
-                "accepted_target": candidate_targets[0] if resolved_to else None,
-                "rationale": "Matched against current compile authority." if resolved_to else "Needs an accepted authority target before planning can run cleanly.",
+                "accepted_target": None,
+                "rationale": (
+                    "Matched against current compile authority; explicit approval is still required before planning can run cleanly."
+                    if resolved_to
+                    else "Needs an accepted authority target before planning can run cleanly."
+                ),
                 "created_at": None,
                 "updated_at": None,
                 "freshness": None,
@@ -322,7 +326,8 @@ def _merge_binding_ledger(
         freshness = _snapshot_freshness(snapshot)
         requested_shape = snapshot.get("requested_shape") if isinstance(snapshot.get("requested_shape"), dict) else {}
         suggested_label = _as_text(requested_shape.get("label")) or _as_text(requested_shape.get("name")) or _as_text(snapshot.get("source_locator")) or snapshot["snapshot_id"]
-        candidate_targets = merged.get(binding_id, {}).get("candidate_targets") or []
+        current_entry = merged.get(binding_id, {})
+        candidate_targets = current_entry.get("candidate_targets") or []
         if not candidate_targets:
             candidate_targets = [
                 {
@@ -331,9 +336,13 @@ def _merge_binding_ledger(
                     "kind": _as_text(requested_shape.get("kind")) or "type",
                 }
             ]
+        current_state = _as_text(current_entry.get("state"))
         state = "stale" if freshness and freshness.get("state") == "stale" else (
-            "accepted" if snapshot.get("approval_state") == "admitted" else "suggested"
+            current_state if current_state in {"accepted", "rejected"} else "suggested"
         )
+        accepted_target = None
+        if state == "accepted" and isinstance(current_entry.get("accepted_target"), dict):
+            accepted_target = _json_clone(current_entry.get("accepted_target"))
         merged[binding_id] = {
             "binding_id": binding_id,
             "source_kind": "import_request",
@@ -342,10 +351,18 @@ def _merge_binding_ledger(
             "source_node_ids": [snapshot["node_id"]] if _as_text(snapshot.get("node_id")) else [],
             "state": state,
             "candidate_targets": _json_clone(candidate_targets),
-            "accepted_target": candidate_targets[0] if snapshot.get("approval_state") == "admitted" and candidate_targets else merged.get(binding_id, {}).get("accepted_target"),
-            "rationale": "Suggested from staged external evidence." if snapshot.get("approval_state") != "admitted" else "Backed by an admitted import snapshot.",
-            "created_at": merged.get(binding_id, {}).get("created_at") or snapshot.get("captured_at"),
-            "updated_at": merged.get(binding_id, {}).get("updated_at") or snapshot.get("captured_at"),
+            "accepted_target": accepted_target,
+            "rationale": (
+                "Backed by an admitted import snapshot; explicit binding approval is still required."
+                if snapshot.get("approval_state") == "admitted" and state != "accepted"
+                else (
+                    _as_text(current_entry.get("rationale")) or "Accepted in build workspace."
+                    if state == "accepted"
+                    else "Suggested from staged external evidence."
+                )
+            ),
+            "created_at": current_entry.get("created_at") or snapshot.get("captured_at"),
+            "updated_at": current_entry.get("updated_at") or snapshot.get("captured_at"),
             "freshness": freshness,
         }
         snapshot["binding_id"] = binding_id
@@ -377,7 +394,7 @@ def _collect_issues(
         target_node_id = source_node_ids[0] if source_node_ids else default_node_id
         if not target_node_id:
             continue
-        severity = "blocking" if state in {"captured", "stale"} else "warning"
+        severity = "blocking" if state in {"captured", "suggested", "stale"} else "warning"
         issues.append(
             {
                 "issue_id": f"issue:{binding['binding_id']}",
@@ -892,6 +909,17 @@ def build_mutation_undo_receipt(
                     },
                 }
             )
+    elif subpath == "build_graph":
+        graph = materialized.get("build_graph") if isinstance(materialized.get("build_graph"), dict) else {}
+        steps.append(
+            {
+                "subpath": "build_graph",
+                "body": {
+                    "nodes": _json_clone(graph.get("nodes")) if isinstance(graph.get("nodes"), list) else [],
+                    "edges": _json_clone(graph.get("edges")) if isinstance(graph.get("edges"), list) else [],
+                },
+            }
+        )
 
     if not steps:
         return None

@@ -17,8 +17,9 @@ Legacy internal skill id: `praxis-phase`
 
 Primary references:
 
-- `AGENTS.md`
+- `.claude/CLAUDE.md`
 - `README.md`
+- `docs/ARCHITECTURE.md`
 - `Code&DBs/README.md`
 - `Code&DBs/Workflow/PUBLIC_NAMING.md`
 - the closest repo-local spec, doc, or implementation authority under `config/cascade/specs/`, `Code&DBs/Workflow/docs/`, `planning/`, or the touched runtime surface
@@ -53,20 +54,21 @@ This is a method skill, not an infrastructure skill.
 When this repo's workflow surfaces are involved:
 
 - validate changed workflow specs before running them
-- use `workflow run <spec.json>` as async kickoff only
+- use `praxis workflow run <spec.json>` as async kickoff only
 - capture `run_id` and treat streaming/status as separate follow-up channels
-- use `workflow run-status <run_id>` for health, failure signals, and idle detection
+- use `praxis workflow run-status <run_id>` for health, failure signals, and idle detection
 - use `--kill-if-idle` only when the run is clearly unhealthy and idle
 - do not rely on legacy wait-style behavior
-- when the exact tool shape is unclear, use `workflow tools describe <tool>` instead of guessing from memory
-- prefer `workflow query`, `workflow discover`, `workflow recall`, and `workflow health` as the operator-facing aliases for read-mostly work
+- when the exact tool shape is unclear, use `praxis workflow tools describe <tool>` instead of guessing from memory
+- prefer `praxis workflow query`, `praxis workflow discover`, `praxis workflow recall`, and `praxis workflow health` as the operator-facing aliases for read-mostly work
 
 ## Required Inputs
 
 Before starting work, read:
 
-- `AGENTS.md`
+- `.claude/CLAUDE.md`
 - `README.md`
+- `docs/ARCHITECTURE.md`
 - `Code&DBs/README.md`
 - `Code&DBs/Workflow/PUBLIC_NAMING.md`
 - the closest contract/spec/docs that define the touched surface

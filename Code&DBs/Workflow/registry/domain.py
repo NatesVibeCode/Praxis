@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from hashlib import sha256
 import json
+from pathlib import Path
 from typing import Any
 
 
@@ -48,6 +49,7 @@ class RuntimeProfile:
     runtime_profile_ref: str
     model_profile_id: str
     provider_policy_id: str
+    sandbox_profile_ref: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +68,23 @@ class RuntimeProfileAuthorityRecord:
     runtime_profile_ref: str
     model_profile_id: str
     provider_policy_id: str
+    sandbox_profile_ref: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class SandboxProfileAuthorityRecord:
+    """Canonical sandbox profile consumed by runtime execution."""
+
+    sandbox_profile_ref: str
+    sandbox_provider: str
+    docker_image: str | None = None
+    docker_cpus: str | None = None
+    docker_memory: str | None = None
+    network_policy: str = "provider_only"
+    workspace_materialization: str = "copy"
+    secret_allowlist: tuple[str, ...] = ()
+    auth_mount_policy: str = "provider_scoped"
+    timeout_profile: str = "default"
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +98,7 @@ class ContextBundle:
     runtime_profile_ref: str
     model_profile_id: str
     provider_policy_id: str
+    sandbox_profile_ref: str
     bundle_version: int
     bundle_hash: str
     bundle_payload: Mapping[str, Any]
@@ -130,6 +150,22 @@ class RegistryResolver:
         }
 
     @staticmethod
+    def _local_repo_root() -> Path:
+        return Path(__file__).resolve().parents[3]
+
+    @classmethod
+    def _normalize_workspace_path(
+        cls,
+        raw_value: str,
+        *,
+        base: Path,
+    ) -> str:
+        path = Path(raw_value).expanduser()
+        if not path.is_absolute():
+            path = (base / path).resolve()
+        return str(path)
+
+    @staticmethod
     def _select_one(
         *,
         reason_code: str,
@@ -175,10 +211,18 @@ class RegistryResolver:
                 "registry.boundary_violation",
                 f"workspace boundary incomplete for ref={workspace_ref!r}",
             )
+        repo_root = self._normalize_workspace_path(
+            candidate.repo_root,
+            base=self._local_repo_root(),
+        )
+        workdir = self._normalize_workspace_path(
+            candidate.workdir,
+            base=Path(repo_root),
+        )
         return WorkspaceIdentity(
             workspace_ref=candidate.workspace_ref,
-            repo_root=candidate.repo_root,
-            workdir=candidate.workdir,
+            repo_root=repo_root,
+            workdir=workdir,
         )
 
     def resolve_runtime_profile(
@@ -207,10 +251,15 @@ class RegistryResolver:
                 "registry.boundary_violation",
                 f"runtime profile boundary incomplete for ref={runtime_profile_ref!r}",
             )
+        sandbox_profile_ref = (
+            str(candidate.sandbox_profile_ref or "").strip()
+            or candidate.runtime_profile_ref
+        )
         return RuntimeProfile(
             runtime_profile_ref=candidate.runtime_profile_ref,
             model_profile_id=candidate.model_profile_id,
             provider_policy_id=candidate.provider_policy_id,
+            sandbox_profile_ref=sandbox_profile_ref,
         )
 
     def resolve_context_bundle(
@@ -241,6 +290,7 @@ class RegistryResolver:
                 "model_profile_id": runtime_profile.model_profile_id,
                 "provider_policy_id": runtime_profile.provider_policy_id,
                 "runtime_profile_ref": runtime_profile.runtime_profile_ref,
+                "sandbox_profile_ref": runtime_profile.sandbox_profile_ref,
             },
             "source_decision_refs": list(source_decision_refs),
             "workspace": {
@@ -260,6 +310,7 @@ class RegistryResolver:
             runtime_profile_ref=runtime_profile.runtime_profile_ref,
             model_profile_id=runtime_profile.model_profile_id,
             provider_policy_id=runtime_profile.provider_policy_id,
+            sandbox_profile_ref=runtime_profile.sandbox_profile_ref,
             bundle_version=bundle_version,
             bundle_hash=bundle_hash,
             bundle_payload=canonical_payload,

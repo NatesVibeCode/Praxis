@@ -13,6 +13,7 @@ from runtime.capability_catalog import CapabilityCatalogError
 from runtime.compile_artifacts import CompileArtifactRecord
 from runtime.verification import VerificationAuthorityError, resolve_verify_commands
 from runtime.operating_model_planner import (
+    PlanningBlockedError,
     current_compiled_spec,
     plan_definition,
 )
@@ -443,6 +444,37 @@ def test_plan_definition_materializes_legacy_projections_from_definition_graph()
     assert result["compiled_spec"]["definition_revision"] == definition["definition_revision"]
     assert result["compiled_spec"]["jobs"][0]["agent"] == "auto/review"
     assert result["compiled_spec"]["triggers"][0]["event_type"] == definition["trigger_intent"][0]["event_type"]
+
+
+def test_plan_definition_blocks_when_explicit_build_authority_state_is_present() -> None:
+    with pytest.raises(PlanningBlockedError, match="Resolve @gmail/search"):
+        plan_definition(
+            {
+                "type": "operating_model",
+                "references": [
+                    {
+                        "id": "ref-001",
+                        "type": "integration",
+                        "slug": "@gmail/search",
+                        "raw": "@gmail/search",
+                        "resolved": True,
+                        "resolved_to": "integration_registry:gmail/search",
+                    }
+                ],
+                "draft_flow": [
+                    {
+                        "id": "step-001",
+                        "title": "Review support inbox",
+                        "summary": "Review the support inbox.",
+                        "reference_slugs": ["@gmail/search"],
+                        "depends_on": [],
+                        "order": 1,
+                    }
+                ],
+                "binding_ledger": [],
+                "definition_revision": "def_explicit_build_state",
+            }
+        )
 
 
 def test_plan_definition_materializes_workflow_invoke_routes_as_integration_jobs() -> None:

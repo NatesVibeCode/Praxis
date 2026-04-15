@@ -202,7 +202,10 @@ def normalize_data_job(
     checks = _mapping_list(raw.get("checks"))
     mapping = _mapping(raw.get("mapping"))
     checkpoint = _mapping(raw.get("checkpoint"))
+    checkpoint_manifest_id = _text(raw.get("checkpoint_manifest_id"))
     checkpoint_path = _text(raw.get("checkpoint_path"))
+    if not checkpoint and checkpoint_manifest_id:
+        checkpoint = {"manifest_id": checkpoint_manifest_id}
     if not checkpoint and checkpoint_path:
         checkpoint = {"path": checkpoint_path}
     plan = _mapping(raw.get("plan"))
@@ -271,7 +274,7 @@ def normalize_data_job(
     if operation == "replay" and not cursor_field and not checkpoint:
         raise DataContractError("replay jobs require cursor_field or checkpoint")
     if operation == "replay" and after is None and before is None and not checkpoint:
-        raise DataContractError("replay jobs require after, before, checkpoint, or checkpoint_path")
+        raise DataContractError("replay jobs require after, before, checkpoint, checkpoint_manifest_id, or checkpoint_path")
     if operation == "approve" and not plan:
         raise DataContractError("approve jobs require plan, plan_manifest_id, or plan_path")
     if operation == "approve" and not approved_by:
@@ -280,8 +283,6 @@ def normalize_data_job(
         raise DataContractError("approve jobs require approval_reason")
     if operation == "apply" and not secondary_input:
         raise DataContractError("apply jobs require secondary_input or secondary_input_path")
-    if operation == "apply" and not plan:
-        raise DataContractError("apply jobs require plan, plan_manifest_id, or plan_path")
     if operation == "apply" and not approval:
         raise DataContractError("apply jobs require approval, approval_manifest_id, or approval_path")
     if operation == "apply" and not keys:

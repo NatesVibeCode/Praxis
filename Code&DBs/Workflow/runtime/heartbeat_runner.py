@@ -336,44 +336,6 @@ class _DatabaseMaintenanceModule(HeartbeatModule):
         return _ok(self.name, t0)
 
 
-class SandboxTempCleanupModule(HeartbeatModule):
-    """Heartbeat adapter for stale local sandbox temp-root cleanup."""
-
-    def __init__(self, *, max_age_seconds: int | None = None) -> None:
-        self._max_age_seconds = max_age_seconds
-
-    @property
-    def name(self) -> str:
-        return "sandbox_temp_cleanup"
-
-    def run(self) -> HeartbeatModuleResult:
-        t0 = time.monotonic()
-        from runtime.sandbox_runtime import cleanup_stale_ephemeral_sandbox_roots
-
-        receipt = cleanup_stale_ephemeral_sandbox_roots(max_age_seconds=self._max_age_seconds)
-        if receipt.removed_paths:
-            logger.info(
-                "sandbox_temp_cleanup: removed %d stale sandbox roots from %s",
-                len(receipt.removed_paths),
-                receipt.root_dir,
-            )
-        if receipt.failed_paths:
-            failed_summary = ", ".join(path for path, _ in receipt.failed_paths[:3])
-            if len(receipt.failed_paths) > 3:
-                failed_summary = f"{failed_summary}, ..."
-            logger.warning(
-                "sandbox_temp_cleanup: failed to remove %d stale sandbox roots: %s",
-                len(receipt.failed_paths),
-                failed_summary,
-            )
-            return _fail(
-                self.name,
-                t0,
-                f"failed to remove {len(receipt.failed_paths)} stale sandbox roots",
-            )
-        return _ok(self.name, t0)
-
-
 class _RateLimitProbeModule(HeartbeatModule):
     """Heartbeat adapter for provider rate-limit health probes."""
 
@@ -469,7 +431,6 @@ class HeartbeatRunner:
                 RelationshipMiner(self._conn, self._engine),
                 RollupGenerator(self._conn, self._engine),
                 SystemEventsCleanupModule(self._conn),
-                SandboxTempCleanupModule(),
             ])
             if self._embedder is not None:
                 from runtime.codebase_index_module import CodebaseIndexModule

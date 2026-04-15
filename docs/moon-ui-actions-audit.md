@@ -33,6 +33,8 @@ Updated source audit for the Moon builder as of 2026-04-15.
 - Empty connections expose the only two inline gate actions Moon trusts today: `Branch` and `On Failure`.
 - The detail dock now mirrors that product cut with three explicit buckets: `Control now`, `Worth building later`, and `Hard choices`.
 - `/api/catalog` now ships truth and surface policy metadata so the backend, action dock, popout, and gate editor classify the same catalog row the same way.
+- Moon primitive metadata now lives in `surface_catalog_registry`; `/api/catalog` reads the table instead of carrying a Python-owned primitive list.
+- Moon no longer carries a browser-owned fallback copy of the action catalog; `/api/catalog` is the only authority for the primary action inventory now.
 - Conditional branches now edit through a Then/Else composer first, with JSON kept as an escape hatch for nested condition trees.
 - `On Failure` now edits as a structural failure path with one honest reset control, not as a fake fallback-settings form.
 - `Approval` now pauses execution behind an authority checkpoint; `Validation` now compiles into a runtime verification command instead of mutating edge state.
@@ -44,6 +46,7 @@ Updated source audit for the Moon builder as of 2026-04-15.
 - The old first-pass assumption that most Moon node actions were decorative is no longer accurate.
 - Ready node actions are preserved through `build_graph -> definition.execution_setup.phases -> compiled_spec.jobs`.
 - Trigger buttons are preserved through `build_graph -> trigger_intent -> compiled_spec.triggers`.
+- The old presenter-local `actionOptions` list is dead and should stay dead; the dock now relies on the catalog authority path instead of a shadow action list.
 - Gate truth is split:
   - `conditional`, `after_failure`, `approval`, and `validation` change planned dependency behavior now.
   - `validation` compiles into a runtime verification command on the upstream step.

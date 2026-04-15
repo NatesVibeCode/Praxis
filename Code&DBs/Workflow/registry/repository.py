@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from functools import lru_cache
+import json
 from typing import Any
 
 import asyncpg
@@ -20,14 +21,9 @@ from storage.migrations import WorkflowMigrationError, workflow_migration_statem
 from .domain import (
     RegistryResolver,
     RuntimeProfileAuthorityRecord,
+    SandboxProfileAuthorityRecord,
     WorkspaceAuthorityRecord,
 )
-from .native_runtime_profile_sync import (
-    NativeRuntimeProfileSyncError,
-    is_native_runtime_profile_ref,
-    sync_native_runtime_profile_authority_async,
-)
-
 _DUPLICATE_SQLSTATES = {"42P07", "42710"}
 _REGISTRY_AUTHORITY_SCHEMA_FILENAME = "002_registry_authority.sql"
 
@@ -108,6 +104,42 @@ def _runtime_profile_record_from_row(
         runtime_profile_ref=str(row["runtime_profile_ref"]),
         model_profile_id=str(row["model_profile_id"]),
         provider_policy_id=str(row["provider_policy_id"]),
+        sandbox_profile_ref=str(row.get("sandbox_profile_ref") or ""),
+    )
+
+
+def _normalize_secret_allowlist(value: object) -> tuple[str, ...]:
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            parsed = [value]
+        value = parsed
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        return ()
+    normalized: list[str] = []
+    for index, entry in enumerate(value):
+        normalized.append(_require_text(entry, field_name=f"secret_allowlist[{index}]"))
+    return tuple(dict.fromkeys(normalized))
+
+
+def _sandbox_profile_record_from_row(
+    row: asyncpg.Record,
+) -> SandboxProfileAuthorityRecord:
+    docker_image = str(row.get("docker_image") or "").strip() or None
+    docker_cpus = str(row.get("docker_cpus") or "").strip() or None
+    docker_memory = str(row.get("docker_memory") or "").strip() or None
+    return SandboxProfileAuthorityRecord(
+        sandbox_profile_ref=str(row["sandbox_profile_ref"]),
+        sandbox_provider=str(row["sandbox_provider"]),
+        docker_image=docker_image,
+        docker_cpus=docker_cpus,
+        docker_memory=docker_memory,
+        network_policy=str(row["network_policy"]),
+        workspace_materialization=str(row["workspace_materialization"]),
+        secret_allowlist=_normalize_secret_allowlist(row.get("secret_allowlist")),
+        auth_mount_policy=str(row["auth_mount_policy"]),
+        timeout_profile=str(row["timeout_profile"]),
     )
 
 
@@ -193,22 +225,29 @@ class PostgresRegistryAuthorityRepository:
             record.provider_policy_id,
             field_name="provider_policy_id",
         )
+        sandbox_profile_ref = _require_text(
+            record.sandbox_profile_ref or record.runtime_profile_ref,
+            field_name="sandbox_profile_ref",
+        )
         try:
             await self._conn.execute(
                 """
                 INSERT INTO registry_runtime_profile_authority (
                     runtime_profile_ref,
                     model_profile_id,
-                    provider_policy_id
-                ) VALUES ($1, $2, $3)
+                    provider_policy_id,
+                    sandbox_profile_ref
+                ) VALUES ($1, $2, $3, $4)
                 ON CONFLICT (runtime_profile_ref) DO UPDATE
                 SET model_profile_id = EXCLUDED.model_profile_id,
                     provider_policy_id = EXCLUDED.provider_policy_id,
+                    sandbox_profile_ref = EXCLUDED.sandbox_profile_ref,
                     recorded_at = now()
                 """,
                 runtime_profile_ref,
                 model_profile_id,
                 provider_policy_id,
+                sandbox_profile_ref,
             )
         except asyncpg.PostgresError as exc:
             raise RegistryRepositoryError(
@@ -223,6 +262,96 @@ class PostgresRegistryAuthorityRepository:
             runtime_profile_ref=runtime_profile_ref,
             model_profile_id=model_profile_id,
             provider_policy_id=provider_policy_id,
+            sandbox_profile_ref=sandbox_profile_ref,
+        )
+
+    async def upsert_sandbox_profile_authority(
+        self,
+        record: SandboxProfileAuthorityRecord,
+    ) -> SandboxProfileAuthorityRecord:
+        sandbox_profile_ref = _require_text(
+            record.sandbox_profile_ref,
+            field_name="sandbox_profile_ref",
+        )
+        sandbox_provider = _require_text(
+            record.sandbox_provider,
+            field_name="sandbox_provider",
+        )
+        network_policy = _require_text(
+            record.network_policy,
+            field_name="network_policy",
+        )
+        workspace_materialization = _require_text(
+            record.workspace_materialization,
+            field_name="workspace_materialization",
+        )
+        auth_mount_policy = _require_text(
+            record.auth_mount_policy,
+            field_name="auth_mount_policy",
+        )
+        timeout_profile = _require_text(
+            record.timeout_profile,
+            field_name="timeout_profile",
+        )
+        secret_allowlist = json.dumps(list(record.secret_allowlist))
+        try:
+            await self._conn.execute(
+                """
+                INSERT INTO registry_sandbox_profile_authority (
+                    sandbox_profile_ref,
+                    sandbox_provider,
+                    docker_image,
+                    docker_cpus,
+                    docker_memory,
+                    network_policy,
+                    workspace_materialization,
+                    secret_allowlist,
+                    auth_mount_policy,
+                    timeout_profile
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10)
+                ON CONFLICT (sandbox_profile_ref) DO UPDATE
+                SET sandbox_provider = EXCLUDED.sandbox_provider,
+                    docker_image = EXCLUDED.docker_image,
+                    docker_cpus = EXCLUDED.docker_cpus,
+                    docker_memory = EXCLUDED.docker_memory,
+                    network_policy = EXCLUDED.network_policy,
+                    workspace_materialization = EXCLUDED.workspace_materialization,
+                    secret_allowlist = EXCLUDED.secret_allowlist,
+                    auth_mount_policy = EXCLUDED.auth_mount_policy,
+                    timeout_profile = EXCLUDED.timeout_profile,
+                    recorded_at = now()
+                """,
+                sandbox_profile_ref,
+                sandbox_provider,
+                record.docker_image,
+                record.docker_cpus,
+                record.docker_memory,
+                network_policy,
+                workspace_materialization,
+                secret_allowlist,
+                auth_mount_policy,
+                timeout_profile,
+            )
+        except asyncpg.PostgresError as exc:
+            raise RegistryRepositoryError(
+                "registry.write_failed",
+                "failed to persist sandbox-profile authority",
+                details={
+                    "sqlstate": getattr(exc, "sqlstate", None),
+                    "sandbox_profile_ref": sandbox_profile_ref,
+                },
+            ) from exc
+        return SandboxProfileAuthorityRecord(
+            sandbox_profile_ref=sandbox_profile_ref,
+            sandbox_provider=sandbox_provider,
+            docker_image=record.docker_image,
+            docker_cpus=record.docker_cpus,
+            docker_memory=record.docker_memory,
+            network_policy=network_policy,
+            workspace_materialization=workspace_materialization,
+            secret_allowlist=tuple(record.secret_allowlist),
+            auth_mount_policy=auth_mount_policy,
+            timeout_profile=timeout_profile,
         )
 
     async def fetch_workspace_authority(
@@ -271,7 +400,7 @@ class PostgresRegistryAuthorityRepository:
             if normalized_refs is None:
                 rows = await self._conn.fetch(
                     """
-                    SELECT runtime_profile_ref, model_profile_id, provider_policy_id
+                    SELECT runtime_profile_ref, model_profile_id, provider_policy_id, sandbox_profile_ref
                     FROM registry_runtime_profile_authority
                     ORDER BY runtime_profile_ref
                     """
@@ -279,7 +408,7 @@ class PostgresRegistryAuthorityRepository:
             else:
                 rows = await self._conn.fetch(
                     """
-                    SELECT runtime_profile_ref, model_profile_id, provider_policy_id
+                    SELECT runtime_profile_ref, model_profile_id, provider_policy_id, sandbox_profile_ref
                     FROM registry_runtime_profile_authority
                     WHERE runtime_profile_ref = ANY($1::text[])
                     ORDER BY runtime_profile_ref
@@ -294,28 +423,68 @@ class PostgresRegistryAuthorityRepository:
             ) from exc
         return tuple(_runtime_profile_record_from_row(row) for row in rows)
 
+    async def fetch_sandbox_profile_authority(
+        self,
+        *,
+        sandbox_profile_refs: Sequence[str] | None = None,
+    ) -> tuple[SandboxProfileAuthorityRecord, ...]:
+        normalized_refs = _normalize_refs(
+            sandbox_profile_refs,
+            field_name="sandbox_profile_refs",
+        )
+        try:
+            if normalized_refs is None:
+                rows = await self._conn.fetch(
+                    """
+                    SELECT
+                        sandbox_profile_ref,
+                        sandbox_provider,
+                        docker_image,
+                        docker_cpus,
+                        docker_memory,
+                        network_policy,
+                        workspace_materialization,
+                        secret_allowlist,
+                        auth_mount_policy,
+                        timeout_profile
+                    FROM registry_sandbox_profile_authority
+                    ORDER BY sandbox_profile_ref
+                    """
+                )
+            else:
+                rows = await self._conn.fetch(
+                    """
+                    SELECT
+                        sandbox_profile_ref,
+                        sandbox_provider,
+                        docker_image,
+                        docker_cpus,
+                        docker_memory,
+                        network_policy,
+                        workspace_materialization,
+                        secret_allowlist,
+                        auth_mount_policy,
+                        timeout_profile
+                    FROM registry_sandbox_profile_authority
+                    WHERE sandbox_profile_ref = ANY($1::text[])
+                    ORDER BY sandbox_profile_ref
+                    """,
+                    list(normalized_refs),
+                )
+        except asyncpg.PostgresError as exc:
+            raise RegistryRepositoryError(
+                "registry.read_failed",
+                "failed to read sandbox-profile authority",
+                details={"sqlstate": getattr(exc, "sqlstate", None)},
+            ) from exc
+        return tuple(_sandbox_profile_record_from_row(row) for row in rows)
+
     async def load_resolver(
         self,
         *,
         workspace_refs: Sequence[str] | None = None,
         runtime_profile_refs: Sequence[str] | None = None,
     ) -> RegistryResolver:
-        should_sync_native_profiles = runtime_profile_refs is None or any(
-            is_native_runtime_profile_ref(ref)
-            for ref in runtime_profile_refs
-        )
-        if should_sync_native_profiles:
-            try:
-                await sync_native_runtime_profile_authority_async(
-                    self._conn,
-                    prune=False,
-                )
-            except NativeRuntimeProfileSyncError as exc:
-                raise RegistryRepositoryError(
-                    "registry.native_profile_sync_failed",
-                    "failed to refresh native runtime-profile authority",
-                    details={"message": str(exc)},
-                ) from exc
         workspace_records = await self.fetch_workspace_authority(
             workspace_refs=workspace_refs,
         )
