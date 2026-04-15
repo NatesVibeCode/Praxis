@@ -273,6 +273,13 @@ def _catalog_truth(item: dict[str, Any]) -> dict[str, str]:
             "detail": "Uses the same `auto/research` route as Web Research today.",
         }
 
+    if action_value == "auto/classify":
+        return {
+            "category": "runtime",
+            "badge": "Runs on release",
+            "detail": "Uses the analysis lane backed by task_type_route_profiles and task_type_routing authority.",
+        }
+
     if action_value == "auto/fan-out":
         return {
             "category": "alias",
@@ -372,6 +379,13 @@ def _catalog_surface_policy(
             "badge": "Merged",
             "detail": "Merged into Web Research because both buttons point at the same route today.",
             "hardChoice": "Merged into Web Research. One route gets one obvious button.",
+        }
+
+    if action_value == "auto/classify":
+        return {
+            "tier": "primary",
+            "badge": "Core now",
+            "detail": "Backed by a real analysis lane instead of borrowing the support route.",
         }
 
     if _text(item.get("family")) == "trigger":

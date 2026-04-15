@@ -48,6 +48,8 @@ class PreSuggestion:
     """Vector-computed suggestions before planner call."""
     integrations: list[dict] = field(default_factory=list)
     modules: list[dict] = field(default_factory=list)
+    calculations: list[dict] = field(default_factory=list)
+    workflows: list[dict] = field(default_factory=list)
     templates: list[dict] = field(default_factory=list)
     best_template_score: float = 0.0
     best_integration_score: float = 0.0
@@ -334,6 +336,8 @@ class TaskAssembler:
     def _build_skeleton_prompt(self, task: str, suggestions: PreSuggestion) -> str:
         """Build a short prompt for the layout skeleton — just modules and positions."""
         tool_names = [intg.get("name", "?") for intg in suggestions.integrations]
+        calculation_names = [calc.get("name", "?") for calc in suggestions.calculations]
+        workflow_names = [workflow.get("name", "?") for workflow in suggestions.workflows]
         rows = self._conn.execute(
             "SELECT name FROM integration_registry WHERE auth_status = 'connected' LIMIT 6"
         )
@@ -345,12 +349,16 @@ class TaskAssembler:
         obj_types = [r["type_id"] for r in rows]
 
         tools = ", ".join(tool_names)
+        calculations = ", ".join(calculation_names)
+        workflows = ", ".join(workflow_names)
         objs = ", ".join(obj_types)
 
         return f"""Return ONLY JSON. Pick modules and layout for: {task}
 
 Modules: data-table, chart, search-panel, activity-feed, button-row, metric, stat-row, status-grid, key-value, dispatch-form, markdown, workflow-builder, intent-box, dropdown-select, bug-card
 Data: {tools}
+Calculations: {calculations}
+Workflows: {workflows}
 Objects: {objs}
 
 Grid cells: Letter=ROW (A-D), Number=COLUMN (1-4). A1=top-left, D4=bottom-right.
@@ -371,6 +379,8 @@ ONLY JSON."""
 
         # Get integrations
         tool_names = [intg.get("name", "?") for intg in suggestions.integrations]
+        calculation_names = [calc.get("name", "?") for calc in suggestions.calculations]
+        workflow_names = [workflow.get("name", "?") for workflow in suggestions.workflows]
         rows = self._conn.execute(
             "SELECT name FROM integration_registry WHERE auth_status = 'connected' LIMIT 6"
         )
@@ -383,6 +393,8 @@ ONLY JSON."""
         obj_types = [f"{r['type_id']}: {r['name']}" for r in rows]
 
         tool_list = ", ".join(tool_names)
+        calc_list = ", ".join(calculation_names)
+        workflow_list = ", ".join(workflow_names)
         obj_list = ", ".join(obj_types)
 
         return f"""Return ONLY JSON. Build an app for: {task}
@@ -390,6 +402,8 @@ ONLY JSON."""
 EXACT module IDs (use ONLY these): data-table, chart, search-panel, activity-feed, button-row, markdown, metric, stat-row, status-grid, key-value, dispatch-form, workflow-builder, intent-box, text-input, dropdown-select, bug-card, model-card
 
 Data: {tool_list}
+Calculations: {calc_list}
+Workflows: {workflow_list}
 Objects: {obj_list}
 
 Grid: 4 cols (A-D), 4 rows (1-4). Cells: A1-D4. Span: "COLSxROWS".
@@ -602,77 +616,123 @@ Be specific: not "get data" but "Query open bugs via workflow bugs or praxis_bug
     # ------------------------------------------------------------------
 
     def _pre_suggest(self, task: str) -> PreSuggestion:
-        """Fast local vector search across integrations, modules, templates."""
-        integrations = []
-        modules = []
-        templates = []
+        """Fast local vector search across integrations, modules, calculations, workflows, and templates."""
+        integrations: list[dict] = []
+        modules: list[dict] = []
+        calculations: list[dict] = []
+        workflows: list[dict] = []
+        templates: list[dict] = []
         best_template_score = 0.0
         best_integration_score = 0.0
 
         if self._vector_store is not None:
             vector_query = self._vector_store.prepare(task)
 
-            # Search integrations (with similarity score)
             try:
-                rows = vector_query.search(
+                integrations = self._search_registry(
+                    task,
                     "integration_registry",
-                    select_columns=("id", "name", "description", "capabilities", "icon"),
+                    columns=("id", "name", "description", "capabilities", "icon"),
                     limit=3,
-                    min_similarity=None,
-                    score_alias="score",
+                    vector_query=vector_query,
                 )
-                integrations = rows
                 if integrations:
                     best_integration_score = integrations[0].get("score", 0.0)
             except Exception:
                 pass
 
-            # Search modules (with similarity score)
             try:
-                rows = vector_query.search(
+                modules = self._search_registry(
+                    task,
                     "registry_ui_components",
-                    select_columns=("id", "name", "description", "category", "props_schema"),
+                    columns=("id", "name", "description", "category", "props_schema"),
                     limit=8,
-                    min_similarity=None,
-                    score_alias="score",
+                    vector_query=vector_query,
                 )
-                modules = rows
             except Exception:
                 pass
 
-            # Search existing templates (with similarity score)
             try:
-                rows = vector_query.search(
-                    "app_manifests",
-                    select_columns=("id", "name", "description"),
-                    filters=(VectorFilter("status", "active"),),
-                    limit=3,
-                    min_similarity=None,
-                    score_alias="score",
+                calculations = self._search_registry(
+                    task,
+                    "registry_calculations",
+                    columns=("id", "name", "description", "category", "input_schema", "output_schema", "execution_type"),
+                    limit=6,
+                    vector_query=vector_query,
                 )
-                templates = rows
+            except Exception:
+                pass
+
+            try:
+                workflows = self._search_registry(
+                    task,
+                    "registry_workflows",
+                    columns=("id", "name", "description", "category", "trigger_type", "input_schema", "output_schema", "steps", "mcp_tool_refs"),
+                    limit=6,
+                    vector_query=vector_query,
+                )
+            except Exception:
+                pass
+
+            try:
+                templates = self._search_registry(
+                    task,
+                    "app_manifests",
+                    columns=("id", "name", "description"),
+                    limit=3,
+                    vector_query=vector_query,
+                    extra_filters=(VectorFilter("status", "active"),),
+                )
                 if templates:
                     best_template_score = templates[0].get("score", 0.0)
             except Exception:
                 pass
         else:
-            # Fallback: FTS search (no scores available)
-            import re
-            words = [w for w in re.findall(r'\w+', task.lower()) if len(w) > 2]
-            or_query = ' | '.join(words) if words else task
             try:
-                rows = self._conn.execute(
-                    "SELECT id, name, description, capabilities, icon "
-                    "FROM integration_registry WHERE search_vector @@ to_tsquery('english', $1) LIMIT 3",
-                    or_query,
+                integrations = self._search_registry(
+                    task,
+                    "integration_registry",
+                    columns=("id", "name", "description", "capabilities", "icon"),
+                    limit=3,
                 )
-                integrations = [dict(r) for r in rows]
+            except Exception:
+                pass
+
+            try:
+                modules = self._search_registry(
+                    task,
+                    "registry_ui_components",
+                    columns=("id", "name", "description", "category", "props_schema"),
+                    limit=8,
+                )
+            except Exception:
+                pass
+
+            try:
+                calculations = self._search_registry(
+                    task,
+                    "registry_calculations",
+                    columns=("id", "name", "description", "category", "input_schema", "output_schema", "execution_type"),
+                    limit=6,
+                )
+            except Exception:
+                pass
+
+            try:
+                workflows = self._search_registry(
+                    task,
+                    "registry_workflows",
+                    columns=("id", "name", "description", "category", "trigger_type", "input_schema", "output_schema", "steps", "mcp_tool_refs"),
+                    limit=6,
+                )
             except Exception:
                 pass
 
         return PreSuggestion(
             integrations=integrations,
             modules=modules,
+            calculations=calculations,
+            workflows=workflows,
             templates=templates,
             best_template_score=best_template_score,
             best_integration_score=best_integration_score,
@@ -703,10 +763,18 @@ Be specific: not "get data" but "Query open bugs via workflow bugs or praxis_bug
         if suggestions.integrations and suggestions.modules:
             integration_scores = [i.get("score", 0.0) for i in suggestions.integrations]
             module_scores = [m.get("score", 0.0) for m in suggestions.modules]
-            combined_coverage = (
-                (max(integration_scores) if integration_scores else 0.0)
-                + (sum(sorted(module_scores, reverse=True)[:4]) / 4 if module_scores else 0.0)
-            ) / 2
+            calculation_scores = [c.get("score", 0.0) for c in suggestions.calculations]
+            workflow_scores = [w.get("score", 0.0) for w in suggestions.workflows]
+            score_buckets = []
+            if integration_scores:
+                score_buckets.append(max(integration_scores))
+            if module_scores:
+                score_buckets.append(sum(sorted(module_scores, reverse=True)[:4]) / min(4, len(module_scores)))
+            if calculation_scores:
+                score_buckets.append(max(calculation_scores))
+            if workflow_scores:
+                score_buckets.append(max(workflow_scores))
+            combined_coverage = sum(score_buckets) / len(score_buckets) if score_buckets else 0.0
             if combined_coverage > 0.7:
                 plan = self._plan_from_suggestions(task, suggestions)
                 manifest_id = self._execute_plan(plan)
@@ -797,7 +865,7 @@ Be specific: not "get data" but "Query open bugs via workflow bugs or praxis_bug
         parts = [
             f'The user wants to: "{task}"',
             "",
-            "Here are pre-matched data sources, modules, and templates from vector search.",
+            "Here are pre-matched data sources, modules, calculations, workflows, and templates from vector search.",
             "Review the suggested wiring and output a plan.",
             "",
         ]
@@ -817,6 +885,22 @@ Be specific: not "get data" but "Query open bugs via workflow bugs or praxis_bug
             parts.append("MATCHED UI MODULES:")
             for m in suggestions.modules:
                 parts.append(f"  - {m['id']}: {m['name']} ({m.get('category', '')})")
+            parts.append("")
+
+        if suggestions.calculations:
+            parts.append("MATCHED CALCULATIONS:")
+            for calc in suggestions.calculations:
+                parts.append(
+                    f"  - {calc['id']}: {calc['name']} ({calc.get('execution_type', calc.get('category', ''))})"
+                )
+            parts.append("")
+
+        if suggestions.workflows:
+            parts.append("MATCHED WORKFLOWS:")
+            for workflow in suggestions.workflows:
+                parts.append(
+                    f"  - {workflow['id']}: {workflow['name']} ({workflow.get('trigger_type', workflow.get('category', ''))})"
+                )
             parts.append("")
 
         if suggestions.templates:
@@ -839,6 +923,8 @@ Be specific: not "get data" but "Query open bugs via workflow bugs or praxis_bug
             "",
             "Rules:",
             "- If an integration matches, use its endpoint as the data source",
+            "- If a calculation matches, prefer it for derived fields or scoring widgets",
+            "- If a workflow matches, prefer workflow-oriented modules like workflow-builder or workflow-status",
             "- If no integration matches, create an object_type as a holding table",
             '- object_type properties should match the task semantics (e.g. "expenses" → amount:currency, date:date, category:dropdown)',
             "- Use data-table for lists, metric for counts, key-value for details, chart for trends, button-row for actions",
@@ -847,6 +933,43 @@ Be specific: not "get data" but "Query open bugs via workflow bugs or praxis_bug
         ])
 
         return "\n".join(parts)
+
+    def _search_registry(
+        self,
+        task: str,
+        table: str,
+        *,
+        columns: tuple[str, ...],
+        limit: int,
+        vector_query: Any | None = None,
+        extra_filters: tuple[Any, ...] = (),
+    ) -> list[dict[str, Any]]:
+        """Search one registry table and return plain dict rows."""
+        if vector_query is not None:
+            rows = vector_query.search(
+                table,
+                select_columns=columns,
+                filters=extra_filters if extra_filters else (),
+                limit=limit,
+                min_similarity=None,
+                score_alias="score",
+            )
+            return [dict(row) for row in rows or []]
+
+        import re
+
+        words = [w for w in re.findall(r"\w+", task.lower()) if len(w) > 2]
+        or_query = " | ".join(words) if words else task
+        sql = (
+            f"SELECT {', '.join(columns)}, "
+            "ts_rank(search_vector, to_tsquery('english', $1)) AS score "
+            f"FROM {table} "
+            "WHERE search_vector @@ to_tsquery('english', $1) "
+            "ORDER BY score DESC "
+            f"LIMIT {limit}"
+        )
+        rows = self._conn.execute(sql, or_query)
+        return [dict(row) for row in rows or []]
 
     def _parse_plan(self, task: str, raw: str) -> AssemblyPlan:
         """Parse planner output JSON."""

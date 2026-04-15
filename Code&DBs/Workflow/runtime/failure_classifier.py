@@ -417,6 +417,14 @@ def _classify_verification_error(failure_code: str, *, outputs: dict | None = No
 
 def _classify_scope_violation(failure_code: str, *, outputs: dict | None = None) -> FailureClassification | None:
     """Check if failure is due to scope or governance violations."""
+    if failure_code in ("provider_disabled", "route_disabled", "policy_blocked"):
+        return FailureClassification(
+            category=FailureCategory.SCOPE_VIOLATION,
+            is_retryable=False,
+            is_transient=False,
+            recommended_action="Choose an allowed provider/model or wait until the policy window ends.",
+            severity="medium",
+        )
     if "scope" in failure_code or "governance" in failure_code:
         return FailureClassification(
             category=FailureCategory.SCOPE_VIOLATION,

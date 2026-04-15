@@ -1306,6 +1306,94 @@ def test_execute_job_blocks_before_cli_spawn_when_provider_not_ready(monkeypatch
     assert "ANTHROPIC_API_KEY" in str(captured["stdout_preview"])
 
 
+def test_execute_job_blocks_before_prompt_and_cli_when_provider_is_route_disabled(monkeypatch) -> None:
+    class _Conn:
+        def execute(self, query: str, *args):
+            normalized = " ".join(query.split())
+            if normalized == "SELECT run_id, current_state, request_envelope FROM workflow_runs WHERE run_id = $1":
+                return [{
+                    "run_id": "run.alpha",
+                    "current_state": "queued",
+                    "request_envelope": {
+                        "spec_snapshot": {
+                            "definition_revision": "def_alpha",
+                            "plan_revision": "plan_alpha",
+                        }
+                    },
+                }]
+            raise AssertionError(f"Unexpected query: {normalized}")
+
+    captured: dict[str, object] = {}
+
+    class _RejectingRouter:
+        def __init__(self, conn) -> None:
+            self.conn = conn
+
+        def resolve_explicit_eligibility(
+            self,
+            agent_slug: str,
+            *,
+            task_type: str | None = None,
+            as_of=None,
+        ):
+            assert agent_slug == "anthropic/claude-sonnet-4"
+            assert task_type == "build"
+            return SimpleNamespace(
+                eligibility_status="rejected",
+                reason_code="provider_disabled",
+                rationale="Anthropic off until Friday morning",
+                decision_ref="decision:anthropic-off",
+            )
+
+    monkeypatch.setattr(_shared_mod, "_CIRCUIT_BREAKERS", None)
+    monkeypatch.setattr(_exec_mod, "mark_running", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(task_type_router, "TaskTypeRouter", _RejectingRouter)
+    monkeypatch.setattr(
+        "registry.agent_config.AgentRegistry.load_from_postgres",
+        lambda _conn: SimpleNamespace(
+            get=lambda _slug: SimpleNamespace(provider="anthropic", model="claude-sonnet-4"),
+        ),
+    )
+    monkeypatch.setattr(_exec_mod, "_runtime_profile_ref_for_run", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        _exec_mod,
+        "_resolve_job_prompt_authority",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("prompt authority should not resolve after route disable"),
+        ),
+    )
+    monkeypatch.setattr(
+        _exec_mod,
+        "_execute_cli",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("CLI subprocess should not run when provider is disabled"),
+        ),
+    )
+    monkeypatch.setattr(
+        _exec_mod,
+        "complete_job",
+        lambda _conn, _job_id, **kwargs: captured.update(kwargs),
+    )
+
+    _exec_mod.execute_job(
+        _Conn(),
+        {
+            "id": 15,
+            "label": "job-alpha",
+            "agent_slug": "anthropic/claude-sonnet-4",
+            "prompt": "use cli",
+            "run_id": "run.alpha",
+            "route_task_type": "build",
+        },
+        repo_root="/tmp/workspace.alpha",
+    )
+
+    assert captured["status"] == "failed"
+    assert captured["error_code"] == "provider_disabled"
+    assert "Anthropic off until Friday morning" in str(captured["stdout_preview"])
+    assert "decision:anthropic-off" in str(captured["stdout_preview"])
+
+
 class _NoopRouter:
     def __init__(self, conn) -> None:
         self.conn = conn
@@ -1621,6 +1709,99 @@ def test_submit_workflow_routes_graph_specs_through_graph_runtime_submit(monkeyp
     assert captured["conn"] is conn
     assert captured["run_id"] == "graph_dispatch"
     assert captured["spec_dict"] == spec._raw
+
+
+def test_submit_workflow_routes_deterministic_specs_through_graph_runtime_submit(monkeypatch):
+    jobs = [
+        {
+            "label": "prepare",
+            "agent": "openai/gpt-5.4-mini",
+            "adapter_type": "deterministic_task",
+            "expected_outputs": {"result": "prepared"},
+        },
+        {
+            "label": "admit",
+            "agent": "openai/gpt-5.4-mini",
+            "adapter_type": "deterministic_task",
+            "depends_on": ["prepare"],
+            "expected_outputs": {"result": "admitted"},
+        },
+    ]
+    spec = _make_spec(jobs)
+    monkeypatch.setattr(WorkflowSpec, "load", classmethod(lambda cls, path: spec))
+
+    captured: dict[str, object] = {}
+
+    def _fake_graph_submit(conn, spec_dict, *, run_id):
+        captured["conn"] = conn
+        captured["spec_dict"] = spec_dict
+        captured["run_id"] = run_id
+        return {"run_id": run_id, "status": "succeeded", "execution_mode": "graph_runtime"}
+
+    monkeypatch.setattr(_admission_mod, "_submit_graph_workflow_inline", _fake_graph_submit)
+    monkeypatch.setattr(
+        _admission_mod,
+        "_do_submit_workflow",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("flat submission path should not run")),
+    )
+
+    conn = _FakeConn()
+    result = unified_workflow.submit_workflow(conn, "spec.queue.json", "/repo", run_id="deterministic_dispatch")
+
+    assert result["execution_mode"] == "graph_runtime"
+    assert captured["conn"] is conn
+    assert captured["run_id"] == "deterministic_dispatch"
+    assert captured["spec_dict"] == spec._raw
+
+
+def test_submit_graph_workflow_inline_reports_current_state_for_success(monkeypatch):
+    fake_request = SimpleNamespace(workflow_id="deterministic_smoke")
+    fake_outcome = SimpleNamespace(
+        validation_result=SimpleNamespace(is_valid=True),
+        current_state=SimpleNamespace(value="claim_accepted"),
+        run_id="run:graph:inline",
+    )
+    fake_execution_result = SimpleNamespace(
+        current_state=SimpleNamespace(value="succeeded"),
+        terminal_reason_code="runtime.workflow_succeeded",
+    )
+
+    class _FakePlanner:
+        def __init__(self, *, registry):
+            self.registry = registry
+
+        def plan(self, *, request):
+            return fake_outcome
+
+    class _FakeWriter:
+        def __init__(self, *, database_url):
+            self.database_url = database_url
+
+        def close_blocking(self):
+            return None
+
+    monkeypatch.setenv("WORKFLOW_DATABASE_URL", "postgresql://postgres@127.0.0.1:5432/praxis")
+    monkeypatch.setattr(_admission_mod, "compile_graph_workflow_request", lambda *_args, **_kwargs: fake_request)
+    monkeypatch.setattr(_admission_mod, "_graph_registry_for_request", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(_admission_mod, "WorkflowIntakePlanner", _FakePlanner)
+    monkeypatch.setattr(_admission_mod, "_persist_graph_authority", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(_admission_mod, "PostgresEvidenceWriter", _FakeWriter)
+    monkeypatch.setattr(
+        _admission_mod,
+        "execute_workflow_request",
+        lambda **_kwargs: (fake_execution_result, None),
+    )
+
+    result = _admission_mod._submit_graph_workflow_inline(
+        _FakeConn(),
+        {"name": "deterministic smoke", "jobs": [{}, {}]},
+        run_id="run:graph:inline",
+    )
+
+    assert result["run_id"] == "run:graph:inline"
+    assert result["status"] == "succeeded"
+    assert result["terminal_reason_code"] == "runtime.workflow_succeeded"
+    assert result["execution_mode"] == "graph_runtime"
 
 
 def test_submit_workflow_insert_keeps_integration_action_and_args(monkeypatch):

@@ -1632,6 +1632,7 @@
       "099_webhook_notify_trigger.sql",
       "100_task_type_profile_scope_defaults.sql",
       "100_webhook_system_events_bridge.sql",
+      "101_analysis_classify_routing.sql",
       "101_model_sync_authority.sql",
       "102_connector_integration_bridge.sql",
       "102_pg_trgm_extension.sql",

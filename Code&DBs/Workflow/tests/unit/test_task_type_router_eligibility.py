@@ -182,6 +182,40 @@ def test_provider_wide_reject_filters_entire_provider_from_chain() -> None:
     ]
 
 
+def test_explicit_slug_eligibility_returns_provider_disable_window() -> None:
+    as_of = _as_of()
+    router = TaskTypeRouter(
+        _FakeConn(
+            _route_rows(),
+            eligibility_rows=[
+                {
+                    "task_route_eligibility_id": "eligibility.anthropic.off",
+                    "task_type": None,
+                    "provider_slug": "anthropic",
+                    "model_slug": None,
+                    "eligibility_status": "rejected",
+                    "reason_code": "provider_disabled",
+                    "rationale": "Anthropic off until Friday morning",
+                    "effective_from": as_of - timedelta(hours=1),
+                    "effective_to": as_of + timedelta(days=2),
+                    "decision_ref": "decision:anthropic-off",
+                }
+            ],
+        ),
+        now_factory=lambda: as_of,
+    )
+
+    decision = router.resolve_explicit_eligibility(
+        "anthropic/claude-sonnet-4-6",
+        task_type="build",
+    )
+
+    assert decision is not None
+    assert decision.eligibility_status == "rejected"
+    assert decision.reason_code == "provider_disabled"
+    assert decision.decision_ref == "decision:anthropic-off"
+
+
 def test_model_specific_override_beats_global_provider_shutdown() -> None:
     as_of = _as_of()
     router = TaskTypeRouter(

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from types import SimpleNamespace
 
 import pytest
 import storage.postgres.schema as postgres_schema
@@ -170,29 +169,10 @@ def test_bootstrap_workflow_schema_locks_and_applies_only_missing_migrations(
     monkeypatch.setattr(postgres_schema, "_acquire_schema_bootstrap_lock", _acquire_lock)
     monkeypatch.setattr(
         postgres_schema,
-        "workflow_migration_manifest",
+        "_workflow_schema_manifest_filenames",
         lambda: (
-            SimpleNamespace(filename="001_compile_artifacts.sql"),
-            SimpleNamespace(filename="002_other.sql"),
-        ),
-    )
-    monkeypatch.setattr(
-        postgres_schema,
-        "workflow_migration_expected_objects",
-        lambda filename: (
-            (
-                postgres_schema.WorkflowMigrationExpectedObject(
-                    object_type="table",
-                    object_name="compile_artifacts",
-                ),
-            )
-            if filename == "001_compile_artifacts.sql"
-            else (
-                postgres_schema.WorkflowMigrationExpectedObject(
-                    object_type="table",
-                    object_name="other_table",
-                ),
-            )
+            "001_compile_artifacts.sql",
+            "002_other.sql",
         ),
     )
 
@@ -253,29 +233,10 @@ def test_bootstrap_workflow_schema_applies_missing_constraint_migration(
     )
     monkeypatch.setattr(
         postgres_schema,
-        "workflow_migration_manifest",
+        "_workflow_schema_manifest_filenames",
         lambda: (
-            SimpleNamespace(filename="089_control_operator_frames.sql"),
-            SimpleNamespace(filename="090_workflow_chain_cancellation_and_alignment.sql"),
-        ),
-    )
-    monkeypatch.setattr(
-        postgres_schema,
-        "workflow_migration_expected_objects",
-        lambda filename: (
-            (
-                postgres_schema.WorkflowMigrationExpectedObject(
-                    object_type="constraint",
-                    object_name="workflow_chain_waves.workflow_chain_waves_status_v2_check",
-                ),
-            )
-            if filename == "090_workflow_chain_cancellation_and_alignment.sql"
-            else (
-                postgres_schema.WorkflowMigrationExpectedObject(
-                    object_type="table",
-                    object_name="run_operator_frames",
-                ),
-            )
+            "089_control_operator_frames.sql",
+            "090_workflow_chain_cancellation_and_alignment.sql",
         ),
     )
 
@@ -332,10 +293,10 @@ def test_bootstrap_workflow_schema_applies_partially_drifted_migration(
     )
     monkeypatch.setattr(
         postgres_schema,
-        "workflow_migration_manifest",
+        "_workflow_schema_manifest_filenames",
         lambda: (
-            SimpleNamespace(filename="073_workflow_run_packet_inspection.sql"),
-            SimpleNamespace(filename="074_provider_policy_multi_provider_refs.sql"),
+            "073_workflow_run_packet_inspection.sql",
+            "074_provider_policy_multi_provider_refs.sql",
         ),
     )
 
@@ -412,7 +373,7 @@ def test_bootstrap_migration_skips_commented_transaction_wrappers(
 
     monkeypatch.setattr(
         postgres_schema,
-        "workflow_migration_statements",
+        "workflow_bootstrap_migration_statements",
         lambda _filename: (
             "-- migration header\nBEGIN",
             "-- create the relation\nCREATE TABLE demo (id INT)",

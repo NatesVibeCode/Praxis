@@ -1,0 +1,11 @@
+# Praxis native instance runtime contract
+#
+# Machine-owned runtime input for repo-local native operator wrappers.
+# Adjust values to match your local environment.
+
+WORKFLOW_DATABASE_URL=postgresql://localhost:5432/praxis
+PRAXIS_LOCAL_POSTGRES_DATA_DIR=Code&DBs/Databases/postgres-dev/data
+PRAXIS_RUNTIME_PROFILE=praxis
+PRAXIS_INSTANCE_NAME=praxis
+PRAXIS_RECEIPTS_DIR=artifacts/runtime_receipts
+PRAXIS_TOPOLOGY_DIR=artifacts/runtime_topology

@@ -282,6 +282,11 @@ def test_workflow_run_prompt_frontdoor_uses_prompt_compiler(monkeypatch: pytest.
         captured["launch_kwargs"] = kwargs
         return 0
 
+    monkeypatch.setattr(
+        workflow_commands,
+        "_default_prompt_provider_slug",
+        lambda: "openai",
+    )
     monkeypatch.setattr(workflow_commands, "compile_prompt_launch_spec", _fake_compile_prompt_launch_spec)
     monkeypatch.setattr(workflow_commands.workflow_cli, "_submit_workflow_launch", _fake_submit_workflow_launch)
     stdout = StringIO()
@@ -300,7 +305,7 @@ def test_workflow_run_prompt_frontdoor_uses_prompt_compiler(monkeypatch: pytest.
 
     assert captured["compile_kwargs"] == {
         "prompt": "fix the failing prompt path",
-        "provider_slug": "anthropic",
+        "provider_slug": "openai",
         "model_slug": None,
         "tier": None,
         "adapter_type": "cli_llm",

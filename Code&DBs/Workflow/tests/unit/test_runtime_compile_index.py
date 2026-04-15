@@ -175,6 +175,22 @@ def _snapshot_row(
     }
 
 
+def test_current_compile_surface_manifest_tracks_live_authority_modules() -> None:
+    manifest = compile_index.current_compile_surface_manifest(Path(_REPO_ROOT))
+    tracked_files = set(manifest["tracked_files"])
+
+    assert "Code&DBs/Workflow/runtime/compile_index.py" in tracked_files
+    assert "Code&DBs/Workflow/runtime/compile_reuse.py" in tracked_files
+    assert "Code&DBs/Workflow/runtime/compiler.py" in tracked_files
+    assert "Code&DBs/Workflow/runtime/definition_compile_kernel.py" in tracked_files
+    assert "Code&DBs/Workflow/runtime/capability_catalog.py" in tracked_files
+    assert "Code&DBs/Workflow/registry/reference_catalog_sync.py" in tracked_files
+    assert "Code&DBs/Workflow/registry/integration_registry_sync.py" in tracked_files
+    assert "Code&DBs/Workflow/runtime/reference_catalog.py" not in tracked_files
+    assert "Code&DBs/Workflow/runtime/integration_registry_sync.py" not in tracked_files
+    assert manifest["surface_revision"].startswith("surface_")
+
+
 def test_refresh_compile_index_materializes_durable_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
     conn = _CompileIndexConn()
     source_rows = _source_rows()

@@ -11,6 +11,8 @@ from storage.postgres.connection import resolve_workflow_database_url
 from storage.postgres.validators import PostgresConfigurationError
 
 from runtime.failure_projection import project_failure_classification
+
+_POLICY_REASON_CODES = frozenset({"provider_disabled", "route_disabled", "policy_blocked"})
 from runtime.claims import ClaimLeaseProposalSnapshot
 from runtime.domain import RunState
 from runtime.subscriptions import (
@@ -256,6 +258,19 @@ def _classify_job_failure(job: dict) -> dict[str, Any] | None:
     job_status = str(job.get("status") or "").strip().lower()
     if job_status not in {"failed", "dead_letter"}:
         return None
+    raw_error_code = str(job.get("last_error_code") or "").strip()
+    if raw_error_code in _POLICY_REASON_CODES:
+        try:
+            from runtime.workflow.unified import _terminal_failure_classification
+        except Exception:
+            return None
+        classification = _terminal_failure_classification(
+            error_code=raw_error_code,
+            stderr=str(job.get("stdout_preview") or ""),
+            exit_code=job.get("exit_code"),
+        )
+        if classification is not None and hasattr(classification, "to_dict"):
+            return classification.to_dict()
     failure_category = str(job.get("failure_category") or "").strip()
     if failure_category:
         return project_failure_classification(
@@ -268,7 +283,7 @@ def _classify_job_failure(job: dict) -> dict[str, Any] | None:
     except Exception:
         return None
     classification = _terminal_failure_classification(
-        error_code=str(job.get("last_error_code") or "").strip(),
+        error_code=raw_error_code,
         stderr=str(job.get("stdout_preview") or ""),
         exit_code=job.get("exit_code"),
     )
@@ -345,9 +360,16 @@ def _run_status_payload(
         attempt = j.get("attempt", 0)
         if attempt:
             entry["attempt"] = attempt
-        error_code = j.get("failure_category") or j.get("last_error_code")
+        raw_error_code = str(j.get("last_error_code") or "").strip()
+        error_code = (
+            raw_error_code
+            if raw_error_code in _POLICY_REASON_CODES
+            else (j.get("failure_category") or raw_error_code)
+        )
         if error_code:
             entry["error_code"] = error_code
+        if raw_error_code and raw_error_code != error_code:
+            entry["reason_code"] = raw_error_code
         duration = j.get("duration_ms", 0)
         if duration:
             entry["duration_ms"] = duration

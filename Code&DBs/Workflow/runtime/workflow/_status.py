@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from storage.postgres.connection import SyncPostgresConnection
 
 logger = logging.getLogger(__name__)
+_POLICY_REASON_CODES = frozenset({"provider_disabled", "route_disabled", "policy_blocked"})
 
 __all__ = [
     "get_run_status",
@@ -357,6 +358,15 @@ def _seconds_since(value, now: datetime) -> float | None:
 
 
 def _classify_run_job_failure(job: dict) -> dict | None:
+    raw_error_code = str(job.get("last_error_code") or "").strip()
+    if raw_error_code in _POLICY_REASON_CODES:
+        classification = _terminal_failure_classification(
+            error_code=raw_error_code,
+            stderr=str(job.get("stdout_preview") or ""),
+            exit_code=job.get("exit_code"),
+        )
+        if classification is not None and hasattr(classification, "to_dict"):
+            return classification.to_dict()
     failure_category = str(job.get("failure_category") or "").strip()
     if failure_category:
         return project_failure_classification(
@@ -365,7 +375,7 @@ def _classify_run_job_failure(job: dict) -> dict | None:
             stdout_preview=str(job.get("stdout_preview") or ""),
         )
     classification = _terminal_failure_classification(
-        error_code=str(job.get("last_error_code") or "").strip(),
+        error_code=raw_error_code,
         stderr=str(job.get("stdout_preview") or ""),
         exit_code=job.get("exit_code"),
     )

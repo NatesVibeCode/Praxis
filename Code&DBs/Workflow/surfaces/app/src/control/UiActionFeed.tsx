@@ -82,6 +82,8 @@ interface UiActionFeedProps {
   maxHeight?: number | string;
   maxVisibleEntries?: number;
   variant?: 'default' | 'compact';
+  collapsible?: boolean;
+  defaultCollapsed?: boolean;
 }
 
 const CATEGORY_ORDER: UiActionEntry['category'][] = ['layout', 'graph', 'authority', 'control'];
@@ -95,6 +97,8 @@ export function UiActionFeed({
   maxHeight,
   maxVisibleEntries = 3,
   variant = 'default',
+  collapsible = false,
+  defaultCollapsed = false,
 }: UiActionFeedProps) {
   const entries = ((useSlice(world, UI_ACTION_LOG_PATH) as UiActionEntry[] | null) ?? [])
     .filter((entry) => (!surface || entry.surface === surface) && (!scope || entry.undoScope === scope));
@@ -118,6 +122,7 @@ export function UiActionFeed({
   const [categoryFilter, setCategoryFilter] = useState<FeedCategoryFilter>('all');
   const [showOlderHistory, setShowOlderHistory] = useState(false);
   const [expandedEntryId, setExpandedEntryId] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
 
   useEffect(() => {
     if (categoryFilter !== 'all' && !availableCategories.includes(categoryFilter)) {
@@ -128,6 +133,12 @@ export function UiActionFeed({
   useEffect(() => {
     setShowOlderHistory(false);
   }, [categoryFilter, entries.length]);
+
+  useEffect(() => {
+    if (!collapsible) {
+      setCollapsed(false);
+    }
+  }, [collapsible]);
 
   const filteredEntries = useMemo(
     () => entries.filter((entry) => categoryFilter === 'all' || entry.category === categoryFilter),
@@ -158,6 +169,7 @@ export function UiActionFeed({
 
   const compact = variant === 'compact';
   const resolvedMaxHeight = typeof maxHeight === 'number' ? `${maxHeight}px` : maxHeight;
+  const latestEntry = filteredEntries[0] ?? null;
 
   useEffect(() => {
     if (expandedEntryId && !visibleEntries.some((entry) => entry.id === expandedEntryId)) {
@@ -166,6 +178,117 @@ export function UiActionFeed({
   }, [expandedEntryId, visibleEntries]);
 
   if (entries.length === 0) return null;
+
+  const handleUndo = (entry: UiActionEntry) => {
+    void (async () => {
+      const result = await undoUiAction(entry.id);
+      if (!result.ok) {
+        show(result.error || 'Undo failed.', 'error');
+        return;
+      }
+      show(`Undid ${entry.label}.`, 'success');
+    })();
+  };
+
+  if (collapsed && latestEntry) {
+    return (
+      <section
+        aria-label="Recent control actions"
+        style={{
+          marginBottom: 'var(--space-md)',
+          padding: '10px 14px',
+          border: '1px solid var(--border)',
+          borderRadius: 'var(--radius)',
+          background: 'color-mix(in srgb, var(--bg-card) 94%, var(--accent) 6%)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 'var(--space-sm)',
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => setCollapsed(false)}
+          style={{
+            border: 'none',
+            background: 'transparent',
+            color: 'var(--text)',
+            cursor: 'pointer',
+            display: 'grid',
+            gap: 2,
+            minWidth: 0,
+            textAlign: 'left',
+            padding: 0,
+          }}
+        >
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              color: 'var(--text-muted)',
+            }}
+          >
+            {title}
+          </span>
+          <span
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: 'var(--text)',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              maxWidth: '56ch',
+            }}
+          >
+            {latestEntry.label}
+          </span>
+        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          {summary.undo_ready > 0 ? (
+            <span style={{ fontSize: 11, color: 'var(--accent)' }}>{summary.undo_ready} undo ready</span>
+          ) : null}
+          {latestEntry.recovery === 'undo_ready' && latestEntry.status === 'applied' ? (
+            <button
+              type="button"
+              onClick={() => handleUndo(latestEntry)}
+              style={{
+                border: '1px solid var(--border)',
+                background: 'var(--bg-card)',
+                borderRadius: 999,
+                padding: '6px 12px',
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              Undo
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => setCollapsed(false)}
+            style={{
+              border: '1px solid var(--border)',
+              background: 'var(--bg-card)',
+              borderRadius: 999,
+              padding: '6px 10px',
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase',
+              cursor: 'pointer',
+              color: 'var(--text-secondary, var(--text-muted))',
+            }}
+          >
+            Open
+          </button>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section
@@ -188,11 +311,33 @@ export function UiActionFeed({
           <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
             {title}
           </div>
-          <div style={{ fontSize: 14, color: 'var(--text-secondary, var(--text-muted))' }}>
-            {subtitle}
-          </div>
+          {subtitle ? (
+            <div style={{ fontSize: 14, color: 'var(--text-secondary, var(--text-muted))' }}>
+              {subtitle}
+            </div>
+          ) : null}
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 8 }}>
+          {collapsible ? (
+            <button
+              type="button"
+              onClick={() => setCollapsed(true)}
+              style={{
+                border: '1px solid var(--border)',
+                background: 'var(--bg-card)',
+                color: 'var(--text-secondary, var(--text-muted))',
+                borderRadius: 999,
+                padding: '6px 10px',
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: '0.04em',
+                textTransform: 'uppercase',
+                cursor: 'pointer',
+              }}
+            >
+              Collapse
+            </button>
+          ) : null}
           {summary.undo_ready > 0 ? (
             <span style={{ fontSize: 11, color: 'var(--accent)' }}>{summary.undo_ready} undo ready</span>
           ) : null}
@@ -207,7 +352,7 @@ export function UiActionFeed({
           ) : null}
         </div>
       </div>
-      {availableCategories.length > 1 || collapsedEntries.length > 0 ? (
+      {!compact && (availableCategories.length > 1 || collapsedEntries.length > 0) ? (
         <div
           style={{
             display: 'flex',
@@ -270,6 +415,28 @@ export function UiActionFeed({
               {showOlderHistory ? 'Focus Newest' : `Show ${collapsedEntries.length} Older`}
             </button>
           ) : null}
+        </div>
+      ) : null}
+      {compact && (collapsedEntries.length > 0 || showOlderHistory) ? (
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <button
+            type="button"
+            onClick={() => setShowOlderHistory((value) => !value)}
+            style={{
+              border: '1px solid var(--border)',
+              background: 'var(--bg-card)',
+              color: 'var(--text-secondary, var(--text-muted))',
+              borderRadius: 999,
+              padding: '6px 10px',
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase',
+              cursor: 'pointer',
+            }}
+          >
+            {showOlderHistory ? 'Newest only' : `Show ${collapsedEntries.length} older`}
+          </button>
         </div>
       ) : null}
       <div
@@ -438,16 +605,7 @@ export function UiActionFeed({
                 {entry.recovery === 'undo_ready' && entry.status === 'applied' ? (
                   <button
                     type="button"
-                    onClick={() => {
-                      void (async () => {
-                        const result = await undoUiAction(entry.id);
-                        if (!result.ok) {
-                          show(result.error || 'Undo failed.', 'error');
-                          return;
-                        }
-                        show(`Undid ${entry.label}.`, 'success');
-                      })();
-                    }}
+                    onClick={() => handleUndo(entry)}
                     style={{
                       border: '1px solid var(--border)',
                       background: 'var(--bg-card)',

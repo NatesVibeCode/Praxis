@@ -19,7 +19,7 @@ _AUTO_ROUTE_TIERS = frozenset({"high", "medium", "low"})
 _AUTO_LATENCY_CLASSES = frozenset({"reasoning", "instant"})
 _SEMANTIC_AUTO_ROUTE_ALIASES = {
     "draft": "chat",
-    "classify": "support",
+    "classify": "analysis",
 }
 class AgentConfigError(RuntimeError):
     """Raised when agent config loading or resolution fails."""

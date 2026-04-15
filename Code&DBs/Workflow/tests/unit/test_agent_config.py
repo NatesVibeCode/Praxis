@@ -165,6 +165,32 @@ class _FakeConn:
                     "latency_rank": 2,
                     "updated_at": "2026-04-08T00:00:00Z",
                 },
+                {
+                    "task_type": "analysis",
+                    "provider_slug": "openai",
+                    "model_slug": "gpt-5.4",
+                    "rank": 1,
+                    "benchmark_score": 91.0,
+                    "cost_per_m_tokens": 8.75,
+                    "route_tier": "high",
+                    "route_tier_rank": 1,
+                    "latency_class": "reasoning",
+                    "latency_rank": 1,
+                    "updated_at": "2026-04-08T00:00:00Z",
+                },
+                {
+                    "task_type": "analysis",
+                    "provider_slug": "openai",
+                    "model_slug": "gpt-5.4-mini",
+                    "rank": 2,
+                    "benchmark_score": 74.0,
+                    "cost_per_m_tokens": 2.63,
+                    "route_tier": "medium",
+                    "route_tier_rank": 2,
+                    "latency_class": "instant",
+                    "latency_rank": 2,
+                    "updated_at": "2026-04-08T00:00:00Z",
+                },
             ]
         raise AssertionError(f"Unexpected SQL: {sql}")
 
@@ -280,6 +306,7 @@ class TestGetBySlug:
         instant = reg.get("auto/instant")
         draft = reg.get("auto/draft")
         classify = reg.get("auto/classify")
+        analysis = reg.get("auto/analysis")
 
         assert build is not None
         assert build.wrapper_command is not None
@@ -299,8 +326,11 @@ class TestGetBySlug:
         assert draft.provider == "openai"
         assert draft.model == "gpt-5.4-mini"
         assert classify is not None
-        assert classify.provider == "anthropic"
-        assert classify.model == "claude-sonnet-4-6"
+        assert classify.provider == "openai"
+        assert classify.model == "gpt-5.4"
+        assert analysis is not None
+        assert analysis.provider == "openai"
+        assert analysis.model == "gpt-5.4"
 
     def test_load_from_postgres_falls_back_when_context_window_missing(
         self,

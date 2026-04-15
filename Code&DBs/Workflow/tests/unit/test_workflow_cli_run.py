@@ -185,6 +185,66 @@ def test_cmd_run_stays_silent_about_result_file_when_not_requested(
     assert "Result written to:" not in rendered
 
 
+def test_cmd_run_renders_live_snapshot_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    spec_path = _write_spec(tmp_path)
+    monkeypatch.setattr(workflow_cli, "_get_pg_conn", lambda: object())
+
+    monkeypatch.setattr(
+        workflow_cli,
+        "submit_workflow_command",
+        lambda _conn, **params: {
+            "run_id": "workflow_live123",
+            "status": "succeeded",
+            "status_source": "live_snapshot",
+            "terminal_reason": "runtime.workflow_succeeded",
+            "spec_name": "cli run smoke",
+            "total_jobs": 1,
+            "command_id": "control.command.submit.999",
+            "command_status": "succeeded",
+            "approval_required": False,
+            "result_ref": "workflow_run:workflow_live123",
+            "stream_url": "/api/workflow-runs/workflow_live123/stream",
+            "status_url": "/api/workflow-runs/workflow_live123/status",
+            "run_metrics": {
+                "completed_jobs": 1,
+                "total_jobs": 1,
+                "elapsed_seconds": 0.4,
+                "health_state": "healthy",
+                "job_status_counts": {"succeeded": 1},
+                "total_cost_usd": 0.0123,
+                "total_duration_ms": 400,
+                "total_tokens_in": 12,
+                "total_tokens_out": 34,
+                "terminal_reason": "runtime.workflow_succeeded",
+            },
+        },
+    )
+
+    result = workflow_cli.cmd_run(
+        argparse.Namespace(
+            spec=spec_path,
+            dry_run=False,
+            fresh=False,
+            job_id=None,
+            run_id=None,
+            result_file=None,
+        )
+    )
+
+    assert result == 0
+    rendered = capsys.readouterr().out
+    assert "Submission status: succeeded" in rendered
+    assert "Status source: live_snapshot" in rendered
+    assert "Terminal reason: runtime.workflow_succeeded" in rendered
+    assert "Run metrics: 1/1 completed | health=healthy | elapsed=0.4s" in rendered
+    assert "Job states: succeeded=1" in rendered
+    assert "Usage: cost=$0.0123 | tokens_in=12 | tokens_out=34" in rendered
+
+
 def test_cmd_spawn_writes_async_result_file(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

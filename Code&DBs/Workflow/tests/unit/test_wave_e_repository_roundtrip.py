@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Mapping, Iterator
 from datetime import datetime, timezone
 
 from storage.postgres.command_repository import PostgresCommandRepository
@@ -247,6 +248,20 @@ class _EvidenceConn:
             row["last_event_id"] = args[4]
             return "UPDATE 1"
         return "OK"
+
+
+class _FrozenMapping(Mapping[str, object]):
+    def __init__(self, payload: dict[str, object]) -> None:
+        self._payload = payload
+
+    def __getitem__(self, key: str) -> object:
+        return self._payload[key]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._payload)
+
+    def __len__(self) -> int:
+        return len(self._payload)
 
 
 class _ReceiptConn:
@@ -543,6 +558,155 @@ def test_evidence_repository_round_trip_persists_workflow_rows_and_terminal_stat
     assert conn.receipts["receipt.wave_e"]["decision_refs"] == [
         {"decision_ref": "decision.wave_e"}
     ]
+
+
+def test_evidence_repository_normalizes_nested_mapping_payloads_for_json() -> None:
+    conn = _EvidenceConn()
+    repository = PostgresEvidenceRepository(conn)
+    now = datetime(2026, 4, 14, 12, 35, tzinfo=timezone.utc)
+
+    async def _exercise() -> None:
+        await repository.insert_workflow_event_if_absent(
+            event_id="evt.wave_e.frozen",
+            event_type="claim.received",
+            schema_version=1,
+            workflow_id="workflow.wave_e",
+            run_id="run.wave_e",
+            request_id="request.wave_e",
+            causation_id=None,
+            node_id=None,
+            occurred_at=now,
+            evidence_seq=1,
+            actor_type="runtime",
+            reason_code=None,
+            payload={
+                "claim_envelope": _FrozenMapping(
+                    {
+                        "nodes": [
+                            _FrozenMapping(
+                                {
+                                    "inputs": _FrozenMapping(
+                                        {"input_payload": _FrozenMapping({"step": 0})}
+                                    )
+                                }
+                            )
+                        ]
+                    }
+                )
+            },
+        )
+
+    asyncio.run(_exercise())
+
+    assert conn.workflow_events["evt.wave_e.frozen"]["payload"] == {
+        "claim_envelope": {
+            "nodes": [
+                {
+                    "inputs": {
+                        "input_payload": {
+                            "step": 0,
+                        }
+                    }
+                }
+            ]
+        }
+    }
+
+
+def test_evidence_repository_normalizes_frozen_request_envelopes_for_definition_and_run_rows() -> None:
+    conn = _EvidenceConn()
+    repository = PostgresEvidenceRepository(conn)
+    now = datetime(2026, 4, 15, 3, 50, tzinfo=timezone.utc)
+    request_envelope = {
+        "workflow_id": "workflow.control_operator",
+        "nodes": [
+            _FrozenMapping(
+                {
+                    "node_id": "route_if",
+                    "inputs": _FrozenMapping(
+                        {
+                            "operator": _FrozenMapping(
+                                {
+                                    "kind": "if",
+                                    "predicate": _FrozenMapping(
+                                        {"field": "flag", "op": "equals", "value": True}
+                                    ),
+                                }
+                            )
+                        }
+                    ),
+                }
+            )
+        ],
+        "edges": [
+            _FrozenMapping(
+                {
+                    "edge_id": "edge.route_if.then",
+                    "release_condition": _FrozenMapping(
+                        {"kind": "branch_selected", "branch": "then"}
+                    ),
+                }
+            )
+        ],
+    }
+
+    async def _exercise() -> None:
+        await repository.insert_workflow_definition_if_absent(
+            workflow_definition_id="def.control_operator",
+            workflow_id="workflow.control_operator",
+            definition_hash="sha256:def",
+            request_envelope=request_envelope,
+            created_at=now,
+        )
+        await repository.insert_workflow_run_if_absent(
+            run_id="run.control_operator",
+            workflow_id="workflow.control_operator",
+            request_id="request.control_operator",
+            request_digest="digest.control_operator",
+            authority_context_digest="authority.control_operator",
+            workflow_definition_id="def.control_operator",
+            admitted_definition_hash="sha256:def",
+            run_idempotency_key="idem.control_operator",
+            request_envelope=request_envelope,
+            context_bundle_id="bundle.control_operator",
+            admission_decision_id="decision.control_operator",
+            current_state="claim_accepted",
+            requested_at=now,
+            admitted_at=now,
+        )
+
+    asyncio.run(_exercise())
+
+    assert conn.workflow_definitions["def.control_operator"]["request_envelope"] == {
+        "workflow_id": "workflow.control_operator",
+        "nodes": [
+            {
+                "node_id": "route_if",
+                "inputs": {
+                    "operator": {
+                        "kind": "if",
+                        "predicate": {
+                            "field": "flag",
+                            "op": "equals",
+                            "value": True,
+                        },
+                    }
+                },
+            }
+        ],
+        "edges": [
+            {
+                "edge_id": "edge.route_if.then",
+                "release_condition": {
+                    "kind": "branch_selected",
+                    "branch": "then",
+                },
+            }
+        ],
+    }
+    assert conn.workflow_runs["run.control_operator"]["request_envelope"] == conn.workflow_definitions[
+        "def.control_operator"
+    ]["request_envelope"]
 
 
 def test_receipt_repository_round_trip_updates_payloads_and_runtime_context() -> None:

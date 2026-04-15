@@ -1,0 +1,611 @@
+"""Explicit CLI metadata for Praxis MCP tools.
+
+This is the CLI-facing authority for discoverability, safety, and documentation.
+It complements the tool-local MCP schema with operator-focused guidance.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+
+def _example(title: str, input_payload: dict[str, Any]) -> dict[str, Any]:
+    return {"title": title, "input": input_payload}
+
+
+def _tool(
+    *,
+    surface: str,
+    tier: str,
+    recommended_alias: str | None,
+    when_to_use: str,
+    when_not_to_use: str,
+    risks: dict[str, Any],
+    examples: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "surface": surface,
+        "tier": tier,
+        "recommended_alias": recommended_alias,
+        "when_to_use": when_to_use,
+        "when_not_to_use": when_not_to_use,
+        "risks": risks,
+        "examples": examples,
+    }
+
+
+CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
+    "praxis_artifacts": _tool(
+        surface="evidence",
+        tier="stable",
+        recommended_alias="artifacts",
+        when_to_use="Browse sandbox outputs, search artifact paths, or compare generated files.",
+        when_not_to_use="Do not use it for workflow receipt history or knowledge-graph recall.",
+        risks={"default": "read", "actions": {"stats": "read", "list": "read", "search": "read", "diff": "read"}},
+        examples=[
+            _example("List the latest sandbox", {"action": "list"}),
+            _example("Search generated outputs", {"action": "search", "query": "migration schema"}),
+            _example("List one sandbox", {"action": "list", "sandbox_id": "sandbox_abc123"}),
+        ],
+    ),
+    "praxis_bugs": _tool(
+        surface="evidence",
+        tier="stable",
+        recommended_alias="bugs",
+        when_to_use="Inspect the bug tracker, run keyword or hybrid search, file a new bug, or drive replay-ready bug workflows.",
+        when_not_to_use="Do not use it for general system status or semantic knowledge search.",
+        risks={
+            "default": "read",
+            "actions": {
+                "list": "read",
+                "search": "read",
+                "stats": "read",
+                "packet": "read",
+                "history": "read",
+                "file": "write",
+                "resolve": "write",
+                "attach_evidence": "write",
+                "replay": "dispatch",
+                "backfill_replay": "dispatch",
+            },
+        },
+        examples=[
+            _example("List open P1 bugs", {"action": "list", "status": "OPEN", "severity": "P1"}),
+            _example("Search open routing bugs", {"action": "search", "title": "routing", "status": "OPEN"}),
+            _example("File a new bug", {"action": "file", "title": "Runner hangs after retry", "severity": "P1"}),
+        ],
+    ),
+    "praxis_connector": _tool(
+        surface="workflow",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Build, inspect, register, or verify third-party API connectors.",
+        when_not_to_use="Do not use it for invoking an existing integration at runtime.",
+        risks={
+            "default": "dispatch",
+            "actions": {
+                "build": "dispatch",
+                "list": "read",
+                "get": "read",
+                "register": "write",
+                "verify": "dispatch",
+            },
+        },
+        examples=[
+            _example("Build a connector", {"action": "build", "app_name": "Slack"}),
+            _example("Verify a built connector", {"action": "verify", "app_slug": "slack"}),
+        ],
+    ),
+    "praxis_constraints": _tool(
+        surface="evidence",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Inspect mined constraints and scope-specific guardrails.",
+        when_not_to_use="Do not use it for code similarity or bug enumeration.",
+        risks={"default": "read", "actions": {"list": "read", "for_scope": "read"}},
+        examples=[
+            _example("List recent constraints", {"action": "list"}),
+            _example("Check scope-specific constraints", {"action": "for_scope", "scope_files": ["runtime/workflow.py"]}),
+        ],
+    ),
+    "praxis_context_shard": _tool(
+        surface="session",
+        tier="session",
+        recommended_alias=None,
+        when_to_use="Read the bounded execution shard for the active workflow MCP session.",
+        when_not_to_use="Do not use it outside workflow-session execution or as a general repository browser.",
+        risks={"default": "session", "views": {"full": "session", "summary": "session", "sections": "session"}},
+        examples=[
+            _example("Read the shard summary", {"view": "summary"}),
+            _example("Read one section", {"view": "sections", "section_name": "TASK BRIEF"}),
+        ],
+    ),
+    "praxis_decompose": _tool(
+        surface="planning",
+        tier="stable",
+        recommended_alias=None,
+        when_to_use="Break a large objective into workflow-sized micro-sprints before dispatch.",
+        when_not_to_use="Do not use it to execute work or inspect historical run state.",
+        risks={"default": "read"},
+        examples=[
+            _example("Decompose a platform change", {"objective": "Consolidate operator read and write surfaces"}),
+        ],
+    ),
+    "praxis_discover": _tool(
+        surface="code",
+        tier="stable",
+        recommended_alias="discover",
+        when_to_use="Search for existing code by behavior with hybrid retrieval before building something new.",
+        when_not_to_use="Do not use it for architectural decisions or receipt analytics.",
+        risks={"default": "read", "actions": {"search": "read", "stats": "read", "reindex": "write"}},
+        examples=[
+            _example("Search by behavior", {"action": "search", "query": "retry logic with exponential backoff"}),
+            _example("Search function-level matches", {"action": "search", "query": "parse JSON from stdin", "kind": "function"}),
+            _example("Search module-level matches", {"action": "search", "query": "Postgres connection pooling", "kind": "module"}),
+            _example("Refresh the index", {"action": "reindex"}),
+        ],
+    ),
+    "praxis_friction": _tool(
+        surface="evidence",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Inspect friction and guardrail events that are slowing workflows down.",
+        when_not_to_use="Do not use it for health probes or general bug search.",
+        risks={"default": "read", "actions": {"stats": "read", "list": "read"}},
+        examples=[
+            _example("Show friction stats", {"action": "stats"}),
+            _example("List recent friction events", {"action": "list", "limit": 20}),
+        ],
+    ),
+    "praxis_get_submission": _tool(
+        surface="submissions",
+        tier="session",
+        recommended_alias=None,
+        when_to_use="Read a sealed submission in the active workflow MCP session.",
+        when_not_to_use="Do not use it outside token-scoped workflow review flows.",
+        risks={"default": "session"},
+        examples=[
+            _example("Read a submission", {"submission_id": "submission_abc123"}),
+        ],
+    ),
+    "praxis_governance": _tool(
+        surface="governance",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Scan prompts and scope for policy, secret, or governance violations.",
+        when_not_to_use="Do not use it as a general quality dashboard or health probe.",
+        risks={"default": "read", "actions": {"scan_prompt": "read", "scan_scope": "read"}},
+        examples=[
+            _example("Scan a prompt", {"action": "scan_prompt", "text": "Ship the API key in the test fixture"}),
+            _example("Scan a scope", {"action": "scan_scope", "write_paths": ["config/runtime_profiles.json"]}),
+        ],
+    ),
+    "praxis_graph": _tool(
+        surface="knowledge",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Inspect blast radius and graph neighbors for a known or latest knowledge-graph entity.",
+        when_not_to_use="Do not use it for broad knowledge search; use recall first when you need ranked candidates.",
+        risks={"default": "read"},
+        examples=[
+            _example("Inspect the latest entity", {"depth": 1}),
+            _example("Inspect blast radius for one entity", {"entity_id": "entity_abc123", "depth": 1}),
+        ],
+    ),
+    "praxis_heal": _tool(
+        surface="governance",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Diagnose failures and propose healing actions with platform-specific guidance.",
+        when_not_to_use="Do not use it as a generic health command or workflow launcher.",
+        risks={"default": "read"},
+        examples=[
+            _example("Classify a failure", {"job_label": "build", "failure_code": "sandbox.timeout", "stderr": "command timed out"}),
+            _example("Infer a missing failure code from stderr", {"job_label": "build", "stderr": "failure_code must be a non-empty string"}),
+        ],
+    ),
+    "praxis_health": _tool(
+        surface="operations",
+        tier="stable",
+        recommended_alias="health",
+        when_to_use="Run a full preflight before dispatch or when the platform feels degraded.",
+        when_not_to_use="Do not use it to inspect one specific workflow run.",
+        risks={"default": "read"},
+        examples=[
+            _example("Run the full health check", {}),
+        ],
+    ),
+    "praxis_heartbeat": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Check or run the knowledge-graph maintenance cycle.",
+        when_not_to_use="Do not use it as a replacement for workflow dispatch or session recall.",
+        risks={"default": "read", "actions": {"status": "read", "run": "write"}},
+        examples=[
+            _example("Show last heartbeat status", {"action": "status"}),
+            _example("Run one maintenance cycle", {"action": "run"}),
+        ],
+    ),
+    "praxis_ingest": _tool(
+        surface="knowledge",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Persist new documents, build events, or research into the knowledge graph.",
+        when_not_to_use="Do not use it for ad hoc questions where nothing should be persisted.",
+        risks={"default": "write"},
+        examples=[
+            _example("Ingest a document", {"kind": "document", "source": "catalog/runtime", "content": "# Runtime catalog"}),
+        ],
+    ),
+    "praxis_integration": _tool(
+        surface="integration",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="List integrations, inspect one, validate credentials, or invoke an integration action.",
+        when_not_to_use="Do not use it to build connectors or launch workflows.",
+        risks={
+            "default": "read",
+            "actions": {
+                "list": "read",
+                "describe": "read",
+                "test_credentials": "read",
+                "health": "read",
+                "call": "dispatch",
+            },
+        },
+        examples=[
+            _example("List integrations", {"action": "list"}),
+            _example("Call an integration action", {"action": "call", "integration_id": "stripe", "integration_action": "list_payments", "args": {"limit": 10}}),
+        ],
+    ),
+    "praxis_intent_match": _tool(
+        surface="planning",
+        tier="stable",
+        recommended_alias=None,
+        when_to_use="Match a product intent against existing platform components before generating a manifest.",
+        when_not_to_use="Do not use it for code search or historical run analysis.",
+        risks={"default": "read"},
+        examples=[
+            _example("Match an app intent", {"intent": "invoice approval workflow with status tracking"}),
+        ],
+    ),
+    "praxis_maintenance": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Run explicit operator maintenance actions that mutate runtime state.",
+        when_not_to_use="Do not use it for ordinary observability or health reading.",
+        risks={
+            "default": "write",
+            "actions": {
+                "reset_metrics": "write",
+                "backfill_bug_replay_provenance": "write",
+            },
+        },
+        examples=[
+            _example("Reset metrics with confirmation", {"action": "reset_metrics", "confirm": True}),
+            _example("Backfill replay provenance", {"action": "backfill_bug_replay_provenance", "open_only": True}),
+        ],
+    ),
+    "praxis_manifest_generate": _tool(
+        surface="planning",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Generate a new manifest from an intent after you've confirmed the building blocks.",
+        when_not_to_use="Do not use it for code execution or connector onboarding.",
+        risks={"default": "write"},
+        examples=[
+            _example("Generate a manifest", {"intent": "customer onboarding pipeline with approval steps"}),
+        ],
+    ),
+    "praxis_manifest_refine": _tool(
+        surface="planning",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Iterate on an existing generated manifest based on feedback.",
+        when_not_to_use="Do not use it without a manifest id from a prior generation step.",
+        risks={"default": "write"},
+        examples=[
+            _example("Refine a manifest", {"manifest_id": "manifest_abc123", "feedback": "Add weekly trends and remove the status grid"}),
+        ],
+    ),
+    "praxis_operator_closeout": _tool(
+        surface="operator",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Preview or commit operator work-item closeout through the shared gate.",
+        when_not_to_use="Do not use it for roadmap item creation or read-only status views.",
+        risks={"default": "read", "actions": {"preview": "read", "commit": "write"}},
+        examples=[
+            _example("Preview a closeout", {"action": "preview", "work_item_id": "WI-123"}),
+        ],
+    ),
+    "praxis_operator_roadmap_view": _tool(
+        surface="operator",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Read roadmap and operator backlog views without mutating them.",
+        when_not_to_use="Do not use it to commit roadmap changes.",
+        risks={"default": "read"},
+        examples=[
+            _example("Read the default roadmap root", {}),
+            _example(
+                "Read one roadmap subtree",
+                {"root_roadmap_item_id": "roadmap_item.authority.cleanup.unified.operator.write.validation.gate"},
+            ),
+        ],
+    ),
+    "praxis_operator_view": _tool(
+        surface="operator",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Discover native operator status, scoreboard, topology, or replay-ready bug views.",
+        when_not_to_use="Do not use it to mutate operator state.",
+        risks={"default": "read", "views": {"status": "read", "scoreboard": "read", "graph": "read", "lineage": "read", "replay_ready_bugs": "read"}},
+        examples=[
+            _example("Read graph topology", {"view": "graph", "run_id": "run_123"}),
+            _example("Read graph lineage", {"view": "lineage", "run_id": "run_123"}),
+            _example("Read replay-ready bugs", {"view": "replay_ready_bugs", "limit": 25}),
+        ],
+    ),
+    "praxis_operator_write": _tool(
+        surface="operator",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Preview, validate, or commit roadmap writes through the operator gate.",
+        when_not_to_use="Do not use it for read-only backlog inspection.",
+        risks={"default": "read", "actions": {"preview": "read", "validate": "read", "commit": "write"}},
+        examples=[
+            _example("Preview a roadmap item", {"action": "preview", "title": "Consolidate CLI frontdoors", "intent_brief": "one authority for operator CLI"}),
+        ],
+    ),
+    "praxis_operator_native_primary_cutover_gate": _tool(
+        surface="operator",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Admit a native-primary cutover gate with required decision metadata into operator-control.",
+        when_not_to_use="Do not use it for read-only operator status views.",
+        risks={"default": "write"},
+        examples=[
+            _example(
+                "Admit roadmap-based cutover gate",
+                {
+                    "decided_by": "operator-auto",
+                    "decision_source": "runbook",
+                    "rationale": "manual rollout hold ended",
+                    "roadmap_item_id": "roadmap_item.platform.deploy",
+                },
+            ),
+        ],
+    ),
+    "praxis_provider_onboard": _tool(
+        surface="integration",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Probe or onboard a new provider/model route into the platform.",
+        when_not_to_use="Do not use it for ordinary model selection or workflow dispatch.",
+        risks={"default": "read", "actions": {"probe": "read", "onboard": "write"}},
+        examples=[
+            _example("Probe a provider", {"action": "probe", "provider_slug": "openrouter", "transport": "api"}),
+        ],
+    ),
+    "praxis_query": _tool(
+        surface="query",
+        tier="stable",
+        recommended_alias="query",
+        when_to_use="Route a natural-language question to the right platform subsystem from the terminal when you are not sure which exact tool to use.",
+        when_not_to_use="Do not use it when you already know the exact specialist tool you need.",
+        risks={"default": "read"},
+        examples=[
+            _example("Ask for status", {"question": "what is failing right now?"}),
+            _example("Ask for schema", {"question": "schema for workflow_runs"}),
+            _example("Ask for code discovery via router", {"question": "find retry logic with exponential backoff"}),
+        ],
+    ),
+    "praxis_recall": _tool(
+        surface="knowledge",
+        tier="stable",
+        recommended_alias="recall",
+        when_to_use="Search the knowledge graph for decisions, patterns, entities, and prior analysis using ranked text, graph, and vector retrieval.",
+        when_not_to_use="Do not use it for code similarity or workflow receipt queries.",
+        risks={"default": "read"},
+        examples=[
+            _example("Recall an architectural decision", {"query": "provider routing", "entity_type": "decision"}),
+            _example("Recall a schema entity", {"query": "workflow_runs", "entity_type": "table"}),
+            _example("Recall a pattern", {"query": "retry policy", "entity_type": "pattern"}),
+        ],
+    ),
+    "praxis_receipts": _tool(
+        surface="evidence",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Search workflow receipts or inspect token burn and execution evidence.",
+        when_not_to_use="Do not use it for current health or knowledge-graph recall.",
+        risks={"default": "read", "actions": {"search": "read", "token_burn": "read"}},
+        examples=[
+            _example("Search receipts", {"action": "search", "query": "sandbox timeout"}),
+            _example("Inspect token burn", {"action": "token_burn", "since_hours": 24}),
+        ],
+    ),
+    "praxis_reload": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Clear in-process caches after changing runtime config or MCP catalog state.",
+        when_not_to_use="Do not use it as a routine health command.",
+        risks={"default": "write"},
+        examples=[
+            _example("Reload process caches", {}),
+        ],
+    ),
+    "praxis_research": _tool(
+        surface="knowledge",
+        tier="stable",
+        recommended_alias=None,
+        when_to_use="Search prior research findings and analysis results with a lighter-weight surface than recall.",
+        when_not_to_use="Do not use it for general knowledge or code search.",
+        risks={"default": "read", "actions": {"search": "read"}},
+        examples=[
+            _example("Search prior research", {"action": "search", "query": "provider routing performance"}),
+        ],
+    ),
+    "praxis_research_workflow": _tool(
+        surface="research",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Launch or inspect fan-out research workflows for deeper multi-angle investigations.",
+        when_not_to_use="Do not use it for single-shot questions where recall or query is enough.",
+        risks={"default": "dispatch", "actions": {"list": "read", "run": "dispatch"}},
+        examples=[
+            _example("Launch a research workflow", {"action": "run", "topic": "best practices for durable MCP transports", "workers": 8}),
+        ],
+    ),
+    "praxis_review_submission": _tool(
+        surface="submissions",
+        tier="session",
+        recommended_alias=None,
+        when_to_use="Approve, reject, or request changes on a sealed submission inside a workflow session.",
+        when_not_to_use="Do not use it outside token-scoped workflow review flows.",
+        risks={"default": "session"},
+        examples=[
+            _example("Approve a submission", {"submission_id": "submission_abc123", "decision": "approve", "summary": "Looks good"}),
+        ],
+    ),
+    "praxis_session": _tool(
+        surface="planning",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Inspect or validate session carry-forward packs between work sessions.",
+        when_not_to_use="Do not use it as a live workflow-session context surface.",
+        risks={"default": "read", "actions": {"latest": "read", "validate": "read"}},
+        examples=[
+            _example("Read the latest carry-forward pack", {"action": "latest"}),
+        ],
+    ),
+    "praxis_session_context": _tool(
+        surface="session",
+        tier="session",
+        recommended_alias=None,
+        when_to_use="Read or write persistent context owned by the active workflow MCP session.",
+        when_not_to_use="Do not use it outside token-scoped workflow execution.",
+        risks={"default": "session", "actions": {"read": "session", "write": "session"}},
+        examples=[
+            _example("Read session context", {"action": "read"}),
+            _example("Write session context", {"action": "write", "context": {"step": 3}}),
+        ],
+    ),
+    "praxis_status": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Inspect workflow pass rate, failure mix, and in-flight run summaries from receipts.",
+        when_not_to_use="Do not use it for deep health probes or workflow dispatch.",
+        risks={"default": "read"},
+        examples=[
+            _example("Show 24h status", {"since_hours": 24}),
+        ],
+    ),
+    "praxis_submit_artifact_bundle": _tool(
+        surface="submissions",
+        tier="session",
+        recommended_alias=None,
+        when_to_use="Submit an artifact-bundle result owned by the active workflow session.",
+        when_not_to_use="Do not use it outside token-scoped workflow execution.",
+        risks={"default": "session"},
+        examples=[
+            _example("Submit an artifact bundle", {"summary": "Generated migration bundle", "primary_paths": ["artifacts/migrations"], "result_kind": "artifact_bundle"}),
+        ],
+    ),
+    "praxis_submit_code_change": _tool(
+        surface="submissions",
+        tier="session",
+        recommended_alias=None,
+        when_to_use="Submit a sealed code-change result owned by the active workflow session.",
+        when_not_to_use="Do not use it outside token-scoped workflow execution.",
+        risks={"default": "session"},
+        examples=[
+            _example("Submit a code change", {"summary": "Fixed MCP transport framing", "primary_paths": ["surfaces/mcp/protocol.py"], "result_kind": "code_change"}),
+        ],
+    ),
+    "praxis_submit_research_result": _tool(
+        surface="submissions",
+        tier="session",
+        recommended_alias=None,
+        when_to_use="Submit a sealed research result owned by the active workflow session.",
+        when_not_to_use="Do not use it outside token-scoped workflow execution.",
+        risks={"default": "session"},
+        examples=[
+            _example("Submit a research result", {"summary": "Surveyed MCP CLI exposure patterns", "primary_paths": ["notes/research.md"], "result_kind": "research_result"}),
+        ],
+    ),
+    "praxis_subscribe_events": _tool(
+        surface="session",
+        tier="session",
+        recommended_alias=None,
+        when_to_use="Poll workflow-scoped event updates since the last cursor position for the active session.",
+        when_not_to_use="Do not use it outside token-scoped workflow execution.",
+        risks={"default": "session"},
+        examples=[
+            _example("Poll build-state events", {"channel": "build_state", "limit": 50}),
+        ],
+    ),
+    "praxis_wave": _tool(
+        surface="workflow",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Observe or coordinate wave-based execution programs.",
+        when_not_to_use="Do not use it for single workflow runs with no wave orchestration.",
+        risks={
+            "default": "read",
+            "actions": {
+                "observe": "read",
+                "next": "read",
+                "start": "dispatch",
+                "record": "write",
+            },
+        },
+        examples=[
+            _example("List runnable jobs on the current wave", {"action": "next"}),
+            _example("Observe current wave state", {"action": "observe"}),
+            _example("Record results on the current wave", {"action": "record", "jobs": "build:pass,test:fail"}),
+        ],
+    ),
+    "praxis_workflow": _tool(
+        surface="workflow",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Run, inspect, retry, cancel, or list workflows through the MCP workflow surface.",
+        when_not_to_use="Do not use it for natural-language questions or health checks.",
+        risks={
+            "default": "dispatch",
+            "actions": {
+                "status": "read",
+                "inspect": "read",
+                "list": "read",
+                "notifications": "read",
+                "run": "dispatch",
+                "retry": "dispatch",
+                "cancel": "dispatch",
+            },
+        },
+        examples=[
+            _example("List recent workflows", {"action": "list"}),
+            _example("Run a spec", {"action": "run", "spec_path": "config/specs/example.queue.json"}),
+        ],
+    ),
+    "praxis_workflow_validate": _tool(
+        surface="workflow",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Validate a workflow spec before launching it.",
+        when_not_to_use="Do not use it when you need to actually run the workflow.",
+        risks={"default": "read"},
+        examples=[
+            _example("Validate a spec", {"spec_path": "Code&DBs/Workflow/artifacts/workflow/operating_model_paradigm.queue.json"}),
+        ],
+    ),
+}
+
+
+__all__ = ["CLI_TOOL_METADATA"]

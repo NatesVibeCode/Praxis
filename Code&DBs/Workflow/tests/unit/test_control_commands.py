@@ -1107,6 +1107,34 @@ def test_control_command_submit_failure_is_reported_with_explicit_reason(monkeyp
     assert "write-scope authority" in (loaded.error_detail or "")
 
 
+def test_control_command_submit_failure_is_reported_when_submit_returns_failed_status(monkeypatch):
+    conn = _FakeConn()
+    intent = _submit_intent()
+
+    monkeypatch.setattr(
+        control_commands.unified_dispatch,
+        "submit_workflow",
+        lambda *_args, **_kwargs: {
+            "run_id": "dispatch_failed_012",
+            "status": "failed",
+            "error": "persistent evidence proof append failed",
+            "execution_mode": "graph_runtime",
+        },
+    )
+
+    failed = control_commands.create_control_command(
+        conn,
+        intent,
+        command_id="control.command.submit.11b",
+        requested_at=_fixed_clock(),
+    )
+
+    assert failed.command_status == "failed"
+    assert failed.result_ref == "workflow_run:dispatch_failed_012"
+    assert failed.error_code == "control.command.workflow_submit_failed"
+    assert failed.error_detail == "graph_runtime submit failed: persistent evidence proof append failed"
+
+
 def test_render_workflow_submit_response_uses_canonical_async_envelope() -> None:
     command = SimpleNamespace(
         command_id="control.command.submit.12",
@@ -1137,6 +1165,105 @@ def test_render_workflow_submit_response_uses_canonical_async_envelope() -> None
         "status_url": "/api/workflow-runs/dispatch_012/status",
         "result_ref": "workflow_run:dispatch_012",
     }
+
+
+def test_submit_workflow_command_surfaces_live_run_metrics(monkeypatch) -> None:
+    command = SimpleNamespace(
+        command_id="control.command.submit.12b",
+        command_status="succeeded",
+        result_ref="workflow_run:dispatch_live_012",
+        to_json=lambda: {
+            "command_id": "control.command.submit.12b",
+            "command_status": "succeeded",
+            "result_ref": "workflow_run:dispatch_live_012",
+        },
+    )
+
+    monkeypatch.setattr(
+        control_commands,
+        "request_workflow_submit_command",
+        lambda *_args, **_kwargs: command,
+    )
+    monkeypatch.setattr(
+        control_commands,
+        "_workflow_submit_run_snapshot",
+        lambda *_args, **_kwargs: {
+            "status": "claim_accepted",
+            "completed_jobs": 0,
+            "total_jobs": 2,
+            "elapsed_seconds": 1.5,
+            "total_cost_usd": 0.25,
+            "total_duration_ms": 2300,
+            "total_tokens_in": 123,
+            "total_tokens_out": 45,
+            "jobs": [
+                {"status": "pending"},
+                {"status": "pending"},
+            ],
+            "health": {"state": "healthy"},
+        },
+    )
+
+    payload = control_commands.submit_workflow_command(
+        _FakeConn(),
+        requested_by_kind="cli",
+        requested_by_ref="tests.control_commands",
+        spec_path="spec.queue.json",
+        repo_root="/repo",
+        spec_name="sample",
+        total_jobs=2,
+    )
+
+    assert payload["run_id"] == "dispatch_live_012"
+    assert payload["status"] == "claim_accepted"
+    assert payload["run_status"] == "claim_accepted"
+    assert payload["status_source"] == "live_snapshot"
+    assert payload["run_metrics"] == {
+        "completed_jobs": 0,
+        "total_jobs": 2,
+        "elapsed_seconds": 1.5,
+        "health_state": "healthy",
+        "job_status_counts": {"pending": 2},
+        "total_cost_usd": 0.25,
+        "total_duration_ms": 2300,
+        "total_tokens_in": 123,
+        "total_tokens_out": 45,
+    }
+
+
+def test_workflow_submit_run_snapshot_waits_for_terminal_details(monkeypatch) -> None:
+    snapshots = [
+        {
+            "status": "succeeded",
+            "completed_jobs": 1,
+            "total_jobs": 2,
+            "jobs": [{"status": "succeeded"}, {"status": "pending"}],
+            "health": {"state": "unknown"},
+            "terminal_reason": "",
+        },
+        {
+            "status": "succeeded",
+            "completed_jobs": 2,
+            "total_jobs": 2,
+            "jobs": [{"status": "succeeded"}, {"status": "succeeded"}],
+            "health": {"state": "healthy"},
+            "terminal_reason": "runtime.workflow_succeeded",
+        },
+    ]
+    sleep_calls: list[float] = []
+
+    def _fake_get_run_status(_conn, _run_id):
+        return snapshots.pop(0)
+
+    monkeypatch.setattr("runtime.workflow._status.get_run_status", _fake_get_run_status)
+    monkeypatch.setattr(control_commands.time, "sleep", lambda seconds: sleep_calls.append(seconds))
+
+    snapshot = control_commands._workflow_submit_run_snapshot(_FakeConn(), "run-live-terminal")
+
+    assert snapshot is not None
+    assert snapshot["completed_jobs"] == 2
+    assert snapshot["terminal_reason"] == "runtime.workflow_succeeded"
+    assert sleep_calls == [0.05]
 
 
 def test_render_workflow_submit_response_fails_closed_without_run_id() -> None:

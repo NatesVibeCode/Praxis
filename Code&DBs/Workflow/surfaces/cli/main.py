@@ -19,6 +19,7 @@ from observability.read_models import (
 )
 
 from .commands.admin import _compile_command, _github_command, _parse_pr_spec
+from .commands.data import _data_command
 from .commands.workflow import (
     _active_command,
     _cancel_command,
@@ -239,6 +240,7 @@ _ARG_COMMANDS: dict[str, ArgsCommandHandler] = {
     "run": _run_command,
     "chain": _chain_command,
     "query": _query_command,
+    "data": _data_command,
     "architecture": _architecture_command,
     "bugs": _bugs_command,
     "recall": _recall_command,
@@ -329,6 +331,7 @@ def _commands_index_text() -> str:
             "  workflow repair <run_id>                       Repair post-run sync state",
             "  workflow work <claim|acknowledge>             Claim or acknowledge worker work",
             "  workflow tools [list|search|describe|call]     Discover and call catalog-backed MCP tools",
+            "  workflow data <action>                         Deterministic data cleanup, validation, and workflow launch",
             "  workflow query|recall|discover|architecture|artifacts|bugs|costs|leaderboard|trust|fitness|trends|scope|risk|reviews|receipts",
             "                                                  Derived search and analysis reads",
             "  workflow inspect|replay|graph-topology|graph-lineage|topology|lineage",
@@ -357,9 +360,10 @@ def _help_text() -> str:
             "  workflow run <spec.json>",
             "  workflow validate <spec.json>",
             "  workflow tools list",
-            "  workflow tools search <topic> [--surface <surface>] [--tier <tier>] [--risk <risk>]",
+            "  workflow tools search <topic> [--exact] [--surface <surface>] [--tier <tier>] [--risk <risk>]",
             "  workflow api routes",
             "  workflow query <question>",
+            "  workflow data profile artifacts/data/users.csv",
             "  workflow work claim --subscription-id <id> --run-id <run_id>",
             "  workflow inspect <run_id>",
             "  workflow replay <run_id>",
@@ -367,6 +371,7 @@ def _help_text() -> str:
             "",
             "Command groups:",
             "  workflow tools [list|search|describe|call]",
+            "  workflow data <action>",
             "  workflow query|recall|discover|architecture|artifacts|bugs|costs|leaderboard|trust|fitness|trends|scope|risk|reviews|receipts",
             "  workflow run|run-status|status|active|scheduler|fan-out|debate|runs|manifest|triggers|retry|cancel|repair|heal|verify|verify-platform|pipeline|proof|queue|diagnose|inspect-job",
             "  workflow inspect|replay|graph-topology|graph-lineage|topology|lineage",

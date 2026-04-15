@@ -1192,6 +1192,7 @@ def load_agent_route_catalog(conn: Any | None) -> dict[str, dict[str, Any]]:
         "auto/high",
         "auto/reasoning",
         "auto/research",
+        "auto/analysis",
         "auto/build",
         "auto/review",
         "auto/instant",

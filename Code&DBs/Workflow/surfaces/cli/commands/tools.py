@@ -16,6 +16,66 @@ from surfaces.cli.mcp_tools import (
 from surfaces.mcp.catalog import McpToolDefinition, get_tool_catalog
 
 
+def _normalize_search_text(value: str | None) -> str:
+    return " ".join(str(value or "").lower().split())
+
+
+def _tool_exact_matches(definition: McpToolDefinition, needle: str) -> bool:
+    normalized_needle = _normalize_search_text(needle)
+    if not normalized_needle:
+        return False
+
+    exact_fields = [
+        definition.name,
+        definition.display_name,
+        definition.cli_recommended_alias or "",
+        definition.cli_entrypoint,
+        definition.cli_describe_command,
+    ]
+    return any(
+        _normalize_search_text(field) == normalized_needle
+        for field in exact_fields
+        if field
+    )
+
+
+def _tool_search_rank(definition: McpToolDefinition, needle: str) -> tuple[int, int, int, str]:
+    normalized_needle = _normalize_search_text(needle)
+    if not normalized_needle:
+        return (0, 0, 0, definition.name)
+
+    ranked_fields = [
+        definition.cli_recommended_alias or "",
+        definition.name,
+        definition.cli_entrypoint,
+        definition.cli_describe_command,
+        definition.cli_when_to_use,
+        definition.description,
+        definition.cli_when_not_to_use,
+    ]
+
+    for field_rank, raw_text in enumerate(ranked_fields):
+        normalized_text = _normalize_search_text(raw_text)
+        if not normalized_text:
+            continue
+        if normalized_text == normalized_needle:
+            return (0, field_rank, 0, definition.name)
+        if normalized_text.startswith(normalized_needle):
+            return (1, field_rank, 0, definition.name)
+
+    best_rank = (2, len(ranked_fields), len(normalized_needle), definition.name)
+    for field_rank, raw_text in enumerate(ranked_fields):
+        normalized_text = _normalize_search_text(raw_text)
+        if not normalized_text:
+            continue
+        index = normalized_text.find(normalized_needle)
+        if index >= 0:
+            candidate = (2, field_rank, index, definition.name)
+            if candidate < best_rank:
+                best_rank = candidate
+    return best_rank
+
+
 def _tools_quickstart_text() -> str:
     definitions = _filtered_tools()
     alias_definitions = [definition for definition in definitions if definition.cli_recommended_alias]
@@ -32,7 +92,7 @@ def _tools_quickstart_text() -> str:
         "",
         "Tool discovery quickstart:",
         "  workflow tools list",
-        "  workflow tools search <topic> [--surface <surface>] [--tier <tier>] [--risk <risk>]",
+        "  workflow tools search <topic> [--exact] [--surface <surface>] [--tier <tier>] [--risk <risk>]",
         "  workflow tools describe <tool|alias>",
         "  workflow tools call <tool|alias> --input-json '<json>' --yes",
         "",
@@ -47,6 +107,9 @@ def _tools_quickstart_text() -> str:
             f"Catalog size: {len(definitions)} tools",
             "Tip: run `workflow tools list --json` for machine-readable discovery.",
             "Tip: run `workflow tools search --surface query --tier stable` to browse a filtered slice.",
+            "Tip: add `--exact` when you already know the alias, tool name, or entrypoint.",
+            "Tip: single-result searches print the direct describe and entrypoint commands next.",
+            "Tip: search results are relevance-ranked; exact alias and entrypoint matches rise first.",
             "Tip: run `workflow help <alias>` or `workflow <alias> --help` for alias-specific usage.",
         ]
     )
@@ -80,7 +143,7 @@ def _filtered_tools(
     search_text: str | None = None,
 ) -> list[McpToolDefinition]:
     catalog = get_tool_catalog()
-    needle = str(search_text or "").strip().lower()
+    needle = _normalize_search_text(search_text)
     rows: list[McpToolDefinition] = []
     for definition in sorted(catalog.values(), key=lambda item: item.name):
         if surface and definition.cli_surface != surface:
@@ -89,7 +152,7 @@ def _filtered_tools(
             continue
         if risk and risk != "all" and risk not in definition.risk_levels:
             continue
-        if needle and needle not in definition.cli_search_text().lower():
+        if needle and needle not in _normalize_search_text(definition.cli_search_text()):
             continue
         rows.append(definition)
     return rows
@@ -139,14 +202,15 @@ def _tools_list_command(args: list[str], *, stdout: TextIO) -> int:
         print_json(stdout, payload)
         return 0
 
-    header = f"{'TOOL':<32} {'ENTRYPOINT':<40} {'SURFACE':<12} {'TIER':<9} {'RISK':<20} DESCRIPTION"
+    header = f"{'TOOL':<32} {'ENTRYPOINT':<28} {'ALIAS':<18} {'SURFACE':<12} {'TIER':<9} {'RISK':<20} DESCRIPTION"
     stdout.write(header + "\n")
-    stdout.write("-" * 160 + "\n")
+    stdout.write("-" * 176 + "\n")
     for definition in definitions:
         risks = "/".join(definition.risk_levels)
         description = definition.description.split("\n", 1)[0]
+        alias = definition.cli_recommended_alias or "-"
         stdout.write(
-            f"{definition.name:<32} {definition.cli_entrypoint:<40} {definition.cli_surface:<12} "
+            f"{definition.name:<32} {definition.cli_entrypoint:<28} {alias:<18} {definition.cli_surface:<12} "
             f"{definition.cli_tier:<9} {risks:<20} {description[:50]}\n"
         )
     stdout.write(f"\n{len(definitions)} tool(s)\n")
@@ -155,6 +219,7 @@ def _tools_list_command(args: list[str], *, stdout: TextIO) -> int:
 
 def _tools_search_command(args: list[str], *, stdout: TextIO) -> int:
     as_json = False
+    exact = False
     surface = None
     tier = "all"
     risk = "all"
@@ -164,6 +229,9 @@ def _tools_search_command(args: list[str], *, stdout: TextIO) -> int:
         arg = args[i]
         if arg == "--json":
             as_json = True
+            i += 1
+        elif arg == "--exact":
+            exact = True
             i += 1
         elif arg == "--surface" and i + 1 < len(args):
             surface = args[i + 1].strip()
@@ -184,13 +252,23 @@ def _tools_search_command(args: list[str], *, stdout: TextIO) -> int:
             query_parts.append(arg)
             i += 1
     query = " ".join(query_parts).strip()
+    if exact and not query:
+        stdout.write(
+            "usage: workflow tools search <text> [--exact] [--surface <surface>] [--tier <tier>] [--risk <risk>] [--json]\n"
+        )
+        stdout.write("error: --exact requires a search text\n")
+        return 2
     if not query and surface is None and tier == "all" and risk == "all":
         stdout.write(
-            "usage: workflow tools search <text> [--surface <surface>] [--tier <tier>] [--risk <risk>] [--json]\n"
+            "usage: workflow tools search <text> [--exact] [--surface <surface>] [--tier <tier>] [--risk <risk>] [--json]\n"
         )
         return 2
 
-    definitions = _filtered_tools(surface=surface, tier=tier, risk=risk, search_text=query or None)
+    definitions = _filtered_tools(surface=surface, tier=tier, risk=risk, search_text=None if exact else query or None)
+    if query and not exact:
+        definitions = sorted(definitions, key=lambda definition: _tool_search_rank(definition, query))
+    if exact:
+        definitions = [definition for definition in definitions if _tool_exact_matches(definition, query)]
     if as_json:
         print_json(
             stdout,
@@ -200,6 +278,7 @@ def _tools_search_command(args: list[str], *, stdout: TextIO) -> int:
                     "surface": definition.cli_surface,
                     "tier": definition.cli_tier,
                     "entrypoint": definition.cli_entrypoint,
+                    "describe_command": definition.cli_describe_command,
                     "recommended_alias": definition.cli_recommended_alias,
                     "badges": list(definition.cli_badges),
                     "when_to_use": definition.cli_when_to_use,
@@ -209,10 +288,19 @@ def _tools_search_command(args: list[str], *, stdout: TextIO) -> int:
         )
         return 0
 
+    if exact and not definitions:
+        stdout.write("no exact matches found\n")
+        return 0
     for definition in definitions:
         stdout.write(f"{definition.name} [{format_badges(definition)}]\n")
         stdout.write(f"  entrypoint: {definition.cli_entrypoint}\n")
+        stdout.write(f"  describe: {definition.cli_describe_command}\n")
         stdout.write(f"  {definition.cli_when_to_use or definition.description.splitlines()[0]}\n")
+    if len(definitions) == 1:
+        definition = definitions[0]
+        stdout.write("\nBest next step:\n")
+        stdout.write(f"  {definition.cli_describe_command}\n")
+        stdout.write(f"  {definition.cli_entrypoint}\n")
     stdout.write(f"\n{len(definitions)} tool(s)\n")
     return 0
 

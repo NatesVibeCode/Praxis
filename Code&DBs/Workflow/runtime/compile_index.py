@@ -14,6 +14,7 @@ the required authority is missing.
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import logging
 import os
@@ -37,14 +38,14 @@ logger = logging.getLogger(__name__)
 _DEFAULT_SURFACE_NAME = "compiler"
 _DEFAULT_SCHEMA_VERSION = 1
 _DEFAULT_STALE_AFTER_SECONDS = 3600
-_COMPILE_INDEX_SURFACE_RELATIVE_PATHS: tuple[str, ...] = (
-    "Code&DBs/Workflow/runtime/compile_index.py",
-    "Code&DBs/Workflow/runtime/compile_reuse.py",
-    "Code&DBs/Workflow/runtime/compiler.py",
-    "Code&DBs/Workflow/runtime/definition_compile_kernel.py",
-    "Code&DBs/Workflow/runtime/reference_catalog.py",
-    "Code&DBs/Workflow/runtime/capability_catalog.py",
-    "Code&DBs/Workflow/runtime/integration_registry_sync.py",
+_COMPILE_INDEX_SURFACE_COMPONENTS: tuple[object, ...] = (
+    __file__,
+    module_surface_manifest,
+    "compiler.py",
+    "definition_compile_kernel.py",
+    load_capability_catalog,
+    sync_reference_catalog,
+    sync_integration_registry,
 )
 
 
@@ -156,6 +157,33 @@ def _stable_hash(value: object) -> str:
 
 def _repo_root_from_module() -> Path:
     return Path(__file__).resolve().parents[3]
+
+
+def _compile_index_surface_paths() -> tuple[Path, ...]:
+    runtime_dir = Path(__file__).resolve().parent
+    resolved_paths: list[Path] = []
+    seen_paths: set[Path] = set()
+    for component in _COMPILE_INDEX_SURFACE_COMPONENTS:
+        if isinstance(component, str):
+            if component.endswith(".py"):
+                path = runtime_dir / component
+            else:
+                path = Path(component)
+        else:
+            source_path = inspect.getsourcefile(component)
+            if not source_path:
+                raise _error(
+                    "compile_index.surface_manifest_unavailable",
+                    "compile index surface manifest source file could not be resolved",
+                    details={"component": repr(component)},
+                )
+            path = Path(source_path)
+        resolved_path = path.resolve()
+        if resolved_path in seen_paths:
+            continue
+        seen_paths.add(resolved_path)
+        resolved_paths.append(resolved_path)
+    return tuple(resolved_paths)
 
 
 def _compile_index_ttl_seconds() -> int:
@@ -755,12 +783,7 @@ def current_compile_surface_manifest(repo_root: str | Path | None = None) -> dic
     resolved_root = Path(repo_root) if repo_root is not None else _repo_root_from_module()
     resolved_root = resolved_root.resolve()
     try:
-        manifest = module_surface_manifest(
-            *(
-                resolved_root / relative_path
-                for relative_path in _COMPILE_INDEX_SURFACE_RELATIVE_PATHS
-            )
-        )
+        manifest = module_surface_manifest(*_compile_index_surface_paths())
     except Exception as exc:
         raise _error(
             "compile_index.surface_manifest_unavailable",

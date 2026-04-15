@@ -12,7 +12,25 @@ from surfaces.cli.main import main as workflow_cli_main
 from surfaces.cli.commands import operate as operate_commands
 from surfaces.cli.commands import query as query_commands
 from surfaces.cli.commands import tools as tools_commands
-from surfaces.mcp.catalog import get_tool_catalog
+from surfaces.mcp.catalog import McpToolDefinition, get_tool_catalog
+
+
+def _tool_definition(
+    name: str,
+    *,
+    description: str,
+    recommended_alias: str | None = None,
+) -> McpToolDefinition:
+    metadata: dict[str, object] = {"description": description}
+    if recommended_alias is not None:
+        metadata["cli"] = {"recommended_alias": recommended_alias}
+    return McpToolDefinition(
+        name=name,
+        module_name="surfaces.mcp.tools.test",
+        handler_name="handler",
+        metadata=metadata,
+        selector_defaults={},
+    )
 
 
 def test_tools_list_json_exposes_catalog() -> None:
@@ -34,7 +52,85 @@ def test_tools_root_shows_quickstart() -> None:
 
     rendered = stdout.getvalue()
     assert "Tool discovery quickstart:" in rendered
-    assert "workflow tools search <topic> [--surface <surface>] [--tier <tier>] [--risk <risk>]" in rendered
+    assert "workflow tools search <topic> [--exact] [--surface <surface>] [--tier <tier>] [--risk <risk>]" in rendered
+    assert "search results are relevance-ranked" in rendered.lower()
+    assert "workflow query" in rendered
+
+
+def test_tools_search_prioritizes_exact_alias_matches(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        tools_commands,
+        "get_tool_catalog",
+        lambda: {
+            "praxis_alpha": _tool_definition(
+                "praxis_alpha",
+                description="General help that mentions query for broader discovery.",
+            ),
+            "praxis_query": _tool_definition(
+                "praxis_query",
+                description="Primary query surface for operator questions.",
+                recommended_alias="query",
+            ),
+        },
+    )
+    stdout = StringIO()
+
+    assert workflow_cli_main(["tools", "search", "query", "--json"], stdout=stdout) == 0
+
+    payload = json.loads(stdout.getvalue())
+    assert [row["name"] for row in payload] == ["praxis_query", "praxis_alpha"]
+
+
+def test_tools_search_exact_mode_returns_only_direct_matches(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        tools_commands,
+        "get_tool_catalog",
+        lambda: {
+            "praxis_alpha": _tool_definition(
+                "praxis_alpha",
+                description="General help that mentions query for broader discovery.",
+            ),
+            "praxis_query": _tool_definition(
+                "praxis_query",
+                description="Primary query surface for operator questions.",
+                recommended_alias="query",
+            ),
+        },
+    )
+    stdout = StringIO()
+
+    assert workflow_cli_main(["tools", "search", "query", "--exact", "--json"], stdout=stdout) == 0
+
+    payload = json.loads(stdout.getvalue())
+    assert [row["name"] for row in payload] == ["praxis_query"]
+    assert payload[0]["describe_command"] == "workflow tools describe praxis_query"
+
+    stdout = StringIO()
+    assert workflow_cli_main(["tools", "search", "workflow query", "--exact", "--json"], stdout=stdout) == 0
+
+    payload = json.loads(stdout.getvalue())
+    assert [row["name"] for row in payload] == ["praxis_query"]
+
+
+def test_tools_search_single_match_prints_next_step(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        tools_commands,
+        "get_tool_catalog",
+        lambda: {
+            "praxis_query": _tool_definition(
+                "praxis_query",
+                description="Primary query surface for operator questions.",
+                recommended_alias="query",
+            ),
+        },
+    )
+    stdout = StringIO()
+
+    assert workflow_cli_main(["tools", "search", "query", "--exact"], stdout=stdout) == 0
+
+    rendered = stdout.getvalue()
+    assert "Best next step:" in rendered
+    assert "workflow tools describe praxis_query" in rendered
     assert "workflow query" in rendered
 
 
@@ -58,7 +154,9 @@ def test_tools_list_plain_output_highlights_entrypoints() -> None:
 
     rendered = stdout.getvalue()
     assert "ENTRYPOINT" in rendered
+    assert "ALIAS" in rendered
     assert "workflow query" in rendered
+    assert "query" in rendered
     assert "workflow tools call praxis_connector" in rendered
 
 

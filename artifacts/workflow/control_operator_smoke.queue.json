@@ -1,0 +1,66 @@
+{
+  "name": "Control Operator Workflow Smoke",
+  "workflow_id": "control_operator_smoke",
+  "phase": "SMOKE",
+  "outcome_goal": "Prove the graph-native control_operator lane can branch deterministically and continue through a joined successor.",
+  "jobs": [
+    {
+      "label": "seed",
+      "adapter_type": "deterministic_task",
+      "inputs": {
+        "task_name": "seed",
+        "input_payload": {
+          "step": 0
+        }
+      },
+      "expected_outputs": {
+        "flag": true
+      }
+    },
+    {
+      "label": "route_if",
+      "adapter_type": "control_operator",
+      "depends_on": [
+        "seed"
+      ],
+      "operator": {
+        "kind": "if",
+        "predicate": {
+          "field": "flag",
+          "op": "equals",
+          "value": true
+        }
+      },
+      "branches": {
+        "then": [
+          {
+            "label": "then_path",
+            "adapter_type": "deterministic_task",
+            "expected_outputs": {
+              "path": "then"
+            }
+          }
+        ],
+        "else": [
+          {
+            "label": "else_path",
+            "adapter_type": "deterministic_task",
+            "expected_outputs": {
+              "path": "else"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "label": "finalize",
+      "adapter_type": "deterministic_task",
+      "depends_on": [
+        "route_if"
+      ],
+      "expected_outputs": {
+        "done": true
+      }
+    }
+  ]
+}

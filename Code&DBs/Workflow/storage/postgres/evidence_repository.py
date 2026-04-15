@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import fields, is_dataclass
 from datetime import datetime
 from typing import Any
 
@@ -15,6 +16,27 @@ from .validators import (
     _require_text,
     _require_utc,
 )
+
+
+def _json_compatible_value(value: object) -> object:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if hasattr(value, "to_json"):
+        return _json_compatible_value(value.to_json())
+    if hasattr(value, "to_contract"):
+        return _json_compatible_value(value.to_contract())
+    if is_dataclass(value):
+        return {
+            field.name: _json_compatible_value(getattr(value, field.name))
+            for field in fields(value)
+        }
+    if isinstance(value, Mapping):
+        return {str(key): _json_compatible_value(item) for key, item in value.items()}
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return [_json_compatible_value(item) for item in value]
+    if hasattr(value, "value") and type(getattr(value, "value")).__name__ == "str":
+        return getattr(value, "value")
+    return value
 
 
 class PostgresEvidenceRepository:
@@ -32,8 +54,8 @@ class PostgresEvidenceRepository:
         request_envelope: Mapping[str, Any],
         created_at: datetime,
     ) -> None:
-        normalized_request_envelope = dict(
-            _require_mapping(request_envelope, field_name="request_envelope")
+        normalized_request_envelope = _json_compatible_value(
+            dict(_require_mapping(request_envelope, field_name="request_envelope"))
         )
         await self._conn.execute(
             """
@@ -108,6 +130,9 @@ class PostgresEvidenceRepository:
         requested_at: datetime,
         admitted_at: datetime | None = None,
     ) -> None:
+        normalized_request_envelope = _json_compatible_value(
+            dict(_require_mapping(request_envelope, field_name="request_envelope"))
+        )
         await self._conn.execute(
             """
             INSERT INTO workflow_runs (
@@ -148,7 +173,7 @@ class PostgresEvidenceRepository:
             _require_text(admitted_definition_hash, field_name="admitted_definition_hash"),
             _require_text(run_idempotency_key, field_name="run_idempotency_key"),
             _encode_jsonb(
-                dict(_require_mapping(request_envelope, field_name="request_envelope")),
+                normalized_request_envelope,
                 field_name="request_envelope",
             ),
             _require_text(context_bundle_id, field_name="context_bundle_id"),
@@ -207,7 +232,9 @@ class PostgresEvidenceRepository:
             _require_text(actor_type, field_name="actor_type"),
             _optional_text(reason_code, field_name="reason_code"),
             _encode_jsonb(
-                dict(_require_mapping(payload, field_name="payload")),
+                _json_compatible_value(
+                    dict(_require_mapping(payload, field_name="payload"))
+                ),
                 field_name="payload",
             ),
         )
@@ -281,24 +308,27 @@ class PostgresEvidenceRepository:
             _require_nonnegative_int(evidence_seq, field_name="evidence_seq"),
             _require_text(executor_type, field_name="executor_type"),
             _require_text(status, field_name="status"),
-            _encode_jsonb(dict(_require_mapping(inputs, field_name="inputs")), field_name="inputs"),
             _encode_jsonb(
-                dict(_require_mapping(outputs, field_name="outputs")),
+                _json_compatible_value(dict(_require_mapping(inputs, field_name="inputs"))),
+                field_name="inputs",
+            ),
+            _encode_jsonb(
+                _json_compatible_value(dict(_require_mapping(outputs, field_name="outputs"))),
                 field_name="outputs",
             ),
             _encode_jsonb(
-                [
+                _json_compatible_value([
                     dict(_require_mapping(item, field_name=f"artifacts[{index}]"))
                     for index, item in enumerate(artifacts)
-                ],
+                ]),
                 field_name="artifacts",
             ),
             _optional_text(failure_code, field_name="failure_code"),
             _encode_jsonb(
-                [
+                _json_compatible_value([
                     dict(_require_mapping(item, field_name=f"decision_refs[{index}]"))
                     for index, item in enumerate(decision_refs)
-                ],
+                ]),
                 field_name="decision_refs",
             ),
         )

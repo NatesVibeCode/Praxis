@@ -1,0 +1,37 @@
+{
+  "name": "deterministic smoke",
+  "workflow_id": "deterministic_smoke",
+  "phase": "execute",
+  "outcome_goal": "Prove the unified worker can execute a minimal deterministic workflow end to end.",
+  "jobs": [
+    {
+      "label": "prepare",
+      "adapter_type": "deterministic_task",
+      "inputs": {
+        "task_name": "prepare",
+        "input_payload": {
+          "step": 0
+        }
+      },
+      "expected_outputs": {
+        "result": "prepared"
+      }
+    },
+    {
+      "label": "admit",
+      "adapter_type": "deterministic_task",
+      "inputs": {
+        "task_name": "admit",
+        "input_payload": {
+          "step": 1
+        }
+      },
+      "expected_outputs": {
+        "result": "admitted"
+      },
+      "depends_on": [
+        "prepare"
+      ]
+    }
+  ]
+}

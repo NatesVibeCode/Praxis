@@ -39,6 +39,16 @@ def _require_workflow_database_url() -> None:
         pytest.skip("WORKFLOW_DATABASE_URL is required for Postgres integration tests")
 
 
+async def _connect_or_skip():
+    try:
+        return await connect_workflow_database()
+    except PostgresConfigurationError as exc:
+        pytest.skip(
+            "repo-local Postgres authority unavailable for Postgres integration tests: "
+            f"{exc.reason_code}"
+        )
+
+
 def _submission(*, suffix: str) -> WorkflowAdmissionSubmission:
     requested_at = datetime(2026, 4, 1, 12, 0, tzinfo=timezone.utc)
     admitted_at = requested_at + timedelta(seconds=1)
@@ -232,7 +242,7 @@ def test_postgres_control_plane_path_rejects_malformed_child_rows() -> None:
 
 async def _exercise_postgres_control_plane_path() -> None:
     _require_workflow_database_url()
-    conn = await connect_workflow_database()
+    conn = await _connect_or_skip()
     try:
         await bootstrap_control_plane_schema(conn)
         suffix = _unique_suffix()
@@ -393,7 +403,7 @@ async def _exercise_postgres_control_plane_path() -> None:
 
 async def _exercise_conflicting_definition_rejection() -> None:
     _require_workflow_database_url()
-    conn = await connect_workflow_database()
+    conn = await _connect_or_skip()
     try:
         await bootstrap_control_plane_schema(conn)
         suffix = _unique_suffix()
@@ -449,7 +459,7 @@ async def _exercise_conflicting_definition_rejection() -> None:
 
 async def _exercise_malformed_child_rejection() -> None:
     _require_workflow_database_url()
-    conn = await connect_workflow_database()
+    conn = await _connect_or_skip()
     try:
         await bootstrap_control_plane_schema(conn)
         suffix = _unique_suffix()

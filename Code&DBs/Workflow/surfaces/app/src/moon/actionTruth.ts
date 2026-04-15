@@ -134,6 +134,14 @@ export function getCatalogTruth(item: CatalogItem): CatalogTruth {
     };
   }
 
+  if (item.actionValue === 'auto/classify') {
+    return {
+      category: 'runtime',
+      badge: 'Runs on release',
+      detail: 'Uses the analysis lane backed by task_type_route_profiles and task_type_routing authority.',
+    };
+  }
+
   if (item.actionValue === 'auto/fan-out') {
     return {
       category: 'alias',
@@ -199,6 +207,14 @@ export function getCatalogSurfacePolicy(item: CatalogItem): CatalogSurfacePolicy
       badge: 'Alias',
       detail: 'Legacy token only, kept so older graphs still open cleanly.',
       hardChoice: 'Compatibility alias for saved graphs only.',
+    };
+  }
+
+  if (item.actionValue === 'auto/classify') {
+    return {
+      tier: 'primary',
+      badge: 'Core now',
+      detail: 'Backed by a real analysis lane instead of borrowing the support route.',
     };
   }
 

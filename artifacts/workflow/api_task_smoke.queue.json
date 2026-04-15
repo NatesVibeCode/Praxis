@@ -1,0 +1,15 @@
+{
+  "name": "API Task Workflow Smoke",
+  "workflow_id": "api_task_smoke",
+  "phase": "SMOKE",
+  "outcome_goal": "Prove the graph-native api_task workflow lane can execute through the managed wrapper and surface live run metrics.",
+  "jobs": [
+    {
+      "label": "http_echo",
+      "adapter_type": "api_task",
+      "method": "GET",
+      "url": "https://httpbin.org/get?workflow_smoke=ok",
+      "timeout": 120
+    }
+  ]
+}

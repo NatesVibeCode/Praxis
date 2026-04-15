@@ -64,7 +64,7 @@ _ROUTE_TIER_BUCKETS = frozenset({"high", "medium", "low"})
 _LATENCY_CLASS_BUCKETS = frozenset({"reasoning", "instant"})
 _SEMANTIC_AUTO_ROUTE_ALIASES = {
     "draft": "chat",
-    "classify": "support",
+    "classify": "analysis",
 }
 _ROUTE_HEALTH_EXTERNAL_FAILURE_CATEGORIES = frozenset(
     {
@@ -607,6 +607,43 @@ class TaskTypeRouter:
             effective_marginal_cost=_row_effective_marginal_cost(economics),
             spend_pressure=str(economics.get("spend_pressure") or "unknown"),
             budget_status=str(economics.get("budget_status") or ""),
+        )
+
+    def resolve_explicit_eligibility(
+        self,
+        agent_slug: str,
+        *,
+        task_type: str | None = None,
+        as_of: datetime | None = None,
+    ) -> TaskRouteEligibilityDecision | None:
+        """Return the active route-eligibility decision for an explicit slug.
+
+        This is the policy answer for direct ``provider/model`` jobs that bypass
+        ``auto/`` routing. A rejected decision means execution should fail closed
+        before any transport-specific readiness or subprocess work begins.
+        """
+        parts = agent_slug.split("/", 1)
+        if len(parts) != 2:
+            raise ValueError(f"Invalid agent slug: '{agent_slug}'")
+        provider, model = parts
+        normalized_task_type = (
+            _resolve_semantic_auto_route(_normalize_auto_route_key(task_type))
+            if task_type
+            else ""
+        )
+        decisions = self._load_route_eligibility(
+            normalized_task_type,
+            provider_slugs=(provider,),
+            model_slugs=(model,),
+            as_of=as_of or self._now_factory(),
+        )
+        if not decisions:
+            return None
+        return self._matching_route_eligibility(
+            normalized_task_type,
+            provider_slug=provider,
+            model_slug=model,
+            decisions=decisions,
         )
 
     def _resolve_auto(

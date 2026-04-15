@@ -110,6 +110,12 @@ _load_timestamp: float | None = None
 _LOAD_TIMEOUT_ENV = "PRAXIS_PROVIDER_REGISTRY_LOAD_TIMEOUT"
 _DEFAULT_LOAD_TIMEOUT = 30
 _DB_LOADED = False
+_DEFAULT_PROVIDER_PRIORITY: tuple[str, ...] = (
+    "openai",
+    "google",
+    "anthropic",
+    "cursor",
+)
 
 
 def _register(profile: ProviderCLIProfile) -> None:
@@ -121,6 +127,15 @@ def _register(profile: ProviderCLIProfile) -> None:
 
 for _builtin_profile in provider_transport.BUILTIN_PROVIDER_PROFILES:
     _register(_builtin_profile)
+
+
+def _restore_builtin_registry() -> None:
+    _REGISTRY.clear()
+    _ALIAS_MAP.clear()
+    for profile in provider_transport.BUILTIN_PROVIDER_PROFILES:
+        _register(profile)
+    _ADAPTER_CONFIG.clear()
+    _ADAPTER_FAILURE_MAPPINGS.clear()
 
 
 def _require_database_url() -> str:
@@ -403,6 +418,7 @@ def _load_from_db() -> None:
             return
 
         if not _ASYNCPG_AVAILABLE:
+            _restore_builtin_registry()
             logger.warning("provider_registry: asyncpg unavailable — using built-in profiles")
             _load_status = RegistryLoadStatus.DEGRADED_BUILTIN
             _load_error = "asyncpg not installed"
@@ -413,6 +429,7 @@ def _load_from_db() -> None:
         try:
             db_url = _require_database_url()
         except RuntimeError as exc:
+            _restore_builtin_registry()
             logger.warning("provider_registry: %s — using built-in profiles", exc)
             _load_status = RegistryLoadStatus.DEGRADED_BUILTIN
             _load_error = str(exc)
@@ -423,6 +440,7 @@ def _load_from_db() -> None:
         try:
             rows, config_rows, failure_rows = _run_async(_fetch_from_db(db_url))
         except ProviderRegistryLoadTimeout as exc:
+            _restore_builtin_registry()
             logger.error("provider_registry: %s — using built-in profiles", exc)
             _load_status = RegistryLoadStatus.DEGRADED_BUILTIN
             _load_error = str(exc)
@@ -430,6 +448,7 @@ def _load_from_db() -> None:
             _DB_LOADED = True
             return
         except Exception as exc:
+            _restore_builtin_registry()
             logger.error(
                 "provider_registry: DB fetch failed (%s: %s) — using built-in profiles",
                 type(exc).__name__,
@@ -442,6 +461,7 @@ def _load_from_db() -> None:
             return
 
         if not rows:
+            _restore_builtin_registry()
             logger.warning(
                 "provider_registry: no active provider_cli_profiles in DB — using built-in profiles"
             )
@@ -475,6 +495,7 @@ def _load_from_db() -> None:
                 loaded_aliases[alias] = profile.provider_slug
 
         if not loaded_registry:
+            _restore_builtin_registry()
             logger.error(
                 "provider_registry: all %d DB rows failed validation — using built-in profiles. "
                 "Errors: %s",
@@ -564,7 +585,12 @@ def default_provider_slug() -> str:
     _load_from_db()
     if not _REGISTRY:
         raise RuntimeError("provider_registry has no authoritative provider profiles")
-    return sorted(_REGISTRY)[0]
+    # Keep the default stable and explicit. Alphabetical fallback silently
+    # picked Anthropic first, which drifted from the operational default lane.
+    for provider_slug in _DEFAULT_PROVIDER_PRIORITY:
+        if provider_slug in _REGISTRY:
+            return provider_slug
+    return next(iter(_REGISTRY))
 
 
 def default_llm_adapter_type() -> str:

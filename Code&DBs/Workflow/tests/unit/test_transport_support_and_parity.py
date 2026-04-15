@@ -635,6 +635,25 @@ def test_llm_task_uses_contract_retry_policy_and_failure_mapping(monkeypatch) ->
         _reg._DB_LOADED = original_loaded
 
 
+def test_provider_registry_prefers_openai_as_default_provider(monkeypatch) -> None:
+    import adapters.provider_transport as provider_transport
+    import registry.provider_execution_registry as _reg
+
+    del monkeypatch
+    original_registry = dict(_reg._REGISTRY)
+    original_loaded = _reg._DB_LOADED
+    builtin_registry = {p.provider_slug: p for p in provider_transport.BUILTIN_PROVIDER_PROFILES}
+    _reg._REGISTRY.clear()
+    _reg._REGISTRY.update(builtin_registry)
+    _reg._DB_LOADED = True
+    try:
+        assert _reg.default_provider_slug() == "openai"
+    finally:
+        _reg._REGISTRY.clear()
+        _reg._REGISTRY.update(original_registry)
+        _reg._DB_LOADED = original_loaded
+
+
 def test_llm_task_accepts_explicit_first_party_route_contract_without_registry_lookup(
     monkeypatch,
 ) -> None:

@@ -11,12 +11,13 @@ from typing import Any
 from adapters import DeterministicTaskRequest
 from contracts.domain import WorkflowNodeContract, WorkflowRequest
 
+from runtime._helpers import _json_compatible
 from ..domain import RuntimeBoundaryError
 from ..intake import WorkflowIntakeOutcome
 
 
 def _workflow_request_payload(request: WorkflowRequest) -> dict[str, Any]:
-    return {
+    payload = {
         "schema_version": request.schema_version,
         "workflow_id": request.workflow_id,
         "request_id": request.request_id,
@@ -55,6 +56,7 @@ def _workflow_request_payload(request: WorkflowRequest) -> dict[str, Any]:
             for edge in request.edges
         ],
     }
+    return _json_compatible(payload)  # type: ignore[return-value]
 
 
 def _authority_payload_hash(payload: Mapping[str, Any]) -> str:

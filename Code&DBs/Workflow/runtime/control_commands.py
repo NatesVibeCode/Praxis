@@ -19,6 +19,7 @@ import importlib
 import json
 import logging
 import sys
+import time
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -119,6 +120,144 @@ def _resolve_unified_dispatch_attr(name: str):
     return unified_dispatch._resolve_attr(name)
 
 
+def _workflow_submit_run_snapshot(
+    conn: "SyncPostgresConnection",
+    run_id: str,
+) -> dict[str, Any] | None:
+    def _load_snapshot() -> dict[str, Any] | None:
+        try:
+            from runtime.workflow._status import (
+                get_run_status,
+                summarize_run_health,
+                summarize_run_recovery,
+            )
+
+            status = get_run_status(conn, run_id)
+        except Exception:
+            logger.debug("workflow submit snapshot lookup failed for run %s", run_id, exc_info=True)
+            return None
+        if not isinstance(status, Mapping):
+            return None
+        snapshot = dict(status)
+        now = datetime.now(timezone.utc)
+        try:
+            health = snapshot.get("health")
+            if not isinstance(health, Mapping):
+                health = summarize_run_health(snapshot, now)
+                snapshot["health"] = health
+            recovery = snapshot.get("recovery")
+            if not isinstance(recovery, Mapping):
+                snapshot["recovery"] = summarize_run_recovery(snapshot, dict(health), now)
+        except Exception:
+            logger.debug("workflow submit snapshot enrichment failed for run %s", run_id, exc_info=True)
+        return snapshot
+
+    last_snapshot: dict[str, Any] | None = None
+    for sleep_seconds in (0.0, 0.05, 0.1, 0.2, 0.3):
+        if sleep_seconds > 0:
+            time.sleep(sleep_seconds)
+        snapshot = _load_snapshot()
+        if snapshot is None:
+            continue
+        last_snapshot = snapshot
+        if _workflow_submit_snapshot_is_informative(snapshot):
+            return snapshot
+    return last_snapshot
+
+
+def _workflow_submit_status_counts(jobs: object) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    if not isinstance(jobs, list):
+        return counts
+    for job in jobs:
+        if not isinstance(job, Mapping):
+            continue
+        label = str(job.get("status") or "unknown").strip() or "unknown"
+        counts[label] = counts.get(label, 0) + 1
+    return counts
+
+
+def _workflow_submit_health_state(snapshot: Mapping[str, Any]) -> str:
+    health = snapshot.get("health")
+    if not isinstance(health, Mapping):
+        return "unknown"
+    return str(health.get("state") or "").strip() or "unknown"
+
+
+def _workflow_submit_terminal_reason(snapshot: Mapping[str, Any]) -> str:
+    return str(
+        snapshot.get("terminal_reason")
+        or snapshot.get("terminal_reason_code")
+        or ""
+    ).strip()
+
+
+def _workflow_submit_snapshot_is_informative(snapshot: Mapping[str, Any]) -> bool:
+    run_status = str(snapshot.get("status") or "").strip()
+    completed_jobs = int(
+        snapshot.get("completed_jobs")
+        or snapshot.get("completed")
+        or 0
+    )
+    total_jobs = int(snapshot.get("total_jobs") or 0)
+    health_state = _workflow_submit_health_state(snapshot)
+    terminal_reason = _workflow_submit_terminal_reason(snapshot)
+    job_status_counts = _workflow_submit_status_counts(snapshot.get("jobs"))
+    if run_status in {"succeeded", "failed", "cancelled"}:
+        return (
+            (total_jobs == 0 or completed_jobs >= total_jobs)
+            and health_state != "unknown"
+            and bool(terminal_reason)
+        )
+    if health_state != "unknown":
+        return True
+    if completed_jobs > 0:
+        return True
+    return any(status != "pending" for status in job_status_counts)
+
+
+def _workflow_submit_metrics(snapshot: Mapping[str, Any]) -> dict[str, Any]:
+    metrics: dict[str, Any] = {
+        "completed_jobs": int(
+            snapshot.get("completed_jobs")
+            or snapshot.get("completed")
+            or 0
+        ),
+        "total_jobs": int(snapshot.get("total_jobs") or 0),
+        "elapsed_seconds": float(snapshot.get("elapsed_seconds") or 0.0),
+        "health_state": _workflow_submit_health_state(snapshot),
+        "job_status_counts": _workflow_submit_status_counts(snapshot.get("jobs")),
+        "total_cost_usd": float(snapshot.get("total_cost_usd") or 0.0),
+        "total_duration_ms": int(snapshot.get("total_duration_ms") or 0),
+        "total_tokens_in": int(snapshot.get("total_tokens_in") or 0),
+        "total_tokens_out": int(snapshot.get("total_tokens_out") or 0),
+    }
+    terminal_reason = _workflow_submit_terminal_reason(snapshot)
+    if terminal_reason:
+        metrics["terminal_reason"] = terminal_reason
+    return metrics
+
+
+def _merge_workflow_submit_metrics(
+    payload: Mapping[str, Any],
+    snapshot: Mapping[str, Any],
+) -> dict[str, Any]:
+    merged = dict(payload)
+    run_status = str(snapshot.get("status") or "").strip()
+    if run_status:
+        merged["status"] = run_status
+        merged["run_status"] = run_status
+    merged["status_source"] = "live_snapshot"
+    merged["run_metrics"] = _workflow_submit_metrics(snapshot)
+    terminal_reason = _workflow_submit_terminal_reason(snapshot)
+    if terminal_reason:
+        merged["terminal_reason"] = terminal_reason
+    recovery = snapshot.get("recovery")
+    if isinstance(recovery, Mapping):
+        merged["recovery"] = _json_compatible(dict(recovery))
+    return merged
+
+
 def submit_workflow_command(
     conn: "SyncPostgresConnection",
     *,
@@ -158,11 +297,22 @@ def submit_workflow_command(
         command_id=command_id,
         requested_at=requested_at,
     )
-    return render_workflow_submit_response(
+    payload = render_workflow_submit_response(
         command,
         spec_name=spec_name,
         total_jobs=total_jobs,
     )
+    run_id_value = payload.get("run_id")
+    if (
+        payload.get("status") in {"failed", "approval_required"}
+        or not isinstance(run_id_value, str)
+        or not run_id_value.strip()
+    ):
+        return payload
+    snapshot = _workflow_submit_run_snapshot(conn, run_id_value)
+    if snapshot is None:
+        return payload
+    return _merge_workflow_submit_metrics(payload, snapshot)
 
 # 040 creates the table; 042 performs the explicit workflow.* type cutover.
 _SCHEMA_FILENAMES = (

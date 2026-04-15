@@ -73,6 +73,8 @@ def test_tool_dag_health_uses_workflow_database_env(monkeypatch) -> None:
         "provider_registry_mod",
         SimpleNamespace(
             registered_providers=lambda: ("openai", "google"),
+            default_provider_slug=lambda: "openai",
+            default_llm_adapter_type=lambda: "cli_llm",
             supports_adapter=lambda provider_slug, adapter_type: not (
                 provider_slug == "google" and adapter_type == "llm_task"
             ),
@@ -110,6 +112,15 @@ def test_tool_dag_health_uses_workflow_database_env(monkeypatch) -> None:
     ]
     assert result["preflight"]["overall"] == "healthy"
     assert result["lane_recommendation"]["recommended_posture"] == "build"
+    assert result["provider_registry"] == {
+        "default_provider_slug": "openai",
+        "default_adapter_type": "cli_llm",
+        "registered_providers": ["openai", "google"],
+        "providers": [
+            {"provider_slug": "openai", "adapters": ["cli_llm", "llm_task"]},
+            {"provider_slug": "google", "adapters": ["cli_llm"]},
+        ],
+    }
     assert result["dependency_truth"] == {"ok": True, "scope": "all"}
     assert provider_probe_calls == [
         ("openai", "cli_llm"),

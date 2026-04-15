@@ -1,0 +1,131 @@
+{
+  "name": "Phase Program Supervisor",
+  "phase": "W",
+  "queue_id": "phase_program_supervisor_20260413",
+  "outcome_goal": "Phase 50 advances through bounded workflow-driven improvements with review and healer gates, while the hourly automation acts only as a scheduler and supervisor.",
+  "anti_requirements": [
+    "Do NOT advance from Phase 50 to Phase 51 without explicit human approval in the thread",
+    "Do NOT modify phases outside the current active-ready focus unless the registry explicitly changes",
+    "Do NOT write outside planning/phase-program and the declared Phase 50 authority files"
+  ],
+  "jobs": [
+    {
+      "label": "phase_50_packet",
+      "agent": "openai/gpt-5.4",
+      "task_type": "architecture",
+      "description": "Turn the current Phase 50 state into one bounded execution packet",
+      "outcome_goal": "planning/phase-program/phase_050_current_packet.md names one concrete next improvement, exact file scope, done criteria, verification commands, and the review/healer/human-approval gate",
+      "prompt": "Read the Phase 50 authority/compiler state and update `planning/phase-program/phase_050_current_packet.md` with one bounded next task only.\n\nSource of truth:\n- `planning/phase-program/praxis_0_100_registry.json`\n- `Code&DBs/Workflow/system_authority/workflow_migration_authority.json`\n- `Code&DBs/Workflow/system_authority/generate_workflow_migration_authority.py`\n- `Code&DBs/Workflow/storage/migrations.py`\n- `Code&DBs/Workflow/storage/postgres/schema.py`\n- `Code&DBs/Workflow/tests/integration/test_workflow_schema_authority_artifacts.py`\n- `Code&DBs/Workflow/tests/integration/test_workflow_migration_policy_boundaries.py`\n- `Code&DBs/Workflow/tests/integration/test_workflow_migration_contracts.py`\n\nThe packet must contain:\n1. Current state summary\n2. One bounded next task inside Phase 50\n3. Exact file scope\n4. Done criteria\n5. Verification commands\n6. Stop boundary\n7. Explicit gate: review -> healer -> human approval before Phase 51\n\nDo not turn this into a multi-phase roadmap refresh. One bounded next task only.",
+      "read": [
+        "planning/phase-program/praxis_0_100_registry.json",
+        "Code&DBs/Workflow/system_authority/workflow_migration_authority.json",
+        "Code&DBs/Workflow/system_authority/generate_workflow_migration_authority.py",
+        "Code&DBs/Workflow/storage/migrations.py",
+        "Code&DBs/Workflow/storage/postgres/schema.py",
+        "Code&DBs/Workflow/tests/integration/test_workflow_schema_authority_artifacts.py",
+        "Code&DBs/Workflow/tests/integration/test_workflow_migration_policy_boundaries.py",
+        "Code&DBs/Workflow/tests/integration/test_workflow_migration_contracts.py"
+      ],
+      "write": [
+        "planning/phase-program/phase_050_current_packet.md"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && grep -q 'Phase 50' planning/phase-program/phase_050_current_packet.md"
+    },
+    {
+      "label": "phase_50_build",
+      "agent": "openai/gpt-5.4",
+      "task_type": "refactor",
+      "depends_on": [
+        "phase_50_packet"
+      ],
+      "description": "Execute the one bounded Phase 50 improvement named in the current packet",
+      "outcome_goal": "Phase 50 advances through one concrete authority/compiler improvement without phase creep",
+      "prompt": "Execute only the bounded task declared in `planning/phase-program/phase_050_current_packet.md`.\n\nHard rules:\n- Stay inside Phase 50\n- Keep writes inside the declared file scope\n- If you change the authority JSON or generator, regenerate `Code&DBs/Workflow/storage/_generated_workflow_migration_authority.py`\n- Keep canonical lookup canonical-only and bootstrap lookup bootstrap-scoped\n- Do not advance the registry to Phase 51\n\nWhen finished, run the packet verification commands or, if they are unchanged, run the focused authority tests already used by this phase.",
+      "read": [
+        "planning/phase-program/phase_050_current_packet.md",
+        "planning/phase-program/praxis_0_100_registry.json",
+        "Code&DBs/Workflow/system_authority/workflow_migration_authority.json",
+        "Code&DBs/Workflow/system_authority/generate_workflow_migration_authority.py",
+        "Code&DBs/Workflow/storage/_generated_workflow_migration_authority.py",
+        "Code&DBs/Workflow/storage/migrations.py",
+        "Code&DBs/Workflow/storage/postgres/schema.py",
+        "Code&DBs/Workflow/tests/integration/test_workflow_schema_authority_artifacts.py",
+        "Code&DBs/Workflow/tests/integration/test_workflow_migration_policy_boundaries.py",
+        "Code&DBs/Workflow/tests/integration/test_workflow_migration_contracts.py"
+      ],
+      "write": [
+        "planning/phase-program/phase_050_current_packet.md",
+        "planning/phase-program/praxis_0_100_registry.json",
+        "Code&DBs/Workflow/system_authority/workflow_migration_authority.json",
+        "Code&DBs/Workflow/system_authority/generate_workflow_migration_authority.py",
+        "Code&DBs/Workflow/storage/_generated_workflow_migration_authority.py",
+        "Code&DBs/Workflow/storage/migrations.py",
+        "Code&DBs/Workflow/storage/postgres/schema.py",
+        "Code&DBs/Workflow/tests/integration/test_workflow_schema_authority_artifacts.py",
+        "Code&DBs/Workflow/tests/integration/test_workflow_migration_policy_boundaries.py",
+        "Code&DBs/Workflow/tests/integration/test_workflow_migration_contracts.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && python3 'Code&DBs/Workflow/system_authority/generate_workflow_migration_authority.py' && PYTHONPATH='Code&DBs/Workflow' python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/integration/test_workflow_schema_authority_artifacts.py' 'Code&DBs/Workflow/tests/integration/test_workflow_migration_policy_boundaries.py' 'Code&DBs/Workflow/tests/integration/test_workflow_migration_contracts.py'"
+    },
+    {
+      "label": "phase_50_review",
+      "agent": "openai/gpt-5.4",
+      "task_type": "review",
+      "depends_on": [
+        "phase_50_build"
+      ],
+      "description": "Review the current Phase 50 authority/compiler changes as a code review",
+      "outcome_goal": "Any remaining risks in lookup policy, generated authority drift, or phase governance are called out before closeout",
+      "prompt": "Review the Phase 50 authority/compiler work as a code review, not a summary.\n\nPrioritize findings on:\n- canonical lookup accidentally reading bootstrap-only or deprecated files\n- derived authority artifacts drifting from the JSON source\n- bootstrap/readiness policy being reconstructed at runtime instead of consumed from generated authority\n- phase registry structure that is still too weak for workflow-driven execution\n- missing or weak tests on policy boundaries and authority drift\n\nFindings first with file references. If no findings remain, say so explicitly and mention residual validation gaps.",
+      "read": [
+        "planning/phase-program/phase_050_current_packet.md",
+        "planning/phase-program/praxis_0_100_registry.json",
+        "Code&DBs/Workflow/system_authority/workflow_migration_authority.json",
+        "Code&DBs/Workflow/system_authority/generate_workflow_migration_authority.py",
+        "Code&DBs/Workflow/storage/_generated_workflow_migration_authority.py",
+        "Code&DBs/Workflow/storage/migrations.py",
+        "Code&DBs/Workflow/storage/postgres/schema.py",
+        "Code&DBs/Workflow/tests/integration/test_workflow_schema_authority_artifacts.py",
+        "Code&DBs/Workflow/tests/integration/test_workflow_migration_policy_boundaries.py",
+        "Code&DBs/Workflow/tests/integration/test_workflow_migration_contracts.py"
+      ],
+      "write": []
+    },
+    {
+      "label": "phase_50_healer",
+      "agent": "openai/gpt-5.4",
+      "task_type": "refactor",
+      "depends_on": [
+        "phase_50_review"
+      ],
+      "description": "Tighten the Phase 50 result after review without advancing the phase boundary",
+      "outcome_goal": "The Phase 50 worker result is patched for any concrete local issues and remains ready for human approval",
+      "prompt": "Apply a narrow healing pass to the current Phase 50 result.\n\nScope rules:\n- Stay inside the Phase 50 file scope\n- Address concrete local issues visible in the current state, especially around policy-aware lookup, generated authority drift, workflow packet quality, and machine-readable phase governance\n- If the review found no issues, only make a minimal tightening pass and preserve the current boundary\n- Do not advance the registry past Phase 50\n\nAfter edits, rerun the focused authority verification commands.",
+      "read": [
+        "planning/phase-program/phase_050_current_packet.md",
+        "planning/phase-program/praxis_0_100_registry.json",
+        "Code&DBs/Workflow/system_authority/workflow_migration_authority.json",
+        "Code&DBs/Workflow/system_authority/generate_workflow_migration_authority.py",
+        "Code&DBs/Workflow/storage/_generated_workflow_migration_authority.py",
+        "Code&DBs/Workflow/storage/migrations.py",
+        "Code&DBs/Workflow/storage/postgres/schema.py",
+        "Code&DBs/Workflow/tests/integration/test_workflow_schema_authority_artifacts.py",
+        "Code&DBs/Workflow/tests/integration/test_workflow_migration_policy_boundaries.py",
+        "Code&DBs/Workflow/tests/integration/test_workflow_migration_contracts.py"
+      ],
+      "write": [
+        "planning/phase-program/phase_050_current_packet.md",
+        "planning/phase-program/praxis_0_100_registry.json",
+        "Code&DBs/Workflow/system_authority/workflow_migration_authority.json",
+        "Code&DBs/Workflow/system_authority/generate_workflow_migration_authority.py",
+        "Code&DBs/Workflow/storage/_generated_workflow_migration_authority.py",
+        "Code&DBs/Workflow/storage/migrations.py",
+        "Code&DBs/Workflow/storage/postgres/schema.py",
+        "Code&DBs/Workflow/tests/integration/test_workflow_schema_authority_artifacts.py",
+        "Code&DBs/Workflow/tests/integration/test_workflow_migration_policy_boundaries.py",
+        "Code&DBs/Workflow/tests/integration/test_workflow_migration_contracts.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && python3 'Code&DBs/Workflow/system_authority/generate_workflow_migration_authority.py' && PYTHONPATH='Code&DBs/Workflow' python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/integration/test_workflow_schema_authority_artifacts.py' 'Code&DBs/Workflow/tests/integration/test_workflow_migration_policy_boundaries.py' 'Code&DBs/Workflow/tests/integration/test_workflow_migration_contracts.py'"
+    }
+  ]
+}

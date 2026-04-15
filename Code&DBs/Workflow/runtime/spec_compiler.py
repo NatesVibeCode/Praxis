@@ -19,7 +19,11 @@ from dataclasses import dataclass, asdict
 from hashlib import sha256
 from typing import Any
 
-from adapters.provider_registry import default_llm_adapter_type, default_provider_slug
+from adapters.provider_registry import (
+    default_llm_adapter_type,
+    default_model_for_provider,
+    default_provider_slug,
+)
 from runtime.capability_catalog import (
     CapabilityCatalogError,
     select_capability_catalog_entries,
@@ -426,6 +430,12 @@ def compile_prompt_launch_spec(
         if not system_prompt:
             system_prompt = "You are a code editor. Return ONLY valid JSON structured output."
 
+    resolved_model_slug = model_slug
+    if resolved_model_slug is None:
+        normalized_provider_slug = str(provider_slug or "").strip()
+        if normalized_provider_slug and "/" not in normalized_provider_slug and not normalized_provider_slug.startswith("auto/"):
+            resolved_model_slug = default_model_for_provider(normalized_provider_slug)
+
     return PromptLaunchSpec(
         name=compiled_prompt[:80] or "workflow cli prompt",
         workflow_id=workflow_id,
@@ -433,7 +443,7 @@ def compile_prompt_launch_spec(
         jobs=[
             {
                 "label": "run",
-                "agent": f"{provider_slug}/{model_slug}" if model_slug else provider_slug,
+                "agent": f"{provider_slug}/{resolved_model_slug}" if resolved_model_slug else provider_slug,
                 "prompt": compiled_prompt,
                 "adapter_type": adapter_type,
                 "tier": tier,

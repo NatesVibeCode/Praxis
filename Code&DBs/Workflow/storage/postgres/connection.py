@@ -23,6 +23,11 @@ _workflow_authority_scope: "_WorkflowAuthorityScope | None" = None
 _bg_loop: asyncio.AbstractEventLoop | None = None
 _bg_thread: _threading.Thread | None = None
 _DEFAULT_DB_USERNAME = "postgres"
+_AUTHORITY_UNAVAILABLE_EXCEPTIONS = (
+    PermissionError,
+    OSError,
+    asyncpg.PostgresError,
+)
 
 
 class _WorkflowAuthorityScope:
@@ -131,7 +136,7 @@ async def connect_workflow_database(
     database_url = resolve_workflow_database_url(env=env)
     try:
         return await asyncpg.connect(database_url)
-    except PermissionError as exc:
+    except _AUTHORITY_UNAVAILABLE_EXCEPTIONS as exc:
         raise _normalize_authority_error(exc, database_url=database_url) from exc
 
 
@@ -174,7 +179,7 @@ async def create_workflow_pool(
     database_url = resolve_workflow_database_url(env=env)
     try:
         return await asyncpg.create_pool(database_url, min_size=min_size, max_size=max_size)
-    except PermissionError as exc:
+    except _AUTHORITY_UNAVAILABLE_EXCEPTIONS as exc:
         raise _normalize_authority_error(exc, database_url=database_url) from exc
 
 

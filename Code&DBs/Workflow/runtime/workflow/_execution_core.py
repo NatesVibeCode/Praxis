@@ -218,6 +218,37 @@ def execute_job(
                      duration_ms=duration_ms, stdout_preview=f"No agent config for: {agent_slug}")
         return
 
+    route_task_type = str(job.get("route_task_type") or job.get("task_type") or "").strip()
+    if "/" in agent_slug:
+        from runtime.task_type_router import TaskTypeRouter
+
+        router = TaskTypeRouter(conn)
+        resolve_explicit_eligibility = getattr(router, "resolve_explicit_eligibility", None)
+        eligibility = (
+            resolve_explicit_eligibility(
+                agent_slug,
+                task_type=route_task_type or None,
+            )
+            if callable(resolve_explicit_eligibility)
+            else None
+        )
+        if eligibility is not None and eligibility.eligibility_status != "eligible":
+            duration_ms = int((time.monotonic() - start) * 1000)
+            task_fragment = f" for task type '{route_task_type}'" if route_task_type else ""
+            rationale = eligibility.rationale or "provider/model rejected by route eligibility policy"
+            complete_job(
+                conn,
+                job_id,
+                status="failed",
+                error_code=eligibility.reason_code or "provider_disabled",
+                duration_ms=duration_ms,
+                stdout_preview=(
+                    f"Route eligibility blocked {agent_slug}{task_fragment}: "
+                    f"{rationale} (decision_ref={eligibility.decision_ref})"
+                )[:2000],
+            )
+            return
+
     prompt, _, _, execution_bundle, execution_context_shard = _resolve_job_prompt_authority(
         conn, job=job, run_row=run_row,
     )
@@ -302,7 +333,7 @@ def execute_job(
             # Resolve reasoning effort from task_type_routing for this agent + task type.
             # Falls back to provider_model_candidates default if no task-type-specific row.
             _reasoning_effort: str | None = None
-            _route_task_type = str(job.get("route_task_type") or "").strip()
+            _route_task_type = route_task_type
             _provider, _, _model = agent_slug.partition("/")
             if _route_task_type and _provider and _model:
                 _rc_rows = conn.execute(

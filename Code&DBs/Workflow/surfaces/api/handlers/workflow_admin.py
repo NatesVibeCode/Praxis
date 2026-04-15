@@ -263,11 +263,12 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
                 },
                 {
                     "command": "workflow tools search <text>",
-                    "description": "Search the tool catalog by intent, noun, or task before guessing a command name.",
+                    "description": "Search the tool catalog by intent, noun, or task before guessing a command name. Add `--exact` when you already know the alias, tool name, or entrypoint.",
                     "examples": [
                         "workflow tools search failure",
                         "workflow tools search roadmap",
                         "workflow tools search architecture",
+                        "workflow tools search workflow query --exact",
                     ],
                 },
                 {
@@ -358,7 +359,7 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
             "Prefer the catalog-backed `workflow` CLI as the default human/operator surface.\n"
             f"There are currently {tool_count} catalog-backed tools. Start with `workflow tools list`, "
             "`workflow tools search <text>`, and `workflow tools describe <tool|alias>` when you need the current "
-            "surface instead of memorizing a static list.\n"
+            "surface instead of memorizing a static list. Use `--exact` when you already know the alias or entrypoint.\n"
             f"For common reads, go straight to `{query_tool.cli_entrypoint}`, `{health_tool.cli_entrypoint}`, "
             f"`{discover_tool.cli_entrypoint}`, `{recall_tool.cli_entrypoint}`, `{bugs_tool.cli_entrypoint}`, "
             "and `workflow architecture scan` when you need exact boundary evidence.\n"

@@ -18,10 +18,12 @@ import importlib.util as _ilu
 
 _rt_dir = Path(__file__).resolve().parent.parent.parent / "runtime"
 
-_hbr_spec = _ilu.spec_from_file_location("runtime.heartbeat_runner", str(_rt_dir / "heartbeat_runner.py"))
-_hbr = _ilu.module_from_spec(_hbr_spec)
-sys.modules.setdefault("runtime.heartbeat_runner", _hbr)
-_hbr_spec.loader.exec_module(_hbr)
+_hbr = sys.modules.get("runtime.heartbeat_runner")
+if _hbr is None:
+    _hbr_spec = _ilu.spec_from_file_location("runtime.heartbeat_runner", str(_rt_dir / "heartbeat_runner.py"))
+    _hbr = _ilu.module_from_spec(_hbr_spec)
+    sys.modules["runtime.heartbeat_runner"] = _hbr
+    _hbr_spec.loader.exec_module(_hbr)
 HeartbeatRunner = _hbr.HeartbeatRunner
 
 _hb = sys.modules["runtime.heartbeat"]

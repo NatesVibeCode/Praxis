@@ -73,6 +73,12 @@ class TestClassification:
         assert c.retryable is False
         assert c.suggested_action == "halt"
 
+    def test_provider_disabled_is_scope_violation_and_non_retryable(self):
+        c = failure_classifier.classify_failure("provider_disabled")
+        assert c.category == OrchestratorFailureCategory.SCOPE_VIOLATION
+        assert c.is_retryable is False
+        assert c.is_transient is False
+
     def test_isolation_breach_is_non_retryable(self, manager: AutoRetryManager):
         c = manager.classify("err", "isolation breach detected in sandbox")
         assert c.category == FailureCategory.NON_RETRYABLE

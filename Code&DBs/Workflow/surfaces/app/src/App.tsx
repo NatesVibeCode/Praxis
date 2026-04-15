@@ -119,13 +119,26 @@ function initialShellPayload(): ShellHistoryPayload {
   return parseShellHistoryPayload(window.history.state) ?? parseShellLocationState(window.location.search);
 }
 
+interface BuildDraftGuardState {
+  dirty: boolean;
+  message: string | null;
+}
+
+interface ShellTransitionOptions {
+  bypassBuildDraftGuard?: boolean;
+}
+
 export function AppShell() {
   const initialPayload = initialShellPayload();
   const [state, setState] = useState<ShellState>(initialPayload.shellState);
   const [chatOpen, setChatOpen] = useState(initialPayload.chatOpen);
   const [commandMenuOpen, setCommandMenuOpen] = useState(false);
   const [creatingSeedId, setCreatingSeedId] = useState<string | null>(null);
+  const [buildDraftGuard, setBuildDraftGuard] = useState<BuildDraftGuardState>({ dirty: false, message: null });
   const commandButtonRef = useRef<HTMLButtonElement | null>(null);
+  const stateRef = useRef(state);
+  const chatOpenRef = useRef(chatOpen);
+  const buildDraftGuardRef = useRef(buildDraftGuard);
 
   const syncHistory = useCallback((nextState: ShellState, nextChatOpen: boolean, historyMode: HistoryMode) => {
     const payload: ShellHistoryPayload = { shellState: nextState, chatOpen: nextChatOpen };
@@ -138,50 +151,119 @@ export function AppShell() {
   }, []);
 
   useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+
+  useEffect(() => {
+    chatOpenRef.current = chatOpen;
+  }, [chatOpen]);
+
+  useEffect(() => {
+    buildDraftGuardRef.current = buildDraftGuard;
+  }, [buildDraftGuard]);
+
+  const commitShellState = useCallback((nextState: ShellState, historyMode: HistoryMode) => {
+    syncHistory(nextState, chatOpenRef.current, historyMode);
+    setState(nextState);
+  }, [syncHistory]);
+
+  const restoreCurrentHistoryEntry = useCallback(() => {
+    const currentState = stateRef.current;
+    const currentChatOpen = chatOpenRef.current;
+    const payload: ShellHistoryPayload = { shellState: currentState, chatOpen: currentChatOpen };
+    const url = buildShellUrl(currentState, currentChatOpen);
+    window.history.pushState(payload, '', url);
+  }, []);
+
+  const shouldBlockBuildDraftExit = useCallback((
+    currentState: ShellState,
+    nextState: ShellState,
+    options?: ShellTransitionOptions,
+  ): boolean => {
+    if (options?.bypassBuildDraftGuard) return false;
+    const draft = buildDraftGuardRef.current;
+    if (!draft.dirty || currentState.activeTabId !== 'build') return false;
+
+    const stayingOnSameBuilder =
+      nextState.activeTabId === 'build'
+      && nextState.buildWorkflowId === currentState.buildWorkflowId
+      && nextState.buildIntent === currentState.buildIntent
+      && nextState.builderSeed === currentState.builderSeed
+      && nextState.buildView === currentState.buildView;
+
+    if (stayingOnSameBuilder) return false;
+
+    return !window.confirm(
+      draft.message || 'This draft workflow is not saved yet. Leave anyway?',
+    );
+  }, []);
+
+  const handleBuildDraftStateChange = useCallback((draft: { dirty: boolean; message?: string | null }) => {
+    const nextMessage = draft.message ?? null;
+    setBuildDraftGuard((current) => (
+      current.dirty === draft.dirty && current.message === nextMessage
+        ? current
+        : { dirty: draft.dirty, message: nextMessage }
+    ));
+  }, []);
+
+  useEffect(() => {
     syncHistory(state, chatOpen, 'replace');
   }, [chatOpen, state, syncHistory]);
 
   useEffect(() => {
     const onPopState = (event: PopStateEvent) => {
       const payload = parseShellHistoryPayload(event.state) ?? parseShellLocationState(window.location.search);
+      const currentState = stateRef.current;
+      if (shouldBlockBuildDraftExit(currentState, payload.shellState)) {
+        restoreCurrentHistoryEntry();
+        return;
+      }
       setState(payload.shellState);
       setChatOpen(payload.chatOpen);
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
-  }, []);
+  }, [restoreCurrentHistoryEntry, shouldBlockBuildDraftExit]);
 
-  const activateTab = useCallback((tabId: string, historyMode: HistoryMode = 'push') => {
-    setState((current) => {
-      const nextState = { ...current, activeTabId: tabId };
-      // Default to moon view when switching to build tab
-      if (tabId === 'build' && !current.buildWorkflowId) {
-        nextState.buildView = 'moon';
-      }
-      syncHistory(nextState, chatOpen, historyMode);
-      return nextState;
-    });
-  }, [chatOpen, syncHistory]);
+  useEffect(() => {
+    if (!(state.activeTabId === 'build' && buildDraftGuard.dirty)) return;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [buildDraftGuard.dirty, state.activeTabId]);
+
+  const activateTab = useCallback((tabId: string, historyMode: HistoryMode = 'push', options?: ShellTransitionOptions) => {
+    const current = stateRef.current;
+    const nextState = { ...current, activeTabId: tabId };
+    if (tabId === 'build' && !current.buildWorkflowId) {
+      nextState.buildView = 'moon';
+    }
+    if (shouldBlockBuildDraftExit(current, nextState, options)) return;
+    commitShellState(nextState, historyMode);
+  }, [commitShellState, shouldBlockBuildDraftExit]);
 
   const openBuild = useCallback((opts?: {
     workflowId?: string | null;
     intent?: string | null;
     seed?: unknown;
     view?: BuildView;
-  }, historyMode: HistoryMode = 'push') => {
-    setState((current) => {
-      const nextState: ShellState = {
-        ...current,
-        activeTabId: 'build',
-        buildWorkflowId: opts?.workflowId ?? null,
-        buildIntent: opts?.intent ?? null,
-        builderSeed: opts?.seed ?? null,
-        buildView: opts?.view ?? current.buildView,
-      };
-      syncHistory(nextState, chatOpen, historyMode);
-      return nextState;
-    });
-  }, [chatOpen, syncHistory]);
+  }, historyMode: HistoryMode = 'push', options?: ShellTransitionOptions) => {
+    const current = stateRef.current;
+    const nextState: ShellState = {
+      ...current,
+      activeTabId: 'build',
+      buildWorkflowId: opts?.workflowId ?? null,
+      buildIntent: opts?.intent ?? null,
+      builderSeed: opts?.seed ?? null,
+      buildView: opts?.view ?? current.buildView,
+    };
+    if (shouldBlockBuildDraftExit(current, nextState, options)) return;
+    commitShellState(nextState, historyMode);
+  }, [commitShellState, shouldBlockBuildDraftExit]);
 
   const openEditModel = useCallback((workflowId: string | null, historyMode: HistoryMode = 'push') => {
     openBuild({ workflowId, intent: null, seed: null, view: 'moon' }, historyMode);
@@ -195,16 +277,15 @@ export function AppShell() {
       closable: true,
       runId,
     };
-    setState((current) => {
-      const nextState: ShellState = {
-        ...current,
-        activeTabId: nextTab.id,
-        dynamicTabs: upsertDynamicTab(current.dynamicTabs, nextTab),
-      };
-      syncHistory(nextState, chatOpen, historyMode);
-      return nextState;
-    });
-  }, [chatOpen, syncHistory]);
+    const current = stateRef.current;
+    const nextState: ShellState = {
+      ...current,
+      activeTabId: nextTab.id,
+      dynamicTabs: upsertDynamicTab(current.dynamicTabs, nextTab),
+    };
+    if (shouldBlockBuildDraftExit(current, nextState)) return;
+    commitShellState(nextState, historyMode);
+  }, [commitShellState, shouldBlockBuildDraftExit]);
 
   const openManifest = useCallback((manifestId: string, manifestTabId?: string | null, historyMode: HistoryMode = 'push') => {
     const normalizedTabId = manifestTabId || 'main';
@@ -216,16 +297,15 @@ export function AppShell() {
       manifestId,
       manifestTabId: normalizedTabId,
     };
-    setState((current) => {
-      const nextState: ShellState = {
-        ...current,
-        activeTabId: nextTab.id,
-        dynamicTabs: upsertDynamicTab(current.dynamicTabs, nextTab),
-      };
-      syncHistory(nextState, chatOpen, historyMode);
-      return nextState;
-    });
-  }, [chatOpen, syncHistory]);
+    const current = stateRef.current;
+    const nextState: ShellState = {
+      ...current,
+      activeTabId: nextTab.id,
+      dynamicTabs: upsertDynamicTab(current.dynamicTabs, nextTab),
+    };
+    if (shouldBlockBuildDraftExit(current, nextState)) return;
+    commitShellState(nextState, historyMode);
+  }, [commitShellState, shouldBlockBuildDraftExit]);
 
   const openManifestEditor = useCallback((manifestId: string, historyMode: HistoryMode = 'push') => {
     const nextTab: DynamicTab = {
@@ -235,29 +315,27 @@ export function AppShell() {
       closable: true,
       manifestId,
     };
-    setState((current) => {
-      const nextState: ShellState = {
-        ...current,
-        activeTabId: nextTab.id,
-        dynamicTabs: upsertDynamicTab(current.dynamicTabs, nextTab),
-      };
-      syncHistory(nextState, chatOpen, historyMode);
-      return nextState;
-    });
-  }, [chatOpen, syncHistory]);
+    const current = stateRef.current;
+    const nextState: ShellState = {
+      ...current,
+      activeTabId: nextTab.id,
+      dynamicTabs: upsertDynamicTab(current.dynamicTabs, nextTab),
+    };
+    if (shouldBlockBuildDraftExit(current, nextState)) return;
+    commitShellState(nextState, historyMode);
+  }, [commitShellState, shouldBlockBuildDraftExit]);
 
   const closeTab = useCallback((tabId: string, historyMode: HistoryMode = 'push') => {
-    setState((current) => {
-      const resolved = closeDynamicTab(current.dynamicTabs, current.activeTabId, tabId);
-      const nextState: ShellState = {
-        ...current,
-        dynamicTabs: resolved.dynamicTabs,
-        activeTabId: resolved.activeTabId,
-      };
-      syncHistory(nextState, chatOpen, historyMode);
-      return nextState;
-    });
-  }, [chatOpen, syncHistory]);
+    const current = stateRef.current;
+    const resolved = closeDynamicTab(current.dynamicTabs, current.activeTabId, tabId);
+    const nextState: ShellState = {
+      ...current,
+      dynamicTabs: resolved.dynamicTabs,
+      activeTabId: resolved.activeTabId,
+    };
+    if (shouldBlockBuildDraftExit(current, nextState)) return;
+    commitShellState(nextState, historyMode);
+  }, [commitShellState, shouldBlockBuildDraftExit]);
 
   useEffect(() => {
     const onOpenTab = (event: Event) => {
@@ -323,12 +401,11 @@ export function AppShell() {
           setChatOpen(false);
           return;
         }
-        activateTab('dashboard');
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [activateTab, chatOpen, commandMenuOpen, openBuild]);
+  }, [chatOpen, commandMenuOpen, openBuild]);
 
   const activeDynamicTab = useMemo(
     () => state.dynamicTabs.find((tab) => tab.id === state.activeTabId) || null,
@@ -424,8 +501,13 @@ export function AppShell() {
         <MoonBuildPage
           workflowId={state.buildWorkflowId}
           onBack={() => activateTab('dashboard')}
-          onWorkflowCreated={(wfId) => openBuild({ workflowId: wfId, intent: null, seed: null, view: 'moon' })}
+          onWorkflowCreated={(wfId) => openBuild(
+            { workflowId: wfId, intent: null, seed: null, view: 'moon' },
+            'push',
+            { bypassBuildDraftGuard: true },
+          )}
           onViewRun={(runId) => openRunDetail(runId)}
+          onDraftStateChange={handleBuildDraftStateChange}
           initialMode={state.buildIntent === '__compose__' ? 'compose' : undefined}
         />
       );

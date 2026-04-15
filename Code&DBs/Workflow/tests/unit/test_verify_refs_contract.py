@@ -16,6 +16,7 @@ from runtime.operating_model_planner import (
     current_compiled_spec,
     plan_definition,
 )
+from runtime.execution.request_building import _workflow_request_payload
 from runtime.workflow_graph_compiler import compile_graph_workflow_request, spec_uses_graph_runtime
 from runtime.workflow_spec import validate_workflow_spec
 
@@ -803,6 +804,135 @@ def test_compile_graph_workflow_request_honors_conditional_dependency_edges() ->
     assert request.edges[0].to_node_id == "then_path"
     assert request.edges[0].edge_type == "conditional"
     assert dict(request.edges[0].release_condition) == condition
+
+
+def test_spec_uses_graph_runtime_for_promptless_deterministic_jobs() -> None:
+    spec = {
+        "name": "Deterministic Slice",
+        "workflow_id": "workflow.deterministic_slice",
+        "phase": "execute",
+        "jobs": [
+            {
+                "label": "prepare",
+                "agent": "openai/gpt-5.4-mini",
+                "expected_outputs": {"result": "prepared"},
+            },
+            {
+                "label": "admit",
+                "agent": "openai/gpt-5.4-mini",
+                "depends_on": ["prepare"],
+                "expected_outputs": {"result": "admitted"},
+            },
+        ],
+    }
+
+    assert spec_uses_graph_runtime(spec) is True
+
+    request = compile_graph_workflow_request(spec)
+
+    assert [node.adapter_type for node in request.nodes] == [
+        "deterministic_task",
+        "deterministic_task",
+    ]
+    assert [(edge.from_node_id, edge.to_node_id) for edge in request.edges] == [
+        ("prepare", "admit"),
+    ]
+
+
+def test_compile_graph_workflow_request_allows_deterministic_branch_jobs() -> None:
+    spec = {
+        "name": "Control Branch Slice",
+        "workflow_id": "workflow.control_branch_slice",
+        "phase": "execute",
+        "jobs": [
+            {
+                "label": "seed",
+                "adapter_type": "deterministic_task",
+                "expected_outputs": {"go": True},
+            },
+            {
+                "label": "route_if",
+                "adapter_type": "control_operator",
+                "depends_on": ["seed"],
+                "operator": {
+                    "kind": "if",
+                    "predicate": {"field": "go", "op": "equals", "value": True},
+                },
+                "branches": {
+                    "then": [
+                        {
+                            "label": "then_path",
+                            "adapter_type": "deterministic_task",
+                            "expected_outputs": {"selected": "then"},
+                        }
+                    ],
+                    "else": [
+                        {
+                            "label": "else_path",
+                            "adapter_type": "deterministic_task",
+                            "expected_outputs": {"selected": "else"},
+                        }
+                    ],
+                },
+            },
+        ],
+    }
+
+    request = compile_graph_workflow_request(spec)
+
+    node_ids = [node.node_id for node in request.nodes]
+    assert "route_if__then__then_path" in node_ids
+    assert "route_if__else__else_path" in node_ids
+
+
+def test_spec_uses_graph_runtime_for_api_jobs_without_control_operators() -> None:
+    spec = {
+        "name": "API Slice",
+        "workflow_id": "workflow.api_slice",
+        "phase": "execute",
+        "jobs": [
+            {
+                "label": "fetch",
+                "adapter_type": "api_task",
+                "method": "GET",
+                "url": "https://example.test/status",
+            },
+        ],
+    }
+
+    assert spec_uses_graph_runtime(spec) is True
+
+    request = compile_graph_workflow_request(spec)
+
+    assert len(request.nodes) == 1
+    assert request.nodes[0].adapter_type == "api_task"
+
+
+def test_workflow_request_payload_normalizes_frozen_graph_contracts_for_json() -> None:
+    spec = {
+        "name": "Deterministic Slice",
+        "workflow_id": "workflow.deterministic_slice",
+        "phase": "execute",
+        "jobs": [
+            {
+                "label": "prepare",
+                "inputs": {"task_name": "prepare", "input_payload": {"step": 0}},
+                "expected_outputs": {"result": "prepared"},
+            },
+            {
+                "label": "admit",
+                "depends_on": ["prepare"],
+                "inputs": {"task_name": "admit", "input_payload": {"step": 1}},
+                "expected_outputs": {"result": "admitted"},
+            },
+        ],
+    }
+
+    request = compile_graph_workflow_request(spec)
+    payload = _workflow_request_payload(request)
+
+    assert json.dumps(payload)
+    assert payload["nodes"][0]["inputs"]["input_payload"]["step"] == 0
 
 
 def test_compile_graph_workflow_request_infers_semantic_task_types_from_agent_routes() -> None:

@@ -1,0 +1,14 @@
+{
+  "name": "Anthropic Workflow Smoke",
+  "workflow_id": "anthropic_smoke",
+  "phase": "SMOKE",
+  "outcome_goal": "Prove the real llm_task workflow lane can execute through the managed wrapper with the locally healthy Anthropic transport.",
+  "jobs": [
+    {
+      "label": "anthropic_echo",
+      "agent": "anthropic/claude-sonnet-4-6",
+      "prompt": "Reply with exactly: ANTHROPIC_WORKFLOW_SMOKE_OK",
+      "timeout": 120
+    }
+  ]
+}

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -290,6 +291,63 @@ def test_workspace_snapshot_ref_is_content_addressed(tmp_path) -> None:
     changed_ref = sandbox_runtime._workspace_snapshot_ref(str(second_root))
 
     assert changed_ref != first_ref
+
+
+def test_cleanup_stale_ephemeral_sandbox_roots_removes_only_old_sandbox_dirs(tmp_path) -> None:
+    root = tmp_path / "temp"
+    root.mkdir()
+    old_dir = root / "praxis-docker-sandbox-old"
+    fresh_dir = root / "praxis-cloudflare-sandbox-fresh"
+    unrelated_dir = root / "not-a-sandbox"
+    (old_dir / "workspace").mkdir(parents=True)
+    (fresh_dir / "workspace").mkdir(parents=True)
+    unrelated_dir.mkdir()
+    (old_dir / "workspace" / "stale.txt").write_text("stale", encoding="utf-8")
+    (fresh_dir / "workspace" / "fresh.txt").write_text("fresh", encoding="utf-8")
+    now = 100_000.0
+    os.utime(old_dir, (now - 7_200, now - 7_200))
+    os.utime(fresh_dir, (now - 60, now - 60))
+
+    receipt = sandbox_runtime.cleanup_stale_ephemeral_sandbox_roots(
+        root_dir=str(root),
+        max_age_seconds=3_600,
+        now=now,
+    )
+
+    assert receipt.removed_paths == (str(old_dir.resolve()),)
+    assert str(fresh_dir.resolve()) in receipt.skipped_paths
+    assert str(unrelated_dir.resolve()) not in receipt.scanned_paths
+    assert not old_dir.exists()
+    assert fresh_dir.exists()
+    assert unrelated_dir.exists()
+
+
+def test_cleanup_stale_ephemeral_sandbox_roots_reports_delete_failures(monkeypatch, tmp_path) -> None:
+    root = tmp_path / "temp"
+    root.mkdir()
+    stubborn_dir = root / "praxis-docker-sandbox-stubborn"
+    (stubborn_dir / "workspace").mkdir(parents=True)
+    now = 100_000.0
+    os.utime(stubborn_dir, (now - 7_200, now - 7_200))
+    real_rmtree = sandbox_runtime.shutil.rmtree
+
+    def _fake_rmtree(path, *args, **kwargs):
+        target = Path(path)
+        if target == stubborn_dir:
+            raise OSError("boom")
+        return real_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(sandbox_runtime.shutil, "rmtree", _fake_rmtree)
+
+    receipt = sandbox_runtime.cleanup_stale_ephemeral_sandbox_roots(
+        root_dir=str(root),
+        max_age_seconds=3_600,
+        now=now,
+    )
+
+    assert receipt.removed_paths == ()
+    assert receipt.failed_paths == ((str(stubborn_dir.resolve()), "boom"),)
+    assert stubborn_dir.exists()
 
 
 def test_derive_sandbox_identity_is_deterministic_for_matching_adhoc_requests(tmp_path) -> None:
@@ -729,22 +787,25 @@ def test_docker_local_requires_available_image(monkeypatch, tmp_path) -> None:
         )()
     )
 
-    with pytest.raises(RuntimeError, match="PRAXIS_DOCKER_IMAGE"):
-        provider.exec(
-            session,
-            type(
-                "Request",
-                (),
-                {
-                    "command": "echo hi",
-                    "stdin_text": "",
-                    "env": {"PATH": "/usr/bin:/bin"},
-                    "timeout_seconds": 30,
-                    "execution_transport": "cli",
-                    "image": None,
-                },
-            )(),
-        )
+    try:
+        with pytest.raises(RuntimeError, match="PRAXIS_DOCKER_IMAGE"):
+            provider.exec(
+                session,
+                type(
+                    "Request",
+                    (),
+                    {
+                        "command": "echo hi",
+                        "stdin_text": "",
+                        "env": {"PATH": "/usr/bin:/bin"},
+                        "timeout_seconds": 30,
+                        "execution_transport": "cli",
+                        "image": None,
+                    },
+                )(),
+            )
+    finally:
+        provider.destroy_session(session, "failed")
 
 
 def test_docker_local_reads_image_from_env_per_exec(monkeypatch, tmp_path) -> None:
@@ -784,24 +845,27 @@ def test_docker_local_reads_image_from_env_per_exec(monkeypatch, tmp_path) -> No
         )()
     )
 
-    result = provider.exec(
-        session,
-        type(
-            "Request",
-            (),
-            {
-                "command": "echo hi",
-                "stdin_text": "",
-                "env": {"PATH": "/usr/bin:/bin"},
-                "timeout_seconds": 30,
-                "execution_transport": "cli",
-                "image": None,
-            },
-        )(),
-    )
+    try:
+        result = provider.exec(
+            session,
+            type(
+                "Request",
+                (),
+                {
+                    "command": "echo hi",
+                    "stdin_text": "",
+                    "env": {"PATH": "/usr/bin:/bin"},
+                    "timeout_seconds": 30,
+                    "execution_transport": "cli",
+                    "image": None,
+                },
+            )(),
+        )
 
-    assert seen["image"] == "dag-worker:test"
-    assert result.execution_mode == "docker_local"
+        assert seen["image"] == "dag-worker:test"
+        assert result.execution_mode == "docker_local"
+    finally:
+        provider.destroy_session(session, "completed")
 
 
 def test_docker_local_exec_mounts_only_provider_auth_files(monkeypatch, tmp_path) -> None:
@@ -849,27 +913,30 @@ def test_docker_local_exec_mounts_only_provider_auth_files(monkeypatch, tmp_path
         )()
     )
 
-    provider.exec(
-        session,
-        type(
-            "Request",
-            (),
-            {
-                "command": "echo hi",
-                "stdin_text": "",
-                "env": {"PATH": "/usr/bin:/bin"},
-                "timeout_seconds": 30,
-                "execution_transport": "cli",
-                "image": None,
-            },
-        )(),
-    )
+    try:
+        provider.exec(
+            session,
+            type(
+                "Request",
+                (),
+                {
+                    "command": "echo hi",
+                    "stdin_text": "",
+                    "env": {"PATH": "/usr/bin:/bin"},
+                    "timeout_seconds": 30,
+                    "execution_transport": "cli",
+                    "image": None,
+                },
+            )(),
+        )
 
-    run_cmd = next(cmd for cmd in docker_cmds if len(cmd) >= 2 and cmd[:2] == ["docker", "run"])
-    joined_cmd = " ".join(run_cmd)
-    assert "/Users/nate/.codex/auth.json:/root/.codex/auth.json:ro" in joined_cmd
-    assert "/Users/nate/.claude.json:/root/.claude.json:ro" not in joined_cmd
-    assert "/Users/nate/.gemini/oauth_creds.json:/root/.gemini/oauth_creds.json:ro" not in joined_cmd
+        run_cmd = next(cmd for cmd in docker_cmds if len(cmd) >= 2 and cmd[:2] == ["docker", "run"])
+        joined_cmd = " ".join(run_cmd)
+        assert "/Users/nate/.codex/auth.json:/root/.codex/auth.json:ro" in joined_cmd
+        assert "/Users/nate/.claude.json:/root/.claude.json:ro" not in joined_cmd
+        assert "/Users/nate/.gemini/oauth_creds.json:/root/.gemini/oauth_creds.json:ro" not in joined_cmd
+    finally:
+        provider.destroy_session(session, "completed")
 
 
 def test_docker_local_autobuilds_default_image_when_missing(monkeypatch, tmp_path) -> None:
@@ -913,21 +980,24 @@ def test_docker_local_autobuilds_default_image_when_missing(monkeypatch, tmp_pat
         )()
     )
 
-    result = provider.exec(
-        session,
-        type(
-            "Request",
-            (),
-            {
-                "command": "echo hi",
-                "stdin_text": "",
-                "env": {"PATH": "/usr/bin:/bin"},
-                "timeout_seconds": 30,
-                "execution_transport": "cli",
-                "image": None,
-            },
-        )(),
-    )
+    try:
+        result = provider.exec(
+            session,
+            type(
+                "Request",
+                (),
+                {
+                    "command": "echo hi",
+                    "stdin_text": "",
+                    "env": {"PATH": "/usr/bin:/bin"},
+                    "timeout_seconds": 30,
+                    "execution_transport": "cli",
+                    "image": None,
+                },
+            )(),
+        )
 
-    assert seen["image"] == "praxis-worker:latest"
-    assert result.execution_mode == "docker_local"
+        assert seen["image"] == "praxis-worker:latest"
+        assert result.execution_mode == "docker_local"
+    finally:
+        provider.destroy_session(session, "completed")

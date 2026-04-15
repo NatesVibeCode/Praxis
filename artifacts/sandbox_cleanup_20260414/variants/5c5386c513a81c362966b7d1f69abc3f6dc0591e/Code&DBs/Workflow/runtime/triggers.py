@@ -1,0 +1,755 @@
+"""Trigger evaluator.
+
+Processes system_events, matches against workflow_triggers, and fires workflows.
+Notification wakes the consumer; checkpoints make the replay deterministic.
+Pure Postgres — no LLM, no HTTP.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+MAX_EVENTS_PER_CYCLE = 50
+MAX_TRIGGER_DEPTH = 3
+_TRIGGER_EVALUATOR_SUBSCRIPTION_ID = "trigger_evaluator"
+_TRIGGER_EVALUATOR_CHECKPOINT_RUN_ID = "trigger_evaluator"
+_TRIGGER_EVALUATOR_SUBSCRIPTION_NAME = "Workflow Trigger Evaluator"
+_TRIGGER_EVALUATOR_CONSUMER_KIND = "system"
+_TRIGGER_EVALUATOR_ENVELOPE_KIND = "system_event"
+_TRIGGER_EVALUATOR_CURSOR_SCOPE = "global"
+
+
+def evaluate_triggers(conn: Any) -> int:
+    """Run workflow triggers and durable event subscriptions from checkpoints."""
+    fired = _evaluate_workflow_triggers(conn)
+    fired += evaluate_event_subscriptions(conn)
+    return fired
+
+
+def _evaluate_workflow_triggers(conn: Any) -> int:
+    """Process workflow_triggers from durable subscription checkpoints."""
+    return _evaluate_workflow_triggers_with_checkpoints(conn)
+
+
+def _evaluate_workflow_triggers_with_checkpoints(conn: Any) -> int:
+    """Process workflow_triggers from durable subscription checkpoints."""
+    _ensure_trigger_evaluator_subscription(conn)
+    checkpoint_rows = conn.execute(
+        """SELECT last_evidence_seq
+           FROM public.subscription_checkpoints
+           WHERE subscription_id = $1
+             AND run_id = $2
+           ORDER BY checkpointed_at DESC
+           LIMIT 1""",
+        _TRIGGER_EVALUATOR_SUBSCRIPTION_ID,
+        _TRIGGER_EVALUATOR_CHECKPOINT_RUN_ID,
+    )
+    last_checkpoint = checkpoint_rows[0]["last_evidence_seq"] if checkpoint_rows else 0
+    if last_checkpoint is None:
+        last_checkpoint = 0
+
+    events = _load_workflow_events_from_checkpoint(conn, last_checkpoint)
+    if not events:
+        return 0
+
+    fired = 0
+
+    for event in events:
+        fired += _evaluate_workflow_triggers_for_event(conn, event=event)
+
+    _upsert_workflow_trigger_checkpoint(
+        conn,
+        last_checkpoint_event_id=events[-1]["id"],
+    )
+
+    return fired
+
+
+def _load_workflow_events_from_checkpoint(conn: Any, last_checkpoint: int) -> list[dict[str, Any]]:
+    args: list[Any] = [last_checkpoint, MAX_EVENTS_PER_CYCLE]
+    return conn.execute(
+        """SELECT id, event_type, source_id, source_type, payload, created_at
+           FROM public.system_events
+           WHERE id > $1
+           ORDER BY id ASC
+           LIMIT $2""",
+        *args,
+    )
+
+
+def _ensure_trigger_evaluator_subscription(conn: Any) -> None:
+    """Persist the trigger evaluator as a first-class durable subscriber."""
+    conn.execute(
+        """INSERT INTO public.event_subscriptions (
+               subscription_id,
+               subscription_name,
+               consumer_kind,
+               envelope_kind,
+               workflow_id,
+               run_id,
+               cursor_scope,
+               status,
+               delivery_policy,
+               filter_policy,
+               created_at
+           ) VALUES (
+               $1, $2, $3, $4, NULL, NULL, $5, 'active', $6::jsonb, $7::jsonb, now()
+           )
+           ON CONFLICT (subscription_id) DO UPDATE SET
+               subscription_name = EXCLUDED.subscription_name,
+               consumer_kind = EXCLUDED.consumer_kind,
+               envelope_kind = EXCLUDED.envelope_kind,
+               workflow_id = EXCLUDED.workflow_id,
+               run_id = EXCLUDED.run_id,
+               cursor_scope = EXCLUDED.cursor_scope,
+               status = EXCLUDED.status,
+               delivery_policy = EXCLUDED.delivery_policy,
+               filter_policy = EXCLUDED.filter_policy""",
+        _TRIGGER_EVALUATOR_SUBSCRIPTION_ID,
+        _TRIGGER_EVALUATOR_SUBSCRIPTION_NAME,
+        _TRIGGER_EVALUATOR_CONSUMER_KIND,
+        _TRIGGER_EVALUATOR_ENVELOPE_KIND,
+        _TRIGGER_EVALUATOR_CURSOR_SCOPE,
+        json.dumps({}, sort_keys=True),
+        json.dumps({}, sort_keys=True),
+    )
+
+
+def _upsert_workflow_trigger_checkpoint(
+    conn: Any,
+    *,
+    last_checkpoint_event_id: int,
+) -> None:
+    _upsert_subscription_checkpoint(
+        conn,
+        subscription_id=_TRIGGER_EVALUATOR_SUBSCRIPTION_ID,
+        checkpoint_run_id=_TRIGGER_EVALUATOR_CHECKPOINT_RUN_ID,
+        last_processed_id=last_checkpoint_event_id,
+        metadata={
+            "last_event_id": last_checkpoint_event_id,
+            "processor": "runtime.triggers._evaluate_workflow_triggers",
+        },
+    )
+
+
+def _evaluate_workflow_triggers_for_event(
+    conn: Any,
+    *,
+    event: dict[str, Any],
+) -> int:
+    event_type = event["event_type"]
+    payload = event.get("payload") or {}
+
+    # Parse payload if string
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except (json.JSONDecodeError, TypeError):
+            payload = {}
+
+    # 2. Find matching enabled triggers
+    trigger_event_types = _workflow_trigger_event_types(event_type)
+    if len(trigger_event_types) == 1:
+        triggers = conn.execute(
+            """SELECT t.id, t.workflow_id, t.filter,
+                      t.trigger_type, t.integration_id, t.integration_action, t.integration_args,
+                      w.definition, w.compiled_spec, w.name as workflow_name
+               FROM public.workflow_triggers t
+               LEFT JOIN public.workflows w ON w.id = t.workflow_id
+               WHERE t.event_type = $1 AND t.enabled = TRUE""",
+            trigger_event_types[0],
+        )
+    else:
+        triggers = conn.execute(
+            """SELECT t.id, t.workflow_id, t.filter,
+                      t.trigger_type, t.integration_id, t.integration_action, t.integration_args,
+                      w.definition, w.compiled_spec, w.name as workflow_name
+               FROM public.workflow_triggers t
+               LEFT JOIN public.workflows w ON w.id = t.workflow_id
+               WHERE t.event_type = ANY($1::text[]) AND t.enabled = TRUE""",
+            list(trigger_event_types),
+        )
+
+    fired = 0
+    for trigger in (triggers or []):
+        trigger_id = trigger["id"]
+        trigger_filter = trigger.get("filter") or {}
+        trigger_type = str(trigger.get("trigger_type") or "workflow").strip().lower()
+
+        # Parse filter if string
+        if isinstance(trigger_filter, str):
+            try:
+                trigger_filter = json.loads(trigger_filter)
+            except (json.JSONDecodeError, TypeError):
+                trigger_filter = {}
+
+        # Check filter match (flat key-value equality)
+        if not _filter_matches(trigger_filter, payload):
+            continue
+
+        # Check trigger depth
+        try:
+            source_depth = int(payload.get("trigger_depth", 0))
+        except (ValueError, TypeError):
+            source_depth = 0
+        if source_depth >= MAX_TRIGGER_DEPTH:
+            logger.warning(
+                "trigger.depth_exceeded: trigger_id=%s depth=%d max=%d -- suppressing execution",
+                trigger_id,
+                source_depth,
+                MAX_TRIGGER_DEPTH,
+            )
+            _emit_depth_exceeded_event(
+                conn,
+                workflow_id=trigger.get("workflow_id") or "",
+                trigger_id=trigger_id,
+                event={
+                    "id": event.get("id"),
+                    "payload": {
+                        "trigger_id": trigger_id,
+                        "trigger_depth": source_depth,
+                    },
+                },
+            )
+            continue
+
+        try:
+            if trigger_type == "integration":
+                did_fire = _fire_integration_trigger(conn, trigger=trigger, event=event, payload=payload)
+            else:
+                did_fire = _fire_workflow_trigger(
+                    conn,
+                    trigger=trigger,
+                    event=event,
+                    event_type=event_type,
+                    payload=payload,
+                )
+        except Exception:
+            logger.exception("trigger.fire_failed: trigger_id=%s type=%s", trigger_id, trigger_type)
+            continue
+
+        if did_fire:
+            conn.execute(
+                "UPDATE public.workflow_triggers SET last_fired_at = now(), fire_count = fire_count + 1 WHERE id = $1",
+                trigger_id,
+            )
+            fired += 1
+
+    return fired
+
+
+def _fire_workflow_trigger(
+    conn: Any,
+    *,
+    trigger: dict[str, Any],
+    event: dict[str, Any],
+    event_type: str,
+    payload: dict[str, Any],
+) -> bool:
+    """Fire a workflow from a matched trigger."""
+    trigger_id = trigger["id"]
+    workflow_id = trigger["workflow_id"]
+    workflow_name = trigger.get("workflow_name", workflow_id)
+
+    from runtime.operating_model_planner import current_compiled_spec
+
+    compiled_spec = current_compiled_spec(trigger.get("definition"), trigger.get("compiled_spec"))
+    if not compiled_spec:
+        logger.warning(
+            "Trigger %s matched but workflow %s has no current plan authority; skipping",
+            trigger_id,
+            workflow_id,
+        )
+        return False
+
+    source_depth = payload.get("trigger_depth", 0)
+    parent_run_id = payload.get("run_id") or event.get("source_id")
+
+    from runtime.workflow.unified import submit_workflow_inline
+
+    spec_copy = json.loads(json.dumps(compiled_spec))
+    if spec_copy.get("jobs"):
+        event_context = (
+            f"\n\n## Trigger Context\n"
+            f"Event: {event_type}\n"
+            f"Source: {event.get('source_type', 'unknown')}/{event.get('source_id', 'unknown')}\n"
+            f"Payload: {json.dumps(payload, default=str)[:500]}"
+        )
+        spec_copy["jobs"][0]["prompt"] = spec_copy["jobs"][0].get("prompt", "") + event_context
+
+    result = submit_workflow_inline(
+        conn,
+        spec_copy,
+        parent_run_id=parent_run_id,
+        trigger_depth=source_depth + 1,
+    )
+
+    logger.info(
+        "Trigger %s fired workflow '%s' → run %s (depth=%d)",
+        trigger_id,
+        workflow_name,
+        result["run_id"],
+        source_depth + 1,
+    )
+    return True
+
+
+def _fire_integration_trigger(
+    conn: Any,
+    *,
+    trigger: dict[str, Any],
+    event: dict[str, Any],
+    payload: dict[str, Any],
+) -> bool:
+    """Fire an integration action from a matched trigger."""
+    trigger_id = trigger["id"]
+    integration_id = str(trigger.get("integration_id") or "").strip()
+    integration_action = str(trigger.get("integration_action") or "").strip()
+    integration_args = trigger.get("integration_args") or {}
+
+    if not integration_id or not integration_action:
+        logger.warning(
+            "trigger.integration_missing_target: trigger_id=%s",
+            trigger_id,
+        )
+        return False
+
+    if isinstance(integration_args, str):
+        try:
+            integration_args = json.loads(integration_args)
+        except (json.JSONDecodeError, TypeError):
+            integration_args = {}
+
+    merged_args = {**integration_args, "_trigger_event": payload}
+
+    from runtime.integrations import execute_integration
+
+    result = execute_integration(integration_id, integration_action, merged_args, conn)
+
+    logger.info(
+        "Trigger %s fired integration %s/%s → %s",
+        trigger_id,
+        integration_id,
+        integration_action,
+        result.get("status", "unknown"),
+    )
+    return True
+
+
+def _workflow_trigger_event_types(event_type: str) -> tuple[str, ...]:
+    normalized = (event_type or "").strip()
+    if normalized == "schedule.fired":
+        # `schedule` remains the compiler-facing alias; `schedule.fired` is the
+        # runtime source. Treat them as one trigger surface so both paths work.
+        return ("schedule.fired", "schedule")
+    if normalized == "schedule":
+        return ("schedule", "schedule.fired")
+    return (normalized,)
+
+
+def evaluate_event_subscriptions(conn: Any) -> int:
+    """Process durable event subscriptions against system_events."""
+    subscriptions = conn.execute(
+        """SELECT s.subscription_id,
+                  s.subscription_name,
+                  s.workflow_id,
+                  s.run_id,
+                  s.consumer_kind,
+                  s.cursor_scope,
+                  s.filter_policy,
+                  w.definition,
+                  w.compiled_spec,
+                  w.name AS workflow_name
+           FROM public.event_subscriptions s
+           LEFT JOIN public.workflows w ON w.id = s.workflow_id
+           WHERE s.status = 'active'
+             AND s.workflow_id IS NOT NULL
+             AND NOT (
+                 COALESCE(s.consumer_kind, '') = 'worker'
+                 AND COALESCE(s.cursor_scope, '') = 'run'
+             )
+           ORDER BY s.created_at ASC
+           LIMIT $1""",
+        MAX_EVENTS_PER_CYCLE,
+    )
+
+    fired = 0
+
+    for subscription in subscriptions or []:
+        subscription_id = subscription["subscription_id"]
+        checkpoint_run_id = _subscription_checkpoint_run_id(subscription)
+        fired += _process_event_subscription(
+            conn,
+            subscription=subscription,
+            checkpoint_run_id=checkpoint_run_id,
+        )
+
+    return fired
+
+
+def _process_event_subscription(
+    conn: Any,
+    *,
+    subscription: dict[str, Any],
+    checkpoint_run_id: str,
+) -> int:
+    subscription_id = subscription["subscription_id"]
+    workflow_id = subscription.get("workflow_id")
+    workflow_name = subscription.get("workflow_name") or workflow_id or subscription_id
+    from runtime.operating_model_planner import current_compiled_spec
+
+    compiled_spec = current_compiled_spec(subscription.get("definition"), subscription.get("compiled_spec"))
+    filter_policy = _json_mapping(subscription.get("filter_policy"))
+
+    if not workflow_id:
+        logger.warning(
+            "Event subscription %s has no workflow_id; skipping",
+            subscription_id,
+        )
+        return 0
+    if not compiled_spec:
+        has_authority_snapshot = bool(subscription.get("definition")) or bool(subscription.get("compiled_spec"))
+        logger.warning(
+            "Event subscription %s %s for workflow %s; skipping",
+            subscription_id,
+            "has stale plan authority"
+            if has_authority_snapshot
+            else "has no stored plan authority",
+            workflow_id,
+        )
+        return 0
+
+    checkpoint_rows = conn.execute(
+        """SELECT checkpoint_id,
+                  last_evidence_seq
+           FROM public.subscription_checkpoints
+           WHERE subscription_id = $1
+             AND run_id = $2
+           ORDER BY checkpointed_at DESC
+           LIMIT 1""",
+        subscription_id,
+        checkpoint_run_id,
+    )
+    checkpoint = checkpoint_rows[0] if checkpoint_rows else None
+    last_processed_id = checkpoint.get("last_evidence_seq") if checkpoint else None
+
+    events = _load_subscription_events(
+        conn,
+        filter_policy=filter_policy,
+        last_processed_id=last_processed_id,
+    )
+    if not events:
+        return 0
+
+    fired = 0
+    max_processed_id = last_processed_id
+
+    for event in events:
+        try:
+            _submit_workflow_for_event(
+                conn,
+                workflow_id=workflow_id,
+                workflow_name=workflow_name,
+                compiled_spec=compiled_spec,
+                event=event,
+                source_depth=_event_payload(event).get("trigger_depth", 0),
+                context_title="Subscription Context",
+                context_lines=[
+                    f"Subscription: {subscription_id}",
+                    f"Checkpoint Run: {checkpoint_run_id}",
+                    f"Filter Policy: {json.dumps(filter_policy, default=str)[:500]}",
+                ],
+            )
+        except RuntimeError as exc:
+            logger.warning("Event subscription %s rejected event %s: %s", subscription_id, event["id"], exc)
+            break
+        except Exception as exc:
+            logger.error("Event subscription %s failed on event %s: %s", subscription_id, event["id"], exc)
+            break
+
+        max_processed_id = event["id"]
+        fired += 1
+
+    if max_processed_id is not None and max_processed_id != last_processed_id:
+        _upsert_subscription_checkpoint(
+            conn,
+            subscription_id=subscription_id,
+            checkpoint_run_id=checkpoint_run_id,
+            last_processed_id=max_processed_id,
+            metadata={
+                "last_event_id": max_processed_id,
+                "processor": "runtime.triggers.evaluate_event_subscriptions",
+            },
+        )
+
+    return fired
+
+
+def _load_subscription_events(
+    conn: Any,
+    *,
+    filter_policy: dict[str, Any],
+    last_processed_id: int | None,
+) -> list[dict[str, Any]]:
+    match_mode, match_value = _event_type_match(filter_policy)
+    source_id = filter_policy.get("source_id")
+    source_type = filter_policy.get("source_type")
+
+    clauses: list[str] = []
+    args: list[Any] = []
+
+    if last_processed_id is not None:
+        args.append(last_processed_id)
+        clauses.append(f"id > ${len(args)}")
+    else:
+        clauses.append("created_at >= now() - interval '24 hours'")
+
+    if match_mode == "exact":
+        args.append(match_value)
+        clauses.append(f"event_type = ${len(args)}")
+    elif match_mode == "like":
+        args.append(match_value)
+        clauses.append(f"event_type LIKE ${len(args)}")
+    elif match_mode == "in":
+        args.append(match_value)
+        clauses.append(f"event_type = ANY(${len(args)})")
+
+    if source_id:
+        args.append(source_id)
+        clauses.append(f"source_id = ${len(args)}")
+    if source_type:
+        args.append(source_type)
+        clauses.append(f"source_type = ${len(args)}")
+
+    args.append(MAX_EVENTS_PER_CYCLE)
+    where_clause = " AND ".join(clauses) if clauses else "TRUE"
+    query = (
+        "SELECT id, event_type, source_id, source_type, payload, created_at "
+        "FROM public.system_events "
+        f"WHERE {where_clause} "
+        "ORDER BY id ASC "
+        f"LIMIT ${len(args)}"
+    )
+
+    rows = conn.execute(query, *args)
+    payload_filter = _subscription_payload_filter(filter_policy)
+    if not payload_filter:
+        return list(rows or [])
+    return [
+        event
+        for event in (rows or [])
+        if _filter_matches(payload_filter, _event_payload(event))
+    ]
+
+
+def _event_type_match(filter_policy: dict[str, Any]) -> tuple[str | None, Any]:
+    event_types = filter_policy.get("event_types")
+    if isinstance(event_types, list):
+        normalized = [str(event_type) for event_type in event_types if str(event_type).strip()]
+        if normalized:
+            return "in", normalized
+
+    raw = (
+        filter_policy.get("event_type_like")
+        or filter_policy.get("event_type_pattern")
+        or filter_policy.get("event_type")
+    )
+    if isinstance(raw, list):
+        normalized = [str(event_type) for event_type in raw if str(event_type).strip()]
+        if normalized:
+            return "in", normalized
+    if not isinstance(raw, str) or not raw.strip():
+        return None, None
+    value = raw.strip()
+    if (
+        "event_type_like" in filter_policy
+        or "event_type_pattern" in filter_policy
+        or "%" in value
+        or "_" in value
+    ):
+        return "like", value
+    return "exact", value
+
+
+def _subscription_payload_filter(filter_policy: dict[str, Any]) -> dict[str, Any]:
+    payload_filter = filter_policy.get("payload")
+    if isinstance(payload_filter, dict):
+        return payload_filter
+    payload_filter = filter_policy.get("payload_filter")
+    if isinstance(payload_filter, dict):
+        return payload_filter
+    return {}
+
+
+def _subscription_checkpoint_run_id(subscription: dict[str, Any]) -> str:
+    run_id = subscription.get("run_id")
+    if isinstance(run_id, str) and run_id.strip():
+        return run_id.strip()
+    return f"subscription:{subscription['subscription_id']}"
+
+
+def _subscription_checkpoint_id(subscription_id: str, checkpoint_run_id: str) -> str:
+    return f"checkpoint:{subscription_id}:{checkpoint_run_id}"
+
+
+def _upsert_subscription_checkpoint(
+    conn: Any,
+    *,
+    subscription_id: str,
+    checkpoint_run_id: str,
+    last_processed_id: int,
+    metadata: dict[str, Any],
+) -> None:
+    conn.execute(
+        """INSERT INTO public.subscription_checkpoints (
+               checkpoint_id,
+               subscription_id,
+               run_id,
+               last_evidence_seq,
+               last_authority_id,
+               checkpoint_status,
+               checkpointed_at,
+               metadata
+           ) VALUES (
+               $1, $2, $3, $4, $5, $6, now(), $7::jsonb
+           )
+           ON CONFLICT (subscription_id, run_id) DO UPDATE SET
+               checkpoint_id = EXCLUDED.checkpoint_id,
+               last_evidence_seq = EXCLUDED.last_evidence_seq,
+               last_authority_id = EXCLUDED.last_authority_id,
+               checkpoint_status = EXCLUDED.checkpoint_status,
+               checkpointed_at = EXCLUDED.checkpointed_at,
+               metadata = EXCLUDED.metadata""",
+        _subscription_checkpoint_id(subscription_id, checkpoint_run_id),
+        subscription_id,
+        checkpoint_run_id,
+        last_processed_id,
+        f"system_event:{last_processed_id}",
+        "committed",
+        json.dumps(metadata, default=str),
+    )
+
+
+def _submit_workflow_for_event(
+    conn: Any,
+    *,
+    workflow_id: str,
+    workflow_name: str,
+    compiled_spec: Any,
+    event: dict[str, Any],
+    source_depth: int,
+    context_title: str,
+    context_lines: list[str] | None = None,
+) -> dict[str, Any]:
+    if source_depth >= MAX_TRIGGER_DEPTH:
+        logger.warning(
+            "trigger.depth_exceeded: workflow_id=%s depth=%d max=%d -- suppressing execution",
+            workflow_id,
+            source_depth,
+            MAX_TRIGGER_DEPTH,
+        )
+        _emit_depth_exceeded_event(conn, workflow_id=workflow_id, trigger_id=workflow_id, event=event)
+        raise RuntimeError(
+            f"Trigger depth {source_depth} exceeds maximum ({MAX_TRIGGER_DEPTH})"
+        )
+
+    spec_copy = _compiled_spec_dict(compiled_spec, workflow_id=workflow_id)
+    payload = _event_payload(event)
+    event_type = event["event_type"]
+    parent_run_id = payload.get("run_id") or event.get("source_id")
+
+    from runtime.workflow.unified import submit_workflow_inline
+
+    if spec_copy.get("jobs"):
+        extra_lines = [
+            f"Event: {event_type}",
+            f"Source: {event.get('source_type', 'unknown')}/{event.get('source_id', 'unknown')}",
+            f"Payload: {json.dumps(payload, default=str)[:500]}",
+        ]
+        extra_lines.extend(context_lines or [])
+        event_context = f"\n\n## {context_title}\n" + "\n".join(extra_lines)
+        spec_copy["jobs"][0]["prompt"] = spec_copy["jobs"][0].get("prompt", "") + event_context
+
+    result = submit_workflow_inline(
+        conn,
+        spec_copy,
+        parent_run_id=parent_run_id,
+        trigger_depth=source_depth + 1,
+    )
+    logger.info(
+        "Workflow '%s' triggered by %s → run %s (depth=%d)",
+        workflow_name,
+        event_type,
+        result["run_id"],
+        source_depth + 1,
+    )
+    return result
+
+
+def _compiled_spec_dict(compiled_spec: Any, *, workflow_id: str) -> dict[str, Any]:
+    if isinstance(compiled_spec, str):
+        try:
+            compiled_spec = json.loads(compiled_spec)
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise ValueError(f"invalid compiled_spec for workflow {workflow_id}") from exc
+    if not isinstance(compiled_spec, dict):
+        raise ValueError(f"compiled_spec for workflow {workflow_id} must be a mapping")
+    return json.loads(json.dumps(compiled_spec))
+
+
+def _event_payload(event: dict[str, Any]) -> dict[str, Any]:
+    return _json_mapping(event.get("payload"))
+
+
+def _json_mapping(value: Any) -> dict[str, Any]:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+    if isinstance(value, dict):
+        return value
+    return {}
+
+
+def _emit_depth_exceeded_event(
+    conn: Any,
+    *,
+    workflow_id: str,
+    trigger_id: str,
+    event: dict[str, Any],
+) -> None:
+    payload = _event_payload(event)
+    conn.execute(
+        "INSERT INTO public.system_events (event_type, source_id, source_type, payload) "
+        "VALUES ($1, $2, $3, $4::jsonb)",
+        "trigger.depth_exceeded",
+        str(trigger_id),
+        "workflow_trigger",
+        json.dumps(
+            {
+                "trigger_id": trigger_id,
+                "workflow_id": workflow_id,
+                "depth": payload.get("trigger_depth", 0),
+                "max_depth": MAX_TRIGGER_DEPTH,
+            }
+        ),
+    )
+
+
+def _filter_matches(filter_dict: dict, payload: dict) -> bool:
+    """Match filter against payload. Supports flat key-value and condition trees."""
+    if not filter_dict:
+        return True
+    if "op" in filter_dict and ("conditions" in filter_dict or "field" in filter_dict):
+        from runtime.condition_evaluator import evaluate_condition_tree
+        return evaluate_condition_tree(payload, filter_dict)
+    for key, expected in filter_dict.items():
+        actual = payload.get(key)
+        if str(actual) != str(expected):
+            return False
+    return True

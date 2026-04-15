@@ -112,3 +112,51 @@ def test_create_workflow_pool_wraps_permission_errors_as_authority_unavailable(m
     assert exc_info.value.reason_code == "postgres.authority_unavailable"
     assert exc_info.value.details["cause_type"] == "PermissionError"
     assert "Operation not permitted" in str(exc_info.value)
+
+
+def test_create_workflow_pool_wraps_asyncpg_auth_errors_as_authority_unavailable(monkeypatch) -> None:
+    async def _blocked_create_pool(*args, **kwargs):
+        del args, kwargs
+        raise connection_mod.asyncpg.InvalidAuthorizationSpecificationError(
+            'role "test" does not exist'
+        )
+
+    monkeypatch.setattr(connection_mod.asyncpg, "create_pool", _blocked_create_pool)
+
+    import asyncio
+
+    with pytest.raises(PostgresConfigurationError) as exc_info:
+        asyncio.run(
+            connection_mod.create_workflow_pool(
+                env={"WORKFLOW_DATABASE_URL": "postgresql://test@localhost:5432/praxis_test"}
+            )
+        )
+
+    assert exc_info.value.reason_code == "postgres.authority_unavailable"
+    assert exc_info.value.details["cause_type"] == "InvalidAuthorizationSpecificationError"
+    assert 'role "test" does not exist' in str(exc_info.value)
+
+
+def test_connect_workflow_database_wraps_asyncpg_auth_errors_as_authority_unavailable(
+    monkeypatch,
+) -> None:
+    async def _blocked_connect(*args, **kwargs):
+        del args, kwargs
+        raise connection_mod.asyncpg.InvalidAuthorizationSpecificationError(
+            'role "test" does not exist'
+        )
+
+    monkeypatch.setattr(connection_mod.asyncpg, "connect", _blocked_connect)
+
+    import asyncio
+
+    with pytest.raises(PostgresConfigurationError) as exc_info:
+        asyncio.run(
+            connection_mod.connect_workflow_database(
+                env={"WORKFLOW_DATABASE_URL": "postgresql://test@localhost:5432/praxis_test"}
+            )
+        )
+
+    assert exc_info.value.reason_code == "postgres.authority_unavailable"
+    assert exc_info.value.details["cause_type"] == "InvalidAuthorizationSpecificationError"
+    assert 'role "test" does not exist' in str(exc_info.value)

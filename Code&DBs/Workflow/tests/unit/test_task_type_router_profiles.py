@@ -600,6 +600,23 @@ class _SemanticAutoAliasConn(_FakeConn):
                     "rationale": "chat profile",
                 },
                 {
+                    "task_type": "analysis",
+                    "affinity_labels": {
+                        "primary": ["analysis", "triage", "categorize", "score"],
+                        "secondary": ["chat", "support", "review"],
+                        "specialized": [],
+                        "fallback": ["research"],
+                        "avoid": [],
+                    },
+                    "affinity_weights": {"primary": 1.0, "secondary": 0.72, "specialized": 0.4, "fallback": 0.2, "unclassified": 0.1, "avoid": 0.0},
+                    "task_rank_weights": {"affinity": 0.55, "route_tier": 0.20, "latency": 0.25},
+                    "benchmark_metric_weights": {},
+                    "route_tier_preferences": ["high", "medium", "low"],
+                    "latency_class_preferences": ["reasoning", "instant"],
+                    "allow_unclassified_candidates": True,
+                    "rationale": "analysis profile",
+                },
+                {
                     "task_type": "support",
                     "affinity_labels": {
                         "primary": ["support", "analysis", "triage"],
@@ -619,6 +636,18 @@ class _SemanticAutoAliasConn(_FakeConn):
             ]
         if "FROM provider_model_candidates" in sql:
             return [
+                {
+                    "provider_slug": "openai",
+                    "model_slug": "gpt-5.4",
+                    "priority": 0,
+                    "route_tier": "high",
+                    "route_tier_rank": 1,
+                    "latency_class": "reasoning",
+                    "latency_rank": 1,
+                    "capability_tags": ["analysis", "reasoning", "build"],
+                    "task_affinities": {"primary": ["analysis"], "secondary": ["chat", "support"], "specialized": [], "avoid": []},
+                    "benchmark_profile": {},
+                },
                 {
                     "provider_slug": "openai",
                     "model_slug": "gpt-5.4-mini",
@@ -668,12 +697,14 @@ def test_semantic_auto_routes_resolve_through_backing_profiles(monkeypatch) -> N
     draft_chain = router.resolve_failover_chain("auto/draft")
     chat_chain = router.resolve_failover_chain("auto/chat")
     classify_chain = router.resolve_failover_chain("auto/classify")
+    analysis_chain = router.resolve_failover_chain("auto/analysis")
     support_chain = router.resolve_failover_chain("auto/support")
 
     assert [entry.model_slug for entry in draft_chain] == [entry.model_slug for entry in chat_chain]
-    assert [entry.model_slug for entry in draft_chain] == ["gpt-5.4-mini", "claude-sonnet-4-6"]
-    assert [entry.model_slug for entry in classify_chain] == [entry.model_slug for entry in support_chain]
-    assert [entry.model_slug for entry in classify_chain] == ["gpt-5.4-mini", "claude-sonnet-4-6"]
+    assert [entry.model_slug for entry in draft_chain[:2]] == ["gpt-5.4-mini", "claude-sonnet-4-6"]
+    assert [entry.model_slug for entry in classify_chain] == [entry.model_slug for entry in analysis_chain]
+    assert classify_chain[0].model_slug == "gpt-5.4"
+    assert support_chain[0].model_slug == "gpt-5.4-mini"
 
 
 def test_unprofiled_task_type_fails_closed() -> None:

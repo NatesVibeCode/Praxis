@@ -24,11 +24,21 @@ def tool_praxis_health(params: dict, _progress_emitter=None) -> dict:
     probes.append(hs_mod.PostgresConnectivityProbe(db_url))
 
     probes.append(hs_mod.DiskSpaceProbe(str(REPO_ROOT)))
-    for provider_slug in provider_registry_mod.registered_providers():
+    registered_providers = tuple(provider_registry_mod.registered_providers())
+    provider_registry_summary: list[dict[str, Any]] = []
+    for provider_slug in registered_providers:
+        adapters: list[str] = []
         for adapter_type in ("cli_llm", "llm_task"):
             if not provider_registry_mod.supports_adapter(provider_slug, adapter_type):
                 continue
+            adapters.append(adapter_type)
             probes.append(hs_mod.ProviderTransportProbe(provider_slug, adapter_type))
+        provider_registry_summary.append(
+            {
+                "provider_slug": provider_slug,
+                "adapters": adapters,
+            }
+        )
 
     if _progress_emitter:
         _progress_emitter.log(f"Running {len(probes)} health probes")
@@ -114,6 +124,12 @@ def tool_praxis_health(params: dict, _progress_emitter=None) -> dict:
             "confidence": lane.confidence,
             "reasons": list(lane.reasons),
             "degraded_cause": lane.degraded_cause,
+        },
+        "provider_registry": {
+            "default_provider_slug": provider_registry_mod.default_provider_slug(),
+            "default_adapter_type": provider_registry_mod.default_llm_adapter_type(),
+            "registered_providers": list(registered_providers),
+            "providers": provider_registry_summary,
         },
         "dependency_truth": dependency_truth,
         "context_cache": cache_stats,

@@ -50,6 +50,17 @@ def _write_result_file(path: str, payload: dict) -> None:
     result_path.write_text(json.dumps(payload, default=str, indent=2), encoding="utf-8")
 
 
+def _format_status_counts(counts: object) -> str:
+    if not isinstance(counts, dict):
+        return ""
+    parts = [
+        f"{str(status)}={int(count)}"
+        for status, count in sorted(counts.items())
+        if int(count) > 0
+    ]
+    return ", ".join(parts)
+
+
 def _submit_workflow_launch(
     *,
     spec_path: str | None = None,
@@ -130,6 +141,47 @@ def _submit_workflow_launch(
     print(f"Submitted workflow: {result['run_id']}")
     print(f"Workflow ID: {workflow_id}")
     print(f"Submission status: {result.get('status', 'queued')}")
+    status_source = str(result.get("status_source") or "").strip()
+    if status_source:
+        print(f"Status source: {status_source}")
+    terminal_reason = str(result.get("terminal_reason") or "").strip()
+    if terminal_reason:
+        print(f"Terminal reason: {terminal_reason}")
+    run_metrics = result.get("run_metrics")
+    if isinstance(run_metrics, dict):
+        completed_jobs = int(run_metrics.get("completed_jobs") or 0)
+        total_metric_jobs = int(run_metrics.get("total_jobs") or total_jobs)
+        health_state = str(run_metrics.get("health_state") or "unknown")
+        elapsed_seconds = float(run_metrics.get("elapsed_seconds") or 0.0)
+        status_counts = _format_status_counts(run_metrics.get("job_status_counts"))
+        total_cost_usd = float(run_metrics.get("total_cost_usd") or 0.0)
+        total_tokens_in = int(run_metrics.get("total_tokens_in") or 0)
+        total_tokens_out = int(run_metrics.get("total_tokens_out") or 0)
+        should_render_metrics = (
+            completed_jobs > 0
+            or health_state != "unknown"
+            or status_counts != ""
+            or total_cost_usd > 0
+            or total_tokens_in > 0
+            or total_tokens_out > 0
+            or terminal_reason != ""
+            or result.get("status") not in {"queued"}
+        )
+        if should_render_metrics:
+            print(
+                "Run metrics: "
+                f"{completed_jobs}/{total_metric_jobs} completed | "
+                f"health={health_state} | elapsed={elapsed_seconds:.1f}s"
+            )
+        if status_counts:
+            print(f"Job states: {status_counts}")
+        if total_cost_usd > 0 or total_tokens_in > 0 or total_tokens_out > 0:
+            print(
+                "Usage: "
+                f"cost=${total_cost_usd:.4f} | "
+                f"tokens_in={total_tokens_in} | "
+                f"tokens_out={total_tokens_out}"
+            )
     if result_file:
         result_payload = dict(result)
         result_payload.update(

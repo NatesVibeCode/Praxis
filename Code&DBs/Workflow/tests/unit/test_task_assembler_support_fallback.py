@@ -5,6 +5,48 @@ from runtime import task_assembler, task_type_router
 
 class _FakeAssemblerConn:
     def execute(self, query: str, *args):
+        if "FROM integration_registry" in query:
+            return [{
+                "id": "gmail",
+                "name": "Gmail",
+                "description": "Mail provider",
+                "capabilities": [{"action": "search", "description": "Search inbox"}],
+                "icon": "mail",
+                "score": 0.93,
+            }]
+        if "FROM registry_ui_components" in query:
+            return [{
+                "id": "data-table",
+                "name": "Data Table",
+                "description": "Tabular data browser",
+                "category": "display",
+                "props_schema": {},
+                "score": 0.91,
+            }]
+        if "FROM registry_calculations" in query:
+            return [{
+                "id": "common_calcs",
+                "name": "Common Calculations",
+                "description": "Common calculations - averages, sums, percentages, growth rates",
+                "category": "formula",
+                "input_schema": {},
+                "output_schema": {},
+                "execution_type": "sql",
+                "score": 0.88,
+            }]
+        if "FROM registry_workflows" in query:
+            return [{
+                "id": "workflow_composition",
+                "name": "Workflow Composition",
+                "description": "Workflows that call and orchestrate other workflows",
+                "category": "automation",
+                "trigger_type": "manual",
+                "input_schema": {},
+                "output_schema": {},
+                "steps": [],
+                "mcp_tool_refs": [],
+                "score": 0.89,
+            }]
         return []
 
 
@@ -118,6 +160,20 @@ def test_assemble_short_circuits_to_support_ticket_drafts(monkeypatch):
         "drafts": drafts,
         "source": "deterministic_support_fallback",
     }
+
+
+def test_pre_suggest_includes_workflow_registry_matches():
+    assembler = task_assembler.TaskAssembler(_FakeAssemblerConn())
+
+    suggestions = assembler._pre_suggest("invoice workflow approval")
+    prompt = assembler._build_planner_prompt("invoice workflow approval", suggestions)
+
+    assert [item["id"] for item in suggestions.integrations] == ["gmail"]
+    assert [item["id"] for item in suggestions.modules] == ["data-table"]
+    assert [item["id"] for item in suggestions.calculations] == ["common_calcs"]
+    assert [item["id"] for item in suggestions.workflows] == ["workflow_composition"]
+    assert "MATCHED CALCULATIONS:" in prompt
+    assert "MATCHED WORKFLOWS:" in prompt
 
 
 def test_task_type_router_resolves_auto_support():

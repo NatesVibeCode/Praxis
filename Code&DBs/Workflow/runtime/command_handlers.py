@@ -297,7 +297,31 @@ def _workflow_submit_dispatch(
                     "force_fresh_run": force_fresh_run,
                 },
             ) from exc
+    result_status = str(result.get("status") or "").strip().lower()
     result_run_id = result.get("run_id")
+    if result_status == "failed":
+        error_detail = str(
+            result.get("error")
+            or result.get("reason_code")
+            or result.get("failure_code")
+            or "workflow submit returned failed status"
+        )
+        execution_mode = str(result.get("execution_mode") or "").strip()
+        if execution_mode:
+            error_detail = f"{execution_mode} submit failed: {error_detail}"
+        raise ControlCommandExecutionError(
+            "control.command.workflow_spawn_failed" if require_parent else "control.command.workflow_submit_failed",
+            error_detail,
+            details={
+                "command_id": command.command_id,
+                "result": result,
+            },
+            result_ref=(
+                None
+                if not isinstance(result_run_id, str) or not result_run_id.strip()
+                else f"workflow_run:{result_run_id}"
+            ),
+        )
     if not result_run_id:
         raise ControlCommandExecutionError(
             "control.command.workflow_spawn_failed" if require_parent else "control.command.workflow_submit_failed",

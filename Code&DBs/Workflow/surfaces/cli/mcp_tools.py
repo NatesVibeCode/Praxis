@@ -173,6 +173,26 @@ def render_health_payload(payload: dict[str, Any], *, stdout: TextIO) -> None:
         ):
             if key in snapshot:
                 stdout.write(f"  {key}: {snapshot[key]}\n")
+    provider_registry = payload.get("provider_registry")
+    if isinstance(provider_registry, dict):
+        stdout.write("\nRouting\n")
+        stdout.write("-" * 50 + "\n")
+        default_provider = str(provider_registry.get("default_provider_slug") or "").strip()
+        default_adapter = str(provider_registry.get("default_adapter_type") or "").strip()
+        if default_provider:
+            suffix = f" ({default_adapter})" if default_adapter else ""
+            stdout.write(f"  default: {default_provider}{suffix}\n")
+        providers = provider_registry.get("providers")
+        if isinstance(providers, list):
+            for provider in providers:
+                if not isinstance(provider, dict):
+                    continue
+                provider_slug = str(provider.get("provider_slug") or "").strip()
+                adapters = provider.get("adapters")
+                if not provider_slug or not isinstance(adapters, list):
+                    continue
+                adapter_text = ", ".join(str(adapter) for adapter in adapters if adapter)
+                stdout.write(f"  {provider_slug}: {adapter_text or 'no admitted adapters'}\n")
     trend = payload.get("trend_observability")
     if isinstance(trend, dict):
         summary = trend.get("summary") if isinstance(trend.get("summary"), dict) else {}

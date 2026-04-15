@@ -1,0 +1,27 @@
+# Canonical runtime dependency contract for the Praxis workflow package.
+# Packaging reads this file directly. Runtime surfaces read the same file and
+# project the declared scopes instead of stitching together a second list.
+#
+# Scope annotations are declarative, human-readable evidence inside the same
+# manifest. `scope=all` means the full contract; `scope=api_server` is the
+# launch-time subset used by the HTTP server.
+
+# scopes: api_server,runtime
+# Core API and database surface
+asyncpg==0.31.0
+fastapi==0.135.1
+pydantic==2.12.5
+uvicorn==0.41.0
+
+# scopes: runtime
+# Runtime model and provider surface
+anthropic==0.86.0
+google-genai==1.70.0
+openai==2.24.0
+
+# scopes: runtime
+# Embedding, analytics, and scheduling support
+numpy==2.4.4
+sentence-transformers==5.3.0
+croniter==6.2.2
+psycopg2-binary==2.9.11

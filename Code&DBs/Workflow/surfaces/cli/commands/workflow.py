@@ -32,6 +32,30 @@ def _workflow_query_mod():
     return workflow_query_mod
 
 
+def _prompt_provider_choices() -> tuple[str, ...]:
+    from adapters import provider_registry as provider_registry_mod
+
+    providers: list[str] = []
+    for provider_slug in provider_registry_mod.registered_providers():
+        if provider_registry_mod.supports_adapter(provider_slug, "cli_llm"):
+            providers.append(provider_slug)
+    return tuple(providers)
+
+
+def _default_prompt_provider_slug() -> str:
+    from adapters import provider_registry as provider_registry_mod
+
+    return provider_registry_mod.default_provider_slug()
+
+
+def _prompt_provider_help_line() -> str:
+    providers = ", ".join(_prompt_provider_choices()) or "openai, google, anthropic"
+    return (
+        "  --provider <slug>    Provider: "
+        f"{providers} (default: {_default_prompt_provider_slug()})\n"
+    )
+
+
 def _coerce_json_object(raw: object) -> dict[str, object]:
     if not isinstance(raw, dict):
         raise ValueError("input must decode to a JSON object")
@@ -202,7 +226,7 @@ def _run_command(args: list[str], *, stdout: TextIO) -> int:
                 "usage: workflow run -p <prompt> [options]\n"
                 "\n"
                 "options:\n"
-                "  --provider <slug>    Provider: anthropic, openai, google\n"
+                + _prompt_provider_help_line() +
                 "  --model <slug>       Model slug (provider-specific)\n"
                 "  --tier <tier>        Route by tier: frontier, mid, economy\n"
                 "  --write <paths>      Files the model should modify (comma-separated)\n"
@@ -216,7 +240,7 @@ def _run_command(args: list[str], *, stdout: TextIO) -> int:
             )
             return 2
 
-        provider = "anthropic"
+        provider = _default_prompt_provider_slug()
         model = None
         tier = None
         adapter = "cli_llm"

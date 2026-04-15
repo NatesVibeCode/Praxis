@@ -33,7 +33,7 @@ The point is to keep launch cheap while workers execute elsewhere and status kee
 The same catalog-backed inventory is visible from the terminal:
 
 - `workflow tools list`
-- `workflow tools search <text>`
+- `workflow tools search <text> [--exact]`
 - `workflow tools describe <tool>`
 - `workflow tools call <tool> --input-json '{...}'`
 

@@ -354,7 +354,6 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
   const isTriggerNode = Boolean(node && isTriggerRoute(triggerRoute));
   const isConditionalEdge = Boolean(selectedEdge && buildEdgeRelease?.family === 'conditional');
   const isFailureEdge = Boolean(selectedEdge && buildEdgeRelease?.family === 'after_failure');
-  const conditionalBranchLabel = branchLabel(buildEdgeRelease?.branch_reason || selectedEdge?.branchReason) || 'Branch';
   const integrationArgs = useMemo(
     () => normalizeIntegrationArgs(buildNode?.integration_args),
     [buildNode?.integration_args],
@@ -396,17 +395,14 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
     [gateItems],
   );
   const primaryGateItems = gateCatalogModels.filter(({ policy }) => policy.tier === 'primary');
-  const advancedGateItems = gateCatalogModels.filter(({ policy }) => policy.tier === 'advanced');
-  const hiddenGateItems = gateCatalogModels.filter(({ policy }) => policy.tier === 'hidden' && policy.hardChoice);
   const selectedGateCatalogModel = gateCatalogModels.find(
     ({ item }) => item.gateFamily === selectedEdge?.gateFamily,
   ) || null;
-  const currentAdvancedGate = gateCatalogModels.find(
-    ({ item, policy }) => policy.tier === 'advanced' && selectedEdge?.gateFamily === item.gateFamily,
-  );
-  const currentHiddenGate = gateCatalogModels.find(
-    ({ item, policy }) => policy.tier === 'hidden' && selectedEdge?.gateFamily === item.gateFamily,
-  );
+  const selectableGateModels = useMemo(() => {
+    if (!selectedGateCatalogModel) return primaryGateItems;
+    if (primaryGateItems.some(({ item }) => item.id === selectedGateCatalogModel.item.id)) return primaryGateItems;
+    return [selectedGateCatalogModel, ...primaryGateItems];
+  }, [primaryGateItems, selectedGateCatalogModel]);
   const selectedBranchOp = BRANCH_OP_OPTIONS.find((option) => option.value === edgeConditionOp) || BRANCH_OP_OPTIONS[0];
   const conditionalTargets = useMemo(() => {
     if (!buildEdge || !buildGraph || !isConditionalEdge) {
@@ -946,6 +942,12 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
     }
   }, [edgeConditionField, edgeConditionMode, edgeConditionOp, edgeConditionText, edgeConditionValueText]);
 
+  const handleGateFamilyChange = useCallback((nextGateFamily: string) => {
+    if (!selectedEdge || !nextGateFamily) return;
+    if ((selectedEdge.gateFamily || '') === nextGateFamily) return;
+    onApplyGate?.(selectedEdge.id, nextGateFamily);
+  }, [onApplyGate, selectedEdge]);
+
   const handleSaveConditionalEdge = useCallback(async () => {
     if (!selectedEdge || !buildGraph || !canCommitGraph || !buildEdge) return;
     setEdgeConditionLoading(true);
@@ -1084,127 +1086,33 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
                 ? 'This connection is ungated'
                 : selectedEdge.gateLabel || selectedGateCatalogModel?.item.label || 'Gate configured'}
             </div>
-            <div className="moon-gate-panel__summary">
-              {selectedEdge.gateState === 'empty'
-                ? 'Moon only promotes Branch and On Failure here because they are the only gate controls that change execution today.'
-                : selectedGateCatalogModel?.policy.detail || selectedGateCatalogModel?.truth.detail || 'This edge carries saved gate metadata.'}
-            </div>
           </div>
 
-          {primaryGateItems.length > 0 && (
-            <>
-              <div className="moon-dock__section-label">Control now</div>
-              <div className="moon-dock__item-desc" style={{ marginBottom: 8 }}>
-                These are the only edge controls that change runtime flow today.
+          {selectableGateModels.length > 0 && (
+            <div className="moon-branch-editor__control">
+              <label className="moon-dock-form__label" htmlFor="moon-gate-family-select">Gate type</label>
+              <div className="moon-dock-form__row">
+                <select
+                  id="moon-gate-family-select"
+                  className="moon-dock-form__select"
+                  value={selectedEdge.gateFamily || ''}
+                  onChange={e => handleGateFamilyChange(e.target.value)}
+                >
+                  <option value="" disabled>{selectedEdge.gateState === 'empty' ? 'Choose a gate' : 'Choose gate type'}</option>
+                  {selectableGateModels.map(({ item, truth, policy }) => (
+                    <option key={item.id} value={item.gateFamily}>
+                      {item.label} - {policy.badge} - {truth.badge}
+                    </option>
+                  ))}
+                </select>
               </div>
-              <div className="moon-dock__catalog-grid">
-                {primaryGateItems.map(({ item, truth, policy }) => (
-                  <button
-                    key={item.id}
-                    className={`moon-dock__catalog-item moon-dock__catalog-item--${truth.category}${selectedEdge.gateFamily === item.gateFamily ? ' moon-dock__catalog-item--active' : ''}`}
-                    onClick={() => item.gateFamily && onApplyGate?.(selectedEdge.id, item.gateFamily)}
-                    draggable
-                    title={`${item.description || item.label} — ${policy.detail}`}
-                    onDragStart={e => {
-                      e.dataTransfer.setData('moon/catalog-id', item.id);
-                      e.dataTransfer.setData('text/plain', item.label);
-                      e.dataTransfer.effectAllowed = 'copyLink';
-                    }}
-                  >
-                    <MoonGlyph type={item.icon} size={14} />
-                    <span className="moon-catalog-item__stack">
-                      <span className="moon-catalog-item__label">{item.label}</span>
-                      <span className="moon-catalog-item__detail">{policy.detail}</span>
-                    </span>
-                    <span className="moon-catalog-item__meta-row">
-                      <span className="moon-surface-badge">{policy.badge}</span>
-                      <span className={`moon-truth-badge moon-truth-badge--${truth.category}`}>{truth.badge}</span>
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-
-          {advancedGateItems.length > 0 && (
-            <>
-              <div className="moon-dock__section-label">Worth building later</div>
-              <div className="moon-dock__item-desc" style={{ marginBottom: 8 }}>
-                These gates stay in Detail because they are still saved-only or incomplete at runtime, but they are still worth shaping deliberately.
-              </div>
-              <div className="moon-dock__catalog-grid">
-                {advancedGateItems.map(({ item, truth, policy }) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    className={`moon-dock__catalog-item moon-dock__catalog-item--preview moon-dock__catalog-item--${truth.category}${selectedEdge.gateFamily === item.gateFamily ? ' moon-dock__catalog-item--active' : ''}`}
-                    title={`${item.description || item.label} — ${policy.detail}`}
-                    disabled
-                  >
-                    <MoonGlyph type={item.icon} size={14} />
-                    <span className="moon-catalog-item__stack">
-                      <span className="moon-catalog-item__label">{item.label}</span>
-                      <span className="moon-catalog-item__detail">{policy.detail}</span>
-                    </span>
-                    <span className="moon-catalog-item__meta-row">
-                      <span className="moon-surface-badge">{policy.badge}</span>
-                      <span className={`moon-truth-badge moon-truth-badge--${truth.category}`}>{truth.badge}</span>
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-
-          {currentAdvancedGate && (
-            <div className="moon-action__legacy-note">
-              Current gate <code>{currentAdvancedGate.item.label}</code> stays on this edge as saved data, but Moon treats it as preview-only until it changes runtime for real.
-            </div>
-          )}
-
-          {hiddenGateItems.length > 0 && (
-            <>
-              <div className="moon-dock__section-label">Hard choices</div>
-              <div className="moon-dock__item-desc" style={{ marginBottom: 8 }}>
-                These are intentionally kept out of the main gate surface so Moon does not promise control it cannot prove.
-              </div>
-              <div className="moon-action__hard-list" style={{ marginBottom: 12 }}>
-                {hiddenGateItems.map(({ item, policy }) => (
-                  <div key={item.id} className="moon-action__hard-item">
-                    <div className="moon-action__hard-label">{item.label}</div>
-                    <div className="moon-action__hard-detail">{policy.hardChoice || policy.detail}</div>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-
-          {currentHiddenGate && (
-            <div className="moon-action__legacy-note">
-              Current gate <code>{currentHiddenGate.item.label}</code> stays in saved data, but it is no longer offered as a main Moon control.
             </div>
           )}
 
           {isFailureEdge && (
             <>
-              <div className="moon-dock__section-label">Failure path</div>
-              <div className="moon-dock__item-desc" style={{ marginBottom: 8 }}>
-                Moon treats this as a pure status gate. There is no extra fallback protocol hiding underneath it today.
-              </div>
-              <div className="moon-failure-path">
-                <div className="moon-failure-path__lane">
-                  <div className="moon-failure-path__lane-label">Success</div>
-                  <div className="moon-failure-path__lane-title">{failureSourceLabel} succeeds</div>
-                  <div className="moon-failure-path__lane-detail">This edge stays closed and {failureTargetLabel} does not run from this path.</div>
-                </div>
-                <div className="moon-failure-path__lane moon-failure-path__lane--active">
-                  <div className="moon-failure-path__lane-label">Failure</div>
-                  <div className="moon-failure-path__lane-title">{failureSourceLabel} fails</div>
-                  <div className="moon-failure-path__lane-detail">{failureTargetLabel} releases as the remediation path.</div>
-                </div>
-              </div>
               <div className="moon-branch-editor__hint" style={{ marginBottom: 8 }}>
-                Hard choice: Moon only exposes the failure-status semantics here because runtime does not yet honor richer fallback settings on this gate.
+                Runs only when {failureSourceLabel} fails.
               </div>
               <div className="moon-gate-panel__actions">
                 <button
@@ -1221,39 +1129,31 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
 
           {isConditionalEdge && (
             <>
-              <div className="moon-dock__section-label">Condition</div>
-              <div className="moon-dock__item-desc" style={{ marginBottom: 8 }}>
-                {conditionalBranchLabel} branch from this source.
-                {buildEdgeRelease?.branch_reason === 'else' ? ' The else branch automatically inverts the same condition.' : ' The else branch, if present, will invert the same condition.'}
-              </div>
               <div className="moon-branch-editor">
-                <div className="moon-branch-editor__lanes">
-                  <div className={`moon-branch-editor__lane${buildEdgeRelease?.branch_reason === 'then' ? ' moon-branch-editor__lane--active' : ''}`}>
-                    <div className="moon-branch-editor__lane-label">Then</div>
-                    <div className="moon-branch-editor__lane-target">{conditionalTargets.thenTarget || edgeToLabel || 'Then path'}</div>
+                <div className="moon-branch-editor__routes" aria-label="Branch routes">
+                  <div className={`moon-branch-editor__route${buildEdgeRelease?.branch_reason === 'then' ? ' moon-branch-editor__route--active' : ''}`}>
+                    <span className="moon-branch-editor__route-label">Then</span>
+                    <span className="moon-branch-editor__route-target">{conditionalTargets.thenTarget || edgeToLabel || 'Then path'}</span>
                   </div>
-                  <div className="moon-branch-editor__lane-separator" aria-hidden="true">Else</div>
-                  <div className={`moon-branch-editor__lane${buildEdgeRelease?.branch_reason === 'else' ? ' moon-branch-editor__lane--active' : ''}`}>
-                    <div className="moon-branch-editor__lane-label">Else</div>
-                    <div className="moon-branch-editor__lane-target">{conditionalTargets.elseTarget || 'Inverse path'}</div>
+                  <div className={`moon-branch-editor__route${buildEdgeRelease?.branch_reason === 'else' ? ' moon-branch-editor__route--active' : ''}`}>
+                    <span className="moon-branch-editor__route-label">Else</span>
+                    <span className="moon-branch-editor__route-target">{conditionalTargets.elseTarget || 'Inverse path'}</span>
                   </div>
                 </div>
 
-                <div className="moon-branch-editor__modes">
-                  <button
-                    type="button"
-                    className={`moon-branch-editor__mode${edgeConditionMode === 'simple' ? ' moon-branch-editor__mode--active' : ''}`}
-                    onClick={() => handleEdgeConditionModeChange('simple')}
-                  >
-                    Composer
-                  </button>
-                  <button
-                    type="button"
-                    className={`moon-branch-editor__mode${edgeConditionMode === 'json' ? ' moon-branch-editor__mode--active' : ''}`}
-                    onClick={() => handleEdgeConditionModeChange('json')}
-                  >
-                    JSON
-                  </button>
+                <div className="moon-branch-editor__control">
+                  <label className="moon-dock-form__label" htmlFor="moon-branch-editor-mode">Condition mode</label>
+                  <div className="moon-dock-form__row">
+                    <select
+                      id="moon-branch-editor-mode"
+                      className="moon-dock-form__select"
+                      value={edgeConditionMode}
+                      onChange={e => handleEdgeConditionModeChange(e.target.value as BranchConditionMode)}
+                    >
+                      <option value="simple">Composer</option>
+                      <option value="json">JSON</option>
+                    </select>
+                  </div>
                 </div>
 
                 {edgeConditionMode === 'simple' ? (
@@ -1263,7 +1163,7 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
                       type="text"
                       value={edgeConditionField}
                       onChange={e => setEdgeConditionField(e.target.value)}
-                      placeholder="Output field or path, for example should_continue or result.score"
+                      placeholder="Field or path, for example should_continue"
                     />
                     <div className="moon-dock-form__row">
                       <select

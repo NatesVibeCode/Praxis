@@ -22,6 +22,8 @@ from typing import Any, TYPE_CHECKING
 
 import asyncpg
 
+from storage.postgres import PostgresWorkflowMetricsRepository
+
 from .failure_projection import project_failure_classification
 
 if TYPE_CHECKING:
@@ -363,54 +365,37 @@ class WorkflowMetricsView:
 
             parent_run_id = result.parent_run_id or result.reviews_workflow_id
 
-            await conn.execute(
-                """
-                INSERT INTO workflow_metrics (
-                    run_id, parent_run_id, reviews_workflow_id, review_target_modules,
-                    author_model, provider_slug, model_slug,
-                    status, failure_code, failure_category, failure_zone,
-                    is_retryable, is_transient, latency_ms, cost_usd,
-                    input_tokens, output_tokens, attempts, retry_count,
-                    tool_use_count, cache_read_tokens, cache_creation_tokens,
-                    duration_api_ms, task_type, workflow_label, capabilities,
-                    label, adapter_type, created_at
-                )
-                VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-                    $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26,
-                    $27, $28, $29
-                )
-                ON CONFLICT (run_id) DO NOTHING
-                """,
-                result.run_id,
-                parent_run_id,
-                result.reviews_workflow_id,
-                review_modules_json,
-                author_model,
-                result.provider_slug,
-                result.model_slug,
-                result.status,
-                result.failure_code,
-                failure_category,
-                failure_zone,
-                is_retryable,
-                is_transient,
-                result.latency_ms,
-                cost_usd,
-                input_tokens,
-                output_tokens,
-                result.attempts,
-                max(result.attempts - 1, 0),
-                tool_use_count,
-                cache_read_tokens,
-                cache_creation_tokens,
-                duration_api_ms,
-                result.task_type,
-                result.label,
-                capabilities_json,
-                result.label,
-                result.adapter_type,
-                _utc_now(),
+            await PostgresWorkflowMetricsRepository().upsert_workflow_metric(
+                conn,
+                run_id=result.run_id,
+                parent_run_id=parent_run_id,
+                reviews_workflow_id=result.reviews_workflow_id,
+                review_target_modules=review_modules_json,
+                author_model=author_model,
+                provider_slug=result.provider_slug,
+                model_slug=result.model_slug,
+                status=result.status,
+                failure_code=result.failure_code,
+                failure_category=failure_category,
+                failure_zone=failure_zone,
+                is_retryable=is_retryable,
+                is_transient=is_transient,
+                latency_ms=result.latency_ms,
+                cost_usd=cost_usd,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                attempts=result.attempts,
+                retry_count=max(result.attempts - 1, 0),
+                tool_use_count=tool_use_count,
+                cache_read_tokens=cache_read_tokens,
+                cache_creation_tokens=cache_creation_tokens,
+                duration_api_ms=duration_api_ms,
+                task_type=result.task_type,
+                workflow_label=result.label,
+                capabilities=capabilities_json,
+                label=result.label,
+                adapter_type=result.adapter_type,
+                created_at=_utc_now(),
             )
 
     def record_workflow(self, result: WorkflowResult) -> None:

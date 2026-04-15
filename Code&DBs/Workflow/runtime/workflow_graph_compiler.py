@@ -37,6 +37,10 @@ _GRAPH_SUPPORTED_ADAPTER_TYPES = frozenset({
     "file_writer",
     "verifier",
 })
+_GRAPH_RUNTIME_TRIGGER_ADAPTER_TYPES = _GRAPH_SUPPORTED_ADAPTER_TYPES - frozenset({
+    "cli_llm",
+    "llm_task",
+})
 _STATIC_BRANCHING_KINDS = frozenset({"if", "switch"})
 
 
@@ -182,13 +186,29 @@ def _dependency_specs(job: Mapping[str, Any]) -> list[dict[str, Any]]:
 
 
 def _graph_control_marker(job: Mapping[str, Any]) -> bool:
-    if _as_text(job.get("adapter_type")) == "control_operator":
+    explicit_adapter_type = _as_text(job.get("adapter_type"))
+    if explicit_adapter_type in _GRAPH_RUNTIME_TRIGGER_ADAPTER_TYPES:
         return True
     if _is_mapping(job.get("operator")):
         return True
     if isinstance(job.get("template_jobs"), list) or _is_mapping(job.get("branches")):
         return True
     if isinstance(job.get("dependency_edges"), list):
+        return True
+    if any(key in job for key in ("url", "endpoint", "method", "headers", "body", "body_template")):
+        return True
+    if _is_mapping(job.get("expected_outputs")) and not _as_text(job.get("prompt")):
+        return True
+    return False
+
+
+def _graph_nested_control_marker(job: Mapping[str, Any]) -> bool:
+    explicit_adapter_type = _as_text(job.get("adapter_type"))
+    if explicit_adapter_type == "control_operator":
+        return True
+    if _is_mapping(job.get("operator")):
+        return True
+    if isinstance(job.get("template_jobs"), list) or _is_mapping(job.get("branches")):
         return True
     return False
 
@@ -409,7 +429,7 @@ def _compile_nested_sequence(
     label_to_node_id: dict[str, str] = {}
     ordered: list[tuple[Mapping[str, Any], str, str]] = []
     for index, nested_job in enumerate(jobs, start=1):
-        if _graph_control_marker(nested_job):
+        if _graph_nested_control_marker(nested_job):
             raise GraphWorkflowCompileError(
                 "workflow.graph_job_unsupported",
                 "nested control operators inside branch/template bodies are not supported yet",

@@ -1,19 +1,21 @@
 # Praxis MCP Tools
 
-Praxis exposes 43 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
+Praxis exposes 44 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
 
 CLI discovery is generated from the same catalog metadata:
 
 - `workflow tools list`
-- `workflow tools search <text>`
+- `workflow tools search <text> [--exact]`
 - `workflow tools describe <tool|alias>`
 - `workflow tools call <tool|alias> --input-json '{...}'`
+- single-result searches print the direct describe and entrypoint commands
 
 ## Catalog Summary
 
 | Tool | Surface | Tier | Alias | Risks | Description |
 | --- | --- | --- | --- | --- | --- |
 | `praxis_discover` | `code` | `stable` | `workflow discover` | `read`, `write` | Find existing code that already does what you need — BEFORE writing new code. Uses hybrid retrieval: vector embeddings over AST-extracted behavioral fingerprints plus Postgres full-text search, fused with reciprocal rank fusion so you get both semantic and exact-ish matches even when naming differs. |
+| `praxis_data` | `data` | `stable` | `workflow data` | `dispatch`, `read`, `write` | Run deterministic data cleanup and reconciliation jobs: parse datasets, profile fields, filter records, sort rows, normalize values, redact sensitive fields, validate contracts, transform records, join or merge sources, aggregate groups, split partitions, export shaped datasets, dedupe keys, reconcile source vs target state, sync target state deterministically, generate workflow specs, and launch those jobs through Praxis. |
 | `praxis_artifacts` | `evidence` | `stable` | `workflow artifacts` | `read` | Browse and compare files produced by workflow sandbox runs. Each workflow job can write artifacts (code, logs, reports) — this tool lets you find, search, and diff them. |
 | `praxis_bugs` | `evidence` | `stable` | `workflow bugs` | `dispatch`, `read`, `write` | Track bugs in the platform's Postgres-backed bug tracker. List open bugs, file new ones, search by keyword, inspect similar historical fixes, replay a bug from canonical evidence, bulk backfill replay provenance, or resolve existing bugs. |
 | `praxis_constraints` | `evidence` | `advanced` | - | `read` | View automatically-mined constraints from past workflow failures. The system learns rules like 'files in runtime/ must include imports' from repeated failures. |
@@ -81,6 +83,31 @@ Example input:
 {
   "action": "search",
   "query": "retry logic with exponential backoff"
+}
+```
+
+### Data
+
+#### `praxis_data`
+
+- Surface: `data`
+- Tier: `stable`
+- Badges: `stable`, `data`, `alias:data`, `mutates-state`, `dispatches-work`
+- Risks: `dispatch`, `read`, `write`
+- CLI entrypoint: `workflow data`
+- CLI schema help: `workflow tools describe praxis_data`
+- When to use: Run deterministic parsing, normalization, validation, mapping, dedupe, or reconcile jobs and optionally launch them through the workflow engine.
+- When not to use: Do not use it for fuzzy inference, free-form classification, or cases where an LLM must invent the transform logic.
+- Recommended alias: `workflow data`
+- Selector: `action`; default `profile`; values `parse`, `profile`, `filter`, `sort`, `normalize`, `redact`, `validate`, `transform`, `join`, `merge`, `aggregate`, `split`, `export`, `dedupe`, `reconcile`, `sync`, `run`, `workflow_spec`, `launch`
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "action": "profile",
+  "input_path": "artifacts/data/users.csv"
 }
 ```
 

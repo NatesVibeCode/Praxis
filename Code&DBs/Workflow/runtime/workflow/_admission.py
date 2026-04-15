@@ -1,6 +1,7 @@
 """Workflow submission pipeline: spec parsing, job creation, and idempotency."""
 from __future__ import annotations
 
+from collections.abc import Mapping
 import concurrent.futures
 import hashlib
 import json
@@ -439,15 +440,34 @@ def _submit_graph_workflow_inline(
     result = failure or execution_result
     if result is None:
         raise RuntimeError("graph-capable workflow submission returned no execution result")
-    return {
+    status = getattr(result, "status", None)
+    if not isinstance(status, str) or not status.strip():
+        current_state = getattr(result, "current_state", None)
+        status = getattr(current_state, "value", current_state)
+    payload = {
         "run_id": intake_outcome.run_id,
-        "status": result.status,
+        "status": str(status or "unknown"),
         "total_jobs": len(spec_dict.get("jobs", [])) if isinstance(spec_dict.get("jobs"), list) else 0,
         "spec_name": str(spec_dict.get("name") or "inline"),
         "workflow_id": request.workflow_id,
         "packet_reuse_provenance": None,
         "execution_mode": "graph_runtime",
     }
+    reason_code = getattr(result, "reason_code", None)
+    if isinstance(reason_code, str) and reason_code.strip():
+        payload["reason_code"] = reason_code
+    failure_code = getattr(result, "failure_code", None)
+    if isinstance(failure_code, str) and failure_code.strip():
+        payload["failure_code"] = failure_code
+    terminal_reason_code = getattr(result, "terminal_reason_code", None)
+    if isinstance(terminal_reason_code, str) and terminal_reason_code.strip():
+        payload["terminal_reason_code"] = terminal_reason_code
+    outputs = getattr(result, "outputs", None)
+    if isinstance(outputs, Mapping):
+        error = outputs.get("error")
+        if isinstance(error, str) and error.strip():
+            payload["error"] = error
+    return payload
 
 
 # ── Submission ────────────────────────────────────────────────────────

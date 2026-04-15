@@ -131,6 +131,52 @@ def test_run_status_payload_omits_failure_classification_for_succeeded_jobs(monk
     assert "failure_classification" not in payload["jobs"][0]
 
 
+def test_run_status_payload_prefers_policy_reason_code_for_route_disabled_failures(monkeypatch) -> None:
+    import runtime.workflow.unified as unified
+
+    now = datetime(2026, 4, 9, 12, 0, tzinfo=timezone.utc)
+
+    monkeypatch.setattr(
+        unified,
+        "get_run_status",
+        lambda _pg, _run_id: {
+            "run_id": "run-policy",
+            "status": "failed",
+            "spec_name": "policy-spec",
+            "total_jobs": 1,
+            "completed_jobs": 1,
+            "total_cost_usd": 0.0,
+            "total_tokens_in": 0,
+            "total_tokens_out": 0,
+            "total_duration_ms": 200,
+            "created_at": now,
+            "jobs": [
+                {
+                    "label": "job.blocked",
+                    "status": "failed",
+                    "agent_slug": "anthropic/claude-sonnet-4-6",
+                    "attempt": 1,
+                    "duration_ms": 200,
+                    "created_at": now,
+                    "stdout_preview": "Route eligibility blocked anthropic/claude-sonnet-4-6",
+                    "failure_category": "scope_violation",
+                    "last_error_code": "provider_disabled",
+                    "failure_zone": "internal",
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(unified, "summarize_run_health", lambda *_args, **_kwargs: {"state": "critical"})
+    monkeypatch.setattr(unified, "summarize_run_recovery", lambda *_args, **_kwargs: {"mode": "inspect"})
+
+    payload = workflow_tools._run_status_payload(object(), "run-policy")
+
+    assert payload["jobs"][0]["error_code"] == "provider_disabled"
+    assert payload["jobs"][0]["failure_classification"]["recommended_action"] == (
+        "Choose an allowed provider/model or wait until the policy window ends."
+    )
+
+
 def test_build_platform_context_warns_that_sandbox_commands_use_live_workspace() -> None:
     context = _exec_mod._build_platform_context("/Users/nate/Praxis")
 

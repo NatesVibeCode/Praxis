@@ -56,6 +56,7 @@ interface Props {
   onBack?: () => void;
   onWorkflowCreated?: (id: string) => void;
   onViewRun?: (runId: string) => void;
+  onDraftStateChange?: (draft: { dirty: boolean; message?: string | null }) => void;
   /** Initial empty mode: 'choice' (default), 'compose' (prose entry), 'trigger-picker' */
   initialMode?: 'choice' | 'compose' | 'trigger-picker';
 }
@@ -232,7 +233,33 @@ function graphHasBranches(graph: NonNullable<BuildPayload['build_graph']>): bool
   return [...outboundCounts.values(), ...inboundCounts.values()].some(count => count > 1);
 }
 
-export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun, initialMode }: Props) {
+function resolvePersistedWorkflowId(workflowId: string | null, payload: BuildPayload | null): string | null {
+  if (workflowId) return workflowId;
+  if (typeof payload?.workflow?.id === 'string' && payload.workflow.id.trim()) return payload.workflow.id;
+  const definitionWorkflowId = (payload?.definition as Record<string, unknown> | undefined)?.workflow_id;
+  return typeof definitionWorkflowId === 'string' && definitionWorkflowId.trim() ? definitionWorkflowId : null;
+}
+
+function hasLocalDraftPayload(payload: BuildPayload | null): boolean {
+  if (!payload) return false;
+  if ((payload.build_graph?.nodes?.length || 0) > 0) return true;
+  if ((payload.build_graph?.edges?.length || 0) > 0) return true;
+  if (payload.definition && Object.keys(payload.definition).length > 0) return true;
+  if (payload.compiled_spec && Object.keys(payload.compiled_spec).length > 0) return true;
+  return false;
+}
+
+function shouldKeepEdgeMenusOpen(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  return Boolean(
+    target.closest('.moon-graph-gate')
+    || target.closest('.moon-dock-side')
+    || target.closest('.moon-halfmoon--right')
+    || target.closest('.menu-panel'),
+  );
+}
+
+export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun, onDraftStateChange, initialMode }: Props) {
   const { payload, loading, error, mutate, reload, setPayload } = useBuildPayload(workflowId);
   const [state, dispatch] = useReducer(moonBuildReducer, {
     ...initialMoonBuildState,
@@ -244,9 +271,35 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
   const [catalog, setCatalog] = useState<CatalogItem[]>(getCatalog());
   const [mutationError, setMutationError] = useState<string | null>(null);
   const { show } = useToast();
+  const persistedWorkflowId = useMemo(
+    () => resolvePersistedWorkflowId(workflowId, payload),
+    [payload, workflowId],
+  );
+  const draftGuardState = useMemo(() => {
+    const dirty = !persistedWorkflowId
+      && (
+        Boolean(state.selectedTrigger)
+        || Boolean(state.compileProse.trim())
+        || hasLocalDraftPayload(payload)
+      );
+    return {
+      dirty,
+      message: dirty
+        ? 'This draft workflow only exists locally. Save it from Action or Release before leaving, or leave anyway and discard the draft.'
+        : null,
+    };
+  }, [payload, persistedWorkflowId, state.compileProse, state.selectedTrigger]);
 
   // Load live catalog from backend on mount
   useEffect(() => { loadCatalog().then(setCatalog); }, []);
+
+  useEffect(() => {
+    onDraftStateChange?.(draftGuardState);
+  }, [draftGuardState, onDraftStateChange]);
+
+  useEffect(() => () => {
+    onDraftStateChange?.({ dirty: false, message: null });
+  }, [onDraftStateChange]);
 
   useEffect(() => {
     if (!mutationError) return;
@@ -1003,12 +1056,32 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
     : null;
   const edgeFromNode = selectedEdge ? viewModel.nodes.find(n => n.id === selectedEdge.from) : null;
   const edgeToNode = selectedEdge ? viewModel.nodes.find(n => n.id === selectedEdge.to) : null;
+  const dismissSelectedEdgeMenus = useCallback(() => {
+    if (!state.selectedEdgeId) return;
+    dispatch({ type: 'SELECT_EDGE', edgeId: null });
+    if (state.openDock === 'context') {
+      dispatch({ type: 'CLOSE_DOCK' });
+    }
+  }, [state.openDock, state.selectedEdgeId]);
   const handleSelectEdge = useCallback((edgeId: string, options?: { openDetail?: boolean }) => {
     dispatch({ type: 'SELECT_EDGE', edgeId });
     if (options?.openDetail) {
       dispatch({ type: 'OPEN_DOCK', dock: 'context' });
     }
   }, []);
+  useEffect(() => {
+    if (!state.selectedEdgeId) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (shouldKeepEdgeMenusOpen(event.target)) return;
+      dismissSelectedEdgeMenus();
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+    };
+  }, [dismissSelectedEdgeMenus, state.selectedEdgeId]);
   const edgeControls = useMemo(() => viewModel.edges.flatMap((edge) => {
     const geometry = getEdgeGeometry(edge, viewModel.layout);
     if (!geometry) return [];
@@ -1052,10 +1125,13 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
           <UiActionFeed
             surface="moon"
             scope={moonUndoScope}
-            subtitle="Authority, outcome, and undo state."
+            title="Control"
+            subtitle=""
             maxHeight="min(34vh, 260px)"
             maxVisibleEntries={2}
             variant="compact"
+            collapsible
+            defaultCollapsed
           />
         </div>
         {/* Middle row */}
@@ -1252,11 +1328,7 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
                               </div>
                             ) : (
                               <div className="moon-graph-gate__note">
-                                {isConditional
-                                  ? 'Branch structure is live. Use Detail to edit the condition and branch metadata.'
-                                  : isFailure
-                                    ? 'This path only releases when the upstream step fails.'
-                                    : 'This gate stays editable in Detail so Moon does not silently overwrite non-core behavior inline.'}
+                                {isConditional ? 'Conditional gate active' : isFailure ? 'Failure gate active' : 'Gate configured'}
                               </div>
                             )}
 
@@ -1265,7 +1337,7 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
                               className="moon-graph-gate__detail-button"
                               onClick={() => handleSelectEdge(control.edge.id, { openDetail: true })}
                             >
-                              Open detail
+                              Edit gate
                             </button>
                           </div>
                         )}
@@ -1350,7 +1422,10 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
                     ...meta,
                   });
                 }}
-                onClose={() => dispatch({ type: 'CLOSE_DOCK' })}
+                onClose={() => {
+                  if (selectedEdge) dismissSelectedEdgeMenus();
+                  else dispatch({ type: 'CLOSE_DOCK' });
+                }}
                 selectedEdge={selectedEdge}
                 edgeFromLabel={edgeFromNode?.title}
                 edgeToLabel={edgeToNode?.title}
