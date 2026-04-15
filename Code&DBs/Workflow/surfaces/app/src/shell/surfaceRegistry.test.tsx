@@ -25,6 +25,7 @@ describe('surfaceRegistry', () => {
     expect(tabs).toEqual([
       { id: 'dashboard', label: 'Overview', kind: 'Suite', closable: false },
       { id: 'build', label: 'Workflow workspace', kind: 'Build', closable: false },
+      { id: 'costs', label: 'Cost Summary', kind: 'Finance', closable: false },
       { id: 'run-detail:run_123', label: 'Run run_123', kind: 'Run', closable: true },
     ]);
 
@@ -40,6 +41,11 @@ describe('surfaceRegistry', () => {
     expect(navigateItems.find((item) => item.id === 'navigate:build')).toMatchObject({
       label: 'Workflow workspace',
       description: 'Jump back into Moon Build.',
+      selected: false,
+    });
+    expect(navigateItems.find((item) => item.id === 'navigate:costs')).toMatchObject({
+      label: 'Cost Summary',
+      description: 'Inspect token spend and recent costed runs.',
       selected: false,
     });
     expect(navigateItems.find((item) => item.id === 'tab:run-detail:run_123')).toMatchObject({

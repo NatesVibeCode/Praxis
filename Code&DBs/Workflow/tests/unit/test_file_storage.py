@@ -26,11 +26,14 @@ class _FakePg:
             if self.storage_path is None:
                 return []
             return [{"storage_path": self.storage_path}]
-        if normalized.startswith("DELETE FROM uploaded_files WHERE id = $1"):
+        if normalized.startswith("DELETE FROM uploaded_files WHERE id = $1 RETURNING storage_path"):
             if self.delete_error is not None:
                 raise self.delete_error
+            storage_path = self.storage_path
             self.storage_path = None
-            return []
+            if storage_path is None:
+                return []
+            return [{"storage_path": storage_path}]
         raise AssertionError(f"unexpected query: {normalized}")
 
 

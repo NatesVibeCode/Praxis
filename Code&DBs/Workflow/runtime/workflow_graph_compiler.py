@@ -1,8 +1,9 @@
 """Compile graph-capable queue specs into WorkflowRequest authority.
 
-This module is the single queue-spec-to-graph compiler for control-operator
-workflows. It fails closed on unsupported lanes instead of teaching each caller
-its own partial control-flow dialect.
+This module is the single queue-spec-to-graph compiler for graph-admitted
+workflow specs, including the single-prompt dispatch lane. It fails closed on
+unsupported lanes instead of teaching each caller its own partial control-flow
+dialect.
 """
 
 from __future__ import annotations
@@ -14,7 +15,6 @@ import hashlib
 import json
 from typing import Any
 
-from adapters.provider_registry import default_provider_slug
 from contracts.domain import (
     MINIMAL_WORKFLOW_NODE_TYPE,
     SUPPORTED_SCHEMA_VERSION,
@@ -185,6 +185,61 @@ def _dependency_specs(job: Mapping[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def _job_write_scope(job: Mapping[str, Any]) -> list[str]:
+    write_scope = _string_list(job.get("write_scope"))
+    if write_scope:
+        return write_scope
+    scope = job.get("scope")
+    if not _is_mapping(scope):
+        return []
+    return _string_list(scope.get("write"))
+
+
+def _job_read_scope(job: Mapping[str, Any]) -> list[str]:
+    read_scope = _string_list(job.get("read_scope"))
+    if read_scope:
+        return read_scope
+    scope = job.get("scope")
+    if not _is_mapping(scope):
+        return []
+    return _string_list(scope.get("read"))
+
+
+def _job_verify_refs(job: Mapping[str, Any]) -> list[str]:
+    return _string_list(job.get("verify_refs"))
+
+
+def _concrete_provider_and_model(value: object) -> tuple[str | None, str | None]:
+    provider_slug, model_slug = _provider_and_model(value)
+    if not provider_slug or not model_slug:
+        return None, None
+    if provider_slug.strip().lower() in {"auto", "human", "integration"}:
+        return None, None
+    return provider_slug, model_slug
+
+
+def _single_job_prompt_graph_candidate(job: Mapping[str, Any]) -> bool:
+    if not _as_text(job.get("prompt")):
+        return False
+    if _is_mapping(job.get("operator")):
+        return False
+    if isinstance(job.get("template_jobs"), list) or _is_mapping(job.get("branches")):
+        return False
+    if any(
+        key in job
+        for key in ("url", "endpoint", "method", "headers", "body", "body_template")
+    ):
+        return False
+    explicit_adapter_type = _as_text(job.get("adapter_type"))
+    if explicit_adapter_type:
+        return explicit_adapter_type in {"cli_llm", "llm_task"}
+    provider_slug, model_slug = _concrete_provider_and_model(job.get("agent"))
+    if provider_slug and model_slug:
+        return True
+    model_value = _as_text(job.get("model"))
+    return model_value is not None
+
+
 def _graph_control_marker(job: Mapping[str, Any]) -> bool:
     explicit_adapter_type = _as_text(job.get("adapter_type"))
     if explicit_adapter_type in _GRAPH_RUNTIME_TRIGGER_ADAPTER_TYPES:
@@ -229,6 +284,14 @@ def spec_uses_graph_runtime(spec_dict: Mapping[str, Any]) -> bool:
     if not isinstance(jobs, list):
         return False
     pending = [job for job in jobs if isinstance(job, Mapping)]
+    if (
+        len(pending) == 1
+        and (
+            bool(spec_dict.get("graph_runtime_submit"))
+            or _single_job_prompt_graph_candidate(pending[0])
+        )
+    ):
+        return True
     while pending:
         job = pending.pop()
         if _graph_control_marker(job):
@@ -322,20 +385,30 @@ def _compile_llm_inputs(job: Mapping[str, Any], *, display_name: str) -> dict[st
     inputs = dict(job.get("inputs") or {}) if _is_mapping(job.get("inputs")) else {}
     prompt = _as_text(job.get("prompt"))
     system_prompt = _as_text(job.get("system_prompt"))
-    if system_prompt:
-        inputs["messages"] = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt or display_name},
-        ]
-    elif prompt:
+    if prompt:
         inputs["prompt"] = prompt
+    if system_prompt:
+        inputs["system_prompt"] = system_prompt
     provider_slug, model_slug = _provider_and_model(job.get("model"))
-    if provider_slug:
-        inputs.setdefault("provider_slug", provider_slug)
-    if model_slug:
-        inputs.setdefault("model_slug", model_slug)
+    agent_provider_slug, agent_model_slug = _concrete_provider_and_model(job.get("agent"))
+    chosen_provider_slug = provider_slug or agent_provider_slug
+    if chosen_provider_slug:
+        inputs.setdefault("provider_slug", chosen_provider_slug)
+    chosen_model_slug = model_slug or agent_model_slug
+    if chosen_model_slug:
+        inputs.setdefault("model_slug", chosen_model_slug)
     elif _as_text(job.get("model")):
         inputs.setdefault("model_slug", _as_text(job.get("model")))
+    agent_slug = _as_text(job.get("agent"))
+    if agent_slug:
+        inputs.setdefault("agent_slug", agent_slug)
+    for field_name in ("timeout", "max_tokens", "temperature"):
+        value = job.get(field_name)
+        if value is not None:
+            inputs.setdefault(field_name, value)
+    write_scope = _job_write_scope(job)
+    if write_scope:
+        inputs.setdefault("scope_write", write_scope)
     inputs.setdefault("task_type", _task_type_for_job(job))
     inputs.setdefault("task_name", display_name)
     return inputs
@@ -386,13 +459,136 @@ def _compile_regular_node_inputs(
     adapter_type: str,
     display_name: str,
 ) -> dict[str, Any]:
-    if adapter_type == "llm_task":
+    if adapter_type in {"llm_task", "cli_llm"}:
         return _compile_llm_inputs(job, display_name=display_name)
     if adapter_type == "api_task":
         return _compile_api_inputs(job, display_name=display_name)
     inputs = dict(job.get("inputs") or {}) if _is_mapping(job.get("inputs")) else {}
     inputs.setdefault("task_name", display_name)
     return inputs
+
+
+def _compile_single_prompt_dispatch_graph(
+    state: _CompileState,
+    *,
+    job: Mapping[str, Any],
+) -> None:
+    label = _job_label(job, fallback="run")
+    display_name = _display_name(job, fallback=label)
+    adapter_type = _graph_adapter_type(job)
+    if adapter_type not in {"cli_llm", "llm_task"}:
+        raise GraphWorkflowCompileError(
+            "workflow.graph_job_unsupported",
+            "single prompt graph expansion only supports cli_llm and llm_task jobs",
+            details={"label": label, "adapter_type": adapter_type},
+        )
+    _graph_regular_job_supported(job)
+
+    write_scope = _job_write_scope(job)
+    read_scope = _job_read_scope(job)
+    verify_refs = _job_verify_refs(job)
+    workdir = _as_text(job.get("workdir"))
+    system_prompt = _as_text(job.get("system_prompt"))
+    prompt = _as_text(job.get("prompt")) or display_name
+
+    llm_inputs = _compile_regular_node_inputs(
+        job,
+        adapter_type=adapter_type,
+        display_name=display_name,
+    )
+    context_inputs: dict[str, Any] = {
+        "task_name": f"{display_name} context",
+        "prompt": prompt,
+    }
+    if read_scope:
+        context_inputs["scope_read"] = read_scope
+    if write_scope:
+        context_inputs["scope_write"] = write_scope
+    if workdir:
+        context_inputs["workdir"] = workdir
+    context_sections = job.get("context_sections")
+    if isinstance(context_sections, list) and context_sections:
+        context_inputs["context_sections"] = _clone_json(context_sections)
+    if system_prompt:
+        context_inputs["system_prompt"] = system_prompt
+    for field_name in ("provider_slug", "model_slug"):
+        value = llm_inputs.get(field_name)
+        if isinstance(value, str) and value.strip():
+            context_inputs[field_name] = value
+
+    context_node_id = f"{label}__context"
+    parser_node_id = f"{label}__parser"
+    state.add_node(
+        node_id=context_node_id,
+        adapter_type="context_compiler",
+        display_name=f"{display_name} context",
+        inputs=context_inputs,
+    )
+    state.add_node(
+        node_id=label,
+        adapter_type=adapter_type,
+        display_name=display_name,
+        inputs=llm_inputs,
+        expected_outputs=(
+            dict(job.get("expected_outputs"))
+            if _is_mapping(job.get("expected_outputs"))
+            else {}
+        ),
+    )
+    state.add_edge(
+        from_node_id=context_node_id,
+        to_node_id=label,
+        payload_mapping={"prompt": "user_message", "system_prompt": "system_message"},
+    )
+    state.add_node(
+        node_id=parser_node_id,
+        adapter_type="output_parser",
+        display_name="parse output",
+        inputs={
+            "task_name": "parse output",
+            "scope_write": write_scope,
+        },
+    )
+    state.add_edge(
+        from_node_id=label,
+        to_node_id=parser_node_id,
+        payload_mapping={"completion": "completion"},
+    )
+
+    previous_node_id = parser_node_id
+    if write_scope and workdir:
+        writer_node_id = f"{label}__writer"
+        state.add_node(
+            node_id=writer_node_id,
+            adapter_type="file_writer",
+            display_name="write files",
+            inputs={
+                "task_name": "write files",
+                "workspace_root": workdir,
+            },
+        )
+        state.add_edge(
+            from_node_id=parser_node_id,
+            to_node_id=writer_node_id,
+            payload_mapping={"code_blocks": "code_blocks"},
+        )
+        previous_node_id = writer_node_id
+
+    if verify_refs:
+        verifier_node_id = f"{label}__verifier"
+        verifier_inputs: dict[str, Any] = {
+            "task_name": "verify",
+            "bindings": verify_refs,
+        }
+        if workdir:
+            verifier_inputs["workdir"] = workdir
+        state.add_node(
+            node_id=verifier_node_id,
+            adapter_type="verifier",
+            display_name="verify",
+            inputs=verifier_inputs,
+        )
+        state.add_edge(from_node_id=previous_node_id, to_node_id=verifier_node_id)
 
 
 def _job_label(job: Mapping[str, Any], *, fallback: str) -> str:
@@ -545,202 +741,217 @@ def compile_graph_workflow_request(
             "jobs entries must all be objects for graph-capable specs",
         )
 
-    top_label_to_node_id: dict[str, str] = {}
-    top_level_by_label: dict[str, Mapping[str, Any]] = {}
-    branch_terminals_by_operator: dict[str, tuple[str, ...]] = {}
-    for index, job in enumerate(top_level_jobs, start=1):
-        label = _job_label(job, fallback=f"job_{index}")
-        if label in top_label_to_node_id:
+    if (
+        len(top_level_jobs) == 1
+        and (
+            bool(spec_dict.get("graph_runtime_submit"))
+            or _single_job_prompt_graph_candidate(top_level_jobs[0])
+        )
+    ):
+        if not _single_job_prompt_graph_candidate(top_level_jobs[0]):
             raise GraphWorkflowCompileError(
-                "workflow.graph_invalid",
-                f"duplicate top-level job label {label!r}",
+                "workflow.graph_job_unsupported",
+                "single-job graph submission requires a prompt-backed cli_llm/llm_task job or a concrete provider/model route",
+                details={"label": top_level_jobs[0].get("label")},
             )
-        top_label_to_node_id[label] = label
-        top_level_by_label[label] = job
-
-    for index, job in enumerate(top_level_jobs, start=1):
-        label = _job_label(job, fallback=f"job_{index}")
-        display_name = _display_name(job, fallback=label)
-        adapter_type = _graph_adapter_type(job)
-        if adapter_type != "control_operator":
-            _graph_regular_job_supported(job)
-        inputs: dict[str, Any]
-        if adapter_type == "control_operator":
-            operator = job.get("operator")
-            if not _is_mapping(operator):
+        _compile_single_prompt_dispatch_graph(state, job=top_level_jobs[0])
+    else:
+        top_label_to_node_id: dict[str, str] = {}
+        top_level_by_label: dict[str, Mapping[str, Any]] = {}
+        branch_terminals_by_operator: dict[str, tuple[str, ...]] = {}
+        for index, job in enumerate(top_level_jobs, start=1):
+            label = _job_label(job, fallback=f"job_{index}")
+            if label in top_label_to_node_id:
                 raise GraphWorkflowCompileError(
                     "workflow.graph_invalid",
-                    "control_operator jobs require an operator mapping",
-                    details={"label": label},
+                    f"duplicate top-level job label {label!r}",
                 )
-            inputs = {
-                "task_name": display_name,
-                "operator": dict(operator),
-            }
-            dependency_mode = _as_text(job.get("dependency_mode"))
-            if dependency_mode:
-                inputs["dependency_mode"] = dependency_mode
-        else:
-            inputs = _compile_regular_node_inputs(
-                job,
+            top_label_to_node_id[label] = label
+            top_level_by_label[label] = job
+
+        for index, job in enumerate(top_level_jobs, start=1):
+            label = _job_label(job, fallback=f"job_{index}")
+            display_name = _display_name(job, fallback=label)
+            adapter_type = _graph_adapter_type(job)
+            if adapter_type != "control_operator":
+                _graph_regular_job_supported(job)
+            inputs: dict[str, Any]
+            if adapter_type == "control_operator":
+                operator = job.get("operator")
+                if not _is_mapping(operator):
+                    raise GraphWorkflowCompileError(
+                        "workflow.graph_invalid",
+                        "control_operator jobs require an operator mapping",
+                        details={"label": label},
+                    )
+                inputs = {
+                    "task_name": display_name,
+                    "operator": dict(operator),
+                }
+                dependency_mode = _as_text(job.get("dependency_mode"))
+                if dependency_mode:
+                    inputs["dependency_mode"] = dependency_mode
+            else:
+                inputs = _compile_regular_node_inputs(
+                    job,
+                    adapter_type=adapter_type,
+                    display_name=display_name,
+                )
+                dependency_mode = _as_text(job.get("dependency_mode"))
+                if dependency_mode:
+                    inputs["dependency_mode"] = dependency_mode
+            state.add_node(
+                node_id=label,
                 adapter_type=adapter_type,
                 display_name=display_name,
+                inputs=inputs,
+                expected_outputs=(
+                    dict(job.get("expected_outputs"))
+                    if _is_mapping(job.get("expected_outputs"))
+                    else {}
+                ),
             )
-            dependency_mode = _as_text(job.get("dependency_mode"))
-            if dependency_mode:
-                inputs["dependency_mode"] = dependency_mode
-        state.add_node(
-            node_id=label,
-            adapter_type=adapter_type,
-            display_name=display_name,
-            inputs=inputs,
-            expected_outputs=(
-                dict(job.get("expected_outputs"))
-                if _is_mapping(job.get("expected_outputs"))
-                else {}
-            ),
-        )
 
-        if adapter_type != "control_operator":
-            continue
+            if adapter_type != "control_operator":
+                continue
 
-        operator = dict(job.get("operator") or {})
-        operator_kind = str(operator.get("kind") or "").strip()
-        if operator_kind in _STATIC_BRANCHING_KINDS:
-            branches = job.get("branches")
-            if not _is_mapping(branches):
-                raise GraphWorkflowCompileError(
-                    "workflow.graph_invalid",
-                    "if/switch control jobs require a branches mapping",
-                    details={"label": label, "operator_kind": operator_kind},
-                )
-            defined_branches = {
-                branch_name: branch_jobs
-                for branch_name, branch_jobs in dict(branches).items()
-                if isinstance(branch_jobs, list)
-            }
-            if operator_kind == "switch":
-                case_branches = {
-                    str(case.get("branch") or "").strip()
-                    for case in operator.get("cases") or ()
-                    if isinstance(case, Mapping) and str(case.get("branch") or "").strip()
-                }
-                missing = sorted(branch for branch in defined_branches if branch not in case_branches)
-                if missing:
+            operator = dict(job.get("operator") or {})
+            operator_kind = str(operator.get("kind") or "").strip()
+            if operator_kind in _STATIC_BRANCHING_KINDS:
+                branches = job.get("branches")
+                if not _is_mapping(branches):
                     raise GraphWorkflowCompileError(
                         "workflow.graph_invalid",
-                        "switch branches must match operator.cases",
-                        details={"label": label, "unexpected_branches": missing},
+                        "if/switch control jobs require a branches mapping",
+                        details={"label": label, "operator_kind": operator_kind},
                     )
-            branch_terminal_ids: list[str] = []
-            for branch_name, branch_jobs in defined_branches.items():
-                roots, terminals = _compile_nested_sequence(
+                defined_branches = {
+                    branch_name: branch_jobs
+                    for branch_name, branch_jobs in dict(branches).items()
+                    if isinstance(branch_jobs, list)
+                }
+                if operator_kind == "switch":
+                    case_branches = {
+                        str(case.get("branch") or "").strip()
+                        for case in operator.get("cases") or ()
+                        if isinstance(case, Mapping) and str(case.get("branch") or "").strip()
+                    }
+                    missing = sorted(branch for branch in defined_branches if branch not in case_branches)
+                    if missing:
+                        raise GraphWorkflowCompileError(
+                            "workflow.graph_invalid",
+                            "switch branches must match operator.cases",
+                            details={"label": label, "unexpected_branches": missing},
+                        )
+                branch_terminal_ids: list[str] = []
+                for branch_name, branch_jobs in defined_branches.items():
+                    roots, terminals = _compile_nested_sequence(
+                        state,
+                        jobs=tuple(
+                            branch_job
+                            for branch_job in branch_jobs
+                            if isinstance(branch_job, Mapping)
+                        ),
+                        owner_node_id=label,
+                        scope_label=branch_name,
+                        template_owner_node_id=None,
+                    )
+                    for root_id in roots:
+                        state.add_edge(
+                            from_node_id=label,
+                            to_node_id=root_id,
+                            release_condition={"branch": branch_name},
+                        )
+                    branch_terminal_ids.extend(terminals)
+                branch_terminals_by_operator[label] = tuple(dict.fromkeys(branch_terminal_ids))
+                continue
+
+            template_jobs = job.get("template_jobs")
+            if operator_kind in {"foreach", "batch", "repeat_until", "while"}:
+                if not isinstance(template_jobs, list):
+                    raise GraphWorkflowCompileError(
+                        "workflow.graph_invalid",
+                        "dynamic control operators require template_jobs",
+                        details={"label": label, "operator_kind": operator_kind},
+                    )
+                _compile_nested_sequence(
                     state,
                     jobs=tuple(
-                        branch_job
-                        for branch_job in branch_jobs
-                        if isinstance(branch_job, Mapping)
+                        template_job
+                        for template_job in template_jobs
+                        if isinstance(template_job, Mapping)
                     ),
                     owner_node_id=label,
-                    scope_label=branch_name,
-                    template_owner_node_id=None,
+                    scope_label="template",
+                    template_owner_node_id=label,
                 )
-                for root_id in roots:
-                    state.add_edge(
-                        from_node_id=label,
-                        to_node_id=root_id,
-                        release_condition={"branch": branch_name},
-                    )
-                branch_terminal_ids.extend(terminals)
-            branch_terminals_by_operator[label] = tuple(dict.fromkeys(branch_terminal_ids))
-            continue
+                continue
 
-        template_jobs = job.get("template_jobs")
-        if operator_kind in {"foreach", "batch", "repeat_until", "while"}:
-            if not isinstance(template_jobs, list):
-                raise GraphWorkflowCompileError(
-                    "workflow.graph_invalid",
-                    "dynamic control operators require template_jobs",
-                    details={"label": label, "operator_kind": operator_kind},
-                )
-            _compile_nested_sequence(
-                state,
-                jobs=tuple(
-                    template_job
-                    for template_job in template_jobs
-                    if isinstance(template_job, Mapping)
-                ),
-                owner_node_id=label,
-                scope_label="template",
-                template_owner_node_id=label,
-            )
-            continue
-
-    for top_job in top_level_jobs:
-        label = _job_label(top_job, fallback="job")
-        dependency_specs = _dependency_specs(top_job)
-        if not dependency_specs:
-            continue
-        depends_on = [str(dependency["label"]) for dependency in dependency_specs]
-        for dependency in dependency_specs:
-            dependency_label = str(dependency["label"])
-            dependency_node_id = top_label_to_node_id.get(dependency_label)
-            if dependency_node_id is None:
-                raise GraphWorkflowCompileError(
-                    "workflow.graph_invalid",
-                    f"unknown top-level dependency {dependency_label!r}",
-                    details={"label": label},
-                )
-            dependency_job = top_level_by_label[dependency_label]
-            dependency_kind = ""
-            if _graph_adapter_type(dependency_job) == "control_operator":
-                dependency_kind = str(
-                    (dependency_job.get("operator") or {}).get("kind") or ""
-                ).strip()
-            if dependency_kind in _STATIC_BRANCHING_KINDS:
-                branch_terminals = branch_terminals_by_operator.get(dependency_label, ())
-                if not branch_terminals:
+        for top_job in top_level_jobs:
+            label = _job_label(top_job, fallback="job")
+            dependency_specs = _dependency_specs(top_job)
+            if not dependency_specs:
+                continue
+            depends_on = [str(dependency["label"]) for dependency in dependency_specs]
+            for dependency in dependency_specs:
+                dependency_label = str(dependency["label"])
+                dependency_node_id = top_label_to_node_id.get(dependency_label)
+                if dependency_node_id is None:
                     raise GraphWorkflowCompileError(
                         "workflow.graph_invalid",
-                        "branching control operators must expose at least one branch terminal",
-                        details={"label": label, "depends_on": dependency_label},
+                        f"unknown top-level dependency {dependency_label!r}",
+                        details={"label": label},
                     )
-                if len(depends_on) > 1:
-                    raise GraphWorkflowCompileError(
-                        "workflow.graph_job_unsupported",
-                        "jobs that continue after if/switch cannot mix that dependency with other parents yet",
-                        details={"label": label, "depends_on": depends_on},
-                    )
-                target_node = next(node for node in state.nodes if node.node_id == label)
-                if str(target_node.inputs.get("dependency_mode") or "all").strip() != "any":
-                    target_index = state.nodes.index(target_node)
-                    state.nodes[target_index] = WorkflowNodeContract(
-                        node_id=target_node.node_id,
-                        node_type=target_node.node_type,
-                        adapter_type=target_node.adapter_type,
-                        display_name=target_node.display_name,
-                        inputs={**dict(target_node.inputs), "dependency_mode": "any"},
-                        expected_outputs=dict(target_node.expected_outputs),
-                        success_condition=dict(target_node.success_condition),
-                        failure_behavior=dict(target_node.failure_behavior),
-                        authority_requirements=dict(target_node.authority_requirements),
-                        execution_boundary=dict(target_node.execution_boundary),
-                        position_index=target_node.position_index,
-                        template_owner_node_id=target_node.template_owner_node_id,
-                    )
-                for branch_terminal_id in branch_terminals:
-                    state.add_edge(from_node_id=branch_terminal_id, to_node_id=label)
-                continue
-            state.add_edge(
-                from_node_id=dependency_node_id,
-                to_node_id=label,
-                edge_type=str(dependency.get("edge_type") or "after_success"),
-                release_condition=(
-                    dict(dependency.get("release_condition"))
-                    if _is_mapping(dependency.get("release_condition"))
-                    else {"kind": "always"}
-                ),
-            )
+                dependency_job = top_level_by_label[dependency_label]
+                dependency_kind = ""
+                if _graph_adapter_type(dependency_job) == "control_operator":
+                    dependency_kind = str(
+                        (dependency_job.get("operator") or {}).get("kind") or ""
+                    ).strip()
+                if dependency_kind in _STATIC_BRANCHING_KINDS:
+                    branch_terminals = branch_terminals_by_operator.get(dependency_label, ())
+                    if not branch_terminals:
+                        raise GraphWorkflowCompileError(
+                            "workflow.graph_invalid",
+                            "branching control operators must expose at least one branch terminal",
+                            details={"label": label, "depends_on": dependency_label},
+                        )
+                    if len(depends_on) > 1:
+                        raise GraphWorkflowCompileError(
+                            "workflow.graph_job_unsupported",
+                            "jobs that continue after if/switch cannot mix that dependency with other parents yet",
+                            details={"label": label, "depends_on": depends_on},
+                        )
+                    target_node = next(node for node in state.nodes if node.node_id == label)
+                    if str(target_node.inputs.get("dependency_mode") or "all").strip() != "any":
+                        target_index = state.nodes.index(target_node)
+                        state.nodes[target_index] = WorkflowNodeContract(
+                            node_id=target_node.node_id,
+                            node_type=target_node.node_type,
+                            adapter_type=target_node.adapter_type,
+                            display_name=target_node.display_name,
+                            inputs={**dict(target_node.inputs), "dependency_mode": "any"},
+                            expected_outputs=dict(target_node.expected_outputs),
+                            success_condition=dict(target_node.success_condition),
+                            failure_behavior=dict(target_node.failure_behavior),
+                            authority_requirements=dict(target_node.authority_requirements),
+                            execution_boundary=dict(target_node.execution_boundary),
+                            position_index=target_node.position_index,
+                            template_owner_node_id=target_node.template_owner_node_id,
+                        )
+                    for branch_terminal_id in branch_terminals:
+                        state.add_edge(from_node_id=branch_terminal_id, to_node_id=label)
+                    continue
+                state.add_edge(
+                    from_node_id=dependency_node_id,
+                    to_node_id=label,
+                    edge_type=str(dependency.get("edge_type") or "after_success"),
+                    release_condition=(
+                        dict(dependency.get("release_condition"))
+                        if _is_mapping(dependency.get("release_condition"))
+                        else {"kind": "always"}
+                    ),
+                )
 
     spec_fingerprint = hashlib.sha256(
         json.dumps(_clone_json(spec_dict), sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")

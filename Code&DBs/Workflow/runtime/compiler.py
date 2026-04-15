@@ -64,6 +64,7 @@ from runtime.compiler_references import (
     workflow_id_for_title as _workflow_id_for_title_impl,
 )
 from runtime.integrations.display_names import display_name_for_integration
+from storage.postgres.validators import PostgresConfigurationError
 
 logger = logging.getLogger(__name__)
 
@@ -71,11 +72,6 @@ _REFRESHABLE_COMPILE_INDEX_REASON_CODES = {
     "compile_index.snapshot_missing",
     "compile_index.snapshot_stale",
 }
-_DEFAULT_REPO_LOCAL_DATABASE_URL = os.environ.get(
-    "WORKFLOW_DATABASE_URL",
-    "postgresql://test@localhost:5432/praxis_test",
-)
-
 _COMPILER_ROUTE_HINTS_CACHE: tuple[tuple[str, str], ...] = ()
 _COMPILER_SURFACE_REVISION_CACHE: str | None = None
 
@@ -122,12 +118,12 @@ def compile_prose(
     except CompileIndexAuthorityError as exc:
         logger.warning("Failed to load compile index snapshot: %s", exc)
         raise RuntimeError(f"{exc.reason_code}: {exc}") from exc
+    except PostgresConfigurationError as exc:
+        logger.warning("Failed to load compiler context: %s", exc)
+        raise RuntimeError(f"{exc.reason_code}: {exc}") from exc
     except Exception as exc:
         logger.warning("Failed to load compiler context: %s", exc)
-        reason = f"compile_index authority missing: {exc}"
-        errors.append(reason)
-        conn = None
-        compile_index = _fallback_compile_index_snapshot(reason=reason)
+        raise RuntimeError(f"compile_index.load_failed: {exc}") from exc
 
     llm_requested = _compiler_llm_enabled() if enable_llm is None else enable_llm
     compile_provenance = _definition_compile_provenance(
@@ -709,8 +705,6 @@ def _get_connection():
 
 def _hydrate_env_from_dotenv() -> None:
     source = _read_compiler_env_file(_compiler_repo_root() / ".env")
-    if not os.environ.get("WORKFLOW_DATABASE_URL", "").strip():
-        source.setdefault("WORKFLOW_DATABASE_URL", _DEFAULT_REPO_LOCAL_DATABASE_URL)
     for key, value in source.items():
         if value and not os.environ.get(key, "").strip():
             os.environ[key] = value

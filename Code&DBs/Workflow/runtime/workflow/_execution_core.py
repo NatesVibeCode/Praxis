@@ -84,6 +84,39 @@ def _spec_snapshot_job_for_verify(
             return dict(job)
     return {}
 
+
+def _approval_checkpoint_for_job(
+    conn: "SyncPostgresConnection",
+    *,
+    run_id: str,
+    workflow_id: str,
+    job_id: int,
+    label: str,
+    question: str,
+) -> dict[str, Any]:
+    checkpoint_card_id = f"workflow_job:{job_id}"
+    rows = conn.execute(
+        """SELECT checkpoint_id, card_id, model_id, authority_level, question, status, decided_by, decided_at, notes, created_at
+           FROM authority_checkpoints
+           WHERE card_id = $1 AND model_id = $2
+           ORDER BY created_at DESC
+           LIMIT 1""",
+        checkpoint_card_id,
+        workflow_id,
+    )
+    if rows:
+        return dict(rows[0])
+
+    from runtime.canonical_checkpoints import request_authority_checkpoint
+
+    return request_authority_checkpoint(
+        conn,
+        card_id=checkpoint_card_id,
+        model_id=workflow_id or run_id,
+        authority_level="approval",
+        question=question or f"Approve job {label} before execution.",
+    )
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["execute_job"]
@@ -274,18 +307,70 @@ def execute_job(
     if execution_bundle_text:
         full_prompt = f"{full_prompt}\n\n{execution_bundle_text}" if full_prompt else execution_bundle_text
 
+    workflow_id_for_run = str(_workflow_run_envelope(run_row).get("workflow_id") or "").strip() or run_id
+    approval_required = bool(execution_bundle.get("approval_required")) if isinstance(execution_bundle, dict) else False
+    if approval_required:
+        approval_question = str(execution_bundle.get("approval_question") or "").strip() if isinstance(execution_bundle, dict) else ""
+        checkpoint = _approval_checkpoint_for_job(
+            conn,
+            run_id=run_id,
+            workflow_id=workflow_id_for_run,
+            job_id=int(job_id),
+            label=label,
+            question=approval_question,
+        )
+        checkpoint_status = str(checkpoint.get("status") or "").strip().lower()
+        if checkpoint_status == "approved":
+            logger.info(
+                "Approval checkpoint already approved for %s/%s; continuing",
+                run_id,
+                label,
+            )
+        elif checkpoint_status in {"rejected", "escalated"}:
+            duration_ms = int((time.monotonic() - start) * 1000)
+            complete_job(
+                conn,
+                job_id,
+                status="failed",
+                error_code="human_rejected" if checkpoint_status == "rejected" else "authority_escalated",
+                duration_ms=duration_ms,
+                stdout_preview=str(checkpoint.get("notes") or approval_question or "Approval checkpoint was not approved")[:2000],
+            )
+            return
+        else:
+            approval_note = approval_question or f"Approve job {label} before execution."
+            conn.execute(
+                """UPDATE workflow_jobs
+                   SET status = 'approval_required',
+                       claimed_by = NULL,
+                       claimed_at = NULL,
+                       heartbeat_at = NULL,
+                       started_at = NULL,
+                       attempt = GREATEST(attempt - 1, 0),
+                       last_error_code = 'approval_required',
+                       stdout_preview = $2
+                   WHERE id = $1
+                     AND status IN ('claimed', 'running')""",
+                job_id,
+                approval_note[:2000],
+            )
+            logger.info(
+                "Job %d (%s) paused for approval checkpoint %s",
+                job_id,
+                label,
+                checkpoint.get("checkpoint_id"),
+            )
+            return
+
     _persist_runtime_context_for_job(
         conn,
         run_id=run_id,
-        workflow_id=str(_workflow_run_envelope(run_row).get("workflow_id") or "").strip() or None,
+        workflow_id=workflow_id_for_run,
         job_label=label,
         execution_context_shard=execution_context_shard,
         execution_bundle=execution_bundle,
     )
 
-    workflow_id_for_run = (
-        str(_workflow_run_envelope(run_row).get("workflow_id") or "").strip() or None
-    )
     try:
         _capture_submission_baseline_if_required(
             conn,
@@ -313,7 +398,7 @@ def execute_job(
     transport_kind = transport.transport_kind
 
     try:
-        if transport_kind == "cli":
+        if transport_kind in {"cli", "mcp"}:
             from runtime.agent_spawner import AgentSpawner
 
             readiness = AgentSpawner().preflight(agent_slug)

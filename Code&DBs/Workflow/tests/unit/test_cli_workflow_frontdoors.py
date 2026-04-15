@@ -97,13 +97,53 @@ def test_notifications_drain_frontdoor_uses_live_notification_path(
     assert stdout.getvalue().strip() == "drained via notifications"
 
 
+def test_top_level_help_mentions_routes_alias() -> None:
+    stdout = StringIO()
+
+    assert workflow_cli_main(["--help"], stdout=stdout) == 0
+    rendered = stdout.getvalue()
+    assert "workflow routes" in rendered
+
+
+def test_commands_index_mentions_routes_alias() -> None:
+    stdout = StringIO()
+
+    assert workflow_cli_main(["commands"], stdout=stdout) == 0
+    rendered = stdout.getvalue()
+    assert "workflow routes" in rendered
+    assert "Alias for workflow API route discovery" in rendered
+
+
 def test_api_help_mentions_route_discovery() -> None:
     stdout = StringIO()
 
-    assert workflow_cli_main(["api", "--help"], stdout=stdout) == 2
+    assert workflow_cli_main(["api", "--help"], stdout=stdout) == 0
     rendered = stdout.getvalue()
     assert "workflow api [routes|--host HOST|--port PORT]" in rendered
     assert "routes        show and filter the live HTTP route catalog without starting the server" in rendered
+    assert "Flat alias: workflow routes" in rendered
+    assert "Discovery shortcuts:" in rendered
+    assert "workflow help routes" in rendered
+
+
+def test_routes_help_alias_mentions_route_discovery() -> None:
+    stdout = StringIO()
+
+    assert workflow_cli_main(["help", "routes"], stdout=stdout) == 0
+    rendered = stdout.getvalue()
+    assert "workflow api [routes|--host HOST|--port PORT]" in rendered
+    assert "Flat alias: workflow routes" in rendered
+    assert "workflow tools list" in rendered
+
+
+def test_api_routes_help_is_a_successful_discovery_command() -> None:
+    stdout = StringIO()
+
+    assert workflow_cli_main(["api", "routes", "--help"], stdout=stdout) == 0
+    rendered = stdout.getvalue()
+    assert "workflow routes --json" in rendered
+    assert "Discovery shortcuts:" in rendered
+    assert "workflow help routes" in rendered
 
 
 def test_api_routes_frontdoor_supports_discovery_filters(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -165,6 +205,64 @@ def test_api_routes_frontdoor_supports_discovery_filters(monkeypatch: pytest.Mon
     }
 
 
+def test_routes_alias_frontdoor_supports_discovery_filters(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_list_api_routes(**kwargs):
+        captured.update(kwargs)
+        return {
+            "count": 1,
+            "docs_url": "/docs",
+            "openapi_url": "/openapi.json",
+            "redoc_url": "/redoc",
+            "filters": {key: value for key, value in kwargs.items() if value is not None},
+            "routes": [
+                {
+                    "path": "/api/health",
+                    "methods": ["GET"],
+                    "summary": "Platform health from Postgres",
+                    "description": "Platform health from Postgres",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(rest, "list_api_routes", _fake_list_api_routes)
+    stdout = StringIO()
+
+    assert (
+        workflow_cli_main(
+            [
+                "routes",
+                "--search",
+                "health",
+                "--method",
+                "GET",
+                "--tag",
+                "platform",
+                "--path-prefix",
+                "/api",
+                "--json",
+            ],
+            stdout=stdout,
+        )
+        == 0
+    )
+
+    assert captured == {
+        "search": "health",
+        "method": "GET",
+        "tag": "platform",
+        "path_prefix": "/api",
+    }
+    payload = json.loads(stdout.getvalue())
+    assert payload["filters"] == {
+        "search": "health",
+        "method": "GET",
+        "tag": "platform",
+        "path_prefix": "/api",
+    }
+
+
 def test_api_routes_frontdoor_lists_the_live_http_surface(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         rest,
@@ -174,6 +272,16 @@ def test_api_routes_frontdoor_lists_the_live_http_surface(monkeypatch: pytest.Mo
             "docs_url": "/docs",
             "openapi_url": "/openapi.json",
             "redoc_url": "/redoc",
+            "summary": {
+                "route_count": 2,
+                "methods": [
+                    {"method": "GET", "count": 2},
+                ],
+                "tags": [
+                    {"tag": "workflow", "count": 2},
+                ],
+                "suggested_filters": {"tag": "workflow", "method": "GET"},
+            },
             "routes": [
                 {
                     "path": "/api/health",
@@ -198,6 +306,55 @@ def test_api_routes_frontdoor_lists_the_live_http_surface(monkeypatch: pytest.Mo
     assert payload["count"] == 2
     assert payload["routes"][0]["path"] == "/api/health"
     assert payload["routes"][1]["path"] == "/api/routes"
+    assert payload["summary"]["route_count"] == 2
+
+
+def test_api_routes_frontdoor_renders_route_facets(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        rest,
+        "list_api_routes",
+        lambda **_kwargs: {
+            "count": 2,
+            "docs_url": "/docs",
+            "openapi_url": "/openapi.json",
+            "redoc_url": "/redoc",
+            "summary": {
+                "route_count": 2,
+                "methods": [
+                    {"method": "GET", "count": 2},
+                    {"method": "POST", "count": 1},
+                ],
+                "tags": [
+                    {"tag": "workflow", "count": 2},
+                    {"tag": "operator", "count": 1},
+                ],
+                "suggested_filters": {"tag": "workflow", "method": "GET"},
+            },
+            "routes": [
+                {
+                    "path": "/api/health",
+                    "methods": ["GET"],
+                    "summary": "Platform health from Postgres",
+                    "description": "Platform health from Postgres",
+                },
+                {
+                    "path": "/api/routes",
+                    "methods": ["GET", "POST"],
+                    "summary": "Route catalog",
+                    "description": "Route catalog",
+                },
+            ],
+        },
+    )
+    stdout = StringIO()
+
+    assert workflow_cli_main(["api", "routes"], stdout=stdout) == 0
+
+    rendered = stdout.getvalue()
+    assert "methods: GET=2, POST=1" in rendered
+    assert "tags:    workflow=2, operator=1" in rendered
+    assert "try:    workflow api routes --tag workflow --method GET" in rendered
+    assert "workflow routes --json" in rendered
 
 
 def test_work_frontdoor_claim_and_acknowledge(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -318,6 +475,65 @@ def test_workflow_run_prompt_frontdoor_uses_prompt_compiler(monkeypatch: pytest.
     }
     assert captured["launch_kwargs"]["prompt_launch_spec"].workflow_id == "workflow_cli_prompt"
     assert captured["launch_kwargs"]["requested_by_ref"] == "workflow.run.prompt"
+
+
+def test_workflow_run_prompt_frontdoor_reports_unadmitted_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        workflow_commands,
+        "_default_prompt_provider_slug",
+        lambda: "openai",
+    )
+    monkeypatch.setattr(
+        workflow_commands,
+        "compile_prompt_launch_spec",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            ValueError(
+                "provider 'cursor' is not admitted for cli_llm; "
+                "reason: Prompt probe did not complete successfully for cursor/composer-2; "
+                "decision_ref: decision.provider-onboarding.cursor.20260415T165657Z; "
+                "known providers: cursor, google, openai"
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        workflow_commands.workflow_cli,
+        "_submit_workflow_launch",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("submit should not run")),
+    )
+    stdout = StringIO()
+
+    assert workflow_commands._run_command(
+        [
+            "-p",
+            "fix the failing prompt path",
+            "--provider",
+            "cursor",
+            "--model",
+            "composer-2",
+        ],
+        stdout=stdout,
+    ) == 2
+
+    assert "error: provider 'cursor' is not admitted for cli_llm" in stdout.getvalue()
+    assert "Prompt probe did not complete successfully for cursor/composer-2" in stdout.getvalue()
+
+
+def test_prompt_provider_help_lists_registered_providers(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        workflow_commands,
+        "_prompt_provider_choices",
+        lambda: ("cursor", "google", "openai"),
+    )
+    monkeypatch.setattr(
+        workflow_commands,
+        "_default_prompt_provider_slug",
+        lambda: "openai",
+    )
+
+    assert (
+        workflow_commands._prompt_provider_help_line()
+        == "  --provider <slug>    Registered provider: cursor, google, openai (default: openai)\n"
+    )
 
 
 def test_triggers_frontdoor_supports_list_and_create(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -484,7 +700,9 @@ def test_root_help_is_discoverable() -> None:
     rendered = stdout.getvalue()
     assert "Most used:" in rendered
     assert "workflow run <spec.json>" in rendered
+    assert "workflow mcp" in rendered
     assert "workflow native-operator instance" in rendered
+    assert "workflow help api" in rendered
     assert "workflow help commands" in rendered
     assert "workflow help <command>" in rendered
 
@@ -501,6 +719,7 @@ def test_commands_root_and_help_topic_show_the_command_index() -> None:
     assert commands_rendered == help_rendered
     assert "Command index:" in commands_rendered
     assert "workflow commands" in commands_rendered
+    assert "workflow mcp [list|search|describe|call]" in commands_rendered
     assert "workflow tools [list|search|describe|call]" in commands_rendered
 
 
@@ -525,6 +744,16 @@ def test_help_can_show_native_operator_usage() -> None:
     assert "start was removed" in rendered
 
 
+def test_help_can_show_api_usage() -> None:
+    stdout = StringIO()
+
+    assert workflow_cli_main(["help", "api"], stdout=stdout) == 0
+
+    rendered = stdout.getvalue()
+    assert "workflow api [routes|--host HOST|--port PORT]" in rendered
+    assert "routes        show and filter the live HTTP route catalog without starting the server" in rendered
+
+
 def test_native_operator_help_entrypoint_is_available() -> None:
     stdout = StringIO()
 
@@ -543,7 +772,27 @@ def test_help_can_show_command_group_usage() -> None:
     rendered = stdout.getvalue()
     assert "Tool discovery quickstart:" in rendered
     assert "workflow tools describe <tool|alias>" in rendered
-    assert "workflow query" in rendered
+    assert "unique prefix" in rendered.lower()
+
+
+def test_help_can_show_mcp_usage() -> None:
+    tools_stdout = StringIO()
+    mcp_stdout = StringIO()
+
+    assert workflow_cli_main(["tools"], stdout=tools_stdout) == 0
+    assert workflow_cli_main(["help", "mcp"], stdout=mcp_stdout) == 0
+
+    assert mcp_stdout.getvalue() == tools_stdout.getvalue()
+
+
+def test_mcp_root_alias_routes_to_tools_quickstart() -> None:
+    tools_stdout = StringIO()
+    mcp_stdout = StringIO()
+
+    assert workflow_cli_main(["tools"], stdout=tools_stdout) == 0
+    assert workflow_cli_main(["mcp"], stdout=mcp_stdout) == 0
+
+    assert mcp_stdout.getvalue() == tools_stdout.getvalue()
 
 
 def test_help_rejects_unknown_topic() -> None:
@@ -553,6 +802,7 @@ def test_help_rejects_unknown_topic() -> None:
 
     rendered = stdout.getvalue()
     assert "unknown help topic: nope" in rendered
+    assert "did you mean:" in rendered
     assert "workflow help run" in rendered
 
 
@@ -563,7 +813,9 @@ def test_unknown_root_command_suggests_help() -> None:
 
     rendered = stdout.getvalue()
     assert "unknown command: nope" in rendered
+    assert "did you mean:" in rendered
     assert "workflow help <command>" in rendered
+    assert "workflow help api" in rendered
 
 
 def test_run_frontdoor_forwards_fresh_launch_intent(

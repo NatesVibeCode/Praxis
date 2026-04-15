@@ -76,6 +76,118 @@ def _tool_search_rank(definition: McpToolDefinition, needle: str) -> tuple[int, 
     return best_rank
 
 
+def _tool_lookup_rank(definition: McpToolDefinition, needle: str) -> tuple[int, int, int, str] | None:
+    normalized_needle = _normalize_search_text(needle)
+    if not normalized_needle:
+        return None
+
+    ranked_fields = [
+        definition.name,
+        definition.display_name,
+        definition.cli_recommended_alias or "",
+        definition.cli_entrypoint,
+        definition.cli_describe_command,
+    ]
+    best_rank: tuple[int, int, int, str] | None = None
+    for field_rank, raw_text in enumerate(ranked_fields):
+        normalized_text = _normalize_search_text(raw_text)
+        if not normalized_text:
+            continue
+        if normalized_text == normalized_needle:
+            return (0, field_rank, 0, definition.name)
+        if normalized_text.startswith(normalized_needle):
+            candidate = (1, field_rank, 0, definition.name)
+            if best_rank is None or candidate < best_rank:
+                best_rank = candidate
+            continue
+        index = normalized_text.find(normalized_needle)
+        if index >= 0:
+            candidate = (2, field_rank, index, definition.name)
+            if best_rank is None or candidate < best_rank:
+                best_rank = candidate
+    return best_rank
+
+
+def _resolve_tool_definition(tool_name: str) -> tuple[McpToolDefinition | None, list[McpToolDefinition]]:
+    exact_definition = get_definition(tool_name)
+    if exact_definition is not None:
+        return exact_definition, []
+
+    ranked_candidates: list[tuple[tuple[int, int, int, str], McpToolDefinition]] = []
+    for definition in get_tool_catalog().values():
+        rank = _tool_lookup_rank(definition, tool_name)
+        if rank is not None:
+            ranked_candidates.append((rank, definition))
+
+    ranked_candidates.sort(key=lambda item: item[0])
+    candidates: list[McpToolDefinition] = []
+    seen: set[str] = set()
+    for _, definition in ranked_candidates:
+        if definition.name in seen:
+            continue
+        seen.add(definition.name)
+        candidates.append(definition)
+
+    if len(candidates) == 1:
+        return candidates[0], []
+    return None, candidates
+
+
+def _render_tool_lookup_failure(
+    tool_name: str,
+    candidates: list[McpToolDefinition],
+    *,
+    stdout: TextIO,
+) -> int:
+    if not candidates:
+        stdout.write(f"unknown tool: {tool_name}\n")
+        stdout.write("tip: run `workflow tools search <text>` to browse matching tools.\n")
+        return 2
+
+    stdout.write(f"ambiguous tool name: {tool_name}\n")
+    stdout.write("did you mean:\n")
+    for definition in candidates[:5]:
+        stdout.write(f"  {definition.name} [{format_badges(definition)}]\n")
+        stdout.write(f"    entrypoint: {definition.cli_entrypoint}\n")
+        stdout.write(f"    describe: {definition.cli_describe_command}\n")
+    stdout.write("tip: add more characters or run `workflow tools search <text>`.\n")
+    return 2
+
+
+def _render_tools_search_no_matches(
+    query: str,
+    *,
+    exact: bool,
+    surface: str | None,
+    tier: str,
+    risk: str,
+    stdout: TextIO,
+) -> None:
+    if exact:
+        stdout.write(f"no exact matches found for {query}\n")
+    else:
+        target = f"{query!r}" if query else "the current filters"
+        stdout.write(f"no tools matched {target}\n")
+
+    active_filters: list[str] = []
+    if surface:
+        active_filters.append(f"--surface {surface}")
+    if tier != "all":
+        active_filters.append(f"--tier {tier}")
+    if risk != "all":
+        active_filters.append(f"--risk {risk}")
+    if active_filters:
+        stdout.write(f"active filters: {' '.join(active_filters)}\n")
+
+    stdout.write("tips:\n")
+    stdout.write("  workflow tools list --json\n")
+    stdout.write("  workflow tools search <broader text>\n")
+    if exact:
+        stdout.write("  add --exact only when you already know the alias, tool name, or entrypoint\n")
+    if active_filters:
+        stdout.write("  rerun without one or more filters to widen the catalog slice\n")
+
+
 def _tools_quickstart_text() -> str:
     definitions = _filtered_tools()
     alias_definitions = [definition for definition in definitions if definition.cli_recommended_alias]
@@ -106,12 +218,14 @@ def _tools_quickstart_text() -> str:
         [
             f"Catalog size: {len(definitions)} tools",
             "Tip: run `workflow tools list --json` for machine-readable discovery.",
-            "Tip: run `workflow tools search --surface query --tier stable` to browse a filtered slice.",
-            "Tip: add `--exact` when you already know the alias, tool name, or entrypoint.",
-            "Tip: single-result searches print the direct describe and entrypoint commands next.",
-            "Tip: search results are relevance-ranked; exact alias and entrypoint matches rise first.",
-            "Tip: run `workflow help <alias>` or `workflow <alias> --help` for alias-specific usage.",
-        ]
+        "Tip: run `workflow tools search --surface query --tier stable` to browse a filtered slice.",
+        "Tip: add `--exact` when you already know the alias, tool name, or entrypoint.",
+        "Tip: if a search returns no matches, the CLI prints broadening hints instead of leaving you at zero.",
+        "Tip: `workflow tools describe` and `workflow tools call` also accept a unique prefix of the alias, tool name, or entrypoint.",
+        "Tip: single-result searches print the direct describe and entrypoint commands next.",
+        "Tip: search results are relevance-ranked; exact alias and entrypoint matches rise first.",
+        "Tip: run `workflow help <alias>` or `workflow <alias> --help` for alias-specific usage.",
+    ]
     )
     return "\n".join(lines)
 
@@ -289,7 +403,26 @@ def _tools_search_command(args: list[str], *, stdout: TextIO) -> int:
         return 0
 
     if exact and not definitions:
-        stdout.write("no exact matches found\n")
+        _render_tools_search_no_matches(
+            query,
+            exact=True,
+            surface=surface,
+            tier=tier,
+            risk=risk,
+            stdout=stdout,
+        )
+        stdout.write("\n0 tool(s)\n")
+        return 0
+    if not definitions:
+        _render_tools_search_no_matches(
+            query,
+            exact=False,
+            surface=surface,
+            tier=tier,
+            risk=risk,
+            stdout=stdout,
+        )
+        stdout.write("\n0 tool(s)\n")
         return 0
     for definition in definitions:
         stdout.write(f"{definition.name} [{format_badges(definition)}]\n")
@@ -311,10 +444,9 @@ def _tools_describe_command(args: list[str], *, stdout: TextIO) -> int:
         return 2
     tool_name = args[0].strip()
     as_json = "--json" in args[1:]
-    definition = get_definition(tool_name)
+    definition, candidates = _resolve_tool_definition(tool_name)
     if definition is None:
-        stdout.write(f"unknown tool: {tool_name}\n")
-        return 2
+        return _render_tool_lookup_failure(tool_name, candidates, stdout=stdout)
 
     payload = {
         "name": definition.name,
@@ -374,10 +506,9 @@ def _tools_call_command(args: list[str], *, stdout: TextIO) -> int:
         )
         return 2
     tool_name = args[0].strip()
-    definition = get_definition(tool_name)
+    definition, candidates = _resolve_tool_definition(tool_name)
     if definition is None:
-        stdout.write(f"unknown tool: {tool_name}\n")
-        return 2
+        return _render_tool_lookup_failure(tool_name, candidates, stdout=stdout)
 
     input_json = None
     input_file = None

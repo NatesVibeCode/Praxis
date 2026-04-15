@@ -2,11 +2,31 @@
 from __future__ import annotations
 
 import os
+import re
 from datetime import datetime, timezone
 from typing import Any
 
 from ..subsystems import _subs, REPO_ROOT
 from ..helpers import _serialize, _bug_to_dict, _matches
+
+
+_DIAGNOSE_RUN_ID_RE = re.compile(
+    r"(?:diagnose(?:\s+run)?(?:\s+id)?|run(?:\s+id)?)[:=#\s]+([A-Za-z0-9:_-]+)",
+    re.IGNORECASE,
+)
+
+
+def _extract_run_id(question: str) -> str:
+    match = _DIAGNOSE_RUN_ID_RE.search(question)
+    if match:
+        return match.group(1).strip()
+
+    # Fall back to the last token if it looks like a run id suffix.
+    tokens = [token.strip(".,;:()[]{}") for token in question.split() if token.strip()]
+    for token in reversed(tokens):
+        if len(token) >= 8 and any(ch.isdigit() for ch in token):
+            return token
+    return ""
 
 
 def tool_praxis_query(params: dict) -> dict:
@@ -84,6 +104,22 @@ def tool_praxis_query(params: dict) -> dict:
             "routed_to": "failures",
             "top_failure_codes": top_failure_codes,
             "total_receipts_checked": len(records),
+        }
+
+    if _matches(question, ["diagnose", "diagnosis", "troubleshoot", "why did", "run id"]):
+        run_id = _extract_run_id(question)
+        if not run_id:
+            return {
+                "routed_to": "workflow_diagnose",
+                "message": "Provide a run_id to diagnose a specific workflow run.",
+            }
+        from .diagnose import tool_praxis_diagnose
+
+        diagnosis = tool_praxis_diagnose({"run_id": run_id})
+        return {
+            "routed_to": "workflow_diagnose",
+            "run_id": run_id,
+            "diagnosis": diagnosis,
         }
 
     if _matches(question, ["agent", "leaderboard", "performance", "who", "how are"]):

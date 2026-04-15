@@ -31,8 +31,8 @@ export interface CatalogSurfaceSummary {
   nodeTotal: number;
 }
 
-const EXECUTABLE_GATE_FAMILIES = new Set(['conditional', 'after_failure']);
-const PERSISTED_GATE_FAMILIES = new Set(['approval', 'human_review', 'validation', 'retry']);
+const EXECUTABLE_GATE_FAMILIES = new Set(['approval', 'conditional', 'after_failure']);
+const PERSISTED_GATE_FAMILIES = new Set(['human_review']);
 const RUNTIME_NODE_ROUTES = new Set([
   'trigger',
   'trigger/schedule',
@@ -110,6 +110,20 @@ export function getCatalogTruth(item: CatalogItem): CatalogTruth {
         category: 'runtime',
         badge: 'Executes',
         detail: 'Compiled into dependency edges that change runtime flow today.',
+      };
+    }
+    if (item.gateFamily === 'validation') {
+      return {
+        category: 'runtime',
+        badge: 'Executes',
+        detail: 'Runs the configured verification command before the downstream step can continue.',
+      };
+    }
+    if (item.gateFamily === 'retry') {
+      return {
+        category: 'runtime',
+        badge: 'Executes',
+        detail: 'Sets downstream job max_attempts so the runtime retry loop can requeue failed work.',
       };
     }
     if (PERSISTED_GATE_FAMILIES.has(item.gateFamily || '')) {
@@ -241,16 +255,16 @@ export function getCatalogSurfacePolicy(item: CatalogItem): CatalogSurfacePolicy
     }
     if (item.gateFamily === 'approval') {
       return {
-        tier: 'advanced',
-        badge: 'Preview',
-        detail: 'Worth building as a real human gate, but Moon keeps it preview-only until the planner enforces it.',
+        tier: 'primary',
+        badge: 'Core now',
+        detail: 'Pauses the downstream step behind a human approval checkpoint before execution continues.',
       };
     }
     if (item.gateFamily === 'validation') {
       return {
-        tier: 'advanced',
-        badge: 'Preview',
-        detail: 'Worth building as executable verification policy, but Moon keeps it preview-only until it affects runtime.',
+        tier: 'primary',
+        badge: 'Core now',
+        detail: 'Executes the configured verification command before the downstream step proceeds.',
       };
     }
     if (item.gateFamily === 'human_review') {
@@ -263,10 +277,9 @@ export function getCatalogSurfacePolicy(item: CatalogItem): CatalogSurfacePolicy
     }
     if (item.gateFamily === 'retry') {
       return {
-        tier: 'hidden',
-        badge: 'Removed',
-        detail: 'Retry belongs to job policy and failure handling, not dependency-edge semantics.',
-        hardChoice: 'Removed from the gate surface. Retry is runtime policy, not graph structure.',
+        tier: 'advanced',
+        badge: 'Later',
+        detail: 'Feeds retry policy into downstream job max_attempts, but stays outside the core gate set.',
       };
     }
     return truth.category === 'runtime'

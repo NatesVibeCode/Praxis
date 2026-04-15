@@ -298,7 +298,11 @@ def _execute_action(conn, run_id: str, card: dict, repo_root: str) -> dict:
     executor = card.get('executor', {})
     executor_kind = executor.get('kind', 'system')
     task = card.get('task', card.get('objective', ''))
-    tools = card.get('toolPermissions', [])
+    tools = [
+        str(tool).strip()
+        for tool in (card.get('toolPermissions', []) or [])
+        if str(tool).strip()
+    ]
 
     # Collect upstream outputs for context
     upstream_outputs = _collect_upstream_outputs(conn, run_id, card.get('id', ''))
@@ -363,8 +367,19 @@ def _execute_action(conn, run_id: str, card: dict, repo_root: str) -> dict:
         started = time.monotonic()
         transport = resolve_execution_transport(agent_config)
         transport_kind = transport.transport_kind
-        if transport_kind == "cli":
-            execution = _execute_cli(agent_config, full_prompt, repo_root)
+        execution_bundle = {
+            "run_id": run_id,
+            "job_label": str(card.get("id") or task or "model_card"),
+            "mcp_tool_names": tools,
+        }
+
+        if transport_kind in {"cli", "mcp"}:
+            execution = _execute_cli(
+                agent_config,
+                full_prompt,
+                repo_root,
+                execution_bundle=execution_bundle,
+            )
         elif transport_kind == "api":
             execution = _execute_api(agent_config, full_prompt, repo_root)
         else:
@@ -380,6 +395,7 @@ def _execute_action(conn, run_id: str, card: dict, repo_root: str) -> dict:
                 "stdout": execution.get("stdout", "")[:4000],
                 "executed_by": executor.get('name', executor_kind),
                 "resolved_agent": resolved_agent_slug,
+                "execution_transport": transport_kind,
                 "duration_seconds": duration_seconds,
             },
             "failure_code": execution.get("error_code", ""),

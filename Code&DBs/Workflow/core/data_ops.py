@@ -682,6 +682,12 @@ def checkpoint_records(
     }
 
 
+def _canonical_digest(value: Any) -> str:
+    return sha256(
+        json.dumps(_canonical_value(value), sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    ).hexdigest()
+
+
 def replay_records(
     records: list[dict[str, Any]],
     *,
@@ -736,6 +742,120 @@ def replay_records(
             "missing_cursor_rows": missing_cursor_rows,
             "skipped_before": skipped_before,
             "skipped_after": skipped_after,
+        },
+    }
+
+
+def repair_loop_records(
+    records: list[dict[str, Any]],
+    *,
+    repairs: dict[str, Any] | None = None,
+    backfill: dict[str, Any] | None = None,
+    rules: dict[str, Any] | None = None,
+    schema: dict[str, Any] | None = None,
+    checks: list[dict[str, Any]] | None = None,
+    predicates: list[dict[str, Any]] | None = None,
+    predicate_mode: str = "all",
+    drop_fields: list[str] | None = None,
+    keys: list[str] | None = None,
+    max_passes: int = 3,
+) -> dict[str, Any]:
+    normalized_repairs = dict(repairs or {})
+    normalized_backfill = dict(backfill or {})
+    normalized_rules = dict(rules or {})
+    normalized_schema = dict(schema or {})
+    normalized_checks = [dict(item) for item in checks or []]
+    normalized_drop_fields = list(drop_fields or [])
+    if max_passes <= 0:
+        raise DataOperationError(
+            "data.repair_loop.max_passes_invalid",
+            "repair_loop max_passes must be positive",
+        )
+    if not (normalized_repairs or normalized_backfill or normalized_rules or normalized_drop_fields):
+        raise DataOperationError(
+            "data.repair_loop.steps_required",
+            "repair_loop requires repairs, backfill, rules, or drop_fields",
+        )
+
+    current = [dict(record) for record in records]
+    passes: list[dict[str, Any]] = []
+    converged = False
+    for pass_index in range(1, max_passes + 1):
+        pass_changed = False
+        pass_payload: dict[str, Any] = {"pass_index": pass_index}
+
+        if normalized_repairs or normalized_drop_fields:
+            repair = repair_records(
+                current,
+                repairs=normalized_repairs,
+                predicates=predicates,
+                predicate_mode=predicate_mode,
+                drop_fields=normalized_drop_fields,
+            )
+            current = [dict(record) for record in repair["records"]]
+            pass_payload["repair"] = dict(repair.get("stats") or {})
+            pass_changed = pass_changed or bool((repair.get("stats") or {}).get("changed_rows"))
+
+        if normalized_backfill:
+            backfilled = backfill_records(
+                current,
+                backfill=normalized_backfill,
+                predicates=predicates,
+                predicate_mode=predicate_mode,
+            )
+            current = [dict(record) for record in backfilled["records"]]
+            pass_payload["backfill"] = dict(backfilled.get("stats") or {})
+            pass_changed = pass_changed or bool((backfilled.get("stats") or {}).get("filled_rows"))
+
+        if normalized_rules:
+            normalized = normalize_records(current, normalized_rules)
+            current = [dict(record) for record in normalized["records"]]
+            pass_payload["normalize"] = dict(normalized.get("stats") or {})
+            pass_changed = pass_changed or bool((normalized.get("stats") or {}).get("changed_rows"))
+
+        validation = validate_records(
+            current,
+            normalized_schema,
+            checks=normalized_checks,
+            keys=keys or [],
+        ) if (normalized_schema or normalized_checks) else {"violations": [], "stats": {"violation_count": 0}}
+        pass_payload["validate"] = dict(validation.get("stats") or {})
+        pass_payload["violation_count"] = int((validation.get("stats") or {}).get("violation_count", 0))
+        passes.append(pass_payload)
+
+        if pass_payload["violation_count"] == 0 or not pass_changed:
+            converged = pass_payload["violation_count"] == 0
+            break
+
+    dead_letter = dead_letter_records(
+        current,
+        schema=normalized_schema,
+        checks=normalized_checks,
+        predicates=[],
+        predicate_mode="any",
+        keys=keys or [],
+    ) if (normalized_schema or normalized_checks) else {
+        "partitions": {"accepted": [dict(record) for record in current], "dead_letter": []},
+        "partition_counts": {"accepted": len(current), "dead_letter": 0},
+        "violations": [],
+        "stats": {"accepted_rows": len(current), "dead_letter_rows": 0, "violation_count": 0},
+    }
+
+    accepted = list((dead_letter.get("partitions") or {}).get("accepted") or [])
+    return {
+        "records": accepted,
+        "partitions": _json_clone(dead_letter.get("partitions") or {}),
+        "partition_counts": dict(dead_letter.get("partition_counts") or {}),
+        "violations": _json_clone(dead_letter.get("violations") or []),
+        "passes": passes,
+        "stats": {
+            "input_rows": len(records),
+            "output_rows": len(accepted),
+            "pass_count": len(passes),
+            "converged": converged,
+            "accepted_rows": int((dead_letter.get("stats") or {}).get("accepted_rows", len(accepted))),
+            "dead_letter_rows": int((dead_letter.get("stats") or {}).get("dead_letter_rows", 0)),
+            "final_violation_count": int((dead_letter.get("stats") or {}).get("violation_count", 0)),
         },
     }
 
@@ -1652,14 +1772,16 @@ def reconcile_records(
         else:
             noops.append({"key": key_payload})
 
+    plan = {
+        "create": creates,
+        "update": updates,
+        "delete": deletes,
+        "noop": noops,
+        "conflicts": conflicts,
+    }
     return {
-        "plan": {
-            "create": creates,
-            "update": updates,
-            "delete": deletes,
-            "noop": noops,
-            "conflicts": conflicts,
-        },
+        "plan": plan,
+        "plan_digest": _canonical_digest(plan),
         "stats": {
             "source_rows": len(source_records),
             "target_rows": len(target_records),
@@ -1673,6 +1795,163 @@ def reconcile_records(
     }
 
 
+def plan_summary(plan: dict[str, Any]) -> dict[str, int]:
+    normalized = dict(plan or {})
+    return {
+        "create_count": len(list(normalized.get("create") or [])),
+        "update_count": len(list(normalized.get("update") or [])),
+        "delete_count": len(list(normalized.get("delete") or [])),
+        "noop_count": len(list(normalized.get("noop") or [])),
+        "conflict_count": len(list(normalized.get("conflicts") or [])),
+    }
+
+
+def plan_digest(plan: dict[str, Any]) -> str:
+    return _canonical_digest(plan or {})
+
+
+def _plan_entry_key(entry: dict[str, Any], keys: list[str]) -> tuple[Any, ...]:
+    key_payload = dict(entry.get("key") or {})
+    return tuple(_canonical_value(key_payload.get(field)) for field in keys)
+
+
+def apply_plan_records(
+    target_records: list[dict[str, Any]],
+    *,
+    plan: dict[str, Any],
+    keys: list[str],
+    approval: dict[str, Any],
+) -> dict[str, Any]:
+    if not keys:
+        raise DataOperationError(
+            "data.apply.keys_required",
+            "apply requires key fields",
+        )
+
+    normalized_plan = _json_clone(plan)
+    normalized_approval = _json_clone(approval)
+    digest = plan_digest(normalized_plan)
+    if str(normalized_approval.get("plan_digest") or "") != digest:
+        raise DataOperationError(
+            "data.apply.approval_mismatch",
+            "approval does not match plan digest",
+            details={
+                "expected_plan_digest": digest,
+                "approval_plan_digest": normalized_approval.get("plan_digest"),
+            },
+        )
+
+    plan_conflicts = list(normalized_plan.get("conflicts") or [])
+    if plan_conflicts:
+        raise DataOperationError(
+            "data.apply.plan_conflicts",
+            "apply refuses plans that contain conflicts",
+            details={"conflict_count": len(plan_conflicts), "conflicts_preview": _json_clone(plan_conflicts[:20])},
+        )
+
+    state: dict[tuple[Any, ...], dict[str, Any]] = {}
+    order: list[tuple[Any, ...]] = []
+    duplicate_targets: list[dict[str, Any]] = []
+    for row_index, record in enumerate(target_records):
+        key = _key_tuple(record, keys)
+        if key in state:
+            duplicate_targets.append(
+                {
+                    "key": {keys[idx]: _json_clone(value) for idx, value in enumerate(key)},
+                    "row_index": row_index,
+                }
+            )
+            continue
+        state[key] = dict(record)
+        order.append(key)
+    if duplicate_targets:
+        raise DataOperationError(
+            "data.apply.target_conflicts",
+            "apply requires a uniquely keyed target dataset",
+            details={"conflict_count": len(duplicate_targets), "conflicts_preview": duplicate_targets[:20]},
+        )
+
+    stale_operations: list[dict[str, Any]] = []
+    applied_create_count = 0
+    applied_update_count = 0
+    applied_delete_count = 0
+    noop_count = 0
+
+    for entry in list(normalized_plan.get("create") or []):
+        key = _plan_entry_key(entry, keys)
+        record = dict(entry.get("record") or {})
+        current = state.get(key)
+        if current is None:
+            state[key] = record
+            order.append(key)
+            applied_create_count += 1
+        elif current == record:
+            noop_count += 1
+        else:
+            stale_operations.append({"type": "create", "key": dict(entry.get("key") or {})})
+
+    for entry in list(normalized_plan.get("update") or []):
+        key = _plan_entry_key(entry, keys)
+        source_record = dict(entry.get("source_record") or {})
+        target_record = dict(entry.get("target_record") or {})
+        current = state.get(key)
+        if current is None:
+            stale_operations.append({"type": "update_missing_target", "key": dict(entry.get("key") or {})})
+            continue
+        if current == source_record:
+            noop_count += 1
+            continue
+        if current != target_record:
+            stale_operations.append({"type": "update_drift", "key": dict(entry.get("key") or {})})
+            continue
+        state[key] = source_record
+        applied_update_count += 1
+
+    for entry in list(normalized_plan.get("delete") or []):
+        key = _plan_entry_key(entry, keys)
+        target_record = dict(entry.get("record") or {})
+        current = state.get(key)
+        if current is None:
+            noop_count += 1
+            continue
+        if current != target_record:
+            stale_operations.append({"type": "delete_drift", "key": dict(entry.get("key") or {})})
+            continue
+        del state[key]
+        applied_delete_count += 1
+
+    if stale_operations:
+        raise DataOperationError(
+            "data.apply.target_drift",
+            "target state no longer matches the approved plan",
+            details={"stale_count": len(stale_operations), "stale_operations": _json_clone(stale_operations[:20])},
+        )
+
+    output_records = [dict(state[key]) for key in order if key in state]
+    summary = plan_summary(normalized_plan)
+    return {
+        "records": output_records,
+        "plan": normalized_plan,
+        "plan_digest": digest,
+        "approval": normalized_approval,
+        "stats": {
+            "target_rows": len(target_records),
+            "output_rows": len(output_records),
+            "planned_create_count": summary["create_count"],
+            "planned_update_count": summary["update_count"],
+            "planned_delete_count": summary["delete_count"],
+            "applied_create_count": applied_create_count,
+            "applied_update_count": applied_update_count,
+            "applied_delete_count": applied_delete_count,
+            "noop_count": noop_count,
+        },
+    }
+
+
+def _chunked_records(records: list[dict[str, Any]], batch_size: int) -> list[list[dict[str, Any]]]:
+    return [records[index : index + batch_size] for index in range(0, len(records), batch_size)]
+
+
 def sync_records(
     source_records: list[dict[str, Any]],
     target_records: list[dict[str, Any]],
@@ -1680,6 +1959,10 @@ def sync_records(
     keys: list[str],
     compare_fields: list[str] | None = None,
     mode: str = "upsert",
+    batch_size: int | None = None,
+    cursor_field: str | None = None,
+    checkpoint: dict[str, Any] | None = None,
+    before: Any = None,
 ) -> dict[str, Any]:
     normalized_mode = mode.strip().lower() or "upsert"
     if normalized_mode not in {"upsert", "mirror"}:
@@ -1687,23 +1970,129 @@ def sync_records(
             "data.sync.unsupported_mode",
             f"unsupported sync mode: {mode}",
         )
+    if batch_size is not None and batch_size <= 0:
+        raise DataOperationError(
+            "data.sync.batch_size_invalid",
+            "sync batch_size must be positive",
+        )
+    if (batch_size is not None or checkpoint or before is not None) and normalized_mode != "upsert":
+        raise DataOperationError(
+            "data.sync.partial_mirror_unsupported",
+            "checkpointed or batched sync is only supported for upsert mode",
+        )
+
+    replay_window: dict[str, Any] | None = None
+    effective_source = [dict(record) for record in source_records]
+    normalized_checkpoint = dict(checkpoint or {})
+    if normalized_checkpoint or before is not None:
+        effective_cursor_field = str(cursor_field or normalized_checkpoint.get("cursor_field") or "").strip()
+        if not effective_cursor_field:
+            raise DataOperationError(
+                "data.sync.cursor_field_required",
+                "checkpointed sync requires cursor_field",
+            )
+        replay = replay_records(
+            effective_source,
+            cursor_field=effective_cursor_field,
+            after=normalized_checkpoint.get("watermark", normalized_checkpoint.get("cursor_max")),
+            before=before,
+        )
+        effective_source = [dict(record) for record in replay["records"]]
+        replay_window = dict(replay["replay_window"])
+        cursor_field = effective_cursor_field
+
+    if batch_size is not None:
+        current_target = [dict(record) for record in target_records]
+        combined_plan = {"create": [], "update": [], "delete": [], "noop": [], "conflicts": []}
+        batch_manifest: list[dict[str, Any]] = []
+        compare_result_fields = list(compare_fields or [])
+        for batch_index, batch_records in enumerate(_chunked_records(effective_source, batch_size), start=1):
+            batch_result = sync_records(
+                batch_records,
+                current_target,
+                keys=keys,
+                compare_fields=compare_fields,
+                mode="upsert",
+            )
+            current_target = [dict(record) for record in batch_result["records"]]
+            compare_result_fields = list(batch_result.get("compare_fields") or compare_result_fields)
+            batch_plan = dict(batch_result.get("plan") or {})
+            for key_name in combined_plan:
+                combined_plan[key_name].extend(_json_clone(list(batch_plan.get(key_name) or [])))
+            batch_entry: dict[str, Any] = {
+                "batch_index": batch_index,
+                "input_rows": len(batch_records),
+                "create_count": len(list(batch_plan.get("create") or [])),
+                "update_count": len(list(batch_plan.get("update") or [])),
+                "noop_count": len(list(batch_plan.get("noop") or [])),
+                "output_rows": len(current_target),
+            }
+            if cursor_field:
+                pairs = [
+                    (_coerce_comparable(record.get(cursor_field)), _json_clone(record.get(cursor_field)))
+                    for record in batch_records
+                    if _non_empty(record.get(cursor_field))
+                ]
+                if pairs:
+                    batch_entry["watermark"] = sorted(pairs, key=lambda item: item[0])[-1][1]
+            batch_manifest.append(batch_entry)
+
+        checkpoint_payload = None
+        if cursor_field and effective_source:
+            checkpoint_payload = checkpoint_records(
+                effective_source,
+                keys=keys,
+                cursor_field=cursor_field,
+            )["checkpoint"]
+        summary = plan_summary(combined_plan)
+        stats = {
+            "source_rows": len(effective_source),
+            "target_rows": len(target_records),
+            "create_count": summary["create_count"],
+            "update_count": summary["update_count"],
+            "delete_count": 0,
+            "noop_count": summary["noop_count"],
+            "conflict_count": summary["conflict_count"],
+            "output_rows": len(current_target),
+            "sync_mode": normalized_mode,
+            "applied_create_count": summary["create_count"],
+            "applied_update_count": summary["update_count"],
+            "applied_delete_count": 0,
+            "batch_count": len(batch_manifest),
+            "batched_input_rows": len(effective_source),
+        }
+        result: dict[str, Any] = {
+            "records": current_target,
+            "plan": combined_plan,
+            "plan_digest": plan_digest(combined_plan),
+            "compare_fields": compare_result_fields,
+            "batch_manifest": batch_manifest,
+            "stats": stats,
+        }
+        if checkpoint_payload is not None:
+            result["checkpoint"] = checkpoint_payload
+        if replay_window is not None:
+            result["replay_window"] = replay_window
+        return result
 
     reconcile = reconcile_records(
-        source_records,
+        effective_source,
         target_records,
         keys=keys,
         compare_fields=compare_fields,
     )
-    plan = dict(reconcile["plan"])
+    plan = _json_clone(reconcile["plan"])
+    if normalized_mode == "upsert":
+        plan["delete"] = []
 
     if normalized_mode == "mirror":
-        output_records = [dict(record) for record in source_records]
+        output_records = [dict(record) for record in effective_source]
     else:
         source_index = {
             _key_tuple(record, keys): dict(record)
-            for record in source_records
+            for record in effective_source
         }
-        output_records: list[dict[str, Any]] = []
+        output_records = []
         seen: set[tuple[Any, ...]] = set()
         for target_record in target_records:
             key = _key_tuple(target_record, keys)
@@ -1712,23 +2101,44 @@ def sync_records(
                 seen.add(key)
             else:
                 output_records.append(dict(target_record))
-        for source_record in source_records:
+        for source_record in effective_source:
             key = _key_tuple(source_record, keys)
             if key in seen:
                 continue
             output_records.append(dict(source_record))
             seen.add(key)
 
-    return {
+    checkpoint_payload = None
+    if cursor_field and effective_source:
+        checkpoint_payload = checkpoint_records(
+            effective_source,
+            keys=keys,
+            cursor_field=cursor_field,
+        )["checkpoint"]
+
+    summary = plan_summary(plan)
+    result = {
         "records": output_records,
         "plan": plan,
+        "plan_digest": plan_digest(plan),
         "compare_fields": list(reconcile.get("compare_fields") or []),
         "stats": {
-            **dict(reconcile.get("stats") or {}),
+            "source_rows": len(effective_source),
+            "target_rows": len(target_records),
+            "create_count": summary["create_count"],
+            "update_count": summary["update_count"],
+            "delete_count": summary["delete_count"] if normalized_mode == "mirror" else 0,
+            "noop_count": summary["noop_count"],
+            "conflict_count": summary["conflict_count"],
             "output_rows": len(output_records),
             "sync_mode": normalized_mode,
-            "applied_create_count": len(plan.get("create") or []),
-            "applied_update_count": len(plan.get("update") or []),
-            "applied_delete_count": len(plan.get("delete") or []) if normalized_mode == "mirror" else 0,
+            "applied_create_count": summary["create_count"],
+            "applied_update_count": summary["update_count"],
+            "applied_delete_count": summary["delete_count"] if normalized_mode == "mirror" else 0,
         },
     }
+    if checkpoint_payload is not None:
+        result["checkpoint"] = checkpoint_payload
+    if replay_window is not None:
+        result["replay_window"] = replay_window
+    return result

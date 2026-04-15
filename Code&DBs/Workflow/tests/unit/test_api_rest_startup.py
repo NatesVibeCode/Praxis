@@ -97,6 +97,9 @@ def test_api_routes_endpoint_lists_the_live_http_surface() -> None:
     assert payload["count"] == len(payload["routes"])
     assert payload["docs_url"] == "/docs"
     assert payload["openapi_url"] == "/openapi.json"
+    assert payload["summary"]["route_count"] == payload["count"]
+    assert isinstance(payload["summary"]["methods"], list)
+    assert isinstance(payload["summary"]["tags"], list)
 
     route_paths = {row["path"] for row in payload["routes"]}
     assert "/api/dashboard" in route_paths
@@ -702,8 +705,29 @@ class _FakeRunSubsystems:
 def test_run_routes_use_shared_pg_authority_and_match_contract(monkeypatch) -> None:
     conn = _FakeRunConn()
     subsystems = _FakeRunSubsystems(conn)
+    captured_health_inputs: list[dict[str, Any]] = []
 
     monkeypatch.setattr(rest, "_ensure_shared_subsystems", lambda _app: subsystems)
+    monkeypatch.setattr(
+        rest,
+        "summarize_run_health",
+        lambda run_data, now: (
+            captured_health_inputs.append(run_data)
+            or {
+                "state": "healthy",
+                "likely_failed": False,
+                "signals": [],
+                "elapsed_seconds": 42.1,
+                "completed_jobs": 2,
+                "running_or_claimed": 1,
+                "terminal_jobs": 1,
+                "resource_telemetry": {
+                    "seconds_since_last_activity": 12.3,
+                },
+                "non_retryable_failed_jobs": [],
+            }
+        ),
+    )
 
     with TestClient(rest.app) as client:
         recent_response = client.get("/api/runs/recent?limit=2")
@@ -735,6 +759,21 @@ def test_run_routes_use_shared_pg_authority_and_match_contract(monkeypatch) -> N
     assert detail_response.json()["jobs"][0]["has_output"] is True
     assert detail_response.json()["jobs"][0]["created_at"] == "2026-04-11T12:00:00+00:00"
     assert detail_response.json()["summary"] == "All 2 steps completed successfully."
+    assert detail_response.json()["health"] == {
+        "state": "healthy",
+        "likely_failed": False,
+        "signals": [],
+        "elapsed_seconds": 42.1,
+        "completed_jobs": 2,
+        "running_or_claimed": 1,
+        "terminal_jobs": 1,
+        "resource_telemetry": {
+            "seconds_since_last_activity": 12.3,
+        },
+        "non_retryable_failed_jobs": [],
+    }
+    assert captured_health_inputs and captured_health_inputs[0]["run_id"] == "run-2"
+    assert len(captured_health_inputs[0]["jobs"]) == 2
 
     assert job_response.status_code == 200
     assert job_response.json()["id"] == 22

@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from surfaces.api.catalog_authority import build_catalog_payload
-from surfaces.api.handlers import workflow_query
+from surfaces.api.handlers import workflow_admin, workflow_query
 
 
 class _CatalogPg:
@@ -56,6 +56,30 @@ class _CatalogPg:
         return []
 
 
+class _WorkflowTemplatePg:
+    def __init__(self) -> None:
+        self.executed: list[tuple[str, tuple[Any, ...]]] = []
+
+    def execute(self, query: str, *params: Any) -> list[dict[str, Any]]:
+        self.executed.append((query, params))
+        if "FROM registry_workflows" in query:
+            assert "registry_workflows" in query
+            return [
+                {
+                    "id": "workflow_composition",
+                    "name": "Workflow Composition",
+                    "description": "Workflows that call and orchestrate other workflows",
+                    "category": "automation",
+                    "trigger_type": "manual",
+                    "input_schema": {"type": "object"},
+                    "output_schema": {"type": "object"},
+                    "steps": ["draft", "review", "publish"],
+                    "mcp_tool_refs": ["workflow.invoke"],
+                }
+            ]
+        return []
+
+
 class _RequestStub:
     def __init__(self, pg: _CatalogPg) -> None:
         self.headers = {"Content-Length": "2"}
@@ -84,11 +108,13 @@ def test_build_catalog_payload_surfaces_shared_static_and_connector_items() -> N
     assert items_by_id["int-workflow-invoke"]["actionValue"] == "@workflow/invoke"
     assert items_by_id["ctrl-branch"]["truth"]["category"] == "runtime"
     assert items_by_id["ctrl-branch"]["surfacePolicy"]["tier"] == "primary"
-    assert items_by_id["ctrl-approval"]["truth"]["category"] == "persisted"
-    assert items_by_id["ctrl-approval"]["surfacePolicy"]["tier"] == "advanced"
-    assert items_by_id["ctrl-validation"]["surfacePolicy"]["badge"] == "Preview"
+    assert items_by_id["ctrl-approval"]["truth"]["category"] == "runtime"
+    assert items_by_id["ctrl-approval"]["surfacePolicy"]["tier"] == "primary"
+    assert items_by_id["ctrl-validation"]["truth"]["category"] == "runtime"
+    assert items_by_id["ctrl-validation"]["surfacePolicy"]["tier"] == "primary"
     assert items_by_id["ctrl-review"]["surfacePolicy"]["tier"] == "hidden"
-    assert items_by_id["ctrl-retry"]["surfacePolicy"]["tier"] == "hidden"
+    assert items_by_id["ctrl-retry"]["truth"]["category"] == "runtime"
+    assert items_by_id["ctrl-retry"]["surfacePolicy"]["tier"] == "advanced"
     assert items_by_id["gather-docs"]["truth"]["category"] == "alias"
     assert items_by_id["gather-docs"]["surfacePolicy"]["tier"] == "hidden"
     assert items_by_id["think-fan-out"]["truth"]["category"] == "runtime"
@@ -99,6 +125,32 @@ def test_build_catalog_payload_surfaces_shared_static_and_connector_items() -> N
     assert items_by_id["conn-gmail"]["truth"]["category"] == "runtime"
     assert payload["sources"]["connectors"] == 1
     assert payload["fetched_at"]
+
+
+def test_workflow_template_handler_reads_registry_workflows() -> None:
+    request = _RequestStub(_WorkflowTemplatePg())
+    request.path = "/api/workflow-templates?q=workflow"
+
+    workflow_admin._handle_workflow_templates_get(request, "/api/workflow-templates")
+
+    assert request.sent is not None
+    status, payload = request.sent
+    assert status == 200
+    assert payload["count"] == 1
+    assert payload["query"] == "workflow"
+    assert payload["templates"] == [
+        {
+            "id": "workflow_composition",
+            "name": "Workflow Composition",
+            "description": "Workflows that call and orchestrate other workflows",
+            "category": "automation",
+            "trigger_type": "manual",
+            "input_schema": {"type": "object"},
+            "output_schema": {"type": "object"},
+            "steps": ["draft", "review", "publish"],
+            "mcp_tool_refs": ["workflow.invoke"],
+        }
+    ]
 
 
 def test_legacy_catalog_handler_uses_shared_catalog_authority() -> None:
@@ -118,5 +170,6 @@ def test_legacy_catalog_handler_uses_shared_catalog_authority() -> None:
     assert items_by_id["conn-gmail"]["actionValue"] == "@gmail"
     assert items_by_id["think-fan-out"]["truth"]["category"] == "runtime"
     assert items_by_id["think-fan-out"]["surfacePolicy"]["tier"] == "primary"
-    assert items_by_id["ctrl-approval"]["surfacePolicy"]["tier"] == "advanced"
+    assert items_by_id["ctrl-approval"]["surfacePolicy"]["tier"] == "primary"
     assert items_by_id["ctrl-review"]["surfacePolicy"]["tier"] == "hidden"
+    assert items_by_id["ctrl-retry"]["surfacePolicy"]["tier"] == "advanced"

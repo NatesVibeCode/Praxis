@@ -1,0 +1,395 @@
+{
+  "name": "Authority Split-Brain Cleanup Waves",
+  "workflow_id": "authority_split_brain_cleanup_waves_20260415",
+  "queue_id": "authority_split_brain_cleanup_waves_20260415",
+  "phase": "W",
+  "outcome_goal": "Remove runtime authority split-brain across workflow frontdoors, compiler, provider registry, task profiles, startup helpers, supervisor discovery, and docs so missing DB authority fails closed everywhere and the live inventory/docs agree on one catalog truth.",
+  "anti_requirements": [
+    "Do not preserve localhost or test DSN fallbacks as runtime behavior.",
+    "Do not preserve built-in provider or task-profile fallbacks as runtime truth.",
+    "Do not widen scope into unrelated route, provider onboarding, or UI work.",
+    "Do not use shell loops or ad hoc scripts as substitute authority.",
+    "Do not cross workspace boundaries outside /Users/nate/Praxis."
+  ],
+  "target_repo": "/Users/nate/Praxis",
+  "workdir": "/Users/nate/Praxis",
+  "jobs": [
+    {
+      "label": "authority_execution_map",
+      "agent": "openai/gpt-5.4",
+      "task_type": "architecture",
+      "description": "Write the detailed execution map for the split-brain cleanup batch.",
+      "outcome_goal": "A concrete packet explains the dependency graph, write boundaries, and verification matrix for every cleanup wave.",
+      "prompt": "Create `artifacts/workflow/authority_cleanup/AUTHORITY_SPLIT_BRAIN_EXECUTION_MAP_20260415.md`.\n\nRequired sections:\n1. Runtime authority contract\n2. Frontdoor and helper dependency graph\n3. Parallel-safe wave groups\n4. File ownership by job\n5. Verification matrix mapped to file groups\n6. Residual risks after rollout\n\nGround the map in the current repo state. Use the following code as direct evidence: scripts/_workflow_env.sh, scripts/praxis, scripts/praxis-workflow, Code&DBs/Workflow/workflow, Code&DBs/Workflow/surfaces/_workflow_database.py, Code&DBs/Workflow/runtime/compiler.py, Code&DBs/Workflow/registry/provider_execution_registry.py, Code&DBs/Workflow/adapters/task_profiles.py, Code&DBs/Workflow/runtime/praxis_supervisor.py, README.md, docs/MCP.md.\n\nDo not edit runtime behavior in this job.",
+      "read": [
+        "scripts/_workflow_env.sh",
+        "scripts/praxis",
+        "scripts/praxis-workflow",
+        "Code&DBs/Workflow/workflow",
+        "Code&DBs/Workflow/surfaces/_workflow_database.py",
+        "Code&DBs/Workflow/runtime/compiler.py",
+        "Code&DBs/Workflow/registry/provider_execution_registry.py",
+        "Code&DBs/Workflow/adapters/task_profiles.py",
+        "Code&DBs/Workflow/runtime/praxis_supervisor.py",
+        "README.md",
+        "docs/MCP.md"
+      ],
+      "write": [
+        "artifacts/workflow/authority_cleanup/AUTHORITY_SPLIT_BRAIN_EXECUTION_MAP_20260415.md"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && test -f artifacts/workflow/authority_cleanup/AUTHORITY_SPLIT_BRAIN_EXECUTION_MAP_20260415.md && grep -q 'Runtime authority contract' artifacts/workflow/authority_cleanup/AUTHORITY_SPLIT_BRAIN_EXECUTION_MAP_20260415.md"
+    },
+    {
+      "label": "surface_authority_resolver_core",
+      "agent": "openai/gpt-5.4",
+      "task_type": "refactor",
+      "depends_on": [
+        "authority_execution_map"
+      ],
+      "description": "Remove repo-local database fallback from the shared surface authority helper.",
+      "outcome_goal": "Shared surface authority resolution uses explicit env or repo .env only and otherwise fails closed.",
+      "prompt": "Refactor the shared surface authority helper so it never fabricates a repo-local database URL.\n\nPrimary file:\n- Code&DBs/Workflow/surfaces/_workflow_database.py\n\nRequirements:\n- Remove DEFAULT_REPO_LOCAL_DATABASE_URL as a runtime fallback.\n- Keep username normalization if the DSN is otherwise valid.\n- Allow explicit process env or repo `.env` to satisfy authority.\n- If neither is valid, raise or surface a clear authority error instead of returning a localhost DSN.\n- Keep the helper focused on authority resolution only; do not redesign other startup plumbing here.\n\nUpdate direct helper tests that are tightly coupled to this file only if required, but leave broader subsystem and supervisor contract tests for later jobs.",
+      "read": [
+        "Code&DBs/Workflow/surfaces/_workflow_database.py",
+        "Code&DBs/Workflow/storage/postgres/connection.py",
+        "scripts/_workflow_env.sh",
+        "Code&DBs/Workflow/tests/unit/test_startup_wiring.py",
+        "Code&DBs/Workflow/tests/unit/test_api_server_dependency_contract.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/surfaces/_workflow_database.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && ! grep -q 'DEFAULT_REPO_LOCAL_DATABASE_URL = \"postgresql://postgres@localhost:5432/praxis\"' Code\\&DBs/Workflow/surfaces/_workflow_database.py && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m py_compile Code\\&DBs/Workflow/surfaces/_workflow_database.py"
+    },
+    {
+      "label": "workflow_wrapper_alignment",
+      "agent": "openai/gpt-5.4",
+      "task_type": "build",
+      "depends_on": [
+        "surface_authority_resolver_core"
+      ],
+      "description": "Align workflow shell and Python wrappers with the explicit authority contract.",
+      "outcome_goal": "Every workflow frontdoor either bootstraps explicit authority through the shared shell helper or fails closed consistently.",
+      "prompt": "Audit and tighten the workflow frontdoors so they do not bypass the explicit authority contract.\n\nFiles in scope:\n- scripts/praxis\n- scripts/praxis-workflow\n- Code&DBs/Workflow/workflow\n- scripts/_workflow_env.sh\n- Code&DBs/Workflow/tests/unit/test_workflow_shell_env.py\n- Code&DBs/Workflow/tests/unit/test_cli_workflow_frontdoors.py\n\nRequirements:\n- Keep the canonical runner surfaces from the skill contract.\n- Do not add new fallback DSNs.\n- Ensure the wrappers either source/bootstrap explicit authority or rely on downstream helpers that fail closed in the same way.\n- Preserve the detached launch behavior of scripts/workflow.sh.\n- Add or adjust tests only for wrapper/frontdoor behavior, not for provider or compiler concerns.\n\nAcceptance:\n- The wrapper layer no longer leaves a hidden path that can fabricate authority.",
+      "read": [
+        "scripts/praxis",
+        "scripts/praxis-workflow",
+        "Code&DBs/Workflow/workflow",
+        "scripts/_workflow_env.sh",
+        "Code&DBs/Workflow/tests/unit/test_workflow_shell_env.py",
+        "Code&DBs/Workflow/tests/unit/test_cli_workflow_frontdoors.py"
+      ],
+      "write": [
+        "scripts/praxis",
+        "scripts/praxis-workflow",
+        "Code&DBs/Workflow/workflow",
+        "Code&DBs/Workflow/tests/unit/test_workflow_shell_env.py",
+        "Code&DBs/Workflow/tests/unit/test_cli_workflow_frontdoors.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m py_compile Code\\&DBs/Workflow/workflow && /opt/homebrew/bin/python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/unit/test_workflow_shell_env.py Code\\&DBs/Workflow/tests/unit/test_cli_workflow_frontdoors.py"
+    },
+    {
+      "label": "compiler_authority_contract",
+      "agent": "openai/gpt-5.4",
+      "task_type": "refactor",
+      "depends_on": [
+        "surface_authority_resolver_core"
+      ],
+      "description": "Remove compiler-side implicit database injection and make missing authority fail closed.",
+      "outcome_goal": "The compiler no longer writes a localhost test DSN into process env when authority is missing.",
+      "prompt": "Refactor the compiler authority path.\n\nFiles in scope:\n- Code&DBs/Workflow/runtime/compiler.py\n- Code&DBs/Workflow/tests/unit/test_runtime_compiler_json.py\n\nRequirements:\n- Remove `_DEFAULT_REPO_LOCAL_DATABASE_URL` as an authority fallback.\n- Remove `_hydrate_env_from_dotenv()` behavior that injects `postgresql://test@localhost:5432/praxis_test` when WORKFLOW_DATABASE_URL is absent.\n- Preserve explicit `.env` loading when it provides a valid explicit authority.\n- Preserve compile-index refresh behavior; this job is only about authority resolution, not compile-index semantics.\n- Rewrite tests so missing authority raises or fails closed instead of blessing fallback env injection.\n\nAcceptance:\n- The compiler cannot resurrect runtime DB authority from a hidden test default.",
+      "read": [
+        "Code&DBs/Workflow/runtime/compiler.py",
+        "Code&DBs/Workflow/tests/unit/test_runtime_compiler_json.py",
+        "Code&DBs/Workflow/storage/postgres/connection.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/runtime/compiler.py",
+        "Code&DBs/Workflow/tests/unit/test_runtime_compiler_json.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/unit/test_runtime_compiler_json.py -k 'authority or hydrate or compile_prose'"
+    },
+    {
+      "label": "provider_registry_fail_closed",
+      "agent": "openai/gpt-5.4",
+      "task_type": "refactor",
+      "depends_on": [
+        "surface_authority_resolver_core"
+      ],
+      "description": "Remove degraded built-in provider registry behavior from runtime authority.",
+      "outcome_goal": "Provider registry load failures surface as authority failures instead of silently restoring built-ins.",
+      "prompt": "Refactor the provider execution registry to fail closed.\n\nFiles in scope:\n- Code&DBs/Workflow/registry/provider_execution_registry.py\n- Code&DBs/Workflow/tests/unit/test_transport_support_and_parity.py\n- Code&DBs/Workflow/tests/unit/test_mcp_health_tool.py\n- Code&DBs/Workflow/tests/unit/test_structured_output.py\n\nRequirements:\n- Remove runtime reliance on DEGRADED_BUILTIN behavior for missing DB authority, load errors, empty rows, and invalid rows.\n- Built-in profiles may remain as explicit fixtures or seed material, but not as runtime truth when DB authority is missing.\n- Keep health/reporting surfaces honest: they should report failure state rather than pretend a valid built-in registry exists.\n- Rewrite tests that currently encode built-in fallback as acceptable runtime behavior.\n\nAcceptance:\n- `registry_health()` without authority no longer reports a healthy built-in inventory.",
+      "read": [
+        "Code&DBs/Workflow/registry/provider_execution_registry.py",
+        "Code&DBs/Workflow/tests/unit/test_transport_support_and_parity.py",
+        "Code&DBs/Workflow/tests/unit/test_mcp_health_tool.py",
+        "Code&DBs/Workflow/tests/unit/test_structured_output.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/registry/provider_execution_registry.py",
+        "Code&DBs/Workflow/tests/unit/test_transport_support_and_parity.py",
+        "Code&DBs/Workflow/tests/unit/test_mcp_health_tool.py",
+        "Code&DBs/Workflow/tests/unit/test_structured_output.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/unit/test_transport_support_and_parity.py Code\\&DBs/Workflow/tests/unit/test_mcp_health_tool.py Code\\&DBs/Workflow/tests/unit/test_structured_output.py -k 'provider_registry or transport_support or health'"
+    },
+    {
+      "label": "task_profiles_fail_closed",
+      "agent": "openai/gpt-5.4",
+      "task_type": "refactor",
+      "depends_on": [
+        "surface_authority_resolver_core"
+      ],
+      "description": "Remove silent runtime fallback seeds from task profile authority.",
+      "outcome_goal": "Task profile and keyword-rule resolution no longer silently use in-module fallback seeds when DB authority is missing.",
+      "prompt": "Refactor task profile authority so runtime behavior does not silently degrade to in-module seeds.\n\nFiles in scope:\n- Code&DBs/Workflow/adapters/task_profiles.py\n- Code&DBs/Workflow/tests/unit/test_route_authority_snapshot.py\n- Code&DBs/Workflow/tests/unit/test_transport_support_and_parity.py\n\nRequirements:\n- Remove silent runtime fallback semantics for missing or invalid DB authority.\n- If seed data must remain, keep it clearly bootstrap-only or test-only.\n- Preserve the public function surface where possible, but make authority failures explicit.\n- Add or adjust tests to prove missing authority fails closed.\n\nAcceptance:\n- Runtime task profile selection cannot quietly drift from DB truth.",
+      "read": [
+        "Code&DBs/Workflow/adapters/task_profiles.py",
+        "Code&DBs/Workflow/tests/unit/test_route_authority_snapshot.py",
+        "Code&DBs/Workflow/tests/unit/test_transport_support_and_parity.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/adapters/task_profiles.py",
+        "Code&DBs/Workflow/tests/unit/test_route_authority_snapshot.py",
+        "Code&DBs/Workflow/tests/unit/test_transport_support_and_parity.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/unit/test_route_authority_snapshot.py Code\\&DBs/Workflow/tests/unit/test_transport_support_and_parity.py -k 'task_profile or route_authority or profile'"
+    },
+    {
+      "label": "surface_startup_consumers",
+      "agent": "openai/gpt-5.4",
+      "task_type": "refactor",
+      "depends_on": [
+        "surface_authority_resolver_core"
+      ],
+      "description": "Align MCP/API startup consumers with the shared explicit authority resolver.",
+      "outcome_goal": "Startup subsystems consume the fail-closed authority helper cleanly and do not reintroduce local DSN defaults.",
+      "prompt": "Tighten the startup consumers that rely on workflow database env helpers.\n\nFiles in scope:\n- Code&DBs/Workflow/surfaces/mcp/subsystems.py\n- Code&DBs/Workflow/surfaces/api/handlers/_subsystems.py\n- Code&DBs/Workflow/surfaces/api/server.py\n- Code&DBs/Workflow/tests/unit/test_startup_wiring.py\n- Code&DBs/Workflow/tests/unit/test_api_server_dependency_contract.py\n\nRequirements:\n- Remove assumptions that a repo-local default DB URL will be fabricated.\n- Preserve explicit env and explicit repo `.env` support.\n- Make startup failure semantics consistent with the shell/bootstrap contract.\n- Rewrite tests that currently assert localhost fallback as desired behavior.\n\nAcceptance:\n- MCP/API startup helpers agree with the shared authority contract.",
+      "read": [
+        "Code&DBs/Workflow/surfaces/mcp/subsystems.py",
+        "Code&DBs/Workflow/surfaces/api/handlers/_subsystems.py",
+        "Code&DBs/Workflow/surfaces/api/server.py",
+        "Code&DBs/Workflow/tests/unit/test_startup_wiring.py",
+        "Code&DBs/Workflow/tests/unit/test_api_server_dependency_contract.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/surfaces/mcp/subsystems.py",
+        "Code&DBs/Workflow/surfaces/api/handlers/_subsystems.py",
+        "Code&DBs/Workflow/surfaces/api/server.py",
+        "Code&DBs/Workflow/tests/unit/test_startup_wiring.py",
+        "Code&DBs/Workflow/tests/unit/test_api_server_dependency_contract.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/unit/test_startup_wiring.py Code\\&DBs/Workflow/tests/unit/test_api_server_dependency_contract.py"
+    },
+    {
+      "label": "supervisor_authority_contract",
+      "agent": "openai/gpt-5.4",
+      "task_type": "refactor",
+      "depends_on": [
+        "surface_authority_resolver_core"
+      ],
+      "description": "Remove default database discovery behavior from the Praxis supervisor.",
+      "outcome_goal": "Supervisor launch-agent and discovery logic no longer fabricate localhost DB authority when none is explicit.",
+      "prompt": "Refactor the Praxis supervisor authority path.\n\nFiles in scope:\n- Code&DBs/Workflow/runtime/praxis_supervisor.py\n- Code&DBs/Workflow/tests/unit/test_praxis_supervisor.py\n\nRequirements:\n- Remove DEFAULT_DB_URL fallback as runtime behavior.\n- `discover_database_url()` may normalize valid explicit values but should not invent a localhost DSN just because the database likely exists.\n- Preserve explicit discovery from launch-agent env when present.\n- Rewrite supervisor tests to require explicit authority and fail closed otherwise.\n\nAcceptance:\n- The supervisor stops being a secret second authority source.",
+      "read": [
+        "Code&DBs/Workflow/runtime/praxis_supervisor.py",
+        "Code&DBs/Workflow/tests/unit/test_praxis_supervisor.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/runtime/praxis_supervisor.py",
+        "Code&DBs/Workflow/tests/unit/test_praxis_supervisor.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/unit/test_praxis_supervisor.py"
+    },
+    {
+      "label": "compiler_contract_tests",
+      "agent": "openai/gpt-5.4",
+      "task_type": "test",
+      "depends_on": [
+        "compiler_authority_contract"
+      ],
+      "description": "Run the compiler authority regression slice and capture the proof.",
+      "outcome_goal": "Compiler authority regressions are proven in one focused test slice with a written receipt.",
+      "prompt": "Run the focused compiler authority regression slice after the compiler authority refactor.\n\nCommands to run:\n- PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q Code&DBs/Workflow/tests/unit/test_runtime_compiler_json.py -k 'authority or hydrate or compile_prose'\n\nWrite `artifacts/workflow/authority_cleanup/compiler_authority_regression_20260415.md` summarizing:\n- exact command run\n- pass/fail result\n- any residual gaps still visible in compiler authority behavior\n\nDo not broaden into provider or startup testing.",
+      "read": [
+        "Code&DBs/Workflow/runtime/compiler.py",
+        "Code&DBs/Workflow/tests/unit/test_runtime_compiler_json.py"
+      ],
+      "write": [
+        "artifacts/workflow/authority_cleanup/compiler_authority_regression_20260415.md"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && test -f artifacts/workflow/authority_cleanup/compiler_authority_regression_20260415.md && grep -q 'exact command run' artifacts/workflow/authority_cleanup/compiler_authority_regression_20260415.md"
+    },
+    {
+      "label": "provider_registry_contract_tests",
+      "agent": "openai/gpt-5.4",
+      "task_type": "test",
+      "depends_on": [
+        "provider_registry_fail_closed"
+      ],
+      "description": "Run the provider registry fail-closed regression slice and capture the proof.",
+      "outcome_goal": "Provider registry fallback behavior is replaced by explicit authority failure and proven by focused tests.",
+      "prompt": "Run the focused provider registry regression slice after the runtime refactor.\n\nCommands to run:\n- PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q Code&DBs/Workflow/tests/unit/test_transport_support_and_parity.py Code&DBs/Workflow/tests/unit/test_mcp_health_tool.py Code&DBs/Workflow/tests/unit/test_structured_output.py -k 'provider_registry or transport_support or health'\n\nWrite `artifacts/workflow/authority_cleanup/provider_registry_regression_20260415.md` with:\n- exact command run\n- pass/fail result\n- any remaining split-brain symptoms in provider surfaces\n\nDo not touch task profiles or compiler in this job.",
+      "read": [
+        "Code&DBs/Workflow/registry/provider_execution_registry.py",
+        "Code&DBs/Workflow/tests/unit/test_transport_support_and_parity.py",
+        "Code&DBs/Workflow/tests/unit/test_mcp_health_tool.py",
+        "Code&DBs/Workflow/tests/unit/test_structured_output.py"
+      ],
+      "write": [
+        "artifacts/workflow/authority_cleanup/provider_registry_regression_20260415.md"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && test -f artifacts/workflow/authority_cleanup/provider_registry_regression_20260415.md && grep -q 'exact command run' artifacts/workflow/authority_cleanup/provider_registry_regression_20260415.md"
+    },
+    {
+      "label": "task_profiles_contract_tests",
+      "agent": "openai/gpt-5.4",
+      "task_type": "test",
+      "depends_on": [
+        "task_profiles_fail_closed"
+      ],
+      "description": "Run the task-profile authority regression slice and capture the proof.",
+      "outcome_goal": "Task profile authority no longer silently degrades and the result is proven with focused tests.",
+      "prompt": "Run the focused task-profile authority regression slice.\n\nCommands to run:\n- PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q Code&DBs/Workflow/tests/unit/test_route_authority_snapshot.py Code&DBs/Workflow/tests/unit/test_transport_support_and_parity.py -k 'task_profile or route_authority or profile'\n\nWrite `artifacts/workflow/authority_cleanup/task_profiles_regression_20260415.md` with:\n- exact command run\n- pass/fail result\n- any remaining places where runtime task profiles still look code-owned\n\nDo not broaden into provider registry or startup helpers.",
+      "read": [
+        "Code&DBs/Workflow/adapters/task_profiles.py",
+        "Code&DBs/Workflow/tests/unit/test_route_authority_snapshot.py",
+        "Code&DBs/Workflow/tests/unit/test_transport_support_and_parity.py"
+      ],
+      "write": [
+        "artifacts/workflow/authority_cleanup/task_profiles_regression_20260415.md"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && test -f artifacts/workflow/authority_cleanup/task_profiles_regression_20260415.md && grep -q 'exact command run' artifacts/workflow/authority_cleanup/task_profiles_regression_20260415.md"
+    },
+    {
+      "label": "startup_surface_contract_tests",
+      "agent": "openai/gpt-5.4",
+      "task_type": "test",
+      "depends_on": [
+        "workflow_wrapper_alignment",
+        "surface_startup_consumers"
+      ],
+      "description": "Run the startup/frontdoor authority regression slice and capture the proof.",
+      "outcome_goal": "Shell, MCP, and API startup surfaces now agree on explicit authority behavior.",
+      "prompt": "Run the focused startup/frontdoor authority regression slice.\n\nCommands to run:\n- PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q Code&DBs/Workflow/tests/unit/test_workflow_shell_env.py Code&DBs/Workflow/tests/unit/test_cli_workflow_frontdoors.py Code&DBs/Workflow/tests/unit/test_startup_wiring.py Code&DBs/Workflow/tests/unit/test_api_server_dependency_contract.py\n\nWrite `artifacts/workflow/authority_cleanup/startup_surface_regression_20260415.md` with:\n- exact command run\n- pass/fail result\n- any remaining mismatch between shell bootstrap and Python startup helpers\n\nDo not broaden into provider or compiler testing.",
+      "read": [
+        "scripts/_workflow_env.sh",
+        "scripts/praxis",
+        "scripts/praxis-workflow",
+        "Code&DBs/Workflow/workflow",
+        "Code&DBs/Workflow/surfaces/_workflow_database.py",
+        "Code&DBs/Workflow/surfaces/mcp/subsystems.py",
+        "Code&DBs/Workflow/surfaces/api/handlers/_subsystems.py",
+        "Code&DBs/Workflow/surfaces/api/server.py",
+        "Code&DBs/Workflow/tests/unit/test_workflow_shell_env.py",
+        "Code&DBs/Workflow/tests/unit/test_cli_workflow_frontdoors.py",
+        "Code&DBs/Workflow/tests/unit/test_startup_wiring.py",
+        "Code&DBs/Workflow/tests/unit/test_api_server_dependency_contract.py"
+      ],
+      "write": [
+        "artifacts/workflow/authority_cleanup/startup_surface_regression_20260415.md"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && test -f artifacts/workflow/authority_cleanup/startup_surface_regression_20260415.md && grep -q 'exact command run' artifacts/workflow/authority_cleanup/startup_surface_regression_20260415.md"
+    },
+    {
+      "label": "supervisor_contract_tests",
+      "agent": "openai/gpt-5.4",
+      "task_type": "test",
+      "depends_on": [
+        "supervisor_authority_contract"
+      ],
+      "description": "Run the supervisor authority regression slice and capture the proof.",
+      "outcome_goal": "Supervisor database discovery now fails closed unless authority is explicit and the result is proven.",
+      "prompt": "Run the focused supervisor authority regression slice.\n\nCommands to run:\n- PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q Code&DBs/Workflow/tests/unit/test_praxis_supervisor.py\n\nWrite `artifacts/workflow/authority_cleanup/supervisor_authority_regression_20260415.md` with:\n- exact command run\n- pass/fail result\n- any remaining hidden authority sources in launch-agent or supervisor behavior\n\nDo not broaden into general startup or compiler tests.",
+      "read": [
+        "Code&DBs/Workflow/runtime/praxis_supervisor.py",
+        "Code&DBs/Workflow/tests/unit/test_praxis_supervisor.py"
+      ],
+      "write": [
+        "artifacts/workflow/authority_cleanup/supervisor_authority_regression_20260415.md"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && test -f artifacts/workflow/authority_cleanup/supervisor_authority_regression_20260415.md && grep -q 'exact command run' artifacts/workflow/authority_cleanup/supervisor_authority_regression_20260415.md"
+    },
+    {
+      "label": "docs_inventory_sync",
+      "agent": "openai/gpt-5.4-mini",
+      "task_type": "build",
+      "depends_on": [
+        "compiler_contract_tests",
+        "provider_registry_contract_tests",
+        "task_profiles_contract_tests",
+        "startup_surface_contract_tests",
+        "supervisor_contract_tests"
+      ],
+      "description": "Bring README and MCP docs back into live catalog and authority reality.",
+      "outcome_goal": "Docs no longer claim stale tool counts or imply fallback behavior that the runtime rejects.",
+      "prompt": "Update the repo-facing documentation so it matches the post-cleanup runtime.\n\nFiles in scope:\n- README.md\n- docs/MCP.md\n- Code&DBs/Workflow/tests/unit/test_repo_guidance_contracts.py\n- Code&DBs/Workflow/tests/unit/test_mcp_docs_and_metadata.py\n\nRequirements:\n- Remove stale hardcoded counts or update them to match the live catalog truth.\n- Prefer wording that avoids future count drift where practical.\n- Ensure docs do not imply runtime fallback DB behavior.\n- Adjust tests accordingly.\n\nAcceptance:\n- Human-facing docs and doc tests agree with the actual runtime/catalog state.",
+      "read": [
+        "README.md",
+        "docs/MCP.md",
+        "Code&DBs/Workflow/tests/unit/test_repo_guidance_contracts.py",
+        "Code&DBs/Workflow/tests/unit/test_mcp_docs_and_metadata.py"
+      ],
+      "write": [
+        "README.md",
+        "docs/MCP.md",
+        "Code&DBs/Workflow/tests/unit/test_repo_guidance_contracts.py",
+        "Code&DBs/Workflow/tests/unit/test_mcp_docs_and_metadata.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q Code\\&DBs/Workflow/tests/unit/test_repo_guidance_contracts.py Code\\&DBs/Workflow/tests/unit/test_mcp_docs_and_metadata.py"
+    },
+    {
+      "label": "authority_regression_matrix",
+      "agent": "openai/gpt-5.4",
+      "task_type": "test",
+      "depends_on": [
+        "docs_inventory_sync"
+      ],
+      "description": "Run the consolidated authority regression matrix and summarize the remaining risk.",
+      "outcome_goal": "One final proof pack shows the consolidated targeted slices and whether the split-brain cleanup is complete.",
+      "prompt": "Run the consolidated targeted regression matrix after all implementation and doc jobs finish.\n\nCommands to run:\n- ./scripts/test.sh selftest\n- env -u WORKFLOW_DATABASE_URL ./Code&DBs/Workflow/workflow tools list || true\n- env -u WORKFLOW_DATABASE_URL ./scripts/praxis workflow tools list || true\n\nAlso run any targeted pytest slices needed to confirm the final state if earlier packet receipts indicate drift.\n\nWrite `artifacts/workflow/authority_cleanup/AUTHORITY_REGRESSION_MATRIX_20260415.md` with:\n1. Commands run\n2. Results summary\n3. Whether missing authority now fails closed across frontdoor, compiler, provider registry, task profiles, startup, and supervisor\n4. Residual risks if any remain\n\nBe concrete and evidence-backed.",
+      "read": [
+        "scripts/test.sh",
+        "Code&DBs/Workflow/workflow",
+        "scripts/praxis",
+        "artifacts/workflow/authority_cleanup/compiler_authority_regression_20260415.md",
+        "artifacts/workflow/authority_cleanup/provider_registry_regression_20260415.md",
+        "artifacts/workflow/authority_cleanup/task_profiles_regression_20260415.md",
+        "artifacts/workflow/authority_cleanup/startup_surface_regression_20260415.md",
+        "artifacts/workflow/authority_cleanup/supervisor_authority_regression_20260415.md"
+      ],
+      "write": [
+        "artifacts/workflow/authority_cleanup/AUTHORITY_REGRESSION_MATRIX_20260415.md"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && test -f artifacts/workflow/authority_cleanup/AUTHORITY_REGRESSION_MATRIX_20260415.md && grep -q 'Results summary' artifacts/workflow/authority_cleanup/AUTHORITY_REGRESSION_MATRIX_20260415.md"
+    },
+    {
+      "label": "authority_cleanup_review",
+      "agent": "openai/gpt-5.4-mini",
+      "task_type": "review",
+      "depends_on": [
+        "authority_regression_matrix"
+      ],
+      "description": "Perform a final review pass over the split-brain cleanup set.",
+      "outcome_goal": "Any remaining authority leaks, weak tests, or docs drift are called out in one final finding set.",
+      "prompt": "Review the split-brain authority cleanup as a code review.\n\nPrioritize findings on:\n- any surviving localhost or test DSN fallback in runtime code\n- any surviving degraded builtin provider or task-profile runtime behavior\n- any startup or supervisor path that still fabricates authority\n- any doc/test mismatch around tool inventory counts or authority semantics\n- any missing verification coverage across the targeted slices\n\nFiles to review include the runtime and test files touched by the previous jobs plus `README.md`, `docs/MCP.md`, and `artifacts/workflow/authority_cleanup/AUTHORITY_REGRESSION_MATRIX_20260415.md`.\n\nFindings first with file references. If no findings remain, say so explicitly and mention residual risk only.",
+      "read": [
+        "Code&DBs/Workflow/surfaces/_workflow_database.py",
+        "scripts/praxis",
+        "scripts/praxis-workflow",
+        "Code&DBs/Workflow/workflow",
+        "Code&DBs/Workflow/runtime/compiler.py",
+        "Code&DBs/Workflow/registry/provider_execution_registry.py",
+        "Code&DBs/Workflow/adapters/task_profiles.py",
+        "Code&DBs/Workflow/surfaces/mcp/subsystems.py",
+        "Code&DBs/Workflow/surfaces/api/handlers/_subsystems.py",
+        "Code&DBs/Workflow/surfaces/api/server.py",
+        "Code&DBs/Workflow/runtime/praxis_supervisor.py",
+        "README.md",
+        "docs/MCP.md",
+        "artifacts/workflow/authority_cleanup/AUTHORITY_REGRESSION_MATRIX_20260415.md"
+      ],
+      "write": []
+    }
+  ]
+}

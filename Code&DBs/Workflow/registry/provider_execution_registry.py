@@ -19,6 +19,7 @@ import logging
 import os
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 from adapters import provider_transport
@@ -138,13 +139,64 @@ def _restore_builtin_registry() -> None:
     _ADAPTER_FAILURE_MAPPINGS.clear()
 
 
+def _clear_registry_state() -> None:
+    _REGISTRY.clear()
+    _ALIAS_MAP.clear()
+    _ADAPTER_CONFIG.clear()
+    _ADAPTER_FAILURE_MAPPINGS.clear()
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[3]
+
+
+def _read_repo_env_file(path: Path) -> dict[str, str]:
+    try:
+        content = path.read_text(encoding="utf-8")
+    except OSError:
+        return {}
+
+    parsed: dict[str, str] = {}
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip("'\"")
+        if key and value:
+            parsed[key] = value
+    return parsed
+
+
 def _require_database_url() -> str:
+    if _DATABASE_URL_ENV not in os.environ:
+        repo_env_path = _repo_root() / ".env"
+        repo_env = _read_repo_env_file(repo_env_path)
+        if _DATABASE_URL_ENV in repo_env:
+            return resolve_workflow_database_url(repo_env)
     try:
         return resolve_workflow_database_url()
     except PostgresConfigurationError as exc:
         raise RuntimeError(
             "provider_registry requires explicit WORKFLOW_DATABASE_URL Postgres authority"
         ) from exc
+
+
+def _record_load_failure(error: str, *, log_level: str, message: str) -> None:
+    global _load_status, _load_error, _load_timestamp, _DB_LOADED
+
+    _clear_registry_state()
+    if log_level == "error":
+        logger.error(message)
+    elif log_level == "warning":
+        logger.warning(message)
+    else:
+        logger.info(message)
+    _load_status = RegistryLoadStatus.LOAD_FAILED
+    _load_error = error
+    _load_timestamp = time.monotonic()
+    _DB_LOADED = True
 
 
 def _row_text_tuple(value: Any, fallback: tuple[str, ...] = ()) -> tuple[str, ...]:
@@ -418,57 +470,49 @@ def _load_from_db() -> None:
             return
 
         if not _ASYNCPG_AVAILABLE:
-            _restore_builtin_registry()
-            logger.warning("provider_registry: asyncpg unavailable — using built-in profiles")
-            _load_status = RegistryLoadStatus.DEGRADED_BUILTIN
-            _load_error = "asyncpg not installed"
-            _load_timestamp = time.monotonic()
-            _DB_LOADED = True
+            _record_load_failure(
+                "asyncpg not installed",
+                log_level="warning",
+                message="provider_registry: asyncpg unavailable — registry load failed",
+            )
             return
 
         try:
             db_url = _require_database_url()
         except RuntimeError as exc:
-            _restore_builtin_registry()
-            logger.warning("provider_registry: %s — using built-in profiles", exc)
-            _load_status = RegistryLoadStatus.DEGRADED_BUILTIN
-            _load_error = str(exc)
-            _load_timestamp = time.monotonic()
-            _DB_LOADED = True
+            _record_load_failure(
+                str(exc),
+                log_level="warning",
+                message=f"provider_registry: {exc} — registry load failed",
+            )
             return
 
         try:
             rows, config_rows, failure_rows = _run_async(_fetch_from_db(db_url))
         except ProviderRegistryLoadTimeout as exc:
-            _restore_builtin_registry()
-            logger.error("provider_registry: %s — using built-in profiles", exc)
-            _load_status = RegistryLoadStatus.DEGRADED_BUILTIN
-            _load_error = str(exc)
-            _load_timestamp = time.monotonic()
-            _DB_LOADED = True
+            _record_load_failure(
+                str(exc),
+                log_level="error",
+                message=f"provider_registry: {exc} — registry load failed",
+            )
             return
         except Exception as exc:
-            _restore_builtin_registry()
-            logger.error(
-                "provider_registry: DB fetch failed (%s: %s) — using built-in profiles",
-                type(exc).__name__,
-                exc,
+            _record_load_failure(
+                f"{type(exc).__name__}: {exc}",
+                log_level="error",
+                message=(
+                    "provider_registry: DB fetch failed "
+                    f"({type(exc).__name__}: {exc}) — registry load failed"
+                ),
             )
-            _load_status = RegistryLoadStatus.DEGRADED_BUILTIN
-            _load_error = f"{type(exc).__name__}: {exc}"
-            _load_timestamp = time.monotonic()
-            _DB_LOADED = True
             return
 
         if not rows:
-            _restore_builtin_registry()
-            logger.warning(
-                "provider_registry: no active provider_cli_profiles in DB — using built-in profiles"
+            _record_load_failure(
+                "no active rows",
+                log_level="warning",
+                message="provider_registry: no active provider_cli_profiles in DB — registry load failed",
             )
-            _load_status = RegistryLoadStatus.DEGRADED_BUILTIN
-            _load_error = "no active rows"
-            _load_timestamp = time.monotonic()
-            _DB_LOADED = True
             return
 
         loaded_registry: dict[str, ProviderCLIProfile] = {}
@@ -495,17 +539,15 @@ def _load_from_db() -> None:
                 loaded_aliases[alias] = profile.provider_slug
 
         if not loaded_registry:
-            _restore_builtin_registry()
-            logger.error(
-                "provider_registry: all %d DB rows failed validation — using built-in profiles. "
-                "Errors: %s",
-                len(rows),
-                "; ".join(parse_errors),
+            _record_load_failure(
+                f"all {len(rows)} rows failed validation",
+                log_level="error",
+                message=(
+                    "provider_registry: all "
+                    f"{len(rows)} DB rows failed validation — registry load failed. "
+                    f"Errors: {'; '.join(parse_errors)}"
+                ),
             )
-            _load_status = RegistryLoadStatus.DEGRADED_BUILTIN
-            _load_error = f"all {len(rows)} rows failed validation"
-            _load_timestamp = time.monotonic()
-            _DB_LOADED = True
             return
 
         _REGISTRY.clear()

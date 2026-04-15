@@ -122,6 +122,34 @@ def test_run_model_fails_closed_when_docker_is_unavailable(monkeypatch):
         )
 
 
+def test_run_model_uses_host_when_docker_is_not_preferred(monkeypatch):
+    monkeypatch.setattr(
+        "adapters.docker_runner.run_on_host",
+        lambda **kwargs: ExecutionResult(
+            stdout="ok",
+            stderr="",
+            exit_code=0,
+            timed_out=False,
+            latency_ms=1,
+            execution_mode="host",
+        ),
+    )
+    monkeypatch.setattr(
+        "adapters.docker_runner._has_docker",
+        lambda: (_ for _ in ()).throw(AssertionError("docker availability should not be checked")),
+    )
+
+    result = run_model(
+        command="echo hello",
+        stdin_text="",
+        timeout=1,
+        prefer_docker=False,
+    )
+
+    assert result.execution_mode == "host"
+    assert result.stdout == "ok"
+
+
 def test_run_in_docker_requires_local_image(monkeypatch):
     monkeypatch.setattr("adapters.docker_runner._has_docker", lambda: True)
     monkeypatch.setattr("adapters.docker_runner._has_docker_image", lambda image: False)

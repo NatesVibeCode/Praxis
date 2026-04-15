@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from storage.postgres import SyncPostgresConnection
     from runtime.embedding_service import EmbeddingService
 
+from runtime import bug_evidence as _bug_evidence
 from storage.postgres.vector_store import PostgresVectorStore
 from runtime.payload_coercion import json_object as _json_object, json_list as _json_list, coerce_datetime as _coerce_datetime
 
@@ -64,11 +65,7 @@ def _ordered_unique(values: list[Any]) -> tuple[Any, ...]:
 
 
 def _attempted_at_sort_key(item: Any) -> datetime:
-    if isinstance(item, dict):
-        attempted_at = item.get("attempted_at")
-        if isinstance(attempted_at, datetime):
-            return attempted_at
-    return datetime.min.replace(tzinfo=timezone.utc)
+    return _bug_evidence.attempted_at_sort_key(item)
 
 
 def _payload_keys(payload: Any) -> tuple[str, ...]:
@@ -78,15 +75,11 @@ def _payload_keys(payload: Any) -> tuple[str, ...]:
 
 
 def _verification_passed(status: object) -> bool:
-    return str(status or "").strip().lower() in _VERIFICATION_SUCCESS_STATUSES
+    return _bug_evidence.verification_passed(status)
 
 
 def _packet_summary(packet: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "signature": packet.get("signature"),
-        "observability_state": packet.get("observability_state"),
-        "observability_gaps": packet.get("observability_gaps"),
-    }
+    return _bug_evidence.packet_summary(packet)
 
 
 def build_failure_signature(
@@ -100,56 +93,24 @@ def build_failure_signature(
     model_slug: str | None = None,
     source_kind: str | None = None,
 ) -> dict[str, Any]:
-    payload = {
-        "failure_code": str(failure_code or "").strip() or None,
-        "job_label": str(job_label or "").strip() or None,
-        "node_id": str(node_id or "").strip() or None,
-        "failure_category": str(failure_category or "").strip() or None,
-        "agent": str(agent or "").strip() or None,
-        "provider_slug": str(provider_slug or "").strip() or None,
-        "model_slug": str(model_slug or "").strip() or None,
-        "source_kind": str(source_kind or "").strip() or None,
-    }
-    payload["fingerprint"] = _stable_fingerprint(
-        {key: value for key, value in payload.items() if key != "fingerprint"}
+    return _bug_evidence.build_failure_signature(
+        failure_code=failure_code,
+        job_label=job_label,
+        node_id=node_id,
+        failure_category=failure_category,
+        agent=agent,
+        provider_slug=provider_slug,
+        model_slug=model_slug,
+        source_kind=source_kind,
     )
-    return payload
 
 
 def _extract_receipt_paths(payload: dict[str, Any], *, key: str) -> tuple[str, ...]:
-    value = payload.get(key)
-    if isinstance(value, list):
-        return tuple(str(item).strip() for item in value if str(item).strip())
-    return ()
+    return _bug_evidence.extract_receipt_paths(payload, key=key)
 
 
 def _extract_write_paths(inputs: dict[str, Any], outputs: dict[str, Any]) -> tuple[str, ...]:
-    paths: list[str] = []
-    seen: set[str] = set()
-    write_manifest = _json_object(outputs.get("write_manifest"))
-    manifest_results = write_manifest.get("results")
-    if isinstance(manifest_results, list):
-        for row in manifest_results:
-            if not isinstance(row, dict):
-                continue
-            path = str(row.get("file_path") or "").strip()
-            if path and path not in seen:
-                seen.add(path)
-                paths.append(path)
-    mutation_provenance = _json_object(outputs.get("mutation_provenance"))
-    for source in (
-        mutation_provenance.get("write_paths"),
-        outputs.get("verified_paths"),
-        inputs.get("write_scope"),
-        inputs.get("file_paths"),
-    ):
-        if isinstance(source, list):
-            for raw_path in source:
-                path = str(raw_path or "").strip()
-                if path and path not in seen:
-                    seen.add(path)
-                    paths.append(path)
-    return tuple(paths)
+    return _bug_evidence.extract_write_paths(inputs, outputs)
 
 
 # -- Enums ------------------------------------------------------------------
@@ -471,41 +432,7 @@ class BugTracker:
             raise ValueError(f"unknown {evidence_kind} reference: {evidence_ref}")
 
     def _public_receipt_summary(self, receipt: dict[str, Any] | None) -> dict[str, Any] | None:
-        if receipt is None:
-            return None
-        inputs = _json_object(receipt.get("inputs"))
-        outputs = _json_object(receipt.get("outputs"))
-        artifacts = _json_object(receipt.get("artifacts"))
-        git_provenance = _json_object(receipt.get("git_provenance"))
-        return {
-            "receipt_id": receipt.get("receipt_id"),
-            "workflow_id": receipt.get("workflow_id"),
-            "run_id": receipt.get("run_id"),
-            "request_id": receipt.get("request_id"),
-            "node_id": receipt.get("node_id"),
-            "status": receipt.get("status"),
-            "failure_code": receipt.get("failure_code"),
-            "timestamp": receipt.get("timestamp"),
-            "started_at": receipt.get("started_at"),
-            "finished_at": receipt.get("finished_at"),
-            "executor_type": receipt.get("executor_type"),
-            "agent": receipt.get("agent"),
-            "provider_slug": receipt.get("provider_slug"),
-            "model_slug": receipt.get("model_slug"),
-            "latency_ms": receipt.get("latency_ms"),
-            "verification_status": receipt.get("verification_status"),
-            "failure_category": receipt.get("failure_category"),
-            "decision_refs": tuple(receipt.get("decision_refs") or ()),
-            "repo_snapshot_ref": git_provenance.get("repo_snapshot_ref"),
-            "workspace_ref": inputs.get("workspace_ref"),
-            "runtime_profile_ref": inputs.get("runtime_profile_ref"),
-            "write_paths": tuple(receipt.get("write_paths") or ()),
-            "verified_paths": tuple(receipt.get("verified_paths") or ()),
-            "payload_redacted": True,
-            "input_keys": _payload_keys(inputs),
-            "output_keys": _payload_keys(outputs),
-            "artifact_keys": _payload_keys(artifacts),
-        }
+        return _bug_evidence.public_receipt_summary(receipt)
 
     def _replay_action(
         self,
@@ -513,36 +440,7 @@ class BugTracker:
         bug_id: str,
         replay_context: dict[str, Any],
     ) -> dict[str, Any]:
-        ready = bool(replay_context.get("ready") and replay_context.get("run_id"))
-        source = str(replay_context.get("source") or "")
-        if ready:
-            reason_code = "bug.replay_ready"
-        elif source == "fallback":
-            reason_code = "bug.replay_inferred_only"
-        elif replay_context.get("run_id"):
-            reason_code = "bug.replay_missing_receipt_context"
-        else:
-            reason_code = "bug.replay_missing_run_context"
-        return {
-            "available": ready,
-            "automatic": ready,
-            "reason_code": reason_code,
-            "run_id": replay_context.get("run_id"),
-            "receipt_id": replay_context.get("receipt_id"),
-            "tool": "praxis_bugs",
-            "arguments": {
-                "action": "replay",
-                "bug_id": bug_id,
-            },
-            "http_request": {
-                "method": "POST",
-                "path": "/bugs",
-                "body": {
-                    "action": "replay",
-                    "bug_id": bug_id,
-                },
-            },
-        }
+        return _bug_evidence.replay_action(bug_id=bug_id, replay_context=replay_context)
 
     def _replay_run_view(self, run_id: str):
         from runtime.execution.orchestrator import RuntimeOrchestrator
@@ -561,91 +459,15 @@ class BugTracker:
         node_id: str | None,
         limit: int,
     ) -> tuple[list[dict[str, Any]], str | None]:
-        clauses: list[str] = []
-        params: list[object] = []
-        idx = 1
-        if failure_code:
-            clauses.append(f"failure_code = ${idx}")
-            params.append(failure_code)
-            idx += 1
-        if node_id:
-            clauses.append(f"node_id = ${idx}")
-            params.append(node_id)
-            idx += 1
-        if not clauses:
-            return [], None
-        params.append(limit)
-        rows, error = self._query_rows_with_error(
-            (
-                "SELECT receipt_id, workflow_id, run_id, request_id, node_id, attempt_no, started_at, finished_at, "
-                "executor_type, status, inputs, outputs, artifacts, failure_code, decision_refs "
-                f"FROM receipts WHERE {' AND '.join(clauses)} "
-                f"ORDER BY COALESCE(finished_at, started_at) DESC NULLS LAST LIMIT ${idx}"
-            ),
-            *params,
+        return _bug_evidence.find_signature_receipts(
+            self._conn,
+            failure_code=failure_code,
+            node_id=node_id,
+            limit=limit,
         )
-        return [self._row_to_receipt_summary(row) for row in rows], error
 
     def _compare_write_sets(self, latest_receipt: dict[str, Any] | None) -> dict[str, Any]:
-        if latest_receipt is None:
-            return {
-                "baseline_receipt_id": None,
-                "added_paths": (),
-                "removed_paths": (),
-                "unchanged_paths": (),
-                "current_write_count": 0,
-                "baseline_write_count": 0,
-                "note": "no receipt evidence available",
-            }
-        node_id = str(latest_receipt.get("node_id") or "").strip()
-        workflow_id = str(latest_receipt.get("workflow_id") or "").strip()
-        receipt_id = str(latest_receipt.get("receipt_id") or "").strip()
-        if not node_id or not workflow_id or not receipt_id:
-            return {
-                "baseline_receipt_id": None,
-                "added_paths": (),
-                "removed_paths": (),
-                "unchanged_paths": (),
-                "current_write_count": len(latest_receipt.get("write_paths") or ()),
-                "baseline_write_count": 0,
-                "note": "missing workflow or node identity for comparison",
-            }
-        row = None
-        try:
-            row = self._conn.fetchrow(
-                """
-                SELECT receipt_id, workflow_id, run_id, request_id, node_id, attempt_no, started_at, finished_at,
-                       executor_type, status, inputs, outputs, artifacts, failure_code, decision_refs
-                  FROM receipts
-                 WHERE workflow_id = $1
-                   AND node_id = $2
-                   AND status = 'succeeded'
-                   AND receipt_id <> $3
-                 ORDER BY COALESCE(finished_at, started_at) DESC NULLS LAST
-                 LIMIT 1
-                """,
-                workflow_id,
-                node_id,
-                receipt_id,
-            )
-        except Exception:
-            row = None
-        baseline_receipt = self._row_to_receipt_summary(row) if row else None
-        current_paths = set(latest_receipt.get("write_paths") or ())
-        baseline_paths = set(
-            baseline_receipt.get("write_paths") or ()
-            if baseline_receipt is not None
-            else ()
-        )
-        return {
-            "baseline_receipt_id": baseline_receipt.get("receipt_id") if baseline_receipt else None,
-            "added_paths": tuple(sorted(current_paths - baseline_paths)),
-            "removed_paths": tuple(sorted(baseline_paths - current_paths)),
-            "unchanged_paths": tuple(sorted(current_paths & baseline_paths)),
-            "current_write_count": len(current_paths),
-            "baseline_write_count": len(baseline_paths),
-            "note": None if baseline_receipt else "no comparable successful receipt",
-        }
+        return _bug_evidence.compare_write_sets(self._conn, latest_receipt)
 
     def _load_verification_rows(
         self,
@@ -653,43 +475,12 @@ class BugTracker:
         id_field: str,
         refs: tuple[str, ...],
     ) -> tuple[dict[str, dict[str, Any]], str | None]:
-        if not refs:
-            return {}, None
-        rows, error = self._query_rows_with_error(
-            f"""
-            SELECT {id_field},
-                   verifier_ref,
-                   target_kind,
-                   target_ref,
-                   status,
-                   inputs,
-                   outputs,
-                   decision_ref,
-                   attempted_at,
-                   duration_ms
-              FROM {table_name}
-             WHERE {id_field} = ANY($1::text[])
-            """,
-            list(refs),
+        return _bug_evidence.load_verification_rows(
+            self._conn,
+            table_name,
+            id_field,
+            refs,
         )
-        result: dict[str, dict[str, Any]] = {}
-        for row in rows:
-            ref = str(row.get(id_field) or "").strip()
-            if not ref:
-                continue
-            result[ref] = {
-                id_field: ref,
-                "verifier_ref": str(row.get("verifier_ref") or ""),
-                "target_kind": str(row.get("target_kind") or ""),
-                "target_ref": str(row.get("target_ref") or ""),
-                "status": str(row.get("status") or ""),
-                "inputs": _json_object(row.get("inputs")),
-                "outputs": _json_object(row.get("outputs")),
-                "decision_ref": str(row.get("decision_ref") or ""),
-                "attempted_at": _coerce_datetime(row.get("attempted_at")),
-                "duration_ms": int(row.get("duration_ms") or 0),
-            }
-        return result, error
 
     def _build_observability_gaps(
         self,
@@ -699,65 +490,16 @@ class BugTracker:
         latest_receipt: dict[str, Any] | None,
         fix_validation_count: int,
     ) -> tuple[str, ...]:
-        gaps: list[str] = []
-        if not evidence_links:
-            gaps.append("bug.evidence_links.missing")
-        if latest_receipt is None:
-            gaps.append("receipt.missing")
-        else:
-            if not latest_receipt.get("run_id"):
-                gaps.append("receipt.run_id.missing")
-            if not latest_receipt.get("receipt_id"):
-                gaps.append("receipt.receipt_id.missing")
-            if not latest_receipt.get("failure_code"):
-                gaps.append("receipt.failure_code.missing")
-            git_provenance = _json_object(latest_receipt.get("git_provenance"))
-            if not git_provenance:
-                gaps.append("receipt.git_provenance.missing")
-            elif not git_provenance.get("repo_snapshot_ref") and not git_provenance.get("available", False):
-                gaps.append("receipt.git_provenance.unavailable")
-            if not latest_receipt.get("write_paths"):
-                gaps.append("receipt.write_paths.missing")
-            if not latest_receipt.get("verification_status"):
-                gaps.append("receipt.verification_status.missing")
-            if not latest_receipt.get("decision_refs") and not bug.decision_ref:
-                gaps.append("decision_ref.missing")
-        if bug.status == BugStatus.FIXED and fix_validation_count <= 0:
-            gaps.append("fix_validation.missing")
-        return tuple(gaps)
+        return _bug_evidence.build_observability_gaps(
+            bug=bug,
+            bug_status_fixed=BugStatus.FIXED,
+            evidence_links=evidence_links,
+            latest_receipt=latest_receipt,
+            fix_validation_count=fix_validation_count,
+        )
 
     def _build_counterfactual_axes(self, latest_receipt: dict[str, Any] | None) -> tuple[dict[str, Any], ...]:
-        if latest_receipt is None:
-            return ()
-        git_provenance = _json_object(latest_receipt.get("git_provenance"))
-        baseline_model = "/".join(
-            part
-            for part in (
-                latest_receipt.get("provider_slug"),
-                latest_receipt.get("model_slug"),
-            )
-            if part
-        ) or latest_receipt.get("agent")
-        return (
-            {
-                "axis": "repo_snapshot",
-                "baseline": git_provenance.get("repo_snapshot_ref") or None,
-                "ready": bool(latest_receipt.get("run_id") and latest_receipt.get("receipt_id")),
-                "description": "Replay the same evidence against a different repo snapshot.",
-            },
-            {
-                "axis": "provider_model",
-                "baseline": baseline_model or None,
-                "ready": bool(baseline_model),
-                "description": "Compare the same workload against a different route or model.",
-            },
-            {
-                "axis": "verification",
-                "baseline": latest_receipt.get("verification_status"),
-                "ready": True,
-                "description": "Re-run verification after a proposed fix and diff the result.",
-            },
-        )
+        return _bug_evidence.build_counterfactual_axes(latest_receipt)
 
     def _build_blast_radius(
         self,
@@ -765,161 +507,29 @@ class BugTracker:
         failure_code: str | None,
         node_id: str | None,
     ) -> dict[str, Any]:
-        if not failure_code and not node_id:
-            return {
-                "window": _BUG_BLAST_RADIUS_WINDOW_SQL,
-                "occurrence_count": 0,
-                "distinct_runs": 0,
-                "distinct_workflows": 0,
-                "distinct_nodes": 0,
-                "distinct_requests": 0,
-                "distinct_agents": 0,
-            }
-        clauses: list[str] = []
-        params: list[object] = []
-        idx = 1
-        if failure_code:
-            clauses.append(f"failure_code = ${idx}")
-            params.append(failure_code)
-            idx += 1
-        if node_id:
-            clauses.append(f"node_id = ${idx}")
-            params.append(node_id)
-            idx += 1
-        row = {}
-        try:
-            row = self._conn.fetchrow(
-                f"""
-                SELECT COUNT(*) AS occurrence_count,
-                       COUNT(DISTINCT run_id) AS distinct_runs,
-                       COUNT(DISTINCT workflow_id) AS distinct_workflows,
-                       COUNT(DISTINCT node_id) AS distinct_nodes,
-                       COUNT(DISTINCT request_id) AS distinct_requests,
-                       COUNT(DISTINCT COALESCE(inputs->>'agent_slug', inputs->>'agent', outputs->>'author_model', executor_type, 'unknown')) AS distinct_agents
-                  FROM receipts
-                 WHERE {' AND '.join(clauses)}
-                   AND COALESCE(finished_at, started_at) >= NOW() - INTERVAL '{_BUG_BLAST_RADIUS_WINDOW_SQL}'
-                """,
-                *params,
-            ) or {}
-        except Exception:
-            row = {}
-        return {
-            "window": _BUG_BLAST_RADIUS_WINDOW_SQL,
-            "occurrence_count": int(row.get("occurrence_count") or 0),
-            "distinct_runs": int(row.get("distinct_runs") or 0),
-            "distinct_workflows": int(row.get("distinct_workflows") or 0),
-            "distinct_nodes": int(row.get("distinct_nodes") or 0),
-            "distinct_requests": int(row.get("distinct_requests") or 0),
-            "distinct_agents": int(row.get("distinct_agents") or 0),
-        }
+        return _bug_evidence.build_blast_radius(
+            self._conn,
+            failure_code=failure_code,
+            node_id=node_id,
+        )
 
     def _bug_signature_from_tags(self, bug: Bug) -> dict[str, Any]:
-        return build_failure_signature(
-            failure_code=_extract_tag_value(bug.tags, "failure_code"),
-            job_label=_extract_tag_value(bug.tags, "job_label"),
-            node_id=_extract_tag_value(bug.tags, "node_id"),
-            failure_category=_extract_tag_value(bug.tags, "failure_category"),
-            agent=_extract_tag_value(bug.tags, "agent"),
-            provider_slug=_extract_tag_value(bug.tags, "provider"),
-            model_slug=_extract_tag_value(bug.tags, "model"),
-            source_kind=bug.source_kind,
-        )
+        return _bug_evidence.bug_signature_from_tags(bug)
 
     def _shared_signature_fields(
         self,
         current_signature: dict[str, Any],
         candidate_signature: dict[str, Any],
     ) -> tuple[str, ...]:
-        shared: list[str] = []
-        for field in (
-            "failure_code",
-            "failure_category",
-            "agent",
-            "provider_slug",
-            "model_slug",
-        ):
-            current_value = str(current_signature.get(field) or "").strip()
-            candidate_value = str(candidate_signature.get(field) or "").strip()
-            if current_value and current_value == candidate_value:
-                shared.append(field)
-        current_node = str(
-            current_signature.get("node_id") or current_signature.get("job_label") or ""
-        ).strip()
-        candidate_node = str(
-            candidate_signature.get("node_id") or candidate_signature.get("job_label") or ""
-        ).strip()
-        if current_node and current_node == candidate_node:
-            shared.append("node_id")
-        return tuple(shared)
+        return _bug_evidence.shared_signature_fields(current_signature, candidate_signature)
 
     def _historical_fix_evidence(self, bug_id: str) -> dict[str, Any]:
         evidence_links = self.list_evidence(bug_id)
-        validation_links = [
-            evidence
-            for evidence in evidence_links
-            if evidence.get("evidence_role") == "validates_fix"
-            and evidence.get("evidence_kind") == "verification_run"
-        ]
-        attempted_fix_links = [
-            evidence
-            for evidence in evidence_links
-            if evidence.get("evidence_role") == "attempted_fix"
-            and evidence.get("evidence_kind") == "healing_run"
-        ]
-        verification_rows, verification_error = self._load_verification_rows(
-            "verification_runs",
-            "verification_run_id",
-            tuple(
-                str(link.get("evidence_ref") or "").strip()
-                for link in validation_links
-                if str(link.get("evidence_ref") or "").strip()
-            ),
+        return _bug_evidence.historical_fix_evidence(
+            self._conn,
+            bug_id,
+            evidence_links,
         )
-        healing_rows, healing_error = self._load_verification_rows(
-            "healing_runs",
-            "healing_run_id",
-            tuple(
-                str(link.get("evidence_ref") or "").strip()
-                for link in attempted_fix_links
-                if str(link.get("evidence_ref") or "").strip()
-            ),
-        )
-        verified_rows = [
-            verification_rows.get(str(link.get("evidence_ref") or ""))
-            for link in validation_links
-            if _verification_passed(
-                verification_rows.get(str(link.get("evidence_ref") or ""), {}).get("status")
-            )
-        ]
-        latest_validation = max(
-            (row for row in verified_rows if isinstance(row, dict)),
-            key=_attempted_at_sort_key,
-            default=None,
-        )
-        latest_attempted_fix = max(
-            (
-                healing_rows.get(str(link.get("evidence_ref") or ""))
-                for link in attempted_fix_links
-                if isinstance(healing_rows.get(str(link.get("evidence_ref") or "")), dict)
-            ),
-            key=_attempted_at_sort_key,
-            default=None,
-        )
-        errors: list[str] = []
-        if verification_error:
-            errors.append(f"verification_runs.query_failed:{verification_error}")
-        if healing_error:
-            errors.append(f"healing_runs.query_failed:{healing_error}")
-        return {
-            "fix_verified": bool(verified_rows),
-            "linked_validation_count": len(validation_links),
-            "verified_validation_count": len(verified_rows),
-            "last_validation": latest_validation,
-            "attempted_fix_count": len(attempted_fix_links),
-            "last_attempted_fix": latest_attempted_fix,
-            "errors": tuple(errors),
-        }
 
     def _build_historical_fixes(
         self,
@@ -1247,15 +857,7 @@ class BugTracker:
         return link
 
     def _signature_expectation_from_bug(self, bug: Bug) -> dict[str, str | None]:
-        return {
-            "failure_code": _extract_tag_value(bug.tags, "failure_code"),
-            "job_label": _extract_tag_value(bug.tags, "job_label"),
-            "node_id": _extract_tag_value(bug.tags, "node_id"),
-            "failure_category": _extract_tag_value(bug.tags, "failure_category"),
-            "agent": _extract_tag_value(bug.tags, "agent"),
-            "provider_slug": _extract_tag_value(bug.tags, "provider"),
-            "model_slug": _extract_tag_value(bug.tags, "model"),
-        }
+        return _bug_evidence.signature_expectation_from_bug(bug)
 
     def _receipt_matches_backfill_signature(
         self,
@@ -1263,33 +865,10 @@ class BugTracker:
         receipt: dict[str, Any],
         expected: dict[str, str | None],
     ) -> bool:
-        candidate = build_failure_signature(
-            failure_code=str(receipt.get("failure_code") or "").strip() or None,
-            job_label=str(receipt.get("node_id") or "").strip() or None,
-            node_id=str(receipt.get("node_id") or "").strip() or None,
-            failure_category=str(receipt.get("failure_category") or "").strip() or None,
-            agent=str(receipt.get("agent") or "").strip() or None,
-            provider_slug=str(receipt.get("provider_slug") or "").strip() or None,
-            model_slug=str(receipt.get("model_slug") or "").strip() or None,
+        return _bug_evidence.receipt_matches_backfill_signature(
+            receipt=receipt,
+            expected=expected,
         )
-        for field in (
-            "failure_code",
-            "failure_category",
-            "agent",
-            "provider_slug",
-            "model_slug",
-        ):
-            expected_value = str(expected.get(field) or "").strip()
-            if expected_value and str(candidate.get(field) or "").strip() != expected_value:
-                return False
-        expected_job = str(expected.get("job_label") or "").strip()
-        expected_node = str(expected.get("node_id") or "").strip()
-        candidate_node = str(candidate.get("node_id") or candidate.get("job_label") or "").strip()
-        if expected_job and candidate_node != expected_job:
-            return False
-        if expected_node and candidate_node != expected_node:
-            return False
-        return True
 
     def _unique_signature_receipt_for_backfill(
         self,
@@ -1763,67 +1342,36 @@ class BugTracker:
             "decision_refs": decision_refs,
             "verification_status": latest_receipt.get("verification_status") if latest_receipt else None,
         }
-        replay_action = self._replay_action(
-            bug_id=bug.bug_id,
-            replay_context=replay_context,
-        )
         historical_fixes = self._build_historical_fixes(
             bug=bug,
             signature=signature,
         )
-        observability_state = "degraded" if (query_errors or observability_gaps) else "complete"
-        return {
-            "bug": bug,
-            "signature": signature,
-            "lifecycle": lifecycle,
-            "evidence_links": tuple(evidence_links),
-            "recent_receipts": tuple(self._public_receipt_summary(receipt) for receipt in explicit_receipts),
-            "latest_receipt": self._public_receipt_summary(latest_receipt),
-            "fallback_receipts": tuple(self._public_receipt_summary(receipt) for receipt in fallback_receipts),
-            "trace": {
-                "run_ids": tuple(sorted(observed_run_ids)),
-                "receipt_ids": tuple(sorted(observed_receipt_ids)),
-                "verification_run_ids": tuple(sorted(verification_run_refs)),
-                "healing_run_ids": tuple(sorted(healing_run_refs)),
-                "decision_refs": decision_refs,
-            },
-            "replay_context": replay_context,
-            "minimal_repro": {
-                "ready": replay_context["ready"],
-                "run_id": replay_context["run_id"],
-                "receipt_id": replay_context["receipt_id"],
-                "node_id": latest_receipt.get("node_id") if latest_receipt else None,
-                "failure_code": failure_code,
-                "workspace_ref": replay_context["workspace_ref"],
-                "runtime_profile_ref": replay_context["runtime_profile_ref"],
-                "write_paths": tuple(latest_receipt.get("write_paths") or ()) if latest_receipt else (),
-                "verified_paths": tuple(latest_receipt.get("verified_paths") or ()) if latest_receipt else (),
-                "input_keys": _payload_keys(latest_receipt.get("inputs")) if latest_receipt else (),
-                "payload_redacted": True,
-            },
-            "write_set_diff": self._compare_write_sets(latest_receipt),
-            "observability_state": observability_state,
-            "observability_gaps": tuple(observability_gaps),
-            "errors": tuple(query_errors),
-            "fix_verification": {
-                "fix_verified": bool(verified_validation_rows),
-                "linked_validation_count": len(validate_fix_links),
-                "verified_validation_count": len(verified_validation_rows),
-                "last_validation": latest_validation,
-                "attempted_fix_count": len(attempted_fix_links),
-                "last_attempted_fix": latest_healing,
-            },
-            "blast_radius": self._build_blast_radius(
+        return _bug_evidence.assemble_failure_packet(
+            bug=bug,
+            bug_status_fixed=BugStatus.FIXED,
+            evidence_links=evidence_links,
+            explicit_receipts=explicit_receipts,
+            fallback_receipts=fallback_receipts,
+            verification_rows=verification_rows,
+            healing_rows=healing_rows,
+            verification_run_refs=verification_run_refs,
+            healing_run_refs=healing_run_refs,
+            query_errors=query_errors,
+            signature=signature,
+            failure_code=failure_code,
+            node_id=node_id,
+            replay_action_result=self._replay_action(
+                bug_id=bug.bug_id,
+                replay_context=replay_context,
+            ),
+            write_set_diff=self._compare_write_sets(latest_receipt),
+            blast_radius=self._build_blast_radius(
                 failure_code=failure_code,
                 node_id=node_id,
             ),
-            "historical_fixes": historical_fixes,
-            "counterfactual_axes": self._build_counterfactual_axes(latest_receipt or inferred_receipt),
-            "agent_actions": {
-                "replay": replay_action,
-            },
-            "provenance_backfill": backfill,
-        }
+            historical_fixes=historical_fixes,
+            backfill=backfill,
+        )
 
     def replay_bug(
         self,

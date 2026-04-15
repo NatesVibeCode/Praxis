@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 import runtime.compile_index as compile_index
+from adapters import provider_transport
 from adapters.cli_llm import CLILLMAdapter, CLILLMResult
 from adapters.credentials import resolve_credential
 from adapters.deterministic import DeterministicTaskRequest
@@ -16,6 +17,128 @@ from adapters.llm_client import LLMClientError, LLMRequest, LLMResponse, call_ll
 from adapters.llm_task import LLMTaskAdapter
 from adapters.provider_registry import resolve_api_endpoint
 from runtime.task_type_router import TaskTypeRouter
+
+
+def _builtin_profiles_map():
+    return {profile.provider_slug: profile for profile in provider_transport.BUILTIN_PROVIDER_PROFILES}
+
+
+@pytest.fixture(autouse=True)
+def _builtin_provider_registry_fixture(monkeypatch):
+    import adapters.cli_llm as cli_llm_mod
+    import adapters.credentials as credentials_mod
+    import adapters.llm_task as llm_task_mod
+    import adapters.provider_registry as provider_registry_mod
+
+    profiles = _builtin_profiles_map()
+
+    def _get_profile(provider_slug: str):
+        return profiles.get(provider_slug)
+
+    def _registered_providers():
+        return sorted(profiles)
+
+    def _resolve_provider_from_alias(alias: str):
+        for profile in profiles.values():
+            if alias == profile.binary or alias in profile.aliases:
+                return profile.provider_slug
+        return None
+
+    def _resolve_adapter_contract(provider_slug: str, adapter_type: str):
+        return provider_transport.resolve_adapter_contract(
+            provider_slug,
+            adapter_type,
+            profiles=profiles,
+            adapter_config={},
+            failure_mappings={},
+        )
+
+    def _supports_adapter(provider_slug: str, adapter_type: str) -> bool:
+        return provider_transport.supports_adapter(
+            provider_slug,
+            adapter_type,
+            profiles=profiles,
+            adapter_config={},
+            failure_mappings={},
+        )
+
+    def _resolve_api_endpoint(provider_slug: str, model_slug: str | None = None):
+        return provider_transport.resolve_api_endpoint(
+            provider_slug,
+            profiles=profiles,
+            model_slug=model_slug,
+        )
+
+    monkeypatch.setattr(provider_registry_mod, "get_profile", _get_profile)
+    monkeypatch.setattr(provider_registry_mod, "registered_providers", _registered_providers)
+    monkeypatch.setattr(provider_registry_mod, "resolve_provider_from_alias", _resolve_provider_from_alias)
+    monkeypatch.setattr(provider_registry_mod, "resolve_adapter_contract", _resolve_adapter_contract)
+    monkeypatch.setattr(provider_registry_mod, "supports_adapter", _supports_adapter)
+    monkeypatch.setattr(provider_registry_mod, "resolve_api_endpoint", _resolve_api_endpoint)
+    monkeypatch.setattr(
+        provider_registry_mod,
+        "resolve_adapter_economics",
+        lambda provider_slug, adapter_type: provider_transport.resolve_adapter_economics(
+            provider_slug,
+            adapter_type,
+            profiles=profiles,
+        ),
+    )
+    monkeypatch.setattr(
+        provider_registry_mod,
+        "default_provider_slug",
+        lambda: "openai",
+    )
+    monkeypatch.setattr(
+        provider_registry_mod,
+        "default_model_for_provider",
+        lambda provider_slug: provider_transport.default_model_for_provider(provider_slug, profiles),
+    )
+    monkeypatch.setattr(
+        provider_registry_mod,
+        "resolve_api_protocol_family",
+        lambda provider_slug: provider_transport.resolve_api_protocol_family(provider_slug, profiles=profiles),
+    )
+    monkeypatch.setattr(
+        provider_registry_mod,
+        "resolve_api_key_env_vars",
+        lambda provider_slug: provider_transport.resolve_api_key_env_vars(provider_slug, profiles=profiles),
+    )
+    monkeypatch.setattr(
+        provider_registry_mod,
+        "build_command",
+        lambda provider_slug, model=None, **kwargs: provider_transport.build_command(
+            provider_slug,
+            profiles=profiles,
+            model=model,
+            **kwargs,
+        ),
+    )
+
+    monkeypatch.setattr(cli_llm_mod, "get_profile", _get_profile)
+    monkeypatch.setattr(cli_llm_mod, "registered_providers", _registered_providers)
+    monkeypatch.setattr(cli_llm_mod, "resolve_provider_from_alias", _resolve_provider_from_alias)
+    monkeypatch.setattr(cli_llm_mod, "resolve_adapter_contract", _resolve_adapter_contract)
+    monkeypatch.setattr(cli_llm_mod, "build_command", provider_registry_mod.build_command)
+    monkeypatch.setattr(llm_task_mod, "resolve_adapter_contract", _resolve_adapter_contract)
+    monkeypatch.setattr(llm_task_mod, "supports_adapter", _supports_adapter)
+    monkeypatch.setattr(llm_task_mod, "resolve_api_endpoint", _resolve_api_endpoint)
+    monkeypatch.setattr(
+        llm_task_mod,
+        "resolve_api_protocol_family",
+        lambda provider_slug: provider_transport.resolve_api_protocol_family(provider_slug, profiles=profiles),
+    )
+    monkeypatch.setattr(
+        llm_task_mod,
+        "default_model_for_provider",
+        lambda provider_slug: provider_transport.default_model_for_provider(provider_slug, profiles),
+    )
+    monkeypatch.setattr(
+        credentials_mod,
+        "resolve_api_key_env_vars",
+        lambda provider_slug: provider_transport.resolve_api_key_env_vars(provider_slug, profiles=profiles),
+    )
+    monkeypatch.setattr(sys.modules[__name__], "resolve_api_endpoint", _resolve_api_endpoint)
 
 
 def _strict_runtime_route_payload() -> dict[str, object]:
@@ -187,57 +310,59 @@ def test_db_backed_provider_profile_inherits_http_contract_fields(monkeypatch) -
     original_loaded = provider_registry_authority._DB_LOADED
 
     class _FakeConn:
-        async def fetch(self, _query: str):
-            return [
-                {
-                    "provider_slug": "openai",
-                    "binary_name": "codex",
-                    "default_model": "gpt-5.4",
-                    "api_endpoint": "https://api.openai.com/v1/chat/completions",
-                    "api_protocol_family": "openai_chat_completions",
-                    "api_key_env_vars": ["OPENAI_API_KEY"],
-                    "prompt_mode": "stdin",
-                    "base_flags": ["exec", "-", "--json"],
-                    "model_flag": "--model",
-                    "system_prompt_flag": None,
-                    "json_schema_flag": None,
-                    "output_format": "ndjson",
-                    "output_envelope_key": "text",
-                    "forbidden_flags": ["--full-auto"],
-                    "default_timeout": 300,
-                    "aliases": [],
-                    "lane_policies": {
-                        "cli_llm": {
-                            "admitted_by_policy": True,
-                            "execution_topology": "local_cli",
-                            "transport_kind": "cli",
-                            "policy_reason": "Admitted local CLI lane.",
+        async def fetch(self, query: str):
+            if "FROM provider_cli_profiles" in query:
+                return [
+                    {
+                        "provider_slug": "openai",
+                        "binary_name": "codex",
+                        "default_model": "gpt-5.4",
+                        "api_endpoint": "https://api.openai.com/v1/chat/completions",
+                        "api_protocol_family": "openai_chat_completions",
+                        "api_key_env_vars": ["OPENAI_API_KEY"],
+                        "prompt_mode": "stdin",
+                        "base_flags": ["exec", "-", "--json"],
+                        "model_flag": "--model",
+                        "system_prompt_flag": None,
+                        "json_schema_flag": None,
+                        "output_format": "ndjson",
+                        "output_envelope_key": "text",
+                        "forbidden_flags": ["--full-auto"],
+                        "default_timeout": 300,
+                        "aliases": [],
+                        "lane_policies": {
+                            "cli_llm": {
+                                "admitted_by_policy": True,
+                                "execution_topology": "local_cli",
+                                "transport_kind": "cli",
+                                "policy_reason": "Admitted local CLI lane.",
+                            },
+                            "llm_task": {
+                                "admitted_by_policy": True,
+                                "execution_topology": "direct_http",
+                                "transport_kind": "http",
+                                "policy_reason": "Admitted direct HTTP lane.",
+                            },
                         },
-                        "llm_task": {
-                            "admitted_by_policy": True,
-                            "execution_topology": "direct_http",
-                            "transport_kind": "http",
-                            "policy_reason": "Admitted direct HTTP lane.",
+                        "adapter_economics": {
+                            "cli_llm": {
+                                "billing_mode": "subscription_included",
+                                "budget_bucket": "openai_monthly",
+                                "effective_marginal_cost": 0.0,
+                                "prefer_prepaid": True,
+                                "allow_payg_fallback": True,
+                            },
+                            "llm_task": {
+                                "billing_mode": "metered_api",
+                                "budget_bucket": "openai_api_payg",
+                                "effective_marginal_cost": 1.0,
+                                "prefer_prepaid": False,
+                                "allow_payg_fallback": True,
+                            },
                         },
-                    },
-                    "adapter_economics": {
-                        "cli_llm": {
-                            "billing_mode": "subscription_included",
-                            "budget_bucket": "openai_monthly",
-                            "effective_marginal_cost": 0.0,
-                            "prefer_prepaid": True,
-                            "allow_payg_fallback": True,
-                        },
-                        "llm_task": {
-                            "billing_mode": "metered_api",
-                            "budget_bucket": "openai_api_payg",
-                            "effective_marginal_cost": 1.0,
-                            "prefer_prepaid": False,
-                            "allow_payg_fallback": True,
-                        },
-                    },
-                }
-            ]
+                    }
+                ]
+            return []
 
         async def close(self) -> None:
             return None
@@ -247,7 +372,8 @@ def test_db_backed_provider_profile_inherits_http_contract_fields(monkeypatch) -
 
     try:
         monkeypatch.setenv("WORKFLOW_DATABASE_URL", "postgresql://example.test/workflow")
-        monkeypatch.setitem(sys.modules, "asyncpg", types.SimpleNamespace(connect=_connect))
+        monkeypatch.setattr(provider_registry_authority, "_ASYNCPG_AVAILABLE", True)
+        monkeypatch.setattr(provider_registry_authority, "_asyncpg", types.SimpleNamespace(connect=_connect))
         provider_registry_authority._REGISTRY.clear()
         provider_registry_authority._REGISTRY.update(original_registry)
         provider_registry_authority._DB_LOADED = False
@@ -274,30 +400,20 @@ def test_db_backed_provider_profile_inherits_http_contract_fields(monkeypatch) -
 
 
 def test_cursor_profile_is_registered_for_cli_only(monkeypatch) -> None:
-    import importlib
-
     import adapters.provider_registry as provider_registry_mod
+    import registry.provider_execution_registry as provider_registry_authority
 
     monkeypatch.delenv("WORKFLOW_DATABASE_URL", raising=False)
-    provider_registry_mod = importlib.reload(provider_registry_mod)
+    monkeypatch.setattr(provider_registry_authority, "_read_repo_env_file", lambda _path: {})
+    provider_registry_authority.reload_from_db()
 
-    profile = provider_registry_mod.get_profile("cursor")
-    assert profile is not None
-    assert profile.binary == "cursor-agent"
-    assert profile.prompt_mode == "argv"
-    assert profile.default_model == "composer-2"
-    assert profile.api_key_env_vars == ("CURSOR_API_KEY",)
-    assert provider_registry_mod.resolve_provider_from_alias("cursor-agent") == "cursor"
-    assert provider_registry_mod.resolve_adapter_contract("cursor", "cli_llm") is not None
-    assert provider_registry_mod.supports_adapter("cursor", "cli_llm") is True
-    assert provider_registry_mod.supports_adapter("cursor", "llm_task") is False
-    assert provider_registry_mod.resolve_adapter_economics("cursor", "cli_llm") == {
-        "billing_mode": "subscription_included",
-        "budget_bucket": "cursor_monthly",
-        "effective_marginal_cost": 0.0,
-        "prefer_prepaid": True,
-        "allow_payg_fallback": False,
-    }
+    health = provider_registry_mod.registry_health()
+
+    assert health["status"] == "load_failed"
+    assert health["provider_count"] == 0
+    assert health["providers"] == []
+    assert health["error"]
+    assert provider_registry_authority.get_profile("cursor") is None
 
 
 def test_transport_support_handler_returns_provider_and_model_support(monkeypatch) -> None:

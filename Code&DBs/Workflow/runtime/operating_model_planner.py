@@ -47,6 +47,26 @@ def _edge_gate_runtime_release(edge_gate: dict[str, Any]) -> tuple[str, dict[str
     return "conditional", json.loads(json.dumps(release_condition))
 
 
+def _edge_gate_validation_command(edge_gate: dict[str, Any]) -> str | None:
+    release = edge_gate.get("release") if isinstance(edge_gate.get("release"), dict) else {}
+    if _as_text(release.get("edge_type")) != "validation" and _as_text(release.get("family")) != "validation":
+        return None
+    config = release.get("config") if isinstance(release.get("config"), dict) else {}
+    return _as_text(config.get("verify_command"))
+
+
+def _edge_gate_retry_max_attempts(edge_gate: dict[str, Any]) -> int | None:
+    release = edge_gate.get("release") if isinstance(edge_gate.get("release"), dict) else {}
+    if _as_text(release.get("edge_type")) != "retry" and _as_text(release.get("family")) != "retry":
+        return None
+    config = release.get("config") if isinstance(release.get("config"), dict) else {}
+    try:
+        attempts = int(config.get("max_attempts") or 0)
+    except (TypeError, ValueError):
+        attempts = 0
+    return max(attempts, 1) if attempts > 0 else 3
+
+
 def current_compiled_spec(definition: Any, compiled_spec: Any) -> dict[str, Any] | None:
     definition_dict = materialize_definition(_json_dict(definition))
     compiled_spec_dict = _json_dict(compiled_spec)
@@ -199,6 +219,19 @@ def _plan_jobs(definition: dict[str, Any]) -> list[dict[str, Any]]:
         and _as_text(edge_gate.get("from_node_id"))
         and _as_text(edge_gate.get("to_node_id"))
     }
+    validation_commands_by_step_id: dict[str, list[str]] = {}
+    retry_max_attempts_by_step_id: dict[str, int] = {}
+    approval_edge_pairs: list[tuple[str, str]] = []
+    for (from_id, to_id), edge_gate in edge_gate_by_pair.items():
+        verify_command = _edge_gate_validation_command(edge_gate)
+        if verify_command:
+            validation_commands_by_step_id.setdefault(from_id, []).append(verify_command)
+        retry_max_attempts = _edge_gate_retry_max_attempts(edge_gate)
+        if retry_max_attempts is not None:
+            retry_max_attempts_by_step_id[to_id] = max(retry_max_attempts_by_step_id.get(to_id, 0), retry_max_attempts)
+        release = normalize_edge_release(edge_gate)
+        if _as_text(release.get("family")) == "approval":
+            approval_edge_pairs.append((from_id, to_id))
     phase_by_step_id = {
         _as_text(phase.get("step_id")): phase
         for phase in execution_setup.get("phases", [])
@@ -206,6 +239,7 @@ def _plan_jobs(definition: dict[str, Any]) -> list[dict[str, Any]]:
     }
 
     label_by_step_id: dict[str, str] = {}
+    title_by_step_id: dict[str, str] = {}
     used_labels: set[str] = set()
     jobs: list[dict[str, Any]] = []
 
@@ -233,6 +267,15 @@ def _plan_jobs(definition: dict[str, Any]) -> list[dict[str, Any]]:
             continue
         label = _unique_label(_slugify(_as_text(step.get("title")) or f"step-{index}"), used_labels)
         label_by_step_id[step_id] = label
+        title_by_step_id[step_id] = _as_text(step.get("title")) or f"Step {index}"
+
+    approval_questions_by_step_id: dict[str, list[str]] = {}
+    for from_id, to_id in approval_edge_pairs:
+        from_title = title_by_step_id.get(from_id) or label_by_step_id.get(from_id) or from_id
+        to_title = title_by_step_id.get(to_id) or label_by_step_id.get(to_id) or to_id
+        approval_questions_by_step_id.setdefault(to_id, []).append(
+            f"Approve transition from {from_title} to {to_title}?"
+        )
 
     for index, step in enumerate(ordered_steps, start=1):
         step_id = _as_text(step.get("id"))
@@ -309,6 +352,20 @@ def _plan_jobs(definition: dict[str, Any]) -> list[dict[str, Any]]:
             job["system_prompt"] = (
                 f"You are {agent_slug}. Execute only the responsibilities assigned in this planned operating-model step."
             )
+        verify_commands = validation_commands_by_step_id.get(step_id)
+        if verify_commands:
+            deduped_verify_commands = [cmd for cmd in dict.fromkeys(cmd.strip() for cmd in verify_commands) if cmd]
+            if deduped_verify_commands:
+                job["verify_command"] = " && ".join(deduped_verify_commands)
+        approval_questions = approval_questions_by_step_id.get(step_id)
+        if approval_questions:
+            deduped_questions = [question for question in dict.fromkeys(question.strip() for question in approval_questions) if question]
+            if deduped_questions:
+                job["approval_required"] = True
+                job["approval_question"] = deduped_questions[0]
+        retry_max_attempts = retry_max_attempts_by_step_id.get(step_id)
+        if retry_max_attempts is not None:
+            job["max_attempts"] = retry_max_attempts
         dependency_edges: list[dict[str, Any]] = []
         depends_on: list[str] = []
         for dependency_step_id in _string_list(step.get("depends_on")):

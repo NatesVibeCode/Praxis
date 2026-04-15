@@ -986,6 +986,297 @@ def test_execute_job_non_packet_runtime_injects_execution_bundle(monkeypatch) ->
     assert execution_bundle["access_policy"]["verify_refs"] == ["verify.spec.global"]
 
 
+def test_execute_job_allows_mcp_transport_through_cli_sandbox(monkeypatch) -> None:
+    class _Conn:
+        def execute(self, query: str, *args):
+            normalized = " ".join(query.split())
+            if normalized == "SELECT run_id, current_state, request_envelope FROM workflow_runs WHERE run_id = $1":
+                return [{
+                    "run_id": "run.alpha",
+                    "current_state": "queued",
+                    "request_envelope": {
+                        "spec_snapshot": {
+                            "verify_refs": ["verify.spec.global"],
+                            "jobs": [
+                                {
+                                    "label": "job-alpha",
+                                    "prompt": "implement the feature",
+                                    "task_type": "build",
+                                    "submission_required": True,
+                                    "write_scope": ["runtime/example.py"],
+                                }
+                            ],
+                        }
+                    },
+                }]
+            if "FROM workflow_job_runtime_context" in normalized:
+                return []
+            if "INSERT INTO workflow_job_runtime_context" in normalized:
+                return []
+            raise AssertionError(f"Unexpected query: {normalized}")
+
+    captured: dict[str, object] = {}
+    completed: dict[str, object] = {}
+
+    monkeypatch.setattr(_exec_mod, "mark_running", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "registry.agent_config.AgentRegistry.load_from_postgres",
+        lambda _conn: SimpleNamespace(get=lambda _slug: SimpleNamespace(provider="openai")),
+    )
+    monkeypatch.setattr(_exec_mod, "_runtime_profile_ref_for_run", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        _exec_mod,
+        "resolve_execution_transport",
+        lambda _config: SimpleNamespace(transport_kind="mcp"),
+    )
+    import runtime.agent_spawner as agent_spawner_module
+
+    monkeypatch.setattr(
+        agent_spawner_module.AgentSpawner,
+        "preflight",
+        lambda self, agent_slug: SimpleNamespace(
+            provider=agent_slug.split("/", 1)[0],
+            ready=True,
+            reason=None,
+            checked_at=datetime.now(timezone.utc),
+        ),
+    )
+    monkeypatch.setattr(
+        _exec_mod,
+        "_resolve_job_prompt_authority",
+        lambda *_args, **_kwargs: ("implement the feature", None, False, None, None),
+    )
+    monkeypatch.setattr(
+        _ctx_mod,
+        "resolve_scope",
+        lambda write_scope, root_dir: SimpleNamespace(
+            computed_read_scope=["runtime/support.py"],
+            test_scope=["tests/test_example.py"],
+            blast_radius=["runtime/downstream.py"],
+            context_sections=[],
+        ),
+    )
+
+    def _capture_cli(_config, prompt, _repo_root, **kwargs):
+        captured["prompt"] = prompt
+        captured["execution_bundle"] = kwargs.get("execution_bundle")
+        return {
+            "status": "succeeded",
+            "stdout": "done",
+            "exit_code": 0,
+            "token_input": 0,
+            "token_output": 0,
+            "cost_usd": 0.0,
+        }
+
+    monkeypatch.setattr(_exec_mod, "_execute_cli", _capture_cli)
+    monkeypatch.setattr(_exec_mod, "_write_output", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr(_exec_mod, "_write_job_receipt", lambda *_args, **_kwargs: "receipt.alpha")
+    monkeypatch.setattr(_exec_mod, "_get_verify_bindings", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        _ctx_mod,
+        "_submission_capture_baseline_for_job",
+        lambda *_args, **_kwargs: {"status": "captured"},
+    )
+    monkeypatch.setattr(
+        _exec_mod,
+        "_resolve_submission",
+        lambda _conn, **kwargs: _SubmissionGateResult(
+            submission_state={"submission_id": "submission.alpha"},
+            final_status=kwargs["final_status"],
+            final_error_code=kwargs["final_error_code"],
+            result=kwargs["result"],
+        ),
+    )
+    monkeypatch.setattr(
+        _exec_mod,
+        "complete_job",
+        lambda _conn, _job_id, **kwargs: completed.update(kwargs),
+    )
+    monkeypatch.setattr(_exec_mod, "_build_platform_context", lambda _repo_root: "platform context")
+
+    _exec_mod.execute_job(
+        _Conn(),
+        {
+            "id": 17,
+            "label": "job-alpha",
+            "agent_slug": "openai/gpt-5.4",
+            "prompt": "implement the feature",
+            "run_id": "run.alpha",
+        },
+        repo_root="/tmp/workspace.alpha",
+    )
+
+    execution_bundle = captured["execution_bundle"]
+    assert completed["status"] == "succeeded"
+    assert "implement the feature" in captured["prompt"]
+    assert execution_bundle["mcp_tool_names"]
+    assert "praxis_submit_code_change" in execution_bundle["mcp_tool_names"]
+    assert "praxis_get_submission" in execution_bundle["mcp_tool_names"]
+
+
+def test_execute_job_pauses_for_approval_checkpoint(monkeypatch) -> None:
+    class _Conn:
+        def __init__(self) -> None:
+            self.queries: list[tuple[str, tuple[object, ...]]] = []
+
+        def execute(self, query: str, *args):
+            normalized = " ".join(query.split())
+            self.queries.append((normalized, args))
+            if normalized == "SELECT run_id, current_state, request_envelope FROM workflow_runs WHERE run_id = $1":
+                return [
+                    {
+                        "run_id": "run.alpha",
+                        "current_state": "queued",
+                        "request_envelope": {
+                            "spec_snapshot": {},
+                        },
+                    }
+                ]
+            if normalized.startswith("UPDATE workflow_jobs SET status = 'approval_required'"):
+                return []
+            raise AssertionError(f"Unexpected query: {normalized}")
+
+    conn = _Conn()
+    completed: dict[str, object] = {}
+
+    monkeypatch.setattr(_exec_mod, "mark_running", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "registry.agent_config.AgentRegistry.load_from_postgres",
+        lambda _conn: SimpleNamespace(get=lambda _slug: SimpleNamespace(provider="openai", model="gpt-5.4")),
+    )
+    monkeypatch.setattr(_exec_mod, "_runtime_profile_ref_for_run", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(_exec_mod, "_resolve_job_prompt_authority", lambda *_args, **_kwargs: (
+        "approve me",
+        None,
+        False,
+        {"approval_required": True, "approval_question": "Approve deployment?"},
+        None,
+    ))
+    monkeypatch.setattr(
+        _exec_mod,
+        "_approval_checkpoint_for_job",
+        lambda *_args, **_kwargs: {"checkpoint_id": "checkpoint.alpha", "status": "pending"},
+    )
+    monkeypatch.setattr(
+        _exec_mod,
+        "complete_job",
+        lambda _conn, _job_id, **kwargs: completed.update(kwargs),
+    )
+
+    _exec_mod.execute_job(
+        conn,
+        {
+            "id": 21,
+            "label": "job-alpha",
+            "agent_slug": "openai/gpt-5.4",
+            "prompt": "approve me",
+            "run_id": "run.alpha",
+        },
+        repo_root="/tmp/workspace.alpha",
+    )
+
+    assert completed == {}
+    assert conn.queries[-1][0].startswith("UPDATE workflow_jobs SET status = 'approval_required'")
+
+
+def test_execute_job_continues_after_approved_approval_checkpoint(monkeypatch) -> None:
+    class _Conn:
+        def __init__(self) -> None:
+            self.queries: list[tuple[str, tuple[object, ...]]] = []
+
+        def execute(self, query: str, *args):
+            normalized = " ".join(query.split())
+            self.queries.append((normalized, args))
+            if normalized == "SELECT run_id, current_state, request_envelope FROM workflow_runs WHERE run_id = $1":
+                return [
+                    {
+                        "run_id": "run.alpha",
+                        "current_state": "queued",
+                        "request_envelope": {
+                            "spec_snapshot": {},
+                        },
+                    }
+                ]
+            raise AssertionError(f"Unexpected query: {normalized}")
+
+    conn = _Conn()
+    captured: dict[str, object] = {}
+    completed: dict[str, object] = {}
+
+    monkeypatch.setattr(_exec_mod, "mark_running", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "registry.agent_config.AgentRegistry.load_from_postgres",
+        lambda _conn: SimpleNamespace(get=lambda _slug: SimpleNamespace(provider="openai", model="gpt-5.4")),
+    )
+    monkeypatch.setattr(_exec_mod, "_runtime_profile_ref_for_run", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(_exec_mod, "resolve_execution_transport", lambda _config: SimpleNamespace(transport_kind="cli"))
+    monkeypatch.setattr(_exec_mod, "_resolve_job_prompt_authority", lambda *_args, **_kwargs: (
+        "approve me",
+        None,
+        False,
+        {"approval_required": True, "approval_question": "Approve deployment?"},
+        None,
+    ))
+    monkeypatch.setattr(
+        _exec_mod,
+        "_approval_checkpoint_for_job",
+        lambda *_args, **_kwargs: {"checkpoint_id": "checkpoint.alpha", "status": "approved"},
+    )
+    monkeypatch.setattr(_exec_mod, "_build_platform_context", lambda _repo_root: "platform context")
+    monkeypatch.setattr(_exec_mod, "_persist_runtime_context_for_job", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(_exec_mod, "_capture_submission_baseline_if_required", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(_exec_mod, "_write_output", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr(_exec_mod, "_write_job_receipt", lambda *_args, **_kwargs: "receipt.alpha")
+    monkeypatch.setattr(_exec_mod, "_run_post_execution_verification", lambda *_args, **_kwargs: {
+        "result": {"status": "succeeded", "stdout": "done", "exit_code": 0, "token_input": 0, "token_output": 0, "cost_usd": 0.0},
+        "final_status": "succeeded",
+        "final_error_code": "",
+        "verification_summary": {},
+        "verification_bindings": {},
+        "verification_error": None,
+    })
+    monkeypatch.setattr(_exec_mod, "_resolve_submission", lambda _conn, **kwargs: _SubmissionGateResult(
+        submission_state=None,
+        final_status=kwargs["final_status"],
+        final_error_code=kwargs["final_error_code"],
+        result=kwargs["result"],
+    ))
+    monkeypatch.setattr(_exec_mod, "_execute_cli", lambda _config, prompt, _repo_root, **_kwargs: captured.update({"prompt": prompt}) or {
+        "status": "succeeded",
+        "stdout": "done",
+        "exit_code": 0,
+        "token_input": 0,
+        "token_output": 0,
+        "cost_usd": 0.0,
+    })
+    monkeypatch.setattr(
+        _exec_mod,
+        "complete_job",
+        lambda _conn, _job_id, **kwargs: completed.update(kwargs),
+    )
+
+    _exec_mod.execute_job(
+        conn,
+        {
+            "id": 22,
+            "label": "job-alpha",
+            "agent_slug": "openai/gpt-5.4",
+            "prompt": "approve me",
+            "run_id": "run.alpha",
+        },
+        repo_root="/tmp/workspace.alpha",
+    )
+
+    assert "approve me" in str(captured["prompt"])
+    assert completed["status"] == "succeeded"
+    assert any(
+        query == "SELECT run_id, current_state, request_envelope FROM workflow_runs WHERE run_id = $1"
+        for query, _args in conn.queries
+    )
+    assert not any("status = 'approval_required'" in query for query, _args in conn.queries)
+
+
 def test_execute_job_fails_closed_when_submission_required_job_has_no_submission(monkeypatch) -> None:
     class _Conn:
         def execute(self, query: str, *args):
@@ -1586,7 +1877,7 @@ def test_submit_workflow_keeps_explicit_dependencies(monkeypatch):
 
 def test_submit_workflow_uses_transaction_when_available(monkeypatch):
     jobs = [
-        {"label": "build_a", "prompt": "create a", "agent": "openai/gpt-5.4"},
+        {"label": "build_a", "prompt": "create a", "agent": "auto/build"},
     ]
     spec = _make_spec(jobs)
     monkeypatch.setattr(WorkflowSpec, "load", classmethod(lambda cls, path: spec))
@@ -1640,7 +1931,7 @@ def test_submit_workflow_fails_closed_when_dependency_edges_not_persisted(monkey
 
 def test_submit_workflow_records_idempotency_for_new_jobs(monkeypatch):
     jobs = [
-        {"label": "build_a", "prompt": "create a", "agent": "openai/gpt-5.4"},
+        {"label": "build_a", "prompt": "create a", "agent": "auto/build"},
     ]
     spec = _make_spec(jobs)
     monkeypatch.setattr(WorkflowSpec, "load", classmethod(lambda cls, path: spec))
@@ -1656,7 +1947,7 @@ def test_submit_workflow_records_idempotency_for_new_jobs(monkeypatch):
 
 def test_submit_workflow_rejects_when_queue_is_at_critical_threshold(monkeypatch):
     jobs = [
-        {"label": "build_a", "prompt": "create a", "agent": "openai/gpt-5.4"},
+        {"label": "build_a", "prompt": "create a", "agent": "auto/build"},
     ]
     spec = _make_spec(jobs)
     monkeypatch.setattr(WorkflowSpec, "load", classmethod(lambda cls, path: spec))
@@ -1754,6 +2045,72 @@ def test_submit_workflow_routes_deterministic_specs_through_graph_runtime_submit
     assert captured["spec_dict"] == spec._raw
 
 
+def test_submit_workflow_inline_routes_single_prompt_specs_through_graph_runtime_submit(monkeypatch):
+    spec_dict = {
+        "name": "prompt inline",
+        "phase": "execute",
+        "jobs": [
+            {
+                "label": "run",
+                "adapter_type": "cli_llm",
+                "agent": "openai/gpt-5.4-mini",
+                "prompt": "Reply with exactly: GRAPH_ONLY",
+                "write_scope": ["runtime/example.py"],
+                "workdir": "/repo",
+            }
+        ],
+    }
+
+    captured: dict[str, object] = {}
+
+    def _fake_graph_submit(conn, inline_spec, *, run_id):
+        captured["conn"] = conn
+        captured["spec_dict"] = inline_spec
+        captured["run_id"] = run_id
+        return {"run_id": run_id, "status": "succeeded", "execution_mode": "graph_runtime"}
+
+    monkeypatch.setattr(_admission_mod, "_submit_graph_workflow_inline", _fake_graph_submit)
+    monkeypatch.setattr(
+        _admission_mod,
+        "_do_submit_workflow",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("flat submission path should not run")),
+    )
+
+    conn = _FakeConn()
+    result = _admission_mod.submit_workflow_inline(conn, spec_dict, run_id="prompt_inline_dispatch")
+
+    assert result["execution_mode"] == "graph_runtime"
+    assert captured["conn"] is conn
+    assert captured["run_id"] == "prompt_inline_dispatch"
+    assert captured["spec_dict"] == spec_dict
+
+
+def test_submit_workflow_inline_fails_closed_when_graph_only_single_job_cannot_compile(monkeypatch):
+    spec_dict = {
+        "name": "prompt inline",
+        "phase": "execute",
+        "graph_runtime_submit": True,
+        "jobs": [
+            {
+                "label": "run",
+                "prompt": "Reply with exactly: SHOULD_NOT_FALL_BACK",
+                "agent": "auto/build",
+            }
+        ],
+    }
+
+    monkeypatch.setattr(
+        _admission_mod,
+        "_do_submit_workflow",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("flat submission path should not run")),
+    )
+
+    conn = _FakeConn()
+
+    with pytest.raises(RuntimeError, match="graph-capable workflow submit failed closed"):
+        _admission_mod.submit_workflow_inline(conn, spec_dict, run_id="prompt_inline_dispatch")
+
+
 def test_submit_graph_workflow_inline_reports_current_state_for_success(monkeypatch):
     fake_request = SimpleNamespace(workflow_id="deterministic_smoke")
     fake_outcome = SimpleNamespace(
@@ -1809,7 +2166,7 @@ def test_submit_workflow_insert_keeps_integration_action_and_args(monkeypatch):
         {
             "label": "build_a",
             "prompt": "create a",
-            "agent": "openai/gpt-5.4",
+            "agent": "auto/build",
             "integration_id": "integration.example",
             "integration_action": "run",
             "integration_args": {"mode": "fast"},
@@ -1840,7 +2197,7 @@ def test_submit_workflow_persists_execution_bundle_and_control_prompt(monkeypatc
         {
             "label": "build_a",
             "prompt": "Implement the feature safely.",
-            "agent": "openai/gpt-5.4",
+            "agent": "auto/build",
             "write_scope": ["app.py"],
             "read_scope": ["tests/test_app.py"],
             "task_type": "build",
@@ -1942,7 +2299,7 @@ def test_submit_workflow_persists_execution_bundle_and_control_prompt(monkeypatc
 
 def test_submit_workflow_replays_existing_idempotency(monkeypatch, caplog):
     jobs = [
-        {"label": "build_a", "prompt": "create a", "agent": "openai/gpt-5.4"},
+        {"label": "build_a", "prompt": "create a", "agent": "auto/build"},
     ]
     spec = _make_spec(jobs)
     monkeypatch.setattr(WorkflowSpec, "load", classmethod(lambda cls, path: spec))
@@ -1979,7 +2336,7 @@ def test_submit_workflow_replays_existing_idempotency(monkeypatch, caplog):
 
 def test_submit_workflow_honors_explicit_run_id_over_existing_replay(monkeypatch, caplog):
     jobs = [
-        {"label": "build_a", "prompt": "create a", "agent": "openai/gpt-5.4"},
+        {"label": "build_a", "prompt": "create a", "agent": "auto/build"},
     ]
     spec = _make_spec(jobs)
     monkeypatch.setattr(WorkflowSpec, "load", classmethod(lambda cls, path: spec))
@@ -2014,7 +2371,7 @@ def test_submit_workflow_honors_explicit_run_id_over_existing_replay(monkeypatch
 
 def test_submit_workflow_force_fresh_run_keeps_system_owned_run_id(monkeypatch, caplog):
     jobs = [
-        {"label": "build_a", "prompt": "create a", "agent": "openai/gpt-5.4"},
+        {"label": "build_a", "prompt": "create a", "agent": "auto/build"},
     ]
     spec = _make_spec(jobs)
     monkeypatch.setattr(WorkflowSpec, "load", classmethod(lambda cls, path: spec))
@@ -2059,7 +2416,7 @@ def test_submit_workflow_force_fresh_run_keeps_system_owned_run_id(monkeypatch, 
 
 def test_submit_workflow_creates_fresh_run_after_failed_idempotent_attempt(monkeypatch):
     jobs = [
-        {"label": "build_a", "prompt": "create a", "agent": "openai/gpt-5.4"},
+        {"label": "build_a", "prompt": "create a", "agent": "auto/build"},
     ]
     spec = _make_spec(jobs)
     monkeypatch.setattr(WorkflowSpec, "load", classmethod(lambda cls, path: spec))
@@ -2094,7 +2451,7 @@ def test_submit_workflow_creates_fresh_run_after_failed_idempotent_attempt(monke
 
 def test_submit_workflow_raises_on_idempotency_conflict(monkeypatch, caplog):
     jobs = [
-        {"label": "build_a", "prompt": "create a", "agent": "openai/gpt-5.4"},
+        {"label": "build_a", "prompt": "create a", "agent": "auto/build"},
     ]
     spec = _make_spec(jobs)
     monkeypatch.setattr(WorkflowSpec, "load", classmethod(lambda cls, path: spec))
@@ -2785,6 +3142,11 @@ def test_complete_job_skips_success_write_when_job_was_cancelled_midflight(monke
                     "run_id": "run-cancelled",
                     "route_task_type": "build",
                     "effective_agent": "openai/gpt-5.4",
+                }]
+            if "SELECT resolved_agent, agent_slug FROM workflow_jobs" in query:
+                return [{
+                    "resolved_agent": "openai/gpt-5.4",
+                    "agent_slug": "openai/gpt-5.4",
                 }]
             if "UPDATE workflow_jobs" in query and "SET status = 'succeeded'" in query:
                 return []

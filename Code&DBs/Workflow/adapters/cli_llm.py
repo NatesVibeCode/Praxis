@@ -40,7 +40,7 @@ from .provider_registry import (
     registered_providers,
 )
 from .structured_output import StructuredOutput, parse_model_output
-from .task_profiles import resolve_profile
+from .task_profiles import try_resolve_profile
 
 _DEFAULT_TIMEOUT = int(os.environ.get("PRAXIS_CLI_TIMEOUT", "300"))
 
@@ -472,8 +472,8 @@ class CLILLMAdapter(BaseNodeAdapter):
         task_type = payload.get("task_type")
         system_prompt_parts: list[str] = []
         if task_type:
-            tp = resolve_profile(task_type)
-            if tp.system_prompt_hint:
+            tp = try_resolve_profile(task_type)
+            if tp is not None and tp.system_prompt_hint:
                 system_prompt_parts.append(tp.system_prompt_hint)
         if packet_system_prompt:
             system_prompt_parts.append(packet_system_prompt)

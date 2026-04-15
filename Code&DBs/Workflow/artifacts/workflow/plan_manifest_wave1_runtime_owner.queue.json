@@ -1,0 +1,28 @@
+{
+  "name": "plan_manifest_wave1_runtime_owner",
+  "description": "Add the runtime owner for raw control-plane manifests backed by app_manifests history.",
+  "phase": "build",
+  "jobs": [
+    {
+      "label": "add_control_plane_manifest_runtime_owner",
+      "agent": "auto/build",
+      "prompt": "## Goal\nCreate a runtime owner for registry-first control-plane manifests so data plans and approvals stop pretending to be file artifacts.\n\n## Read first\n- `Code&DBs/Workflow/artifacts/workflow/_control_manifest_registry_contract.json`\n- `Code&DBs/Workflow/runtime/canonical_manifests.py`\n- `Code&DBs/Workflow/storage/postgres/workflow_runtime_repository.py`\n- `Code&DBs/Workflow/runtime/helm_manifest.py`\n\n## Build\nCreate a new module:\n- `Code&DBs/Workflow/runtime/control_plane_manifests.py`\n\nIt should provide helpers for raw control-plane manifest ownership WITHOUT forcing them through helm normalization. Use the existing app-manifest tables as the durable backend.\n\nImplement helpers for:\n- creating a data plan manifest\n- creating a data approval manifest\n- loading a control-plane manifest by id\n- extracting the plan payload from a plan manifest\n- extracting the approval payload from an approval manifest\n- updating plan status transitions such as `draft -> approved -> applied`\n\n## Rules\n- The raw manifest payload must keep `kind=\\\"praxis_control_manifest\\\"` and `manifest_family=\\\"control_plane\\\"`.\n- Reject manifests that do not match the expected family/type.\n- Record history through `app_manifest_history` when mutating current-state rows.\n- Do not touch API handlers or data-plane runtime in this packet.\n- Do not use helm bundle normalization.\n\n## Required tests\nCreate:\n- `Code&DBs/Workflow/tests/unit/test_control_plane_manifests.py`\n\nCover at least:\n- create plan manifest shapes the raw payload correctly\n- create approval manifest links back to the parent plan manifest\n- load rejects wrong manifest families/kinds\n- status transition updates call through storage owner correctly\n\nDatabase: `postgresql://nate@127.0.0.1:5432/dag_workflow`",
+      "write_scope": [
+        "Code&DBs/Workflow/runtime/control_plane_manifests.py",
+        "Code&DBs/Workflow/tests/unit/test_control_plane_manifests.py"
+      ],
+      "context_packs": [
+        {
+          "label": "contract",
+          "kind": "file",
+          "sourceRef": "file://../artifacts/workflow/_control_manifest_registry_contract.json"
+        },
+        {
+          "label": "canonical_manifests",
+          "kind": "file",
+          "sourceRef": "file://runtime/canonical_manifests.py"
+        }
+      ]
+    }
+  ]
+}

@@ -18,7 +18,7 @@ export interface ShellTabDescriptor {
 export type ResolvedShellSurface =
   | {
       category: 'static';
-      id: 'dashboard' | 'build';
+      id: 'dashboard' | 'build' | 'costs';
       context: ShellSurfaceContext;
     }
   | {
@@ -53,7 +53,16 @@ const STATIC_SURFACES = {
     }),
     getNavigateDescription: (_state: ShellState) => 'Jump back into Moon Build.',
   },
-} satisfies Record<'dashboard' | 'build', {
+  costs: {
+    kindLabel: 'Finance',
+    getTabLabel: (_state: ShellState) => 'Cost Summary',
+    getContext: (_state: ShellState): ShellSurfaceContext => ({
+      label: 'Cost ledger',
+      detail: 'Review token spend, recent receipts, and per-run cost concentration.',
+    }),
+    getNavigateDescription: (_state: ShellState) => 'Inspect token spend and recent costed runs.',
+  },
+} satisfies Record<'dashboard' | 'build' | 'costs', {
   kindLabel: string;
   getTabLabel: (state: ShellState) => string;
   getContext: (state: ShellState) => ShellSurfaceContext;
@@ -100,7 +109,7 @@ export function resolveActiveShellSurface(
   state: ShellState,
   activeDynamicTab: DynamicTab | null,
 ): ResolvedShellSurface {
-  if (state.activeTabId === 'dashboard' || state.activeTabId === 'build') {
+  if (state.activeTabId === 'dashboard' || state.activeTabId === 'build' || state.activeTabId === 'costs') {
     return {
       category: 'static',
       id: state.activeTabId,
@@ -139,6 +148,12 @@ export function buildShellTabs(state: ShellState): ShellTabDescriptor[] {
       kind: STATIC_SURFACES.build.kindLabel,
       closable: false,
     },
+    {
+      id: 'costs',
+      label: STATIC_SURFACES.costs.getTabLabel(state),
+      kind: STATIC_SURFACES.costs.kindLabel,
+      closable: false,
+    },
     ...state.dynamicTabs.map((tab) => ({
       id: tab.id,
       label: tab.label,
@@ -156,13 +171,15 @@ export function buildShellNavigationItems(args: {
 }): MenuAction[] {
   const { state, chatOpen, activateTab, setChatOpen } = args;
 
-  const staticItems: MenuAction[] = (['dashboard', 'build'] as const).map((surfaceId) => ({
+  const staticItems: MenuAction[] = (['dashboard', 'build', 'costs'] as const).map((surfaceId) => ({
     id: `navigate:${surfaceId}`,
     label: STATIC_SURFACES[surfaceId].getTabLabel(state),
     description: STATIC_SURFACES[surfaceId].getNavigateDescription(state),
     keywords: surfaceId === 'dashboard'
       ? ['overview', 'dashboard', 'home']
-      : ['build', 'workflow', 'moon'],
+      : surfaceId === 'build'
+        ? ['build', 'workflow', 'moon']
+        : ['costs', 'spend', 'finance', 'ledger'],
     selected: state.activeTabId === surfaceId,
     onSelect: () => activateTab(surfaceId),
   }));

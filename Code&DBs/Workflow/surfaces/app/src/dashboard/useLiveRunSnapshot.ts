@@ -75,11 +75,34 @@ export interface RunGraph {
   edges: RunGraphEdge[];
 }
 
+export interface RunHealthTelemetry {
+  tokens_total?: number;
+  tokens_per_minute?: number;
+  avg_job_duration_ms?: number;
+  stale_heartbeat_jobs?: number;
+  heartbeat_freshness?: string;
+  seconds_since_last_activity?: number;
+}
+
+export interface RunHealth {
+  state: string;
+  likely_failed: boolean;
+  signals: Array<Record<string, unknown>>;
+  elapsed_seconds: number | null;
+  completed_jobs: number;
+  running_or_claimed: number;
+  terminal_jobs: number;
+  resource_telemetry?: RunHealthTelemetry;
+  stalled_jobs?: Record<string, string[] | number[]>;
+  non_retryable_failed_jobs: string[];
+}
+
 export interface RunDetail extends RecentRun {
   total_duration_ms: number;
   jobs: RunJob[];
   summary?: string | null;
   graph?: RunGraph | null;
+  health?: RunHealth | null;
 }
 
 const TERMINAL_RUN_STATUSES = new Set<RunStatus>(['succeeded', 'failed', 'cancelled']);
@@ -110,6 +133,7 @@ export async function loadRunSnapshot(runId: string): Promise<RunDetail> {
     ...recentMatch,
     total_duration_ms: 0,
     jobs: [],
+    health: null,
   };
 }
 

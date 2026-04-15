@@ -39,10 +39,7 @@ def _env_flag(name: str, default: bool = False) -> bool:
 def _prime_workflow_database_env() -> None:
     """Publish the normalized workflow DB authority for process-wide consumers."""
 
-    try:
-        env = workflow_database_env()
-    except Exception:
-        return
+    env = workflow_database_env()
     database_url = str(env.get("WORKFLOW_DATABASE_URL") or "").strip()
     if database_url:
         os.environ["WORKFLOW_DATABASE_URL"] = database_url

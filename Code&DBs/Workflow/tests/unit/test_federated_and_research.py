@@ -332,6 +332,28 @@ class TestFederatedSearchTelemetry:
         assert metric.result_count == sum(len(results) for results in all_results.values())
         assert metric.latency_ms >= 0.0
 
+    def test_search_can_skip_telemetry_for_embedded_calls(self, monkeypatch):
+        recorded = []
+
+        class RecordingTelemetryStore:
+            def __init__(self, conn):
+                self.conn = conn
+
+            def record(self, metric):
+                recorded.append(metric)
+
+        monkeypatch.setattr(federated_retrieval_module, "TelemetryStore", RecordingTelemetryStore)
+
+        engine = _FakeSearchEngine([
+            _fake_entity("task-1", EntityType.task, "Plan sprint", "plan next sprint milestone"),
+        ])
+        fr = FederatedRetriever(engine)
+
+        results = fr.search("plan milestone", limit=10, record_telemetry=False)
+
+        assert results
+        assert recorded == []
+
 
 # ===========================================================================
 # PathPredictor
@@ -412,6 +434,46 @@ class TestResearchExecutor:
         result = ex.search_local("temperature")
         assert result.total_results >= 1
         assert result.hits[0].title == "Climate data"
+
+    def test_search_local_uses_federated_retriever(self, monkeypatch):
+        calls = []
+
+        class RecordingFederatedRetriever:
+            def __init__(self, engine):
+                self.engine = engine
+
+            def search(self, query: str, limit: int = 20, *, record_telemetry: bool = True):
+                calls.append(
+                    {
+                        "query": query,
+                        "limit": limit,
+                        "record_telemetry": record_telemetry,
+                    }
+                )
+                return [
+                    _fake_entity(
+                        "task-1",
+                        EntityType.task,
+                        "Plan sprint",
+                        "plan next sprint milestone",
+                    )
+                ]
+
+        monkeypatch.setattr(research_runtime_module, "FederatedRetriever", RecordingFederatedRetriever)
+
+        engine = _make_engine()
+        ex = ResearchExecutor(engine=engine)
+        result = ex.search_local("plan milestone")
+
+        assert calls == [
+            {
+                "query": "plan milestone",
+                "limit": 20,
+                "record_telemetry": False,
+            }
+        ]
+        assert result.total_results == 1
+        assert result.hits[0].title == "Plan sprint"
 
     def test_search_local_records_retrieval_telemetry(self, monkeypatch):
         recorded = []

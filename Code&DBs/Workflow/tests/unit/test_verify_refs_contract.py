@@ -17,7 +17,11 @@ from runtime.operating_model_planner import (
     plan_definition,
 )
 from runtime.execution.request_building import _workflow_request_payload
-from runtime.workflow_graph_compiler import compile_graph_workflow_request, spec_uses_graph_runtime
+from runtime.workflow_graph_compiler import (
+    GraphWorkflowCompileError,
+    compile_graph_workflow_request,
+    spec_uses_graph_runtime,
+)
 from runtime.workflow_spec import validate_workflow_spec
 
 
@@ -648,6 +652,157 @@ def test_plan_definition_emits_after_failure_dependency_edges_from_moon_edge_gat
     ]
 
 
+def test_plan_definition_marks_approval_gates_as_approval_required_jobs() -> None:
+    result = plan_definition(
+        {
+            "source_prose": "Pause the downstream step until a human approves it.",
+            "compiled_prose": "Pause the downstream step until a human approves it.",
+            "definition_revision": "def_approval_gate",
+            "references": [],
+            "narrative_blocks": [],
+            "draft_flow": [
+                {
+                    "id": "step-001",
+                    "title": "Primary step",
+                    "summary": "Run the primary step.",
+                    "depends_on": [],
+                    "order": 1,
+                },
+                {
+                    "id": "step-002",
+                    "title": "Approval step",
+                    "summary": "Wait for approval before executing.",
+                    "depends_on": ["step-001"],
+                    "order": 2,
+                },
+            ],
+            "execution_setup": {
+                "edge_gates": [
+                    {
+                        "edge_id": "edge-step-001-step-002",
+                        "from_node_id": "step-001",
+                        "to_node_id": "step-002",
+                        "release": {
+                            "family": "approval",
+                            "edge_type": "approval",
+                            "label": "Approval",
+                            "release_condition": {"kind": "always"},
+                        },
+                    }
+                ]
+            },
+            "trigger_intent": [],
+        }
+    )
+
+    jobs = {job["source_step_id"]: job for job in result["compiled_spec"]["jobs"]}
+    assert jobs["step-002"]["approval_required"] is True
+    assert jobs["step-002"]["approval_question"] == "Approve transition from Primary step to Approval step?"
+    assert jobs["step-002"].get("dependency_edges") is None
+
+
+def test_plan_definition_wires_validation_edge_gates_into_verify_command() -> None:
+    result = plan_definition(
+        {
+            "source_prose": "Validate the primary step before the downstream continuation runs.",
+            "compiled_prose": "Validate the primary step before the downstream continuation runs.",
+            "definition_revision": "def_validation_gate",
+            "references": [],
+            "narrative_blocks": [],
+            "draft_flow": [
+                {
+                    "id": "step-001",
+                    "title": "Primary step",
+                    "summary": "Run the primary step.",
+                    "depends_on": [],
+                    "order": 1,
+                },
+                {
+                    "id": "step-002",
+                    "title": "Continuation",
+                    "summary": "Run after the primary step validates successfully.",
+                    "depends_on": ["step-001"],
+                    "order": 2,
+                },
+            ],
+            "execution_setup": {
+                "edge_gates": [
+                    {
+                        "edge_id": "edge-step-001-step-002",
+                        "from_node_id": "step-001",
+                        "to_node_id": "step-002",
+                        "release": {
+                            "family": "validation",
+                            "edge_type": "validation",
+                            "label": "Validation",
+                            "state": "configured",
+                            "release_condition": {"kind": "always"},
+                            "config": {
+                                "verify_command": "python -m py_compile app.py",
+                            },
+                        },
+                    }
+                ]
+            },
+            "trigger_intent": [],
+        }
+    )
+
+    jobs = {job["source_step_id"]: job for job in result["compiled_spec"]["jobs"]}
+    assert jobs["step-001"]["verify_command"] == "python -m py_compile app.py"
+    assert jobs["step-002"].get("dependency_edges") is None
+
+
+def test_plan_definition_wires_retry_edge_gates_into_job_max_attempts() -> None:
+    result = plan_definition(
+        {
+            "source_prose": "Retry the downstream step when the upstream path can fail transiently.",
+            "compiled_prose": "Retry the downstream step when the upstream path can fail transiently.",
+            "definition_revision": "def_retry_gate",
+            "references": [],
+            "narrative_blocks": [],
+            "draft_flow": [
+                {
+                    "id": "step-001",
+                    "title": "Primary step",
+                    "summary": "Run the primary step.",
+                    "depends_on": [],
+                    "order": 1,
+                },
+                {
+                    "id": "step-002",
+                    "title": "Retry step",
+                    "summary": "Retry this step when it fails.",
+                    "depends_on": ["step-001"],
+                    "order": 2,
+                },
+            ],
+            "execution_setup": {
+                "edge_gates": [
+                    {
+                        "edge_id": "edge-step-001-step-002",
+                        "from_node_id": "step-001",
+                        "to_node_id": "step-002",
+                        "release": {
+                            "family": "retry",
+                            "edge_type": "retry",
+                            "label": "Retry",
+                            "release_condition": {"kind": "always"},
+                            "config": {
+                                "max_attempts": 5,
+                            },
+                        },
+                    }
+                ]
+            },
+            "trigger_intent": [],
+        }
+    )
+
+    jobs = {job["source_step_id"]: job for job in result["compiled_spec"]["jobs"]}
+    assert jobs["step-002"]["max_attempts"] == 5
+
+
 def test_plan_definition_emits_conditional_dependency_edges_from_moon_edge_gates() -> None:
     condition = {"field": "should_continue", "op": "equals", "value": True}
     result = plan_definition(
@@ -908,6 +1063,70 @@ def test_spec_uses_graph_runtime_for_api_jobs_without_control_operators() -> Non
     assert request.nodes[0].adapter_type == "api_task"
 
 
+def test_spec_uses_graph_runtime_for_single_prompt_dispatch_jobs() -> None:
+    spec = {
+        "name": "Prompt Dispatch",
+        "workflow_id": "workflow.prompt_dispatch",
+        "phase": "execute",
+        "jobs": [
+            {
+                "label": "run",
+                "adapter_type": "cli_llm",
+                "agent": "openai/gpt-5.4-mini",
+                "prompt": "Add a farewell helper.",
+                "system_prompt": "Stay inside scope.",
+                "write_scope": ["greeting.py"],
+                "workdir": "/tmp/workspace",
+            },
+        ],
+    }
+
+    assert spec_uses_graph_runtime(spec) is True
+
+    request = compile_graph_workflow_request(spec)
+
+    nodes = {node.node_id: node for node in request.nodes}
+    assert list(nodes) == ["run__context", "run", "run__parser", "run__writer"]
+    assert nodes["run"].adapter_type == "cli_llm"
+    assert nodes["run"].inputs["provider_slug"] == "openai"
+    assert nodes["run"].inputs["model_slug"] == "gpt-5.4-mini"
+    assert nodes["run"].inputs["scope_write"] == ["greeting.py"]
+    assert nodes["run__context"].inputs["system_prompt"] == "Stay inside scope."
+    assert nodes["run__writer"].inputs["workspace_root"] == "/tmp/workspace"
+
+    edge_payloads = {
+        (edge.from_node_id, edge.to_node_id): dict(edge.payload_mapping)
+        for edge in request.edges
+    }
+    assert edge_payloads[("run__context", "run")] == {
+        "prompt": "user_message",
+        "system_prompt": "system_message",
+    }
+    assert edge_payloads[("run", "run__parser")] == {"completion": "completion"}
+    assert edge_payloads[("run__parser", "run__writer")] == {"code_blocks": "code_blocks"}
+
+
+def test_graph_only_single_job_submit_fails_closed_when_job_is_not_prompt_graph_safe() -> None:
+    spec = {
+        "name": "Prompt Dispatch",
+        "workflow_id": "workflow.prompt_dispatch",
+        "phase": "execute",
+        "graph_runtime_submit": True,
+        "jobs": [
+            {
+                "label": "run",
+                "prompt": "Route me without legacy fallback.",
+                "agent": "auto/build",
+            },
+        ],
+    }
+
+    assert spec_uses_graph_runtime(spec) is True
+
+    with pytest.raises(GraphWorkflowCompileError, match="single-job graph submission requires"):
+        compile_graph_workflow_request(spec)
+
+
 def test_workflow_request_payload_normalizes_frozen_graph_contracts_for_json() -> None:
     spec = {
         "name": "Deterministic Slice",
@@ -959,6 +1178,8 @@ def test_compile_graph_workflow_request_infers_semantic_task_types_from_agent_ro
     nodes = {node.node_id: node for node in request.nodes}
     assert nodes["draft_reply"].inputs["task_type"] == "creative"
     assert nodes["classify_queue"].inputs["task_type"] == "analysis"
+    assert "provider_slug" not in nodes["draft_reply"].inputs
+    assert "model_slug" not in nodes["draft_reply"].inputs
 
 
 def test_compile_prose_fails_closed_when_compile_index_snapshot_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:

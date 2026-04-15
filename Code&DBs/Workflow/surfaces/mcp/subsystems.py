@@ -5,10 +5,7 @@ import logging
 from pathlib import Path
 
 from .._subsystems_base import _BaseSubsystems
-from .._workflow_database import (
-    DEFAULT_REPO_LOCAL_DATABASE_URL,
-    workflow_database_env_for_repo,
-)
+from .._workflow_database import workflow_database_env_for_repo
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +37,6 @@ class _Subsystems(_BaseSubsystems):
             repo_root=_REPO_ROOT,
             workflow_root=_WORKFLOW_ROOT,
             receipts_dir=_RECEIPTS_DIR,
-            default_database_url=DEFAULT_REPO_LOCAL_DATABASE_URL,
             logger=logger,
         )
 

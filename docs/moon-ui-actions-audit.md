@@ -1,6 +1,6 @@
 # Moon UI Action Audit
 
-Updated source audit for the Moon builder as of 2026-04-14.
+Updated source audit for the Moon builder as of 2026-04-15.
 
 ## Scope
 - Frontend: `Code&DBs/Workflow/surfaces/app/src/moon/*`
@@ -14,16 +14,16 @@ Updated source audit for the Moon builder as of 2026-04-14.
 - Aliases: `2`
 - Missing verified lane: `1`
 - Gate buttons traced: `6`
-- Gates that affect execution today: `2`
-- Gates that only persist metadata today: `4`
+- Gates that affect execution today: `5`
+- Gates that only persist metadata today: `1`
 
 ## Curated Surface Cut
 - Core step buttons now: `9`
 - Advanced / later step buttons: `0`
 - Removed step buttons from the main UI: `3`
-- Core gate buttons now: `2`
-- Advanced / later gate buttons: `2`
-- Removed gate buttons from the main UI: `2`
+- Core gate buttons now: `4`
+- Advanced / later gate buttons: `1`
+- Removed gate buttons from the main UI: `1`
 
 ## Gate Interaction Model
 - Every connection now renders a visible midpoint gate pod instead of relying on the thin edge line as the primary affordance.
@@ -35,8 +35,8 @@ Updated source audit for the Moon builder as of 2026-04-14.
 - `/api/catalog` now ships truth and surface policy metadata so the backend, action dock, popout, and gate editor classify the same catalog row the same way.
 - Conditional branches now edit through a Then/Else composer first, with JSON kept as an escape hatch for nested condition trees.
 - `On Failure` now edits as a structural failure path with one honest reset control, not as a fake fallback-settings form.
-- `Approval` and `Validation` stay in the detail dock as preview-only advanced shapes instead of mutating edge state.
-- `Human Review` and `Retry` stay off the inline gate surface entirely.
+- `Approval` now pauses execution behind an authority checkpoint; `Validation` now compiles into a runtime verification command instead of mutating edge state.
+- `Human Review` stays off the inline gate surface entirely; `Retry` now feeds runtime job policy from the gate dock.
 - Selecting a gate no longer needs to mean "open a dock immediately"; the pod is now the first-class entry point and the dock is the deeper editor.
 - `Fan Out` now has a verified runtime lane and is no longer treated as a hidden builder-only concept.
 
@@ -45,8 +45,9 @@ Updated source audit for the Moon builder as of 2026-04-14.
 - Ready node actions are preserved through `build_graph -> definition.execution_setup.phases -> compiled_spec.jobs`.
 - Trigger buttons are preserved through `build_graph -> trigger_intent -> compiled_spec.triggers`.
 - Gate truth is split:
-  - `conditional` and `after_failure` change planned dependency behavior now.
-  - `approval`, `human_review`, `validation`, and `retry` are persisted into `execution_setup.edge_gates`, but the planner does not turn them into executable control behavior yet.
+  - `conditional`, `after_failure`, `approval`, and `validation` change planned dependency behavior now.
+  - `validation` compiles into a runtime verification command on the upstream step.
+  - `human_review` stays persisted into `execution_setup.edge_gates`, while `retry` now compiles into downstream job retry policy via `max_attempts`.
 - Product cut for the main Moon surface:
   - Keep only the primitives that are already crisp and trustworthy in the primary UI.
   - Keep promising but not-yet-clean actions in an advanced/later bucket.
@@ -57,14 +58,14 @@ Updated source audit for the Moon builder as of 2026-04-14.
 | Button | Decision | Why |
 | --- | --- | --- |
 | `Docs` | remove from main UI | Same route as `Web Research`; one route should have one obvious button. |
-| `Retry` | remove from gate UI | Retry is job-level runtime policy, not edge semantics. |
+| `Retry` | keep in advanced | Retry now wires job-level runtime policy, but stays out of the core gate set. |
 | `Human Review` | remove from main UI | Collapse into one future human gate concept: `Approval`. |
 | `Notify` | keep in core | Real route with an opinionated config surface in the inspector. |
 | `HTTP Request` | keep in core | Real route with presets, method, header, and body controls in the inspector. |
 | `Run Workflow` | keep in core | Real route with saved-workflow selection in the inspector. |
 | `Fan Out` | hide from main UI | Real concept, but still missing one verified Moon-to-runtime lane. |
-| `Validation` | keep as preview-only advanced | Worth building, but should become real verification policy rather than decorative edge metadata. |
-| `Approval` | keep as preview-only advanced | Worth building once the graph runtime has one clean human-in-the-loop primitive. |
+| `Validation` | keep in core | Real verification behavior now hangs off the upstream step instead of staying decorative edge metadata. |
+| `Approval` | keep in core | Pauses execution behind one canonical human checkpoint. |
 
 ## Dashboard Buttons
 
@@ -109,11 +110,11 @@ These are the step/action buttons shown in the trigger picker, node popout, and 
 
 | Button | Gate family | Truth class | Notes |
 | --- | --- | --- | --- |
-| `Approval` | `approval` | saved only | Stored into `execution_setup.edge_gates`; Moon now shows it as a preview-only advanced gate until planner enforcement exists. |
+| `Approval` | `approval` | runtime | Stored into `execution_setup.edge_gates` and pauses the downstream step behind an authority checkpoint. |
 | `Human Review` | `human_review` | saved only | Stored, not executable yet. |
-| `Validation` | `validation` | saved only | Stored, not compiled into runtime validation flow yet; shown as preview-only in Detail. |
+| `Validation` | `validation` | runtime | Stored into `execution_setup.edge_gates` and compiled into a runtime verification command on the upstream step. |
 | `Branch` | `conditional` | executable | Compiles into `dependency_edges` with `edge_type=conditional`. |
-| `Retry` | `retry` | saved only | Stored, not compiled into retry policy yet. |
+| `Retry` | `retry` | runtime | Feeds downstream job `max_attempts` into the runtime retry loop. |
 | `On Failure` | `after_failure` | executable | Compiles into `dependency_edges` with `edge_type=after_failure`. |
 
 ## Builder / Editor Buttons

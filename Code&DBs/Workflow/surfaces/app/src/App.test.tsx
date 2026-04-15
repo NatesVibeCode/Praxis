@@ -13,6 +13,10 @@ vi.mock('./dashboard/Dashboard', () => ({
   Dashboard: () => <div>Dashboard Surface</div>,
 }));
 
+vi.mock('./dashboard/CostsPanel', () => ({
+  CostsPanel: () => <div>Costs Surface</div>,
+}));
+
 vi.mock('./moon/MoonBuildPage', () => ({
   MoonBuildPage: ({
     workflowId,
@@ -80,6 +84,17 @@ describe('AppShell', () => {
 
     await screen.findByText('Builder Surface');
     expect(screen.getByText('App builder')).toBeInTheDocument();
+  });
+
+  test('switches into the cost summary surface from the shell tabs', async () => {
+    render(<AppShell />);
+
+    await screen.findByText('Dashboard Surface');
+
+    fireEvent.click(screen.getByRole('tab', { name: /cost summary/i }));
+
+    await screen.findByText('Costs Surface');
+    expect(screen.getByText('Cost ledger')).toBeInTheDocument();
   });
 
   test('does not leave the builder when escape is pressed', async () => {

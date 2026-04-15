@@ -91,6 +91,7 @@ from .evidence_repository import PostgresEvidenceRepository
 from .compile_artifact_repository import PostgresCompileArtifactRepository
 from .command_repository import PostgresCommandRepository
 from .friction_repository import PostgresFrictionRepository
+from .uploaded_file_repository import PostgresUploadedFileRepository
 from .roadmap_authoring_repository import PostgresRoadmapAuthoringRepository
 from .observability_maintenance_repository import (
     PostgresObservabilityMaintenanceRepository,
@@ -127,6 +128,7 @@ __all__ = [
     "PostgresFrictionRepository",
     "PostgresMemoryGraphRepository",
     "PostgresObservabilityMaintenanceRepository",
+    "PostgresUploadedFileRepository",
     "PostgresWorkflowMetricsRepository",
     "PostgresOperatorControlRepository",
     "PostgresOperatorFrameRepository",

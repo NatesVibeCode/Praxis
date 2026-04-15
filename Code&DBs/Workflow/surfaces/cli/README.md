@@ -11,9 +11,17 @@ Owns:
   recommended alias and direct entrypoint, plus filtered `workflow tools search`
   with relevance-ranked matches that lift exact alias and entrypoint hits first,
   and `--exact` when you already know the alias, name, or entrypoint; single-hit
-  searches also print the direct describe and entrypoint commands
-- HTTP route discovery via `workflow api routes`, including `--search`,
-  `--method`, `--tag`, and `--path-prefix` filters
+  searches also print the direct describe and entrypoint commands, while empty
+  searches now print broadening hints instead of ending on a bare zero
+- HTTP route discovery via `workflow api routes` and flat alias `workflow routes`, including `--search`,
+  `--method`, `--tag`, and `--path-prefix` filters, plus route-facet summaries
+  that show the most common methods and tags before the table, and `workflow help routes`
+  as a help-topic alias for the same discovery surface
+- legacy discovery command aliases `workflow_cli.py routes` and `workflow_cli.py tools`,
+  plus `workflow_cli.py diagnose`, which forward to the modern route, tool, and
+  run-diagnosis frontdoors for older scripts
+- legacy discovery help aliases `workflow_cli.py help api` and `workflow_cli.py help mcp`,
+  which point operators at the modern HTTP route and tool discovery frontdoors
 
 Does not own:
 

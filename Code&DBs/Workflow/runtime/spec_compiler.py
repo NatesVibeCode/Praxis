@@ -15,14 +15,18 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass, field
 from hashlib import sha256
 from typing import Any
+import uuid
 
 from adapters.provider_registry import (
     default_llm_adapter_type,
     default_model_for_provider,
     default_provider_slug,
+    registered_providers,
+    resolve_lane_policy,
+    supports_adapter,
 )
 from runtime.capability_catalog import (
     CapabilityCatalogError,
@@ -60,8 +64,16 @@ _STAGE_TEMPLATES: dict[str, str] = {
 
 _DEFAULT_WORKSPACE_REF, _DEFAULT_RUNTIME_PROFILE_REF = default_native_authority_refs()
 
-_DEFAULT_PROVIDER_SLUG = default_provider_slug()
-_DEFAULT_LLM_ADAPTER = default_llm_adapter_type()
+
+def _default_provider_slug() -> str:
+    return default_provider_slug()
+
+
+def _default_llm_adapter() -> str:
+    try:
+        return default_llm_adapter_type()
+    except Exception:
+        return "cli_llm"
 
 
 # ---------------------------------------------------------------------------
@@ -102,9 +114,9 @@ class CompiledSpec:
     timeout: int = 300
     max_tokens: int = 4096
     temperature: float = 0.0
-    provider_slug: str = _DEFAULT_PROVIDER_SLUG
+    provider_slug: str = field(default_factory=_default_provider_slug)
     model_slug: str | None = None
-    adapter_type: str = _DEFAULT_LLM_ADAPTER
+    adapter_type: str = field(default_factory=_default_llm_adapter)
     workspace_ref: str = _DEFAULT_WORKSPACE_REF
     runtime_profile_ref: str = _DEFAULT_RUNTIME_PROFILE_REF
     max_retries: int = 0
@@ -138,6 +150,7 @@ class PromptLaunchSpec:
     name: str
     workflow_id: str
     phase: str
+    graph_runtime_submit: bool
     jobs: list[dict[str, Any]]
 
     def to_inline_spec_dict(self) -> dict[str, Any]:
@@ -145,6 +158,7 @@ class PromptLaunchSpec:
             "name": self.name,
             "workflow_id": self.workflow_id,
             "phase": self.phase,
+            "graph_runtime_submit": self.graph_runtime_submit,
             "jobs": self.jobs,
         }
 
@@ -380,10 +394,10 @@ def compile_intent_from_file(file_path: str) -> tuple[Intent | None, list[str]]:
 def compile_prompt_launch_spec(
     *,
     prompt: str,
-    provider_slug: str = _DEFAULT_PROVIDER_SLUG,
+    provider_slug: str | None = None,
     model_slug: str | None = None,
     tier: str | None = None,
-    adapter_type: str = _DEFAULT_LLM_ADAPTER,
+    adapter_type: str | None = None,
     scope_write: list[str] | None = None,
     workdir: str | None = None,
     context_files: list[str] | None = None,
@@ -398,8 +412,35 @@ def compile_prompt_launch_spec(
     regardless of which CLI or API surface collects the prompt arguments.
     """
 
+    if provider_slug is None:
+        provider_slug = _default_provider_slug()
+    if adapter_type is None:
+        adapter_type = _default_llm_adapter()
+
     if scope_write and not workdir:
         workdir = os.getcwd()
+
+    normalized_provider_slug = str(provider_slug or "").strip()
+    if (
+        normalized_provider_slug
+        and "/" not in normalized_provider_slug
+        and not normalized_provider_slug.startswith("auto/")
+        and adapter_type in {"cli_llm", "llm_task"}
+        and not supports_adapter(normalized_provider_slug, adapter_type)
+    ):
+        message_parts = [
+            f"provider {normalized_provider_slug!r} is not admitted for {adapter_type}"
+        ]
+        lane_policy = resolve_lane_policy(normalized_provider_slug, adapter_type)
+        if isinstance(lane_policy, dict):
+            policy_reason = str(lane_policy.get("policy_reason") or "").strip()
+            decision_ref = str(lane_policy.get("decision_ref") or "").strip()
+            if policy_reason:
+                message_parts.append(f"reason: {policy_reason}")
+            if decision_ref:
+                message_parts.append(f"decision_ref: {decision_ref}")
+        message_parts.append(f"known providers: {', '.join(registered_providers())}")
+        raise ValueError("; ".join(message_parts))
 
     context_sections: list[dict[str, str]] = []
     if context_files or scope_write:
@@ -432,14 +473,18 @@ def compile_prompt_launch_spec(
 
     resolved_model_slug = model_slug
     if resolved_model_slug is None:
-        normalized_provider_slug = str(provider_slug or "").strip()
         if normalized_provider_slug and "/" not in normalized_provider_slug and not normalized_provider_slug.startswith("auto/"):
             resolved_model_slug = default_model_for_provider(normalized_provider_slug)
 
+    resolved_workflow_id = workflow_id
+    if workflow_id == "workflow_cli_prompt":
+        resolved_workflow_id = f"workflow_cli_prompt.{uuid.uuid4().hex[:12]}"
+
     return PromptLaunchSpec(
         name=compiled_prompt[:80] or "workflow cli prompt",
-        workflow_id=workflow_id,
+        workflow_id=resolved_workflow_id,
         phase="execute",
+        graph_runtime_submit=True,
         jobs=[
             {
                 "label": "run",
@@ -448,6 +493,7 @@ def compile_prompt_launch_spec(
                 "adapter_type": adapter_type,
                 "tier": tier,
                 "timeout": timeout,
+                "write_scope": list(scope_write or []),
                 "workdir": workdir,
                 "context_sections": context_sections,
                 "system_prompt": system_prompt,

@@ -6,6 +6,7 @@ The CLI is a parser and renderer. It does not own runtime truth.
 from __future__ import annotations
 
 import contextlib
+from difflib import SequenceMatcher
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -78,7 +79,7 @@ from .commands.query import (
     _trends_command,
     _trust_command,
 )
-from .commands.tools import _tools_command
+from .commands.tools import _tools_command, _tools_quickstart_text
 from .render import (
     render_graph_lineage,
     render_graph_topology,
@@ -283,6 +284,7 @@ _ARG_COMMANDS: dict[str, ArgsCommandHandler] = {
     "metrics": _metrics_command,
     "github": _github_command,
     "api": _api_command,
+    "routes": lambda args, *, stdout: _api_command(["routes", *args], stdout=stdout),
     "supervisor": _supervisor_command,
     "tools": _tools_command,
     "generate": lambda args, *, stdout: _delegate_legacy_workflow_cli("generate", args, stdout=stdout),
@@ -308,10 +310,60 @@ def _usage() -> str:
     return "usage: workflow <command> [args]"
 
 
+def _normalize_command_text(value: str) -> str:
+    return " ".join(str(value or "").lower().split())
+
+
+def _command_suggestions(topic: str, candidates: Sequence[str], *, limit: int = 3) -> list[str]:
+    normalized_topic = _normalize_command_text(topic)
+    if not normalized_topic:
+        return []
+
+    ranked: list[tuple[int, int, float, int, str]] = []
+    for candidate in sorted({candidate for candidate in candidates if candidate}):
+        normalized_candidate = _normalize_command_text(candidate)
+        if not normalized_candidate or normalized_candidate == normalized_topic:
+            continue
+        prefix_score = 0 if normalized_candidate.startswith(normalized_topic) else 1
+        contains_score = 0 if normalized_topic in normalized_candidate else 1
+        similarity = SequenceMatcher(None, normalized_topic, normalized_candidate).ratio()
+        length_penalty = abs(len(normalized_candidate) - len(normalized_topic))
+        ranked.append((prefix_score, contains_score, -similarity, length_penalty, candidate))
+
+    ranked.sort()
+    return [candidate for *_ignored, candidate in ranked[:limit]]
+
+
+def _help_topic_candidates() -> list[str]:
+    return sorted(
+        {
+            "commands",
+            "help",
+            "index",
+            "native-operator",
+            *(_known_root_commands()),
+        }
+    )
+
+
 def _native_operator_help_text() -> str:
     from . import native_operator
 
     return native_operator._help_text()
+
+
+def _api_help_text() -> str:
+    from io import StringIO
+
+    from .commands.operate import _api_command
+
+    buffer = StringIO()
+    _api_command(["--help"], stdout=buffer)
+    return buffer.getvalue().rstrip()
+
+
+def _mcp_help_text() -> str:
+    return _tools_quickstart_text()
 
 
 def _commands_index_text() -> str:
@@ -321,6 +373,9 @@ def _commands_index_text() -> str:
             "",
             "Command index:",
             "  workflow commands                               Show this command index",
+            "  workflow routes                                 Alias for workflow API route discovery",
+            "  workflow help routes                            Same route discovery help from the root help system",
+            "  workflow mcp [list|search|describe|call]        Alias for workflow tools discovery",
             "  workflow run <spec.json>                        Submit a workflow spec",
             "  workflow validate <spec.json>                   Validate a spec without running",
             "  workflow status [--since-hours N]               Show recent workflow status",
@@ -359,14 +414,20 @@ def _help_text() -> str:
             "Most used:",
             "  workflow run <spec.json>",
             "  workflow validate <spec.json>",
+            "  workflow mcp",
+            "  workflow routes",
+            "  workflow help routes",
             "  workflow tools list",
             "  workflow tools search <topic> [--exact] [--surface <surface>] [--tier <tier>] [--risk <risk>]",
             "  workflow api routes",
+            "  workflow help tools",
+            "  workflow help api",
             "  workflow query <question>",
             "  workflow data profile artifacts/data/users.csv",
             "  workflow work claim --subscription-id <id> --run-id <run_id>",
             "  workflow inspect <run_id>",
             "  workflow replay <run_id>",
+            "  workflow routes",
             "  workflow native-operator instance",
             "",
             "Command groups:",
@@ -375,11 +436,13 @@ def _help_text() -> str:
             "  workflow query|recall|discover|architecture|artifacts|bugs|costs|leaderboard|trust|fitness|trends|scope|risk|reviews|receipts",
             "  workflow run|run-status|status|active|scheduler|fan-out|debate|runs|manifest|triggers|retry|cancel|repair|heal|verify|verify-platform|pipeline|proof|queue|diagnose|inspect-job",
             "  workflow inspect|replay|graph-topology|graph-lineage|topology|lineage",
-            "  workflow health|health-map|metrics|events|cache|circuits|slots|params|config|notifications|dashboard|api [routes|--host|--port]|supervisor|capabilities|work",
+            "  workflow health|health-map|metrics|events|cache|circuits|slots|params|config|notifications|dashboard|api [routes|--host|--port]|routes|supervisor|capabilities|work",
             "  workflow native-operator instance|health|db-health|bootstrap|db-bootstrap|smoke|inspect|status|graph-topology|graph-lineage|cockpit|route-disable|roadmap-write|work-item-closeout|roadmap-view|provider-onboard|native-primary-cutover-gate",
             "  workflow compile|github",
             "",
             "Tip: run `workflow commands` or `workflow help commands` for the full command index.",
+            "Tip: run `workflow help routes` or `workflow help api` for HTTP route discovery.",
+            "Tip: run `workflow help tools` or `workflow mcp` for catalog-backed tool discovery.",
             "Tip: run `workflow help <command>` or `workflow <command> --help` for command-specific usage.",
         ]
     )
@@ -393,11 +456,20 @@ def _help_topic_text(topic: str, *, stdout: TextIO) -> int:
     if topic == "help":
         stdout.write(_help_text() + "\n")
         return 0
+    if topic == "mcp":
+        stdout.write(_mcp_help_text() + "\n")
+        return 0
     if topic in {"commands", "index"}:
         stdout.write(_commands_index_text() + "\n")
         return 0
     if topic == "native-operator":
         stdout.write(_native_operator_help_text() + "\n")
+        return 0
+    if topic == "api":
+        stdout.write(_api_help_text() + "\n")
+        return 0
+    if topic == "routes":
+        stdout.write(_api_help_text() + "\n")
         return 0
     if topic == "tools":
         _ARG_COMMANDS["tools"](["--help"], stdout=stdout)
@@ -432,15 +504,21 @@ def _help_topic_text(topic: str, *, stdout: TextIO) -> int:
         return 0
 
     stdout.write(f"unknown help topic: {topic}\n")
+    suggestions = _command_suggestions(topic, _help_topic_candidates())
+    if suggestions:
+        stdout.write("did you mean:\n")
+        for suggestion in suggestions:
+            stdout.write(f"  workflow help {suggestion}\n")
     stdout.write(
         "try `workflow help commands`, `workflow help native-operator`, "
-        "`workflow help query`, or `workflow help run`.\n"
+        "`workflow help api`, `workflow help query`, or `workflow help run`.\n"
     )
     return 2
 
 
 def _known_root_commands() -> set[str]:
     return {
+        "mcp",
         "native-operator",
         "inspect",
         "replay",
@@ -540,10 +618,20 @@ def main(
         from . import native_operator
 
         return native_operator.main(args[1:], env=env, stdout=stdout)
+    if args and args[0] == "mcp":
+        return _ARG_COMMANDS["tools"](args[1:], stdout=stdout)
 
     if args[0] not in _known_root_commands():
         stdout.write(f"unknown command: {args[0]}\n")
-        stdout.write("run `workflow commands` or `workflow help <command>` to see command-specific usage.\n")
+        suggestions = _command_suggestions(args[0], _help_topic_candidates())
+        if suggestions:
+            stdout.write("did you mean:\n")
+            for suggestion in suggestions:
+                stdout.write(f"  workflow {suggestion}\n")
+        stdout.write(
+            "run `workflow commands` or `workflow help <command>` to see command-specific usage; "
+            "try `workflow help api` for HTTP route discovery.\n"
+        )
         stdout.write(f"{_usage()}\n")
         return 2
 

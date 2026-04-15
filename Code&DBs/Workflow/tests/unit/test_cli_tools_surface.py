@@ -54,7 +54,9 @@ def test_tools_root_shows_quickstart() -> None:
     assert "Tool discovery quickstart:" in rendered
     assert "workflow tools search <topic> [--exact] [--surface <surface>] [--tier <tier>] [--risk <risk>]" in rendered
     assert "search results are relevance-ranked" in rendered.lower()
-    assert "workflow query" in rendered
+    assert "unique prefix" in rendered.lower()
+    assert "Common direct entrypoints:" in rendered
+    assert "workflow diagnose" in rendered
 
 
 def test_tools_search_prioritizes_exact_alias_matches(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -134,6 +136,53 @@ def test_tools_search_single_match_prints_next_step(monkeypatch: pytest.MonkeyPa
     assert "workflow query" in rendered
 
 
+def test_tools_search_reports_no_matches_with_broadening_hints(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        tools_commands,
+        "get_tool_catalog",
+        lambda: {
+            "praxis_query": _tool_definition(
+                "praxis_query",
+                description="Primary query surface for operator questions.",
+                recommended_alias="query",
+            ),
+        },
+    )
+    stdout = StringIO()
+
+    assert workflow_cli_main(["tools", "search", "needle"], stdout=stdout) == 0
+
+    rendered = stdout.getvalue()
+    assert "no tools matched 'needle'" in rendered
+    assert "tips:" in rendered
+    assert "workflow tools list --json" in rendered
+    assert "workflow tools search <broader text>" in rendered
+    assert "0 tool(s)" in rendered
+
+
+def test_tools_search_reports_no_exact_matches_with_broadening_hints(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        tools_commands,
+        "get_tool_catalog",
+        lambda: {
+            "praxis_query": _tool_definition(
+                "praxis_query",
+                description="Primary query surface for operator questions.",
+                recommended_alias="query",
+            ),
+        },
+    )
+    stdout = StringIO()
+
+    assert workflow_cli_main(["tools", "search", "needle", "--exact"], stdout=stdout) == 0
+
+    rendered = stdout.getvalue()
+    assert "no exact matches found for needle" in rendered
+    assert "tips:" in rendered
+    assert "add --exact only when you already know the alias, tool name, or entrypoint" in rendered
+    assert "0 tool(s)" in rendered
+
+
 def test_tools_describe_surfaces_cli_metadata() -> None:
     stdout = StringIO()
 
@@ -147,6 +196,29 @@ def test_tools_describe_surfaces_cli_metadata() -> None:
     assert '"question"' in rendered
 
 
+def test_tools_describe_accepts_unique_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tools_commands, "get_definition", lambda tool_name: None)
+    monkeypatch.setattr(
+        tools_commands,
+        "get_tool_catalog",
+        lambda: {
+            "praxis_query": _tool_definition(
+                "praxis_query",
+                description="Primary query surface for operator questions.",
+                recommended_alias="query",
+            ),
+        },
+    )
+    stdout = StringIO()
+
+    assert workflow_cli_main(["tools", "describe", "que"], stdout=stdout) == 0
+
+    rendered = stdout.getvalue()
+    assert "praxis_query" in rendered
+    assert "entrypoint: workflow query" in rendered
+    assert "describe_command: workflow tools describe praxis_query" in rendered
+
+
 def test_tools_list_plain_output_highlights_entrypoints() -> None:
     stdout = StringIO()
 
@@ -158,6 +230,36 @@ def test_tools_list_plain_output_highlights_entrypoints() -> None:
     assert "workflow query" in rendered
     assert "query" in rendered
     assert "workflow tools call praxis_connector" in rendered
+
+
+def test_tools_describe_reports_ambiguous_prefixes(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tools_commands, "get_definition", lambda tool_name: None)
+    monkeypatch.setattr(
+        tools_commands,
+        "get_tool_catalog",
+        lambda: {
+            "praxis_alpha": _tool_definition(
+                "praxis_alpha",
+                description="Alpha tool for broad use.",
+                recommended_alias="alpha",
+            ),
+            "praxis_alpine": _tool_definition(
+                "praxis_alpine",
+                description="Alpine tool for a nearby use case.",
+                recommended_alias="alpine",
+            ),
+        },
+    )
+    stdout = StringIO()
+
+    assert workflow_cli_main(["tools", "describe", "al"], stdout=stdout) == 2
+
+    rendered = stdout.getvalue()
+    assert "ambiguous tool name: al" in rendered
+    assert "did you mean:" in rendered
+    assert "praxis_alpha" in rendered
+    assert "praxis_alpine" in rendered
+    assert "workflow tools search <text>" in rendered
 
 
 def test_tools_search_supports_filter_only_browsing() -> None:
@@ -190,6 +292,48 @@ def test_tools_call_requires_yes_for_write_or_dispatch() -> None:
     rendered = stdout.getvalue()
     assert "risk: write" in rendered
     assert "confirmation required" in rendered
+
+
+def test_tools_call_accepts_unique_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _run_cli_tool(tool_name: str, params: dict[str, object], *, workflow_token: str = ""):
+        captured["tool_name"] = tool_name
+        captured["params"] = dict(params)
+        captured["workflow_token"] = workflow_token
+        return 0, {"ok": True}
+
+    monkeypatch.setattr(tools_commands, "get_definition", lambda tool_name: None)
+    monkeypatch.setattr(
+        tools_commands,
+        "get_tool_catalog",
+        lambda: {
+            "praxis_query": _tool_definition(
+                "praxis_query",
+                description="Primary query surface for operator questions.",
+                recommended_alias="query",
+            ),
+        },
+    )
+    monkeypatch.setattr(tools_commands, "run_cli_tool", _run_cli_tool)
+    stdout = StringIO()
+
+    assert workflow_cli_main(
+        [
+            "tools",
+            "call",
+            "que",
+            "--input-json",
+            '{"question":"what failed"}',
+        ],
+        stdout=stdout,
+    ) == 0
+
+    assert captured == {
+        "tool_name": "praxis_query",
+        "params": {"question": "what failed"},
+        "workflow_token": "",
+    }
 
 
 def test_tools_call_accepts_recommended_alias(monkeypatch: pytest.MonkeyPatch) -> None:

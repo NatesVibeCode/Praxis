@@ -29,13 +29,11 @@ class _BaseSubsystems:
         repo_root: Path,
         workflow_root: Path,
         receipts_dir: str,
-        default_database_url: str | None = None,
         logger: logging.Logger | None = None,
     ) -> None:
         self._logger = logger or logging.getLogger(__name__)
         self._repo_root = repo_root
         self._workflow_root = workflow_root
-        self._default_database_url = (default_database_url or "").strip()
         self._lifecycle = LifecycleManager()
 
         self._initialized = False
@@ -95,8 +93,6 @@ class _BaseSubsystems:
 
     def _postgres_env(self) -> dict[str, str]:
         database_url = os.environ.get("WORKFLOW_DATABASE_URL", "").strip()
-        if not database_url:
-            database_url = self._default_database_url
         if not database_url:
             raise RuntimeError("WORKFLOW_DATABASE_URL must be set for subsystem Postgres access")
         database_url = self._normalize_postgres_url(database_url)

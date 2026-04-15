@@ -15,6 +15,8 @@ from .validators import (
     _require_text,
 )
 
+_MANIFEST_UNSET = object()
+
 
 def _normalize_manifest_payload(manifest: object) -> dict[str, Any]:
     if not isinstance(manifest, dict):
@@ -114,7 +116,8 @@ def create_app_manifest(
     created_by: str | None = None,
     intent_history: list[str] | None = None,
     version: int = 4,
-    status: str = "active",
+    parent_manifest_id: object = _MANIFEST_UNSET,
+    status: object = _MANIFEST_UNSET,
     created_at: datetime | None = None,
     updated_at: datetime | None = None,
 ) -> dict[str, Any]:
@@ -125,6 +128,16 @@ def create_app_manifest(
     normalized_description = str(description or "").strip()
     normalized_manifest = _normalize_manifest_payload(manifest)
     normalized_created_by = _optional_text(created_by, field_name="created_by")
+    normalized_parent_manifest_id = (
+        _optional_text(parent_manifest_id, field_name="parent_manifest_id")
+        if parent_manifest_id is not _MANIFEST_UNSET
+        else None
+    )
+    normalized_status = (
+        _require_text(status, field_name="status")
+        if status is not _MANIFEST_UNSET
+        else "active"
+    )
     normalized_created_at = _normalize_timestamp(created_at, field_name="created_at")
     normalized_updated_at = _normalize_timestamp(
         updated_at or normalized_created_at,
@@ -132,35 +145,22 @@ def create_app_manifest(
     )
 
     manifest_json = _encode_jsonb(normalized_manifest, field_name="manifest")
-    if normalized_created_by is not None or intent_history is not None:
-        conn.execute(
-            "INSERT INTO app_manifests "
-            "(id, name, description, created_by, intent_history, manifest, version, status, created_at, updated_at) "
-            "VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9, $10)",
-            normalized_manifest_id,
-            normalized_name,
-            normalized_description,
-            normalized_created_by,
-            _encode_jsonb(intent_history or [], field_name="intent_history"),
-            manifest_json,
-            version,
-            status,
-            normalized_created_at,
-            normalized_updated_at,
-        )
-    else:
-        conn.execute(
-            "INSERT INTO app_manifests (id, name, description, manifest, version, status, created_at, updated_at) "
-            "VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8)",
-            normalized_manifest_id,
-            normalized_name,
-            normalized_description,
-            manifest_json,
-            version,
-            status,
-            normalized_created_at,
-            normalized_updated_at,
-        )
+    conn.execute(
+        "INSERT INTO app_manifests "
+        "(id, name, description, created_by, intent_history, manifest, version, parent_manifest_id, status, created_at, updated_at) "
+        "VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9, $10, $11)",
+        normalized_manifest_id,
+        normalized_name,
+        normalized_description,
+        normalized_created_by or "system",
+        _encode_jsonb(intent_history or [], field_name="intent_history"),
+        manifest_json,
+        version,
+        normalized_parent_manifest_id,
+        normalized_status,
+        normalized_created_at,
+        normalized_updated_at,
+    )
 
     stored_version = conn.fetchval(
         "SELECT EXTRACT(EPOCH FROM updated_at)::bigint FROM app_manifests WHERE id = $1",
@@ -195,7 +195,8 @@ def upsert_app_manifest(
     description: str,
     manifest: dict[str, Any],
     version: int = 4,
-    status: str = "active",
+    parent_manifest_id: object = _MANIFEST_UNSET,
+    status: object = _MANIFEST_UNSET,
 ) -> dict[str, Any]:
     """Create or update one manifest row through the storage layer."""
 
@@ -204,31 +205,57 @@ def upsert_app_manifest(
     normalized_description = str(description or "").strip()
     normalized_manifest = _normalize_manifest_payload(manifest)
     manifest_json = _encode_jsonb(normalized_manifest, field_name="manifest")
+    normalized_parent_manifest_id = (
+        _optional_text(parent_manifest_id, field_name="parent_manifest_id")
+        if parent_manifest_id is not _MANIFEST_UNSET
+        else _MANIFEST_UNSET
+    )
+    normalized_status = (
+        _require_text(status, field_name="status")
+        if status is not _MANIFEST_UNSET
+        else _MANIFEST_UNSET
+    )
 
     existing = conn.fetchval(
         "SELECT 1 FROM app_manifests WHERE id = $1",
         normalized_manifest_id,
     )
     if existing:
-        conn.execute(
-            "UPDATE app_manifests SET manifest = $1::jsonb, name = $2, "
-            "description = $3, version = $4, updated_at = now() WHERE id = $5",
+        params: list[Any] = [
             manifest_json,
             normalized_name,
             normalized_description,
             version,
-            normalized_manifest_id,
+        ]
+        assignments = [
+            "manifest = $1::jsonb",
+            "name = $2",
+            "description = $3",
+            "version = $4",
+            "updated_at = now()",
+        ]
+        if normalized_parent_manifest_id is not _MANIFEST_UNSET:
+            params.append(normalized_parent_manifest_id)
+            assignments.append(f"parent_manifest_id = ${len(params)}")
+        if normalized_status is not _MANIFEST_UNSET:
+            params.append(normalized_status)
+            assignments.append(f"status = ${len(params)}")
+        params.append(normalized_manifest_id)
+        conn.execute(
+            f"UPDATE app_manifests SET {', '.join(assignments)} WHERE id = ${len(params)}",
+            *params,
         )
     else:
         conn.execute(
-            "INSERT INTO app_manifests (id, name, description, manifest, version, status, created_at, updated_at) "
-            "VALUES ($1, $2, $3, $4::jsonb, $5, $6, now(), now())",
+            "INSERT INTO app_manifests (id, name, description, manifest, version, parent_manifest_id, status, created_at, updated_at) "
+            "VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, now(), now())",
             normalized_manifest_id,
             normalized_name,
             normalized_description,
             manifest_json,
             version,
-            status,
+            None if normalized_parent_manifest_id is _MANIFEST_UNSET else normalized_parent_manifest_id,
+            "active" if normalized_status is _MANIFEST_UNSET else normalized_status,
         )
 
     stored_version = conn.fetchval(

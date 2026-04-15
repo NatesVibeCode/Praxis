@@ -212,48 +212,73 @@ class TestNoFilesystemFlags:
     """Verify the adapter never passes filesystem-granting flags."""
 
     def test_anthropic_profile_no_dangerous_flags(self):
-        from adapters.cli_llm import PROVIDER_PROFILES
+        from adapters import provider_transport
 
-        anthropic = PROVIDER_PROFILES["anthropic"]
-        flags = " ".join(anthropic.get("base_flags", []))
+        anthropic = next(
+            profile
+            for profile in provider_transport.BUILTIN_PROVIDER_PROFILES
+            if profile.provider_slug == "anthropic"
+        )
+        flags = " ".join(anthropic.base_flags)
         assert "--dangerously-skip-permissions" not in flags
         assert "--add-dir" not in flags
 
     def test_openai_profile_no_full_auto(self):
-        from adapters.cli_llm import PROVIDER_PROFILES
+        from adapters import provider_transport
 
-        openai = PROVIDER_PROFILES["openai"]
-        flags = " ".join(openai.get("base_flags", []))
+        openai = next(
+            profile
+            for profile in provider_transport.BUILTIN_PROVIDER_PROFILES
+            if profile.provider_slug == "openai"
+        )
+        flags = " ".join(openai.base_flags)
         assert "--full-auto" not in flags
         # "exec" subcommand is fine — it's "--full-auto" that grants filesystem access
 
     def test_google_profile_no_yolo(self):
-        from adapters.cli_llm import PROVIDER_PROFILES
+        from adapters import provider_transport
 
-        google = PROVIDER_PROFILES["google"]
-        flags = " ".join(google.get("base_flags", []))
+        google = next(
+            profile
+            for profile in provider_transport.BUILTIN_PROVIDER_PROFILES
+            if profile.provider_slug == "google"
+        )
+        flags = " ".join(google.base_flags)
         assert "yolo" not in flags
 
     def test_build_cmd_no_add_dir(self):
-        from adapters.cli_llm import _build_provider_cmd
+        from adapters import provider_transport
 
-        cmd = _build_provider_cmd("anthropic", "/usr/bin/claude", "claude-sonnet-4-6")
+        cmd = provider_transport.build_command(
+            "anthropic",
+            profiles={profile.provider_slug: profile for profile in provider_transport.BUILTIN_PROVIDER_PROFILES},
+            model="claude-sonnet-4-6",
+            binary_override="/usr/bin/claude",
+        )
         cmd_str = " ".join(cmd)
         assert "--add-dir" not in cmd_str
         assert "--dangerously-skip-permissions" not in cmd_str
         assert "--allowedTools" not in cmd_str
 
     def test_registry_all_providers_flags_safe(self):
-        from adapters.provider_registry import validate_profiles
+        from adapters import provider_transport
 
-        for slug, report in validate_profiles().items():
+        for slug, report in provider_transport.validate_profiles(
+            {profile.provider_slug: profile for profile in provider_transport.BUILTIN_PROVIDER_PROFILES},
+            adapter_config={},
+            failure_mappings={},
+        ).items():
             assert report["flags_safe"], f"{slug} has forbidden flags in base_flags"
 
     def test_registry_forbidden_flags_enforced(self):
-        from adapters.provider_registry import get_profile
+        from adapters import provider_transport
 
         for slug in ("anthropic", "openai", "google"):
-            profile = get_profile(slug)
+            profile = next(
+                candidate
+                for candidate in provider_transport.BUILTIN_PROVIDER_PROFILES
+                if candidate.provider_slug == slug
+            )
             assert profile is not None, f"missing profile for {slug}"
             assert len(profile.forbidden_flags) > 0, f"{slug} has no forbidden flags"
             flags_str = " ".join(profile.base_flags)

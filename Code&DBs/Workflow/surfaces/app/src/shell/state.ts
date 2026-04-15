@@ -1,7 +1,7 @@
 import { parseEditorSurface } from '../dashboard/operatingModelSurfaceState';
 import { shellUrl } from './routes';
 
-export type StaticTabId = 'dashboard' | 'build';
+export type StaticTabId = 'dashboard' | 'build' | 'costs';
 export type DynamicTabKind = 'run-detail' | 'manifest' | 'manifest-editor';
 export type AppTabId = StaticTabId | string;
 export type BuildView = 'moon';
@@ -108,7 +108,7 @@ export function parseShellLocationState(search: string, pathname: string = windo
   const params = new URLSearchParams(search);
   const shellState = createDefaultShellState();
 
-  // Path-based routes: /app/run/{runId}, /app/build
+  // Path-based routes: /app/run/{runId}, /app/build, /app/costs
   const appRelative = pathname.replace(/^\/app\/?/, '');
   const runMatch = appRelative.match(/^run\/(.+)/);
   if (runMatch) {
@@ -133,6 +133,16 @@ export function parseShellLocationState(search: string, pathname: string = windo
         buildWorkflowId: asString(params.get('workflow')),
         buildIntent: asString(params.get('intent')),
         buildView: 'moon',
+      },
+      chatOpen: false,
+    };
+  }
+
+  if (appRelative === 'costs' || appRelative.startsWith('costs/')) {
+    return {
+      shellState: {
+        ...shellState,
+        activeTabId: 'costs',
       },
       chatOpen: false,
     };
@@ -181,6 +191,16 @@ export function parseShellLocationState(search: string, pathname: string = windo
   }
 
   const page = params.get('page');
+  if (page === 'costs') {
+    return {
+      shellState: {
+        ...shellState,
+        activeTabId: 'costs',
+      },
+      chatOpen: false,
+    };
+  }
+
   if (page === 'build' || page === 'moon' || page === 'builder') {
     return {
       shellState: {
@@ -242,6 +262,10 @@ export function buildShellUrl(state: ShellState, chatOpen: boolean): string {
     if (state.buildIntent) params.set('intent', state.buildIntent);
     const query = params.toString();
     return `/app/build${query ? `?${query}` : ''}`;
+  }
+
+  if (state.activeTabId === 'costs') {
+    return '/app/costs';
   }
 
   const activeDynamicTab = state.dynamicTabs.find((tab) => tab.id === state.activeTabId) || null;

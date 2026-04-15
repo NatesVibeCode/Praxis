@@ -8,6 +8,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from memory.federated_retrieval import FederatedRetriever
 from memory.engine import MemoryEngine
 from memory.retrieval_telemetry import RetrievalMetric, TelemetryStore
 from memory.types import Entity, EntityType
@@ -56,6 +57,9 @@ class ResearchExecutor:
 
     def __init__(self, engine: MemoryEngine | None = None) -> None:
         self._engine = engine
+        self._federated_retriever = (
+            FederatedRetriever(engine) if engine is not None else None
+        )
         self._telemetry_store: TelemetryStore | None = None
 
     def search_local(self, query: str) -> SearchResult:
@@ -63,7 +67,7 @@ class ResearchExecutor:
             return SearchResult(query=query, hits=(), total_results=0)
 
         started_at = time.monotonic()
-        entities = self._engine.search(query, limit=20)
+        entities = self._search_entities(query)
         hits = tuple(
             SearchHit(
                 title=e.name,
@@ -81,6 +85,19 @@ class ResearchExecutor:
             started_at=started_at,
         )
         return result
+
+    def _search_entities(self, query: str) -> list[Entity]:
+        retriever = self._federated_retriever
+        if retriever is not None:
+            try:
+                return retriever.search(
+                    query,
+                    limit=20,
+                    record_telemetry=False,
+                )
+            except Exception:
+                pass
+        return self._engine.search(query, limit=20)
 
     def record_finding(self, query: str, finding: str, source: str) -> None:
         if self._engine is None:

@@ -8,8 +8,6 @@ from pathlib import Path
 
 from storage.postgres import PostgresConfigurationError, resolve_workflow_database_url
 
-DEFAULT_REPO_LOCAL_DATABASE_URL = "postgresql://postgres@localhost:5432/praxis"
-
 
 def _read_repo_env_file(path: Path) -> dict[str, str]:
     try:
@@ -45,11 +43,24 @@ def workflow_database_env_for_repo(
     """Resolve the surface database env without freezing stale import-time state."""
 
     source = env if env is not None else os.environ
-    database_url = _try_resolve_database_url(source)
-    if database_url is None:
-        database_url = _try_resolve_database_url(_read_repo_env_file(repo_root / ".env"))
-    if database_url is None:
-        database_url = DEFAULT_REPO_LOCAL_DATABASE_URL
+    if "WORKFLOW_DATABASE_URL" in source:
+        database_url = resolve_workflow_database_url(env=source)
+    else:
+        repo_env_path = repo_root / ".env"
+        repo_env = _read_repo_env_file(repo_env_path)
+        database_url = _try_resolve_database_url(repo_env)
+        if database_url is None:
+            raise PostgresConfigurationError(
+                "postgres.config_missing",
+                (
+                    "WORKFLOW_DATABASE_URL must be set in process env "
+                    f"or declared in {repo_env_path}"
+                ),
+                details={
+                    "environment_variable": "WORKFLOW_DATABASE_URL",
+                    "repo_env_path": str(repo_env_path),
+                },
+            )
     return {
         "WORKFLOW_DATABASE_URL": database_url,
         "PATH": str(source.get("PATH", "")),
@@ -57,6 +68,5 @@ def workflow_database_env_for_repo(
 
 
 __all__ = [
-    "DEFAULT_REPO_LOCAL_DATABASE_URL",
     "workflow_database_env_for_repo",
 ]

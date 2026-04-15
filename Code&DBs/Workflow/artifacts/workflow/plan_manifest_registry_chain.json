@@ -1,0 +1,54 @@
+{
+  "program": "plan_manifest_registry_control_plane",
+  "mode": "parallel_buildout",
+  "why": "Spread the plan/approval registry work into finer-grained packets so the runner can attack storage, runtime, surfaces, and query reachability in parallel without write-scope collisions.",
+  "validate_order": [
+    "Code&DBs/Workflow/artifacts/workflow/plan_manifest_wave0_contract.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/plan_manifest_wave1_storage_bridge.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/plan_manifest_wave1_runtime_owner.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/plan_manifest_wave2_data_plane.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/plan_manifest_wave2_surface_wiring.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/plan_manifest_wave2_api_boundary.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/plan_manifest_wave2_query_listing.queue.json",
+    "Code&DBs/Workflow/artifacts/workflow/plan_manifest_wave3_integration_verify.queue.json"
+  ],
+  "waves": [
+    {
+      "wave_id": "wave_a_contract",
+      "specs": [
+        "Code&DBs/Workflow/artifacts/workflow/plan_manifest_wave0_contract.queue.json"
+      ]
+    },
+    {
+      "wave_id": "wave_b_registry_core",
+      "depends_on": [
+        "wave_a_contract"
+      ],
+      "specs": [
+        "Code&DBs/Workflow/artifacts/workflow/plan_manifest_wave1_storage_bridge.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/plan_manifest_wave1_runtime_owner.queue.json"
+      ]
+    },
+    {
+      "wave_id": "wave_c_parallel_surface_and_plane",
+      "depends_on": [
+        "wave_b_registry_core"
+      ],
+      "specs": [
+        "Code&DBs/Workflow/artifacts/workflow/plan_manifest_wave2_data_plane.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/plan_manifest_wave2_surface_wiring.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/plan_manifest_wave2_api_boundary.queue.json",
+        "Code&DBs/Workflow/artifacts/workflow/plan_manifest_wave2_query_listing.queue.json"
+      ]
+    },
+    {
+      "wave_id": "wave_d_integration_verify",
+      "depends_on": [
+        "wave_c_parallel_surface_and_plane"
+      ],
+      "specs": [
+        "Code&DBs/Workflow/artifacts/workflow/plan_manifest_wave3_integration_verify.queue.json"
+      ]
+    }
+  ]
+}

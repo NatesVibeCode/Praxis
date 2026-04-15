@@ -1,6 +1,6 @@
 # Praxis MCP Tools
 
-Praxis exposes 44 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
+Praxis exposes 45 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
 
 CLI discovery is generated from the same catalog metadata:
 
@@ -15,7 +15,7 @@ CLI discovery is generated from the same catalog metadata:
 | Tool | Surface | Tier | Alias | Risks | Description |
 | --- | --- | --- | --- | --- | --- |
 | `praxis_discover` | `code` | `stable` | `workflow discover` | `read`, `write` | Find existing code that already does what you need — BEFORE writing new code. Uses hybrid retrieval: vector embeddings over AST-extracted behavioral fingerprints plus Postgres full-text search, fused with reciprocal rank fusion so you get both semantic and exact-ish matches even when naming differs. |
-| `praxis_data` | `data` | `stable` | `workflow data` | `dispatch`, `read`, `write` | Run deterministic data cleanup and reconciliation jobs: parse datasets, profile fields, filter records, sort rows, normalize values, redact sensitive fields, validate contracts, transform records, join or merge sources, aggregate groups, split partitions, export shaped datasets, dedupe keys, reconcile source vs target state, sync target state deterministically, generate workflow specs, and launch those jobs through Praxis. |
+| `praxis_data` | `data` | `stable` | `workflow data` | `dispatch`, `read`, `write` | Run deterministic data cleanup and reconciliation jobs: parse datasets, profile fields, filter records, sort rows, normalize values, repair rows, run repair loops, backfill missing values, redact sensitive fields, checkpoint state, replay cursor windows, approve plans, apply approved plans, validate contracts, transform records, join or merge sources, aggregate groups, split partitions, export shaped datasets, dedupe keys, route dead-letter rows, reconcile source vs target state, sync target state deterministically, generate workflow specs, and launch those jobs through Praxis. |
 | `praxis_artifacts` | `evidence` | `stable` | `workflow artifacts` | `read` | Browse and compare files produced by workflow sandbox runs. Each workflow job can write artifacts (code, logs, reports) — this tool lets you find, search, and diff them. |
 | `praxis_bugs` | `evidence` | `stable` | `workflow bugs` | `dispatch`, `read`, `write` | Track bugs in the platform's Postgres-backed bug tracker. List open bugs, file new ones, search by keyword, inspect similar historical fixes, replay a bug from canonical evidence, bulk backfill replay provenance, or resolve existing bugs. |
 | `praxis_constraints` | `evidence` | `advanced` | - | `read` | View automatically-mined constraints from past workflow failures. The system learns rules like 'files in runtime/ must include imports' from repeated failures. |
@@ -29,6 +29,7 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_ingest` | `knowledge` | `advanced` | - | `write` | Store new information in the knowledge graph so it can be recalled later via praxis_recall. Content is automatically entity-extracted, deduplicated, and embedded for vector search. |
 | `praxis_recall` | `knowledge` | `stable` | `workflow recall` | `read` | Search the platform's knowledge graph for information about modules, functions, decisions, patterns, bugs, constraints, people, or any previously ingested content. Returns ranked results with confidence scores and how each result was found (text match, graph traversal, or vector similarity). |
 | `praxis_research` | `knowledge` | `stable` | - | `read` | Search the knowledge graph specifically for research findings and analysis results. Lighter-weight than praxis_recall — focused on retrieving prior research. |
+| `praxis_diagnose` | `operations` | `stable` | `workflow diagnose` | `read` | Diagnose one workflow run by id. Combines the receipt, failure classification, and provider health into a single operator-facing report. |
 | `praxis_health` | `operations` | `stable` | `workflow health` | `read` | Full system health check — Postgres connectivity, disk space, operator panel state, workflow lane recommendations, context cache stats, and memory graph health. |
 | `praxis_heartbeat` | `operations` | `advanced` | - | `read`, `write` | Run or check the knowledge graph maintenance cycle. The heartbeat syncs receipts, bugs, constraints, and friction events into the knowledge graph, mines relationships between entities, generates daily/weekly rollups, and archives stale nodes. |
 | `praxis_maintenance` | `operations` | `advanced` | - | `write` | Run explicit operator maintenance actions that mutate observability aggregates. |
@@ -99,7 +100,7 @@ Example input:
 - When to use: Run deterministic parsing, normalization, validation, mapping, dedupe, or reconcile jobs and optionally launch them through the workflow engine.
 - When not to use: Do not use it for fuzzy inference, free-form classification, or cases where an LLM must invent the transform logic.
 - Recommended alias: `workflow data`
-- Selector: `action`; default `profile`; values `parse`, `profile`, `filter`, `sort`, `normalize`, `redact`, `validate`, `transform`, `join`, `merge`, `aggregate`, `split`, `export`, `dedupe`, `reconcile`, `sync`, `run`, `workflow_spec`, `launch`
+- Selector: `action`; default `profile`; values `parse`, `profile`, `filter`, `sort`, `normalize`, `repair`, `repair_loop`, `backfill`, `redact`, `checkpoint`, `replay`, `approve`, `apply`, `validate`, `transform`, `join`, `merge`, `aggregate`, `split`, `export`, `dead_letter`, `dedupe`, `reconcile`, `sync`, `run`, `workflow_spec`, `launch`
 - Required args: (none)
 
 Example input:
@@ -408,6 +409,28 @@ Example input:
 ```
 
 ### Operations
+
+#### `praxis_diagnose`
+
+- Surface: `operations`
+- Tier: `stable`
+- Badges: `stable`, `operations`, `alias:diagnose`
+- Risks: `read`
+- CLI entrypoint: `workflow diagnose`
+- CLI schema help: `workflow tools describe praxis_diagnose`
+- When to use: Diagnose one workflow run by id and combine receipt, failure, and provider health context.
+- When not to use: Do not use it for broad health checks or generic receipt search.
+- Recommended alias: `workflow diagnose`
+- Selector: none
+- Required args: `run_id`
+
+Example input:
+
+```json
+{
+  "run_id": "run_abc123"
+}
+```
 
 #### `praxis_health`
 

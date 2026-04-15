@@ -16,11 +16,47 @@ def test_compile_prompt_launch_spec_uses_provider_default_model_when_model_missi
         "default_model_for_provider",
         lambda provider_slug: "gpt-4.1" if provider_slug == "openai" else None,
     )
+    monkeypatch.setattr(spec_compiler, "supports_adapter", lambda provider_slug, adapter_type: True)
 
     spec = spec_compiler.compile_prompt_launch_spec(
         prompt="Reply with exactly: OPENAI_DEFAULT_WORKFLOW_OK",
         provider_slug="openai",
         model_slug=None,
+        scope_write=["greeting.py"],
+        workdir="/repo",
     )
 
     assert spec.jobs[0]["agent"] == "openai/gpt-4.1"
+    assert spec.jobs[0]["write_scope"] == ["greeting.py"]
+    assert spec.jobs[0]["workdir"] == "/repo"
+    assert spec.workflow_id.startswith("workflow_cli_prompt.")
+    assert spec.to_inline_spec_dict()["graph_runtime_submit"] is True
+
+
+def test_compile_prompt_launch_spec_rejects_unadmitted_prompt_provider(monkeypatch) -> None:
+    monkeypatch.setattr(spec_compiler, "supports_adapter", lambda provider_slug, adapter_type: False)
+    monkeypatch.setattr(
+        spec_compiler,
+        "resolve_lane_policy",
+        lambda provider_slug, adapter_type: {
+            "policy_reason": "Prompt probe did not complete successfully for cursor/composer-2",
+            "decision_ref": "decision.provider-onboarding.cursor.20260415T165657Z",
+        },
+    )
+    monkeypatch.setattr(spec_compiler, "registered_providers", lambda: ["google", "openai"])
+
+    try:
+        spec_compiler.compile_prompt_launch_spec(
+            prompt="Reply with exactly: NOPE",
+            provider_slug="cursor",
+            model_slug="composer-2",
+        )
+    except ValueError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("compile_prompt_launch_spec should reject unadmitted providers")
+
+    assert "provider 'cursor' is not admitted for cli_llm" in message
+    assert "Prompt probe did not complete successfully for cursor/composer-2" in message
+    assert "decision.provider-onboarding.cursor.20260415T165657Z" in message
+    assert "google, openai" in message

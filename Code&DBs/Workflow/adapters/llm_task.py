@@ -29,7 +29,7 @@ from .provider_registry import (
     resolve_api_protocol_family,
     supports_adapter,
 )
-from .task_profiles import resolve_profile
+from .task_profiles import try_resolve_profile
 
 _DEFAULT_MAX_TOKENS = 4096
 _DEFAULT_TEMPERATURE = 0.0
@@ -544,8 +544,8 @@ class LLMTaskAdapter(BaseNodeAdapter):
         system_prompt_parts: list[str] = []
         task_type = payload.get("task_type")
         if task_type:
-            tp = resolve_profile(str(task_type))
-            if tp.system_prompt_hint:
+            tp = try_resolve_profile(str(task_type))
+            if tp is not None and tp.system_prompt_hint:
                 system_prompt_parts.append(tp.system_prompt_hint)
         if payload.get("system_prompt"):
             system_prompt_parts.append(str(payload["system_prompt"]))

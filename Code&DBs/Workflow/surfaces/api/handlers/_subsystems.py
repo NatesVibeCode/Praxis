@@ -9,10 +9,7 @@ from ._shared import (
     REPO_ROOT,
     WORKFLOW_ROOT,
 )
-from surfaces._workflow_database import (
-    DEFAULT_REPO_LOCAL_DATABASE_URL,
-    workflow_database_env_for_repo,
-)
+from surfaces._workflow_database import workflow_database_env_for_repo
 
 try:
     from surfaces._subsystems_base import _BaseSubsystems
@@ -34,7 +31,6 @@ class _Subsystems(_BaseSubsystems):
             repo_root=REPO_ROOT,
             workflow_root=WORKFLOW_ROOT,
             receipts_dir=RECEIPTS_DIR,
-            default_database_url=DEFAULT_REPO_LOCAL_DATABASE_URL,
         )
 
     def _postgres_env(self) -> dict[str, str]:

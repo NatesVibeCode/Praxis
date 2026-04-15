@@ -71,6 +71,12 @@ const Dashboard = React.lazy(() =>
   }))
 );
 
+const CostsPanel = React.lazy(() =>
+  import('./dashboard/CostsPanel').then(m => ({ default: m.CostsPanel })).catch(() => ({
+    default: () => <SurfaceFallback title="Cost summary unavailable." copy="The cost surface failed to load." />
+  }))
+);
+
 
 const MoonBuildPage = React.lazy(() =>
   import('./moon/MoonBuildPage').then(m => ({ default: m.MoonBuildPage })).catch(() => ({
@@ -509,6 +515,15 @@ export function AppShell() {
           onViewRun={(runId) => openRunDetail(runId)}
           onDraftStateChange={handleBuildDraftStateChange}
           initialMode={state.buildIntent === '__compose__' ? 'compose' : undefined}
+        />
+      );
+    }
+
+    if (activeSurface.category === 'static' && activeSurface.id === 'costs') {
+      return (
+        <CostsPanel
+          onBack={() => activateTab('dashboard')}
+          onViewRun={(runId) => openRunDetail(runId)}
         />
       );
     }

@@ -4,7 +4,7 @@ Self-hostable AI workflow engine with multi-provider agent routing and MCP integ
 
 ## What is it?
 
-Praxis Engine is an autonomous workflow runner that executes multi-job DAG workflows across LLM providers (OpenAI, Anthropic, Google, DeepSeek). Jobs are routed semantically via task-type prefixes (`auto/build`, `auto/review`, `auto/architecture`, etc.) to the best-fit model for each task. The engine compiles workflow specs into dependency graphs, manages execution leases, and exposes 42 catalog-backed MCP tools for integration with Claude Code and other MCP clients. All state is stored in Postgres with pgvector for embedding-backed knowledge graph and code discovery.
+Praxis Engine is an autonomous workflow runner that executes multi-job DAG workflows across LLM providers (OpenAI, Anthropic, Google, DeepSeek). Jobs are routed semantically via task-type prefixes (`auto/build`, `auto/review`, `auto/architecture`, etc.) to the best-fit model for each task. The engine compiles workflow specs into dependency graphs, manages execution leases, and exposes catalog-backed MCP tools for integration with Claude Code and other MCP clients. All state is stored in Postgres with pgvector for embedding-backed knowledge graph and code discovery.
 
 ## Quickstart
 
@@ -92,7 +92,7 @@ The router resolves these to concrete provider/model pairs based on the provider
 
 ## MCP Integration
 
-Praxis exposes 42 tools via the Model Context Protocol. Add to your `.mcp.json`:
+Praxis exposes catalog-backed tools via the Model Context Protocol. Add to your `.mcp.json`:
 
 ```json
 {
@@ -151,7 +151,7 @@ The API surface also exposes the live route catalog at `GET /api/routes` for cli
 
     +------------------+     +------------------+
     |  Postgres + pgv  |     |   MCP Server     |
-    |  (state, graph,  |     |   (42 tools)     |
+    |  (state, graph,  |     | (catalog-backed) |
     |   embeddings)    |     +------------------+
     +------------------+
 ```

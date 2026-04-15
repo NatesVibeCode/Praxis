@@ -82,7 +82,6 @@ class _TestSubsystems(_BaseSubsystems):
             repo_root=Path(__file__).resolve().parents[4],
             workflow_root=_WORKFLOW_ROOT,
             receipts_dir=str(_WORKFLOW_ROOT / "artifacts" / "test_receipts"),
-            default_database_url="postgresql://test@localhost:5432/praxis_test",
         )
 
     def _postgres_env(self) -> dict[str, str]:
@@ -103,7 +102,6 @@ class _DefaultDatabaseUrlSubsystems(_BaseSubsystems):
             repo_root=Path(__file__).resolve().parents[4],
             workflow_root=_WORKFLOW_ROOT,
             receipts_dir=str(_WORKFLOW_ROOT / "artifacts" / "test_receipts"),
-            default_database_url="postgresql://test@localhost:5432/praxis_test",
         )
 
 
@@ -270,27 +268,26 @@ def test_startup_wiring_can_skip_heartbeat_background(monkeypatch) -> None:
     assert _FakeThread.instances == []
 
 
-def test_postgres_env_falls_back_to_default_database_url_when_env_missing(monkeypatch) -> None:
+def test_postgres_env_requires_explicit_authority_when_env_missing(monkeypatch) -> None:
     monkeypatch.delenv("WORKFLOW_DATABASE_URL", raising=False)
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
 
     subs = _DefaultDatabaseUrlSubsystems()
 
-    assert subs._postgres_env() == {
-        "WORKFLOW_DATABASE_URL": "postgresql://test@localhost:5432/praxis_test",
-        "PATH": "/usr/bin:/bin",
-    }
+    with pytest.raises(RuntimeError, match="WORKFLOW_DATABASE_URL must be set"):
+        subs._postgres_env()
 
 
-def test_mcp_workflow_database_env_falls_back_to_repo_local_default(monkeypatch, tmp_path: Path) -> None:
+def test_mcp_workflow_database_env_requires_explicit_authority(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.delenv("WORKFLOW_DATABASE_URL", raising=False)
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
     monkeypatch.setattr(mcp_subsystems, "_REPO_ROOT", tmp_path)
 
-    assert mcp_subsystems.workflow_database_env() == {
-        "WORKFLOW_DATABASE_URL": "postgresql://postgres@localhost:5432/praxis",
-        "PATH": "/usr/bin:/bin",
-    }
+    with pytest.raises(PostgresConfigurationError) as exc_info:
+        mcp_subsystems.workflow_database_env()
+
+    assert exc_info.value.reason_code == "postgres.config_missing"
+    assert str(tmp_path / ".env") in str(exc_info.value)
 
 
 def test_mcp_workflow_database_env_prefers_repo_env_file(monkeypatch, tmp_path: Path) -> None:
@@ -305,27 +302,33 @@ def test_mcp_workflow_database_env_prefers_repo_env_file(monkeypatch, tmp_path: 
     }
 
 
-def test_mcp_workflow_database_env_ignores_invalid_preimport_env(monkeypatch, tmp_path: Path) -> None:
+def test_mcp_workflow_database_env_invalid_explicit_env_wins_and_raises(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("WORKFLOW_DATABASE_URL", "praxis_test")
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    (tmp_path / ".env").write_text(
+        "WORKFLOW_DATABASE_URL=postgresql://repo.test/workflow\n",
+        encoding="utf-8",
+    )
     importlib.reload(mcp_subsystems)
     monkeypatch.setattr(mcp_subsystems, "_REPO_ROOT", tmp_path)
 
-    assert mcp_subsystems.workflow_database_env() == {
-        "WORKFLOW_DATABASE_URL": "postgresql://postgres@localhost:5432/praxis",
-        "PATH": "/usr/bin:/bin",
-    }
+    with pytest.raises(PostgresConfigurationError) as exc_info:
+        mcp_subsystems.workflow_database_env()
+
+    assert exc_info.value.reason_code == "postgres.config_invalid"
+    assert "postgres:// or postgresql://" in str(exc_info.value)
 
 
-def test_api_workflow_database_env_falls_back_to_repo_local_default(monkeypatch, tmp_path: Path) -> None:
+def test_api_workflow_database_env_requires_explicit_authority(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.delenv("WORKFLOW_DATABASE_URL", raising=False)
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
     monkeypatch.setattr(api_subsystems, "REPO_ROOT", tmp_path)
 
-    assert api_subsystems.workflow_database_env() == {
-        "WORKFLOW_DATABASE_URL": "postgresql://postgres@localhost:5432/praxis",
-        "PATH": "/usr/bin:/bin",
-    }
+    with pytest.raises(PostgresConfigurationError) as exc_info:
+        api_subsystems.workflow_database_env()
+
+    assert exc_info.value.reason_code == "postgres.config_missing"
+    assert str(tmp_path / ".env") in str(exc_info.value)
 
 
 def test_api_workflow_database_env_prefers_repo_env_file(monkeypatch, tmp_path: Path) -> None:
@@ -340,13 +343,18 @@ def test_api_workflow_database_env_prefers_repo_env_file(monkeypatch, tmp_path: 
     }
 
 
-def test_api_workflow_database_env_ignores_invalid_preimport_env(monkeypatch, tmp_path: Path) -> None:
+def test_api_workflow_database_env_invalid_explicit_env_wins_and_raises(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("WORKFLOW_DATABASE_URL", "praxis_test")
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    (tmp_path / ".env").write_text(
+        "WORKFLOW_DATABASE_URL=postgresql://repo.test/workflow\n",
+        encoding="utf-8",
+    )
     importlib.reload(api_subsystems)
     monkeypatch.setattr(api_subsystems, "REPO_ROOT", tmp_path)
 
-    assert api_subsystems.workflow_database_env() == {
-        "WORKFLOW_DATABASE_URL": "postgresql://postgres@localhost:5432/praxis",
-        "PATH": "/usr/bin:/bin",
-    }
+    with pytest.raises(PostgresConfigurationError) as exc_info:
+        api_subsystems.workflow_database_env()
+
+    assert exc_info.value.reason_code == "postgres.config_invalid"
+    assert "postgres:// or postgresql://" in str(exc_info.value)

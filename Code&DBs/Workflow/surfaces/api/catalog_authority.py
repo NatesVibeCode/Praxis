@@ -16,8 +16,8 @@ from runtime.integrations.display_names import display_name_for_integration
 
 logger = logging.getLogger(__name__)
 
-_EXECUTABLE_GATE_FAMILIES = frozenset({"conditional", "after_failure"})
-_PERSISTED_GATE_FAMILIES = frozenset({"approval", "human_review", "validation", "retry"})
+_EXECUTABLE_GATE_FAMILIES = frozenset({"approval", "conditional", "after_failure"})
+_PERSISTED_GATE_FAMILIES = frozenset({"human_review"})
 _RUNTIME_NODE_ROUTES = frozenset(
     {
         "trigger",
@@ -183,7 +183,7 @@ STATIC_CATALOG_ITEMS: tuple[dict[str, Any], ...] = (
         "status": "ready",
         "dropKind": "edge",
         "gateFamily": "validation",
-        "description": "Automated check gate",
+        "description": "Automated verification command gate",
     },
     {
         "id": "ctrl-branch",
@@ -249,6 +249,18 @@ def _catalog_truth(item: dict[str, Any]) -> dict[str, str]:
                 "category": "runtime",
                 "badge": "Executes",
                 "detail": "Compiled into dependency edges that change runtime flow today.",
+            }
+        if gate_family == "validation":
+            return {
+                "category": "runtime",
+                "badge": "Executes",
+                "detail": "Runs the configured verification command before the downstream step can continue.",
+            }
+        if gate_family == "retry":
+            return {
+                "category": "runtime",
+                "badge": "Executes",
+                "detail": "Sets the downstream job's max_attempts so failed work can requeue through the runtime retry loop.",
             }
         if gate_family in _PERSISTED_GATE_FAMILIES:
             return {
@@ -333,15 +345,15 @@ def _catalog_surface_policy(
             }
         if gate_family == "approval":
             return {
-                "tier": "advanced",
-                "badge": "Preview",
-                "detail": "Worth building as a real human gate, but Moon keeps it preview-only until the planner enforces it.",
+                "tier": "primary",
+                "badge": "Core now",
+                "detail": "Pauses the downstream step behind a human approval checkpoint before execution continues.",
             }
         if gate_family == "validation":
             return {
-                "tier": "advanced",
-                "badge": "Preview",
-                "detail": "Worth building as executable verification policy, but Moon keeps it preview-only until it affects runtime.",
+                "tier": "primary",
+                "badge": "Core now",
+                "detail": "Executes the configured verification command before the downstream step proceeds.",
             }
         if gate_family == "human_review":
             return {
@@ -352,10 +364,9 @@ def _catalog_surface_policy(
             }
         if gate_family == "retry":
             return {
-                "tier": "hidden",
-                "badge": "Removed",
-                "detail": "Retry belongs to job policy and failure handling, not dependency-edge semantics.",
-                "hardChoice": "Removed from the gate surface. Retry is runtime policy, not graph structure.",
+                "tier": "advanced",
+                "badge": "Later",
+                "detail": "Feeds retry policy into downstream job max_attempts, but stays outside the core gate set.",
             }
         if truth.get("category") == "runtime":
             return {

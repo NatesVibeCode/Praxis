@@ -1045,6 +1045,15 @@
 .run-detail__status { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; padding: 3px 10px; border-radius: 4px; }
 .run-detail__empty { padding: 16px; border-radius: 8px; background: var(--bg-card); border: 1px solid var(--border); color: var(--text-muted); }
 .run-detail__outcome { padding: 10px 14px; margin: 0 0 16px; border-radius: 6px; background: var(--bg-card); border: 1px solid var(--border); font-size: 13px; line-height: 1.5; color: var(--text-muted); white-space: pre-wrap; }
+.run-detail__health { margin: 0 0 16px; padding: 14px 16px; border-radius: 10px; background: var(--bg-card); border: 1px solid var(--border); }
+.run-detail__health-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+.run-detail__health-title { font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text); }
+.run-detail__health-chip { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; padding: 3px 10px; border-radius: 999px; }
+.run-detail__health-chip--danger { color: var(--danger); background: var(--surface-danger-soft); }
+.run-detail__health-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+.run-detail__health-stat { padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); }
+.run-detail__health-stat span { display: block; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
+.run-detail__health-stat strong { display: block; margin-top: 4px; font-size: 13px; color: var(--text); font-weight: 600; word-break: break-word; }
 
 /* Run graph */
 .run-graph { display: flex; align-items: center; gap: 0; overflow-x: auto; padding: 16px 0 20px; }

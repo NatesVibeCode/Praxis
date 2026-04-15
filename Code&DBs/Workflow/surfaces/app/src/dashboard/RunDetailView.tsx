@@ -29,6 +29,20 @@ function formatCurrency(value: number | null | undefined): string {
   return `$${(value ?? 0).toFixed(2)}`;
 }
 
+function formatSeconds(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) {
+    return 'n/a';
+  }
+  return `${value.toFixed(1)}s`;
+}
+
+function formatCount(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) {
+    return 'n/a';
+  }
+  return new Intl.NumberFormat('en-US').format(value);
+}
+
 function humanizeLabel(label: string): string {
   if (!label) {
     return 'Unnamed Step';
@@ -51,6 +65,13 @@ function getRunStatusColor(status: RunStatus): string {
   if (status === 'succeeded') return 'var(--success)';
   if (status === 'running') return 'var(--accent)';
   if (status === 'failed' || status === 'cancelled') return 'var(--danger)';
+  return 'var(--text-muted)';
+}
+
+function getHealthStatusColor(state: string): string {
+  if (state === 'healthy') return 'var(--success)';
+  if (state === 'degraded') return 'var(--warning)';
+  if (state === 'failed') return 'var(--danger)';
   return 'var(--text-muted)';
 }
 
@@ -186,6 +207,8 @@ export function RunDetailView({ runId, onBack }: RunDetailViewProps) {
 
   const succeeded = run.jobs.filter((j) => j.status === 'succeeded').length;
   const total = run.total_jobs ?? run.jobs.length;
+  const health = run.health;
+  const telemetry = health?.resource_telemetry;
 
   return (
     <div className="run-detail">
@@ -218,6 +241,86 @@ export function RunDetailView({ runId, onBack }: RunDetailViewProps) {
       {run.summary && (
         <div className="run-detail__outcome">
           {run.summary}
+        </div>
+      )}
+
+      {health && (
+        <div className="run-detail__health">
+          <div className="run-detail__health-header">
+            <div className="run-detail__health-title">Health</div>
+            <div
+              className="run-detail__health-chip"
+              style={{
+                color: getHealthStatusColor(health.state),
+                background:
+                  health.state === 'healthy'
+                    ? 'var(--surface-success-soft)'
+                    : health.state === 'degraded'
+                      ? 'var(--surface-warning-soft)'
+                      : health.state === 'failed'
+                        ? 'var(--surface-danger-soft)'
+                        : 'var(--surface-muted)',
+              }}
+            >
+              {health.state}
+            </div>
+            {health.likely_failed ? (
+              <div className="run-detail__health-chip run-detail__health-chip--danger">
+                likely failed
+              </div>
+            ) : null}
+          </div>
+
+          <div className="run-detail__health-grid">
+            <div className="run-detail__health-stat">
+              <span>Elapsed</span>
+              <strong>{formatSeconds(health.elapsed_seconds)}</strong>
+            </div>
+            <div className="run-detail__health-stat">
+              <span>Completed</span>
+              <strong>{formatCount(health.completed_jobs)}</strong>
+            </div>
+            <div className="run-detail__health-stat">
+              <span>Running</span>
+              <strong>{formatCount(health.running_or_claimed)}</strong>
+            </div>
+            <div className="run-detail__health-stat">
+              <span>Terminal</span>
+              <strong>{formatCount(health.terminal_jobs)}</strong>
+            </div>
+            <div className="run-detail__health-stat">
+              <span>Signals</span>
+              <strong>{formatCount(health.signals.length)}</strong>
+            </div>
+            <div className="run-detail__health-stat">
+              <span>Non-retryable</span>
+              <strong>{formatCount(health.non_retryable_failed_jobs.length)}</strong>
+            </div>
+            <div className="run-detail__health-stat">
+              <span>Token total</span>
+              <strong>{telemetry?.tokens_total == null ? 'n/a' : formatCount(telemetry.tokens_total)}</strong>
+            </div>
+            <div className="run-detail__health-stat">
+              <span>Token rate</span>
+              <strong>{telemetry?.tokens_per_minute == null ? 'n/a' : `${telemetry.tokens_per_minute.toFixed(1)}/m`}</strong>
+            </div>
+            <div className="run-detail__health-stat">
+              <span>Avg job</span>
+              <strong>{telemetry?.avg_job_duration_ms == null ? 'n/a' : formatDuration(telemetry.avg_job_duration_ms)}</strong>
+            </div>
+            <div className="run-detail__health-stat">
+              <span>Heartbeat</span>
+              <strong>{telemetry?.heartbeat_freshness ?? 'n/a'}</strong>
+            </div>
+            <div className="run-detail__health-stat">
+              <span>Stale jobs</span>
+              <strong>{telemetry?.stale_heartbeat_jobs == null ? '0' : formatCount(telemetry.stale_heartbeat_jobs)}</strong>
+            </div>
+            <div className="run-detail__health-stat">
+              <span>Last activity</span>
+              <strong>{telemetry?.seconds_since_last_activity == null ? 'n/a' : formatSeconds(telemetry.seconds_since_last_activity)}</strong>
+            </div>
+          </div>
         </div>
       )}
 

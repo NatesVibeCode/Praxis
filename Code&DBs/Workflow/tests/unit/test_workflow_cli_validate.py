@@ -14,7 +14,7 @@ class _Registry:
 
     def get(self, slug: str):
         alias_map = {
-            "openai/codex-5.3-spark": "openai/gpt-5.3-codex-spark",
+            "codex-5.3-spark": "gpt-5.3-codex-spark",
         }
         canonical = slug if slug in self._known_agents else alias_map.get(slug)
         if canonical in self._known_agents:
@@ -53,13 +53,13 @@ def test_cmd_validate_returns_error_when_agent_not_in_postgres_registry(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    spec_path = _write_spec(tmp_path, agent_slug="openai/gpt-5.4-mini")
+    spec_path = _write_spec(tmp_path, agent_slug="gpt-5.4-mini")
 
     monkeypatch.setattr(workflow_cli, "_get_pg_conn", lambda: object())
     monkeypatch.setattr(
         __import__("registry.agent_config", fromlist=["*"]),
         "AgentRegistry",
-        _agent_registry({"openai/gpt-4o"}),
+        _agent_registry({"gpt-4o"}),
     )
 
     result = workflow_cli.cmd_validate(argparse.Namespace(spec=spec_path))
@@ -71,13 +71,13 @@ def test_cmd_validate_passes_when_all_agents_are_known(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    spec_path = _write_spec(tmp_path, agent_slug="openai/gpt-5.4-mini")
+    spec_path = _write_spec(tmp_path, agent_slug="gpt-5.4-mini")
 
     monkeypatch.setattr(workflow_cli, "_get_pg_conn", lambda: object())
     monkeypatch.setattr(
         __import__("registry.agent_config", fromlist=["*"]),
         "AgentRegistry",
-        _agent_registry({"openai/gpt-5.4-mini", "openai/gpt-4o"}),
+        _agent_registry({"gpt-5.4-mini", "gpt-4o"}),
     )
 
     result = workflow_cli.cmd_validate(argparse.Namespace(spec=spec_path))
@@ -89,13 +89,13 @@ def test_cmd_validate_accepts_legacy_agent_aliases(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    spec_path = _write_spec(tmp_path, agent_slug="openai/codex-5.3-spark")
+    spec_path = _write_spec(tmp_path, agent_slug="codex-5.3-spark")
 
     monkeypatch.setattr(workflow_cli, "_get_pg_conn", lambda: object())
     monkeypatch.setattr(
         __import__("registry.agent_config", fromlist=["*"]),
         "AgentRegistry",
-        _agent_registry({"openai/gpt-5.3-codex-spark"}),
+        _agent_registry({"gpt-5.3-codex-spark"}),
     )
 
     result = workflow_cli.cmd_validate(argparse.Namespace(spec=spec_path))

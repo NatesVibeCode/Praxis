@@ -66,7 +66,7 @@ const STATIC_ITEMS: CatalogItem[] = [
   // ── Control (edges) ──────────────────────────────────────────────────
   { id: 'ctrl-approval',     label: 'Approval',       icon: 'gate',     family: 'control', status: 'ready', dropKind: 'edge', gateFamily: 'approval',           description: 'Human approval gate' },
   { id: 'ctrl-review',       label: 'Human Review',   icon: 'review',   family: 'control', status: 'ready', dropKind: 'edge', gateFamily: 'human_review',       description: 'Manual review before proceeding' },
-  { id: 'ctrl-validation',   label: 'Validation',     icon: 'gate',     family: 'control', status: 'ready', dropKind: 'edge', gateFamily: 'validation',         description: 'Automated check gate' },
+  { id: 'ctrl-validation',   label: 'Validation',     icon: 'gate',     family: 'control', status: 'ready', dropKind: 'edge', gateFamily: 'validation',         description: 'Automated verification command gate' },
   { id: 'ctrl-branch',       label: 'Branch',         icon: 'gate',     family: 'control', status: 'ready', dropKind: 'edge', gateFamily: 'conditional',        description: 'Conditional path (equals, in, not_equals, not_in)' },
   { id: 'ctrl-retry',        label: 'Retry',          icon: 'gate',     family: 'control', status: 'ready', dropKind: 'edge', gateFamily: 'retry',              description: 'Retry with backoff + provider failover chain' },
   { id: 'ctrl-on-failure',   label: 'On Failure',     icon: 'gate',     family: 'control', status: 'ready', dropKind: 'edge', gateFamily: 'after_failure',      description: 'Run only if upstream step failed' },

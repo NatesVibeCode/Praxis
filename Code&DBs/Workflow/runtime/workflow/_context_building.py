@@ -425,6 +425,10 @@ def _build_job_execution_bundles(
             blast_radius=_normalize_paths(context_shard.get("blast_radius")),
             test_scope=_normalize_paths(context_shard.get("test_scope")),
             verify_refs=_normalize_paths(context_shard.get("verify_refs")),
+            approval_required=job.get("approval_required")
+            if isinstance(job.get("approval_required"), bool)
+            else None,
+            approval_question=str(job.get("approval_question") or "").strip() or None,
             context_sections=context_shard.get("context_sections")
             if isinstance(context_shard.get("context_sections"), list)
             else [],
@@ -658,6 +662,10 @@ def _runtime_execution_bundle(
         blast_radius=blast_radius,
         test_scope=test_scope,
         verify_refs=verify_refs,
+        approval_required=source_job.get("approval_required")
+        if isinstance(source_job.get("approval_required"), bool)
+        else None,
+        approval_question=str(source_job.get("approval_question") or "").strip() or None,
         context_sections=context_sections,
         submission_required=source_job.get("submission_required")
         if isinstance(source_job.get("submission_required"), bool)

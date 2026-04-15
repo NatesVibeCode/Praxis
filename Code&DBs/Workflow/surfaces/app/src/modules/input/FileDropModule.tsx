@@ -1,4 +1,4 @@
-import React, { useState, DragEvent } from 'react';
+import React, { useRef, useState, DragEvent } from 'react';
 import { QuadrantProps } from '../types';
 import { world } from '../../world';
 
@@ -6,14 +6,108 @@ interface FileDropConfig {
   accept?: string;
   worldPath?: string;
   label?: string;
+  uploadEndpoint?: string;
+  scope?: 'instance' | 'step' | 'workflow';
+  workflowId?: string;
+  stepId?: string;
+  description?: string;
+}
+
+interface UploadedFileRecord {
+  id: string;
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+  scope: string;
+  storage_path: string;
 }
 
 export const FileDropModule: React.FC<QuadrantProps> = ({ config: rawConfig }) => {
   const config = (rawConfig || {}) as FileDropConfig;
+  const inputRef = useRef<HTMLInputElement | null>(null);
   const [isHovered, setIsHovered] = useState(false);
   const [filename, setFilename] = useState<string | null>(null);
+  const [status, setStatus] = useState<'idle' | 'uploading' | 'uploaded' | 'error'>('idle');
+  const [message, setMessage] = useState<string | null>(null);
 
-  const { accept = '.txt', worldPath, label = 'Drag and drop a file here' } = config;
+  const {
+    accept = '.txt',
+    worldPath,
+    label = 'Drag and drop a file here',
+    uploadEndpoint = '/api/files',
+    scope = 'instance',
+    workflowId,
+    stepId,
+    description = '',
+  } = config;
+
+  const fileToBase64 = (file: File): Promise<string> => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : '';
+      const base64 = result.includes(',') ? result.split(',')[1] : result;
+      if (base64) resolve(base64);
+      else reject(new Error('Failed to encode file'));
+    };
+    reader.onerror = () => reject(reader.error ?? new Error('Failed to encode file'));
+    reader.readAsDataURL(file);
+  });
+
+  const uploadFile = async (file: File) => {
+    setFilename(file.name);
+    setStatus('uploading');
+    setMessage(null);
+
+    try {
+      const content = await fileToBase64(file);
+      const response = await fetch(uploadEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          filename: file.name,
+          content,
+          content_type: file.type || 'application/octet-stream',
+          scope,
+          workflow_id: workflowId,
+          step_id: stepId,
+          description,
+        }),
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || `Upload failed (${response.status})`);
+      }
+
+      const uploadedFile = payload?.file as UploadedFileRecord | undefined;
+      if (!uploadedFile?.id) {
+        throw new Error('Upload succeeded but no file record was returned');
+      }
+
+      if (worldPath) {
+        world.set(worldPath, {
+          ...uploadedFile,
+          original_filename: file.name,
+        });
+      }
+
+      setStatus('uploaded');
+      setMessage(`Uploaded as ${uploadedFile.filename}`);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      setStatus('error');
+      setMessage(errorMessage);
+    } finally {
+      if (inputRef.current) {
+        inputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleFiles = async (files: FileList | null | undefined) => {
+    if (!files || files.length === 0) return;
+    await uploadFile(files[0]);
+  };
 
   const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -28,28 +122,25 @@ export const FileDropModule: React.FC<QuadrantProps> = ({ config: rawConfig }) =
   const handleDrop = async (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsHovered(false);
-
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      const file = e.dataTransfer.files[0];
-      setFilename(file.name);
-
-      try {
-        const text = await file.text();
-        if (worldPath) {
-          world.set(worldPath, text);
-        }
-      } catch (err) {
-        console.error('File read error:', err);
-      }
-    }
+    await handleFiles(e.dataTransfer.files);
   };
 
   return (
     <div style={{ padding: 'var(--space-md, 16px)', width: '100%', height: '100%', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
+      <input
+        ref={inputRef}
+        type="file"
+        accept={accept}
+        onChange={(event) => {
+          void handleFiles(event.target.files);
+        }}
+        style={{ display: 'none' }}
+      />
       <div
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
+        onClick={() => inputRef.current?.click()}
         style={{
           flex: 1,
           display: 'flex',
@@ -66,12 +157,13 @@ export const FileDropModule: React.FC<QuadrantProps> = ({ config: rawConfig }) =
           padding: '24px'
         }}
       >
-        {filename ? (
-          <span style={{ color: 'var(--success, #3fb950)', fontWeight: 'bold' }}>{filename}</span>
-        ) : (
-          <span>{label}</span>
-        )}
-        <span style={{ fontSize: '12px', marginTop: '8px' }}>Accepts {accept}</span>
+        <span style={{ color: 'var(--text, #c9d1d9)', fontWeight: 600 }}>{filename || label}</span>
+        <span style={{ fontSize: '12px', marginTop: '8px' }}>
+          {status === 'idle' && `Accepts ${accept}`}
+          {status === 'uploading' && 'Uploading to file storage...'}
+          {status === 'uploaded' && message}
+          {status === 'error' && message}
+        </span>
       </div>
     </div>
   );

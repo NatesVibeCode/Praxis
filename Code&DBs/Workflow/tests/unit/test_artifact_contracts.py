@@ -53,6 +53,8 @@ def test_build_execution_bundle_renders_authoring_and_acceptance_contracts() -> 
         prompt="Draft the brief",
         task_type="research",
         verify_refs=["verify_ref.python.py_compile.test"],
+        approval_required=True,
+        approval_question="Approve the brief before drafting?",
         output_schema={
             "type": "object",
             "properties": {
@@ -82,10 +84,13 @@ def test_build_execution_bundle_renders_authoring_and_acceptance_contracts() -> 
     assert bundle["authoring_contract"]["required_sections"] == ["Findings", "Sources"]
     assert bundle["acceptance_contract"]["verify_refs"] == ["verify_ref.python.py_compile.test"]
     assert bundle["acceptance_contract"]["review"]["required_decision"] == "approve"
+    assert bundle["approval_required"] is True
+    assert bundle["approval_question"] == "Approve the brief before drafting?"
     assert "** AUTHORING CONTRACT **" in rendered
     assert "section_scaffold" in rendered
     assert "** ACCEPTANCE CONTRACT **" in rendered
     assert "review.required_decision: approve" in rendered
+    assert "** APPROVAL REQUIRED **" in rendered
 
 
 def test_evaluate_submission_acceptance_tracks_pending_and_passed_states() -> None:

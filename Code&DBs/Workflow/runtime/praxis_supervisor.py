@@ -24,10 +24,11 @@ from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import urlsplit, urlunsplit
 
+from storage.postgres.connection import resolve_workflow_database_url
+from storage.postgres.validators import PostgresConfigurationError
 
 LOG = logging.getLogger(__name__)
 
-DEFAULT_DB_URL = os.environ.get("WORKFLOW_DATABASE_URL", "postgresql://postgres@localhost:5432/praxis")
 SERVICE_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 SUPERVISOR_LABEL = "com.praxis.engine"
 SUPERVISOR_PROGRAM_NAME = "praxis"
@@ -206,6 +207,25 @@ def _database_exists(database_name: str) -> bool | None:
     return completed.stdout.strip() == "1"
 
 
+def _read_repo_env_file(path: Path) -> dict[str, str]:
+    try:
+        content = path.read_text(encoding="utf-8")
+    except OSError:
+        return {}
+
+    parsed: dict[str, str] = {}
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip("'\"")
+        if key and value:
+            parsed[key] = value
+    return parsed
+
+
 def discover_database_url(repo_root: Path) -> str:
     launch_agents = Path.home() / "Library" / "LaunchAgents"
     unresolved_candidates: list[str] = []
@@ -227,17 +247,22 @@ def discover_database_url(repo_root: Path) -> str:
                         return _ensure_postgres_user(candidate)
                 unresolved_candidates.append(_ensure_postgres_user(candidate))
 
-    env_value = os.environ.get("WORKFLOW_DATABASE_URL")
-    if env_value:
-        return _ensure_postgres_user(env_value.strip())
-
-    if _database_exists("praxis") is True:
-        return "postgresql://postgres@localhost:5432/praxis"
+    try:
+        return resolve_workflow_database_url()
+    except PostgresConfigurationError:
+        pass
 
     if unresolved_candidates:
         return unresolved_candidates[0]
 
-    return DEFAULT_DB_URL
+    repo_env_path = repo_root / ".env"
+    try:
+        return resolve_workflow_database_url(_read_repo_env_file(repo_env_path))
+    except PostgresConfigurationError as exc:
+        raise RuntimeError(
+            "praxis_supervisor requires explicit WORKFLOW_DATABASE_URL authority "
+            f"from process env, launchd, or {repo_env_path}"
+        ) from exc
 
 
 def build_paths(repo_root: Path, database_url: str | None = None) -> SupervisorPaths:

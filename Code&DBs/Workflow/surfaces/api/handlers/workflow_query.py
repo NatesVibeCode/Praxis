@@ -1778,6 +1778,97 @@ def _handle_templates_get(request: Any, path: str) -> None:
         request._send_json(500, {"error": str(exc)})
 
 
+def _manifest_family_from_payload(manifest: Any) -> str | None:
+    if isinstance(manifest, str):
+        try:
+            manifest = json.loads(manifest)
+        except (TypeError, json.JSONDecodeError):
+            return None
+    if not isinstance(manifest, dict):
+        return None
+    return str(manifest.get("manifest_family") or "").strip() or None
+
+
+def _manifest_type_from_payload(manifest: Any) -> str | None:
+    if isinstance(manifest, str):
+        try:
+            manifest = json.loads(manifest)
+        except (TypeError, json.JSONDecodeError):
+            return None
+    if not isinstance(manifest, dict):
+        return None
+    return str(manifest.get("manifest_type") or "").strip() or None
+
+
+def _manifest_listing_row(row: dict[str, Any]) -> dict[str, Any]:
+    manifest = row.get("manifest")
+    return {
+        "id": row.get("id"),
+        "name": row.get("name"),
+        "description": row.get("description") or "",
+        "status": row.get("status"),
+        "manifest_family": _manifest_family_from_payload(manifest),
+        "manifest_type": _manifest_type_from_payload(manifest),
+        "updated_at": row.get("updated_at"),
+    }
+
+
+def _handle_manifests_get(request: Any, path: str) -> None:
+    try:
+        pg = request.subsystems.get_pg_conn()
+        params = _query_params(request.path)
+        query = str((params.get("q") or [""])[0]).strip()
+        manifest_family = str((params.get("manifest_family") or [""])[0]).strip()
+        manifest_type = str((params.get("manifest_type") or [""])[0]).strip()
+        status = str((params.get("status") or [""])[0]).strip()
+        limit = _safe_int_impl((params.get("limit") or ["20"])[0], default=20, minimum=1, maximum=100)
+
+        sql = (
+            "SELECT id, name, description, status, manifest, updated_at "
+            "FROM app_manifests WHERE 1=1"
+        )
+        sql_params: list[Any] = []
+        if query:
+            sql_params.append(query)
+            sql += (
+                " AND (search_vector @@ plainto_tsquery('english', $1)"
+                " OR name ILIKE '%' || $1 || '%'"
+                " OR description ILIKE '%' || $1 || '%'"
+                " OR manifest::text ILIKE '%' || $1 || '%')"
+            )
+        if manifest_family:
+            sql_params.append(manifest_family)
+            sql += f" AND manifest->>'manifest_family' = ${len(sql_params)}"
+        if manifest_type:
+            sql_params.append(manifest_type)
+            sql += f" AND manifest->>'manifest_type' = ${len(sql_params)}"
+        if status:
+            sql_params.append(status)
+            sql += f" AND status = ${len(sql_params)}"
+        sql_params.append(limit)
+        sql += f" ORDER BY updated_at DESC, name ASC LIMIT ${len(sql_params)}"
+
+        rows = pg.execute(sql, *sql_params)
+        request._send_json(
+            200,
+            _serialize(
+                {
+                    "manifests": [_manifest_listing_row(dict(row)) for row in rows],
+                    "count": len(rows),
+                    "filters": {
+                        "q": query or None,
+                        "manifest_family": manifest_family or None,
+                    "manifest_type": manifest_type or None,
+                        "status": status or None,
+                        "limit": limit,
+                    },
+                }
+            ),
+        )
+    except Exception as exc:
+        request._send_json(500, {"error": str(exc)})
+
+
 def _handle_models_get(request: Any, path: str) -> None:
     try:
         params = _query_params(request.path)
@@ -2944,6 +3035,7 @@ QUERY_GET_ROUTES: list[RouteEntry] = [
     (_exact("/api/runs/recent"), _handle_runs_recent_get),
     (_exact("/api/references"), _handle_references_get),
     (_exact("/api/source-options"), _handle_source_options_get),
+    (_exact("/api/manifests"), _handle_manifests_get),
     (_exact("/api/templates"), _handle_templates_get),
     (_exact("/api/models"), _handle_models_get),
     (_exact("/api/models/market"), _handle_market_models_get),

@@ -248,7 +248,7 @@ def _graph_adapter_registry() -> AdapterRegistry:
     registry = AdapterRegistry(
         api_task_adapter=APITaskAdapter(),
         llm_task_adapter=LLMTaskAdapter(),
-        cli_llm_adapter=CLILLMAdapter(),
+        cli_llm_adapter=CLILLMAdapter(prefer_docker=False),
         mcp_task_adapter=MCPTaskAdapter(),
     )
     registry.register("context_compiler", ContextCompilerAdapter(shadow_packet_config=None))

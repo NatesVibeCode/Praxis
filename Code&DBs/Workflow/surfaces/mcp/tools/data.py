@@ -1,6 +1,7 @@
 """Tools: praxis_data."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +11,158 @@ from runtime.data_plane import (
     execute_data_job,
     write_workflow_spec,
 )
-from ..subsystems import REPO_ROOT
+from ..subsystems import REPO_ROOT, _subs
+
+
+_CONTROL_MANIFEST_KIND = "praxis_control_manifest"
+_CONTROL_MANIFEST_FAMILY = "control_plane"
+_CONTROL_PLAN_MANIFEST_TYPE = "data_plan"
+_CONTROL_APPROVAL_MANIFEST_TYPE = "data_approval"
+
+
+def _text(value: Any) -> str:
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _manifest_payload(value: Any, *, field_name: str) -> dict[str, Any]:
+    payload = value
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except json.JSONDecodeError as exc:
+            raise DataRuntimeBoundaryError(
+                "data.manifest.invalid_json",
+                f"{field_name} must be valid JSON",
+                details={"field": field_name},
+            ) from exc
+    if not isinstance(payload, dict):
+        raise DataRuntimeBoundaryError(
+            "data.manifest.invalid_payload",
+            f"{field_name} must be a JSON object",
+            details={"field": field_name},
+        )
+    return dict(payload)
+
+
+def _manifest_ref(row: dict[str, Any]) -> dict[str, Any]:
+    manifest = _manifest_payload(row.get("manifest"), field_name="manifest")
+    kind = _text(manifest.get("kind"))
+    family = _text(manifest.get("manifest_family"))
+    manifest_type = _text(manifest.get("manifest_type"))
+    if kind != _CONTROL_MANIFEST_KIND or family != _CONTROL_MANIFEST_FAMILY:
+        raise DataRuntimeBoundaryError(
+            "data.manifest.invalid_family",
+            "manifest_id must reference a control-plane manifest",
+            details={
+                "manifest_id": str(row.get("id") or ""),
+                "kind": kind,
+                "manifest_family": family,
+            },
+        )
+    if manifest_type not in {_CONTROL_PLAN_MANIFEST_TYPE, _CONTROL_APPROVAL_MANIFEST_TYPE}:
+        raise DataRuntimeBoundaryError(
+            "data.manifest.invalid_type",
+            "manifest_id must reference a data plan or data approval manifest",
+            details={
+                "manifest_id": str(row.get("id") or ""),
+                "manifest_type": manifest_type,
+            },
+        )
+    return {
+        "manifest_id": str(row.get("id") or ""),
+        "name": _text(row.get("name")),
+        "description": _text(row.get("description")),
+        "status": _text(row.get("status")),
+        "updated_at": row.get("updated_at"),
+        "kind": kind,
+        "manifest_family": family,
+        "manifest_type": manifest_type,
+        "manifest": manifest,
+    }
+
+
+def _load_control_manifest(manifest_id: str) -> dict[str, Any]:
+    pg = _subs.get_pg_conn()
+    if pg is None:
+        raise DataRuntimeBoundaryError(
+            "data.manifest.postgres_unavailable",
+            "manifest_id requires a Postgres connection",
+            details={"manifest_id": manifest_id},
+        )
+    row = pg.fetchrow(
+        "SELECT id, name, description, manifest, status, updated_at FROM app_manifests WHERE id = $1",
+        manifest_id,
+    )
+    if row is None:
+        raise DataRuntimeBoundaryError(
+            "data.manifest.not_found",
+            f"manifest not found: {manifest_id}",
+            details={"manifest_id": manifest_id},
+        )
+    return _manifest_ref(dict(row))
+
+
+def _control_manifest_body(manifest_ref: dict[str, Any], *, body_field: str) -> dict[str, Any]:
+    manifest = manifest_ref.get("manifest")
+    if not isinstance(manifest, dict):
+        raise DataRuntimeBoundaryError(
+            "data.manifest.invalid_payload",
+            f"{manifest_ref.get('manifest_id', 'manifest')} has no manifest payload",
+            details={"manifest_id": manifest_ref.get("manifest_id")},
+        )
+    body = manifest.get(body_field)
+    if not isinstance(body, dict):
+        raise DataRuntimeBoundaryError(
+            "data.manifest.invalid_body",
+            f"{manifest_ref.get('manifest_id', 'manifest')} is missing {body_field}",
+            details={
+                "manifest_id": manifest_ref.get("manifest_id"),
+                "body_field": body_field,
+            },
+        )
+    return dict(body)
+
+
+def _resolve_manifest_backed_inputs(
+    job: dict[str, Any],
+    *,
+    action: str,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    plan_ref: dict[str, Any] = {}
+    approval_ref: dict[str, Any] = {}
+    plan_manifest_id = _text(job.pop("plan_manifest_id", None))
+    approval_manifest_id = _text(job.pop("approval_manifest_id", None))
+
+    if action not in {"approve", "apply"}:
+        if plan_manifest_id or approval_manifest_id:
+            raise DataRuntimeBoundaryError(
+                "data.manifest.unsupported_action",
+                "manifest ids are only supported for approve and apply",
+                details={"action": action},
+            )
+        return job, plan_ref, approval_ref
+
+    if plan_manifest_id:
+        plan_ref = _load_control_manifest(plan_manifest_id)
+        if _text(plan_ref.get("manifest_type")) != _CONTROL_PLAN_MANIFEST_TYPE:
+            raise DataRuntimeBoundaryError(
+                "data.manifest.expected_plan",
+                "plan_manifest_id must reference a data plan manifest",
+                details={"manifest_id": plan_manifest_id},
+            )
+        job["plan"] = _control_manifest_body(plan_ref, body_field="plan")
+
+    if action == "apply" and approval_manifest_id:
+        approval_ref = _load_control_manifest(approval_manifest_id)
+        if _text(approval_ref.get("manifest_type")) != _CONTROL_APPROVAL_MANIFEST_TYPE:
+            raise DataRuntimeBoundaryError(
+                "data.manifest.expected_approval",
+                "approval_manifest_id must reference a data approval manifest",
+                details={"manifest_id": approval_manifest_id},
+            )
+        job["approval"] = _control_manifest_body(approval_ref, body_field="approval")
+
+    return job, plan_ref, approval_ref
 
 
 def _tool_workspace_root(params: dict[str, Any]) -> Path:
@@ -105,13 +257,29 @@ def tool_praxis_data(params: dict[str, Any]) -> dict[str, Any]:
             }
 
         job = _job_payload(params)
+        job, plan_ref, approval_ref = _resolve_manifest_backed_inputs(job, action=action)
         default_operation = None if action == "run" else action
-        return execute_data_job(
+        result = execute_data_job(
             job,
             default_operation=default_operation,
             workspace_root=workspace_root,
             dry_run=bool(params.get("dry_run", False)),
         )
+        if plan_ref:
+            result["plan_manifest_id"] = plan_ref.get("manifest_id")
+            result["plan_manifest"] = {
+                key: value
+                for key, value in plan_ref.items()
+                if key != "manifest"
+            }
+        if approval_ref:
+            result["approval_manifest_id"] = approval_ref.get("manifest_id")
+            result["approval_manifest"] = {
+                key: value
+                for key, value in approval_ref.items()
+                if key != "manifest"
+            }
+        return result
     except Exception as exc:
         return _tool_error(exc, action=action)
 
@@ -122,9 +290,11 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
         {
             "description": (
                 "Run deterministic data cleanup and reconciliation jobs: parse datasets, profile fields, "
-                "filter records, sort rows, normalize values, redact sensitive fields, validate contracts, transform records, "
+                "filter records, sort rows, normalize values, repair rows, run repair loops, backfill missing values, "
+                "redact sensitive fields, checkpoint state, replay cursor windows, approve plans, apply approved plans, "
+                "validate contracts, transform records, "
                 "join or merge sources, aggregate groups, split partitions, export shaped datasets, dedupe keys, "
-                "reconcile source vs target state, sync target state deterministically, "
+                "route dead-letter rows, reconcile source vs target state, sync target state deterministically, "
                 "generate workflow specs, and launch those jobs through Praxis.\n\n"
                 "USE WHEN: the platform should own exact parsing, mapping, validation, or diff logic instead "
                 "of asking an LLM to mutate rows heuristically.\n\n"
@@ -138,8 +308,22 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "aggregations=[{'op':'count','as':'row_count'}])\n"
                 "  Normalize data:    praxis_data(action='normalize', input_path='artifacts/data/users.csv', "
                 "rules={'email':['trim','lower']})\n"
+                "  Repair rows:       praxis_data(action='repair', input_path='users.json', "
+                "predicates=[{'field':'status','op':'equals','value':'pending'}], repairs={'status': {'value':'active'}})\n"
+                "  Repair loop:       praxis_data(action='repair_loop', input_path='users.json', "
+                "repairs={'status': {'value':'active'}}, schema={'email': {'required': true, 'regex': '.+@.+'}})\n"
+                "  Backfill values:   praxis_data(action='backfill', input_path='users.json', "
+                "backfill={'country': {'value':'US'}})\n"
                 "  Redact PII:        praxis_data(action='redact', input_path='users.json', "
                 "redactions={'email':'mask_email','ssn':'remove'})\n"
+                "  Checkpoint state:  praxis_data(action='checkpoint', input_path='events.json', "
+                "keys=['id'], cursor_field='updated_at')\n"
+                "  Replay window:     praxis_data(action='replay', input_path='events.json', "
+                "cursor_field='updated_at', checkpoint_path='artifacts/data/events.checkpoint.json')\n"
+                "  Approve plan:      praxis_data(action='approve', plan_manifest_id='plan_abc123', "
+                "approved_by='ops', approval_reason='Reviewed diff and counts')\n"
+                "  Apply plan:        praxis_data(action='apply', plan_manifest_id='plan_abc123', "
+                "approval_manifest_id='approval_def456', secondary_input_path='target.json', keys=['id'])\n"
                 "  Validate rows:     praxis_data(action='validate', input_path='artifacts/data/users.json', "
                 "schema={'email': {'required': true, 'regex': '.+@.+'}})\n"
                 "  Merge sources:     praxis_data(action='merge', input_path='crm.json', secondary_input_path='billing.json', "
@@ -148,6 +332,8 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "output_path='artifacts/data/users_by_status')\n"
                 "  Export fields:     praxis_data(action='export', input_path='users.json', "
                 "fields=['id','email'], field_map={'email':'user_email'})\n"
+                "  Route dead-letter: praxis_data(action='dead_letter', input_path='users.json', "
+                "schema={'email': {'required': true, 'regex': '.+@.+'}}, output_path='artifacts/data/users_dead_letter')\n"
                 "  Reconcile state:   praxis_data(action='reconcile', input_path='source.json', "
                 "secondary_input_path='target.json', keys=['id'])\n"
                 "  Sync target:       praxis_data(action='sync', input_path='source.json', secondary_input_path='target.json', "
@@ -169,7 +355,14 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                             "filter",
                             "sort",
                             "normalize",
+                            "repair",
+                            "repair_loop",
+                            "backfill",
                             "redact",
+                            "checkpoint",
+                            "replay",
+                            "approve",
+                            "apply",
                             "validate",
                             "transform",
                             "join",
@@ -177,6 +370,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                             "aggregate",
                             "split",
                             "export",
+                            "dead_letter",
                             "dedupe",
                             "reconcile",
                             "sync",
@@ -201,12 +395,23 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "predicate_mode": {"type": "string", "enum": ["all", "any"]},
                     "sort": {"type": "array"},
                     "rules": {"type": "object"},
+                    "repairs": {"type": "object"},
+                    "backfill": {"type": "object"},
                     "redactions": {"type": "object"},
+                    "checkpoint": {"type": "object"},
+                    "checkpoint_path": {"type": "string"},
+                    "plan": {"type": "object"},
+                    "plan_path": {"type": "string"},
+                    "plan_manifest_id": {"type": "string"},
+                    "approval": {"type": "object"},
+                    "approval_path": {"type": "string"},
+                    "approval_manifest_id": {"type": "string"},
                     "schema": {"type": "object"},
                     "checks": {"type": "array"},
                     "mapping": {"type": "object"},
                     "field_map": {"type": "object"},
                     "fields": {"type": "array", "items": {"type": "string"}},
+                    "drop_fields": {"type": "array", "items": {"type": "string"}},
                     "keys": {"type": "array", "items": {"type": "string"}},
                     "left_keys": {"type": "array", "items": {"type": "string"}},
                     "right_keys": {"type": "array", "items": {"type": "string"}},
@@ -220,6 +425,11 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     },
                     "order_field": {"type": "string"},
                     "split_by_field": {"type": "string"},
+                    "cursor_field": {"type": "string"},
+                    "after": {},
+                    "before": {},
+                    "approved_by": {"type": "string"},
+                    "approval_reason": {"type": "string"},
                     "join_kind": {"type": "string", "enum": ["inner", "left", "right", "full"]},
                     "merge_mode": {"type": "string", "enum": ["inner", "left", "right", "full"]},
                     "precedence": {"type": "string", "enum": ["left", "right"]},
@@ -232,6 +442,8 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "output_format": {"type": "string", "enum": ["json", "jsonl", "csv", "tsv"]},
                     "receipt_path": {"type": "string"},
                     "dry_run": {"type": "boolean", "default": False},
+                    "max_passes": {"type": "integer", "minimum": 1},
+                    "batch_size": {"type": "integer", "minimum": 1},
                     "workflow_spec_path": {"type": "string"},
                     "wait": {"type": "boolean", "default": False},
                     "fresh": {"type": "boolean", "default": False},

@@ -13,6 +13,17 @@ def _workflow_tool(params: dict[str, object]) -> dict[str, object]:
     return tool_praxis_workflow(params)
 
 
+def _api_discovery_text() -> str:
+    return (
+        "Discovery shortcuts:\n"
+        "  workflow routes                alias for live HTTP route discovery\n"
+        "  workflow routes --json         machine-readable route catalog\n"
+        "  workflow help routes           same discovery help from the root help system\n"
+        "  workflow tools list            browse catalog-backed MCP tools\n"
+        "  workflow tools search <text>    search tools by topic, alias, or entrypoint\n"
+    )
+
+
 def _api_routes_command(args: list[str], *, stdout: TextIO) -> int:
     """Handle `workflow api routes` — list the live HTTP route catalog."""
 
@@ -29,11 +40,19 @@ def _api_routes_command(args: list[str], *, stdout: TextIO) -> int:
             "\n"
             "Examples:\n"
             "  workflow api routes\n"
+            "  workflow routes\n"
             "  workflow api routes --search health --method GET\n"
+            "  workflow routes --tag workflow --method GET\n"
             "  workflow api routes --path-prefix /api/workflow-runs --json\n"
             "  workflow api routes --json\n"
+            "\n"
+            "Tip: plain output also shows the most common methods and tags, plus a suggested follow-up filter.\n"
+            "Tip: JSON output includes a summary facet block for downstream tooling.\n"
+            "Tip: `workflow routes --json` is the flat alias when you already know the surface you want.\n"
+            "\n"
+            f"{_api_discovery_text()}"
         )
-        return 2
+        return 0
 
     as_json = False
     search = None
@@ -80,6 +99,7 @@ def _api_routes_command(args: list[str], *, stdout: TextIO) -> int:
         return 0
 
     routes = list(payload.get("routes", []))
+    summary = payload.get("summary")
     stdout.write(f"API route catalog ({payload.get('count', len(routes))} routes)\n")
     stdout.write(f"  docs:    {payload.get('docs_url')}\n")
     stdout.write(f"  openapi: {payload.get('openapi_url')}\n")
@@ -88,6 +108,24 @@ def _api_routes_command(args: list[str], *, stdout: TextIO) -> int:
     if isinstance(filters, dict) and filters:
         rendered_filters = " ".join(f"{key}={value}" for key, value in sorted(filters.items()))
         stdout.write(f"  filters: {rendered_filters}\n")
+    if isinstance(summary, dict):
+        methods = _render_route_facets(summary.get("methods"), field_name="method")
+        tags = _render_route_facets(summary.get("tags"), field_name="tag")
+        suggested = summary.get("suggested_filters")
+        if methods:
+            stdout.write(f"  methods: {methods}\n")
+        if tags:
+            stdout.write(f"  tags:    {tags}\n")
+        if (not isinstance(filters, dict) or not filters) and isinstance(suggested, dict):
+            follow_up = []
+            tag = str(suggested.get("tag") or "").strip()
+            method = str(suggested.get("method") or "").strip()
+            if tag:
+                follow_up.append(f"--tag {tag}")
+            if method:
+                follow_up.append(f"--method {method}")
+            if follow_up:
+                stdout.write(f"  try:    workflow api routes {' '.join(follow_up)}\n")
     stdout.write("\n")
     if not routes:
         stdout.write("No routes found.\n")
@@ -99,8 +137,25 @@ def _api_routes_command(args: list[str], *, stdout: TextIO) -> int:
         methods = ", ".join(route.get("methods", [])) or "ANY"
         summary = str(route.get("summary") or route.get("description") or "").split("\n", 1)[0]
         stdout.write(f"{methods:<16} {route.get('path', ''):<40} {summary[:80]}\n")
-    stdout.write(f"\nTip: run `workflow api routes --json` for machine-readable discovery.\n")
+    stdout.write(
+        "\nTip: run `workflow api routes --json` or `workflow routes --json` for machine-readable discovery.\n"
+    )
     return 0
+
+
+def _render_route_facets(rows: object, *, field_name: str, limit: int = 5) -> str:
+    if not isinstance(rows, list):
+        return ""
+    parts: list[str] = []
+    for row in rows[:limit]:
+        if not isinstance(row, dict):
+            continue
+        value = str(row.get(field_name) or "").strip()
+        count = row.get("count")
+        if not value or not isinstance(count, int):
+            continue
+        parts.append(f"{value}={count}")
+    return ", ".join(parts)
 
 
 def _circuits_command(*, stdout: TextIO) -> int:
@@ -944,12 +999,15 @@ def _api_command(args: list[str], *, stdout: TextIO) -> int:
             "\n"
             "Start the Praxis REST API server.\n"
             "Reads the runtime dependency contract from requirements.runtime.txt\n"
+            "Flat alias: workflow routes\n"
             "\n"
             "  routes        show and filter the live HTTP route catalog without starting the server\n"
             "  --host HOST   bind address (default: 0.0.0.0)\n"
             "  --port PORT   TCP port     (default: 8420)\n"
+            "\n"
+            f"{_api_discovery_text()}"
         )
-        return 2
+        return 0
 
     if args and args[0] == "routes":
         return _api_routes_command(args[1:], stdout=stdout)

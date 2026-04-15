@@ -401,7 +401,23 @@ def test_compile_prose_preserves_stale_pinned_compile_index_failure(monkeypatch)
         )
 
 
-def test_hydrate_env_from_dotenv_uses_repo_local_defaults_when_missing(
+def test_compile_prose_fails_closed_when_database_authority_is_missing(monkeypatch) -> None:
+    monkeypatch.setattr(
+        compiler,
+        "_get_connection",
+        lambda: (_ for _ in ()).throw(
+            compiler.PostgresConfigurationError(
+                "postgres.config_missing",
+                "WORKFLOW_DATABASE_URL must be set to a Postgres DSN",
+            )
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="postgres.config_missing"):
+        compiler.compile_prose("Compile without database authority")
+
+
+def test_hydrate_env_from_dotenv_only_loads_explicit_repo_env_values(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -415,7 +431,7 @@ def test_hydrate_env_from_dotenv_uses_repo_local_defaults_when_missing(
 
     compiler._hydrate_env_from_dotenv()
 
-    assert os.environ["WORKFLOW_DATABASE_URL"] == "postgresql://test@localhost:5432/praxis_test"
+    assert "WORKFLOW_DATABASE_URL" not in os.environ
     assert os.environ["OPENAI_API_KEY"] == "test-openai-key"
 
 

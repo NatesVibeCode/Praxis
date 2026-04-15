@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from adapters import provider_registry as provider_registry_mod
+from adapters import provider_transport as provider_transport_mod
 
 __all__ = [
     "ProviderOnboardingModelSpec",
@@ -555,6 +556,7 @@ def _resolve_explicit_or_env_secret(
 
 
 def _provider_cli_profile_payload(spec: ProviderOnboardingSpec) -> dict[str, Any]:
+    prompt_mode = _preferred_cli_prompt_mode(spec)
     return {
         "provider_slug": spec.provider_slug,
         "binary_name": spec.binary_name,
@@ -573,7 +575,7 @@ def _provider_cli_profile_payload(spec: ProviderOnboardingSpec) -> dict[str, Any
         "api_protocol_family": spec.api_protocol_family,
         "api_key_env_vars": list(spec.api_key_env_vars),
         "adapter_economics": dict(spec.adapter_economics),
-        "prompt_mode": spec.cli_prompt_mode or "stdin",
+        "prompt_mode": prompt_mode,
     }
 
 
@@ -599,7 +601,7 @@ def _cli_config_for(
 ) -> dict[str, Any]:
     if spec.selected_transport != "cli":
         return {}
-    prompt_mode = spec.cli_prompt_mode or "stdin"
+    prompt_mode = _preferred_cli_prompt_mode(spec)
     cmd_template = [str(spec.binary_name or ""), *spec.base_flags]
     if spec.model_flag:
         cmd_template.extend([spec.model_flag, "{model}"])
@@ -745,6 +747,17 @@ def _fallback_template(provider_slug: str) -> ProviderAuthorityTemplate | None:
             ),
         },
     )
+
+
+def _preferred_cli_prompt_mode(spec: ProviderOnboardingSpec) -> str:
+    explicit = (spec.cli_prompt_mode or "").strip().lower()
+    if explicit in _VALID_CLI_PROMPT_MODES:
+        return explicit
+    profile = provider_registry_mod.get_profile(spec.provider_slug)
+    profile_prompt_mode = str(getattr(profile, "prompt_mode", "") or "").strip().lower()
+    if profile_prompt_mode in _VALID_CLI_PROMPT_MODES:
+        return profile_prompt_mode
+    return "stdin"
 
 
 def _provider_template(provider_slug: str) -> ProviderAuthorityTemplate:

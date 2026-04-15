@@ -136,46 +136,59 @@ async def _run_provider_onboarding(
     transport_step: ProviderOnboardingStepResult | None = None
     model_step: ProviderOnboardingStepResult | None = None
     capacity_step: ProviderOnboardingStepResult | None = None
+    benchmark_step: ProviderOnboardingStepResult | None = None
     resolved_models: tuple[ProviderOnboardingModelSpec, ...] = ()
 
-    async def _finish() -> ProviderOnboardingResult:
-        ok = all(step.status != "failed" for step in steps)
-        if not dry_run and transport_step is not None:
-            failure_step = next((step for step in steps if step.status == "failed"), None)
-            admitted_by_policy = bool(
-                ok
-                and capacity_step is not None
-                and capacity_step.status == "succeeded"
+    async def _record_transport_authority(
+        *,
+        router_supported: bool | None,
+        record_receipts: bool,
+    ) -> None:
+        if dry_run or transport_step is None:
+            return
+        failure_step = next((step for step in steps if step.status == "failed"), None)
+        admitted_by_policy = bool(
+            capacity_step is not None
+            and capacity_step.status == "succeeded"
+            and router_supported is not False
+        )
+        policy_reason = (
+            f"Admitted {spec.provider_slug}/{_adapter_type_for_transport(resolved_spec.selected_transport or '')} "
+            f"via {_execution_topology_for_transport(resolved_spec.selected_transport or '')} after wizard probes succeeded."
+            if admitted_by_policy
+            else str(
+                (failure_step.summary if failure_step is not None else "")
+                or f"Lane not admitted for {resolved_spec.provider_slug}."
             )
-            policy_reason = (
-                f"Admitted {spec.provider_slug}/{_adapter_type_for_transport(resolved_spec.selected_transport or '')} "
-                f"via {_execution_topology_for_transport(resolved_spec.selected_transport or '')} after wizard probes succeeded."
-                if admitted_by_policy
-                else str(
-                    (failure_step.summary if failure_step is not None else "")
-                    or f"Lane not admitted for {resolved_spec.provider_slug}."
-                )
-            )
-            router_supported = provider_report.get("selected_transport_supported")
-            await _get("_upsert_provider_transport_admission", _upsert_provider_transport_admission_impl)(
-                conn,
-                spec=resolved_spec,
-                transport_template=transport_template,
-                transport_step=transport_step,
-                model_step=model_step,
-                capacity_step=capacity_step,
-                selected_models=resolved_models,
-                decision_ref=decision_ref,
-                admitted_by_policy=admitted_by_policy,
-                policy_reason=policy_reason,
-                router_supported=bool(router_supported) if router_supported is not None else None,
-            )
+        )
+        await _get("_upsert_provider_transport_admission", _upsert_provider_transport_admission_impl)(
+            conn,
+            spec=resolved_spec,
+            transport_template=transport_template,
+            transport_step=transport_step,
+            model_step=model_step,
+            capacity_step=capacity_step,
+            selected_models=resolved_models,
+            decision_ref=decision_ref,
+            admitted_by_policy=admitted_by_policy,
+            policy_reason=policy_reason,
+            router_supported=router_supported,
+        )
+        if record_receipts:
             await _get("_record_provider_transport_probe_receipts", _record_provider_transport_probe_receipts_impl)(
                 conn,
                 spec=resolved_spec,
                 decision_ref=decision_ref,
                 steps=steps,
             )
+
+    async def _finish() -> ProviderOnboardingResult:
+        ok = all(step.status != "failed" for step in steps)
+        router_supported = provider_report.get("selected_transport_supported")
+        await _record_transport_authority(
+            router_supported=bool(router_supported) if router_supported is not None else None,
+            record_receipts=False,
+        )
         return ProviderOnboardingResult(
             ok=ok,
             provider_slug=resolved_spec.provider_slug,
@@ -242,7 +255,12 @@ async def _run_provider_onboarding(
             models=resolved_models,
         )
         steps.append(capacity_step)
-        if capacity_step.status == "failed":
+        allow_provisional_registry_write = bool(
+            capacity_step.status == "failed"
+            and resolved_spec.selected_transport == "cli"
+            and resolved_models
+        )
+        if capacity_step.status == "failed" and not allow_provisional_registry_write:
             steps.extend(
                 [
                     _skipped_step("benchmark_probe", "Capacity probe failed"),
@@ -251,13 +269,19 @@ async def _run_provider_onboarding(
                 ]
             )
             return await _finish()
-
-        benchmark_step, benchmark_report = await _get("_probe_benchmark", _probe_benchmark_impl)(
-            conn,
-            spec=resolved_spec,
-            models=resolved_models,
-        )
-        steps.append(benchmark_step)
+        if capacity_step.status == "failed":
+            benchmark_step = _skipped_step(
+                "benchmark_probe",
+                "Capacity probe failed; continuing with provisional CLI registry write",
+            )
+            steps.append(benchmark_step)
+        else:
+            benchmark_step, benchmark_report = await _get("_probe_benchmark", _probe_benchmark_impl)(
+                conn,
+                spec=resolved_spec,
+                models=resolved_models,
+            )
+            steps.append(benchmark_step)
 
         if resolved_spec.selected_transport == "cli":
             discovered_prompt_mode = str(capacity_step.details.get("prompt_mode") or "").strip().lower()
@@ -271,11 +295,18 @@ async def _run_provider_onboarding(
                     (
                         f"Would upsert provider profile, {len(resolved_models)} model_profiles, "
                         f"{len(resolved_models)} candidates, and direct bindings"
+                        if not allow_provisional_registry_write
+                        else (
+                            f"Would provision provider profile, {len(resolved_models)} model_profiles, "
+                            f"{len(resolved_models)} candidates, and direct bindings even though "
+                            "the live capacity probe failed; lane admission would stay disabled until a later successful probe"
+                        )
                     ),
                     details={
                         "provider_slug": resolved_spec.provider_slug,
                         "selected_transport": resolved_spec.selected_transport,
                         "default_model": resolved_spec.default_model,
+                        "provisional_write": allow_provisional_registry_write,
                     },
                 )
             )
@@ -318,7 +349,7 @@ async def _run_provider_onboarding(
                 )
             benchmark_rule_reports: list[dict[str, Any]] = []
             bound_market_models = 0
-            if benchmark_step.status == "succeeded":
+            if benchmark_step is not None and benchmark_step.status == "succeeded":
                 benchmark_rule_reports, bound_market_models = await _get("_apply_benchmark_plan", _apply_benchmark_plan_impl)(
                     conn,
                     spec=resolved_spec,
@@ -340,14 +371,22 @@ async def _run_provider_onboarding(
         steps.append(
             ProviderOnboardingStepResult(
                 step="registry_write",
-                status="succeeded",
+                status="warning" if allow_provisional_registry_write else "succeeded",
                 summary=(
                     f"Wrote provider profile plus {len(resolved_models)} model profile/candidate/binding set(s)"
+                    if not allow_provisional_registry_write
+                    else (
+                        f"Provisioned provider profile plus {len(resolved_models)} model profile/candidate/binding set(s); "
+                        "lane admission remains disabled until the live capacity probe succeeds"
+                    )
                 ),
                 details={
                     "provider_slug": resolved_spec.provider_slug,
                     "selected_transport": resolved_spec.selected_transport,
                     "default_model": resolved_spec.default_model,
+                    "provisional_write": allow_provisional_registry_write,
+                    "capacity_probe_status": capacity_step.status if capacity_step is not None else None,
+                    "capacity_probe_summary": capacity_step.summary if capacity_step is not None else None,
                     "model_profiles": profile_reports,
                     "candidates": candidate_reports,
                     "bindings": binding_reports,
@@ -357,18 +396,28 @@ async def _run_provider_onboarding(
             )
         )
 
+        await _record_transport_authority(
+            router_supported=None,
+            record_receipts=True,
+        )
+
         verification = await _get("_verification_report", _verification_report)(conn=conn, spec=resolved_spec, decision_ref=decision_ref)
         provider_report = dict(verification.get("provider_report") or {})
-        provider_report["selected_transport_supported"] = verification.get(
-            "selected_transport_supported"
-        )
+        selected_transport_supported = bool(verification.get("selected_transport_supported"))
+        provider_report["selected_transport_supported"] = selected_transport_supported
         steps.append(
             ProviderOnboardingStepResult(
                 step="verification",
-                status="succeeded",
+                status="succeeded" if selected_transport_supported else "warning",
                 summary=(
                     f"Verified {verification['model_visibility']['count']} candidate row(s) and "
                     f"{verification['model_profiles']['count']} model profile row(s)"
+                    if selected_transport_supported
+                    else (
+                        f"Verified {verification['model_visibility']['count']} candidate row(s) and "
+                        f"{verification['model_profiles']['count']} model profile row(s); "
+                        "selected transport is registered but not admitted yet"
+                    )
                 ),
                 details=verification,
             )

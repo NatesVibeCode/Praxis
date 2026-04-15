@@ -47,6 +47,15 @@ describe('actionTruth', () => {
         gateFamily: 'approval',
       },
       {
+        id: 'ctrl-validation',
+        label: 'Validation',
+        icon: 'gate',
+        family: 'control',
+        status: 'ready',
+        dropKind: 'edge',
+        gateFamily: 'validation',
+      },
+      {
         id: 'integration-slack-send',
         label: 'Slack send',
         icon: 'notify',
@@ -67,16 +76,17 @@ describe('actionTruth', () => {
       'gather-docs',
       'ctrl-branch',
       'ctrl-approval',
+      'ctrl-validation',
     ]);
     expect(truthSummary.nodeTotal).toBe(2);
     expect(truthSummary.nodeCounts.runtime).toBe(1);
     expect(truthSummary.nodeCounts.alias).toBe(1);
-    expect(truthSummary.edgeTotal).toBe(2);
-    expect(truthSummary.edgeCounts.runtime).toBe(1);
-    expect(truthSummary.edgeCounts.persisted).toBe(1);
+    expect(truthSummary.edgeTotal).toBe(3);
+    expect(truthSummary.edgeCounts.runtime).toBe(3);
+    expect(truthSummary.edgeCounts.persisted).toBe(0);
     expect(surfaceSummary.nodeCounts.primary).toBe(1);
     expect(surfaceSummary.nodeCounts.hidden).toBe(1);
-    expect(surfaceSummary.edgeCounts.primary).toBe(1);
-    expect(surfaceSummary.edgeCounts.advanced).toBe(1);
+    expect(surfaceSummary.edgeCounts.primary).toBe(3);
+    expect(surfaceSummary.edgeCounts.advanced).toBe(0);
   });
 });

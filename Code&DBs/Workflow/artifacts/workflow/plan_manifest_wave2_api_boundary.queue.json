@@ -1,0 +1,28 @@
+{
+  "name": "plan_manifest_wave2_api_boundary",
+  "description": "Keep control-plane manifests raw at the API boundary instead of normalizing them into helm bundles.",
+  "phase": "wiring",
+  "jobs": [
+    {
+      "label": "preserve_raw_control_manifests_at_api_boundary",
+      "agent": "auto/wiring",
+      "prompt": "## Goal\nFix the manifest GET API boundary so control-plane manifests are returned as raw control objects, not mutated into helm bundles.\n\n## Read first\n- `Code&DBs/Workflow/artifacts/workflow/_control_manifest_registry_contract.json`\n- `Code&DBs/Workflow/runtime/helm_manifest.py`\n- `Code&DBs/Workflow/surfaces/api/handlers/workflow_run.py`\n- `Code&DBs/Workflow/tests/unit/test_workflow_run_manifest_handlers.py`\n\n## Required changes\n1. Update the manifest GET handler in `workflow_run.py` so it detects control-plane manifests by `kind` / `manifest_family`.\n2. For ordinary workspace/app manifests, keep existing helm normalization behavior.\n3. For control-plane manifests, return the raw manifest payload with stable metadata instead of adapting it into a helm surface bundle.\n4. Do not change save/generate/refine semantics for workspace manifests in this packet.\n\n## Required tests\nUpdate `test_workflow_run_manifest_handlers.py` to cover both:\n- existing helm manifest GET behavior remains unchanged\n- control-plane manifests come back raw and retain their original `kind`, `manifest_family`, and `manifest_type`\n\nTouch only the handler and its tests.\n\nDatabase: `postgresql://nate@127.0.0.1:5432/dag_workflow`",
+      "write_scope": [
+        "Code&DBs/Workflow/surfaces/api/handlers/workflow_run.py",
+        "Code&DBs/Workflow/tests/unit/test_workflow_run_manifest_handlers.py"
+      ],
+      "context_packs": [
+        {
+          "label": "contract",
+          "kind": "file",
+          "sourceRef": "file://../artifacts/workflow/_control_manifest_registry_contract.json"
+        },
+        {
+          "label": "helm_manifest",
+          "kind": "file",
+          "sourceRef": "file://runtime/helm_manifest.py"
+        }
+      ]
+    }
+  ]
+}

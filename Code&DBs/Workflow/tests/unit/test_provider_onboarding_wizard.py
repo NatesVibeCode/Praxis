@@ -4,6 +4,9 @@ import json
 from io import StringIO
 from types import SimpleNamespace
 
+import pytest
+from adapters import provider_transport
+
 from registry import provider_onboarding
 from surfaces.api.handlers import workflow_admin
 from surfaces.cli import native_operator
@@ -80,6 +83,26 @@ def _cursor_cli_spec() -> provider_onboarding.ProviderOnboardingSpec:
         selected_transport="cli",
         requested_models=("composer-2",),
         provider_api_key="crsr-test-key",
+    )
+
+
+def _builtin_profile(provider_slug: str):
+    return next(
+        (
+            profile
+            for profile in provider_transport.BUILTIN_PROVIDER_PROFILES
+            if profile.provider_slug == provider_slug
+        ),
+        None,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _provider_registry_seed_fixture(monkeypatch):
+    monkeypatch.setattr(
+        provider_onboarding.provider_registry_mod,
+        "get_profile",
+        lambda provider_slug: _builtin_profile(provider_slug),
     )
 
 
@@ -293,6 +316,10 @@ def test_provider_onboarding_mcp_tool_serializes_slots_dataclass(monkeypatch) ->
     monkeypatch.setattr(
         "surfaces.mcp.tools.provider_onboard.resolve_workflow_database_url",
         lambda env=None: "postgresql://example.test/workflow",
+    )
+    monkeypatch.setattr(
+        "surfaces.mcp.tools.provider_onboard.workflow_database_env",
+        lambda: {"WORKFLOW_DATABASE_URL": "postgresql://example.test/workflow", "PATH": ""},
     )
 
     payload = tool_praxis_provider_onboard(
@@ -537,7 +564,137 @@ def test_provider_onboarding_falls_back_to_argv_prompt_mode_when_stdin_probe_fai
     assert provider_profile_insert[-1] == "argv"
 
 
-def test_cursor_template_exposes_local_cli_contract() -> None:
+def test_provider_onboarding_provisions_cli_registry_rows_when_capacity_probe_fails(monkeypatch) -> None:
+    fake_conn = _FakeConn()
+
+    async def _fake_connect(_database_url: str):
+        return fake_conn
+
+    def _fake_probe_transport(spec, transport_template):
+        del transport_template
+        return (
+            provider_onboarding.ProviderOnboardingStepResult(
+                step="transport_probe",
+                status="succeeded",
+                summary="cli ready",
+                details={
+                    "selected_transport": spec.selected_transport,
+                    "binary_path": "/Users/nate/.local/bin/cursor-agent",
+                    "credential_source": "ambient_cli_session",
+                },
+            ),
+            {},
+        )
+
+    def _fake_probe_models(spec, transport_template, *, env, transport_details):
+        del spec, transport_template, env, transport_details
+        return (
+            provider_onboarding.ProviderOnboardingStepResult(
+                step="model_probe",
+                status="succeeded",
+                summary="models discovered",
+                details={
+                    "selected_models": ["composer-2"],
+                    "default_model": "composer-2",
+                },
+            ),
+            (
+                provider_onboarding.ProviderOnboardingModelSpec(
+                    model_slug="composer-2",
+                    route_tier="high",
+                    route_tier_rank=1,
+                    latency_class="reasoning",
+                    latency_rank=1,
+                    context_window=200_000,
+                ),
+            ),
+        )
+
+    def _fake_probe_capacity(spec, transport_template, *, env, transport_details, models):
+        del spec, transport_template, env, transport_details, models
+        return provider_onboarding.ProviderOnboardingStepResult(
+            step="capacity_probe",
+            status="failed",
+            summary="Prompt probe did not complete successfully for cursor/composer-2",
+            details={
+                "selected_transport": "cli",
+                "default_model": "composer-2",
+                "attempts": [
+                    {
+                        "prompt_mode": "argv",
+                        "success": False,
+                        "stderr_excerpt": "Authentication required.",
+                    }
+                ],
+            },
+        )
+
+    async def _fake_verification_report(*, conn, spec, decision_ref):
+        del conn, decision_ref
+        return {
+            "provider_report": {"binary_found": True, "default_model": spec.default_model},
+            "transport": {
+                "cli_llm": {"supported": False, "status": "warning", "message": "not admitted", "details": {}},
+                "llm_task": {"supported": False, "status": "warning", "message": "unsupported", "details": {}},
+            },
+            "model_visibility": {"count": 1, "models": []},
+            "model_profiles": {"count": 1, "profiles": []},
+            "selected_transport_supported": False,
+        }
+
+    monkeypatch.setattr(provider_onboarding.asyncpg, "connect", _fake_connect)
+    monkeypatch.setattr(provider_onboarding.provider_registry_mod, "reload_from_db", lambda: None)
+    monkeypatch.setattr(provider_onboarding, "_probe_transport", _fake_probe_transport)
+    monkeypatch.setattr(provider_onboarding, "_probe_models", _fake_probe_models)
+    monkeypatch.setattr(provider_onboarding, "_probe_capacity", _fake_probe_capacity)
+    monkeypatch.setattr(
+        provider_onboarding,
+        "_probe_benchmark",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("benchmark should stay skipped")),
+    )
+    monkeypatch.setattr(provider_onboarding, "_verification_report", _fake_verification_report)
+
+    result = provider_onboarding.run_provider_onboarding(
+        database_url="postgresql://example.test/workflow",
+        spec=_cursor_cli_spec(),
+    )
+
+    assert result.ok is False
+    assert [step.step for step in result.steps] == [
+        "authority_lookup",
+        "transport_probe",
+        "model_probe",
+        "capacity_probe",
+        "benchmark_probe",
+        "registry_write",
+        "verification",
+    ]
+    assert result.steps[4].status == "skipped"
+    assert result.steps[5].status == "warning"
+    assert result.steps[6].status == "warning"
+    assert "lane admission remains disabled" in result.steps[5].summary
+    assert "not admitted yet" in result.steps[6].summary
+    assert any("INSERT INTO provider_cli_profiles" in query for query, _ in fake_conn.executed)
+    assert any("INSERT INTO provider_model_candidates" in query for query, _ in fake_conn.executed)
+    assert any("INSERT INTO provider_transport_admissions" in query for query, _ in fake_conn.executed)
+
+    provider_profile_insert = next(
+        params
+        for query, params in fake_conn.executed
+        if "INSERT INTO provider_cli_profiles" in query
+    )
+    assert provider_profile_insert[0] == "cursor"
+    assert provider_profile_insert[-1] == "argv"
+
+
+def test_cursor_template_exposes_local_cli_contract(monkeypatch) -> None:
+    cursor_profile = next(
+        profile
+        for profile in provider_transport.BUILTIN_PROVIDER_PROFILES
+        if profile.provider_slug == "cursor"
+    )
+    monkeypatch.setattr(provider_onboarding.provider_registry_mod, "get_profile", lambda _slug: cursor_profile)
+
     template = provider_onboarding._provider_template("cursor")
 
     assert template.provider_slug == "cursor"
@@ -557,6 +714,13 @@ def test_cursor_template_exposes_local_cli_contract() -> None:
     assert template.transports["api"].unsupported_reason == (
         "This provider does not expose an admitted llm_task transport in the registry yet."
     )
+
+
+def test_cursor_template_requires_explicit_registry_profile(monkeypatch) -> None:
+    monkeypatch.setattr(provider_onboarding.provider_registry_mod, "get_profile", lambda _slug: None)
+
+    with pytest.raises(ValueError, match="no onboarding authority template is registered for cursor"):
+        provider_onboarding._provider_template("cursor")
 
 
 def test_native_operator_provider_onboard_cli_uses_shared_wizard(monkeypatch) -> None:

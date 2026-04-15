@@ -33,11 +33,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from adapters.provider_registry import default_llm_adapter_type, default_provider_slug
 from contracts.domain import validate_workflow_request
 from runtime.native_authority import default_native_authority_refs
+from runtime.workflow._status import summarize_run_health
 from runtime.workflow_graph_compiler import compile_graph_workflow_request, spec_uses_graph_runtime
 from surfaces.api.catalog_authority import build_catalog_payload
 from .handlers._subsystems import _Subsystems
@@ -86,6 +87,43 @@ def _api_route_record(route: APIRoute) -> dict[str, Any]:
         "tags": list(route.tags or ()),
         "include_in_schema": bool(route.include_in_schema),
         "operation_id": route.operation_id,
+    }
+
+
+def _route_facet_rows(items: Counter[str], *, field_name: str) -> list[dict[str, Any]]:
+    return [
+        {field_name: value, "count": count}
+        for value, count in sorted(items.items(), key=lambda item: (-item[1], item[0]))
+        if value
+    ]
+
+
+def _route_summary(routes: list[dict[str, Any]]) -> dict[str, Any]:
+    method_counts: Counter[str] = Counter()
+    tag_counts: Counter[str] = Counter()
+    for route in routes:
+        for method in route.get("methods", []):
+            method_text = str(method).strip().upper()
+            if method_text:
+                method_counts[method_text] += 1
+        for tag in route.get("tags", []):
+            tag_text = str(tag).strip()
+            if tag_text:
+                tag_counts[tag_text] += 1
+
+    methods = _route_facet_rows(method_counts, field_name="method")
+    tags = _route_facet_rows(tag_counts, field_name="tag")
+    suggested_filters: dict[str, str] = {}
+    if tags:
+        suggested_filters["tag"] = str(tags[0]["tag"])
+    if methods:
+        suggested_filters["method"] = str(methods[0]["method"])
+
+    return {
+        "route_count": len(routes),
+        "methods": methods,
+        "tags": tags,
+        "suggested_filters": suggested_filters,
     }
 
 
@@ -177,6 +215,7 @@ def list_api_routes(
         "openapi_url": app.openapi_url,
         "redoc_url": app.redoc_url,
         "filters": filters,
+        "summary": _route_summary(filtered_routes),
         "routes": filtered_routes,
     }
 
@@ -235,8 +274,16 @@ app.mount(
 
 _DEFAULT_WORKSPACE_REF, _DEFAULT_RUNTIME_PROFILE_REF = default_native_authority_refs()
 
-_DEFAULT_PROVIDER_SLUG = default_provider_slug()
-_DEFAULT_LLM_ADAPTER = default_llm_adapter_type()
+
+def _default_workflow_provider_slug() -> str:
+    return default_provider_slug()
+
+
+def _default_workflow_adapter_type() -> str:
+    try:
+        return default_llm_adapter_type()
+    except Exception:
+        return "cli_llm"
 
 
 # ---------------------------------------------------------------------------
@@ -247,10 +294,10 @@ class WorkflowRunRequest(BaseModel):
     """Body for POST /api/workflow-runs."""
 
     prompt: str
-    provider_slug: str = _DEFAULT_PROVIDER_SLUG
+    provider_slug: str = Field(default_factory=_default_workflow_provider_slug)
     model_slug: str | None = None
     tier: str | None = None
-    adapter_type: str = _DEFAULT_LLM_ADAPTER
+    adapter_type: str = Field(default_factory=_default_workflow_adapter_type)
     timeout: int = 300
     workdir: str | None = None
     max_tokens: int = 4096
@@ -294,7 +341,7 @@ class WorkflowStepRequest(BaseModel):
 
     name: str
     prompt: str
-    adapter_type: str = _DEFAULT_LLM_ADAPTER
+    adapter_type: str = Field(default_factory=_default_workflow_adapter_type)
     provider_slug: str | None = None
     model_slug: str | None = None
     tier: str | None = None
@@ -701,6 +748,13 @@ def get_run_detail(run_id: str) -> dict[str, Any]:
         jobs = _load_run_jobs_from_status_authority(conn, run_id)
     summary = _build_run_summary(conn, run_id, jobs)
     graph = _build_run_graph(conn, run_id, jobs)
+    health = summarize_run_health(
+        {
+            **run,
+            "jobs": jobs,
+        },
+        datetime.now(timezone.utc),
+    )
 
     return {
         "run_id": run["run_id"],
@@ -715,6 +769,7 @@ def get_run_detail(run_id: str) -> dict[str, Any]:
         "jobs": jobs,
         "summary": summary,
         "graph": graph,
+        "health": health,
     }
 
 
@@ -1364,6 +1419,10 @@ async def manifests_save_post(request: Request) -> Response:
 
 @app.post("/api/manifests/save-as")
 async def manifests_save_as_post(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+@app.get("/api/manifests")
+async def manifests_list(request: Request) -> Response:
     return await _route_to_handler(request)
 
 @app.get("/api/manifests/{manifest_id}")

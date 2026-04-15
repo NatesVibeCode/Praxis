@@ -21,10 +21,13 @@ SUPPORTED_DATA_OPERATIONS = frozenset(
         "sort",
         "normalize",
         "repair",
+        "repair_loop",
         "backfill",
         "redact",
         "checkpoint",
         "replay",
+        "approve",
+        "apply",
         "validate",
         "transform",
         "join",
@@ -93,6 +96,18 @@ def _boolean(value: Any, *, default: bool) -> bool:
     return default
 
 
+def _positive_int(value: Any, *, default: int | None = None) -> int | None:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return default
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
+
+
 def _normalize_source(
     payload: dict[str, Any],
     *,
@@ -141,6 +156,7 @@ def normalize_data_job(
     if operation not in SUPPORTED_DATA_OPERATIONS:
         raise DataContractError(f"unsupported data operation: {operation}")
 
+    input_optional_operations = {"approve", "apply"}
     input_ref = _normalize_source(
         raw,
         source_field="input",
@@ -148,7 +164,7 @@ def normalize_data_job(
         records_field="records",
         format_field="input_format",
     )
-    if not input_ref:
+    if not input_ref and operation not in input_optional_operations:
         raise DataContractError("data job requires an input source")
 
     secondary_input = _normalize_source(
@@ -189,6 +205,20 @@ def normalize_data_job(
     checkpoint_path = _text(raw.get("checkpoint_path"))
     if not checkpoint and checkpoint_path:
         checkpoint = {"path": checkpoint_path}
+    plan = _mapping(raw.get("plan"))
+    plan_manifest_id = _text(raw.get("plan_manifest_id"))
+    plan_path = _text(raw.get("plan_path"))
+    if not plan and plan_manifest_id:
+        plan = {"manifest_id": plan_manifest_id}
+    if not plan and plan_path:
+        plan = {"path": plan_path}
+    approval = _mapping(raw.get("approval"))
+    approval_manifest_id = _text(raw.get("approval_manifest_id"))
+    approval_path = _text(raw.get("approval_path"))
+    if not approval and approval_manifest_id:
+        approval = {"manifest_id": approval_manifest_id}
+    if not approval and approval_path:
+        approval = {"path": approval_path}
     field_map = _mapping(raw.get("field_map"))
     predicates = _mapping_list(raw.get("predicates"))
     sort_spec = _mapping_list(raw.get("sort"))
@@ -207,7 +237,10 @@ def normalize_data_job(
     cursor_field = _text(raw.get("cursor_field")) or None
     after = raw.get("after")
     before = raw.get("before")
-    predicate_mode = _text(raw.get("predicate_mode") or "all").lower() or "all"
+    approved_by = _text(raw.get("approved_by")) or None
+    approval_reason = _text(raw.get("approval_reason")) or None
+    default_predicate_mode = "any" if operation == "dead_letter" else "all"
+    predicate_mode = _text(raw.get("predicate_mode") or default_predicate_mode).lower() or default_predicate_mode
     join_kind = _text(raw.get("join_kind") or "inner").lower() or "inner"
     merge_mode = _text(raw.get("merge_mode") or "full").lower() or "full"
     precedence = _text(raw.get("precedence") or "right").lower() or "right"
@@ -216,6 +249,8 @@ def normalize_data_job(
     right_prefix = _text(raw.get("right_prefix")) or None
     sync_mode = _text(raw.get("sync_mode") or "upsert").lower() or "upsert"
     include_unmatched = _boolean(raw.get("include_unmatched"), default=True)
+    max_passes = _positive_int(raw.get("max_passes"), default=3) or 3
+    batch_size = _positive_int(raw.get("batch_size"))
 
     if operation == "filter" and not predicates:
         raise DataContractError("filter jobs require predicates")
@@ -225,16 +260,32 @@ def normalize_data_job(
         raise DataContractError("normalize jobs require rules")
     if operation == "repair" and not repairs and not drop_fields:
         raise DataContractError("repair jobs require repairs or drop_fields")
+    if operation == "repair_loop" and not (repairs or backfill or rules or drop_fields):
+        raise DataContractError("repair_loop jobs require repairs, backfill, rules, or drop_fields")
     if operation == "backfill" and not backfill:
         raise DataContractError("backfill jobs require backfill")
     if operation == "redact" and not redactions:
         raise DataContractError("redact jobs require redactions")
     if operation == "checkpoint" and not keys and not cursor_field:
         raise DataContractError("checkpoint jobs require keys or cursor_field")
-    if operation == "replay" and not cursor_field:
-        raise DataContractError("replay jobs require cursor_field")
+    if operation == "replay" and not cursor_field and not checkpoint:
+        raise DataContractError("replay jobs require cursor_field or checkpoint")
     if operation == "replay" and after is None and before is None and not checkpoint:
         raise DataContractError("replay jobs require after, before, checkpoint, or checkpoint_path")
+    if operation == "approve" and not plan:
+        raise DataContractError("approve jobs require plan, plan_manifest_id, or plan_path")
+    if operation == "approve" and not approved_by:
+        raise DataContractError("approve jobs require approved_by")
+    if operation == "approve" and not approval_reason:
+        raise DataContractError("approve jobs require approval_reason")
+    if operation == "apply" and not secondary_input:
+        raise DataContractError("apply jobs require secondary_input or secondary_input_path")
+    if operation == "apply" and not plan:
+        raise DataContractError("apply jobs require plan, plan_manifest_id, or plan_path")
+    if operation == "apply" and not approval:
+        raise DataContractError("apply jobs require approval, approval_manifest_id, or approval_path")
+    if operation == "apply" and not keys:
+        raise DataContractError("apply jobs require keys")
     if operation == "validate" and not schema and not checks:
         raise DataContractError("validate jobs require schema or checks")
     if operation == "transform" and not mapping:
@@ -282,6 +333,8 @@ def normalize_data_job(
         "checks": checks,
         "mapping": mapping,
         "checkpoint": checkpoint,
+        "plan": plan,
+        "approval": approval,
         "field_map": field_map,
         "fields": fields,
         "drop_fields": drop_fields,
@@ -298,6 +351,8 @@ def normalize_data_job(
         "cursor_field": cursor_field,
         "after": after,
         "before": before,
+        "approved_by": approved_by,
+        "approval_reason": approval_reason,
         "join_kind": join_kind,
         "merge_mode": merge_mode,
         "precedence": precedence,
@@ -306,6 +361,8 @@ def normalize_data_job(
         "left_prefix": left_prefix,
         "right_prefix": right_prefix,
         "sync_mode": sync_mode,
+        "max_passes": max_passes,
+        "batch_size": batch_size,
         "output": normalized_output,
     }
 

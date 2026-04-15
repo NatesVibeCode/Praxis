@@ -123,19 +123,26 @@ class FederatedRetriever:
                 return node
         return None
 
-    def search(self, query: str, limit: int = 20) -> list:
+    def search(
+        self,
+        query: str,
+        limit: int = 20,
+        *,
+        record_telemetry: bool = True,
+    ) -> list:
         started_at = time.monotonic()
         intent = self.classify(query)
         node = self._domain_node(intent.matched_domain)
         if node is None:
             # GENERAL fallback — search without type filter
             results = self._engine.search(query, limit=limit)
-            self._record_telemetry(
-                query=query,
-                pattern_name="federated.search",
-                result_count=len(results),
-                started_at=started_at,
-            )
+            if record_telemetry:
+                self._record_telemetry(
+                    query=query,
+                    pattern_name="federated.search",
+                    result_count=len(results),
+                    started_at=started_at,
+                )
             return results
 
         results: list = []
@@ -148,12 +155,13 @@ class FederatedRetriever:
             hits = self._engine.search(query, entity_type=et, limit=per_type)
             results.extend(hits)
         results = results[:limit]
-        self._record_telemetry(
-            query=query,
-            pattern_name="federated.search",
-            result_count=len(results),
-            started_at=started_at,
-        )
+        if record_telemetry:
+            self._record_telemetry(
+                query=query,
+                pattern_name="federated.search",
+                result_count=len(results),
+                started_at=started_at,
+            )
         return results
 
     def search_all_domains(

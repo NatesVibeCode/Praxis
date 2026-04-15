@@ -103,6 +103,58 @@ class _RecordingPg:
             return self.market_rows
         if "FROM provider_model_market_bindings" in query:
             return self.binding_rows
+        if "FROM app_manifests" in query and "SELECT id, name, description, status, manifest, updated_at" in query:
+            rows = list(self.manifest_rows.values())
+            param_index = 0
+            if "plainto_tsquery('english', $1)" in query or "ILIKE '%' || $1 || '%'" in query:
+                search = str(params[param_index]).strip().lower()
+                param_index += 1
+                if search:
+                    filtered_rows = []
+                    for row in rows:
+                        haystack = " ".join(
+                            str(part or "").strip().lower()
+                            for part in (
+                                row.get("id"),
+                                row.get("name"),
+                                row.get("description"),
+                                row.get("status"),
+                                json.dumps(row.get("manifest") or {}, sort_keys=True),
+                            )
+                        )
+                        if search in haystack:
+                            filtered_rows.append(row)
+                    rows = filtered_rows
+            if "manifest->>'manifest_family' = $" in query:
+                family = str(params[param_index]).strip()
+                param_index += 1
+                rows = [
+                    row
+                    for row in rows
+                    if str((row.get("manifest") or {}).get("manifest_family") or "") == family
+                ]
+            if "manifest->>'manifest_type' = $" in query:
+                manifest_type = str(params[param_index]).strip()
+                param_index += 1
+                rows = [
+                    row
+                    for row in rows
+                    if str((row.get("manifest") or {}).get("manifest_type") or "") == manifest_type
+                ]
+            if "status = $" in query:
+                status = str(params[param_index]).strip()
+                param_index += 1
+                rows = [row for row in rows if str(row.get("status") or "") == status]
+            rows = sorted(
+                rows,
+                key=lambda row: (
+                    str(row.get("updated_at") or ""),
+                    str(row.get("name") or ""),
+                ),
+                reverse=True,
+            )
+            limit = int(params[param_index]) if param_index < len(params) else len(rows)
+            return rows[:limit]
         if "FROM public.workflow_triggers" in query and "WHERE t.workflow_id = $1" in query:
             workflow_id = str(params[0])
             return [row for row in self.trigger_rows if str(row.get("workflow_id")) == workflow_id]
@@ -4175,6 +4227,141 @@ def test_handle_source_options_get_orders_manifest_tab_options() -> None:
     ]
     assert payload["source_options"][2]["availability"] == "setup_required"
     assert payload["source_options"][2]["activation"] == "configure"
+
+
+def test_handle_manifests_get_returns_compact_listing() -> None:
+    pg = _RecordingPg(
+        manifest_rows={
+            "plan_123": {
+                "id": "plan_123",
+                "name": "Data Cleanup Plan",
+                "description": "Plan for cleanup",
+                "status": "draft",
+                "updated_at": "2026-04-15T12:00:00+00:00",
+                "manifest": {
+                    "kind": "praxis_control_manifest",
+                    "manifest_family": "control_plane",
+                    "manifest_type": "data_plan",
+                },
+            },
+            "manifest_456": {
+                "id": "manifest_456",
+                "name": "Support Workspace",
+                "description": "Workspace bundle",
+                "status": "active",
+                "updated_at": "2026-04-14T12:00:00+00:00",
+                "manifest": {
+                    "kind": "helm_surface_bundle",
+                    "tabs": [{"id": "main"}],
+                },
+            },
+        }
+    )
+    request = _RequestStub(subsystems=SimpleNamespace(get_pg_conn=lambda: pg), path="/api/manifests")
+
+    workflow_query._handle_manifests_get(request, "/api/manifests")
+
+    assert request.sent is not None
+    status, payload = request.sent
+    assert status == 200
+    assert payload["count"] == 2
+    assert [row["id"] for row in payload["manifests"]] == ["plan_123", "manifest_456"]
+    assert payload["manifests"][0]["manifest_family"] == "control_plane"
+    assert payload["manifests"][0]["manifest_type"] == "data_plan"
+    assert payload["manifests"][1]["manifest_family"] is None
+    assert payload["manifests"][1]["manifest_type"] is None
+    assert any("FROM app_manifests" in query for query, _ in pg.executed)
+
+
+def test_handle_manifests_get_filters_control_plane_rows() -> None:
+    pg = _RecordingPg(
+        manifest_rows={
+            "plan_123": {
+                "id": "plan_123",
+                "name": "Data Cleanup Plan",
+                "description": "Plan for cleanup",
+                "status": "draft",
+                "updated_at": "2026-04-15T12:00:00+00:00",
+                "manifest": {
+                    "kind": "praxis_control_manifest",
+                    "manifest_family": "control_plane",
+                    "manifest_type": "data_plan",
+                },
+            },
+            "manifest_456": {
+                "id": "manifest_456",
+                "name": "Support Workspace",
+                "description": "Workspace bundle",
+                "status": "active",
+                "updated_at": "2026-04-14T12:00:00+00:00",
+                "manifest": {
+                    "kind": "helm_surface_bundle",
+                    "tabs": [{"id": "main"}],
+                },
+            },
+        }
+    )
+    request = _RequestStub(
+        subsystems=SimpleNamespace(get_pg_conn=lambda: pg),
+        path="/api/manifests?manifest_family=control_plane&status=draft&limit=10",
+    )
+
+    workflow_query._handle_manifests_get(request, "/api/manifests")
+
+    assert request.sent is not None
+    status, payload = request.sent
+    assert status == 200
+    assert payload["count"] == 1
+    assert payload["manifests"][0]["id"] == "plan_123"
+    assert payload["manifests"][0]["manifest_family"] == "control_plane"
+    assert payload["filters"]["manifest_family"] == "control_plane"
+    assert payload["filters"]["status"] == "draft"
+
+
+def test_handle_manifests_get_combines_search_and_manifest_filters() -> None:
+    pg = _RecordingPg(
+        manifest_rows={
+            "plan_123": {
+                "id": "plan_123",
+                "name": "Data Cleanup Plan",
+                "description": "Cleanup and repair plan",
+                "status": "draft",
+                "updated_at": "2026-04-15T12:00:00+00:00",
+                "manifest": {
+                    "kind": "praxis_control_manifest",
+                    "manifest_family": "control_plane",
+                    "manifest_type": "data_plan",
+                },
+            },
+            "plan_456": {
+                "id": "plan_456",
+                "name": "Approval Record",
+                "description": "Approval companion manifest",
+                "status": "draft",
+                "updated_at": "2026-04-14T12:00:00+00:00",
+                "manifest": {
+                    "kind": "praxis_control_manifest",
+                    "manifest_family": "control_plane",
+                    "manifest_type": "data_approval",
+                },
+            },
+        }
+    )
+    request = _RequestStub(
+        subsystems=SimpleNamespace(get_pg_conn=lambda: pg),
+        path="/api/manifests?q=cleanup&manifest_family=control_plane&manifest_type=data_plan&limit=5",
+    )
+
+    workflow_query._handle_manifests_get(request, "/api/manifests")
+
+    assert request.sent is not None
+    status, payload = request.sent
+    assert status == 200
+    assert payload["count"] == 1
+    assert payload["manifests"][0]["id"] == "plan_123"
+    assert payload["manifests"][0]["manifest_type"] == "data_plan"
+    assert payload["filters"]["q"] == "cleanup"
+    assert payload["filters"]["manifest_type"] == "data_plan"
 
 
 def test_handle_decompose_returns_estimates_and_files() -> None:

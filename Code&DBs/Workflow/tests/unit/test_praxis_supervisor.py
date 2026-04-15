@@ -3,6 +3,8 @@ from __future__ import annotations
 import plistlib
 from pathlib import Path
 
+import pytest
+
 from runtime import praxis_supervisor
 
 
@@ -64,12 +66,25 @@ def test_discover_database_url_prefers_legacy_launch_agent_value(monkeypatch, tm
     assert praxis_supervisor.discover_database_url(tmp_path / "repo") == "postgresql://postgres@localhost:5432/praxis_test"
 
 
-def test_discover_database_url_normalizes_missing_user_authority(monkeypatch, tmp_path: Path) -> None:
+def test_discover_database_url_uses_repo_env_when_process_authority_missing(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.delenv("WORKFLOW_DATABASE_URL", raising=False)
     monkeypatch.setattr(praxis_supervisor.Path, "home", classmethod(lambda cls: tmp_path / "home"))
-    monkeypatch.setattr(praxis_supervisor, "_database_exists", lambda name: name == "praxis")
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True)
+    (repo_root / ".env").write_text(
+        "WORKFLOW_DATABASE_URL=postgresql://repo.test/praxis\n",
+        encoding="utf-8",
+    )
 
-    assert praxis_supervisor.discover_database_url(tmp_path / "repo") == "postgresql://postgres@localhost:5432/praxis"
+    assert praxis_supervisor.discover_database_url(repo_root) == "postgresql://postgres@repo.test/praxis"
+
+
+def test_discover_database_url_requires_explicit_authority(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("WORKFLOW_DATABASE_URL", raising=False)
+    monkeypatch.setattr(praxis_supervisor.Path, "home", classmethod(lambda cls: tmp_path / "home"))
+
+    with pytest.raises(RuntimeError, match="requires explicit WORKFLOW_DATABASE_URL authority"):
+        praxis_supervisor.discover_database_url(tmp_path / "repo")
 
 
 def test_apply_control_action_updates_desired_state_and_restart_tokens(monkeypatch, tmp_path: Path) -> None:

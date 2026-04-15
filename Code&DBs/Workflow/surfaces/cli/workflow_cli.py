@@ -1,6 +1,8 @@
 """CLI entry point for the Praxis Engine workflow runner.
 
 Usage:
+    python workflow_cli.py commands
+    python workflow_cli.py help [<command>]
     python workflow_cli.py run <spec.json> [--dry-run]
     python workflow_cli.py spawn <parent_run_id> <spec.json> [--reason <reason>]
     python workflow_cli.py validate <spec.json>
@@ -8,6 +10,7 @@ Usage:
     python workflow_cli.py chain-status [<chain_id>] [--limit N]
     python workflow_cli.py status [--since-hours N]
     python workflow_cli.py active
+    python workflow_cli.py diagnose <run_id>
     python workflow_cli.py retry <run_id> <label>
     python workflow_cli.py cancel <run_id>
     python workflow_cli.py repair <run_id>
@@ -30,6 +33,63 @@ from surfaces.cli.mcp_tools import run_cli_tool
 
 _WORKFLOW_ROOT = str(Path(__file__).resolve().parent.parent.parent)
 subsystems = surfaces.mcp.subsystems._subs
+
+_COMMAND_SYNONYMS = {
+    "commands": "commands",
+    "help": "help",
+    "generate": "generate",
+    "run": "run",
+    "spawn": "spawn",
+    "validate": "validate",
+    "chain": "chain",
+    "chain-status": "chain-status",
+    "status": "status",
+    "active": "active",
+    "diagnose": "diagnose",
+    "routes": "routes",
+    "tools": "tools",
+    "stream": "stream",
+    "retry": "retry",
+    "cancel": "cancel",
+    "repair": "repair",
+}
+
+_COMMAND_USAGE = {
+    "generate": "usage: workflow_cli.py generate <manifest_file> <output> [--strict|--merge]",
+    "run": "usage: workflow_cli.py run <spec.json> [--dry-run] [--fresh] [--job-id <id>] [--run-id <id>] [--result-file <path>]",
+    "spawn": "usage: workflow_cli.py spawn <parent_run_id> <spec.json> [--reason <reason>] [--parent-job-label <label>] [--lineage-depth <n>] [--fresh] [--job-id <id>] [--run-id <id>] [--result-file <path>]",
+    "validate": "usage: workflow_cli.py validate <spec.json>",
+    "chain": "usage: workflow_cli.py chain <coordination.json> [--result-file <path>] [--no-adopt-active]",
+    "chain-status": "usage: workflow_cli.py chain-status [<chain_id>] [--limit N]",
+    "status": "usage: workflow_cli.py status [--since-hours N]",
+    "active": "usage: workflow_cli.py active",
+    "diagnose": "usage: workflow_cli.py diagnose <run_id>",
+    "routes": "usage: workflow_cli.py routes [--search TEXT] [--method METHOD] [--tag TAG] [--path-prefix PREFIX] [--json]",
+    "tools": "usage: workflow_cli.py tools [list|search|describe|call]",
+    "stream": "usage: workflow_cli.py stream <run_id> [--timeout SECONDS] [--poll-interval SECONDS]",
+    "retry": "usage: workflow_cli.py retry <run_id> <label>",
+    "cancel": "usage: workflow_cli.py cancel <run_id>",
+    "repair": "usage: workflow_cli.py repair <run_id>",
+}
+
+_COMMAND_OVERVIEW = [
+    ("commands / help", "workflow_cli.py commands", "Show this command index"),
+    ("generate", "workflow_cli.py generate <manifest_file> <output>", "Generate a workflow spec from a manifest file"),
+    ("run", "workflow_cli.py run <spec.json>", "Run a workflow spec through the workflow pipeline"),
+    ("spawn", "workflow_cli.py spawn <parent_run_id> <spec.json>", "Spawn a child workflow with explicit parent lineage"),
+    ("validate", "workflow_cli.py validate <spec.json>", "Validate a workflow spec without running"),
+    ("chain", "workflow_cli.py chain <coordination.json>", "Submit a durable multi-wave workflow chain"),
+    ("chain-status", "workflow_cli.py chain-status [<chain_id>]", "Show durable workflow-chain status"),
+    ("status", "workflow_cli.py status [--since-hours N]", "Show recent workflow status from Postgres"),
+    ("active", "workflow_cli.py active", "Show currently active workflow runs"),
+    ("diagnose", "workflow_cli.py diagnose <run_id>", "Diagnose one workflow run by id"),
+    ("routes", "workflow_cli.py routes", "Show the live HTTP route catalog"),
+    ("tools", "workflow_cli.py tools", "Browse catalog-backed MCP tools"),
+    ("stream", "workflow_cli.py stream <run_id>", "Stream one workflow run in the terminal"),
+    ("retry", "workflow_cli.py retry <run_id> <label>", "Retry one failed workflow job"),
+    ("cancel", "workflow_cli.py cancel <run_id>", "Cancel a workflow run"),
+    ("repair", "workflow_cli.py repair <run_id>", "Repair the post-workflow sync state for one workflow run"),
+]
 
 
 def _repo_root() -> str:
@@ -59,6 +119,98 @@ def _format_status_counts(counts: object) -> str:
         if int(count) > 0
     ]
     return ", ".join(parts)
+
+
+def _help_text() -> str:
+    lines = [
+        "usage: workflow_cli.py <command> [args]",
+        "",
+        "Commands:",
+    ]
+    lines.extend(f"  {name:<16} {usage:<42} {summary}" for name, usage, summary in _COMMAND_OVERVIEW)
+    lines.extend(
+        [
+            "",
+            "Tip: run `workflow_cli.py help <command>` to see a command-specific usage line.",
+            "Tip: run `workflow_cli.py help api` for HTTP route discovery.",
+            "Tip: run `workflow_cli.py help mcp` for catalog-backed tool discovery.",
+            "Tip: run `workflow_cli.py help diagnose` for single-run diagnosis.",
+            "Tip: `./scripts/workflow.sh` is the durable shell wrapper around this CLI.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _route_discovery_text() -> str:
+    return "\n".join(
+        [
+            "workflow routes",
+            "",
+            "Route discovery lives on the newer `workflow` frontdoor.",
+            "Use these commands to inspect the live HTTP catalog:",
+            "  workflow api routes",
+            "  workflow routes",
+            "  workflow_cli.py routes",
+            "  workflow api routes --search health --method GET",
+            "  workflow routes --tag workflow --json",
+            "",
+            "Tip: `workflow help api` shows the same discovery help from the modern root CLI.",
+        ]
+    )
+
+
+def _tools_discovery_text() -> str:
+    return "\n".join(
+        [
+            "workflow tools",
+            "",
+            "Tool discovery lives on the newer `workflow` frontdoor.",
+            "Use these commands to browse and call catalog-backed MCP tools:",
+            "  workflow tools list",
+            "  workflow tools search <topic> [--exact] [--surface <surface>] [--tier <tier>] [--risk <risk>]",
+            "  workflow tools describe <tool|alias>",
+            "  workflow tools call <tool|alias> --input-json '<json>' --yes",
+            "  workflow_cli.py tools",
+            "",
+            "Tip: `workflow mcp` is the short alias for the same discovery surface.",
+        ]
+    )
+
+
+def _delegate_modern_workflow_cli(command_name: str, args: list[str]) -> int:
+    from surfaces.cli.main import main as modern_workflow_cli
+
+    return modern_workflow_cli([command_name, *args], stdout=sys.stdout)
+
+
+def _help_topic_text(topic: str) -> tuple[int, str]:
+    normalized = _COMMAND_SYNONYMS.get(topic.strip(), topic.strip())
+    if not normalized:
+        return 0, _help_text()
+    if normalized in {"commands", "help"}:
+        return 0, _help_text()
+    if normalized in {"routes", "api"}:
+        return 0, _route_discovery_text()
+    if normalized in {"tools", "mcp"}:
+        return 0, _tools_discovery_text()
+    usage = _COMMAND_USAGE.get(normalized)
+    if usage is not None:
+        tip = "Tip: `workflow_cli.py commands` shows the full command index."
+        if normalized == "diagnose":
+            tip = "Tip: run `workflow_cli.py diagnose <run_id>` to inspect one workflow receipt and provider-health context."
+        return 0, "\n".join(
+            [
+                usage,
+                "",
+                tip,
+            ]
+        )
+    return 2, "\n".join(
+        [
+            f"unknown help topic: {topic}",
+            "try `workflow_cli.py commands` or `workflow_cli.py help <command>`.",
+        ]
+    )
 
 
 def _submit_workflow_launch(
@@ -766,7 +918,32 @@ def cmd_chain_status(args: argparse.Namespace) -> int:
 # Main
 # ---------------------------------------------------------------------------
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if not argv:
+        print(_help_text())
+        return 0
+    if argv[0] in {"-h", "--help"}:
+        print(_help_text())
+        return 0
+    if argv[0] == "help":
+        rc, output = _help_topic_text(argv[1] if len(argv) > 1 else "")
+        print(output)
+        return rc
+    if argv[0] == "commands":
+        print(_help_text())
+        return 0
+    if argv[0] in {"routes", "tools", "diagnose"}:
+        return _delegate_modern_workflow_cli(argv[0], argv[1:])
+    if argv[0] not in _COMMAND_SYNONYMS:
+        print(f"unknown command: {argv[0]}", file=sys.stderr)
+        print("try `workflow_cli.py commands` or `workflow_cli.py help <command>`.", file=sys.stderr)
+        return 2
+    if any(arg in {"-h", "--help"} for arg in argv[1:]):
+        rc, output = _help_topic_text(argv[0])
+        print(output)
+        return rc
+
     parser = argparse.ArgumentParser(
         prog="workflow_cli",
         description="Praxis Engine workflow CLI (Postgres-backed)",
@@ -839,7 +1016,7 @@ def main() -> int:
     chain_status_parser.add_argument("chain_id", nargs="?", help="Workflow chain id to inspect")
     chain_status_parser.add_argument("--limit", type=int, default=20, help="List N recent chains when chain_id is omitted")
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if args.command == "generate":
         return cmd_generate(args)
@@ -866,7 +1043,7 @@ def main() -> int:
     elif args.command == "chain-status":
         return cmd_chain_status(args)
     else:
-        parser.print_help()
+        print(_help_text())
         return 0
 
 

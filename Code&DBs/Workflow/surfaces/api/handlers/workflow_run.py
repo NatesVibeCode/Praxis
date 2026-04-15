@@ -72,6 +72,25 @@ def _normalize_manifest_record(
     )
 
 
+def _is_control_plane_manifest(manifest: Any) -> bool:
+    manifest_payload = _load_manifest_payload(manifest)
+    return (
+        str(manifest_payload.get("kind") or "").strip() == "praxis_control_manifest"
+        and str(manifest_payload.get("manifest_family") or "").strip() == "control_plane"
+    )
+
+
+def _workflow_job_id_from_checkpoint_card(card_id: Any) -> int | None:
+    card_text = str(card_id or "").strip()
+    prefix = "workflow_job:"
+    if not card_text.startswith(prefix):
+        return None
+    try:
+        return int(card_text[len(prefix) :])
+    except ValueError:
+        return None
+
+
 def _extract_manifest_save_payload(body: Any) -> tuple[str, str, str, dict[str, Any]]:
     if not isinstance(body, dict):
         raise _ClientError("manifest save body must be a JSON object")
@@ -746,6 +765,41 @@ def _handle_checkpoints_post(request: Any, path: str) -> None:
             decided_by=body.get("decided_by"),
             notes=body.get("notes"),
         )
+        workflow_job_id = _workflow_job_id_from_checkpoint_card(row.get("card_id"))
+        if workflow_job_id is not None:
+            decision = str(body.get("decision") or "").strip().lower()
+            notes = str(body.get("notes") or "").strip()
+            if decision == "approved":
+                pg.execute(
+                    """UPDATE workflow_jobs
+                       SET status = 'ready',
+                           ready_at = now(),
+                           claimed_by = NULL,
+                           claimed_at = NULL,
+                           heartbeat_at = NULL,
+                           started_at = NULL,
+                           finished_at = NULL,
+                           last_error_code = NULL,
+                           stdout_preview = '',
+                           failure_category = '',
+                           failure_zone = '',
+                           is_transient = false,
+                           attempt = GREATEST(attempt, 0)
+                       WHERE id = $1
+                         AND status = 'approval_required'""",
+                    workflow_job_id,
+                )
+                pg.execute("SELECT pg_notify('job_ready', $1)", str(workflow_job_id))
+            else:
+                from runtime.workflow._claiming import complete_job
+
+                complete_job(
+                    pg,
+                    workflow_job_id,
+                    status="failed",
+                    error_code="human_rejected" if decision == "rejected" else "authority_escalated",
+                    stdout_preview=notes or str(row.get("question") or "")[:2000],
+                )
         request._send_json(200, _serialize(dict(row)))
     except AuthorityCheckpointBoundaryError as exc:
         request._send_json(exc.status_code, {"error": str(exc)})
@@ -1130,13 +1184,29 @@ def _handle_manifest_get_api(request: Any, path: str) -> None:
         if row is None:
             request._send_json(404, {"error": f"Manifest not found: {manifest_id}"})
             return
-        manifest = _normalize_manifest_record(
-            manifest_id=row["id"],
-            name=row.get("name"),
-            description=row.get("description"),
-            manifest=row["manifest"],
+        record = dict(row)
+        manifest = record.get("manifest")
+        if _is_control_plane_manifest(manifest):
+            raw_manifest = _load_manifest_payload(manifest)
+            response = {
+                **raw_manifest,
+                "id": record.get("id"),
+                "name": record.get("name"),
+                "description": record.get("description"),
+                "status": record.get("status"),
+                "version": record.get("version"),
+                "parent_manifest_id": record.get("parent_manifest_id"),
+                "updated_at": record.get("updated_at"),
+            }
+            request._send_json(200, _serialize(response))
+            return
+        normalized = _normalize_manifest_record(
+            manifest_id=str(record.get("id") or manifest_id),
+            name=record.get("name"),
+            description=record.get("description"),
+            manifest=manifest,
         )
-        request._send_json(200, manifest)
+        request._send_json(200, _serialize(normalized))
     except Exception as exc:
         request._send_json(500, {"error": str(exc)})
 

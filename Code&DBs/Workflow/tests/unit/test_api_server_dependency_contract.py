@@ -10,6 +10,15 @@ from surfaces.api import server
 def test_start_server_checks_dependency_contract_before_launch(monkeypatch) -> None:
     observed: dict[str, object] = {}
 
+    monkeypatch.setattr(
+        server,
+        "workflow_database_env",
+        lambda: {
+            "WORKFLOW_DATABASE_URL": "postgresql://postgres@localhost:5432/praxis",
+            "PATH": "",
+        },
+    )
+
     def _fake_require_runtime_dependencies(*, scope: str = "api_server", manifest_path=None):
         observed["scope"] = scope
         observed["manifest_path"] = manifest_path

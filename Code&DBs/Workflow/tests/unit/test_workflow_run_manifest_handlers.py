@@ -579,6 +579,43 @@ def test_checkpoint_decision_delegates_to_runtime_owner() -> None:
     assert request.sent == (200, {"checkpoint_id": "checkpoint_123", "status": "approved"})
 
 
+def test_checkpoint_approval_requeues_workflow_job() -> None:
+    class _ApprovalPg:
+        def __init__(self) -> None:
+            self.saved: list[tuple[str, tuple[Any, ...]]] = []
+
+        def execute(self, query: str, *args: Any) -> list[dict[str, Any]]:
+            self.saved.append((query, args))
+            return []
+
+    pg = _ApprovalPg()
+    subsystems = SimpleNamespace(get_pg_conn=lambda: pg)
+    request = _RequestStub(
+        {
+            "decision": "approved",
+            "notes": "looks good",
+            "decided_by": "operator",
+        },
+        subsystems=subsystems,
+    )
+
+    with patch.object(
+        workflow_run,
+        "resolve_authority_checkpoint",
+        return_value={
+            "checkpoint_id": "checkpoint_123",
+            "status": "approved",
+            "card_id": "workflow_job:17",
+            "model_id": "workflow.alpha",
+        },
+    ):
+        workflow_run._handle_checkpoints_post(request, "/api/checkpoints/checkpoint_123/approve")
+
+    assert request.sent == (200, {"checkpoint_id": "checkpoint_123", "status": "approved", "card_id": "workflow_job:17", "model_id": "workflow.alpha"})
+    assert any("UPDATE workflow_jobs" in query for query, _args in pg.saved)
+    assert any("pg_notify('job_ready'" in query for query, _args in pg.saved)
+
+
 def test_manifest_get_api_returns_normalized_bundle() -> None:
     subsystems = _SubsystemsStub()
     subsystems.pg.manifest_rows["manifest_123"] = {
@@ -608,6 +645,42 @@ def test_manifest_get_api_returns_normalized_bundle() -> None:
     assert payload["name"] == "Support Workspace"
     assert payload["kind"] == "helm_surface_bundle"
     assert payload["surfaces"]["main"]["manifest"]["quadrants"]["A1"]["module"] == "metric"
+
+
+def test_manifest_get_api_returns_raw_control_plane_manifest() -> None:
+    subsystems = _SubsystemsStub()
+    subsystems.pg.manifest_rows["plan_123"] = {
+        "id": "plan_123",
+        "name": "Data Cleanup Plan",
+        "description": "Plan description",
+        "status": "draft",
+        "version": 3,
+        "parent_manifest_id": None,
+        "updated_at": datetime(2026, 4, 15, tzinfo=timezone.utc),
+        "manifest": {
+            "kind": "praxis_control_manifest",
+            "manifest_family": "control_plane",
+            "manifest_type": "data_plan",
+            "schema_version": 1,
+            "plan": {"job": {"operation": "reconcile"}},
+            "plan_digest": "digest-123",
+        },
+    }
+    request = _RequestStub({}, subsystems=subsystems)
+
+    workflow_run._handle_manifest_get_api(request, "/api/manifests/plan_123")
+
+    assert request.sent is not None
+    status, payload = request.sent
+    assert status == 200
+    assert payload["id"] == "plan_123"
+    assert payload["name"] == "Data Cleanup Plan"
+    assert payload["kind"] == "praxis_control_manifest"
+    assert payload["manifest_family"] == "control_plane"
+    assert payload["manifest_type"] == "data_plan"
+    assert payload["plan_digest"] == "digest-123"
+    assert payload["status"] == "draft"
+    assert payload["version"] == 3
 
 
 def test_workflow_run_handler_does_not_import_manifest_or_checkpoint_storage_writes_directly() -> None:

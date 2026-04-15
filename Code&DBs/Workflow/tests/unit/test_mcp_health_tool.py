@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from datetime import datetime, timezone
 
 from surfaces.mcp.tools import health as health_tool
+import runtime.missing_detector as missing_detector
 
 
 class _FakeProbe:
@@ -51,6 +53,22 @@ def test_tool_dag_health_uses_workflow_database_env(monkeypatch) -> None:
             super().__init__(probes)
             captured["probe_payloads"] = [probe.payload for probe in probes]
 
+    class _FakeConn:
+        def execute(self, sql: str):
+            if "FROM memory_entities" in sql:
+                return [
+                    {
+                        "id": "doc-1",
+                        "entity_type": "document",
+                        "name": "weekly-plan",
+                        "created_at": "2026-04-01T00:00:00+00:00",
+                        "updated_at": "2026-04-05T00:00:00+00:00",
+                    }
+                ]
+            if "FROM memory_edges" in sql:
+                return []
+            raise AssertionError(f"Unexpected SQL in test stub: {sql}")
+
     def _fake_resolve(env=None):
         captured["env"] = env
         return "postgresql://repo.test/workflow"
@@ -68,6 +86,7 @@ def test_tool_dag_health_uses_workflow_database_env(monkeypatch) -> None:
     monkeypatch.setattr(health_tool, "resolve_workflow_database_url", _fake_resolve)
     monkeypatch.setattr(health_tool, "get_context_cache", lambda: SimpleNamespace(stats=lambda: {"hit_rate": 0.0}))
     monkeypatch.setattr(health_tool, "_serialize", lambda value: value)
+    monkeypatch.setattr(missing_detector, "_now", lambda: datetime(2026, 4, 15, tzinfo=timezone.utc))
     monkeypatch.setattr(
         health_tool,
         "provider_registry_mod",
@@ -95,7 +114,7 @@ def test_tool_dag_health_uses_workflow_database_env(monkeypatch) -> None:
                 PreflightRunner=_CapturingPreflightRunner,
             ),
             get_operator_panel=lambda: _FakePanel(),
-            get_memory_engine=lambda: SimpleNamespace(_connect=lambda: None),
+            get_memory_engine=lambda: SimpleNamespace(_connect=lambda: _FakeConn()),
         ),
     )
 
@@ -127,3 +146,13 @@ def test_tool_dag_health_uses_workflow_database_env(monkeypatch) -> None:
         ("openai", "llm_task"),
         ("google", "cli_llm"),
     ]
+    assert result["content_health"] == {
+        "total_findings": 1,
+        "top_findings": [
+            {
+                "finding_type": "weekly_gap",
+                "description": "'document' has a 10-day gap (expected weekly)",
+                "severity": "medium",
+            }
+        ],
+    }

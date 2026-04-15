@@ -35,11 +35,7 @@ def _workflow_query_mod():
 def _prompt_provider_choices() -> tuple[str, ...]:
     from adapters import provider_registry as provider_registry_mod
 
-    providers: list[str] = []
-    for provider_slug in provider_registry_mod.registered_providers():
-        if provider_registry_mod.supports_adapter(provider_slug, "cli_llm"):
-            providers.append(provider_slug)
-    return tuple(providers)
+    return tuple(provider_registry_mod.registered_providers())
 
 
 def _default_prompt_provider_slug() -> str:
@@ -49,10 +45,15 @@ def _default_prompt_provider_slug() -> str:
 
 
 def _prompt_provider_help_line() -> str:
-    providers = ", ".join(_prompt_provider_choices()) or "openai, google, anthropic"
+    try:
+        providers = ", ".join(_prompt_provider_choices()) or "unavailable"
+        default_provider = _default_prompt_provider_slug()
+    except Exception:
+        providers = "unavailable (configure WORKFLOW_DATABASE_URL)"
+        default_provider = "unavailable"
     return (
-        "  --provider <slug>    Provider: "
-        f"{providers} (default: {_default_prompt_provider_slug()})\n"
+        "  --provider <slug>    Registered provider: "
+        f"{providers} (default: {default_provider})\n"
     )
 
 
@@ -289,19 +290,23 @@ def _run_command(args: list[str], *, stdout: TextIO) -> int:
         prompt = " ".join(clean_args)
         if scope_write and system_prompt is None:
             system_prompt = "You are a code editor. Return ONLY valid JSON structured output."
-        prompt_launch_spec = compile_prompt_launch_spec(
-            prompt=prompt,
-            provider_slug=provider,
-            model_slug=model,
-            tier=tier,
-            adapter_type=adapter,
-            scope_write=scope_write,
-            workdir=workdir,
-            context_files=context_files,
-            timeout=timeout,
-            task_type=task_type,
-            system_prompt=system_prompt,
-        )
+        try:
+            prompt_launch_spec = compile_prompt_launch_spec(
+                prompt=prompt,
+                provider_slug=provider,
+                model_slug=model,
+                tier=tier,
+                adapter_type=adapter,
+                scope_write=scope_write,
+                workdir=workdir,
+                context_files=context_files,
+                timeout=timeout,
+                task_type=task_type,
+                system_prompt=system_prompt,
+            )
+        except ValueError as exc:
+            stdout.write(f"error: {exc}\n")
+            return 2
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stdout):
             return workflow_cli._submit_workflow_launch(
                 prompt_launch_spec=prompt_launch_spec,

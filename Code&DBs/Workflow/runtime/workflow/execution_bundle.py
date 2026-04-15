@@ -11,7 +11,7 @@ import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from adapters.task_profiles import infer_task_type, merge_allowed_tools, resolve_profile
+from adapters.task_profiles import infer_task_type, merge_allowed_tools, seed_profile
 from surfaces.mcp.catalog import canonical_tool_name, get_tool_catalog
 from .artifact_contracts import (
     normalize_acceptance_contract,
@@ -285,6 +285,8 @@ def build_execution_bundle(
     blast_radius: Sequence[str] | None = None,
     test_scope: Sequence[str] | None = None,
     verify_refs: Sequence[str] | None = None,
+    approval_required: bool | None = None,
+    approval_question: str | None = None,
     context_sections: Sequence[Mapping[str, Any]] | None = None,
     run_id: str | None = None,
     workflow_id: str | None = None,
@@ -302,7 +304,7 @@ def build_execution_bundle(
         capabilities=normalized_capabilities,
         verify_refs=normalized_verify_refs,
     )
-    profile = resolve_profile(_profile_task_type(normalized_task_type))
+    profile = seed_profile(_profile_task_type(normalized_task_type))
     normalized_allowed_tools = _dedupe_strings(
         [canonical_tool_name(tool) for tool in merge_allowed_tools(profile.allowed_tools, _string_list(allowed_tools))]
     )
@@ -341,6 +343,7 @@ def build_execution_bundle(
     normalized_resolved_read_scope = _dedupe_strings(_string_list(resolved_read_scope))
     normalized_blast_radius = _dedupe_strings(_string_list(blast_radius))
     normalized_test_scope = _dedupe_strings(_string_list(test_scope))
+    normalized_approval_question = str(approval_question or "").strip()
     section_names = [
         str(section.get("name") or "").strip()
         for section in _dict_list(context_sections)
@@ -358,6 +361,8 @@ def build_execution_bundle(
         "mcp_tools": _mcp_tool_entries(normalized_mcp_tools),
         "mcp_tool_names": normalized_mcp_tools,
         "skill_refs": normalized_skill_refs,
+        "approval_required": bool(approval_required),
+        "approval_question": normalized_approval_question or None,
         "completion_contract": completion_contract,
         "authoring_contract": normalized_authoring_contract,
         "acceptance_contract": normalized_acceptance_contract,
@@ -410,6 +415,14 @@ def render_execution_bundle(bundle: Mapping[str, Any] | None) -> str:
             "suggested_question": str(orient.get("suggested_question") or "").strip(),
         }
         parts.append("orient: " + json.dumps(rendered_orient, default=str))
+
+    if bundle.get("approval_required"):
+        approval_question = str(bundle.get("approval_question") or "").strip()
+        parts.append(
+            "\n** APPROVAL REQUIRED **\n"
+            "This job pauses for human approval before execution.\n"
+            + (f"Question: {approval_question}\n" if approval_question else "")
+        )
 
     completion_contract = bundle.get("completion_contract")
     if isinstance(completion_contract, Mapping) and completion_contract:

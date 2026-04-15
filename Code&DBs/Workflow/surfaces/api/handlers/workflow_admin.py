@@ -21,6 +21,7 @@ from ._shared import (
     RouteEntry,
     _ClientError,
     _exact,
+    _query_params,
     _read_json_body,
     _serialize,
 )
@@ -908,18 +909,54 @@ def _handle_platform_overview_get(request: Any, path: str) -> None:
 
 
 def _handle_workflow_templates_get(request: Any, path: str) -> None:
-    request._send_json(
-        200,
-        {
-            "templates": [
-                {"id": "code-review", "name": "Code Review Pipeline", "steps": ["analyze", "review", "fix"]},
-                {"id": "data-analysis", "name": "Data Analysis", "steps": ["collect", "clean", "analyze", "visualize"]},
-                {"id": "content-gen", "name": "Content Generation", "steps": ["research", "outline", "draft", "edit"]},
-                {"id": "bug-triage", "name": "Bug Triage", "steps": ["classify", "reproduce", "fix", "verify"]},
-                {"id": "onboarding", "name": "Onboarding Checklist", "steps": ["setup", "training", "access", "review"]},
-            ]
-        },
-    )
+    del path
+    try:
+        pg = request.subsystems.get_pg_conn()
+        params = _query_params(request.path)
+        query = (params.get("q", [""])[0]).strip()
+
+        columns = (
+            "id, name, description, category, trigger_type, input_schema, output_schema, steps, mcp_tool_refs"
+        )
+        if query:
+            rows = pg.execute(
+                f"""SELECT {columns}
+                       FROM registry_workflows
+                      WHERE search_vector @@ plainto_tsquery('english', $1)
+                         OR name ILIKE '%' || $1 || '%'
+                         OR description ILIKE '%' || $1 || '%'
+                      ORDER BY name
+                      LIMIT 20""",
+                query,
+            )
+        else:
+            rows = pg.execute(
+                f"SELECT {columns} FROM registry_workflows ORDER BY name LIMIT 20"
+            )
+
+        request._send_json(
+            200,
+            {
+                "templates": [
+                    {
+                        "id": row["id"],
+                        "name": row["name"],
+                        "description": row.get("description") or "",
+                        "category": row.get("category") or "",
+                        "trigger_type": row.get("trigger_type") or "",
+                        "input_schema": row.get("input_schema") or {},
+                        "output_schema": row.get("output_schema") or {},
+                        "steps": row.get("steps") or [],
+                        "mcp_tool_refs": row.get("mcp_tool_refs") or [],
+                    }
+                    for row in rows
+                ],
+                "count": len(rows),
+                "query": query,
+            },
+        )
+    except Exception as exc:
+        request._send_json(500, {"error": str(exc)})
 
 
 def _handle_launcher_status_get(request: Any, path: str) -> None:

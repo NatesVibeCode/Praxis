@@ -352,7 +352,7 @@ def run_model(
     workdir: str | None = None,
     execution_control: DeterministicExecutionControl | None = None,
 ) -> ExecutionResult:
-    """Run a model command via Docker only.
+    """Run a model command via Docker or host execution.
 
     Parameters
     ----------
@@ -365,13 +365,13 @@ def run_model(
     network:
         Allow network access in Docker (for research tasks).
     prefer_docker:
-        Reserved for compatibility; Docker remains the only supported execution mode.
+        When False, execute on the host using the cleaned stdin/stdout runner.
     image:
         Override Docker image.
     require_docker:
         Reserved for compatibility; execution fails closed if Docker is unavailable.
     """
-    del prefer_docker, require_docker, workdir
+    del require_docker
 
     if execution_control is not None and execution_control.cancel_requested():
         return ExecutionResult(
@@ -382,6 +382,16 @@ def run_model(
             latency_ms=0,
             execution_mode="docker",
             cancelled=True,
+        )
+
+    if not prefer_docker:
+        return run_on_host(
+            command=command,
+            stdin_text=stdin_text,
+            timeout=timeout,
+            env_overrides=env,
+            workdir=workdir,
+            execution_control=execution_control,
         )
 
     if _has_docker():

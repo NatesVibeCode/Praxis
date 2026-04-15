@@ -7,6 +7,7 @@ export const GRID_TEXT_KEYS = new Set([
   'placeholder',
   'publishSelection',
   'subscribeSelection',
+  'accept',
   'path',
   'label',
   'format',
@@ -18,6 +19,11 @@ export const GRID_TEXT_KEYS = new Set([
   'searchQuery',
   'content',
   'onSubmitEndpoint',
+  'uploadEndpoint',
+  'scope',
+  'workflowId',
+  'stepId',
+  'description',
 ]);
 
 export const GRID_CHART_TYPE_KEYS = new Set(['chartType', 'type']);
@@ -37,6 +43,7 @@ export const GRID_DATA_SOURCES = [
 
 const FIELD_LABELS: Record<string, string> = {
   actions: 'Actions',
+  accept: 'Accepted file types',
   chartType: 'Chart type',
   columns: 'Columns',
   content: 'Content',
@@ -47,11 +54,16 @@ const FIELD_LABELS: Record<string, string> = {
   path: 'Path',
   placeholder: 'Placeholder',
   publishSelection: 'Publish selection',
+  scope: 'Upload scope',
   refreshInterval: 'Refresh interval',
   subscribeSelection: 'Subscribe selection',
+  description: 'Description',
+  stepId: 'Step ID',
   title: 'Title',
   type: 'Chart type',
+  uploadEndpoint: 'Upload endpoint',
   worldPath: 'World path',
+  workflowId: 'Workflow ID',
   xKey: 'X axis key',
   yKey: 'Y axis key',
 };

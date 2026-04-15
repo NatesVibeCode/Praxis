@@ -97,12 +97,17 @@ def tool_praxis_health(params: dict, _progress_emitter=None) -> dict:
                 for row in edge_rows
             ]
             findings = detector.detect_stale_topics(entities)
+            findings.extend(detector.detect_weekly_gaps(entities))
             findings.extend(detector.detect_orphaned_actions(entities, edges))
             prioritized = prioritizer.prioritize(findings, max_surfaced=5)
             content_health = {
                 "total_findings": len(findings),
                 "top_findings": [
-                    {"description": finding.description, "severity": finding.severity}
+                    {
+                        "finding_type": finding.finding_type.value,
+                        "description": finding.description,
+                        "severity": finding.severity,
+                    }
                     for finding in prioritized
                 ],
             }

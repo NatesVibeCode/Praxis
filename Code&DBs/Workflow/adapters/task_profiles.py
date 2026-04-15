@@ -20,9 +20,17 @@ import concurrent.futures
 import json
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
+from storage.postgres.connection import resolve_workflow_database_url
+from storage.postgres.validators import PostgresConfigurationError
+
 _DATABASE_URL_ENV = "WORKFLOW_DATABASE_URL"
+
+
+class TaskProfileAuthorityError(RuntimeError):
+    """Raised when DB-backed task profile authority is unavailable."""
 
 
 @dataclass(frozen=True)
@@ -44,7 +52,7 @@ class TaskProfile:
 # Task profiles — fallback seeds (authoritative copy lives in Postgres)
 # ---------------------------------------------------------------------------
 
-TASK_PROFILES: dict[str, TaskProfile] = {
+_SEED_TASK_PROFILES: dict[str, TaskProfile] = {
     "research": TaskProfile(
         task_type="research",
         allowed_tools=("WebSearch", "WebFetch", "Read"),
@@ -180,7 +188,7 @@ TASK_PROFILES: dict[str, TaskProfile] = {
 # code_clues/creative_clues are used when the keyword is ambiguous.
 # ---------------------------------------------------------------------------
 
-_TASK_TYPE_KEYWORDS: list[tuple[tuple[str, ...], str, tuple[str, ...], tuple[str, ...]]] = [
+_SEED_TASK_TYPE_KEYWORDS: list[tuple[tuple[str, ...], str, tuple[str, ...], tuple[str, ...]]] = [
     (("debate", "argue", "position", "perspective", "crossfire"), "debate",          (), ()),
     (("brainstorm", "ideate", "explore", "possibilities"),        "brainstorm",      (), ()),
     (("architect", "design", "system design", "tradeoff"),        "architecture",    (), ()),
@@ -205,6 +213,8 @@ _TASK_TYPE_KEYWORDS: list[tuple[tuple[str, ...], str, tuple[str, ...], tuple[str
 # ---------------------------------------------------------------------------
 
 _PROFILES_DB_LOADED = False
+_DB_TASK_PROFILES: dict[str, TaskProfile] | None = None
+_DB_TASK_TYPE_KEYWORDS: list[tuple[tuple[str, ...], str, tuple[str, ...], tuple[str, ...]]] | None = None
 
 
 def _run_async(coro: object) -> object:
@@ -218,16 +228,59 @@ def _run_async(coro: object) -> object:
     return asyncio.run(coro)
 
 
-def _load_profiles_from_db() -> None:
-    global _PROFILES_DB_LOADED
+def _read_repo_env_file(path: Path) -> dict[str, str]:
+    try:
+        content = path.read_text(encoding="utf-8")
+    except OSError:
+        return {}
+
+    parsed: dict[str, str] = {}
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip("'\"")
+        if key and value:
+            parsed[key] = value
+    return parsed
+
+
+def _task_profile_repo_root() -> Path:
+    return Path(__file__).resolve().parents[3]
+
+
+def _resolve_task_profile_database_url(*, required: bool) -> str | None:
+    if _DATABASE_URL_ENV in os.environ:
+        try:
+            return resolve_workflow_database_url()
+        except PostgresConfigurationError as exc:
+            raise TaskProfileAuthorityError(str(exc)) from exc
+
+    repo_env = _read_repo_env_file(_task_profile_repo_root() / ".env")
+    if _DATABASE_URL_ENV in repo_env:
+        try:
+            return resolve_workflow_database_url(repo_env)
+        except PostgresConfigurationError as exc:
+            raise TaskProfileAuthorityError(str(exc)) from exc
+
+    if required:
+        raise TaskProfileAuthorityError(
+            "task_profiles requires explicit WORKFLOW_DATABASE_URL Postgres authority"
+        )
+    return None
+
+
+def _load_profiles_from_db(*, required: bool) -> None:
+    global _PROFILES_DB_LOADED, _DB_TASK_PROFILES, _DB_TASK_TYPE_KEYWORDS
     if _PROFILES_DB_LOADED:
         return
 
     try:
         import asyncpg
-
-        db_url = os.environ.get(_DATABASE_URL_ENV, "").strip()
-        if not db_url.startswith(("postgresql://", "postgres://")):
+        db_url = _resolve_task_profile_database_url(required=required)
+        if db_url is None:
             return
 
         async def _fetch() -> tuple[list, list]:
@@ -249,8 +302,8 @@ def _load_profiles_from_db() -> None:
 
         profile_rows, keyword_rows = _run_async(_fetch())  # type: ignore[misc]
 
+        loaded_profiles = dict(_SEED_TASK_PROFILES)
         if profile_rows:
-            TASK_PROFILES.clear()
             for row in profile_rows:
                 tools = row["allowed_tools"]
                 if isinstance(tools, str):
@@ -268,7 +321,7 @@ def _load_profiles_from_db() -> None:
                 acc_contract_raw = row.get("default_acceptance_contract")
                 if isinstance(acc_contract_raw, str):
                     acc_contract_raw = json.loads(acc_contract_raw)
-                TASK_PROFILES[task_type] = TaskProfile(
+                loaded_profiles[task_type] = TaskProfile(
                     task_type=task_type,
                     allowed_tools=tuple(str(t) for t in (tools or [])),
                     default_tier=str(row["default_tier"]),
@@ -280,27 +333,52 @@ def _load_profiles_from_db() -> None:
                     default_acceptance_contract=acc_contract_raw if isinstance(acc_contract_raw, dict) else None,
                 )
 
+        loaded_keywords = list(_SEED_TASK_TYPE_KEYWORDS)
         if keyword_rows:
-            _TASK_TYPE_KEYWORDS.clear()
+            loaded_keywords = []
             for row in keyword_rows:
                 kws = tuple(str(k) for k in (row["keywords"] or []))
                 if not kws:
                     continue
                 code_clues = tuple(str(c) for c in (row["context_code_clues"] or []))
                 creative_clues = tuple(str(c) for c in (row["context_creative_clues"] or []))
-                _TASK_TYPE_KEYWORDS.append((kws, str(row["task_type"]), code_clues, creative_clues))
+                loaded_keywords.append((kws, str(row["task_type"]), code_clues, creative_clues))
 
-    except Exception:
-        pass
+        _DB_TASK_PROFILES = loaded_profiles
+        _DB_TASK_TYPE_KEYWORDS = loaded_keywords
+    except TaskProfileAuthorityError:
+        raise
+    except ImportError as exc:
+        if required:
+            raise TaskProfileAuthorityError("task_profiles requires asyncpg for DB-backed authority") from exc
+    except Exception as exc:
+        if required:
+            raise TaskProfileAuthorityError(
+                f"task_profiles failed to load DB authority: {type(exc).__name__}: {exc}"
+            ) from exc
     finally:
         _PROFILES_DB_LOADED = True
 
 
 def reload_profiles_from_db() -> None:
     """Force a fresh DB read on the next lookup."""
-    global _PROFILES_DB_LOADED
+    global _PROFILES_DB_LOADED, _DB_TASK_PROFILES, _DB_TASK_TYPE_KEYWORDS
     _PROFILES_DB_LOADED = False
-    _load_profiles_from_db()
+    _DB_TASK_PROFILES = None
+    _DB_TASK_TYPE_KEYWORDS = None
+
+
+def seed_profile(task_type: str) -> TaskProfile:
+    """Return the explicit non-authoritative seed profile for authoring defaults."""
+    return _SEED_TASK_PROFILES.get(task_type, _SEED_TASK_PROFILES["general"])
+
+
+def try_resolve_profile(task_type: str) -> TaskProfile | None:
+    """Attempt DB-backed profile resolution without requiring authority."""
+    _load_profiles_from_db(required=False)
+    if _DB_TASK_PROFILES is None:
+        return None
+    return _DB_TASK_PROFILES.get(task_type, _DB_TASK_PROFILES["general"])
 
 
 # ---------------------------------------------------------------------------
@@ -313,8 +391,9 @@ def resolve_profile(task_type: str) -> TaskProfile:
     Returns the profile for task_type, or the "general" profile if
     task_type is unknown.
     """
-    _load_profiles_from_db()
-    return TASK_PROFILES.get(task_type, TASK_PROFILES["general"])
+    _load_profiles_from_db(required=True)
+    assert _DB_TASK_PROFILES is not None
+    return _DB_TASK_PROFILES.get(task_type, _DB_TASK_PROFILES["general"])
 
 
 def infer_task_type(prompt: str, *, label: str | None = None) -> str:
@@ -323,10 +402,9 @@ def infer_task_type(prompt: str, *, label: str | None = None) -> str:
     Uses keyword matching against the task_type_keyword_rules registry.
     Falls back to "general" when no keywords match.
     """
-    _load_profiles_from_db()
     combined = " ".join(filter(None, [label or "", prompt])).lower()
 
-    for keywords, task_type, code_clues, creative_clues in _TASK_TYPE_KEYWORDS:
+    for keywords, task_type, code_clues, creative_clues in _SEED_TASK_TYPE_KEYWORDS:
         for kw in keywords:
             if kw in combined:
                 if code_clues or creative_clues:
