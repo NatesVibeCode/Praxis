@@ -1,0 +1,47 @@
+{
+  "name": "Phase Program Review Child",
+  "phase": "W",
+  "queue_id": "phase_program_review_child_20260414",
+  "outcome_goal": "Phase 50 review runs as a real child workflow and explicitly spawns the healer child workflow when review completes.",
+  "anti_requirements": [
+    "Do NOT advance from Phase 50 to Phase 51",
+    "Do NOT bypass the review findings-first posture",
+    "Do NOT spawn any workflow other than the Phase 50 healer child from this review child"
+  ],
+  "jobs": [
+    {
+      "label": "phase_50_review",
+      "agent": "auto/review",
+      "task_type": "review",
+      "description": "Review the current Phase 50 authority/compiler changes as a code review",
+      "outcome_goal": "Any remaining risks in lookup policy, generated authority drift, or phase governance are called out before healing",
+      "prompt": "Work from `/workspace` only. Review the Phase 50 authority/compiler work as a code review, not a summary.\n\nRead from these sandbox paths:\n- `/workspace/planning/phase-program/phase_050_current_packet.md`\n- `/workspace/planning/phase-program/praxis_0_100_registry.json`\n- `/workspace/Code&DBs/Workflow/system_authority/workflow_migration_authority.json`\n- `/workspace/Code&DBs/Workflow/system_authority/generate_workflow_migration_authority.py`\n- `/workspace/Code&DBs/Workflow/storage/_generated_workflow_migration_authority.py`\n- `/workspace/Code&DBs/Workflow/storage/migrations.py`\n- `/workspace/Code&DBs/Workflow/storage/postgres/schema.py`\n- `/workspace/Code&DBs/Workflow/tests/integration/test_workflow_schema_authority_artifacts.py`\n- `/workspace/Code&DBs/Workflow/tests/integration/test_workflow_migration_policy_boundaries.py`\n- `/workspace/Code&DBs/Workflow/tests/integration/test_workflow_migration_contracts.py`\n\nPrioritize findings on:\n- canonical lookup accidentally reading bootstrap-only or deprecated files\n- derived authority artifacts drifting from the JSON source\n- bootstrap/readiness policy being reconstructed at runtime instead of consumed from generated authority\n- phase registry structure that is still too weak for workflow-driven execution\n- missing or weak tests on policy boundaries and authority drift\n\nFindings first with file references. If no findings remain, say so explicitly and mention residual validation gaps.",
+      "read": [
+        "planning/phase-program/phase_050_current_packet.md",
+        "planning/phase-program/praxis_0_100_registry.json",
+        "Code&DBs/Workflow/system_authority/workflow_migration_authority.json",
+        "Code&DBs/Workflow/system_authority/generate_workflow_migration_authority.py",
+        "Code&DBs/Workflow/storage/_generated_workflow_migration_authority.py",
+        "Code&DBs/Workflow/storage/migrations.py",
+        "Code&DBs/Workflow/storage/postgres/schema.py",
+        "Code&DBs/Workflow/tests/integration/test_workflow_schema_authority_artifacts.py",
+        "Code&DBs/Workflow/tests/integration/test_workflow_migration_policy_boundaries.py",
+        "Code&DBs/Workflow/tests/integration/test_workflow_migration_contracts.py"
+      ],
+      "write": []
+    },
+    {
+      "label": "phase_50_healer_spawn",
+      "agent": "auto/build",
+      "task_type": "operate",
+      "depends_on": [
+        "phase_50_review"
+      ],
+      "description": "Spawn the Phase 50 healer child workflow from the review child",
+      "outcome_goal": "Healing runs as an explicit grandchild workflow with durable lineage",
+      "prompt": "Spawn the healer child workflow and nothing else.\n\nWork from `/workspace` and run this exact command block:\n\n```bash\npython3 - <<'PY'\nimport json\nimport os\nimport subprocess\n\nbundle = json.loads(os.environ['PRAXIS_EXECUTION_BUNDLE'])\nparent_run_id = str(bundle['run_id'])\nparent_job_label = str(bundle['job_label'])\nsubprocess.run([\n    './scripts/workflow.sh',\n    'spawn-managed',\n    parent_run_id,\n    'config/cascade/specs/W_phase_program_healer_child_20260414.queue.json',\n    '--reason',\n    'phase.healer',\n    '--parent-job-label',\n    parent_job_label,\n], check=True)\nprint(json.dumps({\n    'parent_run_id': parent_run_id,\n    'parent_job_label': parent_job_label,\n    'dispatch_reason': 'phase.healer',\n}, indent=2))\nPY\n```\n\nRules:\n- Do not edit repo files\n- Do not apply healing inline in this dispatch job\n- Print the spawned child run id and parent lineage clearly in the final output",
+      "read": [],
+      "write": []
+    }
+  ]
+}

@@ -122,6 +122,11 @@ def _resolve_method_and_body(args: dict) -> tuple[str, Any]:
     return method, body_raw
 
 
+def _method_supports_body(method: str) -> bool:
+    normalized = str(method or "").upper()
+    return normalized not in {"GET", "DELETE"}
+
+
 def execute_webhook(args: dict, pg: Any) -> dict:
     """Execute a webhook call.
 
@@ -157,6 +162,9 @@ def execute_webhook(args: dict, pg: Any) -> dict:
         headers = {}
     else:
         headers = {str(key): str(value) for key, value in headers.items()}
+
+    if not _method_supports_body(method):
+        body_raw = None
 
     # Encode body
     if isinstance(body_raw, dict):

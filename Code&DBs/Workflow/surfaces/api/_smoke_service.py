@@ -83,7 +83,6 @@ def _require_authority_env(env: Mapping[str, str] | None) -> dict[str, str]:
 _SMOKE_WORKFLOW_DEFINITION_ID = "workflow_definition.native_self_hosted_smoke.v1"
 _SMOKE_WORKFLOW_ID = "workflow.native-self-hosted-smoke"
 _SMOKE_DEFAULT_RUNTIME_ENV = {
-    "WORKFLOW_DATABASE_URL": os.environ["WORKFLOW_DATABASE_URL"],
     "PRAXIS_LOCAL_POSTGRES_DATA_DIR": "Code&DBs/Databases/postgres-dev/data",
     PRAXIS_RUNTIME_PROFILE_ENV: "praxis",
     PRAXIS_RUNTIME_PROFILES_CONFIG_ENV: "config/runtime_profiles.json",
@@ -92,11 +91,22 @@ _SMOKE_PATH_ENV_NAMES = {
     "PRAXIS_LOCAL_POSTGRES_DATA_DIR",
     PRAXIS_RUNTIME_PROFILES_CONFIG_ENV,
 }
+
+
 def _default_smoke_runtime_env() -> dict[str, str]:
-    source_env = __import__("os").environ
+    source_env = os.environ
+    workflow_database_url = source_env.get("WORKFLOW_DATABASE_URL")
+    if not workflow_database_url:
+        raise frontdoor.NativeFrontdoorError(
+            "operator_flow.authority_missing",
+            "WORKFLOW_DATABASE_URL must be set to load the native smoke contract",
+        )
     raw_env = {
-        name: str(source_env.get(name, default_value))
-        for name, default_value in _SMOKE_DEFAULT_RUNTIME_ENV.items()
+        "WORKFLOW_DATABASE_URL": workflow_database_url,
+        **{
+            name: str(source_env.get(name, default_value))
+            for name, default_value in _SMOKE_DEFAULT_RUNTIME_ENV.items()
+        },
     }
     return _resolve_smoke_env(raw_env)
 

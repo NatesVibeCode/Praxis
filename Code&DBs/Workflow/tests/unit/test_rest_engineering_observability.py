@@ -14,6 +14,7 @@ if str(_WORKFLOW_ROOT) not in sys.path:
 os.environ.setdefault("WORKFLOW_DATABASE_URL", "postgresql://localhost/test")
 
 import runtime.engineering_observability as observability_mod
+from runtime.trend_detector import TrendDirection
 import surfaces.api.handlers.workflow_admin as workflow_admin
 import surfaces.api.rest as rest
 
@@ -59,3 +60,44 @@ def test_platform_observability_endpoint_gracefully_degrades_on_health_failure(m
     payload = response.json()
     assert payload["sources"]["platform_health"]["available"] is False
     assert "health unavailable" in payload["sources"]["platform_health"]["detail"]
+
+
+def test_platform_observability_endpoint_includes_trend_observability(monkeypatch) -> None:
+    class _FakeTrendDetector:
+        def detect_from_receipts(self):
+            return [
+                SimpleNamespace(
+                    metric_name="latency_p50",
+                    provider_slug="openai",
+                    direction=TrendDirection.DEGRADING,
+                    baseline_value=100.0,
+                    current_value=160.0,
+                    change_pct=60.0,
+                    sample_count=9,
+                    severity="warning",
+                )
+            ]
+
+    monkeypatch.setattr(rest, "_ensure_shared_subsystems", lambda _app: SimpleNamespace())
+    monkeypatch.setattr(workflow_admin, "_handle_health", lambda _subs, _body: {
+        "preflight": {"overall": "healthy", "checks": []},
+        "operator_snapshot": {},
+        "lane_recommendation": {"recommended_posture": "green", "reasons": []},
+    })
+    monkeypatch.setattr(observability_mod, "TrendDetector", _FakeTrendDetector)
+
+    with TestClient(rest.app) as client:
+        response = client.get("/api/observability/platform")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["trend_observability"]["summary"] == {
+        "total_trends": 1,
+        "critical_trends": 0,
+        "warning_trends": 1,
+        "info_trends": 0,
+        "degrading_trends": 1,
+        "accelerating_trends": 0,
+        "improving_trends": 0,
+    }
+    assert payload["trend_observability"]["trends"][0]["metric_name"] == "latency_p50"

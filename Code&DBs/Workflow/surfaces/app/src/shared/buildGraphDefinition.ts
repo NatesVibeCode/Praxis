@@ -1,4 +1,5 @@
 import type { BuildEdge, BuildNode, BuildPayload } from './types';
+import { baseConditionFromRelease, normalizeBuildEdgeRelease } from './edgeRelease';
 
 type DefinitionGate = {
   type: string;
@@ -9,6 +10,13 @@ type DefinitionGate = {
   max_attempts?: number;
   fallback_job?: string;
 };
+
+export interface ReleasePlanSource {
+  definition?: Record<string, unknown>;
+  buildGraph?: BuildPayload['build_graph'] | null;
+  fingerprint: string;
+  title: string;
+}
 
 const TRIGGER_MANUAL_ROUTE = 'trigger';
 const TRIGGER_SCHEDULE_ROUTE = 'trigger/schedule';
@@ -63,11 +71,11 @@ function triggerIntentFromNode(
 }
 
 function buildDefinitionGate(edge: BuildEdge): DefinitionGate | null {
-  const gate = edge.gate;
-  if (!gate?.family) return null;
+  const release = normalizeBuildEdgeRelease(edge);
+  if (!release.family || release.family === 'after_success') return null;
 
   let definitionGate: DefinitionGate | null = null;
-  switch (gate.family) {
+  switch (release.family) {
     case 'approval':
       definitionGate = { type: 'approval', required_approvers: 1 };
       break;
@@ -75,29 +83,44 @@ function buildDefinitionGate(edge: BuildEdge): DefinitionGate | null {
       definitionGate = { type: 'human_review' };
       break;
     case 'validation':
-      definitionGate = { type: 'validation', verify_command: gate.config?.verify_command };
+      definitionGate = { type: 'validation', verify_command: release.config?.verify_command };
       break;
     case 'conditional':
       definitionGate = {
         type: 'conditional',
-        condition: gate.config?.condition && typeof gate.config.condition === 'object' && !Array.isArray(gate.config.condition)
-          ? { ...gate.config.condition as Record<string, unknown> }
-          : undefined,
+        condition: baseConditionFromRelease(release),
       };
       break;
     case 'retry':
-      definitionGate = { type: 'retry', max_attempts: gate.config?.max_attempts || 3 };
+      definitionGate = { type: 'retry', max_attempts: release.config?.max_attempts || 3 };
       break;
     case 'after_failure':
-      definitionGate = { type: 'on_failure', fallback_job: gate.config?.fallback };
+      definitionGate = { type: 'on_failure', fallback_job: release.config?.fallback };
       break;
     default:
       return null;
   }
 
-  const label = edge.gateLabel || gate.label;
+  const label = edge.gateLabel || release.label;
   if (label) definitionGate.label = label;
   return definitionGate;
+}
+
+function stableSerialize(value: unknown): string {
+  if (value === null || value === undefined) return 'null';
+  if (typeof value === 'number' || typeof value === 'boolean') return JSON.stringify(value);
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => stableSerialize(entry)).join(',')}]`;
+  }
+  if (typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, entry]) => entry !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => `${JSON.stringify(key)}:${stableSerialize(entry)}`);
+    return `{${entries.join(',')}}`;
+  }
+  return JSON.stringify(String(value));
 }
 
 export function buildGraphToDefinition(buildGraph: BuildPayload['build_graph']): Record<string, unknown> {
@@ -116,19 +139,22 @@ export function buildGraphToDefinition(buildGraph: BuildPayload['build_graph']):
     }
     const gate = buildDefinitionGate(e);
     if (gate && e.to_node_id) {
+      const release = normalizeBuildEdgeRelease(e);
       gatesByTarget[e.to_node_id] = gatesByTarget[e.to_node_id] || [];
       gatesByTarget[e.to_node_id].push(gate);
       edge_gates.push({
         edge_id: e.edge_id,
         from_node_id: e.from_node_id,
         to_node_id: e.to_node_id,
-        family: e.gate?.family,
-        label: gate.label || e.gate?.label || '',
-        branch_reason: e.branch_reason || undefined,
-        ...(e.gate?.config && typeof e.gate.config === 'object' && !Array.isArray(e.gate.config)
-          ? { config: { ...e.gate.config } }
-          : {}),
-        gate,
+        release: {
+          family: release.family,
+          edge_type: release.edge_type,
+          release_condition: { ...release.release_condition },
+          ...(release.label ? { label: release.label } : {}),
+          ...(release.branch_reason ? { branch_reason: release.branch_reason } : {}),
+          ...(release.state ? { state: release.state } : {}),
+          ...(release.config ? { config: { ...release.config } } : {}),
+        },
       });
     }
   }
@@ -159,6 +185,10 @@ export function buildGraphToDefinition(buildGraph: BuildPayload['build_graph']):
       handoff_target: typeof n.handoff_target === 'string' && n.handoff_target.trim()
         ? n.handoff_target.trim()
         : null,
+      integration_args:
+        n.integration_args && typeof n.integration_args === 'object' && !Array.isArray(n.integration_args)
+          ? { ...n.integration_args }
+          : {},
     }));
   return {
     trigger_intent,
@@ -167,5 +197,20 @@ export function buildGraphToDefinition(buildGraph: BuildPayload['build_graph']):
       phases,
       ...(edge_gates.length > 0 ? { edge_gates } : {}),
     },
+  };
+}
+
+export function resolveReleasePlanSource(payload: BuildPayload | null): ReleasePlanSource | null {
+  if (!payload) return null;
+  const hasDefinition = payload.definition && Object.keys(payload.definition).length > 0;
+  const definition = hasDefinition ? payload.definition : undefined;
+  const buildGraph = payload.build_graph ?? null;
+  if (!definition && !buildGraph) return null;
+  const title = String(payload.workflow?.name || (definition as { title?: unknown })?.title || 'moon-workflow');
+  return {
+    ...(definition ? { definition } : {}),
+    ...(buildGraph ? { buildGraph } : {}),
+    fingerprint: stableSerialize({ title, definition: definition || null, buildGraph }),
+    title,
   };
 }

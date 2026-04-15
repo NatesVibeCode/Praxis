@@ -440,7 +440,7 @@ def test_plan_definition_materializes_legacy_projections_from_definition_graph()
     assert result["compiled_spec"]["triggers"][0]["event_type"] == definition["trigger_intent"][0]["event_type"]
 
 
-def test_plan_definition_honors_explicit_phase_route_from_builder() -> None:
+def test_plan_definition_materializes_workflow_invoke_routes_as_integration_jobs() -> None:
     result = plan_definition(
         {
             "source_prose": "Draft a summary and then invoke the downstream workflow.",
@@ -473,6 +473,10 @@ def test_plan_definition_honors_explicit_phase_route_from_builder() -> None:
                     {
                         "step_id": "step-002",
                         "agent_route": "@workflow/invoke",
+                        "integration_args": {
+                            "workflow_id": "wf_downstream",
+                            "payload": {"ticket_id": "{{ticket_id}}"},
+                        },
                     },
                 ]
             },
@@ -487,7 +491,107 @@ def test_plan_definition_honors_explicit_phase_route_from_builder() -> None:
 
     jobs = result["compiled_spec"]["jobs"]
     assert jobs[0]["agent"] == "auto/draft"
-    assert jobs[1]["agent"] == "@workflow/invoke"
+    assert jobs[1]["agent"] == "integration/workflow/invoke"
+    assert jobs[1]["integration_id"] == "workflow"
+    assert jobs[1]["integration_action"] == "invoke"
+    assert jobs[1]["integration_args"] == {
+        "workflow_id": "wf_downstream",
+        "payload": {"ticket_id": "{{ticket_id}}"},
+    }
+
+
+def test_plan_definition_materializes_notification_routes_as_integration_jobs() -> None:
+    result = plan_definition(
+        {
+            "source_prose": "Draft a workflow notification and send it to the configured channels.",
+            "compiled_prose": "Draft a workflow notification and send it to the configured channels.",
+            "definition_revision": "def_notification_route",
+            "references": [],
+            "narrative_blocks": [],
+            "draft_flow": [
+                {
+                    "id": "step-001",
+                    "title": "Notify ops",
+                    "summary": "Let ops know the run completed.",
+                    "depends_on": [],
+                    "order": 1,
+                }
+            ],
+            "execution_setup": {
+                "phases": [
+                    {
+                        "step_id": "step-001",
+                        "agent_route": "@notifications/send",
+                    }
+                ]
+            },
+            "trigger_intent": [],
+        }
+    )
+
+    jobs = result["compiled_spec"]["jobs"]
+    assert jobs[0]["agent"] == "integration/notifications/send"
+    assert jobs[0]["integration_id"] == "notifications"
+    assert jobs[0]["integration_action"] == "send"
+    assert jobs[0]["integration_args"] == {
+        "title": "Notify ops",
+        "message": "Let ops know the run completed.",
+        "status": "info",
+        "metadata": {
+            "source_step_id": "step-001",
+            "source_node_id": "step-001",
+            "job_label": "notify-ops",
+        },
+    }
+
+
+def test_plan_definition_materializes_webhook_routes_as_generic_integration_jobs() -> None:
+    result = plan_definition(
+        {
+            "source_prose": "Post the payload to the external webhook.",
+            "compiled_prose": "Post the payload to the external webhook.",
+            "definition_revision": "def_webhook_route",
+            "references": [],
+            "narrative_blocks": [],
+            "draft_flow": [
+                {
+                    "id": "step-001",
+                    "title": "Post webhook",
+                    "summary": "Send the payload to the downstream webhook.",
+                    "depends_on": [],
+                    "order": 1,
+                }
+            ],
+            "execution_setup": {
+                "phases": [
+                    {
+                        "step_id": "step-001",
+                        "agent_route": "@webhook/post",
+                        "integration_args": {
+                            "request_preset": "post_json",
+                            "url": "https://example.com/hook",
+                            "method": "POST",
+                            "headers": {"Authorization": "Bearer token"},
+                            "body": {"status": "ready"},
+                        },
+                    }
+                ]
+            },
+            "trigger_intent": [],
+        }
+    )
+
+    jobs = result["compiled_spec"]["jobs"]
+    assert jobs[0]["agent"] == "integration/webhook/post"
+    assert jobs[0]["integration_id"] == "webhook"
+    assert jobs[0]["integration_action"] == "post"
+    assert jobs[0]["integration_args"] == {
+        "request_preset": "post_json",
+        "url": "https://example.com/hook",
+        "method": "POST",
+        "headers": {"Authorization": "Bearer token"},
+        "body": {"status": "ready"},
+    }
 
 
 def test_plan_definition_emits_after_failure_dependency_edges_from_moon_edge_gates() -> None:
@@ -520,8 +624,12 @@ def test_plan_definition_emits_after_failure_dependency_edges_from_moon_edge_gat
                         "edge_id": "edge-step-001-step-002",
                         "from_node_id": "step-001",
                         "to_node_id": "step-002",
-                        "family": "after_failure",
-                        "label": "On Failure",
+                        "release": {
+                            "family": "after_failure",
+                            "edge_type": "after_failure",
+                            "label": "On Failure",
+                            "release_condition": {"kind": "always"},
+                        },
                     }
                 ]
             },
@@ -577,19 +685,27 @@ def test_plan_definition_emits_conditional_dependency_edges_from_moon_edge_gates
                         "edge_id": "edge-step-001-step-002",
                         "from_node_id": "step-001",
                         "to_node_id": "step-002",
-                        "family": "conditional",
-                        "label": "Then",
-                        "branch_reason": "then",
-                        "config": {"condition": condition},
+                        "release": {
+                            "family": "conditional",
+                            "edge_type": "conditional",
+                            "label": "Then",
+                            "branch_reason": "then",
+                            "release_condition": condition,
+                            "config": {"condition": condition},
+                        },
                     },
                     {
                         "edge_id": "edge-step-001-step-003",
                         "from_node_id": "step-001",
                         "to_node_id": "step-003",
-                        "family": "conditional",
-                        "label": "Else",
-                        "branch_reason": "else",
-                        "config": {"condition": condition},
+                        "release": {
+                            "family": "conditional",
+                            "edge_type": "conditional",
+                            "label": "Else",
+                            "branch_reason": "else",
+                            "release_condition": {"op": "not", "conditions": [condition]},
+                            "config": {"condition": condition},
+                        },
                     },
                 ]
             },

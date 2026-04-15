@@ -15,7 +15,9 @@ and fails explicitly when the row is absent.
 from __future__ import annotations
 
 import logging
-import os
+
+from storage.postgres.connection import resolve_workflow_database_url
+from storage.postgres.validators import PostgresConfigurationError
 
 _log = logging.getLogger(__name__)
 
@@ -30,12 +32,12 @@ _model_profiles_loaded: bool = False
 
 
 def _require_database_url() -> str:
-    dsn = os.environ.get(_DATABASE_URL_ENV, "").strip()
-    if dsn.startswith(("postgresql://", "postgres://")):
-        return dsn
-    raise RuntimeError(
-        "model_context_limits requires explicit WORKFLOW_DATABASE_URL Postgres authority"
-    )
+    try:
+        return resolve_workflow_database_url()
+    except PostgresConfigurationError as exc:
+        raise RuntimeError(
+            "model_context_limits requires explicit WORKFLOW_DATABASE_URL Postgres authority"
+        ) from exc
 
 
 def _load_model_profiles_context_windows() -> dict[tuple[str, str], int]:

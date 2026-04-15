@@ -13,6 +13,96 @@ def _workflow_tool(params: dict[str, object]) -> dict[str, object]:
     return tool_praxis_workflow(params)
 
 
+def _api_routes_command(args: list[str], *, stdout: TextIO) -> int:
+    """Handle `workflow api routes` — list the live HTTP route catalog."""
+
+    import json as _json
+
+    from surfaces.api.rest import list_api_routes
+
+    if args and args[0] in {"-h", "--help"}:
+        stdout.write(
+            "usage: workflow api routes [--search TEXT] [--method METHOD] [--tag TAG] [--path-prefix PREFIX] [--json]\n"
+            "\n"
+            "Show the live FastAPI route catalog without starting the server.\n"
+            "Use this to discover the HTTP surface from the CLI.\n"
+            "\n"
+            "Examples:\n"
+            "  workflow api routes\n"
+            "  workflow api routes --search health --method GET\n"
+            "  workflow api routes --path-prefix /api/workflow-runs --json\n"
+            "  workflow api routes --json\n"
+        )
+        return 2
+
+    as_json = False
+    search = None
+    method = None
+    tag = None
+    path_prefix = None
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--json":
+            as_json = True
+            i += 1
+        elif arg == "--search":
+            if i + 1 >= len(args):
+                stdout.write("error: --search requires a value\n")
+                return 2
+            search = args[i + 1]
+            i += 2
+        elif arg == "--method":
+            if i + 1 >= len(args):
+                stdout.write("error: --method requires a value\n")
+                return 2
+            method = args[i + 1]
+            i += 2
+        elif arg == "--tag":
+            if i + 1 >= len(args):
+                stdout.write("error: --tag requires a value\n")
+                return 2
+            tag = args[i + 1]
+            i += 2
+        elif arg == "--path-prefix":
+            if i + 1 >= len(args):
+                stdout.write("error: --path-prefix requires a value\n")
+                return 2
+            path_prefix = args[i + 1]
+            i += 2
+        else:
+            stdout.write(f"error: unknown argument: {arg}\n")
+            return 2
+
+    payload = list_api_routes(search=search, method=method, tag=tag, path_prefix=path_prefix)
+    if as_json:
+        print_json(stdout, payload)
+        return 0
+
+    routes = list(payload.get("routes", []))
+    stdout.write(f"API route catalog ({payload.get('count', len(routes))} routes)\n")
+    stdout.write(f"  docs:    {payload.get('docs_url')}\n")
+    stdout.write(f"  openapi: {payload.get('openapi_url')}\n")
+    stdout.write(f"  redoc:   {payload.get('redoc_url')}\n")
+    filters = payload.get("filters")
+    if isinstance(filters, dict) and filters:
+        rendered_filters = " ".join(f"{key}={value}" for key, value in sorted(filters.items()))
+        stdout.write(f"  filters: {rendered_filters}\n")
+    stdout.write("\n")
+    if not routes:
+        stdout.write("No routes found.\n")
+        return 0
+
+    stdout.write(f"{'METHODS':<16} {'PATH':<40} SUMMARY\n")
+    stdout.write("-" * 92 + "\n")
+    for route in routes:
+        methods = ", ".join(route.get("methods", [])) or "ANY"
+        summary = str(route.get("summary") or route.get("description") or "").split("\n", 1)[0]
+        stdout.write(f"{methods:<16} {route.get('path', ''):<40} {summary[:80]}\n")
+    stdout.write(f"\nTip: run `workflow api routes --json` for machine-readable discovery.\n")
+    return 0
+
+
 def _circuits_command(*, stdout: TextIO) -> int:
     """Handle `workflow circuits` — print all circuit breaker states as JSON."""
 
@@ -843,21 +933,26 @@ def _api_command(args: list[str], *, stdout: TextIO) -> int:
     dependency contract from ``requirements.runtime.txt``.
 
     Options:
+      routes         show the live route catalog without starting the server
       --host HOST   bind address (default: 0.0.0.0)
       --port PORT   TCP port (default: 8420)
     """
 
     if args and args[0] in {"-h", "--help"}:
         stdout.write(
-            "usage: workflow api [--host HOST] [--port PORT]\n"
+            "usage: workflow api [routes|--host HOST|--port PORT]\n"
             "\n"
             "Start the Praxis REST API server.\n"
             "Reads the runtime dependency contract from requirements.runtime.txt\n"
             "\n"
+            "  routes        show and filter the live HTTP route catalog without starting the server\n"
             "  --host HOST   bind address (default: 0.0.0.0)\n"
             "  --port PORT   TCP port     (default: 8420)\n"
         )
         return 2
+
+    if args and args[0] == "routes":
+        return _api_routes_command(args[1:], stdout=stdout)
 
     host = "0.0.0.0"
     port = 8420

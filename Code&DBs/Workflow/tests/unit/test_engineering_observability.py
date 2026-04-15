@@ -5,12 +5,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 _WORKFLOW_ROOT = Path(__file__).resolve().parents[2]
 if str(_WORKFLOW_ROOT) not in sys.path:
     sys.path.insert(0, str(_WORKFLOW_ROOT))
 
 import runtime.engineering_observability as observability_mod
 from runtime.health_map import HealthMapper
+from runtime.trend_detector import TrendDirection
 
 
 def _bug(*, bug_id: str, title: str, severity: str, status: str, category: str):
@@ -46,6 +49,22 @@ class _FakeRiskScorer:
                 avg_duration_ms=1800,
                 failure_codes=("IMPORT_ERROR",),
                 last_touched=datetime(2026, 4, 10, 12, 0, tzinfo=timezone.utc),
+            )
+        ]
+
+
+class _FakeTrendDetector:
+    def detect_from_receipts(self):
+        return [
+            SimpleNamespace(
+                metric_name="cost_trend",
+                provider_slug="anthropic",
+                direction=TrendDirection.DEGRADING,
+                baseline_value=0.5,
+                current_value=0.9,
+                change_pct=80.0,
+                sample_count=7,
+                severity="warning",
             )
         ]
 
@@ -212,6 +231,24 @@ def test_build_platform_observability_flattens_probe_state() -> None:
     assert payload["summary"]["warning_checks"] == 1
     assert payload["checks"][0]["status"] == "warning"
     assert "queue backed up" in payload["degraded_causes"]
+
+
+def test_build_trend_observability_summarizes_recent_trends(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(observability_mod, "TrendDetector", _FakeTrendDetector)
+
+    payload = observability_mod.build_trend_observability()
+
+    assert payload["summary"] == {
+        "total_trends": 1,
+        "critical_trends": 0,
+        "warning_trends": 1,
+        "info_trends": 0,
+        "degrading_trends": 1,
+        "accelerating_trends": 0,
+        "improving_trends": 0,
+    }
+    assert payload["trends"][0]["provider_slug"] == "anthropic"
+    assert "cost_trend" in payload["trend_digest"]
 
 
 def test_health_mapper_skips_test_filenames(tmp_path: Path) -> None:

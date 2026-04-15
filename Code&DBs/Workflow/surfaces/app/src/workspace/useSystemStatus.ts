@@ -16,6 +16,13 @@ export interface SystemStatus {
   modelsOnline: number;
   activeRuns: number;
   queueDepth: number;
+  queueDepthStatus: 'ok' | 'warning' | 'critical' | 'unknown';
+  queueDepthUtilizationPct: number;
+  queueDepthPending: number;
+  queueDepthReady: number;
+  queueDepthClaimed: number;
+  queueDepthRunning: number;
+  queueDepthError: string | null;
   // From /api/metrics or /api/status
   passRate24h: number | null;
   totalRuns24h: number;
@@ -43,6 +50,13 @@ export function useSystemStatus(): SystemStatus {
     modelsOnline: 0,
     activeRuns: 0,
     queueDepth: 0,
+    queueDepthStatus: 'unknown',
+    queueDepthUtilizationPct: 0,
+    queueDepthPending: 0,
+    queueDepthReady: 0,
+    queueDepthClaimed: 0,
+    queueDepthRunning: 0,
+    queueDepthError: null,
     passRate24h: null,
     totalRuns24h: 0,
     totalCost24h: 0,
@@ -68,6 +82,13 @@ export function useSystemStatus(): SystemStatus {
 
       // Count only truly running workflows (not queued/stale)
       const activeRuns = recentRuns.filter(r => r.status === 'running').length;
+      const queueDepth = Number(s.queue_depth ?? s.queue_depth_total ?? 0);
+      const queueDepthStatus = (s.queue_depth_status ?? (
+        queueDepth >= 1000 ? 'critical' : queueDepth >= 500 ? 'warning' : 'ok'
+      )) as SystemStatus['queueDepthStatus'];
+      const queueDepthUtilizationPct = Number.isFinite(Number(s.queue_depth_utilization_pct))
+        ? Number(s.queue_depth_utilization_pct)
+        : Number(((queueDepth / 1000) * 100).toFixed(1));
 
       // Parse leaderboard
       const agents = (lb.agents ?? lb.leaderboard ?? []).map((a: any) => ({
@@ -83,7 +104,16 @@ export function useSystemStatus(): SystemStatus {
       setStatus({
         modelsOnline: agents.length,
         activeRuns,
-        queueDepth: 0,
+        queueDepth,
+        queueDepthStatus,
+        queueDepthUtilizationPct,
+        queueDepthPending: Number(s.queue_depth_pending ?? 0),
+        queueDepthReady: Number(s.queue_depth_ready ?? 0),
+        queueDepthClaimed: Number(s.queue_depth_claimed ?? 0),
+        queueDepthRunning: Number(s.queue_depth_running ?? 0),
+        queueDepthError: typeof s.queue_depth_error === 'string' && s.queue_depth_error.trim()
+          ? s.queue_depth_error
+          : null,
         passRate24h: s.pass_rate ?? null,
         totalRuns24h: s.total_workflows ?? 0,
         totalCost24h: agents.reduce((sum: number, a: any) => sum + (a.totalCost || 0), 0),

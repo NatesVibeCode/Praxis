@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -352,6 +353,244 @@ def test_native_operator_surface_scopes_run_context_and_database_handle_per_requ
     assert fork_selectors[0].runtime_profile_ref == "runtime_profile.test"
     assert fork_selectors[0].fork_ref == "fork.alpha"
     assert fork_selectors[0].worktree_ref == "worktree.alpha"
+
+
+def test_native_operator_surface_query_payload_reuses_request_connection_and_prefetched_bindings(
+    monkeypatch,
+) -> None:
+    as_of = datetime(2026, 4, 3, 9, 0, tzinfo=timezone.utc)
+    env = {"PRAXIS_RUNTIME_PROFILE": "praxis"}
+    connect_calls: list[dict[str, object]] = []
+    close_calls: list[str] = []
+    captured: dict[str, object] = {}
+
+    class _FakeConnection:
+        async def close(self) -> None:
+            close_calls.append("closed")
+
+    fake_connection = _FakeConnection()
+
+    async def _fake_connect_database(source_env):
+        connect_calls.append({"env": dict(source_env or {})})
+        return fake_connection
+
+    async def _fake_query_operator_surface_async(
+        self,
+        *,
+        env,
+        as_of,
+        bug_ids=None,
+        roadmap_item_ids=None,
+        cutover_gate_ids=None,
+        work_item_workflow_binding_ids=None,
+        workflow_run_ids=None,
+        conn=None,
+        prefetched_work_item_workflow_bindings=None,
+    ):
+        del self
+        captured.update(
+            {
+                "env": dict(env or {}),
+                "as_of": as_of,
+                "bug_ids": bug_ids,
+                "roadmap_item_ids": roadmap_item_ids,
+                "cutover_gate_ids": cutover_gate_ids,
+                "work_item_workflow_binding_ids": work_item_workflow_binding_ids,
+                "workflow_run_ids": workflow_run_ids,
+                "conn": conn,
+                "prefetched_work_item_workflow_bindings": prefetched_work_item_workflow_bindings,
+            }
+        )
+        return {
+            "native_instance": {"kind": "native_instance", "label": "shared"},
+            "kind": "operator_query",
+            "as_of": as_of.isoformat(),
+            "query": {
+                "bug_ids": [] if bug_ids is None else list(bug_ids),
+                "roadmap_item_ids": [] if roadmap_item_ids is None else list(roadmap_item_ids),
+                "cutover_gate_ids": [] if cutover_gate_ids is None else list(cutover_gate_ids),
+                "work_item_workflow_binding_ids": (
+                    []
+                    if work_item_workflow_binding_ids is None
+                    else list(work_item_workflow_binding_ids)
+                ),
+                "workflow_run_ids": [] if workflow_run_ids is None else list(workflow_run_ids),
+            },
+            "counts": {
+                "bugs": 0,
+                "roadmap_items": 0,
+                "cutover_gates": 0,
+                "work_item_workflow_bindings": 1,
+                "work_item_assessments": 0,
+                "work_item_closeout_recommendations": 0,
+            },
+            "bugs": [],
+            "roadmap_items": [],
+            "cutover_gates": [],
+            "work_item_workflow_bindings": [],
+            "work_item_assessments": [],
+            "work_item_closeout_recommendations": [],
+        }
+
+    monkeypatch.setattr(
+        native_operator_surface.NativeOperatorQueryFrontdoor,
+        "query_operator_surface_async",
+        _fake_query_operator_surface_async,
+    )
+
+    frontdoor = native_operator_surface.NativeOperatorSurfaceFrontdoor(
+        connect_database=_fake_connect_database,
+    )
+    binding = WorkItemWorkflowBindingRecord(
+        work_item_workflow_binding_id="binding.1",
+        binding_kind="governed_by",
+        binding_status="active",
+        roadmap_item_id=None,
+        bug_id=None,
+        cutover_gate_id="gate.1",
+        workflow_class_id="dispatch.1",
+        schedule_definition_id=None,
+        workflow_run_id="run.1",
+        bound_by_decision_id="decision.1",
+        created_at=as_of,
+        updated_at=as_of,
+    )
+    scope = native_operator_surface._NativeOperatorRequestScope(
+        env=env,
+        connect_database=_fake_connect_database,
+    )
+    scope_token = native_operator_surface._ACTIVE_NATIVE_OPERATOR_REQUEST_SCOPE.set(scope)
+    try:
+        payload = asyncio.run(
+            frontdoor._load_query_payload(
+                env=env,
+                as_of=as_of,
+                run_id="run.1",
+                bug_ids=None,
+                roadmap_item_ids=None,
+                cutover_gate_ids=None,
+                query_binding_ids=("binding.1",),
+                prefetched_work_bindings=(binding,),
+            )
+        )
+    finally:
+        native_operator_surface._ACTIVE_NATIVE_OPERATOR_REQUEST_SCOPE.reset(scope_token)
+        asyncio.run(scope.close())
+
+    assert payload["kind"] == "operator_query"
+    assert connect_calls == [{"env": env}]
+    assert close_calls == ["closed"]
+    assert captured["conn"] is fake_connection
+    assert captured["work_item_workflow_binding_ids"] == ("binding.1",)
+    assert captured["workflow_run_ids"] == ["run.1"]
+    assert captured["prefetched_work_item_workflow_bindings"] == (binding,)
+
+
+def test_native_operator_surface_query_payload_falls_back_to_patched_query_surface(
+    monkeypatch,
+) -> None:
+    as_of = datetime(2026, 4, 3, 9, 30, tzinfo=timezone.utc)
+    env = {"PRAXIS_RUNTIME_PROFILE": "praxis"}
+    query_calls: list[dict[str, object]] = []
+
+    async def _blocked_connect_database(_source_env):
+        raise AssertionError("fallback path should not open a database connection")
+
+    async def _blocked_query_async(self, **_kwargs):
+        del self
+        raise AssertionError("fallback path should not use async operator query frontdoor")
+
+    def _fake_query_operator_surface(
+        *,
+        env=None,
+        as_of=None,
+        bug_ids=None,
+        roadmap_item_ids=None,
+        cutover_gate_ids=None,
+        work_item_workflow_binding_ids=None,
+        workflow_run_ids=None,
+    ) -> dict[str, object]:
+        query_calls.append(
+            {
+                "env": dict(env or {}),
+                "as_of": as_of,
+                "bug_ids": bug_ids,
+                "roadmap_item_ids": roadmap_item_ids,
+                "cutover_gate_ids": cutover_gate_ids,
+                "work_item_workflow_binding_ids": work_item_workflow_binding_ids,
+                "workflow_run_ids": workflow_run_ids,
+            }
+        )
+        return {
+            "native_instance": {"kind": "native_instance", "label": "shared"},
+            "kind": "operator_query",
+            "as_of": as_of.isoformat(),
+            "query": {
+                "bug_ids": [] if bug_ids is None else list(bug_ids),
+                "roadmap_item_ids": [] if roadmap_item_ids is None else list(roadmap_item_ids),
+                "cutover_gate_ids": [] if cutover_gate_ids is None else list(cutover_gate_ids),
+                "work_item_workflow_binding_ids": (
+                    []
+                    if work_item_workflow_binding_ids is None
+                    else list(work_item_workflow_binding_ids)
+                ),
+                "workflow_run_ids": [] if workflow_run_ids is None else list(workflow_run_ids),
+            },
+            "counts": {
+                "bugs": 0,
+                "roadmap_items": 0,
+                "cutover_gates": 0,
+                "work_item_workflow_bindings": 0,
+                "work_item_assessments": 0,
+                "work_item_closeout_recommendations": 0,
+            },
+            "bugs": [],
+            "roadmap_items": [],
+            "cutover_gates": [],
+            "work_item_workflow_bindings": [],
+            "work_item_assessments": [],
+            "work_item_closeout_recommendations": [],
+        }
+
+    monkeypatch.setattr(
+        native_operator_surface.NativeOperatorQueryFrontdoor,
+        "query_operator_surface_async",
+        _blocked_query_async,
+    )
+    monkeypatch.setattr(
+        native_operator_surface,
+        "query_operator_surface",
+        _fake_query_operator_surface,
+    )
+
+    frontdoor = native_operator_surface.NativeOperatorSurfaceFrontdoor(
+        connect_database=_blocked_connect_database,
+    )
+    payload = asyncio.run(
+        frontdoor._load_query_payload(
+            env=env,
+            as_of=as_of,
+            run_id="run.1",
+            bug_ids=None,
+            roadmap_item_ids=None,
+            cutover_gate_ids=None,
+            query_binding_ids=("binding.1",),
+            prefetched_work_bindings=(),
+        )
+    )
+
+    assert payload["kind"] == "operator_query"
+    assert query_calls == [
+        {
+            "env": env,
+            "as_of": as_of,
+            "bug_ids": None,
+            "roadmap_item_ids": None,
+            "cutover_gate_ids": None,
+            "work_item_workflow_binding_ids": ("binding.1",),
+            "workflow_run_ids": ["run.1"],
+        }
+    ]
 
 
 def test_native_operator_surface_consolidates_query_and_cockpit_truth(monkeypatch) -> None:

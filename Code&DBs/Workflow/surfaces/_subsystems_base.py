@@ -12,6 +12,7 @@ import os
 import sys
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 from storage.postgres import PostgresConfigurationError
 
@@ -79,12 +80,26 @@ class _BaseSubsystems:
         os.makedirs(path, exist_ok=True)
         return str(path)
 
+    def _normalize_postgres_url(self, database_url: str) -> str:
+        parsed = urlsplit(database_url)
+        if parsed.username or parsed.scheme not in {"postgresql", "postgres"}:
+            return database_url
+        hostname = parsed.hostname or "localhost"
+        netloc = "postgres"
+        if parsed.password:
+            netloc += f":{parsed.password}"
+        netloc += f"@{hostname}"
+        if parsed.port is not None:
+            netloc += f":{parsed.port}"
+        return urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
+
     def _postgres_env(self) -> dict[str, str]:
         database_url = os.environ.get("WORKFLOW_DATABASE_URL", "").strip()
         if not database_url:
             database_url = self._default_database_url
         if not database_url:
             raise RuntimeError("WORKFLOW_DATABASE_URL must be set for subsystem Postgres access")
+        database_url = self._normalize_postgres_url(database_url)
         return {
             "WORKFLOW_DATABASE_URL": database_url,
             "PATH": os.environ.get("PATH", ""),

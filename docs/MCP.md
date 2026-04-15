@@ -1,13 +1,13 @@
 # Praxis MCP Tools
 
-Praxis exposes 42 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
+Praxis exposes 43 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
 
 CLI discovery is generated from the same catalog metadata:
 
 - `workflow tools list`
 - `workflow tools search <text>`
-- `workflow tools describe <tool>`
-- `workflow tools call <tool> --input-json '{...}'`
+- `workflow tools describe <tool|alias>`
+- `workflow tools call <tool|alias> --input-json '{...}'`
 
 ## Catalog Summary
 
@@ -33,6 +33,7 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_reload` | `operations` | `advanced` | - | `write` | Clear all in-process caches so DB and config changes take effect without restarting Claude Desktop. |
 | `praxis_status` | `operations` | `advanced` | - | `read` | Quick snapshot of how workflows are performing — total runs, pass/fail rate, categorized failure breakdown by zone (external/config/internal), and adjusted pass rate that excludes external provider failures. |
 | `praxis_operator_closeout` | `operator` | `advanced` | - | `read`, `write` | Preview or commit proof-backed bug and roadmap closeout through the shared reconciliation gate. |
+| `praxis_operator_native_primary_cutover_gate` | `operator` | `advanced` | - | `write` | Admit a native primary cutover gate into operator-control decision and gate authority tables. |
 | `praxis_operator_roadmap_view` | `operator` | `advanced` | - | `read` | Read one roadmap subtree and its dependency edges from DB-backed authority. |
 | `praxis_operator_view` | `operator` | `advanced` | - | `read` | Render detailed operator observability views — deeper than praxis_status. |
 | `praxis_operator_write` | `operator` | `advanced` | - | `read`, `write` | Preview, validate, or commit roadmap rows through the shared operator-write validation gate. |
@@ -53,7 +54,7 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_submit_research_result` | `submissions` | `session` | - | `session` | Submit a sealed research result for the current workflow MCP session. The session token owns run_id, workflow_id, and job_label. This tool never accepts those ids as input and returns structured errors instead of stack traces. |
 | `praxis_connector` | `workflow` | `advanced` | - | `dispatch`, `read`, `write` | Build API connectors for third-party applications. One call stamps a workflow spec and launches a 4-job pipeline (discover API → map objects → build client → review). |
 | `praxis_wave` | `workflow` | `advanced` | - | `dispatch`, `read`, `write` | Manage execution waves — groups of jobs with dependency ordering. Waves track which jobs are runnable (all dependencies met) and which are blocked. |
-| `praxis_workflow` | `workflow` | `advanced` | - | `dispatch`, `read` | Execute work by launching a workflow for LLM agents. This is the primary way to run tasks — building code, running tests, writing reviews, refactoring, and debates. |
+| `praxis_workflow` | `workflow` | `advanced` | - | `dispatch`, `read`, `write` | Execute work by launching a workflow for LLM agents. This is the primary way to run tasks — building code, running tests, writing reviews, refactoring, and debates. |
 | `praxis_workflow_validate` | `workflow` | `advanced` | - | `read` | Dry-run a workflow spec to check for errors before executing it. Returns whether the spec is valid, how many jobs it contains, and which agents each job resolves to. |
 
 ## Tool Reference
@@ -505,6 +506,30 @@ Example input:
 {
   "action": "preview",
   "work_item_id": "WI-123"
+}
+```
+
+#### `praxis_operator_native_primary_cutover_gate`
+
+- Surface: `operator`
+- Tier: `advanced`
+- Badges: `advanced`, `operator`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow tools call praxis_operator_native_primary_cutover_gate`
+- CLI schema help: `workflow tools describe praxis_operator_native_primary_cutover_gate`
+- When to use: Admit a native-primary cutover gate with required decision metadata into operator-control.
+- When not to use: Do not use it for read-only operator status views.
+- Selector: none
+- Required args: `decided_by`, `decision_source`, `rationale`
+
+Example input:
+
+```json
+{
+  "decided_by": "operator-auto",
+  "decision_source": "runbook",
+  "rationale": "manual rollout hold ended",
+  "roadmap_item_id": "roadmap_item.platform.deploy"
 }
 ```
 
@@ -965,13 +990,13 @@ Example input:
 
 - Surface: `workflow`
 - Tier: `advanced`
-- Badges: `advanced`, `workflow`, `dispatches-work`
-- Risks: `dispatch`, `read`
+- Badges: `advanced`, `workflow`, `mutates-state`, `dispatches-work`
+- Risks: `dispatch`, `read`, `write`
 - CLI entrypoint: `workflow tools call praxis_workflow`
 - CLI schema help: `workflow tools describe praxis_workflow`
-- When to use: Run, inspect, retry, cancel, or list workflows through the MCP workflow surface.
+- When to use: Run, inspect, claim, acknowledge, retry, cancel, or list workflows through the MCP workflow surface.
 - When not to use: Do not use it for natural-language questions or health checks.
-- Selector: `action`; default `run`; values `run`, `status`, `inspect`, `cancel`, `list`, `notifications`, `retry`, `repair`
+- Selector: `action`; default `run`; values `run`, `spawn`, `status`, `inspect`, `claim`, `acknowledge`, `cancel`, `list`, `notifications`, `retry`, `repair`, `chain`
 - Required args: (none)
 
 Example input:

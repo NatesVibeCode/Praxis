@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Local alpha helper surface for the Praxis service manager.
+"""Import-safe local-alpha helper surface.
 
-This module intentionally delegates to existing repo-local authority surfaces:
-- storage.dev_postgres for DB bootstrap/health
-- operator_read.run_native_self_hosted_smoke for proof execution
+This module intentionally keeps the helper functions importable because tests
+and repo-local health projections depend on them. The direct native control
+CLI remains disabled; callers should use Docker or Cloudflare sandbox
+authority instead of invoking this file as an executable.
 """
 
 from __future__ import annotations
 
-import argparse
 import contextlib
 import io
 import json
@@ -20,23 +20,26 @@ from typing import Any, Mapping
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
-_REPO_ROOT = Path(__file__).resolve().parents[1]
-_WORKFLOW_ROOT = _REPO_ROOT / "Code&DBs" / "Workflow"
-if str(_WORKFLOW_ROOT) not in sys.path:
-    sys.path.insert(0, str(_WORKFLOW_ROOT))
+REPO_ROOT = Path(__file__).resolve().parents[1]
+WORKFLOW_ROOT = REPO_ROOT / "Code&DBs" / "Workflow"
+if str(WORKFLOW_ROOT) not in sys.path:
+    sys.path.insert(0, str(WORKFLOW_ROOT))
 
 from surfaces.api import operator_read
+from runtime.dependency_contract import dependency_truth_report
 from runtime.post_workflow_sync import (
     get_workflow_run_sync_status,
     latest_workflow_run_sync_status,
     repair_workflow_run_sync,
     run_post_workflow_sync,
 )
-from runtime.dependency_contract import dependency_truth_report
 from storage.dev_postgres import local_postgres_bootstrap, local_postgres_health
 
 
-DEFAULT_DB_URL = os.environ["WORKFLOW_DATABASE_URL"]
+DISABLED_MESSAGE = (
+    "Native local-alpha control is disabled. Use Docker or Cloudflare sandbox authority only."
+)
+DEFAULT_DB_URL = os.environ.get("WORKFLOW_DATABASE_URL", "postgresql://postgres@localhost:5432/praxis")
 DEFAULT_API_BASE_URL = "http://127.0.0.1:8420"
 DEFAULT_WORKFLOW_API_BASE_URL = "http://127.0.0.1:8420"
 
@@ -320,7 +323,7 @@ def cmd_smoke(*, state_file: str | None = None) -> int:
                 },
             )
         return _emit(proof)
-    except Exception as exc:  # pragma: no cover - integration failure surfaces depend on env/deploy state
+    except Exception as exc:  # pragma: no cover - integration failure depends on local env
         failure = {
             "ok": False,
             "smoke_run_id": None,
@@ -387,7 +390,6 @@ def cmd_doctor(*, services_ready: str, state_file: str) -> int:
             "sync_cycle_id": state["sync_cycle_id"],
             "sync_error_count": state["sync_error_count"],
             "launch_url": readiness["launch_url"],
-            "helm_url": readiness["helm_url"],
             "dashboard_url": readiness["dashboard_url"],
             "api_docs_url": readiness["api_docs_url"],
             "dependency_truth": dependency_truth_report(scope="all"),
@@ -422,27 +424,9 @@ def cmd_repair_sync(*, run_id: str | None = None) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Local alpha helper for the Praxis service manager")
-    parser.add_argument("command", choices={"db-health", "db-bootstrap", "smoke", "doctor", "repair-sync"})
-    parser.add_argument("--state-file", default="", dest="state_file")
-    parser.add_argument("--services-ready", default="false")
-    parser.add_argument("--run-id", default="")
-    args = parser.parse_args(argv)
-
-    if args.command == "db-health":
-        return cmd_db_health()
-    if args.command == "db-bootstrap":
-        return cmd_db_bootstrap()
-    if args.command == "smoke":
-        return cmd_smoke(state_file=args.state_file or None)
-    if args.command == "doctor":
-        return cmd_doctor(
-            services_ready=args.services_ready,
-            state_file=args.state_file,
-        )
-    if args.command == "repair-sync":
-        return cmd_repair_sync(run_id=args.run_id or None)
-    raise AssertionError(f"unsupported local-alpha command: {args.command}")
+    del argv
+    print(DISABLED_MESSAGE, file=sys.stderr)
+    return 1
 
 
 if __name__ == "__main__":  # pragma: no cover - CLI entrypoint

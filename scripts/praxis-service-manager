@@ -34,6 +34,31 @@ COMPATIBILITY_ALIAS_PATH="${PRAXIS_COMPATIBILITY_ALIAS_PATH:-scripts/praxis-ctl}
 SUPERVISOR_LABEL="com.praxis.engine"
 SUPERVISOR_PLIST="$LAUNCH_AGENTS/$SUPERVISOR_LABEL.plist"
 
+case "${1:-}" in
+    help|--help|-h)
+        echo "Usage: ${COMMAND_NAME} <command> [service]"
+        echo ""
+        echo "Commands:"
+        echo "  install     Install the single Praxis background agent (auto-start on login)"
+        echo "  uninstall   Stop and remove the Praxis background agent (preserves data)"
+        echo "  setup       Run one-shot local alpha setup with schema bootstrap and smoke proof"
+        echo "  launch      Auto-heal services, ensure /app build exists, prove readiness, open launcher"
+        echo "  start       Start service(s)  — ${COMMAND_NAME} start [--foreground|postgres|api|workflow-api|worker|scheduler]"
+        echo "  stop        Stop service(s)   — ${COMMAND_NAME} stop [postgres|api|workflow-api|worker|scheduler]"
+        echo "  restart     Restart service(s)"
+        echo "  doctor      Read setup proof — ${COMMAND_NAME} doctor --json"
+        echo "  repair-sync Re-run graph sync for the latest degraded run or a specific run id"
+        echo "  status      Show all service states, PIDs, ports, and semantic readiness"
+        echo "  logs        Tail logs — ${COMMAND_NAME} logs [postgres|api|workflow-api|worker|scheduler]"
+        echo ""
+        echo "Services: postgres, api, worker, scheduler (or 'all', the default)"
+        exit 0
+        ;;
+esac
+
+echo "Native Praxis service-manager is disabled. Use Docker or Cloudflare sandbox authority only." >&2
+exit 1
+
 # Internal component names in dependency order
 SERVICES=(
     postgres

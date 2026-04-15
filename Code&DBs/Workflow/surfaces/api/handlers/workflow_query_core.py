@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import asdict, is_dataclass
+from datetime import datetime, timezone
 from typing import Any
+
+from storage.postgres.connection import resolve_workflow_database_url
+from storage.postgres.validators import PostgresConfigurationError
 
 from ._shared import _ClientError, _bug_to_dict, _matches, _serialize
 from .workflow_admin import _handle_health
@@ -14,6 +19,28 @@ def _optional_text(value: object) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _build_workflow_bridge(subs: Any):
+    """Build the real workflow bridge over live Postgres-backed authorities."""
+
+    from surfaces.workflow_bridge import build_live_workflow_bridge
+
+    postgres_env = getattr(subs, "_postgres_env", None)
+    env: dict[str, str] = {}
+    if callable(postgres_env):
+        try:
+            env = dict(postgres_env() or {})
+        except Exception:
+            env = {}
+    try:
+        if env.get("WORKFLOW_DATABASE_URL"):
+            database_url = resolve_workflow_database_url(env=env)
+        else:
+            database_url = resolve_workflow_database_url()
+    except PostgresConfigurationError as exc:
+        raise RuntimeError("WORKFLOW_DATABASE_URL is required to inspect workflow bridge state") from exc
+    return build_live_workflow_bridge(database_url)
 
 
 def _empty_result(
@@ -69,6 +96,32 @@ def handle_query(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
     question = (body.get("question") or "").strip().lower()
     if not question:
         raise _ClientError("question is required")
+
+    if _matches(question, ["lane catalog", "lane runtime", "workflow bridge", "worker lane"]):
+        try:
+            bridge = _build_workflow_bridge(subs)
+            catalog = asyncio.run(
+                bridge.inspect_lane_catalog(as_of=datetime.now(timezone.utc))
+            )
+            return {
+                "routed_to": "workflow_bridge",
+                "view": "lane_catalog",
+                "as_of": catalog.as_of.isoformat(),
+                "lane_count": len(catalog.lane_records),
+                "policy_count": len(catalog.lane_policy_records),
+                "lane_names": list(catalog.lane_names),
+                "policy_keys": [list(key) for key in catalog.policy_keys],
+                "catalog": _serialize(catalog),
+            }
+        except Exception as exc:
+            return {
+                "routed_to": "workflow_bridge",
+                "view": "lane_catalog",
+                "status": "unavailable",
+                "reason_code": "workflow_bridge.unavailable",
+                "error_type": type(exc).__name__,
+                "error_message": str(exc),
+            }
 
     if _matches(question, ["status", "panel", "snapshot", "overview", "dashboard"]):
         panel = subs.get_operator_panel()

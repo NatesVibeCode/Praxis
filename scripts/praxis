@@ -5,10 +5,244 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 WORKFLOW_DIR="$REPO_ROOT/Code&DBs/Workflow"
 
+docker_only_usage() {
+    cat <<'EOF'
+Usage: praxis <command> [service]
+
+Docker-only commands:
+  status                  Show Docker service state and active workflows
+  start [service...]      Start Docker services (default: all)
+  stop [service...]       Stop Docker services (default: all)
+  restart [service...]    Restart Docker services (default: all)
+  logs [service...]       Show Docker logs (default: all, tail=200)
+
+Other commands:
+  workflow ...            Delegate to workflow CLI
+  agent-run               Run the Praxis supervisor agent entrypoint
+
+Services:
+  postgres
+  api | api-server | server | workflow-api
+  worker | workflow-worker | queue-worker
+  scheduler
+
+Notes:
+  - Native launchd control is disabled.
+EOF
+}
+
+require_docker() {
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "Docker is required for Praxis docker-only control." >&2
+        exit 1
+    fi
+}
+
+normalize_docker_service() {
+    case "${1:-}" in
+        postgres|pg)
+            echo "postgres"
+            ;;
+        api|api-server|server|praxis-server|workflow-api)
+            echo "api-server"
+            ;;
+        worker|workflow-worker|queue-worker)
+            echo "workflow-worker"
+            ;;
+        scheduler)
+            echo "scheduler"
+            ;;
+        all|"")
+            echo ""
+            ;;
+        *)
+            echo "Unknown Docker service: $1" >&2
+            exit 1
+            ;;
+    esac
+}
+
+docker_services_from_args() {
+    local normalized
+    if [ "$#" -eq 0 ]; then
+        printf '%s\n' postgres api-server workflow-worker scheduler
+        return
+    fi
+    for arg in "$@"; do
+        normalized="$(normalize_docker_service "$arg")"
+        if [ -n "$normalized" ]; then
+            printf '%s\n' "$normalized"
+        fi
+    done | awk '!seen[$0]++'
+}
+
+docker_only_start() {
+    require_docker
+    mapfile -t services < <(docker_services_from_args "$@")
+    (cd "$REPO_ROOT" && docker compose up -d "${services[@]}")
+}
+
+docker_only_stop() {
+    require_docker
+    mapfile -t services < <(docker_services_from_args "$@")
+    (cd "$REPO_ROOT" && docker compose stop "${services[@]}")
+}
+
+docker_only_restart() {
+    require_docker
+    mapfile -t services < <(docker_services_from_args "$@")
+    (cd "$REPO_ROOT" && docker compose restart "${services[@]}")
+}
+
+docker_only_logs() {
+    require_docker
+    local -a services=()
+    local -a options=()
+    local arg
+    local saw_tail=0
+    local saw_follow=0
+    while [ "$#" -gt 0 ]; do
+        arg="$1"
+        if [[ "$arg" == -* ]]; then
+            options+=("$arg")
+            case "$arg" in
+                --tail|-n)
+                    saw_tail=1
+                    shift
+                    if [ "$#" -gt 0 ]; then
+                        options+=("$1")
+                    fi
+                    shift
+                    continue
+                    ;;
+                --tail=*)
+                    saw_tail=1
+                    ;;
+                -f|--follow)
+                    saw_follow=1
+                    ;;
+            esac
+            shift
+            continue
+        fi
+        services+=("$(normalize_docker_service "$arg")")
+        shift
+    done
+    if [ "${#services[@]}" -eq 0 ]; then
+        mapfile -t services < <(docker_services_from_args)
+    fi
+    if [ "$saw_tail" -eq 0 ] && [ "$saw_follow" -eq 0 ]; then
+        options=(--tail=200 "${options[@]}")
+    fi
+    (cd "$REPO_ROOT" && docker compose logs "${options[@]}" "${services[@]}")
+}
+
+docker_only_status() {
+    require_docker
+
+    local compose_json
+    if ! compose_json="$(cd "$REPO_ROOT" && docker compose ps --format json 2>/dev/null)"; then
+        echo "Praxis Docker authority is unavailable. Run from the repo with Docker Compose available." >&2
+        exit 1
+    fi
+
+    echo "Praxis mode: docker-only"
+    PRAXIS_COMPOSE_JSON="$compose_json" python3 - <<'PY'
+import json
+import os
+import sys
+
+raw = os.environ.get("PRAXIS_COMPOSE_JSON", "").strip()
+if not raw:
+    services = []
+else:
+    try:
+        services = json.loads(raw)
+    except json.JSONDecodeError:
+        services = [json.loads(line) for line in raw.splitlines() if line.strip()]
+    if isinstance(services, dict):
+        services = [services]
+
+if not services:
+    print("Services: none")
+else:
+    print("Services:")
+    for service in services:
+        name = service.get("Service") or service.get("Name") or "unknown"
+        state = service.get("State") or service.get("Status") or "unknown"
+        health = service.get("Health") or ""
+        ports = service.get("Publishers") or []
+        published = []
+        for port in ports:
+            url = port.get("URL") or ""
+            target = port.get("TargetPort")
+            published_port = port.get("PublishedPort")
+            protocol = port.get("Protocol") or "tcp"
+            if published_port and target:
+                published.append(f"{url}:{published_port}->{target}/{protocol}".replace("tcp://", ""))
+        suffix = f" [{health}]" if health else ""
+        port_suffix = f" ({', '.join(published)})" if published else ""
+        print(f"  - {name}: {state}{suffix}{port_suffix}")
+PY
+
+    if active_output="$(cd "$REPO_ROOT" && ./scripts/workflow.sh active 2>/dev/null)"; then
+        if [ -n "$active_output" ]; then
+            echo ""
+            echo "Active workflows:"
+            printf '%s\n' "$active_output"
+        fi
+    fi
+
+    if curl -fsS --max-time 2 http://127.0.0.1:8420/api/health >/dev/null 2>&1; then
+        echo ""
+        echo "Links:"
+        echo "  - App:  http://127.0.0.1:8420/app"
+        echo "  - Docs: http://127.0.0.1:8420/docs"
+    fi
+}
+
 if [ "${1:-}" = "agent-run" ]; then
     export PYTHONPATH="$WORKFLOW_DIR${PYTHONPATH:+:$PYTHONPATH}"
     exec python3 -m runtime.praxis_supervisor --repo-root "$REPO_ROOT" run
 fi
+
+if [ "${1:-}" = "workflow" ]; then
+    shift
+    export PYTHONPATH="$WORKFLOW_DIR${PYTHONPATH:+:$PYTHONPATH}"
+    PYTHON_BIN="${PYTHON_BIN:-$(command -v python3.14 || command -v python3.13 || command -v python3)}"
+    exec "$PYTHON_BIN" -m surfaces.cli.main workflow "$@"
+fi
+
+case "${1:-}" in
+    help|--help|-h)
+        docker_only_usage
+        exit 0
+        ;;
+    status)
+        docker_only_status
+        exit 0
+        ;;
+    start)
+        shift
+        docker_only_start "$@"
+        exit 0
+        ;;
+    stop)
+        shift
+        docker_only_stop "$@"
+        exit 0
+        ;;
+    restart)
+        shift
+        docker_only_restart "$@"
+        exit 0
+        ;;
+    logs)
+        shift
+        docker_only_logs "$@"
+        exit 0
+        ;;
+esac
 
 export PRAXIS_COMMAND_NAME="praxis"
 export PRAXIS_SERVICE_MANAGER_PATH="scripts/praxis"

@@ -119,7 +119,10 @@ The same catalog now powers terminal discovery:
 workflow tools list
 workflow tools describe praxis_query
 workflow tools call praxis_health --input-json '{}'
+workflow api routes
 ```
+
+The API surface also exposes the live route catalog at `GET /api/routes` for clients that want discovery without scraping docs.
 
 ## Architecture
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+from contextlib import contextmanager
 import hashlib
 import inspect
 import json
@@ -18,6 +19,7 @@ import runtime.retry_orchestrator as retry_orchestrator
 from runtime.shadow_execution_packet import inspect_shadow_execution_packets
 from runtime.workflow import unified as unified_dispatch
 from runtime.workflow import _admission as _admission_mod
+from registry.runtime_profile_admission import RuntimeProfileAdmissionError
 from runtime.workflow import _context_building as _ctx_mod
 from runtime.workflow import _execution_core as _exec_mod
 from runtime.workflow.submission_gate import SubmissionGateResult as _SubmissionGateResult
@@ -40,6 +42,7 @@ class _FakeConn:
         existing_run_states: dict[str, str] | None = None,
         compile_artifact_rows: list[dict[str, object]] | None = None,
         execution_packet_rows: list[dict[str, object]] | None = None,
+        queue_depth: int = 0,
     ) -> None:
         self.next_job_id = 0
         self.edge_inserts: list[tuple[int, int]] = []
@@ -48,6 +51,7 @@ class _FakeConn:
         self.existing_run_states = existing_run_states or {}
         self.compile_artifact_rows = compile_artifact_rows or []
         self.execution_packet_rows = execution_packet_rows or []
+        self.queue_depth = queue_depth
         self.queries: list[tuple[str, tuple]] = []
 
     def execute(self, query: str, *args):
@@ -99,6 +103,8 @@ class _FakeConn:
         if "FROM idempotency_ledger" in query:
             row = self.existing_idempotency.get((args[0], args[1]))
             return [row] if row else []
+        if "SELECT COUNT(*) FROM workflow_jobs WHERE status IN ('pending', 'ready')" in query:
+            return [{"count": self.queue_depth}]
         if "SELECT current_state" in query and "FROM workflow_runs" in query:
             state = self.existing_run_states.get(args[0])
             return [{"current_state": state}] if state else []
@@ -113,6 +119,13 @@ class _FakeConn:
         if "INSERT INTO workflow_job_edges" in query:
             self.edge_inserts.append((args[0], args[1]))
             return []
+        if "SELECT parent_id, child_id" in query and "FROM workflow_job_edges" in query:
+            child_ids = set(args[0] or [])
+            return [
+                {"parent_id": parent_id, "child_id": child_id}
+                for parent_id, child_id in self.edge_inserts
+                if child_id in child_ids
+            ]
         if "UPDATE workflow_jobs" in query and "SET status = 'ready'" in query and len(args) == 2:
             row = self.existing_jobs.get((args[0], args[1]))
             if row:
@@ -1483,6 +1496,60 @@ def test_submit_workflow_keeps_explicit_dependencies(monkeypatch):
     assert (2, 3) not in conn.edge_inserts
 
 
+def test_submit_workflow_uses_transaction_when_available(monkeypatch):
+    jobs = [
+        {"label": "build_a", "prompt": "create a", "agent": "openai/gpt-5.4"},
+    ]
+    spec = _make_spec(jobs)
+    monkeypatch.setattr(WorkflowSpec, "load", classmethod(lambda cls, path: spec))
+
+    events: list[str] = []
+
+    class _TxConn(_FakeConn):
+        @contextmanager
+        def transaction(self):
+            events.append("begin")
+            try:
+                yield self
+            except Exception:
+                events.append("rollback")
+                raise
+            else:
+                events.append("commit")
+
+    conn = _TxConn()
+
+    unified_workflow.submit_workflow(conn, "spec.queue.json", "/repo", run_id="dispatch_test")
+
+    assert events == ["begin", "commit"]
+
+
+def test_submit_workflow_fails_closed_when_dependency_edges_not_persisted(monkeypatch):
+    jobs = [
+        {"label": "seed", "prompt": "create a", "agent": "openai/gpt-5.4"},
+        {"label": "synth", "prompt": "create b", "agent": "openai/gpt-5.4", "depends_on": ["seed"]},
+    ]
+    spec = _make_spec(jobs)
+    monkeypatch.setattr(WorkflowSpec, "load", classmethod(lambda cls, path: spec))
+
+    class _BrokenEdgeConn(_FakeConn):
+        @contextmanager
+        def transaction(self):
+            yield self
+
+        def execute(self, query: str, *args):
+            if "INSERT INTO workflow_job_edges" in query:
+                return []
+            if "SELECT parent_id, child_id" in query and "FROM workflow_job_edges" in query:
+                return []
+            return super().execute(query, *args)
+
+    conn = _BrokenEdgeConn()
+
+    with pytest.raises(RuntimeError, match="dependency edges were not persisted"):
+        unified_workflow.submit_workflow(conn, "spec.queue.json", "/repo", run_id="dispatch_test")
+
+
 def test_submit_workflow_records_idempotency_for_new_jobs(monkeypatch):
     jobs = [
         {"label": "build_a", "prompt": "create a", "agent": "openai/gpt-5.4"},
@@ -1492,11 +1559,26 @@ def test_submit_workflow_records_idempotency_for_new_jobs(monkeypatch):
 
     conn = _FakeConn()
 
-    result = unified_workflow.submit_workflow(conn, "spec.queue.json", "/repo", run_id="dispatch_test")
+    result = unified_workflow.submit_workflow(conn, "spec.queue.json", "/repo")
 
     assert result["replayed_jobs"] == []
     assert conn.next_job_id == 1
     assert any("INSERT INTO idempotency_ledger" in query for query, _ in conn.queries)
+
+
+def test_submit_workflow_rejects_when_queue_is_at_critical_threshold(monkeypatch):
+    jobs = [
+        {"label": "build_a", "prompt": "create a", "agent": "openai/gpt-5.4"},
+    ]
+    spec = _make_spec(jobs)
+    monkeypatch.setattr(WorkflowSpec, "load", classmethod(lambda cls, path: spec))
+
+    conn = _FakeConn(queue_depth=1000)
+
+    with pytest.raises(RuntimeError, match="queue admission rejected"):
+        unified_workflow.submit_workflow(conn, "spec.queue.json", "/repo")
+
+    assert not any("INSERT INTO workflow_jobs" in query for query, _ in conn.queries)
 
 
 def test_submit_workflow_routes_graph_specs_through_graph_runtime_submit(monkeypatch):
@@ -1702,7 +1784,7 @@ def test_submit_workflow_replays_existing_idempotency(monkeypatch, caplog):
 
     caplog.set_level(logging.INFO)
 
-    result = unified_workflow.submit_workflow(conn, "spec.queue.json", "/repo", run_id="dispatch_test")
+    result = unified_workflow.submit_workflow(conn, "spec.queue.json", "/repo")
 
     assert "Idempotent replay: returning existing run_id=dispatch_existing" in caplog.text
     assert conn.next_job_id == 0
@@ -1712,6 +1794,86 @@ def test_submit_workflow_replays_existing_idempotency(monkeypatch, caplog):
     assert result["run_id"] == "dispatch_existing"
     assert result["status"] == "replayed"
     assert result["replayed_jobs"] == [{"label": "build_a", "existing_run_id": "dispatch_existing"}]
+
+
+def test_submit_workflow_honors_explicit_run_id_over_existing_replay(monkeypatch, caplog):
+    jobs = [
+        {"label": "build_a", "prompt": "create a", "agent": "openai/gpt-5.4"},
+    ]
+    spec = _make_spec(jobs)
+    monkeypatch.setattr(WorkflowSpec, "load", classmethod(lambda cls, path: spec))
+
+    prompt_hash = hashlib.sha256("create a".encode()).hexdigest()[:16]
+    idem_key = f"{spec.name}:build_a:{prompt_hash}"
+    payload_hash = canonical_hash(
+        {"spec_name": spec.name, "label": "build_a", "prompt_hash": prompt_hash}
+    )
+    conn = _FakeConn(
+        existing_idempotency={
+            ("workflow.run", idem_key): {
+                "payload_hash": payload_hash,
+                "run_id": "dispatch_existing",
+                "created_at": None,
+            },
+        },
+        existing_run_states={"dispatch_existing": "succeeded"},
+    )
+
+    caplog.set_level(logging.INFO)
+
+    result = unified_workflow.submit_workflow(conn, "spec.queue.json", "/repo", run_id="dispatch_forced")
+
+    assert "Idempotent replay: returning existing run_id=dispatch_existing" not in caplog.text
+    assert result["run_id"] == "dispatch_forced"
+    assert result["status"] == "queued"
+    assert result["replayed_jobs"] == []
+    assert conn.next_job_id == 1
+    assert not any("DELETE FROM workflow_runs" in query for query, _ in conn.queries)
+
+
+def test_submit_workflow_force_fresh_run_keeps_system_owned_run_id(monkeypatch, caplog):
+    jobs = [
+        {"label": "build_a", "prompt": "create a", "agent": "openai/gpt-5.4"},
+    ]
+    spec = _make_spec(jobs)
+    monkeypatch.setattr(WorkflowSpec, "load", classmethod(lambda cls, path: spec))
+    monkeypatch.setattr(
+        _admission_mod.uuid,
+        "uuid4",
+        lambda: SimpleNamespace(hex="freshgenerated1234567890"),
+    )
+
+    prompt_hash = hashlib.sha256("create a".encode()).hexdigest()[:16]
+    idem_key = f"{spec.name}:build_a:{prompt_hash}"
+    payload_hash = canonical_hash(
+        {"spec_name": spec.name, "label": "build_a", "prompt_hash": prompt_hash}
+    )
+    conn = _FakeConn(
+        existing_idempotency={
+            ("workflow.run", idem_key): {
+                "payload_hash": payload_hash,
+                "run_id": "dispatch_existing",
+                "created_at": None,
+            },
+        },
+        existing_run_states={"dispatch_existing": "succeeded"},
+    )
+
+    caplog.set_level(logging.INFO)
+
+    result = unified_workflow.submit_workflow(
+        conn,
+        "spec.queue.json",
+        "/repo",
+        force_fresh_run=True,
+    )
+
+    assert "Idempotent replay: returning existing run_id=dispatch_existing" not in caplog.text
+    assert result["run_id"] == "workflow_freshgenerat"
+    assert result["status"] == "queued"
+    assert result["replayed_jobs"] == []
+    assert conn.next_job_id == 1
+    assert not any("DELETE FROM workflow_runs" in query for query, _ in conn.queries)
 
 
 def test_submit_workflow_creates_fresh_run_after_failed_idempotent_attempt(monkeypatch):
@@ -1771,7 +1933,7 @@ def test_submit_workflow_raises_on_idempotency_conflict(monkeypatch, caplog):
     caplog.set_level(logging.WARNING)
 
     with pytest.raises(unified_dispatch.IdempotencyConflict) as excinfo:
-        unified_workflow.submit_workflow(conn, "spec.queue.json", "/repo", run_id="dispatch_test")
+        unified_workflow.submit_workflow(conn, "spec.queue.json", "/repo")
 
     assert "Idempotency conflict: key=" in caplog.text
     assert excinfo.value.idempotency_key == idem_key
@@ -1812,6 +1974,31 @@ def test_retry_job_records_dispatch_retry_idempotency(monkeypatch, caplog):
     assert "failure_category = ''" in retry_updates[0]
     assert "failure_zone = ''" in retry_updates[0]
     assert "is_transient = false" in retry_updates[0]
+
+
+def test_retry_job_rejects_when_queue_is_at_critical_threshold():
+    conn = _FakeConn(
+        queue_depth=1000,
+        existing_jobs={
+            ("dispatch_test", "build_a"): {
+                "id": 7,
+                "label": "build_a",
+                "prompt": "create a",
+                "agent_slug": "openai/gpt-5.4",
+                "resolved_agent": "openai/gpt-5.4",
+                "status": "failed",
+                "attempt": 2,
+            },
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="queue admission rejected"):
+        unified_workflow.retry_job(conn, "dispatch_test", "build_a")
+
+    assert not any(
+        "UPDATE workflow_jobs" in query and "SET status = 'ready'" in query
+        for query, _ in conn.queries
+    )
 
 
 def test_retry_job_reports_validated_packet_reuse_provenance() -> None:
@@ -2135,7 +2322,14 @@ def test_write_job_receipt_writes_authority_receipt_and_notification():
         17,
         "build_a",
         "openai/gpt-5.4",
-        {"status": "failed", "error_code": "boom", "token_input": 1, "token_output": 2, "cost_usd": 0.5},
+        {
+            "status": "failed",
+            "error_code": "boom",
+            "token_input": 1,
+            "token_output": 2,
+            "cost_usd": 0.5,
+            "workspace_snapshot_ref": "workspace_snapshot:abc123",
+        },
         2500,
         repo_root="/repo",
         output_path="/repo/artifacts/workflow_outputs/workflow_output_workflow_test_job_17_build.a.md",
@@ -2180,6 +2374,7 @@ def test_write_job_receipt_writes_authority_receipt_and_notification():
     assert receipt_outputs["verified_paths"] == ["runtime/example.py"]
     assert receipt_outputs["verification"]["failed"] == 1
     assert receipt_outputs["workspace_provenance"]["workspace_root"] == "/repo"
+    assert receipt_outputs["workspace_provenance"]["workspace_snapshot_ref"] == "workspace_snapshot:abc123"
     assert receipt_outputs["git_provenance"]["available"] is False
     assert receipt_outputs["write_manifest"]["total_files"] == 1
     assert receipt_outputs["mutation_provenance"]["write_paths"] == ["runtime/example.py"]
@@ -2578,6 +2773,55 @@ def test_runtime_profile_admitted_route_candidates_fall_back_to_chain_when_empty
     )
 
     assert selected == candidates
+
+
+def test_claim_one_quarantines_ready_job_with_missing_runtime_profile_authority(monkeypatch) -> None:
+    blocked: list[tuple[int, str]] = []
+    recomputed: list[str] = []
+
+    class _ClaimConn:
+        def execute(self, query: str, *args):
+            if "FROM workflow_jobs j" in query and "ORDER BY r.requested_at DESC" in query:
+                return [
+                    {
+                        "id": 7,
+                        "run_id": "run-dead-profile",
+                        "label": "phase_ghost",
+                        "status": "ready",
+                        "agent_slug": "auto/architecture",
+                        "route_task_type": "architecture",
+                    }
+                ]
+            if "SET status = 'failed'" in query and "WHERE id = $1" in query:
+                return [
+                    {
+                        "id": 7,
+                        "run_id": "run-dead-profile",
+                        "route_task_type": "architecture",
+                        "effective_agent": "auto/architecture",
+                    }
+                ]
+            raise AssertionError(query)
+
+    monkeypatch.setattr(_claiming_mod, "_job_has_touch_conflict", lambda _conn, _job: False)
+    monkeypatch.setattr(
+        _claiming_mod,
+        "_select_claim_route",
+        lambda _conn, _job: (_ for _ in ()).throw(
+            RuntimeProfileAdmissionError(
+                "routing.profile_unknown",
+                "runtime profile 'dag-project' is missing authority",
+            )
+        ),
+    )
+    monkeypatch.setattr(_claiming_mod, "_block_descendants", lambda _conn, job_id, code: blocked.append((job_id, code)))
+    monkeypatch.setattr(_claiming_mod, "_recompute_workflow_run_state", lambda _conn, run_id: recomputed.append(run_id))
+
+    claimed = _claiming_mod.claim_one(_ClaimConn(), "worker-1")
+
+    assert claimed is None
+    assert blocked == [(7, "routing.profile_unknown")]
+    assert recomputed == ["run-dead-profile"]
 
 
 def test_cancel_run_default_does_not_cancel_running_jobs():

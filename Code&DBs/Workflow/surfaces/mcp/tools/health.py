@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from adapters import provider_registry as provider_registry_mod
+from runtime.engineering_observability import build_trend_observability
 from runtime.dependency_contract import dependency_truth_report
 from runtime.context_cache import get_context_cache
 from storage.postgres.connection import resolve_workflow_database_url
@@ -47,6 +48,7 @@ def tool_praxis_health(params: dict, _progress_emitter=None) -> dict:
     lane = panel.recommend_lane()
     cache_stats = get_context_cache().stats()
     dependency_truth = dependency_truth_report(scope="all")
+    trend_observability = build_trend_observability()
     try:
         from runtime.missing_detector import FindingPrioritizer, MissingContentDetector
 
@@ -116,7 +118,13 @@ def tool_praxis_health(params: dict, _progress_emitter=None) -> dict:
         "dependency_truth": dependency_truth,
         "context_cache": cache_stats,
         "content_health": content_health,
+        "trend_observability": trend_observability,
     }
+
+
+def tool_dag_health(params: dict, _progress_emitter=None) -> dict:
+    """Backwards-compatible alias for the MCP health front door."""
+    return tool_praxis_health(params, _progress_emitter=_progress_emitter)
 
 
 def tool_praxis_reload(params: dict) -> dict:

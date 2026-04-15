@@ -41,6 +41,12 @@ def test_get_workflow_pool_rotates_when_dsn_changes(monkeypatch) -> None:
     connection_mod.shutdown_workflow_pool()
 
 
+def test_resolve_workflow_database_url_normalizes_missing_user() -> None:
+    assert connection_mod.resolve_workflow_database_url(
+        env={"WORKFLOW_DATABASE_URL": "postgresql://localhost:5432/praxis"}
+    ) == "postgresql://postgres@localhost:5432/praxis"
+
+
 def test_shutdown_workflow_pool_clears_cached_state() -> None:
     connection_mod.shutdown_workflow_pool()
     pool = _FakePool("postgresql://example")
@@ -70,6 +76,21 @@ def test_sync_connection_close_delegates_to_shutdown(monkeypatch) -> None:
     conn.close()
 
     assert called == [True]
+
+
+def test_resolve_workflow_authority_cache_key_sanitizes_database_identity() -> None:
+    cache_key = connection_mod.resolve_workflow_authority_cache_key(
+        env={
+            "WORKFLOW_DATABASE_URL": (
+                "postgresql://s3cr3t-user:top-secret@db.internal.example:5432/praxis"
+                "?sslmode=require&application_name=worker"
+            )
+        }
+    )
+
+    assert cache_key.startswith("workflow_pool:")
+    assert "top-secret" not in cache_key
+    assert "db.internal.example" not in cache_key
 
 
 def test_create_workflow_pool_wraps_permission_errors_as_authority_unavailable(monkeypatch) -> None:

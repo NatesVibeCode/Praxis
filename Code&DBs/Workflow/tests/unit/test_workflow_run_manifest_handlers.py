@@ -322,6 +322,118 @@ def test_submit_workflow_via_service_bus_uses_control_command_request(monkeypatc
     }
 
 
+def test_workflow_spawn_post_uses_spawn_command_bus_helper() -> None:
+    request = _RequestStub(
+        {
+            "spec_path": "config/cascade/specs/W_phase_program_review_child_20260414.queue.json",
+            "parent_run_id": "workflow_parent_001",
+            "parent_job_label": "phase_50_review_spawn",
+            "dispatch_reason": "phase.review",
+            "lineage_depth": 1,
+            "run_id": "workflow_review_child_001",
+        },
+        subsystems=SimpleNamespace(get_pg_conn=lambda: object()),
+    )
+
+    fake_spec = SimpleNamespace(
+        name="Phase Program Review Child",
+        jobs=[{"label": "phase_50_review"}],
+    )
+    fake_result = {
+        "run_id": "dispatch_spawn_002",
+        "status": "queued",
+        "spec_name": "Phase Program Review Child",
+        "total_jobs": 1,
+        "command_id": "control.command.spawn.2",
+    }
+
+    with patch.object(workflow_run, "_workflow_spec_mod", return_value=SimpleNamespace(WorkflowSpec=SimpleNamespace(load=lambda _path: fake_spec))):
+        with patch.object(workflow_run, "_spawn_workflow_via_service_bus", return_value=fake_result) as bus_mock:
+            workflow_run._handle_workflow_spawn_post(request, "/api/workflow-runs/spawn")
+
+    assert bus_mock.call_count == 1
+    assert bus_mock.call_args.args[0] is request.subsystems
+    assert bus_mock.call_args.kwargs["requested_by_kind"] == "http"
+    assert bus_mock.call_args.kwargs["requested_by_ref"] == "workflow_spawn"
+    assert bus_mock.call_args.kwargs["parent_run_id"] == "workflow_parent_001"
+    assert bus_mock.call_args.kwargs["parent_job_label"] == "phase_50_review_spawn"
+    assert bus_mock.call_args.kwargs["dispatch_reason"] == "phase.review"
+    assert bus_mock.call_args.kwargs["lineage_depth"] == 1
+    assert bus_mock.call_args.kwargs["run_id"] == "workflow_review_child_001"
+    assert request.sent is not None
+    status, payload = request.sent
+    assert status == 200
+    assert payload["run_id"] == "dispatch_spawn_002"
+
+
+def test_spawn_workflow_via_service_bus_uses_control_command_request(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+    pg = object()
+
+    command = SimpleNamespace(
+        command_id="control.command.spawn.77",
+        command_status="succeeded",
+        result_ref="workflow_run:dispatch_spawn_077",
+        error_detail=None,
+        to_json=lambda: {
+            "command_id": "control.command.spawn.77",
+            "command_status": "succeeded",
+            "result_ref": "workflow_run:dispatch_spawn_077",
+        },
+    )
+
+    control_commands = ModuleType("runtime.control_commands")
+
+    def _fake_request_workflow_spawn_command(_pg, **kwargs):
+        captured["kwargs"] = kwargs
+        return command
+
+    def _fake_render_workflow_spawn_response(command_obj, *, spec_name: str, total_jobs: int):
+        return {
+            "run_id": "dispatch_spawn_077",
+            "status": "queued",
+            "spec_name": spec_name,
+            "total_jobs": total_jobs,
+            "command_id": command_obj.command_id,
+            "command_status": command_obj.command_status,
+            "approval_required": False,
+            "stream_url": "/api/workflow-runs/dispatch_spawn_077/stream",
+            "status_url": "/api/workflow-runs/dispatch_spawn_077/status",
+            "result_ref": command_obj.result_ref,
+        }
+
+    control_commands.request_workflow_spawn_command = _fake_request_workflow_spawn_command
+    control_commands.render_workflow_spawn_response = _fake_render_workflow_spawn_response
+
+    with patch.dict(sys.modules, {"runtime.control_commands": control_commands}):
+        result = workflow_run._spawn_workflow_via_service_bus(
+            SimpleNamespace(get_pg_conn=lambda: pg),
+            spec_path="config/cascade/specs/W_phase_program_review_child_20260414.queue.json",
+            spec_name="Phase Program Review Child",
+            total_jobs=2,
+            requested_by_kind="http",
+            requested_by_ref="workflow_spawn",
+            parent_run_id="workflow_parent_001",
+            parent_job_label="phase_50_review_spawn",
+            dispatch_reason="phase.review",
+            lineage_depth=1,
+            run_id="workflow_review_child_001",
+        )
+
+    assert captured["kwargs"] == {
+        "requested_by_kind": "http",
+        "requested_by_ref": "workflow_spawn",
+        "spec_path": "config/cascade/specs/W_phase_program_review_child_20260414.queue.json",
+        "repo_root": str(workflow_run.REPO_ROOT),
+        "parent_run_id": "workflow_parent_001",
+        "parent_job_label": "phase_50_review_spawn",
+        "dispatch_reason": "phase.review",
+        "lineage_depth": 1,
+        "run_id": "workflow_review_child_001",
+    }
+    assert result["run_id"] == "dispatch_spawn_077"
+
+
 def test_manifest_save_normalizes_v4_bundle() -> None:
     subsystems = _SubsystemsStub()
     request = _RequestStub(

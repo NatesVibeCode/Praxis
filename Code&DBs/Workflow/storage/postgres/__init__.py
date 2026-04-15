@@ -10,6 +10,8 @@ configuration:
 - writes happen through one transactional control-plane path
 """
 
+from typing import TYPE_CHECKING
+
 # Exception classes
 from .validators import (
     PostgresConfigurationError,
@@ -37,12 +39,13 @@ from .evidence import (
     PostgresEvidenceReader,
     fetch_workflow_evidence_timeline,
 )
-from runtime.compile_artifacts import (
-    CompileArtifactError,
-    CompileArtifactRecord,
-    CompileArtifactStore,
-    ExecutionPacketRecord,
-)
+if TYPE_CHECKING:
+    from runtime.compile_artifacts import (
+        CompileArtifactError,
+        CompileArtifactRecord,
+        CompileArtifactStore,
+        ExecutionPacketRecord,
+    )
 
 # Connection management
 from .connection import (
@@ -51,8 +54,10 @@ from .connection import (
     create_workflow_pool,
     ensure_postgres_available,
     get_workflow_pool,
+    resolve_workflow_authority_cache_key,
     resolve_workflow_database_url,
     shutdown_workflow_pool,
+    workflow_authority_cache_key,
 )
 
 # Vector-store adapter
@@ -164,6 +169,7 @@ __all__ = [
     "inspect_workflow_schema",
     "load_app_manifest_record",
     "persist_workflow_admission",
+    "resolve_workflow_authority_cache_key",
     "resolve_workflow_database_url",
     "record_app_manifest_history",
     "reset_observability_metrics",
@@ -175,4 +181,28 @@ __all__ = [
     "_require_text",
     "_require_utc",
     "upsert_app_manifest",
+    "workflow_authority_cache_key",
 ]
+
+
+def __getattr__(name: str):
+    if name in {
+        "CompileArtifactError",
+        "CompileArtifactRecord",
+        "CompileArtifactStore",
+        "ExecutionPacketRecord",
+    }:
+        from runtime.compile_artifacts import (
+            CompileArtifactError,
+            CompileArtifactRecord,
+            CompileArtifactStore,
+            ExecutionPacketRecord,
+        )
+
+        return {
+            "CompileArtifactError": CompileArtifactError,
+            "CompileArtifactRecord": CompileArtifactRecord,
+            "CompileArtifactStore": CompileArtifactStore,
+            "ExecutionPacketRecord": ExecutionPacketRecord,
+        }[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

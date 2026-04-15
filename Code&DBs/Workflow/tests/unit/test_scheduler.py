@@ -54,18 +54,17 @@ def test_run_scheduler_tick_emits_schedule_fired_event(tmp_path, monkeypatch):
 
     monkeypatch.setattr(
         scheduler,
-        "run_cli_tool",
-        lambda tool_name, params: (
-            0,
-            {
-                "run_id": "run-1",
-                "status": "queued",
-                "command_id": "control.command.request.1",
-                "command_status": "succeeded",
-                "result_ref": "workflow_run:run-1",
-            },
-        ),
+        "submit_workflow_command",
+        lambda _conn, **params: {
+            "run_id": "run-1",
+            "status": "queued",
+            "command_id": "control.command.request.1",
+            "command_status": "succeeded",
+            "result_ref": "workflow_run:run-1",
+            **params,
+        },
     )
+    monkeypatch.setattr(scheduler, "_workflow_pg_conn", lambda: object())
 
     results = scheduler.run_scheduler_tick(
         config,

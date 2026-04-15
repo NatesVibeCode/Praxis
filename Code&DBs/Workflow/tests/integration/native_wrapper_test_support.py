@@ -29,7 +29,7 @@ def contract_map() -> dict[str, str]:
     """
     repo = str(REPO_ROOT)
     return {
-        "WORKFLOW_DATABASE_URL": f"postgresql://localhost:5432/praxis",
+        "WORKFLOW_DATABASE_URL": f"postgresql://postgres@localhost:5432/praxis",
         "PRAXIS_LOCAL_POSTGRES_DATA_DIR": f"{repo}/Code&DBs/Databases/postgres-dev/data",
         "PRAXIS_RUNTIME_PROFILE": "praxis",
         "PRAXIS_INSTANCE_NAME": "praxis",

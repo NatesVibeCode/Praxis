@@ -10,6 +10,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from typing import Any
+from pathlib import Path
 
 from runtime.notifications import dispatch_notification_payload
 
@@ -24,8 +25,49 @@ def _json_clone(value: object) -> object:
     return json.loads(json.dumps(value, default=str))
 
 
+def _coerce_int(value: object, *, default: int, minimum: int = 0) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    if parsed < minimum:
+        return default if minimum == 0 else minimum
+    return parsed
+
+
+def _coerce_bool(value: object, *, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "1", "yes", "on", "y"}:
+            return True
+        if lowered in {"false", "0", "no", "off", "n"}:
+            return False
+    return default if value is None else bool(value)
+
+
 def _mapping(value: object) -> dict[str, Any]:
     return dict(value) if isinstance(value, dict) else {}
+
+
+def _load_workflow_spec_file(path_value: str) -> dict[str, Any]:
+    spec_path = Path(path_value).expanduser()
+    with spec_path.open("r", encoding="utf-8") as file_obj:
+        raw = file_obj.read()
+    return _json_load(raw)
+
+
+def _json_load(value: object) -> dict[str, Any]:
+    if not isinstance(value, str):
+        return {}
+    try:
+        parsed = json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    return dict(parsed)
 
 
 def _load_workflow_record(pg: Any, *, workflow_id: str) -> dict[str, Any] | None:
@@ -51,7 +93,10 @@ def _submit_workflow_inline(
     spec_dict: dict[str, Any],
     *,
     parent_run_id: str | None,
+    parent_job_label: str | None = None,
+    dispatch_reason: str | None = None,
     trigger_depth: int,
+    lineage_depth: int | None = None,
     packet_provenance: dict[str, Any],
 ) -> dict[str, Any]:
     from runtime.workflow.unified import submit_workflow_inline
@@ -60,9 +105,46 @@ def _submit_workflow_inline(
         pg,
         spec_dict,
         parent_run_id=parent_run_id,
+        parent_job_label=parent_job_label,
+        dispatch_reason=dispatch_reason,
         trigger_depth=trigger_depth,
+        lineage_depth=lineage_depth,
         packet_provenance=packet_provenance,
     )
+
+
+def _search_receipts(
+    query: str,
+    *,
+    limit: int,
+    status: str | None = None,
+    agent: str | None = None,
+    workflow_id: str | None = None,
+) -> list[dict[str, Any]]:
+    from runtime.receipt_store import search_receipts
+
+    return [
+        row.to_search_result()
+        for row in search_receipts(
+            query,
+            limit=limit,
+            status=status,
+            agent=agent,
+            workflow_id=workflow_id,
+        )
+    ]
+
+
+def _get_run_status(pg: Any, run_id: str) -> dict[str, Any] | None:
+    from runtime.workflow.unified import get_run_status
+
+    return get_run_status(pg, run_id)
+
+
+def _cancel_workflow_run(pg: Any, run_id: str, *, include_running: bool = False) -> dict[str, Any]:
+    from runtime.workflow.unified import cancel_run
+
+    return cancel_run(pg, run_id, include_running=include_running)
 
 
 def _record_workflow_invocation(pg: Any, *, workflow_id: str) -> None:
@@ -99,6 +181,184 @@ def _coerce_trigger_depth(args: dict[str, Any]) -> int:
     except (TypeError, ValueError):
         return 0
     return max(value, 0)
+
+
+def _extract_workflow_spec(args: dict[str, Any]) -> dict[str, Any] | None:
+    for key in ("spec", "workflow_spec", "inline_spec", "definition", "manifest"):
+        spec = _mapping(args.get(key))
+        if spec:
+            return _json_clone(spec)
+
+    for key in ("spec_json", "spec_text"):
+        parsed = _json_load(args.get(key))
+        if parsed:
+            return parsed
+
+    spec_path = _as_text(args.get("spec_path"))
+    if spec_path:
+        try:
+            loaded = _load_workflow_spec_file(spec_path)
+            if loaded:
+                return loaded
+        except Exception:
+            return {}
+
+    return None
+
+
+def execute_dispatch_job(args: dict[str, Any], pg: Any) -> dict[str, Any]:
+    """Submit an inline workflow spec and return its run metadata."""
+    spec = _extract_workflow_spec(args)
+    if not spec:
+        return {
+            "status": "failed",
+            "data": None,
+            "summary": "dispatch_job requires a workflow spec in spec, workflow_spec, inline_spec, definition, manifest, spec_json, or spec_path.",
+            "error": "dispatch_job_missing_spec",
+        }
+
+    trigger_event = _mapping(args.get("_trigger_event"))
+    parent_run_id = _as_text(args.get("parent_run_id")) or _as_text(trigger_event.get("run_id"))
+    parent_job_label = _as_text(args.get("parent_job_label")) or _as_text(trigger_event.get("job_label"))
+    trigger_depth = _coerce_trigger_depth(args)
+    input_payload = (
+        _mapping(args.get("payload"))
+        or _mapping(args.get("input"))
+        or _mapping(args.get("inputs"))
+        or _mapping(args.get("variables"))
+    )
+
+    spec_to_submit = _json_clone(spec)
+    packet_provenance = {
+        "source_kind": "integration_dispatch",
+        "integration_id": "praxis-dispatch",
+        "integration_action": "dispatch_job",
+        "input_payload": input_payload,
+        "trigger_event": trigger_event,
+    }
+
+    try:
+        result = _submit_workflow_inline(
+            pg,
+            spec_to_submit,
+            parent_run_id=parent_run_id or None,
+            parent_job_label=parent_job_label or None,
+            dispatch_reason="integration.dispatch_job",
+            trigger_depth=trigger_depth,
+            packet_provenance=packet_provenance,
+        )
+    except Exception as exc:
+        logger.warning("dispatch_job failed: %s", exc)
+        return {
+            "status": "failed",
+            "data": None,
+            "summary": f"dispatch_job failed: {exc}",
+            "error": "dispatch_job_failed",
+        }
+
+    run_id = _as_text(result.get("run_id"))
+    if not run_id:
+        return {
+            "status": "failed",
+            "data": result,
+            "summary": "dispatch_job did not return a run_id.",
+            "error": "dispatch_job_run_missing",
+        }
+
+    payload = {"run_id": run_id}
+    if "command_id" in result:
+        payload["command_id"] = result["command_id"]
+    if "command_status" in result:
+        payload["command_status"] = result["command_status"]
+    if "status" in result:
+        payload["status"] = result["status"]
+    else:
+        payload["status"] = "queued"
+
+    return {
+        "status": "succeeded",
+        "data": payload,
+        "summary": f"Dispatched workflow spec via integration -> {run_id}",
+        "error": None,
+    }
+
+
+def execute_check_status(args: dict[str, Any], pg: Any) -> dict[str, Any]:
+    """Return run status from the unified workflow runtime."""
+    run_id = _as_text(args.get("run_id")) or _as_text(args.get("id")) or _as_text(args.get("target_run_id"))
+    if not run_id:
+        return {
+            "status": "failed",
+            "data": None,
+            "summary": "check_status requires run_id.",
+            "error": "check_status_missing_run_id",
+        }
+
+    try:
+        status = _get_run_status(pg, run_id)
+    except Exception as exc:
+        logger.warning("check_status failed for %s: %s", run_id, exc)
+        return {
+            "status": "failed",
+            "data": None,
+            "summary": f"check_status failed: {exc}",
+            "error": "check_status_failed",
+        }
+    if status is None:
+        return {
+            "status": "failed",
+            "data": None,
+            "summary": f"Run not found: {run_id}",
+            "error": "run_not_found",
+        }
+
+    return {
+        "status": "succeeded",
+        "data": status,
+        "summary": f"Run {run_id} status retrieved.",
+        "error": None,
+    }
+
+
+def execute_search_receipts(args: dict[str, Any], pg: Any) -> dict[str, Any]:
+    """Search workflow receipts with optional status/agent/workflow_id filters."""
+    query = _as_text(args.get("query"))
+    if not query:
+        return {
+            "status": "failed",
+            "data": None,
+            "summary": "search_receipts requires query.",
+            "error": "search_receipts_missing_query",
+        }
+
+    limit = _coerce_int(args.get("limit"), default=50, minimum=1)
+    status = _as_text(args.get("status")) or None
+    agent = _as_text(args.get("agent")) or None
+    workflow_id = _as_text(args.get("workflow_id")) or None
+
+    try:
+        results = _search_receipts(
+            query,
+            limit=limit,
+            status=status,
+            agent=agent,
+            workflow_id=workflow_id,
+        )
+    except Exception as exc:
+        logger.warning("search_receipts failed for query %s: %s", query, exc)
+        return {
+            "status": "failed",
+            "data": None,
+            "summary": f"search_receipts failed: {exc}",
+            "error": "search_receipts_failed",
+        }
+
+    return {
+        "status": "succeeded",
+        "data": {"query": query, "results": results, "count": len(results)},
+        "summary": f"search_receipts found {len(results)} result(s).",
+        "error": None,
+    }
 
 
 def execute_notification(args: dict[str, Any], _pg: Any) -> dict[str, Any]:
@@ -179,6 +439,7 @@ def execute_workflow_invoke(args: dict[str, Any], pg: Any) -> dict[str, Any]:
 
     trigger_event = _mapping(args.get("_trigger_event"))
     parent_run_id = _as_text(args.get("parent_run_id")) or _as_text(trigger_event.get("run_id"))
+    parent_job_label = _as_text(args.get("parent_job_label")) or _as_text(trigger_event.get("job_label"))
     trigger_depth = _coerce_trigger_depth(args)
     input_payload = (
         _mapping(args.get("payload"))
@@ -202,6 +463,8 @@ def execute_workflow_invoke(args: dict[str, Any], pg: Any) -> dict[str, Any]:
             pg,
             spec_to_submit,
             parent_run_id=parent_run_id or None,
+            parent_job_label=parent_job_label or None,
+            dispatch_reason="integration.workflow.invoke",
             trigger_depth=trigger_depth,
             packet_provenance=packet_provenance,
         )
@@ -254,4 +517,61 @@ def execute_workflow_invoke(args: dict[str, Any], pg: Any) -> dict[str, Any]:
     }
 
 
-__all__ = ["execute_notification", "execute_workflow_invoke"]
+def execute_workflow_cancel(args: dict[str, Any], pg: Any) -> dict[str, Any]:
+    """Cancel a workflow run through the unified workflow control path."""
+    run_id = (
+        _as_text(args.get("run_id"))
+        or _as_text(args.get("id"))
+        or _as_text(args.get("target_run_id"))
+    )
+    if not run_id:
+        return {
+            "status": "failed",
+            "data": None,
+            "summary": "Workflow cancel requires run_id.",
+            "error": "workflow_cancel_missing_run_id",
+        }
+
+    include_running = _coerce_bool(args.get("include_running"), default=False)
+    try:
+        result = _cancel_workflow_run(pg, run_id, include_running=include_running)
+    except Exception as exc:
+        logger.warning("workflow cancel failed for %s: %s", run_id, exc)
+        return {
+            "status": "failed",
+            "data": None,
+            "summary": f"Workflow cancel failed: {exc}",
+            "error": "workflow_cancel_failed",
+        }
+
+    try:
+        _record_system_event(
+            pg,
+            event_type="integration.workflow.cancel",
+            source_id=run_id,
+            source_type="integration",
+            payload={
+                "run_id": run_id,
+                "include_running": include_running,
+                "result": result,
+            },
+        )
+    except Exception as exc:
+        logger.warning("workflow cancel bookkeeping failed for %s: %s", run_id, exc)
+
+    return {
+        "status": "succeeded",
+        "data": result,
+        "summary": f"Workflow run {run_id} cancel requested.",
+        "error": None,
+    }
+
+
+__all__ = [
+    "execute_notification",
+    "execute_workflow_invoke",
+    "execute_workflow_cancel",
+    "execute_dispatch_job",
+    "execute_check_status",
+    "execute_search_receipts",
+]

@@ -3,6 +3,13 @@
 
 import type { BuildPayload } from './types';
 
+interface BuildDefinitionRequest {
+  title?: string;
+  definition?: Record<string, unknown>;
+  buildGraph?: BuildPayload['build_graph'] | null;
+  compiled_spec?: Record<string, unknown> | null;
+}
+
 async function _json(resp: Response): Promise<any> {
   const body = await resp.json();
   if (!resp.ok) throw new Error(body?.error || body?.detail || `HTTP ${resp.status}`);
@@ -43,7 +50,7 @@ export async function refineDefinition(prose: string, definition: any): Promise<
 
 export async function commitDefinition(
   workflowId: string,
-  opts?: { title?: string; definition?: any; compiled_spec?: any },
+  opts?: BuildDefinitionRequest,
 ): Promise<BuildPayload> {
   return _json(await fetch('/api/commit', {
     method: 'POST',
@@ -52,6 +59,7 @@ export async function commitDefinition(
       workflow_id: workflowId,
       title: opts?.title,
       definition: opts?.definition,
+      build_graph: opts?.buildGraph,
       compiled_spec: opts?.compiled_spec,
     }),
   }));
@@ -61,21 +69,33 @@ export async function fetchCatalog(): Promise<any[]> {
   return _json(await fetch('/api/catalog')).then(r => r.items);
 }
 
-export async function createWorkflow(name: string, definition: any): Promise<{ id: string; workflow_id?: string }> {
+export async function createWorkflow(
+  name: string,
+  opts?: Omit<BuildDefinitionRequest, 'title'>,
+): Promise<{ id: string; workflow_id?: string }> {
   const data = await _json(await fetch('/api/workflows', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, definition }),
+    body: JSON.stringify({
+      name,
+      definition: opts?.definition,
+      build_graph: opts?.buildGraph,
+      compiled_spec: opts?.compiled_spec,
+    }),
   }));
   // API returns { workflow: { id, name, ... } }
   return data.workflow || data;
 }
 
-export async function planDefinition(definition: any, title?: string): Promise<any> {
+export async function planDefinition(opts?: Omit<BuildDefinitionRequest, 'compiled_spec'>): Promise<any> {
   return _json(await fetch('/api/plan', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ definition, title }),
+    body: JSON.stringify({
+      definition: opts?.definition,
+      build_graph: opts?.buildGraph,
+      title: opts?.title,
+    }),
   }));
 }
 

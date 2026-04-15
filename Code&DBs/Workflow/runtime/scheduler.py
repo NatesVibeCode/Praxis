@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from surfaces.cli.mcp_tools import run_cli_tool
+from runtime.control_commands import submit_workflow_command
 
 
 # ---------------------------------------------------------------------------
@@ -28,6 +28,12 @@ from surfaces.cli.mcp_tools import run_cli_tool
 # ---------------------------------------------------------------------------
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _workflow_pg_conn():
+    from storage.postgres.connection import SyncPostgresConnection, get_workflow_pool
+
+    return SyncPostgresConnection(get_workflow_pool())
 
 
 # ---------------------------------------------------------------------------
@@ -288,7 +294,6 @@ def run_scheduler_tick(
     Returns a list of result dicts, one per dispatched job, with keys:
       job_name, status, run_id (if dispatched), error (if failed), skipped (bool).
     """
-    from .workflow import run_workflow_from_spec_file, run_workflow_batch_from_file
     from .workflow_spec import load_raw, is_batch_spec
 
     if state is None:
@@ -353,15 +358,17 @@ def run_scheduler_tick(
                     "skipped": False,
                 })
             else:
-                exit_code, payload = run_cli_tool(
-                    "praxis_workflow",
-                    {
-                        "action": "run",
-                        "spec_path": spec_path,
-                        "wait": False,
-                    },
+                payload = submit_workflow_command(
+                    _workflow_pg_conn(),
+                    requested_by_kind="scheduler",
+                    requested_by_ref="scheduler.tick",
+                    spec_path=spec_path,
+                    repo_root=str(_PROJECT_ROOT),
+                    spec_name=str(raw.get("name") or spec_path),
+                    total_jobs=len(raw.get("jobs") or []),
+                    force_fresh_run=False,
                 )
-                if exit_code != 0:
+                if payload.get("error") or not payload.get("run_id"):
                     raise RuntimeError(str(payload.get("error") or payload))
                 results.append({
                     "job_name": job.name,
@@ -396,7 +403,7 @@ def force_run_job(
     state: SchedulerState | None = None,
 ) -> dict[str, Any]:
     """Force-dispatch a specific scheduled job regardless of cron timing."""
-    from surfaces.cli.mcp_tools import run_cli_tool
+    from runtime.control_commands import submit_workflow_command
     from .workflow_spec import load_raw, is_batch_spec
 
     if state is None:
@@ -434,15 +441,16 @@ def force_run_job(
                 "error": "scheduler no longer launches batch specs directly; use workflow chain or API/MCP frontdoor",
             }
         else:
-            exit_code, payload = run_cli_tool(
-                "praxis_workflow",
-                {
-                    "action": "run",
-                    "spec_path": spec_path,
-                    "wait": False,
-                },
+            payload = submit_workflow_command(
+                _workflow_pg_conn(),
+                requested_by_kind="scheduler",
+                requested_by_ref="scheduler.force_run",
+                spec_path=spec_path,
+                repo_root=str(_PROJECT_ROOT),
+                spec_name=str(raw.get("name") or spec_path),
+                total_jobs=len(raw.get("jobs") or []),
             )
-            if exit_code != 0:
+            if payload.get("error") or not payload.get("run_id"):
                 raise RuntimeError(str(payload.get("error") or payload))
             result_dict = {
                 "job_name": job.name,

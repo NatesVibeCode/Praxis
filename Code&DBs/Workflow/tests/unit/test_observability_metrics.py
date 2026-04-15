@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import uuid
 from datetime import datetime, timezone
@@ -78,10 +79,13 @@ def test_failure_breakdown_and_lineage_use_new_metadata(monkeypatch, metrics_db_
         view = WorkflowMetricsView(db_url=metrics_db_url)
         try:
             conn = await view._get_connection()
-            await conn.execute(
-                "DELETE FROM workflow_metrics WHERE created_at >= $1",
-                datetime(2098, 1, 1, tzinfo=timezone.utc),
-            )
+            try:
+                await conn.execute(
+                    "DELETE FROM workflow_metrics WHERE created_at >= $1",
+                    datetime(2098, 1, 1, tzinfo=timezone.utc),
+                )
+            finally:
+                await conn.close()
             await view.record_workflow_async(_result(run_id=parent_id, label="parent-job"))
             await view.record_workflow_async(
                 _result(
@@ -111,8 +115,6 @@ def test_failure_breakdown_and_lineage_use_new_metadata(monkeypatch, metrics_db_
         finally:
             await view.close()
 
-    import asyncio
-
     asyncio.run(_run())
 
 
@@ -124,10 +126,13 @@ def test_efficiency_summary_reports_retries_and_token_usage(monkeypatch, metrics
         view = WorkflowMetricsView(db_url=metrics_db_url)
         try:
             conn = await view._get_connection()
-            await conn.execute(
-                "DELETE FROM workflow_metrics WHERE created_at >= $1",
-                datetime(2098, 1, 1, tzinfo=timezone.utc),
-            )
+            try:
+                await conn.execute(
+                    "DELETE FROM workflow_metrics WHERE created_at >= $1",
+                    datetime(2098, 1, 1, tzinfo=timezone.utc),
+                )
+            finally:
+                await conn.close()
             await view.record_workflow_async(_result(run_id=f"run_ok_{uuid.uuid4().hex[:8]}", cost_usd=1.5))
             await view.record_workflow_async(
                 _result(
@@ -163,6 +168,95 @@ def test_efficiency_summary_reports_retries_and_token_usage(monkeypatch, metrics
         finally:
             await view.close()
 
-    import asyncio
-
     asyncio.run(_run())
+
+
+def test_sync_metric_wrappers_open_loop_local_connections(monkeypatch) -> None:
+    class _LoopBoundConnection:
+        def __init__(self) -> None:
+            self._loop = asyncio.get_running_loop()
+
+        def _assert_loop(self) -> None:
+            if asyncio.get_running_loop() is not self._loop:
+                raise RuntimeError("got Future attached to a different loop")
+
+        async def fetchval(self, _sql: str):
+            self._assert_loop()
+            return True
+
+        async def fetch(self, sql: str, *_args):
+            self._assert_loop()
+            if "information_schema.columns" in sql:
+                return [
+                    {"column_name": column}
+                    for column in observability_mod._REQUIRED_WORKFLOW_METRICS_COLUMNS
+                ]
+            if "GROUP BY provider_slug, model_slug" in sql:
+                return [
+                    {
+                        "provider_slug": "openai",
+                        "model_slug": "gpt-test",
+                        "total_workflows": 1,
+                        "succeeded": 1,
+                        "failed": 0,
+                        "pass_rate": 100.0,
+                    }
+                ]
+            return []
+
+        async def fetchrow(self, _sql: str, *_args):
+            self._assert_loop()
+            return {"p50": 10, "p95": 20, "p99": 30}
+
+        async def close(self) -> None:
+            self._assert_loop()
+
+    class _FakeAsyncPG:
+        def __init__(self) -> None:
+            self.connect_loops: list[int] = []
+
+        async def connect(self, dsn: str):
+            assert dsn == "postgresql://test@localhost:5432/praxis_test"
+            self.connect_loops.append(id(asyncio.get_running_loop()))
+            return _LoopBoundConnection()
+
+    fake_asyncpg = _FakeAsyncPG()
+    monkeypatch.setattr(observability_mod, "asyncpg", fake_asyncpg)
+
+    view = WorkflowMetricsView(db_url="postgresql://test@localhost:5432/praxis_test")
+
+    assert view.pass_rate_by_model(days=7)[0]["provider_slug"] == "openai"
+    assert view.latency_percentiles(days=7)["p95"] == 20
+    assert len(fake_asyncpg.connect_loops) == 2
+
+
+def test_capability_distribution_casts_text_capability_payloads(monkeypatch) -> None:
+    observed: dict[str, str] = {}
+
+    class _FakeConnection:
+        async def fetchval(self, _sql: str):
+            return True
+
+        async def fetch(self, sql: str, *_args):
+            if "information_schema.columns" in sql:
+                return [
+                    {"column_name": column}
+                    for column in observability_mod._REQUIRED_WORKFLOW_METRICS_COLUMNS
+                ]
+            observed["sql"] = sql
+            return [{"capability": "ops", "count": 2}]
+
+        async def close(self) -> None:
+            return None
+
+    class _FakeAsyncPG:
+        async def connect(self, dsn: str):
+            assert dsn == "postgresql://test@localhost:5432/praxis_test"
+            return _FakeConnection()
+
+    monkeypatch.setattr(observability_mod, "asyncpg", _FakeAsyncPG())
+
+    view = WorkflowMetricsView(db_url="postgresql://test@localhost:5432/praxis_test")
+
+    assert view.capability_distribution(days=7) == [{"capability": "ops", "count": 2}]
+    assert "capabilities::jsonb" in observed["sql"]

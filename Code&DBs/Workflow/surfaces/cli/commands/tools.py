@@ -16,15 +16,47 @@ from surfaces.cli.mcp_tools import (
 from surfaces.mcp.catalog import McpToolDefinition, get_tool_catalog
 
 
+def _tools_quickstart_text() -> str:
+    definitions = _filtered_tools()
+    alias_definitions = [definition for definition in definitions if definition.cli_recommended_alias]
+    direct_entrypoints = [
+        definition
+        for definition in alias_definitions
+        if definition.cli_tier == "stable"
+    ][:6]
+    if not direct_entrypoints:
+        direct_entrypoints = alias_definitions[:6]
+
+    lines = [
+        "usage: workflow tools [list|search|describe|call]",
+        "",
+        "Tool discovery quickstart:",
+        "  workflow tools list",
+        "  workflow tools search <topic> [--surface <surface>] [--tier <tier>] [--risk <risk>]",
+        "  workflow tools describe <tool|alias>",
+        "  workflow tools call <tool|alias> --input-json '<json>' --yes",
+        "",
+    ]
+    if direct_entrypoints:
+        lines.append("Common direct entrypoints:")
+        for definition in direct_entrypoints:
+            lines.append(f"  {definition.cli_entrypoint}  ->  {definition.name}")
+        lines.append("")
+    lines.extend(
+        [
+            f"Catalog size: {len(definitions)} tools",
+            "Tip: run `workflow tools list --json` for machine-readable discovery.",
+            "Tip: run `workflow tools search --surface query --tier stable` to browse a filtered slice.",
+            "Tip: run `workflow help <alias>` or `workflow <alias> --help` for alias-specific usage.",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def _tools_command(args: list[str], *, stdout: TextIO) -> int:
-    if not args or args[0] in {"-h", "--help"}:
-        stdout.write(
-            "usage: workflow tools list [--surface <name>] [--tier <stable|advanced|session|all>] [--risk <read|write|dispatch|session|all>] [--json]\n"
-            "       workflow tools search <text> [--json]\n"
-            "       workflow tools describe <tool> [--json]\n"
-            "       workflow tools call <tool> [--input-json <json> | --input-file <path>] [--workflow-token <token>] [--yes] [--json]\n"
-        )
-        return 2
+    if not args or args[0] in {"-h", "--help", "help"}:
+        stdout.write(_tools_quickstart_text() + "\n")
+        return 0
 
     subcommand = args[0]
     tail = args[1:]
@@ -107,15 +139,15 @@ def _tools_list_command(args: list[str], *, stdout: TextIO) -> int:
         print_json(stdout, payload)
         return 0
 
-    header = f"{'TOOL':<32} {'SURFACE':<12} {'TIER':<9} {'RISK':<20} DESCRIPTION"
+    header = f"{'TOOL':<32} {'ENTRYPOINT':<40} {'SURFACE':<12} {'TIER':<9} {'RISK':<20} DESCRIPTION"
     stdout.write(header + "\n")
-    stdout.write("-" * 120 + "\n")
+    stdout.write("-" * 160 + "\n")
     for definition in definitions:
         risks = "/".join(definition.risk_levels)
         description = definition.description.split("\n", 1)[0]
         stdout.write(
-            f"{definition.name:<32} {definition.cli_surface:<12} {definition.cli_tier:<9} "
-            f"{risks:<20} {description[:60]}\n"
+            f"{definition.name:<32} {definition.cli_entrypoint:<40} {definition.cli_surface:<12} "
+            f"{definition.cli_tier:<9} {risks:<20} {description[:50]}\n"
         )
     stdout.write(f"\n{len(definitions)} tool(s)\n")
     return 0
@@ -123,18 +155,42 @@ def _tools_list_command(args: list[str], *, stdout: TextIO) -> int:
 
 def _tools_search_command(args: list[str], *, stdout: TextIO) -> int:
     as_json = False
+    surface = None
+    tier = "all"
+    risk = "all"
     query_parts: list[str] = []
-    for arg in args:
+    i = 0
+    while i < len(args):
+        arg = args[i]
         if arg == "--json":
             as_json = True
+            i += 1
+        elif arg == "--surface" and i + 1 < len(args):
+            surface = args[i + 1].strip()
+            i += 2
+        elif arg == "--tier" and i + 1 < len(args):
+            tier = args[i + 1].strip()
+            i += 2
+        elif arg == "--risk" and i + 1 < len(args):
+            risk = args[i + 1].strip()
+            i += 2
+        elif arg in {"--surface", "--tier", "--risk"}:
+            stdout.write(f"{arg} requires a value\n")
+            return 2
+        elif arg.startswith("--"):
+            stdout.write(f"unknown argument: {arg}\n")
+            return 2
         else:
             query_parts.append(arg)
+            i += 1
     query = " ".join(query_parts).strip()
-    if not query:
-        stdout.write("usage: workflow tools search <text> [--json]\n")
+    if not query and surface is None and tier == "all" and risk == "all":
+        stdout.write(
+            "usage: workflow tools search <text> [--surface <surface>] [--tier <tier>] [--risk <risk>] [--json]\n"
+        )
         return 2
 
-    definitions = _filtered_tools(search_text=query)
+    definitions = _filtered_tools(surface=surface, tier=tier, risk=risk, search_text=query or None)
     if as_json:
         print_json(
             stdout,
@@ -143,6 +199,8 @@ def _tools_search_command(args: list[str], *, stdout: TextIO) -> int:
                     "name": definition.name,
                     "surface": definition.cli_surface,
                     "tier": definition.cli_tier,
+                    "entrypoint": definition.cli_entrypoint,
+                    "recommended_alias": definition.cli_recommended_alias,
                     "badges": list(definition.cli_badges),
                     "when_to_use": definition.cli_when_to_use,
                 }
@@ -153,6 +211,7 @@ def _tools_search_command(args: list[str], *, stdout: TextIO) -> int:
 
     for definition in definitions:
         stdout.write(f"{definition.name} [{format_badges(definition)}]\n")
+        stdout.write(f"  entrypoint: {definition.cli_entrypoint}\n")
         stdout.write(f"  {definition.cli_when_to_use or definition.description.splitlines()[0]}\n")
     stdout.write(f"\n{len(definitions)} tool(s)\n")
     return 0
@@ -160,7 +219,7 @@ def _tools_search_command(args: list[str], *, stdout: TextIO) -> int:
 
 def _tools_describe_command(args: list[str], *, stdout: TextIO) -> int:
     if not args:
-        stdout.write("usage: workflow tools describe <tool> [--json]\n")
+        stdout.write("usage: workflow tools describe <tool|alias> [--json]\n")
         return 2
     tool_name = args[0].strip()
     as_json = "--json" in args[1:]
@@ -223,7 +282,7 @@ def _tools_describe_command(args: list[str], *, stdout: TextIO) -> int:
 def _tools_call_command(args: list[str], *, stdout: TextIO) -> int:
     if not args:
         stdout.write(
-            "usage: workflow tools call <tool> [--input-json <json> | --input-file <path>] [--workflow-token <token>] [--yes] [--json]\n"
+            "usage: workflow tools call <tool|alias> [--input-json <json> | --input-file <path>] [--workflow-token <token>] [--yes] [--json]\n"
         )
         return 2
     tool_name = args[0].strip()

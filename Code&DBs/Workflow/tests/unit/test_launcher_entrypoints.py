@@ -31,15 +31,46 @@ def test_praxis_help_uses_canonical_command_name() -> None:
     completed = _run_launcher_help("praxis")
 
     assert "Usage: praxis <command> [service]" in completed.stdout
-    assert "praxis start [postgres|api|workflow-api|worker|scheduler]" in completed.stdout
+    assert "start [service...]" in completed.stdout
+    assert "scheduler" in completed.stdout
+    assert "Native launchd control is disabled." in completed.stdout
+    assert "Scheduler is not containerized yet." not in completed.stdout
     assert "praxis-ctl start" not in completed.stdout
+
+
+def test_praxis_workflow_passthrough_uses_workflow_frontdoor() -> None:
+    completed = subprocess.run(
+        [str(REPO_ROOT / "scripts" / "praxis"), "workflow", "--help"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert completed.returncode == 0
+    assert "Most used:" in completed.stdout
+    assert "workflow tools list" in completed.stdout
+
+
+def test_praxis_workflow_alias_script_delegates_to_canonical_frontdoor() -> None:
+    completed = subprocess.run(
+        [str(REPO_ROOT / "scripts" / "praxis-workflow"), "--help"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert completed.returncode == 0
+    assert "Most used:" in completed.stdout
+    assert "workflow inspect <run_id>" in completed.stdout
 
 
 def test_praxis_ctl_help_preserves_alias_command_name() -> None:
     completed = _run_launcher_help("praxis-ctl")
 
     assert "Usage: praxis-ctl <command> [service]" in completed.stdout
-    assert "praxis-ctl start [postgres|api|workflow-api|worker|scheduler]" in completed.stdout
+    assert "praxis-ctl start [--foreground|postgres|api|workflow-api|worker|scheduler]" in completed.stdout
     assert "praxis start [postgres|api|workflow-api|worker|scheduler]" not in completed.stdout
 
 
@@ -64,14 +95,12 @@ def test_launcher_status_payload_uses_fast_frontdoor_profile(monkeypatch) -> Non
                 "mcp_bridge_ready": True,
                 "ui_ready": True,
                 "launch_url": "http://127.0.0.1:8420/app",
-                "helm_url": "http://127.0.0.1:8420/app/helm",
                 "dashboard_url": "http://127.0.0.1:8420/app",
                 "api_docs_url": "http://127.0.0.1:8420/docs",
                 "dependency_truth": {"ok": True},
             },
             "dependency_truth": {"ok": True},
             "launch_url": "http://127.0.0.1:8420/app",
-            "helm_url": "http://127.0.0.1:8420/app/helm",
             "dashboard_url": "http://127.0.0.1:8420/app",
             "api_docs_url": "http://127.0.0.1:8420/docs",
         }

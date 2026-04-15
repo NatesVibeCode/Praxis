@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 from types import SimpleNamespace
 
@@ -40,3 +41,34 @@ def test_start_server_checks_dependency_contract_before_launch(monkeypatch) -> N
         "log_level": "info",
     }
 
+
+def test_start_server_primes_normalized_workflow_database_url(monkeypatch) -> None:
+    observed: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        server,
+        "workflow_database_env",
+        lambda: {
+            "WORKFLOW_DATABASE_URL": "postgresql://postgres@localhost:5432/praxis",
+            "PATH": "",
+        },
+    )
+    monkeypatch.setattr(
+        server,
+        "require_runtime_dependencies",
+        lambda *, scope="api_server", manifest_path=None: {
+            "ok": True,
+            "scope": scope,
+            "manifest_path": "/tmp/requirements.runtime.txt",
+        },
+    )
+    monkeypatch.setitem(sys.modules, "uvicorn", SimpleNamespace(run=lambda *args, **kwargs: observed.update({
+        "args": args,
+        "kwargs": kwargs,
+    })))
+    monkeypatch.setitem(sys.modules, "surfaces.api.rest", SimpleNamespace(app="fake-asgi-app"))
+    monkeypatch.setenv("WORKFLOW_DATABASE_URL", "postgresql://localhost:5432/praxis")
+
+    server.start_server(host="127.0.0.1", port=9999)
+
+    assert os.environ["WORKFLOW_DATABASE_URL"] == "postgresql://postgres@localhost:5432/praxis"

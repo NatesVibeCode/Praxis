@@ -1,10 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import './ConfigEditorPanel.css';
+import {
+  defaultConfigValueForKey,
+  GRID_ACTION_VARIANTS,
+  GRID_CHART_TYPE_KEYS,
+  GRID_CHART_TYPES,
+  GRID_DATA_SOURCES,
+  GRID_TEXT_KEYS,
+} from './moduleConfigMetadata';
 
 interface ConfigEditorPanelProps {
   quadrantId: string;
   moduleId: string;
   config: Record<string, unknown>;
+  focusKey?: string | null;
   onSave: (newConfig: Record<string, unknown>) => void;
   onClose: () => void;
 }
@@ -19,9 +28,6 @@ interface ActionDef {
   label: string;
   variant: string;
 }
-
-const CHART_TYPES = ['bar', 'line', 'pie'];
-const ACTION_VARIANTS = ['primary', 'secondary', 'danger', 'ghost'];
 
 function TextInput({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
   return (
@@ -75,10 +81,14 @@ function ColumnsEditor({ columns, onChange }: { columns: ColumnDef[]; onChange: 
             />
             sort
           </label>
-          <button className="config-editor-array-remove" onClick={() => remove(i)}>&times;</button>
+          <button type="button" className="config-editor-array-remove" onClick={() => remove(i)} aria-label="Remove column">
+            &times;
+          </button>
         </div>
       ))}
-      <button className="config-editor-array-add" onClick={add}>+ column</button>
+      <button type="button" className="config-editor-array-add" onClick={add}>
+        + column
+      </button>
     </div>
   );
 }
@@ -98,12 +108,16 @@ function ActionsEditor({ actions, onChange }: { actions: ActionDef[]; onChange: 
         <div key={i} className="config-editor-array-item">
           <input placeholder="label" value={action.label} onChange={e => update(i, { label: e.target.value })} />
           <select value={action.variant} onChange={e => update(i, { variant: e.target.value })}>
-            {ACTION_VARIANTS.map(v => <option key={v} value={v}>{v}</option>)}
+            {GRID_ACTION_VARIANTS.map(v => <option key={v} value={v}>{v}</option>)}
           </select>
-          <button className="config-editor-array-remove" onClick={() => remove(i)}>&times;</button>
+          <button type="button" className="config-editor-array-remove" onClick={() => remove(i)} aria-label="Remove action">
+            &times;
+          </button>
         </div>
       ))}
-      <button className="config-editor-array-add" onClick={add}>+ action</button>
+      <button type="button" className="config-editor-array-add" onClick={add}>
+        + action
+      </button>
     </div>
   );
 }
@@ -138,24 +152,8 @@ function RawJsonEditor({ label, value, onChange }: { label: string; value: unkno
   );
 }
 
-const TEXT_KEYS = new Set(['objectType', 'title', 'placeholder', 'publishSelection', 'subscribeSelection', 'path', 'label', 'format', 'color', 'xKey', 'yKey', 'groupBy', 'worldPath', 'searchQuery', 'content', 'onSubmitEndpoint']);
-const CHART_TYPE_KEYS = new Set(['chartType', 'type']);
-
-const DATA_SOURCES = [
-  { value: 'platform-overview', label: 'Platform Overview' },
-  { value: 'observability/platform', label: 'Platform Observability' },
-  { value: 'observability/code-hotspots', label: 'Code Hotspots' },
-  { value: 'observability/bug-scoreboard', label: 'Bug Scoreboard' },
-  { value: 'runs/recent', label: 'Recent Runs' },
-  { value: 'leaderboard', label: 'Model Leaderboard' },
-  { value: 'workflow-status', label: 'Workflow Status' },
-  { value: 'costs', label: 'Cost Summary' },
-  { value: 'bugs', label: 'Bug List' },
-  { value: 'models', label: 'Available Models' },
-];
-
 function DataSourceDropdown({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const isCustom = value !== '' && !DATA_SOURCES.some(ds => ds.value === value);
+  const isCustom = value !== '' && !GRID_DATA_SOURCES.some(ds => ds.value === value);
   const [showCustom, setShowCustom] = useState(isCustom);
 
   if (showCustom) {
@@ -171,6 +169,7 @@ function DataSourceDropdown({ value, onChange }: { value: string; onChange: (v: 
             style={{ flex: 1 }}
           />
           <button
+            type="button"
             className="config-editor-array-remove"
             onClick={() => setShowCustom(false)}
             title="Switch to dropdown"
@@ -186,7 +185,7 @@ function DataSourceDropdown({ value, onChange }: { value: string; onChange: (v: 
     <div className="config-editor-field">
       <label>endpoint</label>
       <select
-        value={DATA_SOURCES.some(ds => ds.value === value) ? value : ''}
+        value={GRID_DATA_SOURCES.some(ds => ds.value === value) ? value : ''}
         onChange={e => {
           if (e.target.value === '__custom__') {
             setShowCustom(true);
@@ -196,7 +195,7 @@ function DataSourceDropdown({ value, onChange }: { value: string; onChange: (v: 
         }}
       >
         <option value="" disabled>Select data source...</option>
-        {DATA_SOURCES.map(ds => (
+        {GRID_DATA_SOURCES.map(ds => (
           <option key={ds.value} value={ds.value}>{ds.label}</option>
         ))}
         <option value="__custom__">Custom endpoint...</option>
@@ -205,8 +204,23 @@ function DataSourceDropdown({ value, onChange }: { value: string; onChange: (v: 
   );
 }
 
-export function ConfigEditorPanel({ quadrantId, moduleId, config, onSave, onClose }: ConfigEditorPanelProps) {
+export function ConfigEditorPanel({ quadrantId, moduleId, config, focusKey, onSave, onClose }: ConfigEditorPanelProps) {
   const [draft, setDraft] = useState<Record<string, unknown>>(() => structuredClone(config));
+
+  useEffect(() => {
+    setDraft(structuredClone(config));
+  }, [config, moduleId, quadrantId]);
+
+  useEffect(() => {
+    if (!focusKey) return;
+    setDraft((prev) => {
+      if (focusKey in prev) return prev;
+      return {
+        ...prev,
+        [focusKey]: defaultConfigValueForKey(focusKey),
+      };
+    });
+  }, [focusKey]);
 
   const set = (key: string, value: unknown) => {
     setDraft(prev => ({ ...prev, [key]: value }));
@@ -214,42 +228,86 @@ export function ConfigEditorPanel({ quadrantId, moduleId, config, onSave, onClos
 
   const keys = Object.keys(draft);
 
+  useEffect(() => {
+    if (!focusKey) return;
+    const timer = window.setTimeout(() => {
+      const root = document.querySelector('.config-editor-panel');
+      const field = root?.querySelector(`[data-config-key="${focusKey}"]`) as HTMLElement | null;
+      const target = field?.querySelector('input, select, textarea') as HTMLElement | null;
+      field?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      target?.focus();
+    }, 40);
+    return () => window.clearTimeout(timer);
+  }, [draft, focusKey]);
+
   return (
     <div className="config-editor-panel">
       <div className="config-editor-header">
         <h3>{moduleId}</h3>
-        <button className="config-editor-close" onClick={onClose}>&times;</button>
+        <button type="button" className="config-editor-close" onClick={onClose} aria-label="Close config editor">
+          &times;
+        </button>
       </div>
 
       <div className="config-editor-body">
         {keys.map(key => {
           if (key === 'endpoint') {
-            return <DataSourceDropdown key={key} value={String(draft[key] ?? '')} onChange={v => set(key, v)} />;
+            return (
+              <div key={key} data-config-key={key}>
+                <DataSourceDropdown value={String(draft[key] ?? '')} onChange={v => set(key, v)} />
+              </div>
+            );
           }
           if (key === 'presetId') return null;
-          if (TEXT_KEYS.has(key)) {
-            return <TextInput key={key} label={key} value={String(draft[key] ?? '')} onChange={v => set(key, v)} />;
+          if (GRID_TEXT_KEYS.has(key)) {
+            return (
+              <div key={key} data-config-key={key}>
+                <TextInput label={key} value={String(draft[key] ?? '')} onChange={v => set(key, v)} />
+              </div>
+            );
           }
-          if (CHART_TYPE_KEYS.has(key)) {
-            return <DropdownInput key={key} label={key} value={String(draft[key] ?? 'bar')} options={CHART_TYPES} onChange={v => set(key, v)} />;
+          if (GRID_CHART_TYPE_KEYS.has(key)) {
+            return (
+              <div key={key} data-config-key={key}>
+                <DropdownInput label={key} value={String(draft[key] ?? 'bar')} options={[...GRID_CHART_TYPES]} onChange={v => set(key, v)} />
+              </div>
+            );
           }
           if (key === 'refreshInterval') {
-            return <NumberInput key={key} label={key} value={Number(draft[key] ?? 0)} onChange={v => set(key, v)} />;
+            return (
+              <div key={key} data-config-key={key}>
+                <NumberInput label={key} value={Number(draft[key] ?? 0)} onChange={v => set(key, v)} />
+              </div>
+            );
           }
           if (key === 'columns') {
             const cols = (Array.isArray(draft[key]) ? draft[key] : []) as ColumnDef[];
-            return <ColumnsEditor key={key} columns={cols} onChange={v => set(key, v)} />;
+            return (
+              <div key={key} data-config-key={key}>
+                <ColumnsEditor columns={cols} onChange={v => set(key, v)} />
+              </div>
+            );
           }
           if (key === 'actions') {
             const acts = (Array.isArray(draft[key]) ? draft[key] : []) as ActionDef[];
-            return <ActionsEditor key={key} actions={acts} onChange={v => set(key, v)} />;
+            return (
+              <div key={key} data-config-key={key}>
+                <ActionsEditor actions={acts} onChange={v => set(key, v)} />
+              </div>
+            );
           }
-          return <RawJsonEditor key={key} label={key} value={draft[key]} onChange={v => set(key, v)} />;
+          return (
+            <div key={key} data-config-key={key}>
+              <RawJsonEditor label={key} value={draft[key]} onChange={v => set(key, v)} />
+            </div>
+          );
         })}
       </div>
 
       <div className="config-editor-footer">
-        <button className="config-editor-save" onClick={() => onSave(draft)}>Save</button>
+        <button type="button" className="config-editor-save" onClick={() => onSave(draft)}>
+          Save changes
+        </button>
       </div>
     </div>
   );

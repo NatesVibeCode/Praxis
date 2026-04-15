@@ -6,11 +6,13 @@ from io import StringIO
 
 import pytest
 
-os.environ.setdefault("WORKFLOW_DATABASE_URL", "postgresql://localhost:5432/praxis")
+os.environ.setdefault("WORKFLOW_DATABASE_URL", "postgresql://postgres@localhost:5432/praxis")
 
 from surfaces.cli.main import main as workflow_cli_main
 from surfaces.cli.commands import operate as operate_commands
 from surfaces.cli.commands import query as query_commands
+from surfaces.cli.commands import tools as tools_commands
+from surfaces.mcp.catalog import get_tool_catalog
 
 
 def test_tools_list_json_exposes_catalog() -> None:
@@ -20,14 +22,26 @@ def test_tools_list_json_exposes_catalog() -> None:
 
     payload = json.loads(stdout.getvalue())
     names = {row["name"] for row in payload}
-    assert len(payload) == 42
+    assert len(payload) == len(get_tool_catalog())
     assert {"praxis_query", "praxis_discover", "praxis_session_context"} <= names
+    assert any(row["entrypoint"] == "workflow query" for row in payload)
+
+
+def test_tools_root_shows_quickstart() -> None:
+    stdout = StringIO()
+
+    assert workflow_cli_main(["tools"], stdout=stdout) == 0
+
+    rendered = stdout.getvalue()
+    assert "Tool discovery quickstart:" in rendered
+    assert "workflow tools search <topic> [--surface <surface>] [--tier <tier>] [--risk <risk>]" in rendered
+    assert "workflow query" in rendered
 
 
 def test_tools_describe_surfaces_cli_metadata() -> None:
     stdout = StringIO()
 
-    assert workflow_cli_main(["tools", "describe", "praxis_query"], stdout=stdout) == 0
+    assert workflow_cli_main(["tools", "describe", "query"], stdout=stdout) == 0
 
     rendered = stdout.getvalue()
     assert "badges: stable, query, alias:query" in rendered
@@ -35,6 +49,29 @@ def test_tools_describe_surfaces_cli_metadata() -> None:
     assert "describe_command: workflow tools describe praxis_query" in rendered
     assert "workflow_token_required: no" in rendered
     assert '"question"' in rendered
+
+
+def test_tools_list_plain_output_highlights_entrypoints() -> None:
+    stdout = StringIO()
+
+    assert workflow_cli_main(["tools", "list"], stdout=stdout) == 0
+
+    rendered = stdout.getvalue()
+    assert "ENTRYPOINT" in rendered
+    assert "workflow query" in rendered
+    assert "workflow tools call praxis_connector" in rendered
+
+
+def test_tools_search_supports_filter_only_browsing() -> None:
+    stdout = StringIO()
+
+    assert workflow_cli_main(["tools", "search", "--surface", "query", "--json"], stdout=stdout) == 0
+
+    payload = json.loads(stdout.getvalue())
+    assert payload
+    assert all(row["surface"] == "query" for row in payload)
+    assert all("entrypoint" in row for row in payload)
+    assert any(row["entrypoint"] == "workflow query" for row in payload)
 
 
 def test_tools_call_requires_yes_for_write_or_dispatch() -> None:
@@ -55,6 +92,36 @@ def test_tools_call_requires_yes_for_write_or_dispatch() -> None:
     rendered = stdout.getvalue()
     assert "risk: write" in rendered
     assert "confirmation required" in rendered
+
+
+def test_tools_call_accepts_recommended_alias(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _run_cli_tool(tool_name: str, params: dict[str, object], *, workflow_token: str = ""):
+        captured["tool_name"] = tool_name
+        captured["params"] = dict(params)
+        captured["workflow_token"] = workflow_token
+        return 0, {"ok": True}
+
+    monkeypatch.setattr(tools_commands, "run_cli_tool", _run_cli_tool)
+    stdout = StringIO()
+
+    assert workflow_cli_main(
+        [
+            "tools",
+            "call",
+            "query",
+            "--input-json",
+            '{"question":"what failed"}',
+        ],
+        stdout=stdout,
+    ) == 0
+
+    assert captured == {
+        "tool_name": "praxis_query",
+        "params": {"question": "what failed"},
+        "workflow_token": "",
+    }
 
 
 def test_discover_reindex_requires_yes(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -133,6 +200,16 @@ def test_help_text_explains_search_semantics() -> None:
     assert "hybrid retrieval" in discover_stdout.getvalue()
     assert "graph traversal" in recall_stdout.getvalue()
     assert "Best first stop" in query_stdout.getvalue()
+
+
+def test_tools_root_help_mentions_alias_support() -> None:
+    stdout = StringIO()
+
+    assert workflow_cli_main(["tools", "--help"], stdout=stdout) == 0
+
+    rendered = stdout.getvalue()
+    assert "workflow tools describe <tool|alias>" in rendered
+    assert "workflow tools call <tool|alias>" in rendered
 
 
 def test_architecture_scan_alias_renders_exact_static_findings(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -222,3 +299,35 @@ def test_health_alias_uses_catalog_backed_tool_runner(monkeypatch: pytest.Monkey
         "tool_name": "praxis_health",
         "params": {},
     }
+
+
+def test_health_alias_renders_trend_observability(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _run_cli_tool(tool_name: str, params: dict[str, object], *, workflow_token: str = ""):
+        assert tool_name == "praxis_health"
+        assert params == {}
+        return 0, {
+            "preflight": {"overall": "ok", "checks": []},
+            "operator_snapshot": {},
+            "lane_recommendation": {"recommended_posture": "green", "reasons": []},
+            "trend_observability": {
+                "summary": {
+                    "total_trends": 1,
+                    "critical_trends": 0,
+                    "warning_trends": 1,
+                    "info_trends": 0,
+                    "degrading_trends": 1,
+                    "accelerating_trends": 0,
+                    "improving_trends": 0,
+                },
+                "trend_digest": "WARNING:\n  cost_trend anthropic\nSummary: 0 critical, 1 warnings, 0 info",
+            },
+        }
+
+    monkeypatch.setattr(operate_commands, "run_cli_tool", _run_cli_tool)
+    stdout = StringIO()
+
+    assert workflow_cli_main(["health"], stdout=stdout) == 0
+    rendered = stdout.getvalue()
+    assert "Trends" in rendered
+    assert "total_trends: 1" in rendered
+    assert "digest: WARNING:" in rendered

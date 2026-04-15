@@ -1,12 +1,59 @@
 // Canonical build system types — extracted from BuildWorkspace.tsx
 // Every build-related component imports from here.
 
+export type HttpRequestPreset = 'fetch_json' | 'post_json' | 'webhook_callback' | 'custom';
+
+export interface NotificationIntegrationArgs extends Record<string, unknown> {
+  title?: string;
+  message?: string;
+  status?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface HttpRequestIntegrationArgs extends Record<string, unknown> {
+  request_preset?: HttpRequestPreset;
+  url?: string;
+  endpoint?: string;
+  method?: string;
+  headers?: Record<string, unknown>;
+  body?: unknown;
+  body_template?: unknown;
+  timeout?: number;
+  auth_strategy?: Record<string, unknown>;
+  endpoint_map?: unknown[];
+  connector_spec?: Record<string, unknown>;
+}
+
+export interface WorkflowInvokeIntegrationArgs extends Record<string, unknown> {
+  workflow_id?: string;
+  target_workflow_id?: string;
+  payload?: unknown;
+  input?: unknown;
+  inputs?: unknown;
+}
+
+export type BuildNodeIntegrationArgs =
+  | NotificationIntegrationArgs
+  | HttpRequestIntegrationArgs
+  | WorkflowInvokeIntegrationArgs
+  | Record<string, unknown>;
+
+export interface BuildGraphPayload {
+  graph_id?: string;
+  definition_revision?: string;
+  compiler_revision?: string;
+  schema_version?: number;
+  nodes?: BuildNode[];
+  edges?: BuildEdge[];
+}
+
 export interface BuildNode {
   node_id: string;
   kind: 'step' | 'gate' | 'state';
   title?: string;
   summary?: string;
   route?: string;
+  integration_args?: BuildNodeIntegrationArgs;
   trigger?: {
     event_type?: string;
     cron_expression?: string;
@@ -31,21 +78,25 @@ export interface BuildEdge {
   kind: string;
   from_node_id: string;
   to_node_id: string;
-  branch_reason?: string | null;
-  gate?: {
-    state: string;
-    label?: string;
-    family: string;
-    config?: {
-      verify_command?: string;
-      condition?: Record<string, unknown> | string;
-      max_attempts?: number;
-      fallback?: string;
-      [key: string]: unknown;
-    };
-    [key: string]: unknown;
-  } | null;
+  release?: BuildEdgeRelease | null;
   gateLabel?: string;
+}
+
+export interface BuildEdgeRelease {
+  family: string;
+  edge_type: 'after_success' | 'after_failure' | 'after_any' | 'conditional';
+  release_condition: Record<string, unknown>;
+  label?: string;
+  branch_reason?: string;
+  state?: string;
+  config?: {
+    verify_command?: string;
+    condition?: Record<string, unknown> | string;
+    max_attempts?: number;
+    fallback?: string;
+    branch_side?: string;
+    [key: string]: unknown;
+  };
 }
 
 export interface BuildIssue {
@@ -76,11 +127,14 @@ export interface BindingLedgerEntry {
   binding_id: string;
   source_kind?: string;
   source_label?: string;
+  source_span?: unknown[] | null;
   source_node_ids?: string[];
   state?: string;
   candidate_targets?: BindingTarget[];
   accepted_target?: BindingTarget | null;
   rationale?: string;
+  created_at?: string | null;
+  updated_at?: string | null;
   freshness?: {
     state?: string;
     captured_at?: string | null;
@@ -111,6 +165,7 @@ export interface AuthorityAttachment {
   role?: string;
   label?: string;
   promote_to_state?: boolean;
+  state_node_id?: string | null;
 }
 
 export interface WorkflowJob {
@@ -140,6 +195,16 @@ export interface CompiledSpecProjection {
   compiled_spec?: CompiledSpec | null;
 }
 
+export interface BuildUndoReceiptStep {
+  subpath: string;
+  body: Record<string, unknown>;
+}
+
+export interface BuildUndoReceipt {
+  workflow_id: string;
+  steps: BuildUndoReceiptStep[];
+}
+
 export interface BuildPayload {
   workflow?: { id: string; name: string; description?: string } | null;
   definition: Record<string, unknown>;
@@ -147,14 +212,7 @@ export interface BuildPayload {
   planning_notes?: string[];
   build_state?: string;
   build_blockers?: BuildIssue[];
-  build_graph?: {
-    graph_id?: string;
-    definition_revision?: string;
-    compiler_revision?: string;
-    schema_version?: number;
-    nodes?: BuildNode[];
-    edges?: BuildEdge[];
-  } | null;
+  build_graph?: BuildGraphPayload | null;
   binding_ledger?: BindingLedgerEntry[];
   import_snapshots?: ImportSnapshot[];
   authority_attachments?: AuthorityAttachment[];
@@ -174,6 +232,7 @@ export interface BuildPayload {
     calculations?: string[];
     workflows?: string[];
   };
+  undo_receipt?: BuildUndoReceipt | null;
 }
 
 // Service bus event types

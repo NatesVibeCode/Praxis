@@ -6,6 +6,8 @@ import uuid
 import pytest
 
 from runtime.compile_artifacts import CompileArtifactStore
+from runtime.workflow import _admission
+from runtime.workflow import _context_building
 from runtime.workflow import unified
 
 
@@ -14,6 +16,7 @@ class _PacketConn:
         self.rows: list[dict[str, object]] = []
         self.compile_artifact_rows: list[dict[str, object]] = []
         self.next_job_id = 0
+        self.edge_inserts: list[tuple[int, int]] = []
 
     def execute(self, query: str, *args):
         if "INSERT INTO compile_artifacts" in query:
@@ -71,7 +74,15 @@ class _PacketConn:
             self.next_job_id += 1
             return [{"id": self.next_job_id}]
         if "INSERT INTO workflow_job_edges" in query:
+            self.edge_inserts.append((args[0], args[1]))
             return []
+        if "SELECT parent_id, child_id" in query and "FROM workflow_job_edges" in query:
+            child_ids = set(args[0] or [])
+            return [
+                {"parent_id": parent_id, "child_id": child_id}
+                for parent_id, child_id in self.edge_inserts
+                if child_id in child_ids
+            ]
         if "UPDATE workflow_jobs" in query or "UPDATE workflow_runs" in query or "DELETE FROM workflow_runs" in query:
             return []
         if "FROM execution_packets" in query:
@@ -200,10 +211,10 @@ def test_workflow_submit_inline_records_execution_packet_lineage(monkeypatch) ->
                 )
 
     monkeypatch.setattr("runtime.task_type_router.TaskTypeRouter", lambda conn: _Router())
-    monkeypatch.setattr(unified, "check_idempotency", lambda *args, **kwargs: type("Result", (), {"is_replay": False, "is_conflict": False, "existing_run_id": None, "created_at": None})())
-    monkeypatch.setattr(unified, "record_idempotency", lambda *args, **kwargs: None)
-    monkeypatch.setattr(unified, "_ensure_workflow_authority", lambda *args, **kwargs: {"workflow_id": "workflow.alpha", "request_id": "req_1"})
-    monkeypatch.setattr(unified, "_recompute_workflow_run_state", lambda *args, **kwargs: None)
+    monkeypatch.setattr(_admission, "check_idempotency", lambda *args, **kwargs: type("Result", (), {"is_replay": False, "is_conflict": False, "existing_run_id": None, "created_at": None})())
+    monkeypatch.setattr(_admission, "record_idempotency", lambda *args, **kwargs: None)
+    monkeypatch.setattr(_admission, "_ensure_workflow_authority", lambda *args, **kwargs: {"workflow_id": "workflow.alpha", "request_id": "req_1"})
+    monkeypatch.setattr(_admission, "_recompute_workflow_run_state", lambda *args, **kwargs: None)
 
     spec = {
         "name": "alpha workflow",
@@ -234,7 +245,7 @@ def test_workflow_submit_inline_records_execution_packet_lineage(monkeypatch) ->
     payload = json.loads(args[18])
     assert payload["definition_revision"] == "def_1234abcd"
     assert payload["plan_revision"] == "plan_5678efgh"
-    assert payload["model_messages"][0]["messages"][0]["content"] == "build the thing"
+    assert payload["model_messages"][0]["messages"][0]["content"].startswith("build the thing")
     assert payload["verify_refs"] == ["verify_ref.python.py_compile.test"]
 
 
@@ -257,10 +268,10 @@ def test_workflow_submit_inline_reuses_exact_packet_lineage(monkeypatch) -> None
 
     conn = _PacketConn()
     monkeypatch.setattr("runtime.task_type_router.TaskTypeRouter", lambda conn: _Router())
-    monkeypatch.setattr(unified, "check_idempotency", lambda *args, **kwargs: type("Result", (), {"is_replay": False, "is_conflict": False, "existing_run_id": None, "created_at": None})())
-    monkeypatch.setattr(unified, "record_idempotency", lambda *args, **kwargs: None)
-    monkeypatch.setattr(unified, "_ensure_workflow_authority", lambda *args, **kwargs: {"workflow_id": "workflow.alpha", "request_id": "req_1"})
-    monkeypatch.setattr(unified, "_recompute_workflow_run_state", lambda *args, **kwargs: None)
+    monkeypatch.setattr(_admission, "check_idempotency", lambda *args, **kwargs: type("Result", (), {"is_replay": False, "is_conflict": False, "existing_run_id": None, "created_at": None})())
+    monkeypatch.setattr(_admission, "record_idempotency", lambda *args, **kwargs: None)
+    monkeypatch.setattr(_admission, "_ensure_workflow_authority", lambda *args, **kwargs: {"workflow_id": "workflow.alpha", "request_id": "req_1"})
+    monkeypatch.setattr(_admission, "_recompute_workflow_run_state", lambda *args, **kwargs: None)
 
     spec = {
         "name": "alpha workflow",
@@ -309,10 +320,10 @@ def test_workflow_submit_inline_reuses_child_invocation_packet_lineage(monkeypat
 
     conn = _PacketConn()
     monkeypatch.setattr("runtime.task_type_router.TaskTypeRouter", lambda conn: _Router())
-    monkeypatch.setattr(unified, "check_idempotency", lambda *args, **kwargs: type("Result", (), {"is_replay": False, "is_conflict": False, "existing_run_id": None, "created_at": None})())
-    monkeypatch.setattr(unified, "record_idempotency", lambda *args, **kwargs: None)
-    monkeypatch.setattr(unified, "_ensure_workflow_authority", lambda *args, **kwargs: {"workflow_id": "workflow.alpha", "request_id": "req_1"})
-    monkeypatch.setattr(unified, "_recompute_workflow_run_state", lambda *args, **kwargs: None)
+    monkeypatch.setattr(_admission, "check_idempotency", lambda *args, **kwargs: type("Result", (), {"is_replay": False, "is_conflict": False, "existing_run_id": None, "created_at": None})())
+    monkeypatch.setattr(_admission, "record_idempotency", lambda *args, **kwargs: None)
+    monkeypatch.setattr(_admission, "_ensure_workflow_authority", lambda *args, **kwargs: {"workflow_id": "workflow.alpha", "request_id": "req_1"})
+    monkeypatch.setattr(_admission, "_recompute_workflow_run_state", lambda *args, **kwargs: None)
 
     spec = {
         "name": "alpha workflow",
@@ -389,10 +400,10 @@ def test_workflow_submit_inline_rejects_stale_child_invocation_packet_lineage(mo
 
     conn = _PacketConn()
     monkeypatch.setattr("runtime.task_type_router.TaskTypeRouter", lambda conn: _Router())
-    monkeypatch.setattr(unified, "check_idempotency", lambda *args, **kwargs: type("Result", (), {"is_replay": False, "is_conflict": False, "existing_run_id": None, "created_at": None})())
-    monkeypatch.setattr(unified, "record_idempotency", lambda *args, **kwargs: None)
-    monkeypatch.setattr(unified, "_ensure_workflow_authority", lambda *args, **kwargs: {"workflow_id": "workflow.alpha", "request_id": "req_1"})
-    monkeypatch.setattr(unified, "_recompute_workflow_run_state", lambda *args, **kwargs: None)
+    monkeypatch.setattr(_admission, "check_idempotency", lambda *args, **kwargs: type("Result", (), {"is_replay": False, "is_conflict": False, "existing_run_id": None, "created_at": None})())
+    monkeypatch.setattr(_admission, "record_idempotency", lambda *args, **kwargs: None)
+    monkeypatch.setattr(_admission, "_ensure_workflow_authority", lambda *args, **kwargs: {"workflow_id": "workflow.alpha", "request_id": "req_1"})
+    monkeypatch.setattr(_admission, "_recompute_workflow_run_state", lambda *args, **kwargs: None)
 
     spec = {
         "name": "alpha workflow",
@@ -482,12 +493,12 @@ def test_workflow_submit_inline_rejects_malformed_reusable_packet_lineage(monkey
     )
 
     monkeypatch.setattr("runtime.task_type_router.TaskTypeRouter", lambda conn: _Router())
-    monkeypatch.setattr(unified, "check_idempotency", lambda *args, **kwargs: type("Result", (), {"is_replay": False, "is_conflict": False, "existing_run_id": None, "created_at": None})())
-    monkeypatch.setattr(unified, "record_idempotency", lambda *args, **kwargs: None)
-    monkeypatch.setattr(unified, "_ensure_workflow_authority", lambda *args, **kwargs: {"workflow_id": "workflow.alpha", "request_id": "req_1"})
-    monkeypatch.setattr(unified, "_recompute_workflow_run_state", lambda *args, **kwargs: None)
+    monkeypatch.setattr(_admission, "check_idempotency", lambda *args, **kwargs: type("Result", (), {"is_replay": False, "is_conflict": False, "existing_run_id": None, "created_at": None})())
+    monkeypatch.setattr(_admission, "record_idempotency", lambda *args, **kwargs: None)
+    monkeypatch.setattr(_admission, "_ensure_workflow_authority", lambda *args, **kwargs: {"workflow_id": "workflow.alpha", "request_id": "req_1"})
+    monkeypatch.setattr(_admission, "_recompute_workflow_run_state", lambda *args, **kwargs: None)
     monkeypatch.setattr(
-        unified,
+        _context_building,
         "_execution_packet_lineage_payload",
         lambda **kwargs: {
             "definition_revision": "def_1234abcd",

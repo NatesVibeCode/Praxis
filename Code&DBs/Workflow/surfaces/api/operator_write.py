@@ -22,6 +22,7 @@ from policy.native_primary_cutover import (
     PostgresNativePrimaryCutoverRepository,
 )
 from runtime.instance import NativeWorkflowInstance, resolve_native_instance
+from runtime.route_authority_snapshot import invalidate_route_authority_cache_key
 from runtime.recurring_review_repair_flow import (
     RecurringReviewRepairFlowRequest,
     RecurringReviewRepairFlowResolution,
@@ -37,6 +38,7 @@ from storage.postgres import (
     PostgresRoadmapAuthoringRepository,
     PostgresTaskRouteEligibilityRepository,
     connect_workflow_database,
+    resolve_workflow_authority_cache_key,
 )
 from ._operator_helpers import _json_compatible, _normalize_as_of, _now, _run_async
 
@@ -758,6 +760,9 @@ class OperatorControlFrontdoor:
                 )
             if inserted_row is None:
                 raise RuntimeError("failed to read inserted task route eligibility row")
+            invalidate_route_authority_cache_key(
+                resolve_workflow_authority_cache_key(env=env),
+            )
             return TaskRouteEligibilityWriteResult(
                 task_route_eligibility=_task_route_eligibility_record_from_row(
                     inserted_row,

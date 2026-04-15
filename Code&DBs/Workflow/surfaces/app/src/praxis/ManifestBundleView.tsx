@@ -66,68 +66,66 @@ export function ManifestBundleView({ manifestId, tabId }: ManifestBundleViewProp
   const selectedSurface = useMemo(() => (bundle ? resolvePraxisBundleSurface(bundle, tabId) : null), [bundle, tabId]);
 
   if (loading) {
-    return <div style={{ padding: 24, color: 'var(--text-muted)' }}>Loading manifest…</div>;
+    return (
+      <div className="app-shell__fallback">
+        <div className="app-shell__fallback-kicker">Manifest bundle</div>
+        <div className="app-shell__fallback-title">Loading {manifestId}...</div>
+      </div>
+    );
   }
 
   if (error || !bundle || !selectedTab || !selectedSurface) {
-    return <div style={{ padding: 24, color: 'var(--danger)' }}>{error || 'Manifest unavailable'}</div>;
+    return (
+      <div className="app-shell__fallback app-shell__fallback--error">
+        <div className="app-shell__fallback-kicker">Manifest bundle</div>
+        <div className="app-shell__fallback-title">Manifest unavailable</div>
+        <p className="app-shell__fallback-copy">{error || 'The manifest could not be loaded.'}</p>
+      </div>
+    );
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
-      <div style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 12,
-        padding: '16px 20px',
-        borderBottom: '1px solid var(--border)',
-        background: 'var(--bg)',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          <div style={{ fontSize: 18, fontWeight: 700 }}>{bundle.title}</div>
-          <button
-            type="button"
-            onClick={() => emitPraxisOpenTab({ kind: 'manifest-editor', manifestId })}
-            style={{
-              padding: '6px 10px',
-              borderRadius: 8,
-              border: '1px solid var(--border)',
-              background: 'var(--bg-card)',
-              color: 'var(--text)',
-              cursor: 'pointer',
-              fontSize: 12,
-              fontWeight: 600,
-            }}
-          >
-            Edit JSON
-          </button>
+    <div className="app-shell__surface">
+      <div className="app-shell__surface-header">
+        <div className="app-shell__surface-heading">
+          <div className="app-shell__fallback-kicker">Manifest bundle</div>
+          <div className="app-shell__surface-title">{bundle.title}</div>
+          {bundle.description ? (
+            <p className="app-shell__surface-copy">{bundle.description}</p>
+          ) : null}
         </div>
-        {bundle.tabs.length > 1 && (
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {bundle.tabs.map((entry) => (
-              <button
-                key={entry.id}
-                type="button"
-                onClick={() => emitPraxisOpenTab({ kind: 'manifest', manifestId, tabId: entry.id })}
-                style={{
-                  padding: '6px 10px',
-                  borderRadius: 999,
-                  border: entry.id === selectedTab.id ? '1px solid var(--accent)' : '1px solid var(--border)',
-                  background: entry.id === selectedTab.id ? 'var(--surface-accent-soft)' : 'var(--bg-card)',
-                  color: 'var(--text)',
-                  cursor: 'pointer',
-                  fontSize: 12,
-                  fontWeight: 600,
-                }}
-              >
-                {entry.label}
-              </button>
-            ))}
-          </div>
-        )}
+        <button
+          type="button"
+          onClick={() => emitPraxisOpenTab({ kind: 'manifest-editor', manifestId })}
+          className="app-shell__surface-action"
+        >
+          Edit JSON
+        </button>
+      </div>
+
+      {bundle.tabs.length > 1 && (
+        <div className="app-shell__surface-tabs">
+          {bundle.tabs.map((entry) => (
+            <button
+              key={entry.id}
+              type="button"
+              onClick={() => emitPraxisOpenTab({ kind: 'manifest', manifestId, tabId: entry.id })}
+              className={[
+                'app-shell__surface-tab',
+                entry.id === selectedTab.id ? 'app-shell__surface-tab--active' : '',
+              ].filter(Boolean).join(' ')}
+            >
+              {entry.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="app-shell__surface-source-rail">
         <SourceOptionPills options={sourceOptions} />
       </div>
-      <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+
+      <div className="app-shell__surface-body">
         <QuadrantGrid
           manifest={selectedSurface.manifest}
           saveTarget={{

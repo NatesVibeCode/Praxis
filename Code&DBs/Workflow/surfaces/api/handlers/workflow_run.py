@@ -139,6 +139,8 @@ def _handle_workflow(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         total_jobs=len(getattr(spec, "jobs", [])),
         requested_by_kind="http",
         requested_by_ref="workflow_run",
+        run_id=str(body.get("run_id") or "").strip() or None,
+        force_fresh_run=bool(body.get("force_fresh_run", False)),
     )
     if result.get("error"):
         return result
@@ -154,6 +156,54 @@ def _handle_workflow(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _handle_workflow_spawn(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
+    spec_path = body.get("spec_path")
+    parent_run_id = str(body.get("parent_run_id") or "").strip()
+    dispatch_reason = str(body.get("dispatch_reason") or "").strip()
+    if not spec_path:
+        raise _ClientError("spec_path is required")
+    if not parent_run_id:
+        raise _ClientError("parent_run_id is required")
+    if not dispatch_reason:
+        raise _ClientError("dispatch_reason is required")
+
+    spec_mod = _workflow_spec_mod()
+    spec = spec_mod.WorkflowSpec.load(spec_path)
+    result = _spawn_workflow_via_service_bus(
+        subs,
+        spec_path=spec_path,
+        spec_name=getattr(spec, "name", spec_path),
+        total_jobs=len(getattr(spec, "jobs", [])),
+        requested_by_kind="http",
+        requested_by_ref="workflow_spawn",
+        parent_run_id=parent_run_id,
+        parent_job_label=str(body.get("parent_job_label") or "").strip() or None,
+        dispatch_reason=dispatch_reason,
+        lineage_depth=body.get("lineage_depth"),
+        run_id=str(body.get("run_id") or "").strip() or None,
+        force_fresh_run=bool(body.get("force_fresh_run", False)),
+    )
+    if result.get("error"):
+        return result
+
+    return {
+        "run_id": result["run_id"],
+        "status": "queued",
+        "spec_name": result["spec_name"],
+        "total_jobs": result["total_jobs"],
+        "command_id": result["command_id"],
+        "stream_url": f"/api/workflow-runs/{result['run_id']}/stream",
+        "status_url": f"/api/workflow-runs/{result['run_id']}/status",
+        "lineage": {
+            "child_run_id": result["run_id"],
+            "parent_run_id": parent_run_id,
+            "parent_job_label": str(body.get("parent_job_label") or "").strip() or None,
+            "dispatch_reason": dispatch_reason,
+            "lineage_depth": body.get("lineage_depth"),
+        },
+    }
+
+
 def _submit_workflow_via_service_bus(
     subs: Any,
     *,
@@ -163,6 +213,8 @@ def _submit_workflow_via_service_bus(
     total_jobs: int,
     requested_by_kind: str,
     requested_by_ref: str,
+    run_id: str | None = None,
+    force_fresh_run: bool = False,
 ) -> dict[str, Any]:
     from runtime.control_commands import (
         render_workflow_submit_response,
@@ -178,12 +230,68 @@ def _submit_workflow_via_service_bus(
         command_kwargs["spec_path"] = spec_path
     if inline_spec is not None:
         command_kwargs["inline_spec"] = inline_spec
+    if run_id is not None:
+        command_kwargs["run_id"] = run_id
+    if force_fresh_run:
+        command_kwargs["force_fresh_run"] = True
 
     command = request_workflow_submit_command(
         subs.get_pg_conn(),
         **command_kwargs,
     )
     return render_workflow_submit_response(
+        command,
+        spec_name=spec_name,
+        total_jobs=total_jobs,
+    )
+
+
+def _spawn_workflow_via_service_bus(
+    subs: Any,
+    *,
+    spec_path: str | None = None,
+    inline_spec: dict[str, Any] | None = None,
+    spec_name: str,
+    total_jobs: int,
+    requested_by_kind: str,
+    requested_by_ref: str,
+    parent_run_id: str,
+    dispatch_reason: str,
+    parent_job_label: str | None = None,
+    run_id: str | None = None,
+    lineage_depth: int | None = None,
+    force_fresh_run: bool = False,
+) -> dict[str, Any]:
+    from runtime.control_commands import (
+        render_workflow_spawn_response,
+        request_workflow_spawn_command,
+    )
+
+    command_kwargs: dict[str, Any] = {
+        "requested_by_kind": requested_by_kind,
+        "requested_by_ref": requested_by_ref,
+        "repo_root": str(REPO_ROOT),
+        "parent_run_id": parent_run_id,
+        "dispatch_reason": dispatch_reason,
+    }
+    if spec_path is not None:
+        command_kwargs["spec_path"] = spec_path
+    if inline_spec is not None:
+        command_kwargs["inline_spec"] = inline_spec
+    if parent_job_label is not None:
+        command_kwargs["parent_job_label"] = parent_job_label
+    if run_id is not None:
+        command_kwargs["run_id"] = run_id
+    if lineage_depth is not None:
+        command_kwargs["lineage_depth"] = lineage_depth
+    if force_fresh_run:
+        command_kwargs["force_fresh_run"] = True
+
+    command = request_workflow_spawn_command(
+        subs.get_pg_conn(),
+        **command_kwargs,
+    )
+    return render_workflow_spawn_response(
         command,
         spec_name=spec_name,
         total_jobs=total_jobs,
@@ -699,6 +807,54 @@ def _handle_workflow_async_post(request: Any, path: str) -> None:
             request._send_json(500, {"error": str(exc)})
         finally:
             os.unlink(spec_file)
+    except Exception as exc:
+        request._send_json(
+            500,
+            {"error": str(exc), "trace": traceback.format_exc()},
+        )
+
+
+def _handle_workflow_spawn_post(request: Any, path: str) -> None:
+    try:
+        body = _read_json_body(request)
+    except (json.JSONDecodeError, ValueError) as exc:
+        request._send_json(400, {"error": f"Invalid JSON: {exc}"})
+        return
+
+    try:
+        spec_path = str(body.get("spec_path") or "").strip()
+        parent_run_id = str(body.get("parent_run_id") or "").strip()
+        dispatch_reason = str(body.get("dispatch_reason") or "").strip()
+        if not spec_path:
+            request._send_json(400, {"error": "spec_path is required"})
+            return
+        if not parent_run_id:
+            request._send_json(400, {"error": "parent_run_id is required"})
+            return
+        if not dispatch_reason:
+            request._send_json(400, {"error": "dispatch_reason is required"})
+            return
+
+        spec_mod = _workflow_spec_mod()
+        spec = spec_mod.WorkflowSpec.load(spec_path)
+        result = _spawn_workflow_via_service_bus(
+            request.subsystems,
+            spec_path=spec_path,
+            spec_name=str(getattr(spec, "name", None) or spec_path),
+            total_jobs=len(getattr(spec, "jobs", [])),
+            requested_by_kind="http",
+            requested_by_ref="workflow_spawn",
+            parent_run_id=parent_run_id,
+            parent_job_label=str(body.get("parent_job_label") or "").strip() or None,
+            dispatch_reason=dispatch_reason,
+            lineage_depth=body.get("lineage_depth"),
+            run_id=str(body.get("run_id") or "").strip() or None,
+            force_fresh_run=bool(body.get("force_fresh_run", False)),
+        )
+        if result.get("error"):
+            request._send_json(500, result)
+            return
+        request._send_json(200, result)
     except Exception as exc:
         request._send_json(
             500,
@@ -1264,6 +1420,7 @@ RUN_POST_ROUTES: list[RouteEntry] = [
         _handle_checkpoints_post,
     ),
     (_exact("/api/workflow-runs"), _handle_workflow_async_post),
+    (_exact("/api/workflow-runs/spawn"), _handle_workflow_spawn_post),
     (_exact("/api/workflows/run"), _handle_workflows_run_post),
     (_exact("/api/workflow-job"), _handle_workflow_job_post),
     (_exact("/api/manifests/save"), _handle_manifest_save_post),

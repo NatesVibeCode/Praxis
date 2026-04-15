@@ -3,25 +3,31 @@
 # project the declared scopes instead of stitching together a second list.
 #
 # Scope annotations are declarative, human-readable evidence inside the same
-# manifest. `scope=all` means the full contract; `scope=api_server` is the
-# launch-time subset used by the HTTP server.
+# manifest. `scope=all` means the full contract; `api_server`, `workflow_worker`,
+# and `scheduler` are build/install projections from this one manifest.
+
+# scopes: api_server,workflow_worker,scheduler,runtime
+# Core database + contract surface
+asyncpg==0.31.0
+pydantic==2.12.5
 
 # scopes: api_server,runtime
-# Core API and database surface
-asyncpg==0.31.0
+# HTTP frontdoor surface
 fastapi==0.135.1
-pydantic==2.12.5
 uvicorn==0.41.0
 
-# scopes: runtime
+# scopes: workflow_worker,runtime
 # Runtime model and provider surface
 anthropic==0.86.0
 google-genai==1.70.0
 openai==2.24.0
 
-# scopes: runtime
-# Embedding, analytics, and scheduling support
-numpy==2.4.4
-sentence-transformers==5.3.0
+# scopes: workflow_worker,scheduler,runtime
+# Scheduling + durable Postgres surface
 croniter==6.2.2
 psycopg2-binary==2.9.11
+
+# scopes: runtime
+# Embedding and analytics support
+numpy==2.4.4
+sentence-transformers==5.3.0

@@ -13,6 +13,7 @@ import json
 import os
 import shutil
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -88,6 +89,32 @@ class _LiveBudgetWindow:
     tokens_used: object
     spend_limit_usd: object
     spend_used_usd: object
+
+
+def _default_live_budget_window(
+    config: NativeRuntimeProfileConfig,
+    *,
+    candidates: tuple[_LiveCandidate, ...] | None = None,
+) -> _LiveBudgetWindow:
+    provider_ref = (
+        str(candidates[0].provider_ref).strip()
+        if candidates and str(candidates[0].provider_ref).strip()
+        else f"provider.{config.provider_name}"
+    )
+    now = datetime.now(timezone.utc)
+    return _LiveBudgetWindow(
+        provider_ref=provider_ref,
+        budget_scope="runtime",
+        budget_status="available",
+        window_started_at=now - timedelta(hours=1),
+        window_ended_at=now + timedelta(days=1),
+        request_limit=100000,
+        requests_used=0,
+        token_limit=100000000,
+        tokens_used=0,
+        spend_limit_usd="1000.000000",
+        spend_used_usd="0.000000",
+    )
 
 
 def _native_transport_ready_refs(
@@ -465,6 +492,7 @@ async def _live_route_states_async(
 def _latest_budget_window_sync(
     conn: "SyncPostgresConnection",
     config: NativeRuntimeProfileConfig,
+    candidates: tuple[_LiveCandidate, ...] | None = None,
 ) -> _LiveBudgetWindow:
     rows = conn.execute(
         """
@@ -491,9 +519,7 @@ def _latest_budget_window_sync(
         config.provider_name,
     )
     if not rows:
-        raise NativeRuntimeProfileSyncError(
-            f"{config.runtime_profile_ref} has no live provider_budget_windows for {config.provider_name}",
-        )
+        return _default_live_budget_window(config, candidates=candidates)
     row = rows[0]
     return _LiveBudgetWindow(
         provider_ref=str(row["provider_ref"]),
@@ -513,6 +539,7 @@ def _latest_budget_window_sync(
 async def _latest_budget_window_async(
     conn: "asyncpg.Connection",
     config: NativeRuntimeProfileConfig,
+    candidates: tuple[_LiveCandidate, ...] | None = None,
 ) -> _LiveBudgetWindow:
     row = await conn.fetchrow(
         """
@@ -539,9 +566,7 @@ async def _latest_budget_window_async(
         config.provider_name,
     )
     if row is None:
-        raise NativeRuntimeProfileSyncError(
-            f"{config.runtime_profile_ref} has no live provider_budget_windows for {config.provider_name}",
-        )
+        return _default_live_budget_window(config, candidates=candidates)
     return _LiveBudgetWindow(
         provider_ref=str(row["provider_ref"]),
         budget_scope=str(row["budget_scope"]),
@@ -1179,7 +1204,7 @@ def sync_native_runtime_profile_authority(
         _upsert_workspace_authority_sync(conn, config)
         candidates = _live_candidates_sync(conn, config)
         _upsert_profile_authority_rows_sync(conn, config, candidates)
-        budget = _latest_budget_window_sync(conn, config)
+        budget = _latest_budget_window_sync(conn, config, candidates=candidates)
         live_states = _live_route_states_sync(conn, config)
         _sync_candidate_bindings_sync(conn, config, candidates)
         _sync_budget_window_sync(conn, config, budget)
@@ -1227,7 +1252,7 @@ async def sync_native_runtime_profile_authority_async(
         await _upsert_workspace_authority_async(conn, config)
         candidates = await _live_candidates_async(conn, config)
         await _upsert_profile_authority_rows_async(conn, config, candidates)
-        budget = await _latest_budget_window_async(conn, config)
+        budget = await _latest_budget_window_async(conn, config, candidates=candidates)
         live_states = await _live_route_states_async(conn, config)
         await _sync_candidate_bindings_async(conn, config, candidates)
         await _sync_budget_window_async(conn, config, budget)

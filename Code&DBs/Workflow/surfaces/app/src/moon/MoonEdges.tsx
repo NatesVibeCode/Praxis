@@ -1,7 +1,45 @@
 import React from 'react';
 import type { OrbitEdge, GraphLayout } from './moonBuildPresenter';
+import { MOON_LAYOUT } from './moonLayout';
 
-const R = 30; // node radius = half of 60px node size
+const NODE_RADIUS = MOON_LAYOUT.nodeRadius;
+export const MOON_GRAPH_CANVAS_PAD = MOON_LAYOUT.canvasPad;
+
+export interface MoonEdgeGeometry {
+  centerX: number;
+  centerY: number;
+  endX: number;
+  endY: number;
+  path: string;
+  startX: number;
+  startY: number;
+}
+
+export function getEdgeGeometry(
+  edge: Pick<OrbitEdge, 'from' | 'to'>,
+  layout: GraphLayout,
+  pad = MOON_GRAPH_CANVAS_PAD,
+): MoonEdgeGeometry | null {
+  const from = layout.nodes.get(edge.from);
+  const to = layout.nodes.get(edge.to);
+  if (!from || !to) return null;
+
+  const startX = from.x + pad + NODE_RADIUS;
+  const startY = from.y + pad;
+  const endX = to.x + pad - NODE_RADIUS;
+  const endY = to.y + pad;
+  const dx = endX - startX;
+
+  return {
+    centerX: (startX + endX) / 2,
+    centerY: (startY + endY) / 2,
+    endX,
+    endY,
+    path: `M${startX} ${startY}C${startX + dx * 0.4} ${startY},${endX - dx * 0.4} ${endY},${endX} ${endY}`,
+    startX,
+    startY,
+  };
+}
 
 interface MoonEdgesProps {
   edges: OrbitEdge[];
@@ -11,29 +49,20 @@ interface MoonEdgesProps {
 }
 
 export function MoonEdges({ edges, layout, selectedEdgeId, onEdgeClick }: MoonEdgesProps) {
-  const PAD = 120; // canvas padding
   return (
     <svg
       style={{
         position: 'absolute',
         top: 0,
         left: 0,
-        width: layout.width + PAD * 2,
-        height: layout.height + PAD * 2,
+        width: layout.width + MOON_GRAPH_CANVAS_PAD * 2,
+        height: layout.height + MOON_GRAPH_CANVAS_PAD * 2,
         pointerEvents: 'none',
       }}
     >
       {edges.map((edge) => {
-        const from = layout.nodes.get(edge.from);
-        const to = layout.nodes.get(edge.to);
-        if (!from || !to) return null;
-
-        const x1 = from.x + PAD + R;
-        const y1 = from.y + PAD;
-        const x2 = to.x + PAD - R;
-        const y2 = to.y + PAD;
-        const dx = x2 - x1;
-        const d = `M${x1} ${y1}C${x1 + dx * 0.4} ${y1},${x2 - dx * 0.4} ${y2},${x2} ${y2}`;
+        const geometry = getEdgeGeometry(edge, layout);
+        if (!geometry) return null;
 
         const isSelected = edge.id === selectedEdgeId;
         const isConditional = edge.gateFamily === 'conditional';
@@ -44,13 +73,10 @@ export function MoonEdges({ edges, layout, selectedEdgeId, onEdgeClick }: MoonEd
             : 'var(--moon-muted, #484f58)';
         const width = isSelected ? 2.5 : edge.isOnDominantPath ? 2 : 1.5;
 
-        const mx = (x1 + x2) / 2;
-        const my = (y1 + y2) / 2;
-
         return (
           <g key={edge.id}>
             <path
-              d={d}
+              d={geometry.path}
               stroke="transparent"
               strokeWidth={18}
               fill="none"
@@ -62,40 +88,13 @@ export function MoonEdges({ edges, layout, selectedEdgeId, onEdgeClick }: MoonEd
               }}
             />
             <path
-              d={d}
+              d={geometry.path}
               stroke={color}
               strokeWidth={width}
               fill="none"
               strokeDasharray={isConditional ? '7 5' : undefined}
               style={{ pointerEvents: 'none' }}
             />
-            {edge.gateLabel && (() => {
-              const textLen = edge.gateLabel!.length * 6.5 + 16;
-              return (
-                <>
-                  <rect
-                    x={mx - textLen / 2}
-                    y={my - 10}
-                    width={textLen}
-                    height={20}
-                    rx={4}
-                    fill="var(--moon-surface, #161b22)"
-                    stroke="var(--moon-border, #30363d)"
-                    strokeWidth={1}
-                  />
-                  <text
-                    x={mx}
-                    y={my + 4}
-                    textAnchor="middle"
-                    fontSize={11}
-                    fill="var(--moon-fg-dim, #8b949e)"
-                    style={{ pointerEvents: 'none' }}
-                  >
-                    {edge.gateLabel}
-                  </text>
-                </>
-              );
-            })()}
           </g>
         );
       })}

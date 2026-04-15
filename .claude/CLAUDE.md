@@ -22,14 +22,14 @@ Single Postgres database: `postgresql://localhost:5432/praxis`
 
 ## Tool Authority
 
-Praxis currently exposes **42 catalog-backed tools**.
+Praxis exposes a live surface of catalog-backed tools.
 
 Do not memorize a static surface table. Ask the catalog:
 
 - `workflow tools list`
 - `workflow tools search <text>`
-- `workflow tools describe <tool>`
-- `workflow tools call <tool> --input-json '{...}'`
+- `workflow tools describe <tool|alias>`
+- `workflow tools call <tool|alias> --input-json '{...}'`
 
 Curated high-frequency aliases stay flat:
 

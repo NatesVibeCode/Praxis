@@ -19,6 +19,7 @@ from typing import Any, Iterable, Sequence
 
 from .health_map import HealthMapper
 from .risk_scoring import RiskScorer
+from .trend_detector import TrendDetector, format_trends
 
 DEFAULT_SCAN_ROOTS: tuple[str, ...] = ("runtime", "surfaces/api", "surfaces/cli")
 DEFAULT_BUG_PACKET_LIMIT = 100
@@ -36,6 +37,19 @@ def _source_payload(*, available: bool, mode: str, detail: str | None = None) ->
     if detail:
         payload["detail"] = detail
     return payload
+
+
+def _trend_to_dict(trend: Any) -> dict[str, Any]:
+    return {
+        "metric_name": str(getattr(trend, "metric_name", "") or ""),
+        "provider_slug": str(getattr(trend, "provider_slug", "") or ""),
+        "direction": str(getattr(getattr(trend, "direction", None), "value", getattr(trend, "direction", "")) or ""),
+        "baseline_value": float(getattr(trend, "baseline_value", 0.0) or 0.0),
+        "current_value": float(getattr(trend, "current_value", 0.0) or 0.0),
+        "change_pct": float(getattr(trend, "change_pct", 0.0) or 0.0),
+        "sample_count": int(getattr(trend, "sample_count", 0) or 0),
+        "severity": str(getattr(trend, "severity", "") or ""),
+    }
 
 
 def _normalize_roots(roots: Sequence[str] | None) -> tuple[str, ...]:
@@ -610,6 +624,62 @@ def build_bug_scoreboard(
     }
 
 
+def build_trend_observability(*, limit: int = 5) -> dict[str, Any]:
+    """Summarize recent provider trend detection from receipt history."""
+
+    try:
+        trends = TrendDetector().detect_from_receipts()
+        trend_rows = [_trend_to_dict(trend) for trend in trends]
+        severity_counts = Counter(row["severity"] for row in trend_rows)
+        direction_counts = Counter(row["direction"] for row in trend_rows)
+        digest = format_trends(trends[:limit]) if trend_rows else "No trends detected."
+        return {
+            "authority": "runtime.engineering_observability.build_trend_observability",
+            "generated_at": _utcnow().isoformat(),
+            "sources": {
+                "receipt_trends": _source_payload(
+                    available=bool(trend_rows),
+                    mode="live" if trend_rows else "unavailable",
+                )
+            },
+            "summary": {
+                "total_trends": len(trend_rows),
+                "critical_trends": int(severity_counts.get("critical", 0)),
+                "warning_trends": int(severity_counts.get("warning", 0)),
+                "info_trends": int(severity_counts.get("info", 0)),
+                "degrading_trends": int(direction_counts.get("degrading", 0)),
+                "accelerating_trends": int(direction_counts.get("accelerating", 0)),
+                "improving_trends": int(direction_counts.get("improving", 0)),
+            },
+            "trends": trend_rows[:limit],
+            "trend_digest": digest,
+        }
+    except Exception as exc:
+        detail = f"{type(exc).__name__}: {exc}"
+        return {
+            "authority": "runtime.engineering_observability.build_trend_observability",
+            "generated_at": _utcnow().isoformat(),
+            "sources": {
+                "receipt_trends": _source_payload(
+                    available=False,
+                    mode="unavailable",
+                    detail=detail,
+                )
+            },
+            "summary": {
+                "total_trends": 0,
+                "critical_trends": 0,
+                "warning_trends": 0,
+                "info_trends": 0,
+                "degrading_trends": 0,
+                "accelerating_trends": 0,
+                "improving_trends": 0,
+            },
+            "trends": [],
+            "trend_digest": f"Trend detection unavailable: {exc}",
+        }
+
+
 def build_platform_observability(
     *,
     platform_payload: dict[str, Any] | None = None,
@@ -621,6 +691,7 @@ def build_platform_observability(
     lane = _coerce_mapping(payload.get("lane_recommendation"))
     proof_metrics = _coerce_mapping(payload.get("proof_metrics"))
     schema_authority = _coerce_mapping(payload.get("schema_authority"))
+    trend_observability = build_trend_observability()
     raw_checks = _coerce_list(preflight.get("checks"))
 
     checks: list[dict[str, Any]] = []
@@ -671,7 +742,13 @@ def build_platform_observability(
                 available=bool(platform_payload),
                 mode="live" if platform_payload else "unavailable",
                 detail=error,
-            )
+            ),
+            "receipt_trends": trend_observability.get(
+                "sources", {}
+            ).get(
+                "receipt_trends",
+                _source_payload(available=False, mode="unavailable"),
+            ),
         },
         "summary": {
             "overall": str(preflight.get("overall") or "unknown"),
@@ -694,6 +771,7 @@ def build_platform_observability(
         "operator_snapshot": snapshot,
         "proof_metrics": proof_metrics,
         "schema_authority": schema_authority,
+        "trend_observability": trend_observability,
     }
 
 
@@ -703,4 +781,5 @@ __all__ = [
     "build_bug_scoreboard",
     "build_code_hotspots",
     "build_platform_observability",
+    "build_trend_observability",
 ]

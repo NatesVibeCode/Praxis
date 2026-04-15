@@ -143,6 +143,8 @@ class McpToolDefinition:
         parts = [
             self.name,
             self.display_name,
+            self.cli_entrypoint,
+            self.cli_describe_command,
             self.description,
             self.cli_surface,
             self.cli_tier,
@@ -328,6 +330,7 @@ class McpToolDefinition:
             "icon": "tool",
             "mcp_server_id": _MCP_SERVER_ID,
             "manifest_source": "mcp_tool",
+            "catalog_dispatch": True,
             "cli": {
                 "surface": self.cli_surface,
                 "tier": self.cli_tier,

@@ -127,6 +127,24 @@ class CompiledSpec:
         return spec_dict
 
 
+@dataclass(frozen=True)
+class PromptLaunchSpec:
+    """Canonical inline workflow.submit payload for prompt-backed launches."""
+
+    name: str
+    workflow_id: str
+    phase: str
+    jobs: list[dict[str, Any]]
+
+    def to_inline_spec_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "workflow_id": self.workflow_id,
+            "phase": self.phase,
+            "jobs": self.jobs,
+        }
+
+
 # ---------------------------------------------------------------------------
 # Compiler logic
 # ---------------------------------------------------------------------------
@@ -353,3 +371,77 @@ def compile_intent_from_file(file_path: str) -> tuple[Intent | None, list[str]]:
 
     is_valid, errors = _validate_intent(intent)
     return (intent if is_valid else None), errors
+
+
+def compile_prompt_launch_spec(
+    *,
+    prompt: str,
+    provider_slug: str = _DEFAULT_PROVIDER_SLUG,
+    model_slug: str | None = None,
+    tier: str | None = None,
+    adapter_type: str = _DEFAULT_LLM_ADAPTER,
+    scope_write: list[str] | None = None,
+    workdir: str | None = None,
+    context_files: list[str] | None = None,
+    timeout: int = 300,
+    task_type: str | None = None,
+    system_prompt: str | None = None,
+    workflow_id: str = "workflow_cli_prompt",
+) -> PromptLaunchSpec:
+    """Compile a prompt launch into the inline workflow.submit shape.
+
+    This keeps prompt-backed launches on the same canonical inline spec shape
+    regardless of which CLI or API surface collects the prompt arguments.
+    """
+
+    if scope_write and not workdir:
+        workdir = os.getcwd()
+
+    context_sections: list[dict[str, str]] = []
+    if context_files or scope_write:
+        all_paths = list(context_files or []) + list(scope_write or [])
+        for fpath in all_paths:
+            abs_path = os.path.join(workdir or ".", fpath)
+            try:
+                with open(abs_path, encoding="utf-8") as fh:
+                    content = fh.read()
+            except OSError:
+                continue
+            context_sections.append(
+                {
+                    "name": f"FILE: {fpath}",
+                    "content": content,
+                }
+            )
+
+    compiled_prompt = prompt
+    if scope_write:
+        compiled_prompt += (
+            "\n\nReturn your response as JSON with this schema:\n"
+            '{"code_blocks": [{"file_path": "<path>", '
+            '"content": "<FULL FILE>", "language": "python", '
+            '"action": "replace"}], '
+            '"explanation": "<what you changed>"}'
+        )
+        if not system_prompt:
+            system_prompt = "You are a code editor. Return ONLY valid JSON structured output."
+
+    return PromptLaunchSpec(
+        name=compiled_prompt[:80] or "workflow cli prompt",
+        workflow_id=workflow_id,
+        phase="execute",
+        jobs=[
+            {
+                "label": "run",
+                "agent": f"{provider_slug}/{model_slug}" if model_slug else provider_slug,
+                "prompt": compiled_prompt,
+                "adapter_type": adapter_type,
+                "tier": tier,
+                "timeout": timeout,
+                "workdir": workdir,
+                "context_sections": context_sections,
+                "system_prompt": system_prompt,
+                "task_type": task_type,
+            }
+        ],
+    )

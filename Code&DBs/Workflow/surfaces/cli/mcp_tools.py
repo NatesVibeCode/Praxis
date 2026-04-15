@@ -173,6 +173,28 @@ def render_health_payload(payload: dict[str, Any], *, stdout: TextIO) -> None:
         ):
             if key in snapshot:
                 stdout.write(f"  {key}: {snapshot[key]}\n")
+    trend = payload.get("trend_observability")
+    if isinstance(trend, dict):
+        summary = trend.get("summary") if isinstance(trend.get("summary"), dict) else {}
+        stdout.write("\nTrends\n")
+        stdout.write("-" * 50 + "\n")
+        stdout.write(
+            "  total_trends: "
+            f"{summary.get('total_trends', 0)} "
+            f"critical={summary.get('critical_trends', 0)} "
+            f"warning={summary.get('warning_trends', 0)} "
+            f"info={summary.get('info_trends', 0)}\n"
+        )
+        stdout.write(
+            "  direction: "
+            f"degrading={summary.get('degrading_trends', 0)} "
+            f"accelerating={summary.get('accelerating_trends', 0)} "
+            f"improving={summary.get('improving_trends', 0)}\n"
+        )
+        digest = str(trend.get("trend_digest") or "").strip()
+        if digest:
+            first_line = digest.splitlines()[0]
+            stdout.write(f"  digest: {first_line}\n")
     lane = payload.get("lane_recommendation")
     if isinstance(lane, dict):
         posture = lane.get("recommended_posture")
@@ -222,4 +244,15 @@ def require_confirmation(
 
 
 def get_definition(tool_name: str) -> McpToolDefinition | None:
-    return get_tool_catalog().get(tool_name)
+    catalog = get_tool_catalog()
+    definition = catalog.get(tool_name)
+    if definition is not None:
+        return definition
+
+    alias = str(tool_name or "").strip()
+    if not alias:
+        return None
+    for candidate in catalog.values():
+        if candidate.cli_recommended_alias == alias:
+            return candidate
+    return None

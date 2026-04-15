@@ -38,6 +38,7 @@ def _sandbox_result(**overrides):
         "artifact_refs": ("README.md",),
         "started_at": "2026-04-09T00:00:00+00:00",
         "finished_at": "2026-04-09T00:00:01+00:00",
+        "workspace_snapshot_ref": "workspace_snapshot:test1234",
         "network_policy": "provider_only",
         "provider_latency_ms": 12,
         "workspace_root": "/tmp/workspace",
@@ -73,6 +74,7 @@ def test_execute_cli_routes_through_sandbox_runtime(monkeypatch, tmp_path) -> No
             "job_label": "job.alpha",
             "mcp_tool_names": ["praxis_query", "praxis_discover"],
             "skill_refs": ["workflow", "cli-summary"],
+            "access_policy": {"write_scope": ["README.md"]},
         },
     )
 
@@ -84,9 +86,12 @@ def test_execute_cli_routes_through_sandbox_runtime(monkeypatch, tmp_path) -> No
     assert captured["env"]["OPENAI_API_KEY"] == "test-key"
     assert captured["env"]["PRAXIS_ALLOWED_MCP_TOOLS"] == "praxis_query,praxis_discover"
     assert captured["env"]["PRAXIS_ALLOWED_MCP_TOOLS"] == "praxis_query,praxis_discover"
+    assert captured["metadata"]["provider_slug"] == "openai"
+    assert captured["metadata"]["execution_bundle"]["access_policy"]["write_scope"] == ["README.md"]
     assert result["status"] == "succeeded"
     assert result["sandbox_provider"] == "docker_local"
     assert result["artifact_refs"] == ["README.md"]
+    assert result["workspace_snapshot_ref"] == "workspace_snapshot:test1234"
 
 
 def test_execute_cli_exports_ripgrep_config_path(monkeypatch, tmp_path) -> None:
@@ -118,6 +123,34 @@ def test_execute_cli_exports_ripgrep_config_path(monkeypatch, tmp_path) -> None:
     execution_backends.execute_cli(_agent(), "hello", str(workdir))
 
     assert captured["env"]["RIPGREP_CONFIG_PATH"] == "../../.ripgreprc"
+
+
+def test_execute_cli_uses_stable_adhoc_sandbox_identity(monkeypatch, tmp_path) -> None:
+    captured_ids: list[str] = []
+
+    class _FakeRuntime:
+        def execute_command(self, **kwargs):
+            captured_ids.append(str(kwargs["sandbox_session_id"]))
+            return _sandbox_result(
+                sandbox_session_id=str(kwargs["sandbox_session_id"]),
+                sandbox_group_id=kwargs["sandbox_group_id"],
+            )
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(execution_backends, "SandboxRuntime", lambda: _FakeRuntime())
+    monkeypatch.setattr(
+        execution_backends,
+        "augment_cli_command_for_workflow_mcp",
+        lambda **kwargs: list(kwargs["command_parts"]),
+    )
+
+    execution_backends.execute_cli(_agent(), "hello", str(tmp_path))
+    execution_backends.execute_cli(_agent(), "hello", str(tmp_path))
+    execution_backends.execute_cli(_agent(), "hello again", str(tmp_path))
+
+    assert captured_ids[0] == captured_ids[1]
+    assert captured_ids[0] != captured_ids[2]
+    assert all(value.startswith("sandbox_session:adhoc:") for value in captured_ids)
 
 
 def test_execute_cli_uses_argv_prompt_when_wrapper_declares_prompt_placeholder(monkeypatch, tmp_path) -> None:
@@ -255,7 +288,11 @@ def test_execute_api_routes_through_sandbox_runtime(monkeypatch, tmp_path) -> No
         ),
         "hello from api",
         workdir=str(tmp_path),
-        execution_bundle={"run_id": "run.alpha", "job_label": "job.api"},
+        execution_bundle={
+            "run_id": "run.alpha",
+            "job_label": "job.api",
+            "access_policy": {"write_scope": ["api_output.json"]},
+        },
     )
 
     command = str(captured["command"])
@@ -265,5 +302,39 @@ def test_execute_api_routes_through_sandbox_runtime(monkeypatch, tmp_path) -> No
     assert captured["stdin_text"] == "hello from api"
     assert captured["execution_transport"] == "api"
     assert captured["sandbox_session_id"] == "sandbox_session:run.alpha:job.api"
+    assert captured["metadata"]["provider_slug"] == "anthropic"
+    assert captured["metadata"]["execution_bundle"]["access_policy"]["write_scope"] == ["api_output.json"]
     assert result["status"] == "succeeded"
     assert result["stdout"] == "api output"
+    assert result["workspace_snapshot_ref"] == "workspace_snapshot:test1234"
+
+
+def test_execute_api_uses_stable_adhoc_sandbox_identity(monkeypatch, tmp_path) -> None:
+    captured_ids: list[str] = []
+
+    class _FakeRuntime:
+        def execute_command(self, **kwargs):
+            captured_ids.append(str(kwargs["sandbox_session_id"]))
+            return _sandbox_result(
+                stdout="api output",
+                execution_transport="api",
+                sandbox_session_id=str(kwargs["sandbox_session_id"]),
+                sandbox_group_id=kwargs["sandbox_group_id"],
+            )
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setattr(execution_backends, "SandboxRuntime", lambda: _FakeRuntime())
+
+    agent = _agent(
+        provider="anthropic",
+        model="claude-haiku-4-5-20251001",
+        wrapper_command=None,
+        execution_transport="api",
+    )
+    execution_backends.execute_api(agent, "hello from api", workdir=str(tmp_path))
+    execution_backends.execute_api(agent, "hello from api", workdir=str(tmp_path))
+    execution_backends.execute_api(agent, "hello from a different api call", workdir=str(tmp_path))
+
+    assert captured_ids[0] == captured_ids[1]
+    assert captured_ids[0] != captured_ids[2]
+    assert all(value.startswith("sandbox_session:adhoc:") for value in captured_ids)

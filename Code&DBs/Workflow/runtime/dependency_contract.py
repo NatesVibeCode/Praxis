@@ -32,6 +32,7 @@ _SCOPE_INLINE_RE = re.compile(r"\bscopes?\s*[:=]\s*(?P<scopes>[^#]+)", re.IGNORE
 class _ManifestEntry:
     """One requirement line and the scopes it declares."""
 
+    requirement: str
     distribution: str
     scopes: tuple[str, ...]
 
@@ -40,6 +41,7 @@ class _ManifestEntry:
 class DependencyStatus:
     """One declared dependency and its importability status."""
 
+    requirement: str
     distribution: str
     import_name: str
     available: bool
@@ -47,6 +49,7 @@ class DependencyStatus:
 
     def to_json(self) -> dict[str, Any]:
         return {
+            "requirement": self.requirement,
             "distribution": self.distribution,
             "import_name": self.import_name,
             "available": self.available,
@@ -74,6 +77,16 @@ def _scopes_from_comment(comment: str) -> tuple[str, ...]:
     if match is None:
         return ()
     return _parse_scope_names(match.group("scopes"))
+
+
+_DISTRIBUTION_RE = re.compile(r"^\s*(?P<name>[A-Za-z0-9][A-Za-z0-9._-]*)")
+
+
+def _distribution_name(requirement: str) -> str:
+    match = _DISTRIBUTION_RE.match(requirement)
+    if match is None:
+        raise ValueError(f"invalid requirement line: {requirement!r}")
+    return match.group("name")
 
 
 def _read_manifest(manifest_path: Path) -> tuple[_ManifestEntry, ...]:
@@ -104,7 +117,8 @@ def _read_manifest(manifest_path: Path) -> tuple[_ManifestEntry, ...]:
         scoped_names = _scopes_from_comment(comment_text) or current_scopes
         entries.append(
             _ManifestEntry(
-                distribution=requirement,
+                requirement=requirement,
+                distribution=_distribution_name(requirement),
                 scopes=scoped_names,
             )
         )
@@ -122,18 +136,18 @@ def _installed_version(distribution: str) -> str | None:
         return None
 
 
-def _scope_distributions(
+def _scope_entries(
     scope: str,
     declared: tuple[_ManifestEntry, ...],
     *,
     manifest_path: Path,
-) -> tuple[str, ...]:
+) -> tuple[_ManifestEntry, ...]:
     normalized = _normalize_scope_name(scope or "all") or "all"
     if normalized == "all":
-        return tuple(entry.distribution for entry in declared)
+        return declared
 
     scoped = tuple(
-        entry.distribution
+        entry
         for entry in declared
         if normalized in entry.scopes
     )
@@ -154,12 +168,26 @@ def _scope_distributions(
     )
 
 
-def _status_for_distribution(distribution: str) -> DependencyStatus:
-    import_name = _import_name_for(distribution)
+def requirements_for_scope(
+    *,
+    scope: str = "all",
+    manifest_path: Path | None = None,
+) -> tuple[str, ...]:
+    """Return the exact requirement lines declared for one scope."""
+
+    manifest = DEFAULT_MANIFEST_PATH if manifest_path is None else manifest_path
+    declared = _read_manifest(manifest)
+    scoped = _scope_entries(scope, declared, manifest_path=manifest)
+    return tuple(entry.requirement for entry in scoped)
+
+
+def _status_for_entry(entry: _ManifestEntry) -> DependencyStatus:
+    import_name = _import_name_for(entry.distribution)
     available = importlib.util.find_spec(import_name) is not None
-    version = _installed_version(distribution) if available else None
+    version = _installed_version(entry.distribution) if available else None
     return DependencyStatus(
-        distribution=distribution,
+        requirement=entry.requirement,
+        distribution=entry.distribution,
         import_name=import_name,
         available=available,
         installed_version=version,
@@ -175,8 +203,8 @@ def dependency_statuses(
 
     manifest = DEFAULT_MANIFEST_PATH if manifest_path is None else manifest_path
     declared = _read_manifest(manifest)
-    scoped = _scope_distributions(scope, declared, manifest_path=manifest)
-    return tuple(_status_for_distribution(distribution) for distribution in scoped)
+    scoped = _scope_entries(scope, declared, manifest_path=manifest)
+    return tuple(_status_for_entry(entry) for entry in scoped)
 
 
 def dependency_truth_report(
@@ -194,8 +222,8 @@ def dependency_truth_report(
     manifest = DEFAULT_MANIFEST_PATH if manifest_path is None else manifest_path
     try:
         declared = _read_manifest(manifest)
-        scoped = _scope_distributions(scope, declared, manifest_path=manifest)
-        statuses = tuple(_status_for_distribution(distribution) for distribution in scoped)
+        scoped = _scope_entries(scope, declared, manifest_path=manifest)
+        statuses = tuple(_status_for_entry(entry) for entry in scoped)
     except Exception as exc:
         return {
             "ok": False,

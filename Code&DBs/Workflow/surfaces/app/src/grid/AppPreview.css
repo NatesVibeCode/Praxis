@@ -5,7 +5,8 @@
   right: 0;
   bottom: 0;
   z-index: 1000;
-  background: var(--overlay);
+  background: rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(6px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -18,16 +19,18 @@
 }
 
 .app-preview-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  max-width: 1200px;
-  width: 95vw;
-  max-height: 90vh;
-  overflow-y: auto;
+  background:
+    radial-gradient(circle at top, rgba(243, 238, 228, 0.07), transparent 30%),
+    var(--bg-card);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 24px;
+  max-width: 1220px;
+  width: min(96vw, 1220px);
+  max-height: min(92vh, 980px);
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  box-shadow: var(--shadow-modal);
+  box-shadow: 0 28px 72px rgba(0, 0, 0, 0.44);
   animation: app-preview-slide-up 0.25s ease;
 }
 
@@ -38,26 +41,58 @@
 
 .app-preview-header {
   display: flex;
-  align-items: center;
-  gap: var(--space-md, 16px);
-  padding: var(--space-lg, 24px);
-  border-bottom: 1px solid var(--border);
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-lg, 24px);
+  padding: 24px 24px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
   flex-shrink: 0;
+}
+
+.app-preview-header__copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.app-preview-kicker {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-muted);
 }
 
 .app-preview-header h2 {
   margin: 0;
-  font-size: 18px;
+  font-size: 24px;
   font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.04em;
   color: var(--text);
-  flex: 1;
+}
+
+.app-preview-header p {
+  margin: 0;
+  max-width: 56ch;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+.app-preview-header__controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
 }
 
 .app-preview-confidence {
   font-size: 12px;
   font-weight: 600;
-  padding: 4px 10px;
-  border-radius: 12px;
+  padding: 6px 10px;
+  border-radius: 999px;
   white-space: nowrap;
 }
 
@@ -77,28 +112,40 @@
 }
 
 .app-preview-close {
-  background: none;
-  border: none;
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   color: var(--text-muted);
   font-size: 20px;
   cursor: pointer;
-  padding: 4px 8px;
-  border-radius: var(--radius, 8px);
+  padding: 0;
+  border-radius: 12px;
   line-height: 1;
-  transition: color 0.15s, background 0.15s;
+  transition: transform 0.15s, color 0.15s, background 0.15s, border-color 0.15s;
 }
 
 .app-preview-close:hover {
+  transform: translateY(-1px);
   color: var(--text);
-  background: var(--surface-hover);
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(243, 238, 228, 0.18);
+}
+
+.app-preview-close:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 .app-preview-explanation {
-  margin: var(--space-lg, 24px);
-  padding: var(--space-md, 16px);
-  background: var(--surface-accent-soft);
-  border: 1px solid var(--border);
-  border-radius: var(--radius, 8px);
+  margin: 18px 24px 0;
+  padding: 14px 16px;
+  background: rgba(243, 238, 228, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 16px;
   color: var(--text);
   font-size: 14px;
   line-height: 1.6;
@@ -106,10 +153,22 @@
 }
 
 .app-preview-grid-container {
-  padding: 0 var(--space-lg, 24px);
-  overflow: hidden;
+  padding: 18px 24px 20px;
+  overflow: auto;
   flex: 1;
   min-height: 0;
+  scrollbar-gutter: stable;
+}
+
+.app-preview-grid-frame {
+  min-height: 100%;
+  padding: 18px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.03), transparent 30%),
+    rgba(255, 255, 255, 0.02);
+  overflow: hidden;
 }
 
 .app-preview-grid-scaler {
@@ -124,19 +183,21 @@
   align-items: center;
   justify-content: center;
   gap: var(--space-md, 16px);
-  padding: var(--space-lg, 24px);
-  border-top: 1px solid var(--border);
+  padding: 18px 24px 24px;
+  border-top: 1px solid rgba(255, 255, 255, 0.09);
   flex-shrink: 0;
+  background: linear-gradient(180deg, rgba(11, 11, 11, 0.28), rgba(11, 11, 11, 0.72));
 }
 
 .app-preview-btn {
-  border: none;
-  border-radius: var(--radius, 8px);
-  padding: 10px 24px;
+  min-height: 42px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  padding: 0 18px;
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
-  transition: transform 0.1s, box-shadow 0.15s, opacity 0.15s;
+  transition: transform 0.1s, box-shadow 0.15s, opacity 0.15s, border-color 0.15s, background 0.15s;
 }
 
 .app-preview-btn:hover {
@@ -158,21 +219,80 @@
 }
 
 .app-preview-btn.default {
-  background: var(--bg);
+  background: rgba(255, 255, 255, 0.03);
   color: var(--text);
-  border: 1px solid var(--border);
+  border-color: rgba(255, 255, 255, 0.1);
 }
 
 .app-preview-btn.default:hover {
-  border-color: var(--accent);
+  border-color: rgba(243, 238, 228, 0.24);
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .app-preview-btn.subtle {
   background: none;
   color: var(--text-muted);
-  padding: 10px 16px;
+  padding-inline: 14px;
 }
 
 .app-preview-btn.subtle:hover {
   color: var(--text);
+}
+
+.app-preview-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-preview-overlay,
+  .app-preview-card,
+  .app-preview-btn {
+    animation: none;
+    transition: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .app-preview-card {
+    width: calc(100vw - 20px);
+    max-height: calc(100vh - 20px);
+    border-radius: 22px;
+  }
+
+  .app-preview-header {
+    padding: 18px 18px 14px;
+    flex-direction: column;
+  }
+
+  .app-preview-header h2 {
+    font-size: 20px;
+  }
+
+  .app-preview-header__controls {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .app-preview-explanation,
+  .app-preview-grid-container,
+  .app-preview-actions {
+    margin-left: 18px;
+    margin-right: 18px;
+  }
+
+  .app-preview-grid-container {
+    padding: 14px 0 16px;
+  }
+
+  .app-preview-grid-frame {
+    padding: 12px;
+  }
+
+  .app-preview-actions {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    padding-bottom: 18px;
+  }
 }

@@ -5,6 +5,7 @@ import type {
   BuildPayload, BuildNode, BuildEdge, BuildIssue,
   AuthorityAttachment, BindingLedgerEntry, ImportSnapshot,
 } from '../shared/types';
+import { branchLabel, normalizeBuildEdgeRelease } from '../shared/edgeRelease';
 
 // --- View model types ---
 
@@ -112,27 +113,15 @@ export interface MoonBuildViewModel {
   blockedNodes: number;
 }
 
-function branchLabel(reason: string | null | undefined): string | undefined {
-  const normalized = (reason || '').trim();
-  if (!normalized) return undefined;
-  if (normalized === 'then') return 'Then';
-  if (normalized === 'else') return 'Else';
-  return normalized
-    .split(/[_\s-]+/)
-    .filter(Boolean)
-    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ');
-}
-
 function branchSideScore(edge: BuildEdge): number {
-  const raw = edge as any;
-  const side = typeof raw.gate?.config?.branch_side === 'string'
-    ? raw.gate.config.branch_side.trim().toLowerCase()
+  const release = normalizeBuildEdgeRelease(edge);
+  const side = typeof release.config?.branch_side === 'string'
+    ? release.config.branch_side.trim().toLowerCase()
     : '';
   if (side === 'above') return -1;
   if (side === 'below') return 1;
-  if (edge.branch_reason === 'then') return -1;
-  if (edge.branch_reason === 'else') return 1;
+  if (release.branch_reason === 'then') return -1;
+  if (release.branch_reason === 'else') return 1;
   return 0;
 }
 
@@ -146,6 +135,7 @@ function nodeToGlyph(node: BuildNode): GlyphType {
   const route = (node.route || '').toLowerCase();
   if (route.includes('trigger')) return 'trigger';
   if (route.includes('research')) return 'research';
+  if (route.includes('fanout') || route.includes('fan-out')) return 'classify';
   if (route.includes('classify') || route.includes('score') || route.includes('triage')) return 'classify';
   if (route.includes('draft') || route.includes('write') || route.includes('generate')) return 'draft';
   if (route.includes('notify') || route.includes('alert') || route.includes('send')) return 'notify';
@@ -399,13 +389,13 @@ export function presentBuild(
 
   // Gate state on edges
   const edges: OrbitEdge[] = rawEdges.map(e => {
-    const raw = e as any;
+    const release = normalizeBuildEdgeRelease(e);
     let gateState: GateState = 'empty';
-    if (raw.gate) {
-      const gs = (raw.gate.state || '').toLowerCase();
+    if (release.family !== 'after_success') {
+      const gs = (release.state || '').toLowerCase();
       if (gs === 'passed') gateState = 'passed';
       else if (gs === 'blocked') gateState = 'blocked';
-      else if (gs === 'configured' || raw.gate.family) gateState = 'configured';
+      else if (gs === 'configured' || release.family) gateState = 'configured';
       else gateState = 'proposed';
     }
     return {
@@ -415,12 +405,10 @@ export function presentBuild(
       kind: e.kind,
       isOnDominantPath: pathSet.has(e.from_node_id) && pathSet.has(e.to_node_id),
       gateState,
-      gateLabel: raw.gate?.label || branchLabel(e.branch_reason),
-      gateFamily: raw.gate?.family,
-      branchReason: typeof e.branch_reason === 'string' ? e.branch_reason : undefined,
-      gateConfig: raw.gate?.config && typeof raw.gate.config === 'object' && !Array.isArray(raw.gate.config)
-        ? { ...raw.gate.config as Record<string, unknown> }
-        : undefined,
+      gateLabel: release.label || branchLabel(release.branch_reason),
+      gateFamily: release.family !== 'after_success' ? release.family : undefined,
+      branchReason: release.branch_reason,
+      gateConfig: release.config ? { ...release.config as Record<string, unknown> } : undefined,
     };
   });
 

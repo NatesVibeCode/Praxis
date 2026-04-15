@@ -1,4 +1,3 @@
-const legacyShellPath = '/app/helm';
 const praxisShellPath = '/app';
 const launcherPath = '/app/status';
 

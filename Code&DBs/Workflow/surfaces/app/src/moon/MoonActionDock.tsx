@@ -1,9 +1,15 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { compileDefinition, refineDefinition, commitDefinition, createWorkflow } from '../shared/buildController';
 import type { BuildPayload } from '../shared/types';
-import { buildGraphToDefinition } from '../shared/buildGraphDefinition';
 import { loadCatalog, getCatalog, FAMILY_LABELS } from './catalog';
 import type { CatalogItem, CatalogFamily } from './catalog';
+import {
+  getCatalogSurfacePolicy,
+  getCatalogTruth,
+  isMoonSurfaceAuthorityItem,
+  summarizeCatalogSurface,
+  summarizeCatalogTruth,
+} from './actionTruth';
 import { MoonGlyph } from './MoonGlyph';
 
 interface Props {
@@ -12,12 +18,13 @@ interface Props {
   onReload: () => void;
   onClose: () => void;
   onStartCatalogDrag: (event: React.PointerEvent, item: CatalogItem) => void;
+  onPayloadChange: (payload: BuildPayload) => void;
   onWorkflowCreated?: (workflowId: string) => void;
 }
 
 const DOCK_FAMILIES: CatalogFamily[] = ['trigger', 'gather', 'think', 'act', 'control'];
 
-export function MoonActionDock({ workflowId, payload, onReload, onClose, onStartCatalogDrag, onWorkflowCreated }: Props) {
+export function MoonActionDock({ workflowId, payload, onReload, onClose, onStartCatalogDrag, onPayloadChange, onWorkflowCreated }: Props) {
   const [prose, setProse] = useState('');
   const [loading, setLoading] = useState(false);
   const [action, setAction] = useState<string | null>(null);
@@ -28,14 +35,54 @@ export function MoonActionDock({ workflowId, payload, onReload, onClose, onStart
 
   useEffect(() => { loadCatalog().then(setCatalog); }, []);
 
-  const visibleCatalog = catalog.filter(c => c.status === 'ready' && c.gateFamily !== 'conditional');
-  const filteredCatalog = familyFilter
-    ? visibleCatalog.filter(c => c.family === familyFilter)
-    : visibleCatalog;
+  const visibleCatalog = useMemo(() => catalog.filter(c => c.status === 'ready'), [catalog]);
+  const moonSurfaceCatalog = useMemo(
+    () => visibleCatalog.filter((item) => isMoonSurfaceAuthorityItem(item)),
+    [visibleCatalog],
+  );
+  const catalogSummary = useMemo(() => summarizeCatalogTruth(moonSurfaceCatalog), [moonSurfaceCatalog]);
+  const surfaceSummary = useMemo(() => summarizeCatalogSurface(moonSurfaceCatalog), [moonSurfaceCatalog]);
+  const visibleCatalogModels = useMemo(
+    () => visibleCatalog.map((item) => ({
+      item,
+      truth: getCatalogTruth(item),
+      policy: getCatalogSurfacePolicy(item),
+    })),
+    [visibleCatalog],
+  );
+  const filterableFamilies = useMemo(
+    () => DOCK_FAMILIES.filter((family) => visibleCatalogModels.some(({ item, policy }) => item.family === family && policy.tier === 'primary')),
+    [visibleCatalogModels],
+  );
+  const filteredCatalog = useMemo(
+    () => (familyFilter
+      ? visibleCatalogModels.filter(({ item }) => item.family === familyFilter)
+      : visibleCatalogModels),
+    [familyFilter, visibleCatalogModels],
+  );
+  const primaryCatalog = filteredCatalog.filter(({ policy }) => policy.tier === 'primary');
+  const surfaceStats = useMemo(() => ({
+    stepTotal: catalogSummary.nodeTotal,
+    stepCore: surfaceSummary.nodeCounts.primary,
+    stepOther: Math.max(0, catalogSummary.nodeTotal - surfaceSummary.nodeCounts.primary),
+    gateTotal: catalogSummary.edgeTotal,
+    gateCore: surfaceSummary.edgeCounts.primary,
+    gateOther: Math.max(0, catalogSummary.edgeTotal - surfaceSummary.edgeCounts.primary),
+  }), [catalogSummary, surfaceSummary]);
 
   const hasDefinition = !!(payload?.definition && Object.keys(payload.definition).length > 0);
   const hasGraphSteps = !!payload?.build_graph?.nodes?.some(node => (node.route || '').trim().length > 0);
   const buildState = payload?.build_state || 'draft';
+
+  const adoptBuildPayload = useCallback((nextPayload: BuildPayload) => {
+    const workflow = nextPayload.workflow
+      ?? payload?.workflow
+      ?? (workflowId ? { id: workflowId, name: payload?.workflow?.name || 'Workflow workspace' } : null);
+    onPayloadChange({
+      ...nextPayload,
+      workflow,
+    });
+  }, [onPayloadChange, payload?.workflow, workflowId]);
 
   const handleRefine = useCallback(async () => {
     if (!prose.trim() || !payload?.definition) return;
@@ -44,16 +91,16 @@ export function MoonActionDock({ workflowId, payload, onReload, onClose, onStart
     setError(null);
     setSuccess(null);
     try {
-      await refineDefinition(prose.trim(), payload.definition);
+      const result = await refineDefinition(prose.trim(), payload.definition);
+      adoptBuildPayload(result);
       setSuccess('Definition refined');
       setProse('');
-      onReload();
     } catch (e: any) {
       setError(e.message || 'Refinement failed');
     } finally {
       setLoading(false);
     }
-  }, [prose, payload, onReload]);
+  }, [adoptBuildPayload, payload, prose]);
 
   const handleCompile = useCallback(async () => {
     if (!prose.trim()) return;
@@ -62,16 +109,16 @@ export function MoonActionDock({ workflowId, payload, onReload, onClose, onStart
     setError(null);
     setSuccess(null);
     try {
-      await compileDefinition(prose.trim());
+      const result = await compileDefinition(prose.trim(), payload?.workflow?.name);
+      adoptBuildPayload(result);
       setSuccess('Compiled');
       setProse('');
-      onReload();
     } catch (e: any) {
       setError(e.message || 'Compilation failed');
     } finally {
       setLoading(false);
     }
-  }, [prose, onReload]);
+  }, [adoptBuildPayload, payload?.workflow?.name, prose]);
 
   const handleCommit = useCallback(async () => {
     if (!hasDefinition && !hasGraphSteps) return;
@@ -83,11 +130,12 @@ export function MoonActionDock({ workflowId, payload, onReload, onClose, onStart
       const title = payload?.workflow?.name || 'Moon draft';
       const definition = (payload?.definition && Object.keys(payload.definition).length > 0)
         ? payload.definition as Record<string, unknown>
-        : buildGraphToDefinition(payload?.build_graph);
+        : undefined;
+      const buildGraph = hasGraphSteps ? payload?.build_graph : undefined;
       if (workflowId) {
-        await commitDefinition(workflowId, { title, definition });
+        await commitDefinition(workflowId, { title, definition, buildGraph });
       } else {
-        const created = await createWorkflow(title, definition);
+        const created = await createWorkflow(title, { definition, buildGraph });
         const createdWorkflowId = created.id || created.workflow_id;
         if (createdWorkflowId && onWorkflowCreated) onWorkflowCreated(createdWorkflowId);
       }
@@ -99,6 +147,32 @@ export function MoonActionDock({ workflowId, payload, onReload, onClose, onStart
       setLoading(false);
     }
   }, [workflowId, payload, hasDefinition, hasGraphSteps, onReload, onWorkflowCreated]);
+
+  const renderCatalogButton = useCallback((
+    item: CatalogItem,
+    detail: string,
+    truthBadge: string,
+    truthCategory: string,
+    surfaceBadge?: string,
+  ) => (
+    <button
+      key={item.id}
+      type="button"
+      className={`moon-dock__catalog-item moon-dock__catalog-item--${truthCategory}`}
+      onPointerDown={e => onStartCatalogDrag(e, item)}
+      title={`${item.description || item.label} — ${detail}`}
+    >
+      <MoonGlyph type={item.icon} size={14} />
+      <span className="moon-catalog-item__stack">
+        <span className="moon-catalog-item__label">{item.label}</span>
+        <span className="moon-catalog-item__detail">{detail}</span>
+      </span>
+      <span className="moon-catalog-item__meta-row">
+        {surfaceBadge && <span className="moon-surface-badge">{surfaceBadge}</span>}
+        <span className={`moon-truth-badge moon-truth-badge--${truthCategory}`}>{truthBadge}</span>
+      </span>
+    </button>
+  ), [onStartCatalogDrag]);
 
   return (
     <>
@@ -144,9 +218,41 @@ export function MoonActionDock({ workflowId, payload, onReload, onClose, onStart
 
       {/* Draggable catalog — drag items onto chain nodes or edges */}
       <div style={{ marginTop: 20 }}>
-        <div className="moon-dock__section-label">Catalog — drag onto chain</div>
+        <div className="moon-action__surface-card">
+          <div className="moon-dock__section-label">Moon surface</div>
+          <div className="moon-action__surface-note">
+            Counts reflect first-class Moon primitives only, not every live registry lane.
+          </div>
+          <div className="moon-action__surface-grid">
+            <div className="moon-action__surface-stat">
+              <span className="moon-action__surface-value">{surfaceStats.stepTotal}</span>
+              <span className="moon-action__surface-label">step actions</span>
+            </div>
+            <div className="moon-action__surface-stat">
+              <span className="moon-action__surface-value">{surfaceStats.stepCore}</span>
+              <span className="moon-action__surface-label">core now</span>
+            </div>
+            <div className="moon-action__surface-stat">
+              <span className="moon-action__surface-value">{surfaceStats.stepOther}</span>
+              <span className="moon-action__surface-label">off main surface</span>
+            </div>
+            <div className="moon-action__surface-stat">
+              <span className="moon-action__surface-value">{surfaceStats.gateTotal}</span>
+              <span className="moon-action__surface-label">gate types</span>
+            </div>
+            <div className="moon-action__surface-stat">
+              <span className="moon-action__surface-value">{surfaceStats.gateCore}</span>
+              <span className="moon-action__surface-label">execute now</span>
+            </div>
+            <div className="moon-action__surface-stat">
+              <span className="moon-action__surface-value">{surfaceStats.gateOther}</span>
+              <span className="moon-action__surface-label">preview or removed</span>
+            </div>
+          </div>
+        </div>
+        <div className="moon-dock__section-label">Catalog — drag onto a step or edge</div>
         <div className="moon-catalog__filters">
-          {DOCK_FAMILIES.map(f => (
+          {filterableFamilies.map(f => (
             <button
               key={f}
               className={`moon-catalog__filter${familyFilter === f ? ' moon-catalog__filter--active' : ''}`}
@@ -154,19 +260,15 @@ export function MoonActionDock({ workflowId, payload, onReload, onClose, onStart
             >{FAMILY_LABELS[f]}</button>
           ))}
         </div>
-        <div className="moon-dock__catalog-grid">
-          {filteredCatalog.map(item => (
-            <div
-              key={item.id}
-              className="moon-dock__catalog-item"
-              onPointerDown={e => onStartCatalogDrag(e, item)}
-              title={item.description}
-            >
-              <MoonGlyph type={item.icon} size={14} />
-              <span>{item.label}</span>
+        {primaryCatalog.length > 0 && (
+          <>
+            <div className="moon-dock__section-label">Core now</div>
+            <div className="moon-dock__item-desc">These are the curated primitives we trust in the main Moon surface.</div>
+            <div className="moon-dock__catalog-grid">
+              {primaryCatalog.map(({ item, truth, policy }) => renderCatalogButton(item, policy.detail, truth.badge, truth.category))}
             </div>
-          ))}
-        </div>
+          </>
+        )}
       </div>
 
       {payload?.matched_building_blocks && payload.matched_building_blocks.length > 0 && (

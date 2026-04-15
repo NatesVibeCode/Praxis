@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 from typing import Any
 
 from ..subsystems import _subs, REPO_ROOT
@@ -109,11 +110,7 @@ def tool_praxis_query(params: dict) -> dict:
         return tool_praxis_discover({"action": "search", "query": question, "limit": 10})
 
     if _matches(question, ["stale", "staleness", "inactive", "dormant"]):
-        detector = _subs.get_staleness_detector()
-        return {
-            "routed_to": "staleness_detector",
-            "message": "staleness detector ready; provide items to scan via praxis_health or direct probe",
-        }
+        return _run_staleness_query(params)
 
     if _matches(question, ["import path", "how to import", "where is", "from import",
                             "import for", "defined in"]):
@@ -233,6 +230,256 @@ def tool_praxis_query(params: dict) -> dict:
     recall_result = tool_praxis_recall({"query": question})
     recall_result["routed_to"] = "knowledge_graph"
     return recall_result
+
+
+def _parse_int(value: Any, default: int) -> int:
+    """Parse a user-provided int with a safe fallback."""
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
+
+
+def _parse_datetime(value: Any) -> datetime | None:
+    """Parse timestamps used by stale candidate rows."""
+    if isinstance(value, datetime):
+        dt = value
+    elif isinstance(value, str):
+        normalized = value.replace("Z", "+00:00")
+        try:
+            dt = datetime.fromisoformat(normalized)
+        except ValueError:
+            return None
+    else:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _collect_staleness_candidates_from_rows(
+    source: str,
+    rows: list[dict[str, Any]],
+    candidates: list[dict],
+    seen: set[tuple[str, str]],
+    limit: int,
+    key_column: str,
+    type_value: str,
+    last_activity_columns: list[str],
+) -> int:
+    collected = 0
+    for row in rows or []:
+        if len(candidates) >= limit:
+            break
+        item_id = str(row.get(key_column, "") or "").strip()
+        if not item_id:
+            continue
+        last_activity = None
+        for column in last_activity_columns:
+            last_activity = _parse_datetime(row.get(column))
+            if last_activity is not None:
+                break
+        if last_activity is None:
+            continue
+        key = (type_value, item_id)
+        if key in seen:
+            continue
+        candidates.append({
+            "item_id": item_id,
+            "item_type": type_value,
+            "last_activity": last_activity,
+            "source": source,
+        })
+        seen.add(key)
+        collected += 1
+    return collected
+
+
+def _collect_staleness_candidates_from_database(
+    conn,
+    *,
+    per_source_limit: int,
+) -> tuple[list[dict], list[dict], list[str]]:
+    candidates: list[dict] = []
+    sources: list[dict] = []
+    warnings: list[str] = []
+    seen: set[tuple[str, str]] = set()
+    limit = max(per_source_limit, 1)
+
+    if conn is None:
+        return candidates, sources, warnings
+
+    def _run_query(
+        name: str,
+        sql: str,
+        args: tuple[Any, ...],
+        key_column: str,
+        type_value: str,
+        last_activity_columns: list[str],
+    ) -> None:
+        try:
+            rows = conn.execute(sql, *args)
+            count = _collect_staleness_candidates_from_rows(
+                source=name,
+                rows=rows,
+                candidates=candidates,
+                seen=seen,
+                limit=limit,
+                key_column=key_column,
+                type_value=type_value,
+                last_activity_columns=last_activity_columns,
+            )
+            sources.append({"source": name, "count": count, "requested": limit})
+        except Exception as exc:
+            if name == "workflow_runs":
+                details = "workflow_runs query unsupported"
+            elif name == "workflow_jobs":
+                details = "workflow_jobs query unsupported"
+            elif name == "memory_entities":
+                details = "memory_entities query unsupported"
+            elif name == "dispatch_runs":
+                details = "dispatch_runs query unsupported"
+            else:
+                details = f"{name} query unsupported"
+            warnings.append(f"{details}: {exc}")
+
+    _run_query(
+        name="memory_entities",
+        sql=(
+            "SELECT id, entity_type, updated_at "
+            "FROM memory_entities "
+            "WHERE archived = false "
+            "ORDER BY updated_at DESC "
+            "LIMIT $1"
+        ),
+        args=(limit,),
+        key_column="id",
+        type_value="memory_entities",
+        last_activity_columns=["updated_at"],
+    )
+
+    _run_query(
+        name="workflow_runs",
+        sql=(
+            "SELECT run_id, requested_at, started_at, finished_at "
+            "FROM workflow_runs "
+            "ORDER BY requested_at DESC "
+            "LIMIT $1"
+        ),
+        args=(limit,),
+        key_column="run_id",
+        type_value="work_items",
+        last_activity_columns=["finished_at", "started_at", "requested_at"],
+    )
+
+    _run_query(
+        name="workflow_jobs",
+        sql=(
+            "SELECT id, created_at, ready_at, claimed_at, started_at, finished_at "
+            "FROM workflow_jobs "
+            "ORDER BY created_at DESC "
+            "LIMIT $1"
+        ),
+        args=(limit,),
+        key_column="id",
+        type_value="work_items",
+        last_activity_columns=["finished_at", "started_at", "claimed_at", "ready_at", "created_at"],
+    )
+
+    _run_query(
+        name="dispatch_runs",
+        sql=(
+            "SELECT run_id, created_at, started_at, finished_at, terminal_reason "
+            "FROM dispatch_runs "
+            "ORDER BY created_at DESC "
+            "LIMIT $1"
+        ),
+        args=(limit,),
+        key_column="run_id",
+        type_value="phases",
+        last_activity_columns=["finished_at", "started_at", "created_at"],
+    )
+
+    return candidates, sources, warnings
+
+
+def _run_staleness_query(params: dict) -> dict:
+    detector = _subs.get_staleness_detector()
+    per_source_limit = _parse_int(params.get("per_source_limit"), 200)
+    max_items = _parse_int(params.get("max_items"), 20)
+
+    direct_items: list[dict] = []
+    if isinstance(params.get("items"), list):
+        for item in params["items"]:
+            if not isinstance(item, dict):
+                continue
+            item_id = str(item.get("item_id") or item.get("id") or "").strip()
+            item_type = str(item.get("item_type") or "work_items").strip() or "work_items"
+            last_activity = _parse_datetime(item.get("last_activity"))
+            if item_id and last_activity is not None:
+                direct_items.append({
+                    "item_id": item_id,
+                    "item_type": item_type,
+                    "last_activity": last_activity,
+                    "source": "direct",
+                })
+
+    candidates = direct_items
+    sources = [{"source": "direct", "count": len(direct_items), "requested": len(direct_items)}] if direct_items else []
+    warnings = []
+
+    if not candidates:
+        conn = getattr(_subs, "_pg_conn", None)
+        db_candidates, db_sources, db_warnings = _collect_staleness_candidates_from_database(
+            conn,
+            per_source_limit=per_source_limit,
+        )
+        candidates.extend(db_candidates)
+        sources.extend(db_sources)
+        warnings.extend(db_warnings)
+
+    if not candidates:
+        return {
+            "routed_to": "staleness_detector",
+            "message": "No staleness candidates available. Provide 'items' or run this tool with active DB connectivity.",
+            "sources": sources,
+            "warnings": warnings,
+        }
+
+    try:
+        stale = detector.scan(candidates)
+    except Exception as exc:
+        return {
+            "routed_to": "staleness_detector",
+            "error": str(exc),
+            "sources": sources,
+            "warnings": warnings,
+        }
+
+    stale_items = [_serialize(item) for item in stale[:max_items]]
+    if stale_items:
+        return {
+            "routed_to": "staleness_detector",
+            "candidate_count": len(candidates),
+            "stale_count": len(stale),
+            "returned_count": len(stale_items),
+            "sources": sources,
+            "warnings": warnings,
+            "summary": detector.alert_summary(stale),
+            "items": stale_items,
+        }
+
+    return {
+        "routed_to": "staleness_detector",
+        "candidate_count": len(candidates),
+        "stale_count": 0,
+        "returned_count": 0,
+        "sources": sources,
+        "warnings": warnings,
+        "message": "Scanned items are all fresh according to configured staleness rules.",
+        "summary": detector.alert_summary(stale),
+    }
 
 
 def _data_dictionary(question: str) -> dict:

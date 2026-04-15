@@ -18,14 +18,16 @@ import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any, Protocol
 from uuid import uuid4
+from pathlib import PurePosixPath
 
 from .docker_image_authority import DOCKER_IMAGE_ENV, resolve_docker_image
 
 _DOCKER_MEMORY_ENV = "PRAXIS_DOCKER_MEMORY"
 _DOCKER_CPUS_ENV = "PRAXIS_DOCKER_CPUS"
+_CLI_AUTH_HOME_ENV = "PRAXIS_CLI_AUTH_HOME"
 
 
 def _parse_docker_mem_str(mem_str: str) -> int:
@@ -49,22 +51,145 @@ _CLOUDFLARE_SANDBOX_TOKEN_ENV = "PRAXIS_CLOUDFLARE_SANDBOX_TOKEN"
 _IGNORED_MANIFEST_DIRS = frozenset({".git", "__pycache__", ".pytest_cache", ".mypy_cache"})
 
 # CLI auth files to mount read-only into Docker containers.
-# Each entry: (host_path_relative_to_home, container_path).
-_CLI_AUTH_MOUNTS: tuple[tuple[str, str], ...] = (
-    (".codex/auth.json", "/root/.codex/auth.json"),
-    (".gemini/oauth_creds.json", "/root/.gemini/oauth_creds.json"),
-    (".gemini/google_accounts.json", "/root/.gemini/google_accounts.json"),
-    (".gemini/settings.json", "/root/.gemini/settings.json"),
+# Each entry: (provider slugs, host_path_relative_to_home, container_path).
+_CLI_AUTH_MOUNTS: tuple[tuple[frozenset[str], str, str], ...] = (
+    (frozenset({"openai"}), ".codex/auth.json", "/root/.codex/auth.json"),
+    (frozenset({"anthropic"}), ".claude.json", "/root/.claude.json"),
+    (frozenset({"google", "gemini"}), ".gemini/oauth_creds.json", "/root/.gemini/oauth_creds.json"),
+    (frozenset({"google", "gemini"}), ".gemini/google_accounts.json", "/root/.gemini/google_accounts.json"),
+    (frozenset({"google", "gemini"}), ".gemini/settings.json", "/root/.gemini/settings.json"),
 )
 
 
-def _cli_auth_volume_flags() -> list[str]:
+def _cli_auth_home() -> str:
+    configured = os.environ.get(_CLI_AUTH_HOME_ENV, "").strip()
+    if configured:
+        return configured
+    return os.path.expanduser("~")
+
+
+def _cli_auth_probe_homes() -> tuple[str, ...]:
+    host_home = _cli_auth_home()
+    probe_homes: list[str] = []
+    for candidate in (host_home, os.path.expanduser("~")):
+        normalized = str(candidate or "").strip()
+        if normalized and normalized not in probe_homes:
+            probe_homes.append(normalized)
+    return tuple(probe_homes)
+
+
+def _normalize_relative_path(value: object, *, field_name: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        raise RuntimeError(f"{field_name} must be a non-empty relative path")
+
+    normalized_text = text.replace("\\", "/")
+    path = PurePosixPath(normalized_text)
+    if path.is_absolute():
+        raise RuntimeError(f"{field_name} must stay inside the sandbox workspace boundary: {text}")
+
+    parts: list[str] = []
+    for part in path.parts:
+        if part in ("", "."):
+            continue
+        if part == ".." or part.endswith(":"):
+            raise RuntimeError(f"{field_name} must stay inside the sandbox workspace boundary: {text}")
+        parts.append(part)
+
+    if not parts:
+        raise RuntimeError(f"{field_name} must be a non-empty relative path")
+    return "/".join(parts)
+
+
+def _normalize_relative_paths(
+    values: object,
+    *,
+    field_name: str,
+) -> tuple[str, ...]:
+    if values is None:
+        return ()
+    if isinstance(values, (str, Path)):
+        raw_values = [values]
+    elif isinstance(values, Sequence):
+        raw_values = list(values)
+    else:
+        return ()
+
+    normalized: list[str] = []
+    for value in raw_values:
+        normalized_path = _normalize_relative_path(value, field_name=field_name)
+        if normalized_path not in normalized:
+            normalized.append(normalized_path)
+    return tuple(normalized)
+
+
+def _scope_allows_path(path: str, write_scope: Sequence[str]) -> bool:
+    normalized_path = _normalize_relative_path(path, field_name="artifact_ref")
+    for scope_path in write_scope:
+        normalized_scope = _normalize_relative_path(scope_path, field_name="write_scope")
+        if normalized_path == normalized_scope:
+            return True
+        prefix = normalized_scope.rstrip("/")
+        if prefix and normalized_path.startswith(prefix + "/"):
+            return True
+    return False
+
+
+def _execution_write_scope(metadata: Mapping[str, Any] | None) -> tuple[str, ...] | None:
+    if not isinstance(metadata, Mapping):
+        return None
+    execution_bundle = metadata.get("execution_bundle")
+    if not isinstance(execution_bundle, Mapping):
+        return None
+    access_policy = execution_bundle.get("access_policy")
+    if not isinstance(access_policy, Mapping):
+        return None
+    return _normalize_relative_paths(
+        access_policy.get("write_scope"),
+        field_name="execution_bundle.access_policy.write_scope",
+    )
+
+
+def _validated_artifact_refs(
+    artifact_refs: Sequence[str],
+    *,
+    write_scope: tuple[str, ...] | None,
+) -> tuple[str, ...]:
+    normalized_refs = _normalize_relative_paths(artifact_refs, field_name="artifact_ref")
+    if write_scope is None:
+        return normalized_refs
+
+    blocked_refs = [
+        ref
+        for ref in normalized_refs
+        if not _scope_allows_path(ref, write_scope)
+    ]
+    if blocked_refs:
+        raise RuntimeError(
+            "sandbox produced artifacts outside declared write_scope: "
+            + ", ".join(blocked_refs)
+        )
+    return normalized_refs
+
+
+def _provider_slug(metadata: Mapping[str, Any] | None) -> str | None:
+    if not isinstance(metadata, Mapping):
+        return None
+    raw = str(metadata.get("provider_slug") or "").strip().lower()
+    return raw or None
+
+
+def _cli_auth_volume_flags(*, provider_slug: str | None = None) -> list[str]:
     """Return docker -v flags for CLI auth files that exist on the host."""
-    home = os.path.expanduser("~")
+    home = _cli_auth_home()
+    probe_homes = _cli_auth_probe_homes()
     flags: list[str] = []
-    for rel_path, container_path in _CLI_AUTH_MOUNTS:
+    normalized_provider = str(provider_slug or "").strip().lower()
+    for providers, rel_path, container_path in _CLI_AUTH_MOUNTS:
+        if normalized_provider and normalized_provider not in providers:
+            continue
         host_path = os.path.join(home, rel_path)
-        if os.path.isfile(host_path):
+        if any(os.path.isfile(os.path.join(probe_home, rel_path)) for probe_home in probe_homes):
             flags.extend(["-v", f"{host_path}:{container_path}:ro"])
     return flags
 
@@ -75,6 +200,7 @@ class WorkspaceSnapshot:
 
     source_root: str
     materialization: str = "copy"
+    workspace_snapshot_ref: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +239,7 @@ class HydrationReceipt:
     workspace_root: str
     hydrated_files: int
     workspace_materialization: str
+    workspace_snapshot_ref: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,6 +291,7 @@ class SandboxExecutionResult:
     provider_latency_ms: int
     execution_mode: str
     workspace_root: str
+    workspace_snapshot_ref: str = ""
     container_cpu_percent: float | None = None
     container_mem_bytes: int | None = None
 
@@ -264,6 +392,30 @@ def _workspace_manifest(root: str) -> dict[str, tuple[int, int]]:
     return manifest
 
 
+def _workspace_snapshot_ref(root: str) -> str:
+    """Return a stable content-addressed ref for one hydrated workspace input."""
+    entries: list[tuple[str, str]] = []
+    root_path = Path(root)
+    if root_path.exists():
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [name for name in dirnames if name not in _IGNORED_MANIFEST_DIRS]
+            current_dir = Path(dirpath)
+            for filename in filenames:
+                absolute = current_dir / filename
+                try:
+                    content_hash = hashlib.sha256(absolute.read_bytes()).hexdigest()
+                except OSError as exc:
+                    raise RuntimeError(
+                        f"workspace snapshot fingerprint could not read {absolute}"
+                    ) from exc
+                relpath = absolute.relative_to(root_path).as_posix()
+                entries.append((relpath, content_hash))
+    entries.sort(key=lambda item: item[0])
+    canonical = json.dumps(entries, separators=(",", ":"), ensure_ascii=True)
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+    return f"workspace_snapshot:{digest}"
+
+
 def _hydrate_copy(source_root: str, destination_root: str) -> int:
     copied = 0
     source = Path(source_root)
@@ -342,12 +494,16 @@ class DockerLocalSandboxProvider:
         session: SandboxSession,
         snapshot: WorkspaceSnapshot,
     ) -> HydrationReceipt:
+        snapshot_ref = str(
+            getattr(snapshot, "workspace_snapshot_ref", "") or _workspace_snapshot_ref(snapshot.source_root)
+        ).strip()
         copied = _hydrate_copy(snapshot.source_root, session.workspace_root)
         return HydrationReceipt(
             sandbox_session_id=session.sandbox_session_id,
             workspace_root=session.workspace_root,
             hydrated_files=copied,
             workspace_materialization=snapshot.materialization,
+            workspace_snapshot_ref=snapshot_ref,
         )
 
     def exec(self, session: SandboxSession, request: SandboxExecRequest) -> SandboxExecutionResult:
@@ -385,7 +541,9 @@ class DockerLocalSandboxProvider:
             "-v",
             f"{session.workspace_root}:/workspace",
         ]
-        docker_cmd.extend(_cli_auth_volume_flags())
+        docker_cmd.extend(
+            _cli_auth_volume_flags(provider_slug=_provider_slug(session.metadata))
+        )
         for key, value in sorted(request.env.items()):
             docker_cmd.extend(["-e", f"{key}={value}"])
         if session.network_policy == "disabled":
@@ -461,97 +619,9 @@ class DockerLocalSandboxProvider:
             provider_latency_ms=latency_ms,
             execution_mode=self.provider_name,
             workspace_root=session.workspace_root,
+            workspace_snapshot_ref="",
             container_cpu_percent=peak_cpu[0] if peak_cpu[0] > 0 else None,
             container_mem_bytes=peak_mem[0] if peak_mem[0] > 0 else None,
-        )
-
-    def collect_artifacts(
-        self,
-        session: SandboxSession,
-        before_manifest: dict[str, tuple[int, int]],
-    ) -> ArtifactReceipt:
-        after_manifest = _workspace_manifest(session.workspace_root)
-        changed = sorted(
-            path for path, metadata in after_manifest.items() if before_manifest.get(path) != metadata
-        )
-        return ArtifactReceipt(
-            sandbox_session_id=session.sandbox_session_id,
-            artifact_refs=tuple(changed),
-            artifact_count=len(changed),
-        )
-
-    def destroy_session(self, session: SandboxSession, disposition: str) -> TeardownReceipt:
-        shutil.rmtree(Path(session.workspace_root).parent, ignore_errors=True)
-        return TeardownReceipt(
-            sandbox_session_id=session.sandbox_session_id,
-            provider=self.provider_name,
-            disposition=disposition,
-        )
-
-
-class HostLocalSandboxProvider:
-    """Host-backed provider for machines that do not have Docker available."""
-
-    provider_name = "host_local"
-    execution_lane = "local"
-    requires_artifact_sync = False
-
-    def create_session(self, spec: SandboxSessionSpec) -> SandboxSession:
-        session_root = os.path.realpath(tempfile.mkdtemp(prefix="praxis-host-sandbox-"))
-        workspace_root = os.path.join(session_root, "workspace")
-        os.makedirs(workspace_root, exist_ok=True)
-        return SandboxSession(
-            sandbox_session_id=spec.sandbox_session_id,
-            sandbox_group_id=spec.sandbox_group_id,
-            provider=self.provider_name,
-            provider_session_id=Path(session_root).name,
-            workspace_root=workspace_root,
-            network_policy=spec.network_policy,
-            workspace_materialization=spec.workspace_materialization,
-            metadata=dict(spec.metadata),
-        )
-
-    def hydrate_workspace(
-        self,
-        session: SandboxSession,
-        snapshot: WorkspaceSnapshot,
-    ) -> HydrationReceipt:
-        copied = _hydrate_copy(snapshot.source_root, session.workspace_root)
-        return HydrationReceipt(
-            sandbox_session_id=session.sandbox_session_id,
-            workspace_root=session.workspace_root,
-            hydrated_files=copied,
-            workspace_materialization=snapshot.materialization,
-        )
-
-    def exec(self, session: SandboxSession, request: SandboxExecRequest) -> SandboxExecutionResult:
-        from adapters.docker_runner import run_on_host
-
-        start = _utc_now()
-        result = run_on_host(
-            command=request.command,
-            stdin_text=request.stdin_text,
-            timeout=request.timeout_seconds,
-            env_overrides=request.env,
-            workdir=session.workspace_root,
-        )
-        end = _utc_now()
-        return SandboxExecutionResult(
-            sandbox_session_id=session.sandbox_session_id,
-            sandbox_group_id=session.sandbox_group_id,
-            sandbox_provider=self.provider_name,
-            execution_transport=request.execution_transport,
-            exit_code=result.exit_code,
-            stdout=result.stdout,
-            stderr=result.stderr,
-            timed_out=result.timed_out,
-            artifact_refs=(),
-            started_at=start.isoformat(),
-            finished_at=end.isoformat(),
-            network_policy=session.network_policy,
-            provider_latency_ms=result.latency_ms,
-            execution_mode=self.provider_name,
-            workspace_root=session.workspace_root,
         )
 
     def collect_artifacts(
@@ -651,12 +721,16 @@ class CloudflareRemoteSandboxProvider:
         session: SandboxSession,
         snapshot: WorkspaceSnapshot,
     ) -> HydrationReceipt:
+        snapshot_ref = str(
+            getattr(snapshot, "workspace_snapshot_ref", "") or _workspace_snapshot_ref(snapshot.source_root)
+        ).strip()
         buffer = io.BytesIO()
         with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
             archive.add(snapshot.source_root, arcname="workspace")
         payload = {
             "archive_base64": base64.b64encode(buffer.getvalue()).decode("ascii"),
             "workspace_materialization": snapshot.materialization,
+            "workspace_snapshot_ref": snapshot_ref,
         }
         response = self._request(f"/sessions/{session.provider_session_id}/hydrate", payload)
         return HydrationReceipt(
@@ -664,6 +738,7 @@ class CloudflareRemoteSandboxProvider:
             workspace_root=session.workspace_root,
             hydrated_files=int(response.get("hydrated_files") or 0),
             workspace_materialization=snapshot.materialization,
+            workspace_snapshot_ref=str(response.get("workspace_snapshot_ref") or snapshot_ref),
         )
 
     def exec(self, session: SandboxSession, request: SandboxExecRequest) -> SandboxExecutionResult:
@@ -686,13 +761,17 @@ class CloudflareRemoteSandboxProvider:
             stdout=str(response.get("stdout") or ""),
             stderr=str(response.get("stderr") or ""),
             timed_out=bool(response.get("timed_out")),
-            artifact_refs=tuple(str(path) for path in response.get("artifact_refs") or ()),
+            artifact_refs=_normalize_relative_paths(
+                response.get("artifact_refs") or (),
+                field_name="artifact_ref",
+            ),
             started_at=str(response.get("started_at") or _iso_now()),
             finished_at=str(response.get("finished_at") or _iso_now()),
             network_policy=session.network_policy,
             provider_latency_ms=int(response.get("provider_latency_ms") or 0),
             execution_mode=self.provider_name,
             workspace_root=session.workspace_root,
+            workspace_snapshot_ref="",
         )
 
     def collect_artifacts(
@@ -705,16 +784,20 @@ class CloudflareRemoteSandboxProvider:
             f"/sessions/{session.provider_session_id}/artifacts",
             {"include_content": True},
         )
-        artifact_refs = tuple(str(path) for path in response.get("artifact_refs") or ())
+        artifact_refs = _normalize_relative_paths(
+            response.get("artifact_refs") or (),
+            field_name="artifact_ref",
+        )
         artifacts_payload = response.get("artifacts")
         if isinstance(artifacts_payload, list):
             synced_refs: list[str] = []
             for artifact in artifacts_payload:
                 if not isinstance(artifact, dict):
                     continue
-                relpath = str(artifact.get("path") or "").strip()
-                if not relpath:
+                raw_path = artifact.get("path")
+                if raw_path is None:
                     continue
+                relpath = _normalize_relative_path(raw_path, field_name="artifact.path")
                 absolute_path = os.path.join(session.workspace_root, relpath)
                 if artifact.get("content_base64") is not None:
                     content = base64.b64decode(str(artifact["content_base64"]))
@@ -753,7 +836,6 @@ class SandboxRuntime:
     def __init__(self) -> None:
         self._providers: dict[str, SandboxProviderAdapter] = {
             "docker_local": DockerLocalSandboxProvider(),
-            "host_local": HostLocalSandboxProvider(),
             "cloudflare_remote": CloudflareRemoteSandboxProvider(),
         }
 
@@ -781,18 +863,14 @@ class SandboxRuntime:
         metadata: dict[str, Any] | None = None,
         artifact_store: Any | None = None,
     ) -> SandboxExecutionResult:
-        effective_provider_name = provider_name
-        if provider_name == "docker_local" and not _docker_available():
-            effective_provider_name = "host_local"
-        provider = self._provider(effective_provider_name)
+        provider = self._provider(provider_name)
         provider_metadata = dict(metadata or {})
-        if effective_provider_name != provider_name:
-            provider_metadata.setdefault("requested_provider", provider_name)
+        write_scope = _execution_write_scope(provider_metadata)
         session = provider.create_session(
             SandboxSessionSpec(
                 sandbox_session_id=sandbox_session_id,
                 sandbox_group_id=sandbox_group_id,
-                provider=effective_provider_name,
+                provider=provider_name,
                 workdir=workdir,
                 network_policy=network_policy,
                 workspace_materialization=workspace_materialization,
@@ -802,11 +880,13 @@ class SandboxRuntime:
         )
         disposition = "completed"
         try:
-            provider.hydrate_workspace(
+            workspace_snapshot_ref = _workspace_snapshot_ref(workdir)
+            hydration_receipt = provider.hydrate_workspace(
                 session,
                 WorkspaceSnapshot(
                     source_root=workdir,
                     materialization=workspace_materialization,
+                    workspace_snapshot_ref=workspace_snapshot_ref,
                 ),
             )
             before_manifest = _workspace_manifest(session.workspace_root)
@@ -822,7 +902,10 @@ class SandboxRuntime:
                 ),
             )
             artifact_receipt = provider.collect_artifacts(session, before_manifest)
-            artifact_refs = artifact_receipt.artifact_refs
+            artifact_refs = _validated_artifact_refs(
+                artifact_receipt.artifact_refs,
+                write_scope=write_scope,
+            )
             # Dehydrate: copy changed files from sandbox back to host workdir.
             # Without this, agent-produced files exist only in the ephemeral
             # container workspace and never reach the host repo.
@@ -860,6 +943,11 @@ class SandboxRuntime:
                 provider_latency_ms=result.provider_latency_ms,
                 execution_mode=result.execution_mode,
                 workspace_root=result.workspace_root,
+                workspace_snapshot_ref=(
+                    hydration_receipt.workspace_snapshot_ref
+                    or workspace_snapshot_ref
+                    or result.workspace_snapshot_ref
+                ),
             )
         except Exception:
             disposition = "failed"
@@ -873,6 +961,7 @@ def derive_sandbox_identity(
     workdir: str,
     execution_bundle: dict[str, Any] | None,
     execution_transport: str,
+    identity_payload: Mapping[str, Any] | None = None,
 ) -> tuple[str, str | None]:
     bundle = execution_bundle if isinstance(execution_bundle, dict) else {}
     run_id = str(bundle.get("run_id") or "").strip()
@@ -880,5 +969,20 @@ def derive_sandbox_identity(
     if run_id:
         suffix = job_label or execution_transport
         return f"sandbox_session:{run_id}:{suffix}", f"group:{run_id}"
-    digest = hashlib.sha1(f"{workdir}:{execution_transport}:{time.time_ns()}".encode("utf-8")).hexdigest()[:12]
+    identity_seed: dict[str, Any] = {
+        "workdir": os.path.realpath(workdir),
+        "execution_transport": str(execution_transport or "").strip(),
+        "execution_bundle": bundle,
+    }
+    if isinstance(identity_payload, Mapping):
+        identity_seed["request"] = dict(identity_payload)
+    elif identity_payload is not None:
+        identity_seed["request"] = str(identity_payload)
+    canonical_seed = json.dumps(
+        identity_seed,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    digest = hashlib.sha1(canonical_seed.encode("utf-8")).hexdigest()[:16]
     return f"sandbox_session:adhoc:{digest}", None

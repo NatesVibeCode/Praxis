@@ -2,6 +2,7 @@
 
 Usage:
     python workflow_cli.py run <spec.json> [--dry-run]
+    python workflow_cli.py spawn <parent_run_id> <spec.json> [--reason <reason>]
     python workflow_cli.py validate <spec.json>
     python workflow_cli.py chain <coordination.json>
     python workflow_cli.py chain-status [<chain_id>] [--limit N]
@@ -23,6 +24,8 @@ from pathlib import Path
 
 import surfaces.mcp.subsystems
 from runtime.canonical_manifests import generate_manifest, load_app_manifest_record, ManifestRuntimeBoundaryError
+from runtime.control_commands import submit_workflow_command
+from runtime.spec_compiler import PromptLaunchSpec, compile_prompt_launch_spec
 from surfaces.cli.mcp_tools import run_cli_tool
 
 _WORKFLOW_ROOT = str(Path(__file__).resolve().parent.parent.parent)
@@ -45,6 +48,107 @@ def _write_result_file(path: str, payload: dict) -> None:
     result_path = Path(path)
     result_path.parent.mkdir(parents=True, exist_ok=True)
     result_path.write_text(json.dumps(payload, default=str, indent=2), encoding="utf-8")
+
+
+def _submit_workflow_launch(
+    *,
+    spec_path: str | None = None,
+    prompt_launch_spec: PromptLaunchSpec | None = None,
+    dry_run: bool = False,
+    fresh: bool = False,
+    job_id: str | None = None,
+    run_id: str | None = None,
+    result_file: str | None = None,
+    requested_by_kind: str = "cli",
+    requested_by_ref: str = "workflow_cli.run",
+) -> int:
+    if spec_path is None and prompt_launch_spec is None:
+        print("ERROR: workflow launch requires a spec path or inline spec", file=sys.stderr)
+        return 1
+
+    if spec_path is not None:
+        from runtime.workflow_spec import WorkflowSpec, WorkflowSpecError
+
+        try:
+            spec = WorkflowSpec.load(spec_path)
+        except WorkflowSpecError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+        workflow_id = spec.workflow_id
+        spec_name = spec.name
+        total_jobs = len(spec.jobs)
+    else:
+        assert prompt_launch_spec is not None
+        spec = prompt_launch_spec
+        workflow_id = spec.workflow_id
+        spec_name = spec.name
+        total_jobs = len(spec.jobs)
+
+    mode_label = "DRY-RUN" if dry_run else "ASYNC"
+    print(f"=== Workflow {mode_label}: {spec_name} ===")
+    print(f"Phase: {spec.phase}  |  Jobs: {total_jobs}  |  Workflow ID: {workflow_id}")
+    print()
+
+    if dry_run:
+        from runtime.workflow.dry_run import dry_run_workflow
+
+        result = dry_run_workflow(spec)
+        for jr in result.job_results:
+            status_icon = {"succeeded": "+", "failed": "X", "blocked": "!", "skipped": "-"}.get(str(jr.status or ""), "?")
+            verify_passed = jr.verify_passed
+            verify_str = f"  verify={'PASS' if verify_passed else 'FAIL'}" if verify_passed is not None else ""
+            print(
+                f"  [{status_icon}] {str(jr.job_label or ''):<50} "
+                f"{str(jr.status or ''):<10} {float(jr.duration_seconds or 0.0):>6.1f}s{verify_str}"
+            )
+
+        print()
+        print("--- Summary ---")
+        print(f"Total: {result.total_jobs}  |  OK: {result.succeeded}  |  "
+              f"Failed: {result.failed}  |  Blocked: {result.blocked}  |  "
+              f"Skipped: {result.skipped}")
+        print(f"Duration: {float(result.duration_seconds or 0.0):.2f}s")
+        print(f"Receipts: {len(result.receipts_written)} written")
+        return 0 if result.failed == 0 and result.blocked == 0 else 1
+
+    result = submit_workflow_command(
+        _get_pg_conn(),
+        requested_by_kind=requested_by_kind,
+        requested_by_ref=requested_by_ref,
+        spec_path=spec_path,
+        inline_spec=None if prompt_launch_spec is None else prompt_launch_spec.to_inline_spec_dict(),
+        repo_root=_repo_root(),
+        run_id=run_id,
+        force_fresh_run=fresh,
+        spec_name=spec_name,
+        total_jobs=total_jobs,
+    )
+    if result.get("error") or not result.get("run_id"):
+        print(json.dumps(result, indent=2), file=sys.stderr)
+        return 1
+
+    print(f"Submitted workflow: {result['run_id']}")
+    print(f"Workflow ID: {workflow_id}")
+    print(f"Submission status: {result.get('status', 'queued')}")
+    if result_file:
+        result_payload = dict(result)
+        result_payload.update(
+            {
+                "job_id": job_id or "cli",
+                "workflow_id": workflow_id,
+            }
+        )
+        _write_result_file(
+            result_file,
+            result_payload,
+        )
+        print(f"Result written to: {result_file}")
+    print("Observe via:")
+    print(f"  ./scripts/praxis workflow stream {result['run_id']}")
+    print(f"  ./scripts/praxis-workflow stream {result['run_id']}")
+    print(f"  GET {result['stream_url']}")
+    print(f"  GET {result['status_url']}")
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -121,6 +225,21 @@ def cmd_generate(args: argparse.Namespace) -> int:
 def cmd_run(args: argparse.Namespace) -> int:
     if _WORKFLOW_ROOT not in sys.path:
         sys.path.insert(0, _WORKFLOW_ROOT)
+    return _submit_workflow_launch(
+        spec_path=args.spec,
+        dry_run=bool(args.dry_run),
+        fresh=bool(getattr(args, "fresh", False)),
+        job_id=args.job_id,
+        run_id=args.run_id,
+        result_file=args.result_file,
+        requested_by_kind="cli",
+        requested_by_ref="workflow_cli.run",
+    )
+
+
+def cmd_spawn(args: argparse.Namespace) -> int:
+    if _WORKFLOW_ROOT not in sys.path:
+        sys.path.insert(0, _WORKFLOW_ROOT)
 
     from runtime.workflow_spec import WorkflowSpec, WorkflowSpecError
 
@@ -130,47 +249,32 @@ def cmd_run(args: argparse.Namespace) -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
-    mode_label = "DRY-RUN" if args.dry_run else "ASYNC"
-    print(f"=== Workflow {mode_label}: {spec.name} ===")
-    print(f"Phase: {spec.phase}  |  Jobs: {len(spec.jobs)}  |  Workflow ID: {spec.workflow_id}")
+    print(f"=== Workflow SPAWN: {spec.name} ===")
+    print(f"Parent Run: {args.parent_run_id}  |  Phase: {spec.phase}  |  Jobs: {len(spec.jobs)}  |  Workflow ID: {spec.workflow_id}")
     print()
 
     action_payload: dict[str, object] = {
-        "action": "run",
+        "action": "spawn",
         "spec_path": args.spec,
+        "parent_run_id": args.parent_run_id,
+        "dispatch_reason": args.reason,
     }
-    if args.dry_run:
-        action_payload["dry_run"] = True
-    else:
-        action_payload["wait"] = False
+    if args.parent_job_label:
+        action_payload["parent_job_label"] = args.parent_job_label
+    if args.run_id:
+        action_payload["run_id"] = args.run_id
+    if getattr(args, "fresh", False):
+        action_payload["force_fresh_run"] = True
+    if args.lineage_depth is not None:
+        action_payload["lineage_depth"] = args.lineage_depth
 
     exit_code, result = run_cli_tool("praxis_workflow", action_payload)
     if exit_code != 0:
         print(json.dumps(result, indent=2), file=sys.stderr)
         return 1
 
-    if args.dry_run:
-        for jr in result.get("job_results", []):
-            if not isinstance(jr, dict):
-                continue
-            status_icon = {"succeeded": "+", "failed": "X", "blocked": "!", "skipped": "-"}.get(str(jr.get("status") or ""), "?")
-            verify_passed = jr.get("verify_passed")
-            verify_str = f"  verify={'PASS' if verify_passed else 'FAIL'}" if verify_passed is not None else ""
-            print(
-                f"  [{status_icon}] {str(jr.get('job_label') or ''):<50} "
-                f"{str(jr.get('status') or ''):<10} {float(jr.get('duration_seconds') or 0.0):>6.1f}s{verify_str}"
-            )
-
-        print()
-        print("--- Summary ---")
-        print(f"Total: {result.get('total_jobs', 0)}  |  OK: {result.get('succeeded', 0)}  |  "
-              f"Failed: {result.get('failed', 0)}  |  Blocked: {result.get('blocked', 0)}  |  "
-              f"Skipped: {result.get('skipped', 0)}")
-        print(f"Duration: {float(result.get('duration_seconds') or 0.0):.2f}s")
-        print(f"Receipts: {len(result.get('receipts_written') or [])} written")
-        return 0 if result.get("failed", 0) == 0 and result.get("blocked", 0) == 0 else 1
-
-    print(f"Submitted workflow: {result['run_id']}")
+    print(f"Spawned child workflow: {result['run_id']}")
+    print(f"Parent run: {args.parent_run_id}")
     print(f"Workflow ID: {spec.workflow_id}")
     print(f"Submission status: {result.get('status', 'queued')}")
     if args.result_file:
@@ -179,6 +283,8 @@ def cmd_run(args: argparse.Namespace) -> int:
             {
                 "job_id": args.job_id or "cli",
                 "workflow_id": spec.workflow_id,
+                "parent_run_id": args.parent_run_id,
+                "dispatch_reason": args.reason,
             }
         )
         _write_result_file(
@@ -187,7 +293,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         )
         print(f"Result written to: {args.result_file}")
     print("Observe via:")
-    print(f"  ./scripts/workflow.sh stream {result['run_id']}")
+    print(f"  ./scripts/praxis workflow stream {result['run_id']}")
+    print(f"  ./scripts/praxis-workflow stream {result['run_id']}")
     print(f"  GET {result['stream_url']}")
     print(f"  GET {result['status_url']}")
     return 0
@@ -624,9 +731,29 @@ def main() -> int:
     run_parser = sub.add_parser("run", help="Run a workflow spec through the workflow pipeline")
     run_parser.add_argument("spec", help="Path to .queue.json spec file")
     run_parser.add_argument("--dry-run", action="store_true", help="Simulate without executing")
+    run_parser.add_argument(
+        "--fresh",
+        action="store_true",
+        help="Launch a fresh run and let the system mint the run_id instead of replaying onto an existing completed run",
+    )
     run_parser.add_argument("--job-id", help="Job ID for tracking (written to result file)")
-    run_parser.add_argument("--run-id", help="Pre-assigned workflow run_id (for outbox tracking)")
+    run_parser.add_argument("--run-id", help="Internal override: pre-assigned workflow run_id (for outbox tracking)")
     run_parser.add_argument("--result-file", help="Write JSON result to this path on completion")
+
+    spawn_parser = sub.add_parser("spawn", help="Spawn a child workflow with explicit parent lineage")
+    spawn_parser.add_argument("parent_run_id", help="Parent workflow run id")
+    spawn_parser.add_argument("spec", help="Path to .queue.json spec file")
+    spawn_parser.add_argument("--reason", default="cli.spawn", help="Explicit reason for the child workflow spawn")
+    spawn_parser.add_argument("--parent-job-label", help="Optional parent job label responsible for spawning the child workflow")
+    spawn_parser.add_argument("--lineage-depth", type=int, help="Optional explicit lineage depth override")
+    spawn_parser.add_argument(
+        "--fresh",
+        action="store_true",
+        help="Launch a fresh child run and let the system mint the run_id instead of replaying onto an existing completed run",
+    )
+    spawn_parser.add_argument("--job-id", help="Job ID for tracking (written to result file)")
+    spawn_parser.add_argument("--run-id", help="Internal override: pre-assigned child workflow run_id")
+    spawn_parser.add_argument("--result-file", help="Write JSON result to this path on completion")
 
     val_parser = sub.add_parser("validate", help="Validate a workflow spec without running")
     val_parser.add_argument("spec", help="Path to .queue.json spec file")
@@ -666,6 +793,8 @@ def main() -> int:
         return cmd_generate(args)
     elif args.command == "run":
         return cmd_run(args)
+    elif args.command == "spawn":
+        return cmd_spawn(args)
     elif args.command == "validate":
         return cmd_validate(args)
     elif args.command == "status":

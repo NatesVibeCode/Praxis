@@ -22,11 +22,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
+from urllib.parse import urlsplit, urlunsplit
 
 
 LOG = logging.getLogger(__name__)
 
-DEFAULT_DB_URL = os.environ.get("WORKFLOW_DATABASE_URL", "postgresql://localhost:5432/praxis")
+DEFAULT_DB_URL = os.environ.get("WORKFLOW_DATABASE_URL", "postgresql://postgres@localhost:5432/praxis")
 SERVICE_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 SUPERVISOR_LABEL = "com.praxis.engine"
 SUPERVISOR_PROGRAM_NAME = "praxis"
@@ -108,6 +109,7 @@ COMPAT_ALIASES = {
 }
 
 _STOP_REQUESTED = False
+_DEFAULT_DB_USERNAME = "postgres"
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,6 +169,20 @@ def database_name_from_url(database_url: str) -> str:
     return database_name or "praxis"
 
 
+def _ensure_postgres_user(database_url: str) -> str:
+    parsed = urlsplit(database_url)
+    if parsed.username or parsed.scheme not in {"postgresql", "postgres"}:
+        return database_url
+    hostname = parsed.hostname or "localhost"
+    netloc = _DEFAULT_DB_USERNAME
+    if parsed.password:
+        netloc += f":{parsed.password}"
+    netloc += f"@{hostname}"
+    if parsed.port is not None:
+        netloc += f":{parsed.port}"
+    return urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
+
+
 def _database_exists(database_name: str) -> bool | None:
     escaped_name = database_name.replace("'", "''")
     completed = subprocess.run(
@@ -203,23 +219,20 @@ def discover_database_url(repo_root: Path) -> str:
             continue
         env_vars = payload.get("EnvironmentVariables")
         if isinstance(env_vars, dict):
-            candidate = env_vars.get("WORKFLOW_DATABASE_URL")
-            if isinstance(candidate, str) and candidate.strip():
-                candidate = candidate.strip()
-                exists = _database_exists(database_name_from_url(candidate))
-                if exists is True:
-                    return candidate
-                unresolved_candidates.append(candidate)
+                candidate = env_vars.get("WORKFLOW_DATABASE_URL")
+                if isinstance(candidate, str) and candidate.strip():
+                    candidate = candidate.strip()
+                    exists = _database_exists(database_name_from_url(candidate))
+                    if exists is True:
+                        return _ensure_postgres_user(candidate)
+                unresolved_candidates.append(_ensure_postgres_user(candidate))
 
     env_value = os.environ.get("WORKFLOW_DATABASE_URL")
     if env_value:
-        exists = _database_exists(database_name_from_url(env_value))
-        if exists is True:
-            return env_value
-        unresolved_candidates.append(env_value)
+        return _ensure_postgres_user(env_value.strip())
 
     if _database_exists("praxis") is True:
-        return "postgresql://localhost:5432/praxis"
+        return "postgresql://postgres@localhost:5432/praxis"
 
     if unresolved_candidates:
         return unresolved_candidates[0]

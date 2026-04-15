@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 
 _MAINTENANCE_BATCH_LIMIT = 50
 _MAINTENANCE_MAX_CLAIMS_PER_CYCLE = 600
+_RATE_LIMIT_PROBE_INTERVAL_SECONDS = 8 * 60 * 60
 _HEARTBEAT_STATUS_DDL = """
 CREATE TABLE IF NOT EXISTS heartbeat_status_current (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton),
@@ -330,6 +331,41 @@ class _DatabaseMaintenanceModule(HeartbeatModule):
         return _ok(self.name, t0)
 
 
+class _RateLimitProbeModule(HeartbeatModule):
+    """Heartbeat adapter for provider rate-limit health probes."""
+
+    def __init__(self, *, min_interval_seconds: int = _RATE_LIMIT_PROBE_INTERVAL_SECONDS) -> None:
+        self._min_interval_seconds = min_interval_seconds
+        self._last_run_at: float | None = None
+        self._delegate = None
+
+    @property
+    def name(self) -> str:
+        return "rate_limit_prober"
+
+    def _get_delegate(self):
+        if self._delegate is None:
+            from runtime.rate_limit_prober import RateLimitProbeModule
+
+            self._delegate = RateLimitProbeModule()
+        return self._delegate
+
+    def run(self) -> HeartbeatModuleResult:
+        t0 = time.monotonic()
+        if self._last_run_at is not None:
+            elapsed = t0 - self._last_run_at
+            if elapsed < self._min_interval_seconds:
+                logger.debug(
+                    "rate_limit_prober: skipped (last run %.0fs ago, min_interval=%ss)",
+                    elapsed,
+                    self._min_interval_seconds,
+                )
+                return _ok(self.name, t0)
+
+        self._last_run_at = t0
+        return self._get_delegate().run()
+
+
 # ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
@@ -352,6 +388,12 @@ class HeartbeatRunner:
         self._embedder = embedder
         self._include_probers = include_probers
         self._engine = MemoryEngine(conn=conn, db_path=engine_db_path, embedder=embedder)
+        self._rate_limit_probe_module: _RateLimitProbeModule | None = None
+
+    def _get_rate_limit_probe_module(self) -> _RateLimitProbeModule:
+        if self._rate_limit_probe_module is None:
+            self._rate_limit_probe_module = _RateLimitProbeModule()
+        return self._rate_limit_probe_module
 
     def build_modules(self) -> list[HeartbeatModule]:
         """Create all heartbeat modules wired to the memory engine."""
@@ -388,6 +430,7 @@ class HeartbeatRunner:
             modules.append(_CronHeartbeatModule(self._conn))
             modules.append(_TriggerEvaluatorModule(self._conn))
             modules.append(_WorkflowChainEvaluatorModule(self._conn))
+            modules.append(self._get_rate_limit_probe_module())
 
         return modules
 

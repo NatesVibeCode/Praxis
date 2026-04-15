@@ -575,11 +575,13 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         surface="workflow",
         tier="advanced",
         recommended_alias=None,
-        when_to_use="Run, inspect, retry, cancel, or list workflows through the MCP workflow surface.",
+        when_to_use="Run, inspect, claim, acknowledge, retry, cancel, or list workflows through the MCP workflow surface.",
         when_not_to_use="Do not use it for natural-language questions or health checks.",
         risks={
             "default": "dispatch",
             "actions": {
+                "claim": "read",
+                "acknowledge": "write",
                 "status": "read",
                 "inspect": "read",
                 "list": "read",
@@ -592,6 +594,14 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         examples=[
             _example("List recent workflows", {"action": "list"}),
             _example("Run a spec", {"action": "run", "spec_path": "config/specs/example.queue.json"}),
+            _example(
+                "Read claimable worker work",
+                {"action": "claim", "subscription_id": "dispatch:worker:bridge", "run_id": "dispatch_001"},
+            ),
+            _example(
+                "Acknowledge a worker batch",
+                {"action": "acknowledge", "work": {"claimable": True}, "through_evidence_seq": 2},
+            ),
         ],
     ),
     "praxis_workflow_validate": _tool(

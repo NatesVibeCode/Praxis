@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite';
+import { defineConfig, type ViteDevServer } from 'vite';
 import react from '@vitejs/plugin-react';
 import { spawn, ChildProcess } from 'child_process';
 import { readFileSync, watch, FSWatcher } from 'fs';
@@ -54,6 +54,22 @@ function loadDotEnv(repoRoot: string): Record<string, string> {
   return envVars;
 }
 
+function normalizeWorkflowDatabaseUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'postgresql:' && url.protocol !== 'postgres:') {
+      return value;
+    }
+    if (url.username) {
+      return value;
+    }
+    url.username = 'postgres';
+    return url.toString();
+  } catch {
+    return value;
+  }
+}
+
 // Auto-start the Python API server as part of Vite lifecycle
 function apiServerPlugin(apiPort: number) {
   let proc: ChildProcess | null = null;
@@ -72,11 +88,16 @@ function apiServerPlugin(apiPort: number) {
 
   function loadApiEnv() {
     const dotEnv = loadDotEnv(repoRoot);
+    const workflowDatabaseUrl = normalizeWorkflowDatabaseUrl(
+      dotEnv.WORKFLOW_DATABASE_URL
+      || process.env.WORKFLOW_DATABASE_URL
+      || 'postgresql://postgres@localhost:5432/praxis',
+    );
     return {
       ...process.env,
       ...dotEnv,
       PYTHONPATH: workflowRoot,
-      WORKFLOW_DATABASE_URL: 'postgresql://localhost:5432/praxis',
+      WORKFLOW_DATABASE_URL: workflowDatabaseUrl,
       PRAXIS_API_PORT: String(apiPort),
       PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
     };
@@ -151,6 +172,15 @@ function apiServerPlugin(apiPort: number) {
     const normalized = file.replace(/\\/g, '/');
     if (normalized === normalizedRepoEnvPath) return true;
     if (!normalized.startsWith(`${normalizedWorkflowRoot}/`)) return false;
+    if (
+      normalized.includes('/node_modules/')
+      || normalized.includes('/dist/')
+      || normalized.includes('/__pycache__/')
+      || normalized.includes('/.pytest_cache/')
+      || normalized.includes('/.mypy_cache/')
+    ) {
+      return false;
+    }
     return normalized.endsWith('.py') || normalized.endsWith('.json') || normalized.endsWith('.sql');
   }
 
@@ -189,7 +219,7 @@ function apiServerPlugin(apiPort: number) {
 
   return {
     name: 'api-server',
-    configureServer(server) {
+    configureServer(server: ViteDevServer) {
       const handleProcessShutdown = () => {
         shutdownPlugin();
       };
@@ -225,13 +255,15 @@ export default defineConfig(async ({ command }) => {
     console.log(`[dev] UI port ${uiPort} | API port ${apiPort}`);
   }
 
+  const apiOrigin = `http://127.0.0.1:${apiPort}`;
+
   return {
     base: isServe ? '/' : '/app/',
-    plugins: [react()],
+    plugins: isServe ? [react(), apiServerPlugin(apiPort)] : [react()],
     build: {
       rollupOptions: {
-        output: {
-          manualChunks(id) {
+          output: {
+          manualChunks(id: string) {
             if (id.includes('/node_modules/react/') || id.includes('/node_modules/react-dom/')) {
               return 'vendor-react';
             }
@@ -280,15 +312,15 @@ export default defineConfig(async ({ command }) => {
       strictPort: true,
       proxy: {
         '/api': {
-          target: 'http://127.0.0.1:8420',
+          target: apiOrigin,
           changeOrigin: true,
         },
         '/orient': {
-          target: 'http://127.0.0.1:8420',
+          target: apiOrigin,
           changeOrigin: true,
         },
         '/mcp': {
-          target: 'http://127.0.0.1:8420',
+          target: apiOrigin,
           changeOrigin: true,
         },
       },

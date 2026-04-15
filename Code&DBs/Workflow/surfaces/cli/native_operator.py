@@ -181,6 +181,28 @@ def _usage() -> str:
     )
 
 
+def _help_text() -> str:
+    return "\n".join(
+        [
+            "usage: workflow native-operator <command> [args]",
+            "",
+            "Most used:",
+            "  workflow native-operator instance",
+            "  workflow native-operator health",
+            "  workflow native-operator inspect <run_id>",
+            "  workflow native-operator status <run_id>",
+            "",
+            "Command groups:",
+            "  workflow native-operator instance|health|db-health|bootstrap|db-bootstrap|smoke",
+            "  workflow native-operator inspect|status|graph-topology|graph-lineage|cockpit",
+            "  workflow native-operator route-disable|roadmap-write|work-item-closeout|roadmap-view",
+            "  workflow native-operator provider-onboard|native-primary-cutover-gate",
+            "",
+            "Tip: start was removed; use `workflow native-operator instance` to read the native contract.",
+        ]
+    )
+
+
 def _unsupported_start_message() -> str:
     return (
         "workflow native-operator start has been removed; "
@@ -596,6 +618,9 @@ def main(
     stdout = sys.stdout if stdout is None else stdout
     source = env if env is not None else os.environ
     args = list(sys.argv[1:] if argv is None else argv)
+    if not args or args[0] in {"-h", "--help", "help"}:
+        stdout.write(_help_text() + "\n")
+        return 0
     try:
         command = _parse(args)
     except ValueError as exc:

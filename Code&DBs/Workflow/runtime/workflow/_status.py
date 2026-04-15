@@ -103,6 +103,32 @@ def _normalize_run_row_metadata(run_row: dict[str, Any], *, job_count: int) -> s
     if "requested_at" in run_row and "created_at" not in run_row:
         run_row["created_at"] = run_row["requested_at"]
     run_row["terminal_reason"] = run_row.get("terminal_reason_code")
+    lineage = envelope.get("lineage")
+    if not isinstance(lineage, dict):
+        lineage = {}
+    if not lineage.get("child_run_id"):
+        lineage["child_run_id"] = run_row.get("run_id")
+    if not lineage.get("child_workflow_id"):
+        lineage["child_workflow_id"] = run_row.get("workflow_id")
+    if "parent_run_id" not in lineage and envelope.get("parent_run_id") is not None:
+        lineage["parent_run_id"] = envelope.get("parent_run_id")
+    if "parent_job_label" not in lineage and envelope.get("parent_job_label") is not None:
+        lineage["parent_job_label"] = envelope.get("parent_job_label")
+    if "dispatch_reason" not in lineage and envelope.get("dispatch_reason") is not None:
+        lineage["dispatch_reason"] = envelope.get("dispatch_reason")
+    if "lineage_depth" not in lineage:
+        lineage["lineage_depth"] = int(
+            envelope.get(
+                "lineage_depth",
+                (int(envelope.get("trigger_depth", 0) or 0) + (1 if envelope.get("parent_run_id") else 0)),
+            )
+            or 0
+        )
+    run_row["parent_run_id"] = lineage.get("parent_run_id")
+    run_row["parent_job_label"] = lineage.get("parent_job_label")
+    run_row["dispatch_reason"] = lineage.get("dispatch_reason")
+    run_row["lineage_depth"] = int(lineage.get("lineage_depth") or 0)
+    run_row["lineage"] = lineage
     return status_value
 
 
@@ -955,7 +981,11 @@ def cancel_run(
 
 def retry_job(conn: SyncPostgresConnection, run_id: str, label: str) -> dict:
     """Re-queue a single failed job and resume the run."""
-    from ._admission import IdempotencyConflict, _retry_packet_reuse_provenance
+    from ._admission import (
+        IdempotencyConflict,
+        _enforce_queue_admission,
+        _retry_packet_reuse_provenance,
+    )
 
     from runtime.compile_artifacts import CompileArtifactStore
 
@@ -969,6 +999,7 @@ def retry_job(conn: SyncPostgresConnection, run_id: str, label: str) -> dict:
         logger.warning("Idempotency conflict: key=%s exists with different payload", idempotency_key)
         raise IdempotencyConflict(idempotency_key, result.existing_run_id, result.created_at)
     packet_reuse_provenance = _retry_packet_reuse_provenance(conn, run_id=run_id)
+    _enforce_queue_admission(conn, job_count=1)
 
     rows = conn.execute(
         """UPDATE workflow_jobs

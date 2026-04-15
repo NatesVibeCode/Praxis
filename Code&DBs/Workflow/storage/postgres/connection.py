@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
+from contextlib import contextmanager
+import hashlib
 import os
 import threading as _threading
+from urllib.parse import urlsplit, urlunsplit
 
 import asyncpg
 
@@ -19,6 +22,7 @@ _workflow_pool_dsn: str | None = None
 _workflow_authority_scope: "_WorkflowAuthorityScope | None" = None
 _bg_loop: asyncio.AbstractEventLoop | None = None
 _bg_thread: _threading.Thread | None = None
+_DEFAULT_DB_USERNAME = "postgres"
 
 
 class _WorkflowAuthorityScope:
@@ -49,6 +53,30 @@ def _normalize_authority_error(
             "cause_message": str(exc),
         },
     )
+
+
+def _ensure_postgres_user(database_url: str) -> str:
+    parsed = urlsplit(database_url)
+    if parsed.username or parsed.scheme not in {"postgresql", "postgres"}:
+        return database_url
+    hostname = parsed.hostname or "localhost"
+    netloc = _DEFAULT_DB_USERNAME
+    if parsed.password:
+        netloc += f":{parsed.password}"
+    netloc += f"@{hostname}"
+    if parsed.port is not None:
+        netloc += f":{parsed.port}"
+    return urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
+
+
+def workflow_authority_cache_key(database_url: str) -> str:
+    """Return a stable, sanitized cache key for one workflow authority."""
+    parsed = urlsplit(database_url)
+    hostname = (parsed.hostname or "localhost").lower()
+    port = f":{parsed.port}" if parsed.port is not None else ""
+    identity = f"{parsed.scheme}://{hostname}{port}{parsed.path or '/'}?{parsed.query}"
+    digest = hashlib.blake2s(identity.encode("utf-8"), digest_size=12).hexdigest()
+    return f"workflow_pool:{digest}"
 
 
 def resolve_workflow_database_url(
@@ -85,7 +113,14 @@ def resolve_workflow_database_url(
             },
         )
 
-    return database_url
+    return _ensure_postgres_user(database_url)
+
+
+def resolve_workflow_authority_cache_key(
+    env: Mapping[str, str] | None = None,
+) -> str:
+    """Resolve the sanitized cache key for the configured workflow authority."""
+    return workflow_authority_cache_key(resolve_workflow_database_url(env=env))
 
 
 async def connect_workflow_database(
@@ -153,7 +188,7 @@ def get_workflow_pool(env: Mapping[str, str] | None = None) -> asyncpg.Pool:
         _workflow_pool = _run_sync(create_workflow_pool(env=env))
         _workflow_pool_dsn = database_url
         _workflow_authority_scope = _WorkflowAuthorityScope(
-            cache_key=f"workflow_pool:{database_url}",
+            cache_key=resolve_workflow_authority_cache_key(env=env),
         )
     return _workflow_pool
 
@@ -217,6 +252,29 @@ class SyncPostgresConnection:
                 return await conn.fetchval(query, *args)
         return _run_sync(_do())
 
+    @contextmanager
+    def transaction(self):
+        async def _begin():
+            conn = await self._pool.acquire()
+            tx = conn.transaction()
+            await tx.start()
+            return conn, tx
+
+        raw_conn, tx = _run_sync(_begin())
+        pinned = _PinnedSyncPostgresConnection(
+            pool=self._pool,
+            conn=raw_conn,
+            tx=tx,
+            authority_scope=self._authority_scope,
+        )
+        try:
+            yield pinned
+        except Exception:
+            pinned.rollback()
+            raise
+        else:
+            pinned.commit()
+
     def execute_many(self, query: str, args_list: list):
         async def _do():
             async with self._pool.acquire() as conn:
@@ -236,6 +294,101 @@ class SyncPostgresConnection:
         """No-op — asyncpg auto-commits each statement."""
 
 
+class _PinnedSyncPostgresConnection:
+    """Sync wrapper pinned to one asyncpg connection/transaction."""
+
+    def __init__(
+        self,
+        *,
+        pool: asyncpg.Pool,
+        conn: asyncpg.Connection,
+        tx: asyncpg.transaction.Transaction,
+        authority_scope: _WorkflowAuthorityScope,
+    ) -> None:
+        self._pool = pool
+        self._conn = conn
+        self._tx = tx
+        self._closed = False
+        self._authority_scope = authority_scope
+        self._authority_cache_key = authority_scope.cache_key
+
+    def _ensure_open(self) -> None:
+        if self._closed:
+            raise RuntimeError("workflow transaction connection is closed")
+
+    def execute(self, query: str, *args) -> list:
+        self._ensure_open()
+
+        async def _do():
+            return await self._conn.fetch(query, *args)
+
+        return _run_sync(_do())
+
+    def fetchrow(self, query: str, *args):
+        self._ensure_open()
+
+        async def _do():
+            return await self._conn.fetchrow(query, *args)
+
+        return _run_sync(_do())
+
+    def fetchval(self, query: str, *args):
+        self._ensure_open()
+
+        async def _do():
+            return await self._conn.fetchval(query, *args)
+
+        return _run_sync(_do())
+
+    def execute_many(self, query: str, args_list: list):
+        self._ensure_open()
+
+        async def _do():
+            await self._conn.executemany(query, args_list)
+
+        _run_sync(_do())
+
+    def execute_script(self, sql: str):
+        self._ensure_open()
+
+        async def _do():
+            await self._conn.execute(sql)
+
+        _run_sync(_do())
+
+    @contextmanager
+    def transaction(self):
+        yield self
+
+    def commit(self) -> None:
+        if self._closed:
+            return
+
+        async def _do():
+            try:
+                await self._tx.commit()
+            finally:
+                await self._pool.release(self._conn)
+
+        _run_sync(_do())
+        self._closed = True
+
+    def rollback(self) -> None:
+        if self._closed:
+            return
+
+        async def _do():
+            try:
+                await self._tx.rollback()
+            finally:
+                await self._pool.release(self._conn)
+
+        _run_sync(_do())
+        self._closed = True
+
+    def close(self) -> None:
+        self.rollback()
+
 def ensure_postgres_available(
     env: Mapping[str, str] | None = None,
 ) -> SyncPostgresConnection:
@@ -246,18 +399,9 @@ def ensure_postgres_available(
     2. Bootstraps the schema if needed (idempotent)
     3. Returns a SyncPostgresConnection wrapping the shared pool
 
-    If the local cluster is down and dev_postgres helpers are available,
-    attempts to start it first.
+    Native Postgres auto-start is forbidden. Callers must provide an explicit
+    reachable database authority from the sandboxed runtime lane.
     """
-    # Try to start the local cluster if it's not running.
-    # This is best-effort — if dev_postgres helpers fail (e.g. path mismatch),
-    # we still attempt a direct connection since Postgres may already be up.
-    try:
-        from storage.dev_postgres import local_postgres_up
-        local_postgres_up(env=env)
-    except Exception:
-        pass  # Cluster may already be running or managed externally
-
     pool = get_workflow_pool(env=env)
 
     # Idempotent schema bootstrap

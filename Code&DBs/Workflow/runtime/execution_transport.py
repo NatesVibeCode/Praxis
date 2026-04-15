@@ -9,7 +9,6 @@ TransportKind = Literal["cli", "api", "mcp", "unknown"]
 ExecutionLane = Literal["local", "remote", "unknown"]
 SandboxProviderKind = Literal[
     "docker_local",
-    "host_local",
     "cloudflare_remote",
     "unknown",
 ]
@@ -42,6 +41,8 @@ def _transport(agent_config: Any) -> str:
 def _sandbox_provider(agent_config: Any) -> str:
     explicit = _normalized_value(getattr(agent_config, "sandbox_provider", None))
     if explicit:
+        if explicit == "host_local":
+            return "unknown"
         return explicit
     transport = _transport(agent_config)
     if transport == "mcp":

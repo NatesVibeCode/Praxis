@@ -36,7 +36,7 @@ def test_resolve_execution_transport_prefers_explicit_provider_and_transport() -
     assert transport.sandbox_provider == "cloudflare_remote"
 
 
-def test_resolve_execution_transport_accepts_host_local_provider() -> None:
+def test_resolve_execution_transport_rejects_host_local_provider() -> None:
     transport = resolve_execution_transport(
         SimpleNamespace(
             execution_transport="cli",
@@ -45,8 +45,8 @@ def test_resolve_execution_transport_accepts_host_local_provider() -> None:
     )
 
     assert transport.transport_kind == "cli"
-    assert transport.execution_lane == "local"
-    assert transport.sandbox_provider == "host_local"
+    assert transport.execution_lane == "unknown"
+    assert transport.sandbox_provider == "unknown"
 
 
 def test_resolve_execution_transport_fails_closed_for_unknown_backend() -> None:

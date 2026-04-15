@@ -42,6 +42,7 @@ from .commands.workflow import (
     _triggers_command,
     _verify_command,
     _verify_platform_command,
+    _work_command,
 )
 from .commands.operate import (
     _api_command,
@@ -288,9 +289,11 @@ _ARG_COMMANDS: dict[str, ArgsCommandHandler] = {
     "chain-status": lambda args, *, stdout: _delegate_legacy_workflow_cli("chain-status", args, stdout=stdout),
     "triggers": _triggers_command,
     "repair": _repair_command,
+    "work": _work_command,
 }
 
 _STDOUT_COMMANDS: dict[str, StdoutCommandHandler] = {
+    "commands": lambda *, stdout: _commands_index_command(stdout=stdout),
     "status": _status_command,
     "costs": _costs_command,
     "circuits": _circuits_command,
@@ -300,7 +303,158 @@ _STDOUT_COMMANDS: dict[str, StdoutCommandHandler] = {
 
 
 def _usage() -> str:
-    return "usage: workflow <tools|query|architecture|bugs|recall|discover|artifacts|health|run|run-status|status|costs|receipts|leaderboard|trust|fitness|scope|risk|reviews|diagnose|inspect-job|heal|verify|debate|runs|manifest|triggers|retry|repair|cancel|active|circuits|slots|inspect|replay|graph-topology|graph-lineage|...> <args>"
+    return "usage: workflow <command> [args]"
+
+
+def _native_operator_help_text() -> str:
+    from . import native_operator
+
+    return native_operator._help_text()
+
+
+def _commands_index_text() -> str:
+    return "\n".join(
+        [
+            "usage: workflow commands",
+            "",
+            "Command index:",
+            "  workflow commands                               Show this command index",
+            "  workflow run <spec.json>                        Submit a workflow spec",
+            "  workflow validate <spec.json>                   Validate a spec without running",
+            "  workflow status [--since-hours N]               Show recent workflow status",
+            "  workflow active                                 Show active workflow runs",
+            "  workflow stream <run_id>                       Stream one workflow run",
+            "  workflow retry <run_id> <label>                Retry one failed job",
+            "  workflow cancel <run_id>                       Cancel a workflow run",
+            "  workflow repair <run_id>                       Repair post-run sync state",
+            "  workflow work <claim|acknowledge>             Claim or acknowledge worker work",
+            "  workflow tools [list|search|describe|call]     Discover and call catalog-backed MCP tools",
+            "  workflow query|recall|discover|architecture|artifacts|bugs|costs|leaderboard|trust|fitness|trends|scope|risk|reviews|receipts",
+            "                                                  Derived search and analysis reads",
+            "  workflow inspect|replay|graph-topology|graph-lineage|topology|lineage",
+            "                                                  Derived observability views",
+            "  workflow health|health-map|metrics|events|cache|circuits|slots|params|config|notifications|dashboard|api|supervisor|capabilities|work",
+            "                                                  Operator and platform surfaces",
+            "  workflow native-operator <subcommand>           Repo-local operator surface",
+            "  workflow compile|github                        Build and repository automation",
+            "",
+            "Tip: run `workflow help <command>` or `workflow <command> --help` for command-specific usage.",
+        ]
+    )
+
+
+def _commands_index_command(*, stdout: TextIO) -> int:
+    stdout.write(_commands_index_text() + "\n")
+    return 0
+
+
+def _help_text() -> str:
+    return "\n".join(
+        [
+            "usage: workflow <command> [args]",
+            "",
+            "Most used:",
+            "  workflow run <spec.json>",
+            "  workflow validate <spec.json>",
+            "  workflow tools list",
+            "  workflow tools search <topic> [--surface <surface>] [--tier <tier>] [--risk <risk>]",
+            "  workflow api routes",
+            "  workflow query <question>",
+            "  workflow work claim --subscription-id <id> --run-id <run_id>",
+            "  workflow inspect <run_id>",
+            "  workflow replay <run_id>",
+            "  workflow native-operator instance",
+            "",
+            "Command groups:",
+            "  workflow tools [list|search|describe|call]",
+            "  workflow query|recall|discover|architecture|artifacts|bugs|costs|leaderboard|trust|fitness|trends|scope|risk|reviews|receipts",
+            "  workflow run|run-status|status|active|scheduler|fan-out|debate|runs|manifest|triggers|retry|cancel|repair|heal|verify|verify-platform|pipeline|proof|queue|diagnose|inspect-job",
+            "  workflow inspect|replay|graph-topology|graph-lineage|topology|lineage",
+            "  workflow health|health-map|metrics|events|cache|circuits|slots|params|config|notifications|dashboard|api [routes|--host|--port]|supervisor|capabilities|work",
+            "  workflow native-operator instance|health|db-health|bootstrap|db-bootstrap|smoke|inspect|status|graph-topology|graph-lineage|cockpit|route-disable|roadmap-write|work-item-closeout|roadmap-view|provider-onboard|native-primary-cutover-gate",
+            "  workflow compile|github",
+            "",
+            "Tip: run `workflow commands` or `workflow help commands` for the full command index.",
+            "Tip: run `workflow help <command>` or `workflow <command> --help` for command-specific usage.",
+        ]
+    )
+
+
+def _help_topic_text(topic: str, *, stdout: TextIO) -> int:
+    topic = topic.strip()
+    if not topic:
+        stdout.write(_help_text() + "\n")
+        return 0
+    if topic == "help":
+        stdout.write(_help_text() + "\n")
+        return 0
+    if topic in {"commands", "index"}:
+        stdout.write(_commands_index_text() + "\n")
+        return 0
+    if topic == "native-operator":
+        stdout.write(_native_operator_help_text() + "\n")
+        return 0
+    if topic == "tools":
+        _ARG_COMMANDS["tools"](["--help"], stdout=stdout)
+        return 0
+
+    if topic in {"inspect", "replay", "graph-topology", "topology", "graph-lineage", "lineage"}:
+        usage = {
+            "inspect": "usage: workflow inspect <run_id>",
+            "replay": "usage: workflow replay <run_id>",
+            "graph-topology": "usage: workflow graph-topology <run_id>",
+            "topology": "usage: workflow topology <run_id>",
+            "graph-lineage": "usage: workflow graph-lineage <run_id>",
+            "lineage": "usage: workflow lineage <run_id>",
+        }[topic]
+        stdout.write(usage + "\n")
+        return 0
+
+    if topic in _STDOUT_COMMANDS:
+        usage = {
+            "status": "usage: workflow status [--since-hours N]",
+            "active": "usage: workflow active",
+            "costs": "usage: workflow costs",
+            "circuits": "usage: workflow circuits",
+            "slots": "usage: workflow slots",
+        }.get(topic)
+        if usage is not None:
+            stdout.write(usage + "\n")
+            return 0
+
+    if topic in _ARG_COMMANDS:
+        _ARG_COMMANDS[topic](["--help"], stdout=stdout)
+        return 0
+
+    stdout.write(f"unknown help topic: {topic}\n")
+    stdout.write(
+        "try `workflow help commands`, `workflow help native-operator`, "
+        "`workflow help query`, or `workflow help run`.\n"
+    )
+    return 2
+
+
+def _known_root_commands() -> set[str]:
+    return {
+        "native-operator",
+        "inspect",
+        "replay",
+        "graph-topology",
+        "topology",
+        "graph-lineage",
+        "lineage",
+        *(_ARG_COMMANDS.keys()),
+        *(_STDOUT_COMMANDS.keys()),
+    }
+
+
+def _normalize_namespace_tokens(argv: Sequence[str]) -> list[str]:
+    args = list(argv)
+    if len(args) >= 2 and args[0] == "praxis" and args[1] == "workflow":
+        return args[1:]
+    if args and args[0] in {"workflow", "praxis-workflow"}:
+        return args[1:]
+    return args
 
 
 def _parse(
@@ -371,11 +525,22 @@ def main(
     """
 
     stdout = sys.stdout if stdout is None else stdout
-    args = list(sys.argv[1:] if argv is None else argv)
+    args = _normalize_namespace_tokens(sys.argv[1:] if argv is None else argv)
+    if not args or args[0] in {"-h", "--help", "help"}:
+        if len(args) >= 2 and args[0] == "help":
+            return _help_topic_text(args[1], stdout=stdout)
+        stdout.write(_help_text() + "\n")
+        return 0
     if args and args[0] == "native-operator":
         from . import native_operator
 
         return native_operator.main(args[1:], env=env, stdout=stdout)
+
+    if args[0] not in _known_root_commands():
+        stdout.write(f"unknown command: {args[0]}\n")
+        stdout.write("run `workflow commands` or `workflow help <command>` to see command-specific usage.\n")
+        stdout.write(f"{_usage()}\n")
+        return 2
 
     if args:
         command_name = args[0]

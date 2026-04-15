@@ -61,6 +61,7 @@ Relevant implementation files:
 ## File Action Mapping
 
 `workflow tools call praxis_bugs --input-json '{"action":"file",...}'` maps to `BugTracker.file_bug(...)`.
+`praxis_bugs(action="file", ...)` maps to the same filing path when you are using the MCP surface directly.
 
 Important behavior:
 

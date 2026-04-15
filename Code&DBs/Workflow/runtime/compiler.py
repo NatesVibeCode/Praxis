@@ -29,9 +29,13 @@ import runtime.compiler_output_builders as _compiler_output_builders
 from runtime.compile_index import (
     CompileIndexAuthorityError,
     CompileIndexSnapshot,
+    _load_integrations as _compile_index_load_integrations,
+    _load_object_types as _compile_index_load_object_types,
+    _load_reference_catalog as _compile_index_load_reference_catalog,
     load_compile_index_snapshot,
     refresh_compile_index,
 )
+from runtime.capability_catalog import load_capability_catalog
 from runtime.definition_compile_kernel import (
     build_definition as _kernel_build_definition,
     detect_triggers as _kernel_detect_triggers,
@@ -67,7 +71,10 @@ _REFRESHABLE_COMPILE_INDEX_REASON_CODES = {
     "compile_index.snapshot_missing",
     "compile_index.snapshot_stale",
 }
-_DEFAULT_REPO_LOCAL_DATABASE_URL = os.environ.get("WORKFLOW_DATABASE_URL", "postgresql://localhost:5432/praxis")
+_DEFAULT_REPO_LOCAL_DATABASE_URL = os.environ.get(
+    "WORKFLOW_DATABASE_URL",
+    "postgresql://test@localhost:5432/praxis_test",
+)
 
 _COMPILER_ROUTE_HINTS_CACHE: tuple[tuple[str, str], ...] = ()
 _COMPILER_SURFACE_REVISION_CACHE: str | None = None
@@ -219,10 +226,19 @@ def compile_prose(
     llm_guard_reason: str | None = None
     if llm_requested:
         try:
-            compiled = _call_llm_compile(
-                clean_prose, context, conn=conn,
-                hydrate_env=_hydrate_env_from_dotenv, get_connection=_get_connection,
-            )
+            try:
+                compiled = _call_llm_compile(
+                    clean_prose,
+                    context,
+                    conn=conn,
+                    hydrate_env=_hydrate_env_from_dotenv,
+                    get_connection=_get_connection,
+                )
+            except TypeError as exc:
+                message = str(exc)
+                if "unexpected keyword argument 'hydrate_env'" not in message and "unexpected keyword argument 'get_connection'" not in message:
+                    raise
+                compiled = _call_llm_compile(clean_prose, context, conn=conn)
             llm_succeeded = True
         except Exception as exc:
             logger.warning("LLM compilation failed: %s", exc)
@@ -726,6 +742,22 @@ def _read_compiler_env_file(path: Path) -> dict[str, str]:
             cleaned = cleaned[1:-1]
         parsed[key] = cleaned
     return parsed
+
+
+def _build_capability_catalog(integrations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return _compiler_components.build_capability_catalog(integrations)
+
+
+def _load_reference_catalog(conn: Any) -> list[dict[str, Any]]:
+    return _compile_index_load_reference_catalog(conn)
+
+
+def _load_integrations(conn: Any) -> list[dict[str, Any]]:
+    return _compile_index_load_integrations(conn)
+
+
+def _load_object_types(conn: Any) -> list[dict[str, Any]]:
+    return _compile_index_load_object_types(conn)
 
 
 def _compiler_surface_revision() -> str:

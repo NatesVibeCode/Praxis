@@ -2,151 +2,170 @@
 
 Status: execution_ready
 
-Registry authority: [planning/phase-program/praxis_0_100_registry.json](/workspace/planning/phase-program/praxis_0_100_registry.json) phase `2` (`Control Plane Core`), status `historical_foundation`, predecessor phase `1`, with mandatory closeout sequence `review -> healer -> human_approval`.
+Authority map:
+- `planning/phase-program/praxis_0_100_registry.json` declares phase `2` as `Control Plane Core`.
+- The registry marks phase `2` as predecessor-bound to phase `1`.
+- Registry governance requires `one_phase_one_thing = true`.
+- Registry governance requires the closeout sequence `review -> healer -> human_approval`.
+- `config/cascade/specs/W_phase_001_010_foundation_wave_20260414.queue.json` requires one bounded execution packet for `phase_002_control_plane_core`.
 
-Grounding note: this packet is based on the current checked-out repo snapshot in this workspace. In current repo terms, the most defensible Phase 2 seam is the native frontdoor submit/status spine that sits directly on top of the original control-plane schema from migration `001_v1_control_plane.sql`.
+Grounding note:
+- This packet is grounded in the mounted repo snapshot at `/workspace`.
+- The declared execution root is `/Users/nate/Praxis`; verification commands target that root exactly.
+- The execution shard says compile inputs are ready, but proof coverage is still effectively unproven: `verification_coverage=0.0`, `fully_proved_verification_coverage=0.0`, `write_manifest_coverage=0.2337`.
+- The repo already contains the schema, storage writer, native frontdoor, and split tests for this phase. The first sprint is therefore a proof-and-repair sprint, not a redesign sprint.
 
 ## 1. Objective in repo terms
 
-- Reassert one explicit Phase 2 control-plane core seam in the current repo: the repo-local native frontdoor that admits a workflow request into canonical control-plane tables and reads the same run back through the frontdoor status surface.
-- Keep the sprint bounded to the initial durable control-plane spine:
-- `workflow_definitions`
-- `admission_decisions`
-- `workflow_runs`
-- First-sprint target: prove that [Code&DBs/Workflow/surfaces/api/frontdoor.py](/workspace/Code&DBs/Workflow/surfaces/api/frontdoor.py) can perform one real submit -> persist -> status round-trip against Postgres using the canonical native instance contract, without relying on stubbed persistence or direct SQL fixture seeding in the test itself.
+- Prove that the repo-local native control-plane frontdoor is a thin wrapper over the canonical Postgres control-plane core.
+- The bounded seam is the real `submit(...) -> durable Postgres control-plane write -> status(...)` path in:
+- `Code&DBs/Workflow/surfaces/api/frontdoor.py`
+- `Code&DBs/Workflow/storage/postgres/admission.py`
+- `Code&DBs/Workflow/storage/postgres/__init__.py`
+- `Code&DBs/Workflow/runtime/intake.py`
+- Repo-level target: a real native submit call persists canonical `workflow_definitions`, `admission_decisions`, and `workflow_runs` rows through `persist_workflow_admission(...)`, and a follow-up native status call reads the durable run back from the same control-plane path.
+- Stop at Phase 2 control-plane admission/status truth. Do not widen into command-bus convergence, later lifecycle orchestration, operator-control surfaces, or schema expansion.
 
 ## 2. Current evidence in the repo
 
-- Phase `2` is declared in the registry as `Control Plane Core` in [planning/phase-program/praxis_0_100_registry.json](/workspace/planning/phase-program/praxis_0_100_registry.json), with predecessor `1` and required closeout sequence `review -> healer -> human_approval`.
-- The original control-plane schema for this phase already exists in [Code&DBs/Databases/migrations/workflow/001_v1_control_plane.sql](/workspace/Code&DBs/Databases/migrations/workflow/001_v1_control_plane.sql). It creates the foundational tables:
+- `planning/phase-program/praxis_0_100_registry.json` defines phase `2` as `Control Plane Core` and requires closeout sequence `review -> healer -> human_approval`.
+- `config/cascade/specs/W_phase_001_010_foundation_wave_20260414.queue.json` assigns this exact packet path to job label `phase_002_control_plane_core`.
+- `Code&DBs/Databases/migrations/workflow/001_v1_control_plane.sql` already defines the core Phase 2 tables, including:
 - `workflow_definitions`
 - `workflow_definition_nodes`
 - `workflow_definition_edges`
 - `admission_decisions`
 - `workflow_runs`
-- `run_nodes`
-- `run_edges`
-- The checked-in storage layer already exposes explicit Phase 2 write authority through [Code&DBs/Workflow/storage/postgres/admission.py](/workspace/Code&DBs/Workflow/storage/postgres/admission.py):
+- `Code&DBs/Workflow/storage/postgres/__init__.py` exports the canonical control-plane storage surface used by the native frontdoor:
+- `connect_workflow_database`
+- `bootstrap_control_plane_schema`
+- `persist_workflow_admission`
+- `Code&DBs/Workflow/storage/postgres/admission.py` already owns the transactional write contract through:
 - `WorkflowAdmissionDecisionWrite`
 - `WorkflowRunWrite`
 - `WorkflowAdmissionSubmission`
+- `WorkflowAdmissionWriteResult`
 - `persist_workflow_admission(...)`
-- The storage package already treats schema bootstrap as an explicit control-plane concern in [Code&DBs/Workflow/storage/postgres/__init__.py](/workspace/Code&DBs/Workflow/storage/postgres/__init__.py) by exporting `bootstrap_control_plane_schema`, `connect_workflow_database`, and `persist_workflow_admission`.
-- The native frontdoor surface already exists in [Code&DBs/Workflow/surfaces/api/frontdoor.py](/workspace/Code&DBs/Workflow/surfaces/api/frontdoor.py) and is intentionally narrow:
-- `submit(...)` resolves the native repo-local instance, plans intake, builds `WorkflowAdmissionSubmission`, bootstraps schema, and persists the submission
-- `status(...)` reads the durable `workflow_runs` row and derives compact observability payloads
-- `health(...)` resolves repo-local instance plus Postgres health/bootstrap status
-- Repo-local native boundary enforcement already exists in [Code&DBs/Workflow/runtime/instance.py](/workspace/Code&DBs/Workflow/runtime/instance.py) and [config/runtime_profiles.json](/workspace/config/runtime_profiles.json), which means the Phase 2 seam can be exercised without inventing a new workspace or deployment model.
-- Integration coverage already proves the persistence layer and frontdoor in pieces, but not yet as one durable seam:
-- [Code&DBs/Workflow/tests/integration/test_postgres_runtime_path.py](/workspace/Code&DBs/Workflow/tests/integration/test_postgres_runtime_path.py) proves `persist_workflow_admission(...)` writes canonical control-plane rows and rejects malformed or conflicting inputs
-- [Code&DBs/Workflow/tests/integration/test_native_frontdoor.py](/workspace/Code&DBs/Workflow/tests/integration/test_native_frontdoor.py) proves frontdoor request shaping, repo-local native-instance resolution, status serialization, packet-inspection fallback behavior, and observability shaping mostly through fake/stub connections
-- Unit/frontdoor-adjacent surfaces already depend on this core behaving coherently:
-- [Code&DBs/Workflow/tests/unit/test_rest_queue_submit.py](/workspace/Code&DBs/Workflow/tests/unit/test_rest_queue_submit.py)
-- [Code&DBs/Workflow/tests/unit/test_cli_workflow_frontdoors.py](/workspace/Code&DBs/Workflow/tests/unit/test_cli_workflow_frontdoors.py)
-- [Code&DBs/Workflow/tests/unit/test_workflow_command_bus_authority.py](/workspace/Code&DBs/Workflow/tests/unit/test_workflow_command_bus_authority.py)
-- Current repo evidence also shows that many broader integration tests still seed `workflow_definitions`, `admission_decisions`, and `workflow_runs` directly with SQL fixtures instead of proving the public Phase 2 frontdoor is the seam that creates the initial durable run identity.
+- `Code&DBs/Workflow/surfaces/api/frontdoor.py` already implements the intended shape of the seam:
+- `NativeWorkflowFrontdoor.submit(...)` resolves the native instance, plans intake with `WorkflowIntakePlanner`, builds `WorkflowAdmissionSubmission`, and delegates to `_submit_submission(...)`
+- `_submit_submission(...)` uses `connect_workflow_database`, `bootstrap_control_plane_schema`, and `persist_workflow_admission`
+- `NativeWorkflowFrontdoor.status(...)` reads `workflow_runs` through the same connection surface and serializes the durable run payload
+- The public module-level `submit(...)` and `status` exports in `frontdoor.py` point to the real native frontdoor rather than a compatibility wrapper
+- `Code&DBs/Workflow/tests/integration/test_postgres_runtime_path.py` already proves the storage-owned write seam directly:
+- `test_postgres_control_plane_path_writes_a_run_and_decision`
+- `test_postgres_control_plane_path_rejects_conflicting_preseeded_definition_rows`
+- `test_postgres_control_plane_path_rejects_malformed_child_rows`
+- `Code&DBs/Workflow/tests/integration/test_native_frontdoor.py` already proves frontdoor behavior such as status serialization and native instance enforcement, but its submit-path tests use injected fakes for database connection, schema bootstrap, and persistence instead of the real Postgres path.
+- `Code&DBs/Workflow/runtime/instance.py` already provides the repo-local native instance boundary that Phase 2 submit/status depends on.
 
 ## 3. Gap or ambiguity still remaining
 
-- The repo already has a canonical Phase 2 schema and a canonical Phase 2 write primitive, but it does not yet have one focused integration proof that the public native frontdoor itself can round-trip a real request through that control-plane core.
-- Today the proof splits are separate:
-- storage integration proves `persist_workflow_admission(...)`
-- frontdoor integration proves request shaping and status payloads through stubs/fakes
-- That leaves an ambiguity about the true live seam for Phase 2:
-- Is `NativeWorkflowFrontdoor.submit(...)` actually the durable owner of initial run creation in repo-local native mode?
-- Or is the current confidence mostly assembled from lower-level persistence tests plus higher-level mocked frontdoor tests?
-- The first sprint should remove that ambiguity with one real repo-grounded round-trip contract, not broaden into command-bus policy, operator read surfaces, workflow submission review, or observability redesign.
-- `status(...)` currently includes packet-inspection and derived observability behavior, but those are adjacent layers, not the core Phase 2 objective. The first sprint should prove the frontdoor can read back the canonical run row and stable identity fields; it should not try to solve every later read-model concern.
+- The repo currently proves the storage writer in one suite and the frontdoor surface shape in another suite, but it does not yet prove the exact Phase 2 vertical slice end to end.
+- The unresolved ambiguity is narrow:
+- whether the public native `submit(...)` path actually drives the canonical Postgres control-plane writer in live repo terms
+- whether `status(...)` round-trips the same durable run identity from the same real persisted row rather than from fake test seams
+- Because the frontdoor tests use injected fakes, the current test matrix could still pass while the real `submit -> bootstrap -> persist -> status` handoff is broken.
+- Phase 2 does not need a new architecture. It needs one live proof that removes this ambiguity and any minimal repair needed to make that proof true.
 
 ## 4. One bounded first sprint only
 
-- Add one integration contract that uses the real native frontdoor over a real Postgres connection and proves:
-- `submit(...)` bootstraps the control-plane schema if needed
-- `submit(...)` persists one canonical admission decision and one canonical workflow run
-- `status(...)` can read back the same run through the frontdoor surface with stable identity fields from durable storage
-- Prefer reusing the existing request-builder patterns from [Code&DBs/Workflow/tests/integration/test_native_frontdoor.py](/workspace/Code&DBs/Workflow/tests/integration/test_native_frontdoor.py) and the Postgres helpers from [Code&DBs/Workflow/tests/integration/test_postgres_runtime_path.py](/workspace/Code&DBs/Workflow/tests/integration/test_postgres_runtime_path.py).
-- If the new integration test exposes a defect, fix only the narrow handoff between:
-- frontdoor request/intake shaping
-- `WorkflowAdmissionSubmission` construction
-- schema bootstrap / persistence invocation
-- frontdoor status row loading / stable field serialization
-- Stop after one end-to-end Phase 2 proof exists and passes.
-- Do not widen into:
-- service-bus command routing
-- CLI or MCP submit/retry/cancel unification
-- packet-inspection redesign
-- observability taxonomy redesign
-- operator-control tables
-- submission review policy
+- Add one focused Postgres-backed integration proof for the native frontdoor vertical slice.
+- Preferred implementation shape:
+- extend `Code&DBs/Workflow/tests/integration/test_native_frontdoor.py`
+- reuse request-payload builders already present there
+- reuse durable-row assertion patterns already present in `Code&DBs/Workflow/tests/integration/test_postgres_runtime_path.py`
+- The sprint proves exactly these behaviors:
+- `submit(...)` through `Code&DBs/Workflow/surfaces/api/frontdoor.py` persists one admitted workflow definition, one admission decision, and one workflow run through the real Postgres writer
+- `status(...)` for the resulting `run_id` returns the same durable identity fields from storage
+- the proof uses a real `WORKFLOW_DATABASE_URL`, not fake persistence hooks or in-memory stand-ins
+- Allow repair only if the proof exposes a real defect in:
+- request-to-submission mapping
+- `NativeWorkflowFrontdoor._submit_submission(...)`
+- durable run-row loading inside `NativeWorkflowFrontdoor.status(...)`
+- Stop after one vertical slice is proved. Explicitly out of scope:
+- `rest.py` command-bus surfaces
+- workflow job lifecycle or execution packet lifecycle behavior
+- operator-control or promotion/gate tables
+- new migrations
+- broad fixture cleanup
+- replacing unrelated frontdoor tests
 
 ## 5. Exact file or subsystem scope
 
 - Primary implementation scope:
-- [Code&DBs/Workflow/surfaces/api/frontdoor.py](/workspace/Code&DBs/Workflow/surfaces/api/frontdoor.py)
-- [Code&DBs/Workflow/tests/integration/test_native_frontdoor.py](/workspace/Code&DBs/Workflow/tests/integration/test_native_frontdoor.py)
-- Primary supporting authority scope:
-- [Code&DBs/Workflow/storage/postgres/admission.py](/workspace/Code&DBs/Workflow/storage/postgres/admission.py)
-- [Code&DBs/Workflow/tests/integration/test_postgres_runtime_path.py](/workspace/Code&DBs/Workflow/tests/integration/test_postgres_runtime_path.py)
-- Read-only grounding references:
-- [Code&DBs/Databases/migrations/workflow/001_v1_control_plane.sql](/workspace/Code&DBs/Databases/migrations/workflow/001_v1_control_plane.sql)
-- [Code&DBs/Workflow/runtime/instance.py](/workspace/Code&DBs/Workflow/runtime/instance.py)
-- [config/runtime_profiles.json](/workspace/config/runtime_profiles.json)
-- [Code&DBs/Workflow/observability/status_observability.py](/workspace/Code&DBs/Workflow/observability/status_observability.py)
+- `Code&DBs/Workflow/tests/integration/test_native_frontdoor.py`
+- Read-only authority and proof references:
+- `planning/phase-program/praxis_0_100_registry.json`
+- `config/cascade/specs/W_phase_001_010_foundation_wave_20260414.queue.json`
+- `Code&DBs/Databases/migrations/workflow/001_v1_control_plane.sql`
+- `Code&DBs/Workflow/surfaces/api/frontdoor.py`
+- `Code&DBs/Workflow/storage/postgres/__init__.py`
+- `Code&DBs/Workflow/storage/postgres/admission.py`
+- `Code&DBs/Workflow/runtime/intake.py`
+- `Code&DBs/Workflow/runtime/instance.py`
+- `Code&DBs/Workflow/tests/integration/test_postgres_runtime_path.py`
+- Repair-only scope if the new proof finds a defect:
+- `Code&DBs/Workflow/surfaces/api/frontdoor.py`
+- `Code&DBs/Workflow/storage/postgres/admission.py`
+- `Code&DBs/Workflow/storage/postgres/__init__.py` only if the defect is at the exported control-plane seam
+- Subsystem boundary:
+- native repo-local submit/status surface over the canonical Postgres control-plane admission core
 - Explicitly out of scope:
-- [Code&DBs/Workflow/runtime/control_commands.py](/workspace/Code&DBs/Workflow/runtime/control_commands.py)
-- [Code&DBs/Workflow/surfaces/api/rest.py](/workspace/Code&DBs/Workflow/surfaces/api/rest.py)
-- [Code&DBs/Workflow/surfaces/api/handlers/workflow_run.py](/workspace/Code&DBs/Workflow/surfaces/api/handlers/workflow_run.py)
-- [Code&DBs/Workflow/surfaces/api/workflow_submission.py](/workspace/Code&DBs/Workflow/surfaces/api/workflow_submission.py)
-- [Code&DBs/Workflow/storage/postgres/workflow_submission_repository.py](/workspace/Code&DBs/Workflow/storage/postgres/workflow_submission_repository.py)
-- command-bus retry/cancel policy
-- packet-inspection schema evolution
-- broad removal of direct SQL fixture seeding from unrelated tests
+- `Code&DBs/Workflow/surfaces/api/rest.py`
+- `Code&DBs/Workflow/surfaces/api/handlers/`
+- `Code&DBs/Workflow/runtime/command_handlers.py`
+- `Code&DBs/Workflow/storage/postgres/workflow_submission_repository.py`
+- any migration after `001_v1_control_plane.sql`
+- any packet outside `planning/phase-program/foundation-wave/phase_002_control_plane_core.md`
 
 ## 6. Done criteria
 
-- A focused integration test proves one real `NativeWorkflowFrontdoor.submit(...)` -> Postgres persistence -> `NativeWorkflowFrontdoor.status(...)` round-trip using the repo-local native instance contract.
-- The test asserts stable control-plane identity fields at minimum:
+- One real Postgres-backed integration proof exists for `submit(...) -> durable write -> status(...)` through `Code&DBs/Workflow/surfaces/api/frontdoor.py`.
+- The proof uses the actual `connect_workflow_database`, `bootstrap_control_plane_schema`, and `persist_workflow_admission` path, not test doubles.
+- The proof confirms durable rows exist for:
+- `workflow_definitions`
+- `admission_decisions`
+- `workflow_runs`
+- The proof asserts stable persisted identity fields across submit and status, at minimum:
 - `run_id`
 - `workflow_id`
 - `request_id`
 - `workflow_definition_id`
 - `admitted_definition_hash`
-- `current_state`
 - `admission_decision_id`
-- The new proof depends on canonical storage/bootstrap helpers rather than a fake connection for the submit path.
-- Existing frontdoor integration tests still pass, including legacy packet-inspection fallback behavior.
-- Existing persistence integration tests still pass, including malformed-submission and conflict rejection.
-- No new migration is added and migration `001_v1_control_plane.sql` is not edited in this sprint.
-- No command-bus, operator-control, or submission-review surfaces are changed as collateral work.
+- `current_state`
+- Existing storage-path proofs in `Code&DBs/Workflow/tests/integration/test_postgres_runtime_path.py` still pass.
+- Existing native frontdoor proofs unrelated to this vertical slice still pass.
+- No migration file is added or modified.
+- No later-phase control-plane concerns are pulled into the sprint.
 
 ## 7. Verification commands
 
-- `export WORKFLOW_DATABASE_URL='postgresql://nate@127.0.0.1:5432/praxis'`
-- `export PYTHONPATH='/Users/nate/Praxis/Code&DBs/Workflow'`
 - `cd /Users/nate/Praxis`
-- `python -m pytest Code\&DBs/Workflow/tests/integration/test_native_frontdoor.py -q`
-- `python -m pytest Code\&DBs/Workflow/tests/integration/test_postgres_runtime_path.py -q`
-- `python -m pytest Code\&DBs/Workflow/tests/unit/test_cli_workflow_frontdoors.py Code\&DBs/Workflow/tests/unit/test_rest_queue_submit.py -q`
-- `rg -n "persist_workflow_admission|bootstrap_control_plane_schema|FROM workflow_runs" Code\&DBs/Workflow/surfaces/api/frontdoor.py`
+- `export WORKFLOW_DATABASE_URL='postgresql://nate@127.0.0.1:5432/praxis'`
+- `export PYTHONPATH='Code&DBs/Workflow'`
+- `python -m pytest 'Code&DBs/Workflow/tests/integration/test_native_frontdoor.py' -q`
+- `python -m pytest 'Code&DBs/Workflow/tests/integration/test_postgres_runtime_path.py' -q`
+- `rg -n "class NativeWorkflowFrontdoor|def submit\\(|def status\\(|connect_workflow_database|bootstrap_control_plane_schema|persist_workflow_admission" 'Code&DBs/Workflow/surfaces/api/frontdoor.py'`
+- `rg -n "test_postgres_control_plane_path_writes_a_run_and_decision|test_postgres_control_plane_path_rejects_conflicting_preseeded_definition_rows|test_postgres_control_plane_path_rejects_malformed_child_rows" 'Code&DBs/Workflow/tests/integration/test_postgres_runtime_path.py'`
 
 Expected verification outcome:
 
-- the native frontdoor passes with one real Postgres-backed admission/status proof
-- the canonical persistence layer still enforces control-plane invariants
-- frontdoor code still clearly depends on explicit control-plane bootstrap and persistence seams
+- the native frontdoor has one direct Postgres-backed proof instead of only fake-hook submit tests
+- the control-plane transaction boundary remains owned by storage
+- status reads back the same durable run identity that submit wrote
 
 ## 8. Review -> healer -> human approval gate
 
 - Review:
-- confirm the packet stays on the Phase 2 control-plane core seam and does not drift into later command-bus or operator-control phases
-- confirm the new proof is genuinely end-to-end for the native frontdoor submit/status path and does not reintroduce a fake connection for the write path
-- confirm the asserted fields are core control-plane identity fields, not a grab bag of later observability extras
-- confirm no out-of-scope files were changed
+- confirm the new proof hits the real native `frontdoor.submit(...)` and `frontdoor.status(...)` seam
+- confirm the test uses a real Postgres connection and does not smuggle fake persistence through monkeypatched helpers
+- confirm assertions cover durable row existence and identity round-trip, not only returned JSON shape
+- confirm the sprint stayed inside the Phase 2 seam and did not widen into command-bus, handler, or migration work
 - Healer:
-- if review finds frontdoor drift, brittle proof shape, or accidental expansion into later surfaces, repair only:
-- [Code&DBs/Workflow/surfaces/api/frontdoor.py](/workspace/Code&DBs/Workflow/surfaces/api/frontdoor.py)
-- [Code&DBs/Workflow/tests/integration/test_native_frontdoor.py](/workspace/Code&DBs/Workflow/tests/integration/test_native_frontdoor.py)
-- rerun all verification commands
+- if review finds handoff drift, persistence drift, or brittle proof structure, repair only the scoped files above
+- do not widen healer work into schema redesign, workflow lifecycle work, or unrelated frontdoor cleanup
+- rerun the full verification command set after any repair
 - Human approval gate:
 - require explicit human approval after review and any healer pass before opening a second Phase 2 sprint
-- the next Phase 2 sprint, if approved later, should take exactly one adjacent seam only, most likely command-surface convergence or status-read authority cleanup, not “finish the whole control plane” in one pass
+- if a later Phase 2 sprint is approved, it must target one adjacent seam only, not “finish the control plane”

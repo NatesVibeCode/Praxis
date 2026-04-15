@@ -6,6 +6,7 @@ import base64
 import binascii
 import json
 import logging
+from datetime import datetime, timezone
 from email.parser import BytesParser
 from email.policy import default
 from pathlib import Path
@@ -15,6 +16,7 @@ from urllib.parse import quote
 from runtime.canonical_workflows import (
     WorkflowRuntimeBoundaryError,
     commit_workflow,
+    materialize_definition_from_build_graph,
     delete_workflow,
     mutate_workflow_build,
     save_workflow,
@@ -121,6 +123,7 @@ _SOURCE_OPTION_SEEDS: tuple[dict[str, Any], ...] = (
         "description": "Attach a dataset feed or import before using it in the workspace.",
     },
 )
+_DASHBOARD_SECTION_ORDER: tuple[str, ...] = ("live", "saved", "draft")
 
 
 def _prefix_single_segment(
@@ -448,6 +451,14 @@ def _trigger_to_dict(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _run_to_dict(row: dict[str, Any]) -> dict[str, Any]:
+    lineage = {
+        "child_run_id": row["run_id"],
+        "child_workflow_id": row.get("workflow_id"),
+        "parent_run_id": row.get("parent_run_id"),
+        "parent_job_label": row.get("parent_job_label"),
+        "dispatch_reason": row.get("dispatch_reason"),
+        "lineage_depth": int(row.get("lineage_depth") or 0),
+    }
     return {
         "run_id": row["run_id"],
         "spec_name": row.get("spec_name"),
@@ -456,7 +467,333 @@ def _run_to_dict(row: dict[str, Any]) -> dict[str, Any]:
         "created_at": _isoformat(row.get("created_at")),
         "finished_at": _isoformat(row.get("finished_at")),
         "parent_run_id": row.get("parent_run_id"),
+        "parent_job_label": row.get("parent_job_label"),
+        "dispatch_reason": row.get("dispatch_reason"),
+        "lineage_depth": int(row.get("lineage_depth") or 0),
         "trigger_depth": int(row.get("trigger_depth") or 0),
+        "lineage": lineage,
+    }
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _optional_text(value: Any) -> str | None:
+    text = str(value or "").strip()
+    return text or None
+
+
+def _workflow_dashboard_bucket(workflow: dict[str, Any]) -> str:
+    trigger = workflow.get("trigger")
+    if isinstance(trigger, dict) and bool(trigger.get("enabled")):
+        return "live"
+    if int(workflow.get("invocation_count") or 0) > 0:
+        return "saved"
+    return "draft"
+
+
+def _workflow_dashboard_badge(workflow: dict[str, Any]) -> dict[str, str]:
+    trigger = workflow.get("trigger")
+    if isinstance(trigger, dict) and bool(trigger.get("enabled")) and trigger.get("cron_expression"):
+        return {
+            "label": "Scheduled",
+            "tone": "scheduled",
+            "class_name": "wf-card__badge--scheduled",
+        }
+    if isinstance(trigger, dict) and bool(trigger.get("enabled")):
+        return {
+            "label": "Live",
+            "tone": "live",
+            "class_name": "wf-card__badge--live",
+        }
+    if isinstance(trigger, dict) and not bool(trigger.get("enabled")):
+        return {
+            "label": "Paused",
+            "tone": "paused",
+            "class_name": "wf-card__badge--paused",
+        }
+    if int(workflow.get("invocation_count") or 0) > 0:
+        return {
+            "label": "Validated",
+            "tone": "validated",
+            "class_name": "wf-card__badge--validated",
+        }
+    return {
+        "label": "Draft",
+        "tone": "draft",
+        "class_name": "wf-card__badge--draft",
+    }
+
+
+def _annotate_dashboard_workflow(workflow: dict[str, Any]) -> dict[str, Any]:
+    annotated = dict(workflow)
+    annotated["dashboard_bucket"] = _workflow_dashboard_bucket(annotated)
+    annotated["dashboard_badge"] = _workflow_dashboard_badge(annotated)
+    return annotated
+
+
+def _load_workflow_inventory(pg: Any) -> list[dict[str, Any]]:
+    rows = pg.execute(
+        """SELECT w.id, w.name, w.description, w.definition, w.compiled_spec, w.tags,
+                  w.version, w.is_template, w.invocation_count, w.last_invoked_at,
+                  w.created_at, w.updated_at,
+                  t.id AS trigger_id, t.event_type AS trigger_event, t.enabled AS trigger_enabled,
+                  t.cron_expression, t.last_fired_at AS trigger_last_fired, t.fire_count AS trigger_fire_count,
+                  r.run_id AS latest_run_id, r.spec_name AS latest_run_spec_name,
+                  r.status AS latest_run_status, r.total_jobs AS latest_run_total_jobs,
+                  r.created_at AS latest_run_created_at, r.finished_at AS latest_run_finished_at,
+                  r.parent_run_id AS latest_run_parent_run_id,
+                  r.trigger_depth AS latest_run_trigger_depth
+           FROM public.workflows w
+           LEFT JOIN public.workflow_triggers t ON t.workflow_id = w.id AND t.enabled = TRUE
+           LEFT JOIN LATERAL (
+               SELECT run_id,
+                      COALESCE(request_envelope->>'name', workflow_id) AS spec_name,
+                      current_state AS status,
+                      COALESCE(NULLIF(request_envelope->>'total_jobs', ''), '0')::int AS total_jobs,
+                      requested_at AS created_at,
+                      finished_at,
+                      request_envelope->>'parent_run_id' AS parent_run_id,
+                      COALESCE(NULLIF(request_envelope->>'trigger_depth', ''), '0')::int AS trigger_depth
+               FROM public.workflow_runs
+               WHERE COALESCE(request_envelope->>'name', workflow_id) = w.name
+               ORDER BY requested_at DESC
+               LIMIT 1
+           ) r ON TRUE
+           ORDER BY w.updated_at DESC"""
+    )
+    seen: set[str] = set()
+    workflows: list[dict[str, Any]] = []
+    for row in (rows or []):
+        record = dict(row)
+        workflow_id = str(record["id"])
+        if workflow_id in seen:
+            continue
+        seen.add(workflow_id)
+
+        workflow = _workflow_to_dict(record)
+        if record.get("trigger_id"):
+            workflow["trigger"] = {
+                "id": record["trigger_id"],
+                "event_type": record["trigger_event"],
+                "enabled": bool(record.get("trigger_enabled")),
+                "cron_expression": record.get("cron_expression"),
+                "last_fired_at": _isoformat(record.get("trigger_last_fired")),
+                "fire_count": int(record.get("trigger_fire_count") or 0),
+            }
+        if record.get("latest_run_id"):
+            workflow["latest_run"] = {
+                "run_id": record["latest_run_id"],
+                "spec_name": record.get("latest_run_spec_name"),
+                "status": record.get("latest_run_status"),
+                "total_jobs": int(record.get("latest_run_total_jobs") or 0),
+                "created_at": _isoformat(record.get("latest_run_created_at")),
+                "finished_at": _isoformat(record.get("latest_run_finished_at")),
+                "parent_run_id": record.get("latest_run_parent_run_id"),
+                "trigger_depth": int(record.get("latest_run_trigger_depth") or 0),
+            }
+        workflows.append(_annotate_dashboard_workflow(workflow))
+    return workflows
+
+
+def _load_leaderboard_snapshot(subs: Any, *, since_hours: int = 72) -> list[dict[str, Any]]:
+    ingester = subs.get_receipt_ingester()
+    receipts = ingester.load_recent(since_hours=since_hours)
+    agents: dict[str, dict[str, int]] = {}
+    for receipt in receipts:
+        slug = receipt.get("agent_slug", receipt.get("agent", "unknown"))
+        if slug not in agents:
+            agents[slug] = {"total": 0, "succeeded": 0}
+        agents[slug]["total"] += 1
+        if receipt.get("status") == "succeeded":
+            agents[slug]["succeeded"] += 1
+    leaderboard: list[dict[str, Any]] = []
+    for slug, stats in agents.items():
+        parts = str(slug).split("/", 1)
+        provider_slug = parts[0] if len(parts) == 2 else ""
+        model_slug = parts[1] if len(parts) == 2 else str(slug)
+        pass_rate = stats["succeeded"] / stats["total"] if stats["total"] else 0.0
+        leaderboard.append({
+            "provider_slug": provider_slug,
+            "model_slug": model_slug,
+            "pass_rate": round(pass_rate, 4),
+            "total_workflows": stats["total"],
+            "total_cost_usd": 0,
+            "avg_latency_ms": 0,
+        })
+    leaderboard.sort(key=lambda item: (-item["pass_rate"], -item["total_workflows"]))
+    return leaderboard
+
+
+def _load_receipt_rollup(subs: Any, *, since_hours: int = 24) -> dict[str, Any]:
+    ingester = subs.get_receipt_ingester()
+    receipts = ingester.load_recent(since_hours=since_hours)
+    pass_rate = ingester.compute_pass_rate(receipts)
+    total_cost = round(sum(_safe_float(receipt.get("cost_usd")) for receipt in receipts), 4)
+    return {
+        "receipts": receipts,
+        "pass_rate": round(pass_rate, 4) if pass_rate is not None else None,
+        "top_failure_codes": ingester.top_failure_codes(receipts),
+        "total_cost_usd": total_cost,
+        "total_runs": len(receipts),
+        "since_hours": since_hours,
+    }
+
+
+def _load_recent_runs_snapshot(pg: Any, *, limit: int = 20) -> list[dict[str, Any]]:
+    safe_limit = max(1, min(int(limit or 20), 100))
+    rows = pg.execute(
+        """SELECT r.run_id,
+                  COALESCE(r.request_envelope->>'name', r.workflow_id) AS spec_name,
+                  r.current_state AS status,
+                  COALESCE(NULLIF(r.request_envelope->>'total_jobs', ''), '0')::int AS total_jobs,
+                  r.requested_at AS created_at,
+                  r.finished_at,
+                  COUNT(j.id) FILTER (WHERE j.status IN ('succeeded','failed','dead_letter')) as completed_jobs,
+                  COALESCE(SUM(j.cost_usd), 0) as total_cost
+           FROM public.workflow_runs r
+           LEFT JOIN public.workflow_jobs j ON j.run_id = r.run_id
+           GROUP BY r.run_id, r.workflow_id, r.request_envelope, r.current_state, r.requested_at, r.finished_at
+           ORDER BY r.requested_at DESC
+           LIMIT $1""",
+        safe_limit,
+    )
+    result = []
+    for row in (rows or []):
+        result.append({
+            "run_id": row["run_id"],
+            "spec_name": row["spec_name"],
+            "status": row["status"],
+            "total_jobs": int(row["total_jobs"]),
+            "completed_jobs": int(row["completed_jobs"]),
+            "total_cost": float(row["total_cost"]),
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+            "finished_at": row["finished_at"].isoformat() if row["finished_at"] else None,
+        })
+    return result
+
+
+def _dashboard_health_descriptor(
+    pass_rate: float | None,
+    *,
+    queue_status: str,
+    queue_error: str | None,
+) -> dict[str, str]:
+    if queue_error or queue_status == "critical":
+        return {
+            "readiness": "recover",
+            "label": "Recover",
+            "tone": "danger",
+            "copy": "Queue pressure or probe failures are strong enough that recovery should come before scale.",
+        }
+    if pass_rate is None:
+        if queue_status == "warning":
+            return {
+                "readiness": "watch",
+                "label": "Watch",
+                "tone": "warning",
+                "copy": "The queue is warming up while outcome receipts are still calibrating.",
+            }
+        return {
+            "readiness": "calibrating",
+            "label": "Calibrating",
+            "tone": "neutral",
+            "copy": "Metrics will harden as receipts and leaderboard data accumulate.",
+        }
+    if pass_rate >= 0.85 and queue_status == "ok":
+        return {
+            "readiness": "healthy",
+            "label": "Healthy",
+            "tone": "healthy",
+            "copy": "Recent workflow outcomes are strong and the control plane looks settled.",
+        }
+    if pass_rate >= 0.6 and queue_status != "critical":
+        return {
+            "readiness": "watch",
+            "label": "Watch",
+            "tone": "warning",
+            "copy": "The platform is moving, but recent results suggest a few lanes need attention.",
+        }
+    return {
+        "readiness": "recover",
+        "label": "Recover",
+        "tone": "danger",
+        "copy": "Recent outcomes are soft enough that recovery and inspection should come before scale.",
+    }
+
+
+def _build_dashboard_payload(subs: Any) -> dict[str, Any]:
+    pg = subs.get_pg_conn() if hasattr(subs, "get_pg_conn") else None
+    workflows = _load_workflow_inventory(pg) if pg is not None else []
+    receipt_rollup = _load_receipt_rollup(subs)
+    queue_snapshot = _queue_depth_snapshot(pg)
+    leaderboard = _load_leaderboard_snapshot(subs)
+    recent_runs = _load_recent_runs_snapshot(pg, limit=20) if pg is not None else []
+
+    workflow_ids_by_bucket: dict[str, list[str]] = {key: [] for key in _DASHBOARD_SECTION_ORDER}
+    for workflow in workflows:
+        bucket = str(workflow.get("dashboard_bucket") or "draft")
+        workflow_ids_by_bucket.setdefault(bucket, []).append(str(workflow["id"]))
+
+    queue_status = str(queue_snapshot.get("queue_depth_status") or "unknown")
+    queue_error = _optional_text(queue_snapshot.get("queue_depth_error"))
+    health = _dashboard_health_descriptor(
+        receipt_rollup["pass_rate"],
+        queue_status=queue_status,
+        queue_error=queue_error,
+    )
+    active_runs = sum(1 for run in recent_runs if str(run.get("status") or "") == "running")
+    top_agent_row = leaderboard[0] if leaderboard else None
+    top_agent = None
+    if isinstance(top_agent_row, dict):
+        provider = str(top_agent_row.get("provider_slug") or "").strip()
+        model = str(top_agent_row.get("model_slug") or "").strip()
+        top_agent = f"{provider}/{model}".strip("/") or None
+
+    sections = [
+        {
+            "key": key,
+            "count": len(workflow_ids_by_bucket.get(key, [])),
+            "workflow_ids": workflow_ids_by_bucket.get(key, []),
+        }
+        for key in _DASHBOARD_SECTION_ORDER
+    ]
+
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "summary": {
+            "workflow_counts": {
+                "total": len(workflows),
+                "live": len(workflow_ids_by_bucket.get("live", [])),
+                "saved": len(workflow_ids_by_bucket.get("saved", [])),
+                "draft": len(workflow_ids_by_bucket.get("draft", [])),
+            },
+            "health": health,
+            "runs_24h": int(receipt_rollup["total_runs"]),
+            "active_runs": active_runs,
+            "pass_rate_24h": receipt_rollup["pass_rate"],
+            "total_cost_24h": receipt_rollup["total_cost_usd"],
+            "top_agent": top_agent,
+            "models_online": len(leaderboard),
+            "queue": {
+                "depth": int(queue_snapshot.get("queue_depth") or 0),
+                "status": queue_status,
+                "utilization_pct": _safe_float(queue_snapshot.get("queue_depth_utilization_pct")),
+                "pending": int(queue_snapshot.get("queue_depth_pending") or 0),
+                "ready": int(queue_snapshot.get("queue_depth_ready") or 0),
+                "claimed": int(queue_snapshot.get("queue_depth_claimed") or 0),
+                "running": int(queue_snapshot.get("queue_depth_running") or 0),
+                "error": queue_error,
+            },
+        },
+        "sections": sections,
+        "workflows": workflows,
+        "recent_runs": recent_runs,
+        "leaderboard": leaderboard,
     }
 
 
@@ -469,6 +806,9 @@ def _fetch_workflow_runs(pg: Any, workflow_name: str, limit: int = 10) -> list[d
                   requested_at AS created_at,
                   finished_at,
                   request_envelope->>'parent_run_id' AS parent_run_id,
+                  request_envelope->>'parent_job_label' AS parent_job_label,
+                  request_envelope->>'dispatch_reason' AS dispatch_reason,
+                  COALESCE(NULLIF(request_envelope->>'lineage_depth', ''), '0')::int AS lineage_depth,
                   COALESCE(NULLIF(request_envelope->>'trigger_depth', ''), '0')::int AS trigger_depth
            FROM public.workflow_runs
            WHERE COALESCE(request_envelope->>'name', workflow_id) = $1
@@ -734,6 +1074,7 @@ def _workflow_build_payload(
     compiled_spec: dict[str, Any] | None = None,
     build_bundle: dict[str, Any] | None = None,
     planning_notes: list[str] | None = None,
+    undo_receipt: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     effective_definition = _parse_json_field(definition if definition is not None else row.get("definition")) or {}
     effective_compiled_spec = _parse_json_field(compiled_spec if compiled_spec is not None else row.get("compiled_spec"))
@@ -772,6 +1113,7 @@ def _workflow_build_payload(
         "build_issues": build_bundle.get("build_issues") or [],
         "projection_status": build_bundle.get("projection_status") or {},
         "compiled_spec_projection": build_bundle.get("compiled_spec_projection"),
+        "undo_receipt": undo_receipt,
     }
 
 
@@ -794,10 +1136,13 @@ def _validate_workflow_body(
         return "name must be a non-empty string"
 
     definition = body.get("definition")
-    if require_definition and not isinstance(definition, dict):
-        return "definition is required and must be an object"
+    build_graph = body.get("build_graph")
+    if require_definition and not isinstance(definition, dict) and not isinstance(build_graph, dict):
+        return "definition or build_graph is required and must be an object"
     if "definition" in body and definition is not None and not isinstance(definition, dict):
         return "definition must be an object"
+    if "build_graph" in body and build_graph is not None and not isinstance(build_graph, dict):
+        return "build_graph must be an object"
 
     compiled_spec = body.get("compiled_spec")
     if "compiled_spec" in body and compiled_spec is not None and not isinstance(compiled_spec, dict):
@@ -903,66 +1248,7 @@ def _handle_workflows_get(request: Any, path: str) -> None:
     if path == "/api/workflows":
         try:
             pg = request.subsystems.get_pg_conn()
-            rows = pg.execute(
-                """SELECT w.id, w.name, w.description, w.definition, w.compiled_spec, w.tags,
-                          w.version, w.is_template, w.invocation_count, w.last_invoked_at,
-                          w.created_at, w.updated_at,
-                          t.id AS trigger_id, t.event_type AS trigger_event, t.enabled AS trigger_enabled,
-                          t.cron_expression, t.last_fired_at AS trigger_last_fired, t.fire_count AS trigger_fire_count,
-                          r.run_id AS latest_run_id, r.spec_name AS latest_run_spec_name,
-                          r.status AS latest_run_status, r.total_jobs AS latest_run_total_jobs,
-                          r.created_at AS latest_run_created_at, r.finished_at AS latest_run_finished_at,
-                          r.parent_run_id AS latest_run_parent_run_id,
-                          r.trigger_depth AS latest_run_trigger_depth
-                   FROM public.workflows w
-                   LEFT JOIN public.workflow_triggers t ON t.workflow_id = w.id AND t.enabled = TRUE
-                   LEFT JOIN LATERAL (
-                       SELECT run_id,
-                              COALESCE(request_envelope->>'name', workflow_id) AS spec_name,
-                              current_state AS status,
-                              COALESCE(NULLIF(request_envelope->>'total_jobs', ''), '0')::int AS total_jobs,
-                              requested_at AS created_at,
-                              finished_at,
-                              request_envelope->>'parent_run_id' AS parent_run_id,
-                              COALESCE(NULLIF(request_envelope->>'trigger_depth', ''), '0')::int AS trigger_depth
-                       FROM public.workflow_runs
-                       WHERE COALESCE(request_envelope->>'name', workflow_id) = w.name
-                       ORDER BY requested_at DESC
-                       LIMIT 1
-                   ) r ON TRUE
-                   ORDER BY w.updated_at DESC"""
-            )
-            seen: set[str] = set()
-            workflows = []
-            for row in (rows or []):
-                record = dict(row)
-                workflow_id = record["id"]
-                if workflow_id in seen:
-                    continue
-                seen.add(workflow_id)
-
-                workflow = _workflow_to_dict(record)
-                if record.get("trigger_id"):
-                    workflow["trigger"] = {
-                        "id": record["trigger_id"],
-                        "event_type": record["trigger_event"],
-                        "enabled": bool(record.get("trigger_enabled")),
-                        "cron_expression": record.get("cron_expression"),
-                        "last_fired_at": _isoformat(record.get("trigger_last_fired")),
-                        "fire_count": int(record.get("trigger_fire_count") or 0),
-                    }
-                if record.get("latest_run_id"):
-                    workflow["latest_run"] = {
-                        "run_id": record["latest_run_id"],
-                        "spec_name": record.get("latest_run_spec_name"),
-                        "status": record.get("latest_run_status"),
-                        "total_jobs": int(record.get("latest_run_total_jobs") or 0),
-                        "created_at": _isoformat(record.get("latest_run_created_at")),
-                        "finished_at": _isoformat(record.get("latest_run_finished_at")),
-                        "parent_run_id": record.get("latest_run_parent_run_id"),
-                        "trigger_depth": int(record.get("latest_run_trigger_depth") or 0),
-                    }
-                workflows.append(workflow)
+            workflows = _load_workflow_inventory(pg)
             request._send_json(200, {"workflows": workflows, "count": len(workflows)})
         except Exception as exc:
             request._send_json(500, {"error": str(exc)})
@@ -1265,9 +1551,15 @@ def _handle_plan_post(request: Any, path: str) -> None:
 
     try:
         definition = body.get("definition")
-        if not isinstance(definition, dict):
-            request._send_json(400, {"error": "definition is required and must be an object"})
+        build_graph = body.get("build_graph")
+        if not isinstance(definition, dict) and not isinstance(build_graph, dict):
+            request._send_json(400, {"error": "definition or build_graph is required and must be an object"})
             return
+        if isinstance(build_graph, dict):
+            definition = materialize_definition_from_build_graph(
+                definition if isinstance(definition, dict) else {},
+                build_graph=build_graph,
+            )
         title = body.get("title")
         if title is not None and not isinstance(title, str):
             request._send_json(400, {"error": "title must be a string"})
@@ -1299,8 +1591,12 @@ def _handle_commit_post(request: Any, path: str) -> None:
             request._send_json(400, {"error": "title is required"})
             return
         definition = body.get("definition")
-        if not isinstance(definition, dict):
-            request._send_json(400, {"error": "definition is required and must be an object"})
+        build_graph = body.get("build_graph")
+        if not isinstance(definition, dict) and not isinstance(build_graph, dict):
+            request._send_json(400, {"error": "definition or build_graph is required and must be an object"})
+            return
+        if "build_graph" in body and build_graph is not None and not isinstance(build_graph, dict):
+            request._send_json(400, {"error": "build_graph must be an object"})
             return
         compiled_spec = body.get("compiled_spec")
         if "compiled_spec" in body and compiled_spec is not None and not isinstance(compiled_spec, dict):
@@ -1316,9 +1612,10 @@ def _handle_commit_post(request: Any, path: str) -> None:
             commit_workflow(
                 request.subsystems.get_pg_conn(),
                 title=title.strip(),
-                definition=definition,
+                definition=definition if isinstance(definition, dict) else None,
                 compiled_spec=compiled_spec,
                 workflow_id=workflow_id,
+                build_graph=build_graph if isinstance(build_graph, dict) else None,
             ),
         )
     except WorkflowRuntimeBoundaryError as exc:
@@ -1367,6 +1664,7 @@ def _handle_workflow_build_post(request: Any, path: str) -> None:
                 compiled_spec=result["compiled_spec"],
                 build_bundle=result["build_bundle"],
                 planning_notes=result["planning_notes"],
+                undo_receipt=result.get("undo_receipt"),
             ),
         )
     except WorkflowRuntimeBoundaryError as exc:
@@ -2191,51 +2489,109 @@ def _handle_objects_get(request: Any, path: str) -> None:
 def _handle_leaderboard_get(request: Any, path: str) -> None:
     """GET /api/leaderboard — agent performance from receipts."""
     try:
-        subs = request.subsystems
-        ingester = subs.get_receipt_ingester()
-        receipts = ingester.load_recent(since_hours=72)
-        agents: dict[str, dict[str, int]] = {}
-        for receipt in receipts:
-            slug = receipt.get("agent_slug", receipt.get("agent", "unknown"))
-            if slug not in agents:
-                agents[slug] = {"total": 0, "succeeded": 0}
-            agents[slug]["total"] += 1
-            if receipt.get("status") == "succeeded":
-                agents[slug]["succeeded"] += 1
-        leaderboard = []
-        for slug, stats in agents.items():
-            parts = slug.split("/", 1)
-            provider_slug = parts[0] if len(parts) == 2 else ""
-            model_slug = parts[1] if len(parts) == 2 else slug
-            pass_rate = stats["succeeded"] / stats["total"] if stats["total"] else 0.0
-            leaderboard.append({
-                "provider_slug": provider_slug,
-                "model_slug": model_slug,
-                "pass_rate": round(pass_rate, 4),
-                "total_workflows": stats["total"],
-                "total_cost_usd": 0,
-                "avg_latency_ms": 0,
-            })
-        leaderboard.sort(key=lambda item: (-item["pass_rate"], -item["total_workflows"]))
+        leaderboard = _load_leaderboard_snapshot(request.subsystems, since_hours=72)
         request._send_json(200, {"agents": leaderboard})
     except Exception as exc:
         request._send_json(500, {"error": str(exc)})
+
+
+def _queue_utilization_pct(total_queued: int, critical_threshold: int) -> float:
+    if critical_threshold <= 0:
+        return 999.9 if total_queued > 0 else 0.0
+    return min(round(total_queued / critical_threshold * 100, 1), 999.9)
+
+
+def _queue_depth_snapshot(pg: Any) -> dict[str, Any]:
+    warning_threshold = 500
+    critical_threshold = 1000
+    if pg is None or not hasattr(pg, "execute"):
+        return {
+            "queue_depth": 0,
+            "queue_depth_status": "unknown",
+            "queue_depth_pending": 0,
+            "queue_depth_ready": 0,
+            "queue_depth_claimed": 0,
+            "queue_depth_running": 0,
+            "queue_depth_total": 0,
+            "queue_depth_warning_threshold": warning_threshold,
+            "queue_depth_critical_threshold": critical_threshold,
+            "queue_depth_utilization_pct": 0.0,
+            "queue_depth_error": "pg connection unavailable",
+        }
+    try:
+        rows = pg.execute(
+            """SELECT
+                      COUNT(*) FILTER (WHERE status = 'pending') AS pending,
+                      COUNT(*) FILTER (WHERE status = 'ready') AS ready,
+                      COUNT(*) FILTER (WHERE status = 'claimed') AS claimed,
+                      COUNT(*) FILTER (WHERE status = 'running') AS running
+               FROM workflow_jobs
+               WHERE status IN ('pending', 'ready', 'claimed', 'running')"""
+        )
+        row = rows[0] if rows else {}
+        pending = int(row.get("pending") or 0)
+        ready = int(row.get("ready") or 0)
+        claimed = int(row.get("claimed") or 0)
+        running = int(row.get("running") or 0)
+        total_queued = pending + ready
+        utilization_pct = _queue_utilization_pct(total_queued, critical_threshold)
+        if total_queued >= critical_threshold:
+            queue_status = "critical"
+        elif total_queued >= warning_threshold:
+            queue_status = "warning"
+        else:
+            queue_status = "ok"
+        return {
+            "queue_depth": total_queued,
+            "queue_depth_status": queue_status,
+            "queue_depth_pending": pending,
+            "queue_depth_ready": ready,
+            "queue_depth_claimed": claimed,
+            "queue_depth_running": running,
+            "queue_depth_total": total_queued,
+            "queue_depth_warning_threshold": warning_threshold,
+            "queue_depth_critical_threshold": critical_threshold,
+            "queue_depth_utilization_pct": utilization_pct,
+            "queue_depth_error": None,
+        }
+    except Exception as exc:
+        return {
+            "queue_depth": 0,
+            "queue_depth_status": "unknown",
+            "queue_depth_pending": 0,
+            "queue_depth_ready": 0,
+            "queue_depth_claimed": 0,
+            "queue_depth_running": 0,
+            "queue_depth_total": 0,
+            "queue_depth_warning_threshold": warning_threshold,
+            "queue_depth_critical_threshold": critical_threshold,
+            "queue_depth_utilization_pct": 0.0,
+            "queue_depth_error": str(exc),
+        }
 
 
 def _handle_status_get(request: Any, path: str) -> None:
     """GET /api/status — workflow summary stats."""
     try:
         subs = request.subsystems
-        ingester = subs.get_receipt_ingester()
-        receipts = ingester.load_recent(since_hours=24)
-        pass_rate = ingester.compute_pass_rate(receipts)
-        top_failures = ingester.top_failure_codes(receipts)
+        receipt_rollup = _load_receipt_rollup(subs, since_hours=24)
+        queue_conn = subs.get_pg_conn() if hasattr(subs, "get_pg_conn") else None
+        queue_snapshot = _queue_depth_snapshot(queue_conn)
         request._send_json(200, {
-            "total_workflows": len(receipts),
-            "pass_rate": round(pass_rate, 4),
-            "top_failure_codes": top_failures,
-            "since_hours": 24,
+            "total_workflows": receipt_rollup["total_runs"],
+            "pass_rate": receipt_rollup["pass_rate"],
+            "top_failure_codes": receipt_rollup["top_failure_codes"],
+            "since_hours": receipt_rollup["since_hours"],
+            **queue_snapshot,
         })
+    except Exception as exc:
+        request._send_json(500, {"error": str(exc)})
+
+
+def _handle_dashboard_get(request: Any, path: str) -> None:
+    """GET /api/dashboard — backend-authored dashboard snapshot."""
+    try:
+        request._send_json(200, _build_dashboard_payload(request.subsystems))
     except Exception as exc:
         request._send_json(500, {"error": str(exc)})
 
@@ -2244,34 +2600,8 @@ def _handle_runs_recent_get(request: Any, path: str) -> None:
     """GET /api/runs/recent — recent workflow runs from Postgres."""
     try:
         pg = request.subsystems.get_pg_conn()
-        rows = pg.execute(
-            """SELECT r.run_id,
-                      COALESCE(r.request_envelope->>'name', r.workflow_id) AS spec_name,
-                      r.current_state AS status,
-                      COALESCE(NULLIF(r.request_envelope->>'total_jobs', ''), '0')::int AS total_jobs,
-                      r.requested_at AS created_at,
-                      r.finished_at,
-                      COUNT(j.id) FILTER (WHERE j.status IN ('succeeded','failed','dead_letter')) as completed_jobs,
-                      COALESCE(SUM(j.cost_usd), 0) as total_cost
-               FROM public.workflow_runs r
-               LEFT JOIN public.workflow_jobs j ON j.run_id = r.run_id
-               GROUP BY r.run_id, r.workflow_id, r.request_envelope, r.current_state, r.requested_at, r.finished_at
-               ORDER BY r.requested_at DESC
-               LIMIT 20"""
-        )
-        result = []
-        for r in (rows or []):
-            result.append({
-                "run_id": r["run_id"],
-                "spec_name": r["spec_name"],
-                "status": r["status"],
-                "total_jobs": r["total_jobs"],
-                "completed_jobs": int(r["completed_jobs"]),
-                "total_cost": float(r["total_cost"]),
-                "created_at": r["created_at"].isoformat() if r["created_at"] else None,
-                "finished_at": r["finished_at"].isoformat() if r["finished_at"] else None,
-            })
-        request._send_json(200, result)
+        limit = _safe_int_impl(_query_params(request.path).get("limit"), default=20, min_value=1, max_value=100)
+        request._send_json(200, _load_recent_runs_snapshot(pg, limit=limit))
     except Exception as exc:
         request._send_json(500, {"error": str(exc)})
 
@@ -2608,6 +2938,7 @@ QUERY_PUT_ROUTES: list[RouteEntry] = [
 
 QUERY_GET_ROUTES: list[RouteEntry] = [
     (_prefix_suffix("/api/workflows/", "/build/stream"), _handle_build_stream),
+    (_exact("/api/dashboard"), _handle_dashboard_get),
     (_exact("/api/leaderboard"), _handle_leaderboard_get),
     (_exact("/api/status"), _handle_status_get),
     (_exact("/api/runs/recent"), _handle_runs_recent_get),

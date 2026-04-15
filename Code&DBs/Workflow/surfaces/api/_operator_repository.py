@@ -1856,6 +1856,39 @@ class NativeOperatorQueryFrontdoor:
             ) from exc
         return tuple(_binding_record_from_row(row) for row in rows)
 
+    @staticmethod
+    def _prefetched_binding_records(
+        *,
+        prefetched_work_item_workflow_bindings: tuple[WorkItemWorkflowBindingRecord, ...],
+        work_item_workflow_binding_ids: tuple[str, ...] | None,
+        workflow_run_ids: tuple[str, ...] | None,
+    ) -> tuple[WorkItemWorkflowBindingRecord, ...] | None:
+        if not prefetched_work_item_workflow_bindings:
+            return None
+        bindings_by_id = {
+            binding.work_item_workflow_binding_id: binding
+            for binding in prefetched_work_item_workflow_bindings
+        }
+        if (
+            work_item_workflow_binding_ids is not None
+            and any(binding_id not in bindings_by_id for binding_id in work_item_workflow_binding_ids)
+        ):
+            return None
+        selected = (
+            tuple(bindings_by_id[binding_id] for binding_id in work_item_workflow_binding_ids)
+            if work_item_workflow_binding_ids is not None
+            else tuple(prefetched_work_item_workflow_bindings)
+        )
+        if workflow_run_ids is None:
+            return selected
+        workflow_run_id_set = set(workflow_run_ids)
+        return tuple(
+            binding
+            for binding in selected
+            if binding.workflow_run_id is not None
+            and binding.workflow_run_id in workflow_run_id_set
+        )
+
     async def _fetch_workflow_run_packet_inspections(
         self,
         *,
@@ -1972,8 +2005,12 @@ class NativeOperatorQueryFrontdoor:
         cutover_gate_ids: tuple[str, ...] | None,
         work_item_workflow_binding_ids: tuple[str, ...] | None,
         workflow_run_ids: tuple[str, ...] | None,
+        conn: _Connection | None = None,
+        prefetched_work_item_workflow_bindings: tuple[WorkItemWorkflowBindingRecord, ...] | None = None,
     ) -> NativeOperatorQuerySnapshot:
-        conn = await self.connect_database(env)
+        managed_conn = conn is None
+        if conn is None:
+            conn = await self.connect_database(env)
         try:
             roadmap_items = await self._fetch_roadmap_item_records(
                 conn=conn,
@@ -2020,11 +2057,21 @@ class NativeOperatorQueryFrontdoor:
                 cutover_gate_ids=cutover_gate_ids,
                 as_of=as_of,
             )
-            work_item_workflow_bindings = await self._fetch_binding_records(
-                conn=conn,
+            work_item_workflow_bindings = self._prefetched_binding_records(
+                prefetched_work_item_workflow_bindings=(
+                    ()
+                    if prefetched_work_item_workflow_bindings is None
+                    else prefetched_work_item_workflow_bindings
+                ),
                 work_item_workflow_binding_ids=work_item_workflow_binding_ids,
                 workflow_run_ids=workflow_run_ids,
             )
+            if work_item_workflow_bindings is None:
+                work_item_workflow_bindings = await self._fetch_binding_records(
+                    conn=conn,
+                    work_item_workflow_binding_ids=work_item_workflow_binding_ids,
+                    workflow_run_ids=workflow_run_ids,
+                )
             (
                 workflow_run_packet_inspections,
                 workflow_run_observability,
@@ -2096,7 +2143,64 @@ class NativeOperatorQueryFrontdoor:
                 workflow_run_observability=workflow_run_observability,
             )
         finally:
-            await conn.close()
+            if managed_conn:
+                await conn.close()
+
+    async def query_operator_surface_async(
+        self,
+        *,
+        env: Mapping[str, str] | None = None,
+        as_of: datetime | None = None,
+        bug_ids: Sequence[str] | None = None,
+        roadmap_item_ids: Sequence[str] | None = None,
+        cutover_gate_ids: Sequence[str] | None = None,
+        work_item_workflow_binding_ids: Sequence[str] | None = None,
+        workflow_run_ids: Sequence[str] | None = None,
+        conn: _Connection | None = None,
+        prefetched_work_item_workflow_bindings: Sequence[WorkItemWorkflowBindingRecord] | None = None,
+    ) -> dict[str, Any]:
+        """Async operator query entrypoint that can reuse an existing connection."""
+
+        source, instance = self._resolve_instance(env=env)
+        snapshot = await self._query_operator_surface(
+            env=source,
+            as_of=(
+                _now()
+                if as_of is None
+                else _normalize_as_of(
+                    as_of,
+                    error_type=NativeOperatorQueryError,
+                    reason_code="operator_query.invalid_as_of",
+                )
+            ),
+            bug_ids=_normalize_ids(bug_ids, field_name="bug_ids"),
+            roadmap_item_ids=_normalize_ids(
+                roadmap_item_ids,
+                field_name="roadmap_item_ids",
+            ),
+            cutover_gate_ids=_normalize_ids(
+                cutover_gate_ids,
+                field_name="cutover_gate_ids",
+            ),
+            work_item_workflow_binding_ids=_normalize_ids(
+                work_item_workflow_binding_ids,
+                field_name="work_item_workflow_binding_ids",
+            ),
+            workflow_run_ids=_normalize_ids(
+                workflow_run_ids,
+                field_name="workflow_run_ids",
+            ),
+            conn=conn,
+            prefetched_work_item_workflow_bindings=(
+                None
+                if prefetched_work_item_workflow_bindings is None
+                else tuple(prefetched_work_item_workflow_bindings)
+            ),
+        )
+        return {
+            "native_instance": instance.to_contract(),
+            **snapshot.to_json(),
+        }
 
     async def _query_roadmap_tree(
         self,

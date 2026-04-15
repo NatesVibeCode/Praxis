@@ -4,6 +4,8 @@ from types import SimpleNamespace
 
 from registry.native_runtime_profile_sync import (
     NativeRuntimeProfileConfig,
+    _default_live_budget_window,
+    _latest_budget_window_sync,
     _upsert_profile_authority_rows_sync,
 )
 from registry.runtime_profile_admission import _effective_provider_policy_name
@@ -78,3 +80,50 @@ def test_native_transport_ready_degraded_candidate_is_admitted_for_native_profil
         reason_code="provider_disabled",
         source_window_refs=["transport:cli_llm", "binary:/usr/local/bin/codex"],
     ) is False
+
+
+def test_latest_budget_window_sync_synthesizes_default_when_missing() -> None:
+    conn = _FakeConn()
+    config = NativeRuntimeProfileConfig(
+        runtime_profile_ref="praxis",
+        workspace_ref="praxis",
+        model_profile_id="model_profile.praxis.default",
+        provider_policy_id="provider_policy.praxis.default",
+        provider_name="openai",
+        provider_names=("openai",),
+        allowed_models=("gpt-5.4",),
+        repo_root=".",
+        workdir=".",
+    )
+    candidates = (
+        SimpleNamespace(provider_ref="provider.openai", provider_name="openai"),
+    )
+
+    budget = _latest_budget_window_sync(conn, config, candidates=candidates)
+
+    assert budget.provider_ref == "provider.openai"
+    assert budget.budget_scope == "runtime"
+    assert budget.budget_status == "available"
+    assert budget.requests_used == 0
+    assert budget.tokens_used == 0
+    assert budget.spend_used_usd == "0.000000"
+
+
+def test_default_live_budget_window_falls_back_to_provider_name() -> None:
+    config = NativeRuntimeProfileConfig(
+        runtime_profile_ref="praxis",
+        workspace_ref="praxis",
+        model_profile_id="model_profile.praxis.default",
+        provider_policy_id="provider_policy.praxis.default",
+        provider_name="openai",
+        provider_names=("openai",),
+        allowed_models=("gpt-5.4",),
+        repo_root=".",
+        workdir=".",
+    )
+
+    budget = _default_live_budget_window(config)
+
+    assert budget.provider_ref == "provider.openai"
+    assert budget.budget_scope == "runtime"
+    assert budget.budget_status == "available"

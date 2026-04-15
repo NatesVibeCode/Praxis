@@ -50,7 +50,6 @@ class SandboxProvider(enum.Enum):
     """Which sandbox substrate isolates execution."""
 
     docker_local = "docker_local"
-    host_local = "host_local"
     cloudflare_remote = "cloudflare_remote"
 
 
@@ -156,6 +155,11 @@ def _normalize_execution_contract(
             else ExecutionTransport.cli
         )
     )
+    if raw_provider is not None and str(raw_provider).strip() == "host_local":
+        raise AgentConfigError(
+            "unsupported_sandbox_provider",
+            "host_local sandbox execution is disabled; use docker_local or cloudflare_remote",
+        )
     sandbox_provider = (
         SandboxProvider(str(raw_provider))
         if raw_provider is not None

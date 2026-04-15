@@ -172,8 +172,7 @@ def launcher_status_payload() -> dict[str, Any]:
         "ready": ready,
         "platform_state": "ready" if ready else "degraded",
         "launch_url": "http://127.0.0.1:8420/app",
-        "helm_url": "http://127.0.0.1:8420/app/helm",
-        "dashboard_url": "http://127.0.0.1:8420/ui",
+        "dashboard_url": "http://127.0.0.1:8420/app",
         "api_docs_url": "http://127.0.0.1:8420/docs",
         "doctor": doctor,
         "dependency_truth": doctor.get("dependency_truth"),
@@ -216,7 +215,6 @@ def launcher_recover_payload(
             "services": services,
             "service_summary": _service_summary(services if isinstance(services, list) else []),
             "launch_url": result.get("launch_url"),
-            "helm_url": result.get("helm_url"),
             "dashboard_url": result.get("dashboard_url"),
             "api_docs_url": result.get("api_docs_url"),
         }
@@ -274,7 +272,6 @@ def launcher_recover_payload(
             "mcp_bridge_ready": status.get("mcp_bridge_ready"),
             "ui_ready": status.get("ui_ready"),
             "launch_url": status.get("launch_url"),
-            "helm_url": status.get("helm_url"),
             "dashboard_url": status.get("dashboard_url"),
             "api_docs_url": status.get("api_docs_url"),
             "dependency_truth": status.get("dependency_truth"),
@@ -300,7 +297,6 @@ def launcher_recover_payload(
         "compatibility_alias": "scripts/praxis-ctl",
         "preferred_command": "praxis",
         "launch_url": doctor.get("launch_url"),
-        "helm_url": doctor.get("helm_url"),
         "dashboard_url": doctor.get("dashboard_url"),
         "api_docs_url": doctor.get("api_docs_url"),
     }

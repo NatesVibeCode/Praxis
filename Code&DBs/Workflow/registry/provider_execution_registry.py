@@ -23,6 +23,8 @@ from typing import Any
 
 from adapters import provider_transport
 from adapters.provider_types import ProviderAdapterContract, ProviderCLIProfile
+from storage.postgres.connection import resolve_workflow_database_url
+from storage.postgres.validators import PostgresConfigurationError
 
 __all__ = [
     "ProviderRegistryError",
@@ -122,12 +124,12 @@ for _builtin_profile in provider_transport.BUILTIN_PROVIDER_PROFILES:
 
 
 def _require_database_url() -> str:
-    dsn = os.environ.get(_DATABASE_URL_ENV, "").strip()
-    if dsn.startswith(("postgresql://", "postgres://")):
-        return dsn
-    raise RuntimeError(
-        "provider_registry requires explicit WORKFLOW_DATABASE_URL Postgres authority"
-    )
+    try:
+        return resolve_workflow_database_url()
+    except PostgresConfigurationError as exc:
+        raise RuntimeError(
+            "provider_registry requires explicit WORKFLOW_DATABASE_URL Postgres authority"
+        ) from exc
 
 
 def _row_text_tuple(value: Any, fallback: tuple[str, ...] = ()) -> tuple[str, ...]:

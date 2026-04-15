@@ -7,6 +7,7 @@ or invent protocol-specific orchestration behavior.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
@@ -143,7 +144,55 @@ class WorkflowBridge:
         )
 
 
+def build_live_workflow_bridge(database_url: str) -> WorkflowBridge:
+    """Build a live Postgres-backed bridge over runtime and worker authorities."""
+
+    import asyncpg
+
+    from policy.workflow_lanes import load_workflow_lane_catalog
+    from runtime.claims import ClaimLeaseProposalRuntime
+    from runtime.outbox import PostgresWorkflowOutboxSubscriber
+    from runtime.subscription_repository import PostgresEventSubscriptionRepository
+    from runtime.subscriptions import WorkflowWorkerSubscription
+
+    class _ClaimRouteReader:
+        def __init__(self, url: str) -> None:
+            self._url = url
+            self._runtime = ClaimLeaseProposalRuntime()
+
+        def inspect_route(self, *, run_id: str):
+            async def _inspect():
+                conn = await asyncpg.connect(self._url, timeout=5.0)
+                try:
+                    return await self._runtime.inspect_route(conn, run_id=run_id)
+                finally:
+                    await conn.close()
+
+            return asyncio.run(_inspect())
+
+    class _LaneCatalogReader:
+        def __init__(self, url: str) -> None:
+            self._url = url
+
+        async def load_catalog(self, *, as_of: datetime):
+            conn = await asyncpg.connect(self._url, timeout=5.0)
+            try:
+                return await load_workflow_lane_catalog(conn, as_of=as_of)
+            finally:
+                await conn.close()
+
+    return WorkflowBridge(
+        routes=_ClaimRouteReader(database_url),
+        subscriptions=WorkflowWorkerSubscription(
+            subscriber=PostgresWorkflowOutboxSubscriber(database_url=database_url),
+            repository=PostgresEventSubscriptionRepository(database_url=database_url),
+        ),
+        lane_catalogs=_LaneCatalogReader(database_url),
+    )
+
+
 __all__ = [
+    "build_live_workflow_bridge",
     "ClaimRouteReader",
     "WorkflowAcknowledgement",
     "WorkflowBridge",

@@ -35,6 +35,13 @@
   border-radius: 28px;
   background: linear-gradient(180deg, rgba(18, 18, 18, 0.96), rgba(10, 10, 10, 0.98));
   box-shadow: 0 32px 88px rgba(0, 0, 0, 0.34);
+  transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.launcher-hero:hover,
+.launcher-service-panel:hover {
+  border-color: rgba(243, 238, 228, 0.16);
+  box-shadow: 0 36px 100px rgba(0, 0, 0, 0.38);
 }
 
 .launcher-hero {
@@ -133,7 +140,7 @@
 }
 
 .launcher-authority-item {
-  min-width: 140px;
+  flex: 1 1 150px;
   padding: 10px 12px;
   border-radius: 16px;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -223,6 +230,11 @@
   transform: translateY(-1px);
 }
 
+.launcher-primary:active:not(:disabled),
+.launcher-secondary:active {
+  transform: translateY(0);
+}
+
 .launcher-statusline {
   min-height: 20px;
   color: var(--text-muted);
@@ -240,6 +252,7 @@
   padding: 18px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(18, 18, 18, 0.92);
+  transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
 }
 
 .launcher-card--healthy {
@@ -248,6 +261,11 @@
 
 .launcher-card--degraded {
   box-shadow: inset 0 0 0 1px rgba(248, 81, 73, 0.12);
+}
+
+.launcher-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(243, 238, 228, 0.16);
 }
 
 .launcher-card__title {
@@ -376,8 +394,60 @@
     align-items: flex-start;
   }
 
+  .launcher-heading-row {
+    gap: 12px;
+  }
+
+  .launcher-authority-item {
+    min-width: 0;
+  }
+
   .launcher-summary,
   .launcher-pill {
     align-self: flex-start;
+  }
+
+  .launcher-primary,
+  .launcher-secondary {
+    flex: 1 1 170px;
+  }
+}
+
+@media (max-width: 640px) {
+  .launcher-hero {
+    padding: 18px;
+  }
+
+  .launcher-copy-panel,
+  .launcher-logo-panel {
+    border-radius: 18px;
+  }
+
+  .launcher-copy-panel {
+    padding: 18px;
+  }
+
+  .launcher-copy-panel::before {
+    width: 82px;
+    height: 82px;
+    top: 16px;
+    right: 16px;
+  }
+
+  .launcher-actions {
+    gap: 10px;
+  }
+
+  .launcher-primary,
+  .launcher-secondary {
+    width: 100%;
+  }
+
+  .launcher-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .launcher-card {
+    padding: 16px;
   }
 }

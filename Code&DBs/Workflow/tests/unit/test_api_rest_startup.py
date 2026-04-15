@@ -44,7 +44,6 @@ def test_launcher_status_endpoint_delegates_to_handler(monkeypatch) -> None:
         "ready": False,
         "platform_state": "degraded",
         "launch_url": "http://127.0.0.1:8420/app",
-        "helm_url": "http://127.0.0.1:8420/app/helm",
         "dashboard_url": "http://127.0.0.1:8420/app",
         "api_docs_url": "http://127.0.0.1:8420/docs",
         "doctor": {"api_server_ready": False},
@@ -86,6 +85,39 @@ def test_launcher_recover_endpoint_returns_structured_payload(monkeypatch) -> No
     assert response.status_code == 200
     assert response.json()["action"] == "restart_service"
     assert response.json()["service"] == "workflow-api"
+
+
+def test_api_routes_endpoint_lists_the_live_http_surface() -> None:
+    with TestClient(rest.app) as client:
+        response = client.get("/api/routes")
+
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert payload["count"] == len(payload["routes"])
+    assert payload["docs_url"] == "/docs"
+    assert payload["openapi_url"] == "/openapi.json"
+
+    route_paths = {row["path"] for row in payload["routes"]}
+    assert "/api/dashboard" in route_paths
+    assert "/api/health" in route_paths
+    assert "/api/routes" in route_paths
+
+    health_route = next(row for row in payload["routes"] if row["path"] == "/api/health")
+    assert health_route["methods"] == ["GET"]
+    assert health_route["include_in_schema"] is True
+
+
+def test_api_routes_endpoint_filters_the_live_http_surface() -> None:
+    with TestClient(rest.app) as client:
+        response = client.get("/api/routes", params={"path_prefix": "/api/routes"})
+
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert payload["count"] == 1
+    assert payload["filters"] == {"path_prefix": "/api/routes"}
+    assert [row["path"] for row in payload["routes"]] == ["/api/routes"]
 
 
 def test_launcher_app_serves_index_from_dist(monkeypatch, tmp_path: Path) -> None:
@@ -786,7 +818,7 @@ def test_rest_legacy_api_bridge_routes_unknown_api_paths_to_handler(monkeypatch)
             content={"ok": True, "path": request.url.path, "method": request.method},
         )
 
-    monkeypatch.setattr(rest, "_dispatch_legacy_handler", _fake_dispatch)
+    monkeypatch.setattr(rest, "_route_to_handler", _fake_dispatch)
 
     with TestClient(rest.app) as client:
         get_response = client.get("/api/models")
@@ -797,3 +829,26 @@ def test_rest_legacy_api_bridge_routes_unknown_api_paths_to_handler(monkeypatch)
     assert post_response.status_code == 200
     assert post_response.json() == {"ok": True, "path": "/api/compile", "method": "POST"}
     assert seen == [("GET", "/api/models"), ("POST", "/api/compile")]
+
+
+def test_dashboard_route_delegates_to_handler_bridge(monkeypatch) -> None:
+    seen: list[tuple[str, str]] = []
+
+    async def _fake_dispatch(request):
+        seen.append((request.method, request.url.path))
+        return rest.JSONResponse(
+            status_code=200,
+            content={
+                "generated_at": "2026-04-14T12:00:00+00:00",
+                "summary": {"workflow_counts": {"total": 0, "live": 0, "saved": 0, "draft": 0}},
+            },
+        )
+
+    monkeypatch.setattr(rest, "_route_to_handler", _fake_dispatch)
+
+    with TestClient(rest.app) as client:
+        response = client.get("/api/dashboard")
+
+    assert response.status_code == 200
+    assert response.json()["summary"]["workflow_counts"] == {"total": 0, "live": 0, "saved": 0, "draft": 0}
+    assert seen == [("GET", "/api/dashboard")]

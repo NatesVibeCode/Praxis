@@ -9,6 +9,7 @@ import re
 from typing import Any
 
 from runtime.definition_compile_kernel import definition_revision, materialize_definition
+from runtime.edge_release import normalize_edge_release, with_edge_release
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 _TRIGGER_MANUAL_ROUTE = "trigger"
@@ -49,6 +50,62 @@ def _iso_now() -> str:
 def _stable_digest(prefix: str, payload: Any) -> str:
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     return f"{prefix}_{hashlib.sha256(encoded.encode('utf-8')).hexdigest()[:16]}"
+
+
+def _binding_target_key(value: Any) -> str:
+    if not isinstance(value, dict):
+        return _stable_digest("binding_target", value)
+    target_ref = _as_text(value.get("target_ref"))
+    if target_ref:
+        return f"target_ref:{target_ref}"
+    return _stable_digest("binding_target", _json_clone(value))
+
+
+def _normalize_binding_targets(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    normalized: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        cloned = _json_clone(item)
+        key = _binding_target_key(cloned)
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(cloned)
+    return normalized
+
+
+def _attachment_id_for(node_id: str, authority_kind: str, authority_ref: str, role: str) -> str:
+    return _stable_digest(
+        "attachment",
+        {
+            "node_id": node_id,
+            "authority_kind": authority_kind,
+            "authority_ref": authority_ref,
+            "role": role,
+        },
+    )
+
+
+def _snapshot_id_for(
+    *,
+    node_id: str | None,
+    source_kind: str,
+    source_locator: str,
+    requested_shape: dict[str, Any] | None = None,
+) -> str:
+    return _stable_digest(
+        "import",
+        {
+            "node_id": node_id,
+            "source_kind": source_kind,
+            "source_locator": source_locator,
+            "requested_shape": requested_shape or {},
+        },
+    )
 
 
 def _trigger_route_for_payload(trigger: dict[str, Any]) -> str:
@@ -101,7 +158,7 @@ def _normalize_import_snapshot(value: Any) -> dict[str, Any] | None:
         "captured_at": _as_text(value.get("captured_at")) or None,
         "stale_after_at": _as_text(value.get("stale_after_at")) or None,
         "approval_state": _as_text(value.get("approval_state")) or "staged",
-        "admitted_targets": _json_clone(value.get("admitted_targets")) if isinstance(value.get("admitted_targets"), list) else [],
+        "admitted_targets": _normalize_binding_targets(value.get("admitted_targets")),
         "binding_id": _as_text(value.get("binding_id")) or None,
         "node_id": _as_text(value.get("node_id")) or None,
     }
@@ -465,6 +522,7 @@ def _build_graph(
                 "title": _as_text(trigger.get("title")) or f"Trigger {index}",
                 "summary": _as_text(trigger.get("summary")) or _as_text(trigger.get("event_type")) or "Trigger",
                 "route": route,
+                "integration_args": {},
                 "trigger": {
                     "event_type": _as_text(trigger.get("event_type")),
                     "cron_expression": _as_text(trigger.get("cron_expression")),
@@ -508,6 +566,7 @@ def _build_graph(
                 "title": _as_text(step.get("title")) or f"Step {int(step.get('order') or 0) or 1}",
                 "summary": _as_text(step.get("summary")) or _as_text(step.get("title")),
                 "route": _as_text(phase.get("agent_route") or phase.get("resolved_agent_slug")),
+                "integration_args": _json_clone(phase.get("integration_args")) if isinstance(phase.get("integration_args"), dict) else {},
                 "prompt": _as_text(phase.get("system_prompt")),
                 "required_inputs": _string_list(phase.get("required_inputs")),
                 "outputs": _string_list(phase.get("outputs")),
@@ -558,6 +617,7 @@ def _build_graph(
                     "title": _as_text(issue.get("label")) or "Gate",
                     "summary": _as_text(issue.get("summary")) or "Authority gate.",
                     "route": "",
+                    "integration_args": {},
                     "prompt": "",
                     "required_inputs": [],
                     "outputs": [],
@@ -570,15 +630,15 @@ def _build_graph(
                 }
             )
             edges.append(
-                {
-                    "edge_id": f"edge:{gate_node_id}:{step_id}",
-                    "kind": "authority_gate",
-                    "from_node_id": gate_node_id,
-                    "to_node_id": step_id,
-                    "release_condition": _json_clone(issue.get("gate_rule")) if isinstance(issue.get("gate_rule"), dict) else {},
-                    "branch_reason": _as_text(issue.get("kind")) or None,
-                    "position_index": len(edges),
-                }
+                with_edge_release(
+                    {
+                        "edge_id": f"edge:{gate_node_id}:{step_id}",
+                        "kind": "authority_gate",
+                        "from_node_id": gate_node_id,
+                        "to_node_id": step_id,
+                        "position_index": len(edges),
+                    }
+                )
             )
         dependencies = _string_list(step.get("depends_on"))
         dependency_targets = gate_nodes or [step_id]
@@ -590,33 +650,29 @@ def _build_graph(
                     "kind": "proceeds_to",
                     "from_node_id": dependency,
                     "to_node_id": target,
-                    "release_condition": {},
-                    "branch_reason": None,
                     "position_index": len(edges),
                 }
                 if eg:
-                    edge_entry["gate"] = {
-                        "state": "configured",
-                        "family": _as_text(eg.get("family")),
-                        "label": _as_text(eg.get("label")) or _as_text(eg.get("family")),
-                    }
-                    if isinstance(eg.get("config"), dict):
-                        edge_entry["gate"]["config"] = _json_clone(eg.get("config"))
-                    if _as_text(eg.get("branch_reason")):
-                        edge_entry["branch_reason"] = _as_text(eg.get("branch_reason"))
-                edges.append(edge_entry)
+                    edges.append(
+                        with_edge_release(
+                            edge_entry,
+                            normalize_edge_release(eg),
+                        )
+                    )
+                else:
+                    edges.append(with_edge_release(edge_entry))
 
     for edge_id, from_node_id, to_node_id in sorted(state_edges):
         edges.append(
-            {
-                "edge_id": edge_id,
-                "kind": "state_informs" if from_node_id.startswith("state:") and not to_node_id.startswith("state:") else "proceeds_to",
-                "from_node_id": from_node_id,
-                "to_node_id": to_node_id,
-                "release_condition": {},
-                "branch_reason": "persisted_state",
-                "position_index": len(edges),
-            }
+            with_edge_release(
+                {
+                    "edge_id": edge_id,
+                    "kind": "state_informs" if from_node_id.startswith("state:") and not to_node_id.startswith("state:") else "proceeds_to",
+                    "from_node_id": from_node_id,
+                    "to_node_id": to_node_id,
+                    "position_index": len(edges),
+                }
+            )
         )
 
     nodes.extend(state_nodes.values())
@@ -709,6 +765,142 @@ def apply_authority_bundle(
     return materialized
 
 
+def _find_materialized_attachment(materialized: dict[str, Any], attachment_id: str) -> dict[str, Any] | None:
+    attachments = materialized.get("authority_attachments") if isinstance(materialized.get("authority_attachments"), list) else []
+    for entry in attachments:
+        attachment = _normalize_attachment(entry)
+        if attachment is not None and _as_text(attachment.get("attachment_id")) == attachment_id:
+            return attachment
+    return None
+
+
+def _find_materialized_binding(materialized: dict[str, Any], binding_id: str) -> dict[str, Any] | None:
+    bindings = materialized.get("binding_ledger") if isinstance(materialized.get("binding_ledger"), list) else []
+    for entry in bindings:
+        binding = _normalize_existing_binding(entry)
+        if binding is not None and _as_text(binding.get("binding_id")) == binding_id:
+            return binding
+    return None
+
+
+def _find_materialized_snapshot(materialized: dict[str, Any], snapshot_id: str) -> dict[str, Any] | None:
+    snapshots = materialized.get("import_snapshots") if isinstance(materialized.get("import_snapshots"), list) else []
+    for entry in snapshots:
+        snapshot = _normalize_import_snapshot(entry)
+        if snapshot is not None and _as_text(snapshot.get("snapshot_id")) == snapshot_id:
+            return snapshot
+    return None
+
+
+def build_mutation_undo_receipt(
+    definition: dict[str, Any],
+    *,
+    workflow_id: str,
+    subpath: str,
+    body: dict[str, Any],
+) -> dict[str, Any] | None:
+    materialized = apply_authority_bundle(definition)
+    steps: list[dict[str, Any]] = []
+
+    if subpath == "attachments":
+        node_id = _as_text(body.get("node_id"))
+        authority_kind = _as_text(body.get("authority_kind"))
+        authority_ref = _as_text(body.get("authority_ref"))
+        role = _as_text(body.get("role")) or "input"
+        if node_id and authority_kind and authority_ref:
+            attachment_id = _attachment_id_for(node_id, authority_kind, authority_ref, role)
+            steps.append(
+                {
+                    "subpath": f"attachments/{attachment_id}/restore",
+                    "body": {
+                        "attachment": _json_clone(_find_materialized_attachment(materialized, attachment_id)),
+                    },
+                }
+            )
+    elif subpath.startswith("bindings/") and (
+        subpath.endswith("/accept") or subpath.endswith("/reject") or subpath.endswith("/replace")
+    ):
+        binding_id = subpath[len("bindings/") :].split("/", 1)[0].strip("/")
+        if binding_id:
+            steps.append(
+                {
+                    "subpath": f"bindings/{binding_id}/restore",
+                    "body": {
+                        "binding": _json_clone(_find_materialized_binding(materialized, binding_id)),
+                    },
+                }
+            )
+    elif subpath == "imports":
+        source_locator = _as_text(body.get("source_locator"))
+        if source_locator:
+            snapshot_id = _snapshot_id_for(
+                node_id=_as_text(body.get("node_id")) or None,
+                source_kind=_as_text(body.get("source_kind")) or "net",
+                source_locator=source_locator,
+                requested_shape=body.get("requested_shape") if isinstance(body.get("requested_shape"), dict) else None,
+            )
+            steps.append(
+                {
+                    "subpath": f"imports/{snapshot_id}/restore",
+                    "body": {
+                        "snapshot": _json_clone(_find_materialized_snapshot(materialized, snapshot_id)),
+                    },
+                }
+            )
+    elif subpath.startswith("imports/") and subpath.endswith("/admit"):
+        snapshot_id = subpath[len("imports/") : -len("/admit")].strip("/")
+        if snapshot_id:
+            steps.append(
+                {
+                    "subpath": f"imports/{snapshot_id}/restore",
+                    "body": {
+                        "snapshot": _json_clone(_find_materialized_snapshot(materialized, snapshot_id)),
+                    },
+                }
+            )
+    elif subpath == "materialize-here":
+        node_id = _as_text(body.get("node_id"))
+        admitted_target = body.get("admitted_target") if isinstance(body.get("admitted_target"), dict) else {}
+        authority_kind = _as_text(body.get("authority_kind"))
+        authority_ref = _as_text(body.get("authority_ref")) or _as_text(admitted_target.get("target_ref"))
+        role = _as_text(body.get("role")) or "input"
+        if node_id and authority_kind and authority_ref:
+            attachment_id = _attachment_id_for(node_id, authority_kind, authority_ref, role)
+            steps.append(
+                {
+                    "subpath": f"attachments/{attachment_id}/restore",
+                    "body": {
+                        "attachment": _json_clone(_find_materialized_attachment(materialized, attachment_id)),
+                    },
+                }
+            )
+        snapshot_id = _as_text(body.get("snapshot_id"))
+        source_locator = _as_text(body.get("source_locator"))
+        if not snapshot_id and source_locator:
+            snapshot_id = _snapshot_id_for(
+                node_id=node_id or None,
+                source_kind=_as_text(body.get("source_kind")) or "net",
+                source_locator=source_locator,
+                requested_shape=body.get("requested_shape") if isinstance(body.get("requested_shape"), dict) else None,
+            )
+        if snapshot_id:
+            steps.append(
+                {
+                    "subpath": f"imports/{snapshot_id}/restore",
+                    "body": {
+                        "snapshot": _json_clone(_find_materialized_snapshot(materialized, snapshot_id)),
+                    },
+                }
+            )
+
+    if not steps:
+        return None
+    return {
+        "workflow_id": workflow_id,
+        "steps": steps,
+    }
+
+
 def recompute_definition_revision(definition: dict[str, Any]) -> dict[str, Any]:
     cloned = _json_clone(definition if isinstance(definition, dict) else {})
     cloned["definition_revision"] = definition_revision({k: v for k, v in cloned.items() if k != "definition_revision"})
@@ -760,6 +952,32 @@ def upsert_binding(
     return recompute_definition_revision(materialized)
 
 
+def restore_binding(
+    definition: dict[str, Any],
+    *,
+    binding_id: str,
+    binding: dict[str, Any] | None,
+) -> dict[str, Any]:
+    materialized = apply_authority_bundle(definition)
+    bindings = materialized.get("binding_ledger") if isinstance(materialized.get("binding_ledger"), list) else []
+    restored = _normalize_existing_binding(binding) if isinstance(binding, dict) else None
+    next_bindings: list[dict[str, Any]] = []
+    inserted = False
+    for entry in bindings:
+        if not isinstance(entry, dict):
+            continue
+        if _as_text(entry.get("binding_id")) != binding_id:
+            next_bindings.append(entry)
+            continue
+        if restored is not None and not inserted:
+            next_bindings.append(restored)
+            inserted = True
+    if restored is not None and not inserted:
+        next_bindings.append(restored)
+    materialized["binding_ledger"] = next_bindings
+    return recompute_definition_revision(materialized)
+
+
 def attach_authority(
     definition: dict[str, Any],
     *,
@@ -787,10 +1005,7 @@ def attach_authority(
             return recompute_definition_revision(materialized)
     attachments.append(
         {
-            "attachment_id": _stable_digest(
-                "attachment",
-                {"node_id": node_id, "authority_kind": authority_kind, "authority_ref": authority_ref, "role": role},
-            ),
+            "attachment_id": _attachment_id_for(node_id, authority_kind, authority_ref, role),
             "node_id": node_id,
             "authority_kind": authority_kind,
             "authority_ref": authority_ref,
@@ -801,6 +1016,32 @@ def attach_authority(
         }
     )
     materialized["authority_attachments"] = attachments
+    return recompute_definition_revision(materialized)
+
+
+def restore_attachment(
+    definition: dict[str, Any],
+    *,
+    attachment_id: str,
+    attachment: dict[str, Any] | None,
+) -> dict[str, Any]:
+    materialized = apply_authority_bundle(definition)
+    attachments = materialized.get("authority_attachments") if isinstance(materialized.get("authority_attachments"), list) else []
+    restored = _normalize_attachment(attachment) if isinstance(attachment, dict) else None
+    next_attachments: list[dict[str, Any]] = []
+    inserted = False
+    for entry in attachments:
+        if not isinstance(entry, dict):
+            continue
+        if _as_text(entry.get("attachment_id")) != attachment_id:
+            next_attachments.append(entry)
+            continue
+        if restored is not None and not inserted:
+            next_attachments.append(restored)
+            inserted = True
+    if restored is not None and not inserted:
+        next_attachments.append(restored)
+    materialized["authority_attachments"] = next_attachments
     return recompute_definition_revision(materialized)
 
 
@@ -817,31 +1058,35 @@ def stage_import_snapshot(
     materialized = apply_authority_bundle(definition)
     snapshots = materialized.get("import_snapshots") if isinstance(materialized.get("import_snapshots"), list) else []
     captured_at = datetime.now(timezone.utc).replace(microsecond=0)
-    snapshot_id = _stable_digest(
-        "import",
-        {
-            "node_id": node_id,
-            "source_kind": source_kind,
-            "source_locator": source_locator,
-            "requested_shape": requested_shape or {},
-        },
+    snapshot_id = _snapshot_id_for(
+        node_id=node_id,
+        source_kind=source_kind,
+        source_locator=source_locator,
+        requested_shape=requested_shape if isinstance(requested_shape, dict) else None,
     )
-    snapshots.append(
-        {
-            "snapshot_id": snapshot_id,
-            "source_kind": source_kind,
-            "source_locator": source_locator,
-            "requested_shape": _json_clone(requested_shape or {}),
-            "payload": _json_clone(payload),
-            "freshness_ttl": max(60, int(freshness_ttl or 3600)),
-            "captured_at": captured_at.isoformat(),
-            "stale_after_at": (captured_at + timedelta(seconds=max(60, int(freshness_ttl or 3600)))).isoformat(),
-            "approval_state": "staged",
-            "admitted_targets": [],
-            "binding_id": f"binding:import:{snapshot_id}",
-            "node_id": node_id,
-        }
-    )
+    snapshot_entry = {
+        "snapshot_id": snapshot_id,
+        "source_kind": source_kind,
+        "source_locator": source_locator,
+        "requested_shape": _json_clone(requested_shape or {}),
+        "payload": _json_clone(payload),
+        "freshness_ttl": max(60, int(freshness_ttl or 3600)),
+        "captured_at": captured_at.isoformat(),
+        "stale_after_at": (captured_at + timedelta(seconds=max(60, int(freshness_ttl or 3600)))).isoformat(),
+        "approval_state": "staged",
+        "admitted_targets": [],
+        "binding_id": f"binding:import:{snapshot_id}",
+        "node_id": node_id,
+    }
+    replaced = False
+    for index, existing in enumerate(snapshots):
+        if not isinstance(existing, dict) or _as_text(existing.get("snapshot_id")) != snapshot_id:
+            continue
+        snapshots[index] = snapshot_entry
+        replaced = True
+        break
+    if not replaced:
+        snapshots.append(snapshot_entry)
     materialized["import_snapshots"] = snapshots
     return recompute_definition_revision(materialized)
 
@@ -858,9 +1103,43 @@ def admit_import_snapshot(
         if not isinstance(snapshot, dict) or _as_text(snapshot.get("snapshot_id")) != snapshot_id:
             continue
         snapshot["approval_state"] = "admitted"
-        admitted_targets = snapshot.get("admitted_targets") if isinstance(snapshot.get("admitted_targets"), list) else []
-        admitted_targets.append(_json_clone(admitted_target))
+        normalized_target = _json_clone(admitted_target)
+        admitted_targets = _normalize_binding_targets(snapshot.get("admitted_targets"))
+        target_key = _binding_target_key(normalized_target)
+        for index, existing in enumerate(admitted_targets):
+            if _binding_target_key(existing) != target_key:
+                continue
+            admitted_targets[index] = normalized_target
+            break
+        else:
+            admitted_targets.append(normalized_target)
         snapshot["admitted_targets"] = admitted_targets
         break
     materialized["import_snapshots"] = snapshots
+    return recompute_definition_revision(materialized)
+
+
+def restore_import_snapshot(
+    definition: dict[str, Any],
+    *,
+    snapshot_id: str,
+    snapshot: dict[str, Any] | None,
+) -> dict[str, Any]:
+    materialized = apply_authority_bundle(definition)
+    snapshots = materialized.get("import_snapshots") if isinstance(materialized.get("import_snapshots"), list) else []
+    restored = _normalize_import_snapshot(snapshot) if isinstance(snapshot, dict) else None
+    next_snapshots: list[dict[str, Any]] = []
+    inserted = False
+    for entry in snapshots:
+        if not isinstance(entry, dict):
+            continue
+        if _as_text(entry.get("snapshot_id")) != snapshot_id:
+            next_snapshots.append(entry)
+            continue
+        if restored is not None and not inserted:
+            next_snapshots.append(restored)
+            inserted = True
+    if restored is not None and not inserted:
+        next_snapshots.append(restored)
+    materialized["import_snapshots"] = next_snapshots
     return recompute_definition_revision(materialized)

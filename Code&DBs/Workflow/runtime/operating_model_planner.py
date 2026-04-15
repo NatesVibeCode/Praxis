@@ -16,6 +16,7 @@ from runtime.compile_artifacts import CompileArtifactError, CompileArtifactStore
 from runtime.compile_reuse import module_surface_revision, stable_hash
 from runtime.build_authority import build_authority_bundle
 from runtime.definition_compile_kernel import materialize_definition
+from runtime.edge_release import normalize_edge_release
 
 logger = logging.getLogger(__name__)
 
@@ -35,18 +36,15 @@ def missing_execution_plan_message(workflow_name: str | None = None) -> str:
     return "Workflow has no current execution plan. Generate plan first."
 
 
-def _conditional_release_condition(edge_gate: dict[str, Any]) -> dict[str, Any] | None:
-    config = edge_gate.get("config")
-    if not isinstance(config, dict):
-        return None
-    condition = config.get("condition")
-    if not isinstance(condition, dict) or not condition:
-        return None
-    normalized = json.loads(json.dumps(condition))
-    branch_reason = _as_text(edge_gate.get("branch_reason")).strip().lower()
-    if branch_reason == "else":
-        return {"op": "not", "conditions": [normalized]}
-    return normalized
+def _edge_gate_runtime_release(edge_gate: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
+    release = normalize_edge_release(edge_gate)
+    edge_type = _as_text(release.get("edge_type")) or "after_success"
+    if edge_type != "conditional":
+        return edge_type, None
+    release_condition = release.get("release_condition")
+    if not isinstance(release_condition, dict) or not release_condition:
+        return "after_success", None
+    return "conditional", json.loads(json.dumps(release_condition))
 
 
 def current_compiled_spec(definition: Any, compiled_spec: Any) -> dict[str, Any] | None:
@@ -240,6 +238,7 @@ def _plan_jobs(definition: dict[str, Any]) -> list[dict[str, Any]]:
         step_id = _as_text(step.get("id"))
         if not step_id:
             continue
+        label = label_by_step_id[step_id]
         reference_slugs = _string_list(step.get("reference_slugs"))
         capability_slugs = _string_list(step.get("capability_slugs"))
         source_block_ids = _string_list(step.get("source_block_ids"))
@@ -251,7 +250,20 @@ def _plan_jobs(definition: dict[str, Any]) -> list[dict[str, Any]]:
             references_by_slug=references_by_slug,
             blocks_by_id=blocks_by_id,
         )
-        label = label_by_step_id[step_id]
+        integration_job = _integration_job_from_route(
+            agent_route,
+            step=step,
+            explicit_phase=phase_by_step_id.get(step_id),
+            compiled_prose=compiled_prose,
+            label=label,
+        )
+        if integration_job is not None:
+            integration_id, integration_action, integration_args = integration_job
+            agent_slug = f"integration/{integration_id}/{integration_action}"
+        else:
+            integration_id = ""
+            integration_action = ""
+            integration_args = None
 
         source_text = "\n".join(
             _as_text(blocks_by_id[block_id].get("text"))
@@ -272,8 +284,13 @@ def _plan_jobs(definition: dict[str, Any]) -> list[dict[str, Any]]:
             prompt_sections.extend(["## References", "\n".join(reference_slugs)])
         if capability_slugs:
             prompt_sections.extend(["## Capabilities", "\n".join(capability_slugs)])
-        if agent_slug:
+        if agent_slug and not integration_job:
             prompt_sections.extend(["## Responsible Agent", agent_slug])
+        elif integration_job is not None:
+            prompt_sections.extend([
+                "## Integration",
+                f"@{integration_id}/{integration_action}",
+            ])
 
         job = {
             "label": label,
@@ -282,7 +299,12 @@ def _plan_jobs(definition: dict[str, Any]) -> list[dict[str, Any]]:
             "source_step_id": _as_text(step.get("id")) or None,
             "source_node_id": _as_text(step.get("id")) or None,
         }
-        if agent_slug:
+        if integration_job is not None:
+            job["agent"] = agent_slug
+            job["integration_id"] = integration_id
+            job["integration_action"] = integration_action
+            job["integration_args"] = integration_args
+        elif agent_slug:
             job["agent_name"] = agent_slug
             job["system_prompt"] = (
                 f"You are {agent_slug}. Execute only the responsibilities assigned in this planned operating-model step."
@@ -298,13 +320,7 @@ def _plan_jobs(definition: dict[str, Any]) -> list[dict[str, Any]]:
             release_condition: dict[str, Any] | None = None
             edge_gate = edge_gate_by_pair.get((dependency_step_id, step_id))
             if isinstance(edge_gate, dict):
-                gate_family = _as_text(edge_gate.get("family"))
-                if gate_family == "after_failure":
-                    edge_type = "after_failure"
-                elif gate_family == "conditional":
-                    release_condition = _conditional_release_condition(edge_gate)
-                    if release_condition:
-                        edge_type = "conditional"
+                edge_type, release_condition = _edge_gate_runtime_release(edge_gate)
             edge_spec = {
                 "label": dependency_label,
                 "edge_type": edge_type,
@@ -457,6 +473,59 @@ def _agent_for_step(
     summary = _as_text(step.get("summary"))
     route = _infer_agent_route(_slugify(title) or "execute-agent", {"description": f"{title} {summary} {block_text}"})
     return "", route
+
+
+def _integration_job_from_route(
+    route: str,
+    *,
+    step: dict[str, Any],
+    explicit_phase: dict[str, Any] | None,
+    compiled_prose: str,
+    label: str,
+) -> tuple[str, str, dict[str, Any]] | None:
+    normalized_route = _as_text(route)
+    if not normalized_route.startswith("@") or "/" not in normalized_route:
+        return None
+
+    integration_id, _, integration_action = normalized_route[1:].partition("/")
+    if not integration_id or not integration_action:
+        return None
+
+    phase = explicit_phase if isinstance(explicit_phase, dict) else {}
+    integration_args = _json_dict(phase.get("integration_args"))
+
+    if normalized_route == "@notifications/send":
+        title = _as_text(integration_args.get("title")) or _as_text(step.get("title")) or "Notification"
+        message = (
+            _as_text(integration_args.get("message"))
+            or _as_text(step.get("summary"))
+            or _as_text(phase.get("system_prompt"))
+            or compiled_prose
+            or title
+        )
+        metadata = {
+            **_json_dict(integration_args.get("metadata")),
+            "source_step_id": _as_text(step.get("id")) or "",
+            "source_node_id": _as_text(step.get("id")) or "",
+            "job_label": label,
+        }
+        return (
+            "notifications",
+            "send",
+            {
+                **integration_args,
+                "title": title,
+                "message": message,
+                "status": _as_text(integration_args.get("status")) or "info",
+                "metadata": metadata,
+            },
+        )
+
+    return (
+        integration_id,
+        integration_action,
+        integration_args,
+    )
 
 
 def _string_list(value: Any) -> list[str]:

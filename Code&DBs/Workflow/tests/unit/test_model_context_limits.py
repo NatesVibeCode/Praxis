@@ -88,3 +88,33 @@ def test_safe_context_budget_requires_authoritative_budget_ratio(
     )
 
     assert model_context_limits.safe_context_budget("openai", "gpt-5.4") == 100_000
+
+
+def test_context_window_normalizes_missing_user_in_workflow_database_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: dict[str, str] = {}
+
+    class _FakeConn:
+        async def fetch(self, _sql: str):
+            return [
+                {
+                    "provider_name": "openai",
+                    "model_name": "gpt-5.4",
+                    "default_parameters": {"context_window": 200_000},
+                }
+            ]
+
+        async def close(self) -> None:
+            return None
+
+    class _FakeAsyncPGModule:
+        async def connect(self, dsn: str):
+            observed["dsn"] = dsn
+            return _FakeConn()
+
+    monkeypatch.setenv("WORKFLOW_DATABASE_URL", "postgresql://localhost:5432/praxis_test")
+    monkeypatch.setitem(sys.modules, "asyncpg", _FakeAsyncPGModule())
+
+    assert model_context_limits.context_window_for_model("openai", "gpt-5.4") == 200_000
+    assert observed["dsn"] == "postgresql://postgres@localhost:5432/praxis_test"

@@ -74,6 +74,7 @@ def test_apply_receipt_provenance_rewrites_legacy_git_payload_when_repo_snapshot
             "workspace_root": "/repo",
             "workspace_ref": "workspace://praxis",
             "runtime_profile_ref": "runtime://praxis",
+            "workspace_snapshot_ref": "workspace_snapshot:abc123",
         },
         inputs={},
         outputs={
@@ -96,6 +97,7 @@ def test_apply_receipt_provenance_rewrites_legacy_git_payload_when_repo_snapshot
         "workspace_root": "/repo",
         "workspace_ref": "workspace://praxis",
         "runtime_profile_ref": "runtime://praxis",
+        "workspace_snapshot_ref": "workspace_snapshot:abc123",
     }
     assert inputs["workspace_root"] == "/repo"
     assert inputs["workspace_ref"] == "workspace://praxis"
@@ -104,8 +106,12 @@ def test_apply_receipt_provenance_rewrites_legacy_git_payload_when_repo_snapshot
 
 class _ProofMetricsConn:
     def execute(self, query: str, *args):
-        if "FROM receipts" in query:
-            return [{
+        raise AssertionError(query)
+
+    def fetchrow(self, query: str, *args):
+        normalized = " ".join(query.split())
+        if normalized.startswith("SELECT COUNT(*) AS receipts_total,"):
+            return {
                 "receipts_total": 10,
                 "receipts_with_verification_status": 5,
                 "receipts_with_attempted_verification": 3,
@@ -120,11 +126,7 @@ class _ProofMetricsConn:
                 "receipts_with_mutation_provenance": 3,
                 "receipts_with_git_provenance": 10,
                 "receipts_with_repo_snapshot_ref": 8,
-            }]
-        raise AssertionError(query)
-
-    def fetchrow(self, query: str, *args):
-        normalized = " ".join(query.split())
+            }
         if normalized.startswith("SELECT COUNT(*) FILTER (WHERE entity_type = 'code_unit') AS code_units"):
             return {
                 "code_units": 7,
@@ -220,7 +222,13 @@ class _BackfillConn:
                         "workspace_root": "/repo",
                         "workspace_ref": "workspace://praxis",
                         "runtime_profile_ref": "runtime://praxis",
-                    }
+                    },
+                    "workspace_provenance": {
+                        "workspace_root": "/repo",
+                        "workspace_ref": "workspace://praxis",
+                        "runtime_profile_ref": "runtime://praxis",
+                        "workspace_snapshot_ref": "workspace_snapshot:abc123",
+                    },
                 },
                 "touch_keys": [],
                 "request_envelope": {},
@@ -251,6 +259,7 @@ def test_backfill_receipt_provenance_uses_stored_workspace_root_for_git_compacti
     updated_outputs = json.loads(conn.updates[0][2])
     assert updated_outputs["git_provenance"] == compact_git
     assert updated_outputs["workspace_provenance"]["workspace_root"] == "/repo"
+    assert updated_outputs["workspace_provenance"]["workspace_snapshot_ref"] == "workspace_snapshot:abc123"
     assert "workspace_root" not in updated_outputs["git_provenance"]
 
 

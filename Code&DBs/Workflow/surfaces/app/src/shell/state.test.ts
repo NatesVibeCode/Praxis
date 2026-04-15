@@ -35,7 +35,7 @@ describe('shell state helpers', () => {
       ],
     };
 
-    expect(buildShellUrl(state, false)).toBe('?page=run-detail&run=run_123');
+    expect(buildShellUrl(state, false)).toBe('/app/run/run_123');
   });
 
   test('parses build query params into the build tab', () => {
@@ -64,7 +64,7 @@ describe('shell state helpers', () => {
       buildView: 'moon' as const,
     };
 
-    expect(buildShellUrl(state, false)).toBe('?page=build&workflow=wf_moon&intent=research');
+    expect(buildShellUrl(state, false)).toBe('/app/build?workflow=wf_moon&intent=research');
   });
 
   test('closing the active dynamic tab falls back to dashboard when none remain', () => {

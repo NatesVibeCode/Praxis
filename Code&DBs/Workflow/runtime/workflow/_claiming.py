@@ -4,6 +4,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from registry.runtime_profile_admission import RuntimeProfileAdmissionError
+
 from ._shared import (
     STALE_REAPER_QUERY,
     _TERMINAL_JOB_STATUSES,
@@ -40,6 +42,49 @@ __all__ = [
 ]
 
 
+def _fail_unclaimable_ready_job(
+    conn: SyncPostgresConnection,
+    job: dict,
+    *,
+    error_code: str,
+    stdout_preview: str,
+    failure_category: str = "authority_missing",
+    failure_zone: str = "routing",
+) -> None:
+    rows = conn.execute(
+        """UPDATE workflow_jobs
+           SET status = 'failed',
+               finished_at = now(),
+               last_error_code = $2,
+               stdout_preview = $3,
+               failure_category = $4,
+               failure_zone = $5,
+               is_transient = false
+           WHERE id = $1
+             AND status = 'ready'
+           RETURNING id, run_id, route_task_type, COALESCE(resolved_agent, agent_slug) AS effective_agent""",
+        int(job["id"]),
+        error_code,
+        stdout_preview[:2000],
+        failure_category,
+        failure_zone,
+    )
+    if not rows:
+        return
+    row = rows[0]
+    _record_task_route_outcome(
+        conn,
+        task_type=str(row.get("route_task_type") or "").strip(),
+        effective_agent=str(row.get("effective_agent") or "").strip(),
+        succeeded=False,
+        failure_code=error_code,
+        failure_category=failure_category,
+        failure_zone=failure_zone,
+    )
+    _block_descendants(conn, int(row["id"]), error_code)
+    _recompute_workflow_run_state(conn, str(row["run_id"]))
+
+
 def claim_one(conn: SyncPostgresConnection, worker_id: str) -> dict | None:
     """Claim the next ready job after route and touch-key admission checks.
 
@@ -60,7 +105,22 @@ def claim_one(conn: SyncPostgresConnection, worker_id: str) -> dict | None:
         job = dict(candidate)
         if _job_has_touch_conflict(conn, job):
             continue
-        resolved_agent = _select_claim_route(conn, job)
+        try:
+            resolved_agent = _select_claim_route(conn, job)
+        except RuntimeProfileAdmissionError as exc:
+            logger.error(
+                "Claim rejected for job %s (%s): %s",
+                job.get("id"),
+                job.get("label"),
+                exc,
+            )
+            _fail_unclaimable_ready_job(
+                conn,
+                job,
+                error_code=exc.reason_code,
+                stdout_preview=str(exc),
+            )
+            continue
         rows = conn.execute(
             """UPDATE workflow_jobs
                SET status = 'claimed',

@@ -363,6 +363,7 @@ def write_job_receipt(
             workspace_root=workspace_root,
             workspace_ref=workspace_ref,
             runtime_profile_ref=runtime_profile_ref,
+            workspace_snapshot_ref=str(result.get("workspace_snapshot_ref") or "").strip() or None,
             packet_provenance=packet_provenance,
         )
         receipt_outputs["git_provenance"] = build_git_provenance(

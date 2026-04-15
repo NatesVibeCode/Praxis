@@ -1,0 +1,186 @@
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import React from 'react';
+import { vi } from 'vitest';
+
+import type { ReleaseStatus } from './moonBuildPresenter';
+import { MoonReleaseTray } from './MoonReleaseTray';
+import type { BuildPayload } from '../shared/types';
+import { planDefinition } from '../shared/buildController';
+
+const buildControllerMocks = vi.hoisted(() => ({
+  planDefinition: vi.fn(),
+  commitDefinition: vi.fn(),
+  triggerWorkflow: vi.fn(),
+  createWorkflow: vi.fn(),
+}));
+
+vi.mock('../shared/buildController', () => buildControllerMocks);
+
+const release: ReleaseStatus = {
+  readiness: 'draft',
+  blockers: [],
+  projectedJobs: [],
+  checklist: [],
+};
+
+function buildPayload(prompt: string): BuildPayload {
+  return {
+    workflow: { id: 'wf_alpha', name: 'Alpha' },
+    definition: {
+      trigger_intent: [{ event_type: 'manual' }],
+      execution_setup: {
+        phases: [
+          {
+            step_id: 'step-001',
+            agent_route: 'auto/draft',
+            prompt,
+          },
+        ],
+      },
+    },
+    compiled_spec_projection: {
+      compiled_spec: {
+        jobs: [{ label: 'Projected draft', agent: 'auto/draft' }],
+        triggers: [{ event_type: 'manual' }],
+      },
+    },
+  };
+}
+
+function buildGraphPayload(): BuildPayload {
+  return {
+    workflow: { id: 'wf_graph', name: 'Graph Alpha' },
+    definition: {},
+    build_graph: {
+      nodes: [
+        {
+          node_id: 'trigger-001',
+          kind: 'step',
+          title: 'Manual',
+          route: 'trigger',
+          trigger: { event_type: 'manual', filter: {} },
+        },
+        {
+          node_id: 'step-001',
+          kind: 'step',
+          title: 'Fetch status',
+          route: '@webhook/post',
+          integration_args: {
+            request_preset: 'fetch_json',
+            url: 'https://api.example.com/status',
+            method: 'GET',
+            headers: { Accept: 'application/json' },
+          },
+        },
+      ],
+      edges: [
+        {
+          edge_id: 'edge-trigger-step',
+          kind: 'sequence',
+          from_node_id: 'trigger-001',
+          to_node_id: 'step-001',
+        },
+      ],
+    },
+    compiled_spec_projection: {
+      compiled_spec: {
+        jobs: [{ label: 'Projected fetch', agent: 'integration/webhook/post' }],
+        triggers: [{ event_type: 'manual' }],
+      },
+    },
+  };
+}
+
+describe('MoonReleaseTray', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    buildControllerMocks.planDefinition.mockResolvedValue({
+      compiled_spec: {
+        jobs: [{ label: 'Planned draft', agent: 'auto/draft' }],
+      },
+    });
+    buildControllerMocks.createWorkflow.mockResolvedValue({ id: 'wf_created' });
+    buildControllerMocks.commitDefinition.mockResolvedValue({});
+    buildControllerMocks.triggerWorkflow.mockResolvedValue({ run_id: 'run_123', status: 'queued' });
+  });
+
+  test('invalidates a previewed plan immediately when the workflow definition changes', async () => {
+    const { rerender } = render(
+      <MoonReleaseTray
+        release={release}
+        payload={buildPayload('Draft the initial response.')}
+        workflowId="wf_alpha"
+        onClose={() => undefined}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Preview plan' }));
+
+    await screen.findAllByText('Planned draft');
+    expect(screen.getByRole('button', { name: 'Dispatch' })).toBeEnabled();
+
+    rerender(
+      <MoonReleaseTray
+        release={release}
+        payload={buildPayload('Draft the updated response with routing notes.')}
+        workflowId="wf_alpha"
+        onClose={() => undefined}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('The workflow changed after preview. Preview plan again before dispatch.')).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole('button', { name: 'Preview plan' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Dispatch' })).toBeDisabled();
+    expect(planDefinition).toHaveBeenCalledTimes(1);
+  });
+
+  test('plans and dispatches graph-backed workflows through the canonical build_graph path', async () => {
+    buildControllerMocks.planDefinition.mockResolvedValue({
+      compiled_spec: {
+        jobs: [{ label: 'Planned fetch', agent: 'integration/webhook/post' }],
+      },
+    });
+
+    render(
+      <MoonReleaseTray
+        release={release}
+        payload={buildGraphPayload()}
+        workflowId={null}
+        onClose={() => undefined}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Preview plan' }));
+
+    await waitFor(() => {
+      expect(buildControllerMocks.planDefinition).toHaveBeenCalledTimes(1);
+    });
+    expect(buildControllerMocks.planDefinition).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Graph Alpha',
+      buildGraph: buildGraphPayload().build_graph,
+    }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Dispatch' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirm Release' }));
+
+    await waitFor(() => {
+      expect(buildControllerMocks.createWorkflow).toHaveBeenCalledWith(
+        'Graph Alpha',
+        expect.objectContaining({
+          buildGraph: buildGraphPayload().build_graph,
+        }),
+      );
+    });
+    expect(buildControllerMocks.commitDefinition).toHaveBeenCalledWith(
+      'wf_created',
+      expect.objectContaining({
+        title: 'Graph Alpha',
+        buildGraph: buildGraphPayload().build_graph,
+      }),
+    );
+    expect(buildControllerMocks.triggerWorkflow).toHaveBeenCalledWith('wf_created');
+  });
+});

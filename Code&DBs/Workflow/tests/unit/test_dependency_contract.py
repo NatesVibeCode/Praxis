@@ -125,12 +125,79 @@ def test_default_manifest_exposes_the_api_server_subset(monkeypatch) -> None:
     assert api_report["required_count"] == 4
     assert [pkg["distribution"] for pkg in api_report["packages"]] == [
         "asyncpg",
-        "fastapi",
         "pydantic",
+        "fastapi",
         "uvicorn",
     ]
     assert runtime_report["ok"] is True
     assert runtime_report["required_count"] == 11
+
+
+def test_dependency_truth_report_strips_version_pins_from_distribution_names(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    manifest = tmp_path / "requirements.runtime.txt"
+    manifest.write_text(
+        "\n".join(
+            [
+                "# scopes: api_server",
+                "asyncpg==0.31.0",
+                "google-genai==1.70.0",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    versions = {
+        "asyncpg": "0.31.0",
+        "google-genai": "1.70.0",
+    }
+
+    monkeypatch.setattr(dependency_contract.importlib.util, "find_spec", lambda name: object())
+    monkeypatch.setattr(
+        dependency_contract.importlib.metadata,
+        "version",
+        lambda dist: versions[dist],
+    )
+
+    report = dependency_contract.dependency_truth_report(
+        scope="api_server",
+        manifest_path=manifest,
+    )
+
+    assert [pkg["requirement"] for pkg in report["packages"]] == [
+        "asyncpg==0.31.0",
+        "google-genai==1.70.0",
+    ]
+    assert [pkg["distribution"] for pkg in report["packages"]] == [
+        "asyncpg",
+        "google-genai",
+    ]
+
+
+def test_requirements_for_scope_returns_exact_requirement_lines(tmp_path: Path) -> None:
+    manifest = tmp_path / "requirements.runtime.txt"
+    manifest.write_text(
+        "\n".join(
+            [
+                "# scopes: api_server",
+                "asyncpg==0.31.0",
+                "# scopes: workflow_worker",
+                "openai==2.24.0",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert dependency_contract.requirements_for_scope(
+        scope="api_server",
+        manifest_path=manifest,
+    ) == ("asyncpg==0.31.0",)
+    assert dependency_contract.requirements_for_scope(
+        scope="workflow_worker",
+        manifest_path=manifest,
+    ) == ("openai==2.24.0",)
 
 
 def test_dependency_truth_report_uses_manifest_and_import_mapping(

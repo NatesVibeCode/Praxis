@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { HistoryMode } from './dashboard/operatingModelSurfaceState';
 import { APP_CONFIG } from './config';
 import type { PraxisOpenTabDetail } from './praxis/events';
@@ -19,9 +19,15 @@ import {
   type DynamicTab,
   type ShellHistoryPayload,
   type ShellState,
-  type StaticTabId,
 } from './shell/state';
 import { isLauncherRoute } from './shell/routes';
+import {
+  buildShellNavigationItems,
+  buildShellTabs,
+  resolveActiveShellSurface,
+} from './shell/surfaceRegistry';
+import { MenuPanel, type MenuSection } from './menu';
+import './styles/app-shell.css';
 
 class AppErrorBoundary extends React.Component<React.PropsWithChildren, { error: Error | null }> {
   state = { error: null as Error | null };
@@ -37,26 +43,18 @@ class AppErrorBoundary extends React.Component<React.PropsWithChildren, { error:
   render() {
     if (this.state.error) {
       return (
-        <div style={{
-          minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-          padding: 32, background: 'var(--bg)', color: 'var(--text)',
-        }}>
-          <div style={{
-            width: 'min(560px, 100%)', display: 'flex', flexDirection: 'column', gap: 16,
-            padding: 32, background: 'var(--bg-card)', border: '1px solid var(--border)',
-            borderRadius: 10, boxShadow: 'var(--shadow-modal)',
-          }}>
-            <div style={{ fontSize: 20, fontWeight: 700 }}>Something broke.</div>
-            <details style={{ padding: 16, background: 'var(--bg-alt, var(--bg))', border: '1px solid var(--border)', borderRadius: 8 }}>
-              <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Error details</summary>
-              <pre style={{ margin: '8px 0 0', whiteSpace: 'pre-wrap', fontFamily: 'var(--font-mono)', color: 'var(--danger)' }}>
-                {this.state.error.message}
-              </pre>
+        <div className="app-shell__crash">
+          <div className="app-shell__crash-card">
+            <div className="app-shell__crash-kicker">Surface error</div>
+            <div className="app-shell__crash-title">Something broke.</div>
+            <p className="app-shell__crash-copy">
+              The app shell caught a runtime error before it could take the rest of the UI down.
+            </p>
+            <details className="app-shell__crash-details">
+              <summary>Inspect error details</summary>
+              <pre>{this.state.error.stack || this.state.error.message}</pre>
             </details>
-            <button type="button" onClick={() => window.location.reload()} style={{
-              alignSelf: 'flex-start', padding: '10px 16px', borderRadius: 8,
-              border: 'none', background: 'var(--accent)', color: '#000', cursor: 'pointer', fontWeight: 600,
-            }}>
+            <button type="button" onClick={() => window.location.reload()} className="app-shell__crash-action">
               Reload
             </button>
           </div>
@@ -69,24 +67,20 @@ class AppErrorBoundary extends React.Component<React.PropsWithChildren, { error:
 
 const Dashboard = React.lazy(() =>
   import('./dashboard/Dashboard').then(m => ({ default: m.Dashboard })).catch(() => ({
-    default: () => (
-      <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: 'var(--bg)', color: 'var(--text-muted)' }}>
-        Overview unavailable.
-      </div>
-    )
+    default: () => <SurfaceFallback title="Overview unavailable." copy="The dashboard failed to load." />
   }))
 );
 
 
 const MoonBuildPage = React.lazy(() =>
   import('./moon/MoonBuildPage').then(m => ({ default: m.MoonBuildPage })).catch(() => ({
-    default: () => <div style={{ padding: 32, color: 'var(--text-muted)' }}>Moon Build loading...</div>
+    default: () => <SurfacePlaceholder title="Moon Build loading..." />
   }))
 );
 
 const RunDetailView = React.lazy(() =>
   import('./dashboard/RunDetailView').then(m => ({ default: m.RunDetailView })).catch(() => ({
-    default: () => <div style={{ padding: 32, color: 'var(--text-muted)' }}>Run detail view loading...</div>
+    default: () => <SurfacePlaceholder title="Run detail view loading..." />
   }))
 );
 
@@ -98,42 +92,40 @@ const ChatPanel = React.lazy(() =>
 
 const ManifestEditorPage = React.lazy(() =>
   import('./grid/ManifestEditorPage').then(m => ({ default: m.ManifestEditorPage })).catch(() => ({
-    default: () => <div style={{ padding: 32, color: 'var(--text-muted)' }}>Manifest editor loading...</div>
+    default: () => <SurfacePlaceholder title="Manifest editor loading..." />
   }))
 );
+
+function SurfacePlaceholder({ title }: { title: string }) {
+  return (
+    <div className="app-shell__fallback">
+      <div className="app-shell__fallback-kicker">Loading</div>
+      <div className="app-shell__fallback-title">{title}</div>
+    </div>
+  );
+}
+
+function SurfaceFallback({ title, copy }: { title: string; copy: string }) {
+  return (
+    <div className="app-shell__fallback app-shell__fallback--error">
+      <div className="app-shell__fallback-kicker">Unavailable</div>
+      <div className="app-shell__fallback-title">{title}</div>
+      <p className="app-shell__fallback-copy">{copy}</p>
+    </div>
+  );
+}
 
 function initialShellPayload(): ShellHistoryPayload {
   return parseShellHistoryPayload(window.history.state) ?? parseShellLocationState(window.location.search);
 }
 
-function baseTabLabel(tabId: StaticTabId): string {
-  if (tabId === 'build') return 'Build';
-  return APP_CONFIG.name;
-}
-
-function tabButtonStyle(active: boolean): React.CSSProperties {
-  return {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 8,
-    padding: '8px 12px',
-    borderRadius: 10,
-    border: active ? '1px solid var(--accent)' : '1px solid var(--border)',
-    background: active ? 'rgba(88,166,255,0.12)' : 'var(--bg-card)',
-    color: 'var(--text)',
-    cursor: 'pointer',
-    fontSize: 13,
-    fontWeight: 600,
-    flexShrink: 0,
-  };
-}
-
-function AppShell() {
+export function AppShell() {
   const initialPayload = initialShellPayload();
   const [state, setState] = useState<ShellState>(initialPayload.shellState);
   const [chatOpen, setChatOpen] = useState(initialPayload.chatOpen);
-  const [seedMenuOpen, setSeedMenuOpen] = useState(false);
+  const [commandMenuOpen, setCommandMenuOpen] = useState(false);
   const [creatingSeedId, setCreatingSeedId] = useState<string | null>(null);
+  const commandButtonRef = useRef<HTMLButtonElement | null>(null);
 
   const syncHistory = useCallback((nextState: ShellState, nextChatOpen: boolean, historyMode: HistoryMode) => {
     const payload: ShellHistoryPayload = { shellState: nextState, chatOpen: nextChatOpen };
@@ -308,9 +300,14 @@ function AppShell() {
     const onKey = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase();
       if (event.metaKey || event.ctrlKey) {
-        if (key === 'k') {
+        if (key === 'k' && !event.shiftKey) {
           event.preventDefault();
           setChatOpen((open) => !open);
+          setCommandMenuOpen(false);
+        }
+        if (key === 'k' && event.shiftKey) {
+          event.preventDefault();
+          setCommandMenuOpen((open) => !open);
         }
         if (key === 'n') {
           event.preventDefault();
@@ -318,6 +315,10 @@ function AppShell() {
         }
       }
       if (event.key === 'Escape') {
+        if (commandMenuOpen) {
+          setCommandMenuOpen(false);
+          return;
+        }
         if (chatOpen) {
           setChatOpen(false);
           return;
@@ -327,12 +328,17 @@ function AppShell() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [activateTab, chatOpen, openBuild]);
+  }, [activateTab, chatOpen, commandMenuOpen, openBuild]);
 
   const activeDynamicTab = useMemo(
     () => state.dynamicTabs.find((tab) => tab.id === state.activeTabId) || null,
     [state.activeTabId, state.dynamicTabs],
   );
+  const activeSurface = useMemo(
+    () => resolveActiveShellSurface(state, activeDynamicTab),
+    [activeDynamicTab, state],
+  );
+  const activeContext = activeSurface.context;
 
   const createSeedTab = useCallback(async (seedId: string) => {
     const seed = seedBundles.find((candidate) => candidate.id === seedId);
@@ -354,7 +360,7 @@ function AppShell() {
         throw new Error(payload?.error || `Failed to create ${seed.label}`);
       }
       openManifest(payload.id, 'main');
-      setSeedMenuOpen(false);
+      setCommandMenuOpen(false);
     } catch (error) {
       console.error(error);
     } finally {
@@ -362,8 +368,45 @@ function AppShell() {
     }
   }, [openManifest]);
 
+  const commandMenuSections = useMemo<MenuSection[]>(() => {
+    const createItems = [
+      {
+        id: 'create:builder',
+        label: 'Blank Builder',
+        description: 'Start with an empty workflow graph and wire the steps directly.',
+        keywords: ['builder', 'workflow', 'moon', 'new', 'blank'],
+        shortcut: 'Ctrl+N',
+        onSelect: () => openBuild({ workflowId: null, intent: null, seed: null, view: 'moon' }),
+      },
+      ...seedBundles.map((seed) => ({
+        id: `seed:${seed.id}`,
+        label: seed.label,
+        description: seed.description,
+        keywords: ['seed', 'starter', 'surface', seed.id, seed.label],
+        meta: creatingSeedId === seed.id ? 'Creating…' : 'Surface',
+        disabled: creatingSeedId !== null,
+        keepOpen: true,
+        onSelect: () => {
+          void createSeedTab(seed.id);
+        },
+      })),
+    ];
+
+    const navigateItems = buildShellNavigationItems({
+      state,
+      chatOpen,
+      activateTab,
+      setChatOpen,
+    });
+
+    return [
+      { id: 'create', title: 'Create', items: createItems },
+      { id: 'navigate', title: 'Navigate', items: navigateItems },
+    ];
+  }, [activateTab, chatOpen, createSeedTab, creatingSeedId, openBuild, setChatOpen, state]);
+
   const renderActiveTab = () => {
-    if (state.activeTabId === 'dashboard') {
+    if (activeSurface.category === 'static' && activeSurface.id === 'dashboard') {
       return (
         <Dashboard
           onEditWorkflow={(id: string) => openBuild({ workflowId: id, intent: null, seed: null, view: 'moon' })}
@@ -376,7 +419,7 @@ function AppShell() {
       );
     }
 
-    if (state.activeTabId === 'build') {
+    if (activeSurface.category === 'static' && activeSurface.id === 'build') {
       return (
         <MoonBuildPage
           workflowId={state.buildWorkflowId}
@@ -388,182 +431,118 @@ function AppShell() {
       );
     }
 
-    if (activeDynamicTab?.kind === 'run-detail' && activeDynamicTab.runId) {
+    if (activeSurface.category === 'dynamic' && activeSurface.kind === 'run-detail' && activeSurface.dynamicTab.runId) {
       return (
         <RunDetailView
-          runId={activeDynamicTab.runId}
+          runId={activeSurface.dynamicTab.runId}
           onBack={() => activateTab('dashboard')}
         />
       );
     }
 
-    if (activeDynamicTab?.kind === 'manifest' && activeDynamicTab.manifestId) {
+    if (activeSurface.category === 'dynamic' && activeSurface.kind === 'manifest' && activeSurface.dynamicTab.manifestId) {
       return (
         <ManifestBundleView
-          manifestId={activeDynamicTab.manifestId}
-          tabId={activeDynamicTab.manifestTabId}
+          manifestId={activeSurface.dynamicTab.manifestId}
+          tabId={activeSurface.dynamicTab.manifestTabId}
         />
       );
     }
 
-    if (activeDynamicTab?.kind === 'manifest-editor' && activeDynamicTab.manifestId) {
-      return <ManifestEditorPage manifestId={activeDynamicTab.manifestId} />;
+    if (activeSurface.category === 'dynamic' && activeSurface.kind === 'manifest-editor' && activeSurface.dynamicTab.manifestId) {
+      return <ManifestEditorPage manifestId={activeSurface.dynamicTab.manifestId} />;
     }
 
-    return <div style={{ padding: 32, color: 'var(--text-muted)' }}>Select a tab to continue.</div>;
+    return <SurfaceFallback title="No tab selected" copy="Select a tab to continue." />;
   };
 
-  const tabs = [
-    { id: 'dashboard', label: baseTabLabel('dashboard'), closable: false },
-    { id: 'build', label: baseTabLabel('build'), closable: false },
-    ...state.dynamicTabs.map((tab) => ({ id: tab.id, label: tab.label, closable: tab.closable })),
-  ];
+  const tabs = useMemo(() => buildShellTabs(state), [state]);
 
   return (
-    <React.Suspense fallback={<div style={{ background: 'var(--bg)', minHeight: '100vh' }} />}>
-      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-          padding: '10px 16px',
-          borderBottom: '1px solid var(--border)',
-          background: 'var(--bg)',
-          position: 'sticky',
-          top: 0,
-          zIndex: 20,
-        }}>
-          <div style={{ display: 'flex', gap: 8, overflowX: 'auto', flex: 1, minWidth: 0, paddingBottom: 2 }}>
-            {tabs.map((tab) => {
-              const active = tab.id === state.activeTabId;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => activateTab(tab.id)}
-                  style={tabButtonStyle(active)}
-                >
-                  <span>{tab.label}</span>
-                  {tab.closable && (
-                    <span
-                      role="button"
-                      aria-label={`Close ${tab.label}`}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        closeTab(tab.id);
-                      }}
-                      style={{ color: 'var(--text-muted)', cursor: 'pointer', lineHeight: 1 }}
-                    >
-                      ×
-                    </span>
-                  )}
-                </button>
-              );
-            })}
+    <React.Suspense fallback={<SurfacePlaceholder title="Loading workspace..." />}>
+      <div className="app-shell">
+        <header className="app-shell__chrome">
+          <div className="app-shell__identity">
+            <div className="app-shell__identity-mark" aria-hidden="true" />
+            <div className="app-shell__identity-copy">
+              <span>{APP_CONFIG.suiteName}</span>
+              <strong>{APP_CONFIG.name}</strong>
+              <em>{activeContext.label}</em>
+              <p>{activeContext.detail}</p>
+            </div>
           </div>
-          <div style={{ position: 'relative', flexShrink: 0 }}>
+
+          <div className="app-shell__nav">
+            <div className="app-shell__tabstrip" role="tablist" aria-label="Praxis views">
+              {tabs.map((tab) => {
+                const active = tab.id === state.activeTabId;
+                return (
+                  <div
+                    key={tab.id}
+                    className={`app-shell__tab ${active ? 'app-shell__tab--active' : ''}`}
+                  >
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={active}
+                      onClick={() => activateTab(tab.id)}
+                      className="app-shell__tab-button"
+                    >
+                      <span className="app-shell__tab-kind">{tab.kind}</span>
+                      <span className="app-shell__tab-label">{tab.label}</span>
+                    </button>
+                    {tab.closable && (
+                      <button
+                        type="button"
+                        aria-label={`Close ${tab.label}`}
+                        onClick={() => closeTab(tab.id)}
+                        className="app-shell__tab-close"
+                      >
+                        x
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="app-shell__actions">
+            <div className="app-shell__menu">
+              <button
+                ref={commandButtonRef}
+                type="button"
+                onClick={() => setCommandMenuOpen((open) => !open)}
+                className={`app-shell__action-button ${commandMenuOpen ? 'app-shell__action-button--active' : ''}`}
+                aria-haspopup="dialog"
+                aria-expanded={commandMenuOpen}
+              >
+                <span className="app-shell__action-kicker">Workspace</span>
+                <span>New</span>
+              </button>
+            </div>
             <button
               type="button"
-              onClick={() => setSeedMenuOpen((open) => !open)}
-              style={{
-                padding: '8px 12px',
-                borderRadius: 10,
-                border: seedMenuOpen ? '1px solid var(--accent)' : '1px solid var(--border)',
-                background: seedMenuOpen ? 'rgba(88,166,255,0.12)' : 'var(--bg-card)',
-                color: 'var(--text)',
-                cursor: 'pointer',
-                fontSize: 13,
-                fontWeight: 600,
-              }}
+              onClick={() => setChatOpen((open) => !open)}
+              className={`app-shell__action-button ${chatOpen ? 'app-shell__action-button--active' : ''}`}
             >
-              + Tab
+              <span className="app-shell__action-kicker">Cmd/Ctrl + K</span>
+              <span>Chat</span>
             </button>
-            {seedMenuOpen && (
-              <div style={{
-                position: 'absolute',
-                top: 'calc(100% + 8px)',
-                right: 0,
-                width: 300,
-                padding: 8,
-                borderRadius: 12,
-                border: '1px solid var(--border)',
-                background: 'var(--bg-card)',
-                boxShadow: 'var(--shadow-modal)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 8,
-              }}>
-                {seedBundles.map((seed) => (
-                  <button
-                    key={seed.id}
-                    type="button"
-                    onClick={() => void createSeedTab(seed.id)}
-                    disabled={creatingSeedId !== null}
-                    style={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'flex-start',
-                      gap: 4,
-                      padding: '10px 12px',
-                      borderRadius: 10,
-                      border: '1px solid var(--border)',
-                      background: 'var(--bg)',
-                      color: 'var(--text)',
-                      cursor: creatingSeedId !== null ? 'not-allowed' : 'pointer',
-                    }}
-                  >
-                    <span style={{ fontSize: 13, fontWeight: 700 }}>
-                      {creatingSeedId === seed.id ? `Creating ${seed.label}...` : seed.label}
-                    </span>
-                    <span style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'left' }}>
-                      {seed.description}
-                    </span>
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSeedMenuOpen(false);
-                    openBuild({ workflowId: null, intent: null, seed: null, view: 'moon' });
-                  }}
-                  style={{
-                    padding: '10px 12px',
-                    borderRadius: 10,
-                    border: '1px solid var(--border)',
-                    background: 'var(--bg)',
-                    color: 'var(--text)',
-                    cursor: 'pointer',
-                    fontSize: 13,
-                    fontWeight: 600,
-                    textAlign: 'left',
-                  }}
-                >
-                  Open Builder
-                </button>
-              </div>
-            )}
           </div>
-          <button
-            type="button"
-            onClick={() => setChatOpen((open) => !open)}
-            style={{
-              padding: '8px 12px',
-              borderRadius: 10,
-              border: chatOpen ? '1px solid var(--accent)' : '1px solid var(--border)',
-              background: chatOpen ? 'rgba(88,166,255,0.12)' : 'var(--bg-card)',
-              color: 'var(--text)',
-              cursor: 'pointer',
-              fontSize: 13,
-              fontWeight: 600,
-              flexShrink: 0,
-            }}
-          >
-            Chat
-          </button>
-        </div>
-        <div style={{ flex: 1, minHeight: 0 }}>
+        </header>
+        <MenuPanel
+          open={commandMenuOpen}
+          anchorRect={commandButtonRef.current?.getBoundingClientRect() ?? null}
+          title="Open or Create"
+          subtitle="Search tabs, surfaces, and shell actions."
+          searchPlaceholder="Search tabs, surfaces, and actions…"
+          sections={commandMenuSections}
+          onClose={() => setCommandMenuOpen(false)}
+        />
+        <main className="app-shell__content">
           {renderActiveTab()}
-        </div>
+        </main>
       </div>
       <ChatPanel open={chatOpen} onClose={() => setChatOpen(false)} />
     </React.Suspense>

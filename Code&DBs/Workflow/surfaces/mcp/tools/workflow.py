@@ -3,11 +3,24 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+import threading
 import uuid
 from typing import Any
 
+from storage.postgres.connection import resolve_workflow_database_url
+from storage.postgres.validators import PostgresConfigurationError
+
 from runtime.failure_projection import project_failure_classification
+from runtime.claims import ClaimLeaseProposalSnapshot
+from runtime.domain import RunState
+from runtime.subscriptions import (
+    WorkerInboxFact,
+    WorkerSubscriptionBatch,
+    WorkerSubscriptionCursor,
+)
+from surfaces.workflow_bridge import WorkflowBridge, WorkflowClaimableWork, build_live_workflow_bridge
 from ..subsystems import _subs, REPO_ROOT
+from ..helpers import _serialize
 
 
 _TERMINAL_STATUSES = {"succeeded", "failed", "cancelled", "dead_letter"}
@@ -27,6 +40,155 @@ def _workflow_spec_mod():
     import runtime.workflow_spec as spec_mod
 
     return spec_mod
+
+
+def _workflow_database_url() -> str:
+    postgres_env = getattr(_subs, "_postgres_env", None)
+    env: dict[str, str] = {}
+    if callable(postgres_env):
+        try:
+            env = dict(postgres_env() or {})
+        except Exception:
+            env = {}
+    try:
+        if env.get("WORKFLOW_DATABASE_URL"):
+            return resolve_workflow_database_url(env=env)
+        return resolve_workflow_database_url()
+    except PostgresConfigurationError as exc:
+        raise RuntimeError("WORKFLOW_DATABASE_URL is required to inspect workflow bridge state") from exc
+
+
+def _build_workflow_bridge() -> WorkflowBridge:
+    """Build the real workflow bridge over live Postgres-backed authorities."""
+
+    return build_live_workflow_bridge(_workflow_database_url())
+
+
+def _text_or_none(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _int_or_none(value: Any, *, field_name: str) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError(f"{field_name} must be an integer")
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be an integer") from exc
+
+
+def _datetime_or_none(value: Any, *, field_name: str) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(str(value))
+    except ValueError as exc:
+        raise ValueError(f"{field_name} must be an ISO datetime string") from exc
+
+
+def _run_state_from_value(value: Any) -> RunState:
+    text = str(value or "").strip()
+    if text.startswith("RunState."):
+        text = text.split(".", 1)[1].lower()
+    return RunState(text)
+
+
+def _deserialize_claimable_work(payload: dict[str, Any]) -> WorkflowClaimableWork:
+    route_snapshot_data = dict(payload.get("route_snapshot") or {})
+    inbox_batch_data = dict(payload.get("inbox_batch") or {})
+
+    route_snapshot = ClaimLeaseProposalSnapshot(
+        run_id=str(route_snapshot_data.get("run_id") or ""),
+        workflow_id=str(route_snapshot_data.get("workflow_id") or ""),
+        request_id=str(route_snapshot_data.get("request_id") or ""),
+        current_state=_run_state_from_value(route_snapshot_data.get("current_state")),
+        claim_id=str(route_snapshot_data.get("claim_id") or ""),
+        lease_id=_text_or_none(route_snapshot_data.get("lease_id")),
+        proposal_id=_text_or_none(route_snapshot_data.get("proposal_id")),
+        attempt_no=int(route_snapshot_data.get("attempt_no") or 0),
+        transition_seq=int(route_snapshot_data.get("transition_seq") or 0),
+        sandbox_group_id=_text_or_none(route_snapshot_data.get("sandbox_group_id")),
+        sandbox_session_id=_text_or_none(route_snapshot_data.get("sandbox_session_id")),
+        share_mode=str(route_snapshot_data.get("share_mode") or ""),
+        reuse_reason_code=_text_or_none(route_snapshot_data.get("reuse_reason_code")),
+        last_event_id=_text_or_none(route_snapshot_data.get("last_event_id")),
+    )
+
+    cursor_data = dict(inbox_batch_data.get("cursor") or {})
+    next_cursor_data = dict(inbox_batch_data.get("next_cursor") or {})
+    cursor = WorkerSubscriptionCursor(
+        subscription_id=str(cursor_data.get("subscription_id") or ""),
+        run_id=str(cursor_data.get("run_id") or ""),
+        last_acked_evidence_seq=_int_or_none(
+            cursor_data.get("last_acked_evidence_seq"),
+            field_name="work.inbox_batch.cursor.last_acked_evidence_seq",
+        ),
+    )
+    next_cursor = WorkerSubscriptionCursor(
+        subscription_id=str(next_cursor_data.get("subscription_id") or cursor.subscription_id),
+        run_id=str(next_cursor_data.get("run_id") or cursor.run_id),
+        last_acked_evidence_seq=_int_or_none(
+            next_cursor_data.get("last_acked_evidence_seq"),
+            field_name="work.inbox_batch.next_cursor.last_acked_evidence_seq",
+        ),
+    )
+
+    facts = []
+    for fact_data in inbox_batch_data.get("facts") or []:
+        if not isinstance(fact_data, dict):
+            continue
+        facts.append(
+            WorkerInboxFact(
+                inbox_fact_id=str(fact_data.get("inbox_fact_id") or ""),
+                subscription_id=str(fact_data.get("subscription_id") or cursor.subscription_id),
+                authority_table=str(fact_data.get("authority_table") or ""),
+                authority_id=str(fact_data.get("authority_id") or ""),
+                envelope_kind=str(fact_data.get("envelope_kind") or ""),
+                workflow_id=str(fact_data.get("workflow_id") or ""),
+                run_id=str(fact_data.get("run_id") or cursor.run_id),
+                request_id=str(fact_data.get("request_id") or ""),
+                evidence_seq=int(fact_data.get("evidence_seq") or 0),
+                transition_seq=int(fact_data.get("transition_seq") or 0),
+                authority_recorded_at=_datetime_or_none(
+                    fact_data.get("authority_recorded_at"),
+                    field_name="work.inbox_batch.facts[].authority_recorded_at",
+                )
+                or datetime.now(timezone.utc),
+                envelope=dict(fact_data.get("envelope") or {}),
+            )
+        )
+
+    return WorkflowClaimableWork(
+        route_snapshot=route_snapshot,
+        inbox_batch=WorkerSubscriptionBatch(
+            cursor=cursor,
+            next_cursor=next_cursor,
+            facts=tuple(facts),
+            has_more=bool(inbox_batch_data.get("has_more", False)),
+        ),
+        claimable=bool(payload.get("claimable", False)),
+    )
+
+
+def _normalize_run_state_strings(value: Any) -> Any:
+    if isinstance(value, dict):
+        normalized = {key: _normalize_run_state_strings(item) for key, item in value.items()}
+        route_snapshot = normalized.get("route_snapshot")
+        if isinstance(route_snapshot, dict):
+            current_state = route_snapshot.get("current_state")
+            if isinstance(current_state, str) and current_state.startswith("RunState."):
+                route_snapshot["current_state"] = current_state.split(".", 1)[1].lower()
+        return normalized
+    if isinstance(value, list):
+        return [_normalize_run_state_strings(item) for item in value]
+    return value
 
 
 def _structured_runtime_error(exc: Exception, *, action: str) -> dict[str, Any]:
@@ -91,6 +253,9 @@ def _delivery_metadata(*, emitter: Any | None = None, wait_requested: bool | Non
 
 def _classify_job_failure(job: dict) -> dict[str, Any] | None:
     """Classify a failed job and return machine-readable failure metadata."""
+    job_status = str(job.get("status") or "").strip().lower()
+    if job_status not in {"failed", "dead_letter"}:
+        return None
     failure_category = str(job.get("failure_category") or "").strip()
     if failure_category:
         return project_failure_classification(
@@ -247,6 +412,9 @@ def _run_status_payload(
         "jobs": jobs_summary,
         "elapsed_seconds": elapsed,
     }
+    lineage = status_data.get("lineage")
+    if isinstance(lineage, dict) and lineage:
+        payload["lineage"] = lineage
     cost = status_data.get("total_cost_usd", 0.0)
     if cost:
         payload["total_cost_usd"] = cost
@@ -528,12 +696,11 @@ def _dashboard_view_from_status_data(
         now=current,
     )
 
-    completed_count = 0
-    pending_count = 0
+    observed_completed = 0
     running_count = 0
-    total_cost = 0.0
-    total_tok_in = 0
-    total_tok_out = 0
+    observed_total_cost = 0.0
+    observed_tok_in = 0
+    observed_tok_out = 0
     job_views: list[dict[str, Any]] = []
 
     for raw_job in jobs:
@@ -542,12 +709,12 @@ def _dashboard_view_from_status_data(
         job = dict(raw_job)
         status = str(job.get("status") or "pending")
         label = str(job.get("label") or "?")
-        total_cost += float(job.get("cost_usd") or 0.0)
-        total_tok_in += int(job.get("token_input") or 0)
-        total_tok_out += int(job.get("token_output") or 0)
+        observed_total_cost += float(job.get("cost_usd") or 0.0)
+        observed_tok_in += int(job.get("token_input") or 0)
+        observed_tok_out += int(job.get("token_output") or 0)
 
         if status in _TERMINAL_STATUSES:
-            completed_count += 1
+            observed_completed += 1
             job_views.append(
                 {
                     "kind": "terminal",
@@ -576,16 +743,11 @@ def _dashboard_view_from_status_data(
             )
             continue
 
-        pending_count += 1
-
-    if not jobs:
-        total_cost = float(status_data.get("total_cost_usd") or 0.0)
-        total_tok_in = int(status_data.get("total_tokens_in") or 0)
-        total_tok_out = int(status_data.get("total_tokens_out") or 0)
-
-    observed_jobs = completed_count + running_count + pending_count
-    if observed_jobs < resolved_total_jobs:
-        pending_count += resolved_total_jobs - observed_jobs
+    completed_count = int(status_data.get("completed_jobs") or observed_completed)
+    total_cost = float(status_data.get("total_cost_usd") or observed_total_cost)
+    total_tok_in = int(status_data.get("total_tokens_in") or observed_tok_in)
+    total_tok_out = int(status_data.get("total_tokens_out") or observed_tok_out)
+    pending_count = max(resolved_total_jobs - completed_count - running_count, 0)
 
     return {
         "spec_name": resolved_spec_name,
@@ -724,9 +886,10 @@ def _poll_run_to_completion(
     poll_interval: float = _POLL_INTERVAL_MIN_SECONDS,
     max_poll_seconds: float = 3600.0,
 ) -> dict[str, Any]:
-    """Poll a workflow run until terminal, emitting a live dashboard panel after each job batch."""
+    """Track a workflow run until terminal, waking on workflow notifications when possible."""
     import time as _time
     from runtime.workflow.unified import get_run_status
+    from runtime.workflow_notifications import start_run_wakeup_listener
 
     start_mono = _time.monotonic()
 
@@ -734,57 +897,61 @@ def _poll_run_to_completion(
         emitter.log(f"Launched {spec_name} ({total_jobs} jobs) — run_id={run_id}")
         emitter.emit(progress=0, total=total_jobs, message=f"Submitted {spec_name}")
 
-    seen_terminal: set[str] = set()
     current_interval = max(_POLL_INTERVAL_MIN_SECONDS, float(poll_interval))
     last_signature: tuple[Any, ...] | None = None
     latest_status_data: dict[str, Any] | None = None
     deadline = start_mono + max_poll_seconds
+    wakeup_event = threading.Event()
+    listener = start_run_wakeup_listener(
+        run_id=run_id,
+        wakeup_event=wakeup_event,
+    )
 
-    while _time.monotonic() < deadline:
-        _time.sleep(current_interval)
-        status_data = get_run_status(pg, run_id)
-        if status_data is None:
-            current_interval = _next_poll_interval(current_interval, progress_changed=False)
-            continue
-        latest_status_data = status_data
+    try:
+        while _time.monotonic() < deadline:
+            if listener is not None:
+                wakeup_event.wait(timeout=current_interval)
+                wakeup_event.clear()
+            else:
+                _time.sleep(current_interval)
+            status_data = get_run_status(pg, run_id)
+            if status_data is None:
+                current_interval = _next_poll_interval(current_interval, progress_changed=False)
+                continue
+            latest_status_data = status_data
 
-        new_terminal: list[str] = []
-        for j in status_data.get("jobs", []):
-            jlabel = j.get("label", "")
-            jstatus = j.get("status", "")
-            if jstatus in _TERMINAL_STATUSES and jlabel not in seen_terminal:
-                seen_terminal.add(jlabel)
-                new_terminal.append(jlabel)
+            signature = _poll_progress_signature(status_data)
+            progress_changed = signature != last_signature
+            last_signature = signature
 
-        signature = _poll_progress_signature(status_data)
-        progress_changed = signature != last_signature or bool(new_terminal)
-        last_signature = signature
+            if progress_changed and emitter is not None:
+                elapsed = _time.monotonic() - start_mono
+                panel = _render_dashboard_panel_from_view(
+                    _dashboard_view_from_status_data(
+                        status_data,
+                        spec_name=spec_name,
+                        total_jobs=total_jobs,
+                        elapsed_seconds=elapsed,
+                    ),
+                    run_id=run_id,
+                )
+                emitter.log(panel)
+                emitter.emit(
+                    progress=int(status_data.get("completed_jobs") or 0),
+                    total=total_jobs,
+                    message=f"{int(status_data.get('completed_jobs') or 0)}/{total_jobs} jobs complete",
+                )
 
-        if new_terminal and emitter is not None:
-            elapsed = _time.monotonic() - start_mono
-            panel = _render_dashboard_panel_from_view(
-                _dashboard_view_from_status_data(
-                    status_data,
-                    spec_name=spec_name,
-                    total_jobs=total_jobs,
-                    elapsed_seconds=elapsed,
-                ),
-                run_id=run_id,
+            run_status = status_data.get("status", "")
+            if run_status in _TERMINAL_STATUSES:
+                break
+            current_interval = _next_poll_interval(
+                current_interval,
+                progress_changed=progress_changed,
             )
-            emitter.log(panel)
-            emitter.emit(
-                progress=len(seen_terminal),
-                total=total_jobs,
-                message=f"{len(seen_terminal)}/{total_jobs} jobs complete",
-            )
-
-        run_status = status_data.get("status", "")
-        if run_status in _TERMINAL_STATUSES:
-            break
-        current_interval = _next_poll_interval(
-            current_interval,
-            progress_changed=progress_changed,
-        )
+    finally:
+        if listener is not None:
+            listener.stop()
 
     # Final dashboard + summary
     elapsed = _time.monotonic() - start_mono
@@ -823,7 +990,19 @@ def _poll_run_to_completion(
     return payload
 
 
-def _submit_workflow_via_service_bus(pg, *, spec_path: str, spec_name: str, total_jobs: int) -> dict[str, Any]:
+def _submit_workflow_via_service_bus(
+    pg,
+    *,
+    spec_path: str,
+    spec_name: str,
+    total_jobs: int,
+    run_id: str | None = None,
+    parent_run_id: str | None = None,
+    parent_job_label: str | None = None,
+    dispatch_reason: str | None = None,
+    lineage_depth: int | None = None,
+    force_fresh_run: bool = False,
+) -> dict[str, Any]:
     from runtime.control_commands import (
         render_workflow_submit_response,
         request_workflow_submit_command,
@@ -835,8 +1014,52 @@ def _submit_workflow_via_service_bus(pg, *, spec_path: str, spec_name: str, tota
         requested_by_ref="praxis_workflow.run",
         spec_path=spec_path,
         repo_root=str(REPO_ROOT),
+        run_id=run_id,
+        parent_run_id=parent_run_id,
+        parent_job_label=parent_job_label,
+        dispatch_reason=dispatch_reason,
+        lineage_depth=lineage_depth,
+        force_fresh_run=force_fresh_run,
     )
     return render_workflow_submit_response(
+        command,
+        spec_name=spec_name,
+        total_jobs=total_jobs,
+    )
+
+
+def _spawn_workflow_via_service_bus(
+    pg,
+    *,
+    spec_path: str,
+    spec_name: str,
+    total_jobs: int,
+    parent_run_id: str,
+    parent_job_label: str | None = None,
+    dispatch_reason: str,
+    run_id: str | None = None,
+    lineage_depth: int | None = None,
+    force_fresh_run: bool = False,
+) -> dict[str, Any]:
+    from runtime.control_commands import (
+        render_workflow_spawn_response,
+        request_workflow_spawn_command,
+    )
+
+    command = request_workflow_spawn_command(
+        pg,
+        requested_by_kind="mcp",
+        requested_by_ref="praxis_workflow.spawn",
+        spec_path=spec_path,
+        repo_root=str(REPO_ROOT),
+        parent_run_id=parent_run_id,
+        parent_job_label=parent_job_label,
+        dispatch_reason=dispatch_reason,
+        run_id=run_id,
+        lineage_depth=lineage_depth,
+        force_fresh_run=force_fresh_run,
+    )
+    return render_workflow_spawn_response(
         command,
         spec_name=spec_name,
         total_jobs=total_jobs,
@@ -950,6 +1173,84 @@ def tool_praxis_workflow(params: dict, _progress_emitter=None) -> dict:
             return inspect_job(pg, run_id, label)
         except Exception as exc:
             return _structured_runtime_error(exc, action="inspect")
+
+    if action == "claim":
+        subscription_id = str(params.get("subscription_id") or "").strip()
+        run_id = str(params.get("run_id") or "").strip()
+        if not subscription_id:
+            return {"error": "subscription_id is required for action='claim'"}
+        if not run_id:
+            return {"error": "run_id is required for action='claim'"}
+
+        limit = params.get("limit", 100)
+        try:
+            limit = max(1, int(limit))
+        except (TypeError, ValueError):
+            return {"error": "limit must be an integer for action='claim'"}
+
+        last_acked_evidence_seq = params.get("last_acked_evidence_seq")
+        try:
+            if last_acked_evidence_seq is not None:
+                last_acked_evidence_seq = int(last_acked_evidence_seq)
+        except (TypeError, ValueError):
+            return {"error": "last_acked_evidence_seq must be an integer when provided"}
+
+        try:
+            bridge = _build_workflow_bridge()
+            work = bridge.claimable_work(
+                cursor=WorkerSubscriptionCursor(
+                    subscription_id=subscription_id,
+                    run_id=run_id,
+                    last_acked_evidence_seq=last_acked_evidence_seq,
+                ),
+                limit=limit,
+            )
+            claimable_work = _serialize(work)
+            claimable_work = _normalize_run_state_strings(claimable_work)
+            if isinstance(claimable_work, dict):
+                claimable_work.setdefault("subscription_id", subscription_id)
+                claimable_work.setdefault("run_id", run_id)
+                claimable_work.setdefault("limit", limit)
+            return {
+                "routed_to": "workflow_bridge",
+                "view": "claimable_work",
+                "claimable_work": claimable_work,
+            }
+        except Exception as exc:
+            return _structured_runtime_error(exc, action="claim")
+
+    if action == "acknowledge":
+        raw_work = params.get("work")
+        if isinstance(raw_work, str):
+            try:
+                raw_work = json.loads(raw_work)
+            except json.JSONDecodeError as exc:
+                return {"error": f"work must be JSON if provided as a string: {exc}"}
+        if not isinstance(raw_work, dict):
+            return {"error": "work is required for action='acknowledge'"}
+
+        through_evidence_seq = params.get("through_evidence_seq")
+        try:
+            if through_evidence_seq is not None:
+                through_evidence_seq = int(through_evidence_seq)
+        except (TypeError, ValueError):
+            return {"error": "through_evidence_seq must be an integer when provided"}
+
+        try:
+            bridge = _build_workflow_bridge()
+            work = _deserialize_claimable_work(raw_work)
+            acknowledgement = bridge.acknowledge(
+                work=work,
+                through_evidence_seq=through_evidence_seq,
+            )
+            acknowledgement_payload = _normalize_run_state_strings(_serialize(acknowledgement))
+            return {
+                "routed_to": "workflow_bridge",
+                "view": "acknowledge",
+                "acknowledgement": acknowledgement_payload,
+            }
+        except Exception as exc:
+            return _structured_runtime_error(exc, action="acknowledge")
 
     # --- Cancel a workflow run ---
     if action == "cancel":
@@ -1090,11 +1391,11 @@ def tool_praxis_workflow(params: dict, _progress_emitter=None) -> dict:
     if not spec_path:
         return {"error": "spec_path is required"}
 
-    if action != "run":
+    if action not in {"run", "spawn", "claim", "acknowledge"}:
         return {
             "error": (
                 f"Unsupported action='{action}'. Expected one of: "
-                "run, status, inspect, cancel, list, notifications, retry, repair, chain."
+                "run, spawn, status, inspect, claim, acknowledge, cancel, list, notifications, retry, repair, chain."
             )
         }
 
@@ -1145,12 +1446,47 @@ def tool_praxis_workflow(params: dict, _progress_emitter=None) -> dict:
         spec_mod = _workflow_spec_mod()
         spec = spec_mod.WorkflowSpec.load(spec_path)
         total_jobs = len(getattr(spec, "jobs", []))
-        result = _submit_workflow_via_service_bus(
-            pg,
-            spec_path=spec_path,
-            spec_name=getattr(spec, "name", spec_path),
-            total_jobs=total_jobs,
-        )
+        run_id_override = str(params.get("run_id") or "").strip() or None
+        force_fresh_run = bool(params.get("force_fresh_run", False))
+        if action == "spawn":
+            parent_run_id = str(params.get("parent_run_id") or "").strip()
+            if not parent_run_id:
+                return {"error": "parent_run_id is required for action='spawn'"}
+            parent_job_label = str(params.get("parent_job_label") or "").strip() or None
+            dispatch_reason = str(params.get("dispatch_reason") or "").strip() or "manual.spawn"
+            lineage_depth = params.get("lineage_depth")
+            if lineage_depth is not None:
+                try:
+                    lineage_depth = max(int(lineage_depth), 0)
+                except (TypeError, ValueError):
+                    return {"error": "lineage_depth must be an integer when provided"}
+            spawn_kwargs: dict[str, Any] = {
+                "spec_path": spec_path,
+                "spec_name": getattr(spec, "name", spec_path),
+                "total_jobs": total_jobs,
+                "parent_run_id": parent_run_id,
+                "dispatch_reason": dispatch_reason,
+            }
+            if parent_job_label is not None:
+                spawn_kwargs["parent_job_label"] = parent_job_label
+            if run_id_override is not None:
+                spawn_kwargs["run_id"] = run_id_override
+            if lineage_depth is not None:
+                spawn_kwargs["lineage_depth"] = lineage_depth
+            if force_fresh_run:
+                spawn_kwargs["force_fresh_run"] = True
+            result = _spawn_workflow_via_service_bus(pg, **spawn_kwargs)
+        else:
+            submit_kwargs: dict[str, Any] = {
+                "spec_path": spec_path,
+                "spec_name": getattr(spec, "name", spec_path),
+                "total_jobs": total_jobs,
+            }
+            if run_id_override is not None:
+                submit_kwargs["run_id"] = run_id_override
+            if force_fresh_run:
+                submit_kwargs["force_fresh_run"] = True
+            result = _submit_workflow_via_service_bus(pg, **submit_kwargs)
         if result.get("error"):
             return result
 
@@ -1214,8 +1550,8 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
             "description": (
                 "Execute work by launching a workflow for LLM agents. This is the primary way to run tasks — "
                 "building code, running tests, writing reviews, refactoring, and debates.\n\n"
-                "USE WHEN: you need to run a workflow spec, check on a running workflow, retry a "
-                "failed job, cancel a run, or repair a degraded post-run sync state.\n\n"
+                "USE WHEN: you need to run a workflow spec, spawn a child workflow, check on a running workflow, "
+                "retry a failed job, cancel a run, or repair a degraded post-run sync state.\n\n"
                 "WORKFLOW CONTRACT:\n"
                 "  - action='run' is the kickoff call. Treat run_id as the authority and follow with "
                 "status or stream reads on separate channels.\n"
@@ -1229,10 +1565,13 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "  - Use wait=false to force kickoff-only behavior even when a progress emitter exists.\n"
                 "  - Use action='status' for a snapshot of a running or completed workflow, including "
                 "dashboard.\n"
+                "  - Use action='claim' to inspect claimable worker work for a subscription/run pair.\n"
+                "  - Use action='acknowledge' to commit a checkpoint for a previously claimed worker batch.\n"
                 "  - Read health.likely_failed, health.signals to detect stuck runs.\n"
                 "  - Use kill_if_idle=true on a status call if the run is clearly idle and unhealthy.\n\n"
                 "EXAMPLES:\n"
                 "  Launch:          praxis_workflow(action='run', spec_path='artifacts/workflow/my_spec.queue.json')\n"
+                "  Spawn child:     praxis_workflow(action='spawn', spec_path='...', parent_run_id='workflow_parent', dispatch_reason='phase.spawn')\n"
                 "  Force kickoff:   praxis_workflow(action='run', spec_path='...', wait=false)\n"
                 "  Check status:    praxis_workflow(action='status', run_id='workflow_abc123')\n"
                 "  Retry a failure: praxis_workflow(action='retry', run_id='workflow_abc123', label='build_step')\n"
@@ -1245,7 +1584,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "spec_path": {"type": "string", "description": "Path to a .queue.json spec file. Required for 'run'."},
+                    "spec_path": {"type": "string", "description": "Path to a .queue.json spec file. Required for 'run' and 'spawn'."},
                     "wait": {
                         "type": "boolean",
                         "description": (
@@ -1262,8 +1601,11 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         "type": "string",
                         "description": (
                 "Operation: 'run' (default — submits and returns run_id), "
+                            "'spawn' (submits a child workflow with explicit lineage), "
                             "'status' (poll a running/completed workflow with health heuristics), "
                             "'inspect' (deep job inspection of all fields), "
+                            "'claim' (inspect claimable worker work for a subscription/run pair), "
+                            "'acknowledge' (commit a worker checkpoint for a previously claimed batch), "
                             "'cancel' (cancel a workflow run), "
                             "'repair' (repair the post-run sync state for a workflow run), "
                             "'chain' (submit a durable workflow chain from coordination JSON), "
@@ -1271,8 +1613,24 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                             "'notifications' (drain pending completion events), "
                             "'retry' (re-queue a failed job)."
                         ),
-                        "enum": ["run", "status", "inspect", "cancel", "list", "notifications", "retry", "repair", "chain"],
+                        "enum": ["run", "spawn", "status", "inspect", "claim", "acknowledge", "cancel", "list", "notifications", "retry", "repair", "chain"],
                         "default": "run",
+                    },
+                    "parent_run_id": {
+                        "type": "string",
+                        "description": "Required for action='spawn'. Parent workflow run id.",
+                    },
+                    "parent_job_label": {
+                        "type": "string",
+                        "description": "Optional for action='spawn'. Parent job label responsible for the child workflow.",
+                    },
+                    "dispatch_reason": {
+                        "type": "string",
+                        "description": "Optional for action='spawn'. Explicit reason for the child workflow.",
+                    },
+                    "lineage_depth": {
+                        "type": "integer",
+                        "description": "Optional for action='spawn'. Explicit lineage depth override.",
                     },
                     "coordination_path": {
                         "type": "string",
@@ -1285,6 +1643,19 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     },
                     "run_id": {"type": "string", "description": "Workflow run ID. Required for 'status', 'inspect', 'cancel', 'retry', and 'repair'."},
                     "label": {"type": "string", "description": "Job label. Required for 'retry', optional for 'inspect'."},
+                    "subscription_id": {"type": "string", "description": "Durable worker subscription id. Required for 'claim'."},
+                    "last_acked_evidence_seq": {
+                        "type": "integer",
+                        "description": "Optional previous acknowledgement watermark for 'claim'.",
+                    },
+                    "work": {
+                        "type": "object",
+                        "description": "Serialized claim payload from a prior 'claim' call. Required for 'acknowledge'.",
+                    },
+                    "through_evidence_seq": {
+                        "type": "integer",
+                        "description": "Optional explicit acknowledgement watermark for 'acknowledge'.",
+                    },
                     "kill_if_idle": {
                         "type": "boolean",
                         "description": (

@@ -1,0 +1,46 @@
+{
+  "name": "Phase Program Healer Child",
+  "phase": "W",
+  "queue_id": "phase_program_healer_child_20260414",
+  "outcome_goal": "The Phase 50 result is healed in its own child workflow without advancing the phase boundary.",
+  "anti_requirements": [
+    "Do NOT advance the registry past Phase 50",
+    "Do NOT widen the Phase 50 file scope",
+    "Do NOT skip the focused authority verification commands after edits"
+  ],
+  "jobs": [
+    {
+      "label": "phase_50_healer",
+      "agent": "auto/refactor",
+      "task_type": "refactor",
+      "description": "Tighten the Phase 50 result after review without advancing the phase boundary",
+      "outcome_goal": "The Phase 50 worker result is patched for any concrete local issues and remains ready for human approval",
+      "prompt": "Work from `/workspace` only. Apply a narrow healing pass to the current Phase 50 result.\n\nRead and write only these sandbox paths:\n- `/workspace/planning/phase-program/phase_050_current_packet.md`\n- `/workspace/planning/phase-program/praxis_0_100_registry.json`\n- `/workspace/Code&DBs/Workflow/system_authority/workflow_migration_authority.json`\n- `/workspace/Code&DBs/Workflow/system_authority/generate_workflow_migration_authority.py`\n- `/workspace/Code&DBs/Workflow/storage/_generated_workflow_migration_authority.py`\n- `/workspace/Code&DBs/Workflow/storage/migrations.py`\n- `/workspace/Code&DBs/Workflow/storage/postgres/schema.py`\n- `/workspace/Code&DBs/Workflow/tests/integration/test_workflow_schema_authority_artifacts.py`\n- `/workspace/Code&DBs/Workflow/tests/integration/test_workflow_migration_policy_boundaries.py`\n- `/workspace/Code&DBs/Workflow/tests/integration/test_workflow_migration_contracts.py`\n\nScope rules:\n- Stay inside the Phase 50 file scope\n- Address concrete local issues visible in the current state, especially around policy-aware lookup, generated authority drift, workflow packet quality, and machine-readable phase governance\n- If the review found no issues, only make a minimal tightening pass and preserve the current boundary\n- Do not advance the registry past Phase 50\n\nAfter edits, rerun the focused authority verification commands.",
+      "read": [
+        "planning/phase-program/phase_050_current_packet.md",
+        "planning/phase-program/praxis_0_100_registry.json",
+        "Code&DBs/Workflow/system_authority/workflow_migration_authority.json",
+        "Code&DBs/Workflow/system_authority/generate_workflow_migration_authority.py",
+        "Code&DBs/Workflow/storage/_generated_workflow_migration_authority.py",
+        "Code&DBs/Workflow/storage/migrations.py",
+        "Code&DBs/Workflow/storage/postgres/schema.py",
+        "Code&DBs/Workflow/tests/integration/test_workflow_schema_authority_artifacts.py",
+        "Code&DBs/Workflow/tests/integration/test_workflow_migration_policy_boundaries.py",
+        "Code&DBs/Workflow/tests/integration/test_workflow_migration_contracts.py"
+      ],
+      "write": [
+        "planning/phase-program/phase_050_current_packet.md",
+        "planning/phase-program/praxis_0_100_registry.json",
+        "Code&DBs/Workflow/system_authority/workflow_migration_authority.json",
+        "Code&DBs/Workflow/system_authority/generate_workflow_migration_authority.py",
+        "Code&DBs/Workflow/storage/_generated_workflow_migration_authority.py",
+        "Code&DBs/Workflow/storage/migrations.py",
+        "Code&DBs/Workflow/storage/postgres/schema.py",
+        "Code&DBs/Workflow/tests/integration/test_workflow_schema_authority_artifacts.py",
+        "Code&DBs/Workflow/tests/integration/test_workflow_migration_policy_boundaries.py",
+        "Code&DBs/Workflow/tests/integration/test_workflow_migration_contracts.py"
+      ],
+      "verify_command": "cd /workspace && python3 'Code&DBs/Workflow/system_authority/generate_workflow_migration_authority.py' && PYTHONPATH='Code&DBs/Workflow' python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/integration/test_workflow_schema_authority_artifacts.py' 'Code&DBs/Workflow/tests/integration/test_workflow_migration_policy_boundaries.py' 'Code&DBs/Workflow/tests/integration/test_workflow_migration_contracts.py'"
+    }
+  ]
+}

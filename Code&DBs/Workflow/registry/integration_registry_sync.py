@@ -71,6 +71,7 @@ _STATIC_INTEGRATIONS: list[dict[str, Any]] = [
         "provider": "praxis",
         "capabilities": [
             {"action": "invoke", "description": "Invoke a registered workflow by workflow id."},
+            {"action": "cancel", "description": "Cancel an in-flight workflow run by run id."},
         ],
         "auth_status": "connected",
         "icon": "workflow",
@@ -124,6 +125,10 @@ def sync_integration_registry(conn: Any) -> int:
         insert_columns.append("endpoint_templates")
         placeholders.append(f"${len(placeholders) + 1}::jsonb")
         update_assignments.append("endpoint_templates = EXCLUDED.endpoint_templates")
+    if "catalog_dispatch" in columns:
+        insert_columns.append("catalog_dispatch")
+        placeholders.append(f"${len(placeholders) + 1}")
+        update_assignments.append("catalog_dispatch = EXCLUDED.catalog_dispatch")
 
     sql = f"""
         INSERT INTO integration_registry (
@@ -154,6 +159,8 @@ def sync_integration_registry(conn: Any) -> int:
             row.append(json.dumps(integration.get("auth_shape", {})))
         if "endpoint_templates" in columns:
             row.append(json.dumps(integration.get("endpoint_templates", {})))
+        if "catalog_dispatch" in columns:
+            row.append(bool(integration.get("catalog_dispatch", False)))
         rows.append(tuple(row))
 
     try:

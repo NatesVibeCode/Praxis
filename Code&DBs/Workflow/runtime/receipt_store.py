@@ -373,6 +373,7 @@ def _apply_receipt_provenance(
     touch_entries = payload.get("touch_keys")
     workspace_ref = str(payload.get("workspace_ref") or "")
     runtime_profile_ref = str(payload.get("runtime_profile_ref") or "")
+    workspace_snapshot_ref = str(payload.get("workspace_snapshot_ref") or "").strip()
     packet_provenance = _json_object(payload.get("packet_provenance"))
 
     if workspace_root:
@@ -391,6 +392,11 @@ def _apply_receipt_provenance(
                 "workspace_root": workspace_root,
                 "workspace_ref": workspace_ref,
                 "runtime_profile_ref": runtime_profile_ref,
+                **(
+                    {"workspace_snapshot_ref": workspace_snapshot_ref}
+                    if workspace_snapshot_ref
+                    else {}
+                ),
             },
         )
     if write_paths:
@@ -548,6 +554,11 @@ def list_receipt_payloads(
         normalize_receipt_payload(record.to_dict())
         for record in list_receipts(limit=limit, since_hours=since_hours, status=status, agent=agent)
     ]
+
+
+def load_receipt_payload(receipt_id: int | str) -> Optional[dict[str, Any]]:
+    record = load_receipt(receipt_id)
+    return normalize_receipt_payload(record.to_dict()) if record is not None else None
 
 
 def receipt_stats(*, since_hours: int = 24) -> dict[str, Any]:
@@ -726,6 +737,7 @@ def backfill_receipt_provenance(
                 or workspace_provenance.get("runtime_profile_ref")
                 or existing_git.get("runtime_profile_ref")
             ),
+            "workspace_snapshot_ref": workspace_provenance.get("workspace_snapshot_ref"),
         }
         inputs_before = json.dumps(inputs, sort_keys=True, default=str)
         outputs_before = json.dumps(outputs, sort_keys=True, default=str)

@@ -42,7 +42,7 @@ export function SourceOptionPills({ options }: SourceOptionPillsProps) {
   };
 
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+    <div className="app-shell__surface-chip-list">
       {options.map((option) => {
         const color = familyColor(option);
         return (
@@ -51,28 +51,14 @@ export function SourceOptionPills({ options }: SourceOptionPillsProps) {
             type="button"
             onClick={() => handleClick(option)}
             title={option.description || option.label}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 8,
-              minHeight: 30,
-              padding: '6px 10px',
-              borderRadius: 999,
-              border: `1px solid ${color}33`,
-              background: `${color}14`,
-              color: 'var(--text)',
-              cursor: 'pointer',
-            }}
+            className="app-shell__surface-chip"
+            style={{ borderColor: `${color}33`, background: `${color}14` }}
           >
-            <span style={{
-              width: 8,
-              height: 8,
-              borderRadius: '50%',
-              background: color,
-              flexShrink: 0,
-            }} />
-            <span style={{ fontSize: 12, fontWeight: 600 }}>{option.label}</span>
-            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{subtitle(option)}</span>
+            <span className="app-shell__surface-chip-dot" style={{ background: color }} />
+            <span className="app-shell__surface-chip-copy">
+              <span className="app-shell__surface-chip-label">{option.label}</span>
+              <span className="app-shell__surface-chip-subtitle">{subtitle(option)}</span>
+            </span>
           </button>
         );
       })}

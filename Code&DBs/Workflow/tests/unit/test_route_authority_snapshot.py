@@ -106,3 +106,45 @@ def test_store_invalidates_explicit_authority_cache_key_across_wrappers() -> Non
     assert first == {"task_type": "verify"}
     assert second == {"task_type": "verify"}
     assert calls == ["verify", "verify"]
+
+
+def test_store_reloads_snapshot_when_epoch_changes_during_load() -> None:
+    store = RouteAuthoritySnapshotStore()
+    conn = _ExplicitKeyConn("workflow_pool:test-c")
+    calls: list[str] = []
+
+    def _load_snapshot(_conn: object) -> RouteAuthoritySnapshot:
+        calls.append("snapshot")
+        if len(calls) == 1:
+            store.invalidate(conn)
+        return RouteAuthoritySnapshot(
+            route_policy={"default": len(calls)},
+            failure_zones={},
+            task_profiles={},
+            benchmark_metrics={},
+        )
+
+    snapshot = store.get_snapshot(conn, load_snapshot=_load_snapshot)
+    second = store.get_snapshot(conn, load_snapshot=_load_snapshot)
+
+    assert snapshot.route_policy == {"default": 2}
+    assert second is snapshot
+    assert calls == ["snapshot", "snapshot"]
+
+
+def test_store_invalidates_explicit_cache_key_directly() -> None:
+    store = RouteAuthoritySnapshotStore()
+    conn = _ExplicitKeyConn("workflow_pool:test-d")
+    calls: list[str] = []
+
+    def _load_policy(_conn: object, task_type: str) -> dict[str, str]:
+        calls.append(task_type)
+        return {"task_type": task_type, "generation": str(len(calls))}
+
+    first = store.get_task_policy(conn, task_type="build", load_policy=_load_policy)
+    store.invalidate_cache_key("workflow_pool:test-d")
+    second = store.get_task_policy(conn, task_type="build", load_policy=_load_policy)
+
+    assert first["generation"] == "1"
+    assert second["generation"] == "2"
+    assert calls == ["build", "build"]

@@ -6,6 +6,11 @@ from datetime import datetime
 from typing import Any, Mapping
 
 from runtime.dependency_contract import dependency_truth_report
+from runtime.engineering_observability import (
+    build_bug_scoreboard,
+    build_code_hotspots,
+    build_platform_observability,
+)
 from storage.postgres.connection import resolve_workflow_database_url
 from surfaces.api import operator_read, operator_write
 from surfaces.api.handlers import workflow_launcher
@@ -114,6 +119,28 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
     except Exception as exc:
         recent_activity = {"error": f"Could not load receipts: {exc}"}
 
+    try:
+        bug_tracker = subs.get_bug_tracker()
+    except Exception:
+        bug_tracker = None
+
+    engineering_observability = {
+        "code_hotspots": build_code_hotspots(
+            repo_root=REPO_ROOT,
+            bug_tracker=bug_tracker,
+            roots=("runtime", "surfaces/api", "surfaces/cli"),
+            limit=10,
+        ),
+        "bug_scoreboard": build_bug_scoreboard(
+            bug_tracker=bug_tracker,
+            repo_root=REPO_ROOT,
+            limit=10,
+        ),
+        "platform_observability": build_platform_observability(
+            platform_payload=health_payload,
+        ),
+    }
+
     discover_tool = _tool_definition("praxis_discover")
     recall_tool = _tool_definition("praxis_recall")
     query_tool = _tool_definition("praxis_query")
@@ -182,6 +209,7 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         "lane_recommendation": health_payload.get("lane_recommendation"),
         "dependency_truth": dependency_truth,
         "recent_activity": recent_activity,
+        "engineering_observability": engineering_observability,
         "search_surfaces": {
             "architecture_scan": _cli_surface_hint(
                 "workflow architecture scan",
@@ -251,7 +279,7 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
                     ],
                 },
                 {
-                    "command": "workflow tools describe <tool>",
+                    "command": "workflow tools describe <tool|alias>",
                     "description": "Inspect one tool's schema, risk, badges, and example payloads before calling it.",
                     "examples": [
                         "workflow tools describe praxis_query",
@@ -259,7 +287,7 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
                     ],
                 },
                 {
-                    "command": "workflow tools call <tool> --input-json '{...}'",
+                    "command": "workflow tools call <tool|alias> --input-json '{...}'",
                     "description": "Use the generic direct-call surface when no friendly alias fits or when you want exact schema control.",
                     "examples": [
                         "workflow tools call praxis_query --input-json '{\"question\":\"what is failing right now?\"}'",
@@ -329,12 +357,12 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
             "You are operating the Praxis Engine autonomous engineering control plane.\n"
             "Prefer the catalog-backed `workflow` CLI as the default human/operator surface.\n"
             f"There are currently {tool_count} catalog-backed tools. Start with `workflow tools list`, "
-            "`workflow tools search <text>`, and `workflow tools describe <tool>` when you need the current "
+            "`workflow tools search <text>`, and `workflow tools describe <tool|alias>` when you need the current "
             "surface instead of memorizing a static list.\n"
             f"For common reads, go straight to `{query_tool.cli_entrypoint}`, `{health_tool.cli_entrypoint}`, "
             f"`{discover_tool.cli_entrypoint}`, `{recall_tool.cli_entrypoint}`, `{bugs_tool.cli_entrypoint}`, "
             "and `workflow architecture scan` when you need exact boundary evidence.\n"
-            "Use `workflow tools call <tool> --input-json '{...}'` as the generic fallback when no direct alias fits.\n"
+            "Use `workflow tools call <tool|alias> --input-json '{...}'` as the generic fallback when no direct alias fits.\n"
             "CLI guardrails are intentional: write/dispatch flows require `--yes`, and session-only tools require a "
             "workflow token.\n"
             "SEARCH BEFORE YOU BUILD: Before writing any new function, module, class, or pattern, "

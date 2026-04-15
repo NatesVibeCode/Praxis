@@ -254,6 +254,7 @@ def _result_payload(result, *, timeout: int, parse_json_output: bool) -> dict[st
         "artifact_refs": list(result.artifact_refs),
         "started_at": result.started_at,
         "finished_at": result.finished_at,
+        "workspace_snapshot_ref": getattr(result, "workspace_snapshot_ref", ""),
         "network_policy": result.network_policy,
         "provider_latency_ms": result.provider_latency_ms,
         "container_cpu_percent": result.container_cpu_percent,
@@ -380,10 +381,30 @@ def execute_cli(
     )
     timeout = int(getattr(agent_config, "timeout_seconds", 900) or 900)
     contract = resolve_execution_transport(agent_config)
+    network_policy = _sandbox_policy_value(
+        agent_config,
+        "network_policy",
+        "provider_only"
+        if _env_flag_enabled(_WORKFLOW_MODEL_NETWORK_ENV, default=True)
+        else "disabled",
+    )
+    workspace_materialization = _sandbox_policy_value(
+        agent_config,
+        "workspace_materialization",
+        "copy",
+    )
     sandbox_session_id, sandbox_group_id = derive_sandbox_identity(
         workdir=workdir,
         execution_bundle=execution_bundle,
         execution_transport="cli",
+        identity_payload={
+            "provider_slug": provider_slug,
+            "model_slug": getattr(agent_config, "model", None),
+            "command": shlex.join(cmd),
+            "stdin_text": stdin_text,
+            "network_policy": network_policy,
+            "workspace_materialization": workspace_materialization,
+        },
     )
 
     try:
@@ -396,18 +417,8 @@ def execute_cli(
             stdin_text=stdin_text,
             env=env,
             timeout_seconds=timeout,
-            network_policy=_sandbox_policy_value(
-                agent_config,
-                "network_policy",
-                "provider_only"
-                if _env_flag_enabled(_WORKFLOW_MODEL_NETWORK_ENV, default=True)
-                else "disabled",
-            ),
-            workspace_materialization=_sandbox_policy_value(
-                agent_config,
-                "workspace_materialization",
-                "copy",
-            ),
+            network_policy=network_policy,
+            workspace_materialization=workspace_materialization,
             execution_transport="cli",
             image=getattr(agent_config, "docker_image", None),
             metadata={"provider_slug": provider_slug, "execution_bundle": execution_bundle or {}},
@@ -454,11 +465,6 @@ def execute_api(
     max_output_tokens = int(getattr(agent_config, "max_output_tokens", 4096) or 4096)
     timeout = int(getattr(agent_config, "timeout_seconds", 90) or 90)
     contract = resolve_execution_transport(agent_config)
-    sandbox_session_id, sandbox_group_id = derive_sandbox_identity(
-        workdir=resolved_workdir,
-        execution_bundle=execution_bundle,
-        execution_transport="api",
-    )
     # Look up transport metadata from provider_cli_profiles.
     # The worker dispatches by protocol family — no provider names.
     from adapters.provider_registry import get_profile as _get_provider_profile
@@ -477,6 +483,12 @@ def execute_api(
     _reasoning_flag = (
         f"--reasoning-effort {shlex.quote(reasoning_effort)}" if reasoning_effort else ""
     )
+    network_policy = _sandbox_policy_value(agent_config, "network_policy", "provider_only")
+    workspace_materialization = _sandbox_policy_value(
+        agent_config,
+        "workspace_materialization",
+        "copy",
+    )
     command = (
         "python3 -m runtime.api_transport_worker "
         f"--api-protocol {shlex.quote(_api_protocol)} "
@@ -486,6 +498,21 @@ def execute_api(
         f"--max-output-tokens {max_output_tokens} "
         f"--timeout-seconds {timeout}"
         + (f" {_reasoning_flag}" if _reasoning_flag else "")
+    )
+    sandbox_session_id, sandbox_group_id = derive_sandbox_identity(
+        workdir=resolved_workdir,
+        execution_bundle=execution_bundle,
+        execution_transport="api",
+        identity_payload={
+            "provider_slug": provider_slug,
+            "model_slug": model_slug,
+            "command": command,
+            "stdin_text": prompt,
+            "network_policy": network_policy,
+            "workspace_materialization": workspace_materialization,
+            "max_output_tokens": max_output_tokens,
+            "reasoning_effort": reasoning_effort,
+        },
     )
     try:
         result = SandboxRuntime().execute_command(
@@ -497,10 +524,14 @@ def execute_api(
             stdin_text=prompt,
             env=env,
             timeout_seconds=timeout,
-            network_policy=_sandbox_policy_value(agent_config, "network_policy", "provider_only"),
-            workspace_materialization=_sandbox_policy_value(agent_config, "workspace_materialization", "copy"),
+            network_policy=network_policy,
+            workspace_materialization=workspace_materialization,
             execution_transport="api",
-            metadata={"provider_slug": provider_slug, "model_slug": model_slug},
+            metadata={
+                "provider_slug": provider_slug,
+                "model_slug": model_slug,
+                "execution_bundle": execution_bundle or {},
+            },
             artifact_store=artifact_store,
         )
     except RuntimeError as exc:

@@ -1,9 +1,11 @@
 :root {
+  color-scheme: dark;
+
   /* Surface layers — monochrome suite shell */
-  --bg: #090909;
-  --bg-card: #121212;
-  --bg-alt: #1a1a1a;
-  --bg-input: rgba(9, 9, 9, 0.92);
+  --bg: #080808;
+  --bg-card: #141414;
+  --bg-alt: #1b1b1b;
+  --bg-input: rgba(10, 10, 10, 0.94);
 
   /* Accent — pale authority linework */
   --accent: #f3eee4;
@@ -17,6 +19,7 @@
 
   /* Borders */
   --border: #2a2a2a;
+  --focus-ring: 0 0 0 3px rgba(243, 238, 228, 0.12), 0 0 0 1px rgba(243, 238, 228, 0.3);
 
   /* Status */
   --success: #3fb950;
@@ -50,6 +53,10 @@
   --shadow-modal: 0 20px 56px rgba(0, 0, 0, 0.42);
   --shadow-sticky: 0 -12px 28px rgba(0, 0, 0, 0.24);
   --card-shadow: 0 18px 38px rgba(0, 0, 0, 0.22), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  --surface-elevated: linear-gradient(180deg, rgba(243, 238, 228, 0.05), rgba(255, 255, 255, 0.02));
+  --surface-raised: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.02));
+  --shell-border: rgba(255, 255, 255, 0.08);
+  --shell-backdrop: rgba(9, 9, 9, 0.84);
 
   /* Glows — restrained */
   --accent-glow-soft: 0 0 0 1px rgba(243, 238, 228, 0.16), 0 0 18px rgba(243, 238, 228, 0.1);
@@ -103,14 +110,45 @@
 }
 
 body {
+  min-height: 100vh;
   background-image:
-    radial-gradient(circle at top, rgba(255, 255, 255, 0.05), transparent 28%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.01), transparent 22%);
+    radial-gradient(circle at top left, rgba(243, 238, 228, 0.09), transparent 22%),
+    radial-gradient(circle at 88% 0%, rgba(88, 166, 255, 0.08), transparent 18%),
+    radial-gradient(circle at 50% 110%, rgba(63, 185, 80, 0.04), transparent 18%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent 20%);
   background-color: var(--bg);
   color: var(--text);
   font-family: var(--font-sans);
   font-size: 14px;
   line-height: 1.5;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+::selection {
+  background: var(--selection-bg);
+  color: var(--text);
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+a:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 .slot-layout {

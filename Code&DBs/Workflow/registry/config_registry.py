@@ -21,6 +21,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from storage.postgres.connection import resolve_workflow_database_url
+from storage.postgres.validators import PostgresConfigurationError
+
 _log = logging.getLogger(__name__)
 
 _DATABASE_URL_ENV = "WORKFLOW_DATABASE_URL"
@@ -70,9 +73,12 @@ def _value_type_label(value: Any) -> str:
 def _resolve_database_url() -> str | None:
     """Return the Postgres DSN for configuration authority."""
     raw = os.environ.get(_DATABASE_URL_ENV)
-    if raw and raw.strip().startswith(("postgresql://", "postgres://")):
-        return raw.strip()
-    return None
+    if raw is None:
+        return None
+    try:
+        return resolve_workflow_database_url(env={_DATABASE_URL_ENV: raw})
+    except PostgresConfigurationError:
+        return None
 
 
 def _require_database_url() -> str:

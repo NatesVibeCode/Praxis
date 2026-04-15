@@ -16,6 +16,23 @@ from runtime.integrations.display_names import display_name_for_integration
 
 logger = logging.getLogger(__name__)
 
+_EXECUTABLE_GATE_FAMILIES = frozenset({"conditional", "after_failure"})
+_PERSISTED_GATE_FAMILIES = frozenset({"approval", "human_review", "validation", "retry"})
+_RUNTIME_NODE_ROUTES = frozenset(
+    {
+        "trigger",
+        "trigger/schedule",
+        "trigger/webhook",
+        "auto/research",
+        "auto/draft",
+        "auto/classify",
+        "workflow.fanout",
+        "@notifications/send",
+        "@webhook/post",
+        "@workflow/invoke",
+    }
+)
+
 
 STATIC_CATALOG_ITEMS: tuple[dict[str, Any], ...] = (
     {
@@ -95,8 +112,18 @@ STATIC_CATALOG_ITEMS: tuple[dict[str, Any], ...] = (
         "family": "think",
         "status": "ready",
         "dropKind": "node",
-        "actionValue": "auto/fan-out",
+        "actionValue": "workflow.fanout",
         "description": "Split into parallel sub-tasks and aggregate",
+    },
+    {
+        "id": "think-fan-out-legacy",
+        "label": "Fan Out (Legacy)",
+        "icon": "classify",
+        "family": "think",
+        "status": "ready",
+        "dropKind": "node",
+        "actionValue": "auto/fan-out",
+        "description": "Legacy fan-out token kept for older saved graphs",
     },
     {
         "id": "act-notify",
@@ -207,10 +234,244 @@ _KIND_TO_ICON: dict[str, str] = {
 }
 
 
+def _catalog_truth(item: dict[str, Any]) -> dict[str, str]:
+    if _text(item.get("status")) == "coming_soon":
+        return {
+            "category": "coming_soon",
+            "badge": "Soon",
+            "detail": "Listed in the catalog, but not enabled in the current surface.",
+        }
+
+    if _text(item.get("dropKind")) == "edge":
+        gate_family = _text(item.get("gateFamily"))
+        if gate_family in _EXECUTABLE_GATE_FAMILIES:
+            return {
+                "category": "runtime",
+                "badge": "Executes",
+                "detail": "Compiled into dependency edges that change runtime flow today.",
+            }
+        if gate_family in _PERSISTED_GATE_FAMILIES:
+            return {
+                "category": "persisted",
+                "badge": "Saved only",
+                "detail": "Stored in edge metadata now, but not enforced by the planner yet.",
+            }
+        return {
+            "category": "partial",
+            "badge": "Unverified",
+            "detail": "Stored in the graph, but the runtime meaning is not verified yet.",
+        }
+
+    item_id = _text(item.get("id"))
+    action_value = _text(item.get("actionValue"))
+    source = _text(item.get("source"))
+
+    if item_id == "gather-docs":
+        return {
+            "category": "alias",
+            "badge": "Alias",
+            "detail": "Uses the same `auto/research` route as Web Research today.",
+        }
+
+    if action_value == "auto/fan-out":
+        return {
+            "category": "alias",
+            "badge": "Alias",
+            "detail": "Legacy fan-out token kept for existing saved graphs; Moon uses `workflow.fanout` now.",
+        }
+
+    if action_value == "workflow.fanout":
+        return {
+            "category": "runtime",
+            "badge": "Runs on release",
+            "detail": "Fan-out now has a verified runtime lane and compiles into the same release path as other core step routes.",
+        }
+
+    if source in {"capability", "integration", "connector"} or action_value in _RUNTIME_NODE_ROUTES:
+        return {
+            "category": "runtime",
+            "badge": "Runs on release",
+            "detail": (
+                "Creates trigger intent that is preserved into compiled triggers."
+                if action_value.startswith("trigger")
+                else "Persists into the build graph and becomes a planned runtime route at release."
+            ),
+        }
+
+    return {
+        "category": "partial",
+        "badge": "Unverified",
+        "detail": "The UI can assign this action, but the runtime lane is not verified in source yet.",
+    }
+
+
+def _catalog_surface_policy(
+    item: dict[str, Any],
+    truth: dict[str, str],
+) -> dict[str, str]:
+    if _text(item.get("status")) == "coming_soon":
+        return {
+            "tier": "hidden",
+            "badge": "Soon",
+            "detail": "Keep this off the main builder until the route and config surface are real.",
+        }
+
+    if _text(item.get("dropKind")) == "edge":
+        gate_family = _text(item.get("gateFamily"))
+        if gate_family in {"conditional", "after_failure"}:
+            return {
+                "tier": "primary",
+                "badge": "Core now",
+                "detail": "This is one of the few gate types that changes execution today.",
+            }
+        if gate_family == "approval":
+            return {
+                "tier": "advanced",
+                "badge": "Preview",
+                "detail": "Worth building as a real human gate, but Moon keeps it preview-only until the planner enforces it.",
+            }
+        if gate_family == "validation":
+            return {
+                "tier": "advanced",
+                "badge": "Preview",
+                "detail": "Worth building as executable verification policy, but Moon keeps it preview-only until it affects runtime.",
+            }
+        if gate_family == "human_review":
+            return {
+                "tier": "hidden",
+                "badge": "Removed",
+                "detail": "Folded into Approval so Moon keeps one obvious human gate concept.",
+                "hardChoice": "Collapsed into Approval. Two human gate names for one future concept would be noise.",
+            }
+        if gate_family == "retry":
+            return {
+                "tier": "hidden",
+                "badge": "Removed",
+                "detail": "Retry belongs to job policy and failure handling, not dependency-edge semantics.",
+                "hardChoice": "Removed from the gate surface. Retry is runtime policy, not graph structure.",
+            }
+        if truth.get("category") == "runtime":
+            return {
+                "tier": "advanced",
+                "badge": "Later",
+                "detail": "Real edge behavior, but not part of the curated Moon gate set yet.",
+            }
+        return {
+            "tier": "hidden",
+            "badge": "Removed",
+            "detail": "Saved-only edge metadata stays out of the main gate surface until it changes execution.",
+        }
+
+    item_id = _text(item.get("id"))
+    action_value = _text(item.get("actionValue"))
+    source = _text(item.get("source"))
+
+    if item_id == "gather-docs":
+        return {
+            "tier": "hidden",
+            "badge": "Merged",
+            "detail": "Merged into Web Research because both buttons point at the same route today.",
+            "hardChoice": "Merged into Web Research. One route gets one obvious button.",
+        }
+
+    if _text(item.get("family")) == "trigger":
+        return {
+            "tier": "primary",
+            "badge": "Core now",
+            "detail": "Primary trigger primitive with real compile and release authority.",
+        }
+
+    if action_value in {"auto/research", "auto/classify", "auto/draft"}:
+        return {
+            "tier": "primary",
+            "badge": "Core now",
+            "detail": "Primary Moon step primitive with a real planned runtime route.",
+        }
+
+    if action_value == "workflow.fanout":
+        return {
+            "tier": "primary",
+            "badge": "Core now",
+            "detail": "Fan-out now has a verified runtime lane, so Moon can surface it as a core builder primitive.",
+        }
+
+    if action_value == "auto/fan-out":
+        return {
+            "tier": "hidden",
+            "badge": "Alias",
+            "detail": "Legacy token only, kept so older graphs still open cleanly.",
+            "hardChoice": "Compatibility alias for saved graphs only.",
+        }
+
+    if action_value == "@notifications/send":
+        return {
+            "tier": "primary",
+            "badge": "Core now",
+            "detail": "Real action primitive with a stable property surface in the node inspector.",
+        }
+
+    if action_value == "@webhook/post":
+        return {
+            "tier": "primary",
+            "badge": "Core now",
+            "detail": "Visible now that Moon offers opinionated request presets instead of a blank transport form.",
+        }
+
+    if action_value == "@workflow/invoke":
+        return {
+            "tier": "primary",
+            "badge": "Core now",
+            "detail": "Visible now that Moon can pick saved child workflows by name from the inspector.",
+        }
+
+    if source in {"capability", "integration", "connector"}:
+        if truth.get("category") == "runtime":
+            return {
+                "tier": "hidden",
+                "badge": "Hidden",
+                "detail": "Live catalog lanes stay out of the main Moon builder until they map cleanly onto the core primitive set.",
+            }
+        return {
+            "tier": "hidden",
+            "badge": "Removed",
+            "detail": "Keep non-core live catalog items off the main builder unless their runtime contract is explicit.",
+        }
+
+    if truth.get("category") == "runtime":
+        return {
+            "tier": "advanced",
+            "badge": "Later",
+            "detail": "Real route, but not part of the curated core surface yet.",
+        }
+
+    return {
+        "tier": "hidden",
+        "badge": "Removed",
+        "detail": (
+            "Alias routes stay out of the main builder."
+            if truth.get("category") == "alias"
+            else "Non-core buttons stay hidden until they have one obvious runtime meaning."
+        ),
+    }
+
+
+def _decorate_catalog_item(item: dict[str, Any]) -> dict[str, Any]:
+    decorated = dict(item)
+    truth = decorated.get("truth")
+    if not isinstance(truth, dict):
+        truth = _catalog_truth(decorated)
+    surface_policy = decorated.get("surfacePolicy")
+    if not isinstance(surface_policy, dict):
+        surface_policy = _catalog_surface_policy(decorated, truth)
+    decorated["truth"] = truth
+    decorated["surfacePolicy"] = surface_policy
+    return decorated
+
+
 def build_catalog_payload(pg: Any) -> dict[str, Any]:
     """Project static and database-backed catalog items into API payload form."""
 
-    items: list[dict[str, Any]] = [dict(item) for item in STATIC_CATALOG_ITEMS]
+    items: list[dict[str, Any]] = [_decorate_catalog_item(dict(item)) for item in STATIC_CATALOG_ITEMS]
     sources: dict[str, int] = {
         "static": len(items),
         "capabilities": 0,
@@ -230,17 +491,19 @@ def build_catalog_payload(pg: Any) -> dict[str, Any]:
             kind = _text(row.get("capability_kind")) or "task"
             slug = _text(row.get("capability_slug"))
             items.append(
-                {
-                    "id": f"cap-{slug.replace('/', '-')}",
-                    "label": _text(row.get("title")) or slug,
-                    "icon": _KIND_TO_ICON.get(kind, "classify"),
+                _decorate_catalog_item(
+                    {
+                        "id": f"cap-{slug.replace('/', '-')}",
+                        "label": _text(row.get("title")) or slug,
+                        "icon": _KIND_TO_ICON.get(kind, "classify"),
                     "family": _KIND_TO_FAMILY.get(kind, "think"),
                     "status": "ready",
                     "dropKind": "node",
                     "actionValue": _text(row.get("route")) or f"auto/{slug}",
-                    "description": _text(row.get("summary")) or _text(row.get("description")),
-                    "source": "capability",
-                }
+                        "description": _text(row.get("summary")) or _text(row.get("description")),
+                        "source": "capability",
+                    }
+                )
             )
             sources["capabilities"] += 1
     except Exception as exc:
@@ -258,18 +521,20 @@ def build_catalog_payload(pg: Any) -> dict[str, Any]:
             capabilities = _json_array(row.get("capabilities"))
             if not capabilities:
                 items.append(
-                    {
-                        "id": f"int-{integration_id}",
-                        "label": name,
-                        "icon": _text(row.get("icon")) or "tool",
+                    _decorate_catalog_item(
+                        {
+                            "id": f"int-{integration_id}",
+                            "label": name,
+                            "icon": _text(row.get("icon")) or "tool",
                         "family": "act",
                         "status": "ready" if auth == "connected" else "coming_soon",
                         "dropKind": "node",
                         "actionValue": f"@{integration_id}",
                         "description": _text(row.get("description")) or f"Use {name}",
-                        "source": "integration",
-                        "connectionStatus": auth,
-                    }
+                            "source": "integration",
+                            "connectionStatus": auth,
+                        }
+                    )
                 )
                 sources["integrations"] += 1
                 continue
@@ -282,18 +547,20 @@ def build_catalog_payload(pg: Any) -> dict[str, Any]:
                     else ""
                 )
                 items.append(
-                    {
-                        "id": f"int-{integration_id}-{action}".replace(" ", "-").lower(),
-                        "label": f"{name}: {action}" if action else name,
-                        "icon": _text(row.get("icon")) or "tool",
+                    _decorate_catalog_item(
+                        {
+                            "id": f"int-{integration_id}-{action}".replace(" ", "-").lower(),
+                            "label": f"{name}: {action}" if action else name,
+                            "icon": _text(row.get("icon")) or "tool",
                         "family": "act",
                         "status": "ready" if auth == "connected" else "coming_soon",
                         "dropKind": "node",
                         "actionValue": f"@{integration_id}/{action}" if action else f"@{integration_id}",
                         "description": description or _text(row.get("description")) or f"Use {name}",
-                        "source": "integration",
-                        "connectionStatus": auth,
-                    }
+                            "source": "integration",
+                            "connectionStatus": auth,
+                        }
+                    )
                 )
                 sources["integrations"] += 1
     except Exception as exc:
@@ -308,22 +575,24 @@ def build_catalog_payload(pg: Any) -> dict[str, Any]:
             slug = _text(row.get("slug"))
             health = _text(row.get("health_status")) or "unknown"
             items.append(
-                {
-                    "id": f"conn-{slug}",
-                    "label": _text(row.get("display_name")) or slug,
-                    "icon": "tool",
+                _decorate_catalog_item(
+                    {
+                        "id": f"conn-{slug}",
+                        "label": _text(row.get("display_name")) or slug,
+                        "icon": "tool",
                     "family": "act",
                     "status": "ready" if health in ("healthy", "degraded") else "coming_soon",
                     "dropKind": "node",
-                    "actionValue": f"@connector/{slug}",
+                    "actionValue": f"@{slug}",
                     "description": (
                         f"v{_text(row.get('version')) or '?'}"
                         f" — {_text(row.get('auth_type'))} auth"
                         f" — {_text(row.get('base_url'))}"
                     ),
-                    "source": "connector",
-                    "connectionStatus": health,
-                }
+                        "source": "connector",
+                        "connectionStatus": health,
+                    }
+                )
             )
             sources["connectors"] += 1
     except Exception:

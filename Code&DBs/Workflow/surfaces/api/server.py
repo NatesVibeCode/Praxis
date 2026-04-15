@@ -23,6 +23,7 @@ from runtime.dependency_contract import (
     format_dependency_truth_report,
     require_runtime_dependencies,
 )
+from surfaces.api.handlers._subsystems import workflow_database_env
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -35,13 +36,25 @@ def _env_flag(name: str, default: bool = False) -> bool:
     return normalized not in {"", "0", "false", "no", "off"}
 
 
+def _prime_workflow_database_env() -> None:
+    """Publish the normalized workflow DB authority for process-wide consumers."""
+
+    try:
+        env = workflow_database_env()
+    except Exception:
+        return
+    database_url = str(env.get("WORKFLOW_DATABASE_URL") or "").strip()
+    if database_url:
+        os.environ["WORKFLOW_DATABASE_URL"] = database_url
+
+
 def start_server(
     host: str = "0.0.0.0",
     port: int = 8420,
     *,
     reload: bool = False,
     reload_dirs: tuple[str, ...] | None = None,
-) -> None:
+    ) -> None:
     """Start the Praxis Engine REST API server.
 
     Args:
@@ -50,6 +63,7 @@ def start_server(
         reload: Enable uvicorn auto-reload for local development.
         reload_dirs: Explicit directories to watch when reload is enabled.
     """
+    _prime_workflow_database_env()
     try:
         report = require_runtime_dependencies(scope="api_server")
     except RuntimeError as exc:

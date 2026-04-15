@@ -37,22 +37,32 @@ export function AppPreview({
     <div className="app-preview-overlay" onClick={handleOverlayClick}>
       <div className="app-preview-card">
         <div className="app-preview-header">
-          <h2>Preview: Generated App</h2>
-          <span className={`app-preview-confidence ${badge.level}`}>{badge.text}</span>
-          <button className="app-preview-close" onClick={onClose} title="Close">&times;</button>
+          <div className="app-preview-header__copy">
+            <div className="app-preview-kicker">Preview</div>
+            <h2>Generated app</h2>
+            <p>Review the shape of the workspace before we open the live tab.</p>
+          </div>
+          <div className="app-preview-header__controls">
+            <span className={`app-preview-confidence ${badge.level}`}>{badge.text}</span>
+            <button type="button" className="app-preview-close" onClick={onClose} title="Close preview" aria-label="Close preview">
+              &times;
+            </button>
+          </div>
         </div>
 
         <div className="app-preview-explanation">{explanation}</div>
 
         <div className="app-preview-grid-container">
-          <div className="app-preview-grid-scaler">
-            <QuadrantGrid manifest={manifest} />
+          <div className="app-preview-grid-frame">
+            <div className="app-preview-grid-scaler">
+              <QuadrantGrid manifest={manifest} />
+            </div>
           </div>
         </div>
 
         <div className="app-preview-actions">
           <button className="app-preview-btn primary" onClick={onAccept}>
-            Open Tab
+            Open tab
           </button>
           <button className="app-preview-btn default" onClick={onRegenerate}>
             Regenerate

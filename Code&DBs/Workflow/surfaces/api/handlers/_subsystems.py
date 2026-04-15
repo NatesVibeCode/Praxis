@@ -9,6 +9,10 @@ from ._shared import (
     REPO_ROOT,
     WORKFLOW_ROOT,
 )
+from surfaces._workflow_database import (
+    DEFAULT_REPO_LOCAL_DATABASE_URL,
+    workflow_database_env_for_repo,
+)
 
 try:
     from surfaces._subsystems_base import _BaseSubsystems
@@ -16,6 +20,10 @@ except ModuleNotFoundError:
     if str(WORKFLOW_ROOT) not in sys.path:
         sys.path.insert(0, str(WORKFLOW_ROOT))
     from surfaces._subsystems_base import _BaseSubsystems
+
+
+def workflow_database_env() -> dict[str, str]:
+    return workflow_database_env_for_repo(REPO_ROOT)
 
 
 class _Subsystems(_BaseSubsystems):
@@ -26,12 +34,16 @@ class _Subsystems(_BaseSubsystems):
             repo_root=REPO_ROOT,
             workflow_root=WORKFLOW_ROOT,
             receipts_dir=RECEIPTS_DIR,
-            default_database_url=None,
+            default_database_url=DEFAULT_REPO_LOCAL_DATABASE_URL,
         )
 
+    def _postgres_env(self) -> dict[str, str]:
+        return workflow_database_env()
+
     def _should_start_heartbeat_background(self) -> bool:
-        """Keep API surfaces request-only; background heartbeats belong to worker lanes."""
-        return False
+        # API surface is long-lived and now gets heartbeat-driven maintenance
+        # during startup, so trigger processing remains active.
+        return True
 
 
-__all__ = ["_Subsystems"]
+__all__ = ["_Subsystems", "workflow_database_env"]

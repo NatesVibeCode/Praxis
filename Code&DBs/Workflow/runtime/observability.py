@@ -10,11 +10,12 @@ Module-level singleton via get_workflow_metrics_view().
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 import json
 import os
 import sys
 import threading
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, TYPE_CHECKING
@@ -217,60 +218,70 @@ class WorkflowMetricsView:
             db_url: Postgres connection URL. If None, reads WORKFLOW_DATABASE_URL.
         """
         self._db_url = db_url or os.environ.get("WORKFLOW_DATABASE_URL")
-        self._conn: asyncpg.Connection | None = None
-        self._lock = threading.Lock()
         self._schema_initialized = False
 
     async def _get_connection(self) -> asyncpg.Connection:
-        """Get or create the Postgres connection."""
+        """Open a Postgres connection for the current async operation."""
         if not self._db_url:
             raise RuntimeError(
                 "WORKFLOW_DATABASE_URL not set and no db_url provided to WorkflowMetricsView"
             )
-        if self._conn is None:
-            self._conn = await asyncpg.connect(self._db_url)
-        return self._conn
+        return await asyncpg.connect(self._db_url)
+
+    @asynccontextmanager
+    async def _connection(self) -> AsyncIterator[asyncpg.Connection]:
+        """Yield a loop-local connection and always close it afterwards."""
+
+        conn = await self._get_connection()
+        try:
+            yield conn
+        finally:
+            await conn.close()
 
     async def close(self) -> None:
-        """Close the database connection."""
-        if self._conn:
-            await self._conn.close()
-            self._conn = None
+        """Compatibility no-op now that connections are operation-scoped."""
+        return None
 
-    async def _ensure_schema(self) -> None:
+    async def _ensure_schema(self, *, conn: asyncpg.Connection | None = None) -> None:
         """Verify the canonical workflow_metrics schema is present."""
         if self._schema_initialized:
             return
 
-        conn = await self._get_connection()
-        table_exists = await conn.fetchval(
-            "SELECT to_regclass('public.workflow_metrics') IS NOT NULL"
-        )
-        if not table_exists:
-            raise RuntimeError(
-                "workflow_metrics table is missing; bootstrap workflow schema so "
-                "081_observability_lineage_and_metrics.sql can materialize it"
+        owns_connection = conn is None
+        if conn is None:
+            conn = await self._get_connection()
+        try:
+            table_exists = await conn.fetchval(
+                "SELECT to_regclass('public.workflow_metrics') IS NOT NULL"
             )
+            if not table_exists:
+                raise RuntimeError(
+                    "workflow_metrics table is missing; bootstrap workflow schema so "
+                    "081_observability_lineage_and_metrics.sql can materialize it"
+                )
 
-        rows = await conn.fetch(
-            """
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_schema = 'public'
-              AND table_name = 'workflow_metrics'
-            """
-        )
-        available_columns = {str(row["column_name"]) for row in rows}
-        missing_columns = sorted(
-            _REQUIRED_WORKFLOW_METRICS_COLUMNS.difference(available_columns)
-        )
-        if missing_columns:
-            raise RuntimeError(
-                "workflow_metrics schema is incomplete; missing columns: "
-                + ", ".join(missing_columns)
+            rows = await conn.fetch(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'workflow_metrics'
+                """
             )
+            available_columns = {str(row["column_name"]) for row in rows}
+            missing_columns = sorted(
+                _REQUIRED_WORKFLOW_METRICS_COLUMNS.difference(available_columns)
+            )
+            if missing_columns:
+                raise RuntimeError(
+                    "workflow_metrics schema is incomplete; missing columns: "
+                    + ", ".join(missing_columns)
+                )
 
-        self._schema_initialized = True
+            self._schema_initialized = True
+        finally:
+            if owns_connection:
+                await conn.close()
 
     async def record_workflow_async(self, result: WorkflowResult) -> None:
         """Record a workflow result in the metrics table.
@@ -278,130 +289,129 @@ class WorkflowMetricsView:
         Args:
             result: The WorkflowResult to record.
         """
-        await self._ensure_schema()
-        conn = await self._get_connection()
+        async with self._connection() as conn:
+            await self._ensure_schema(conn=conn)
 
-        cost_usd, input_tokens, output_tokens = _extract_cost_and_tokens(
-            result.outputs
-        )
+            cost_usd, input_tokens, output_tokens = _extract_cost_and_tokens(
+                result.outputs
+            )
 
-        capabilities_json = (
-            json.dumps(result.capabilities) if result.capabilities else None
-        )
-        review_modules_json = (
-            json.dumps(result.review_target_modules)
-            if result.review_target_modules
-            else None
-        )
-        failure_category = None
-        failure_zone = None
-        is_retryable = None
-        is_transient = None
-        if result.status != "succeeded" and result.failure_code:
-            classification = None
-            if isinstance(result.outputs, Mapping):
-                raw_classification = result.outputs.get("failure_classification")
-                if isinstance(raw_classification, dict):
-                    classification = dict(raw_classification)
-            if classification is None:
-                stdout_preview = ""
+            capabilities_json = (
+                json.dumps(result.capabilities) if result.capabilities else None
+            )
+            review_modules_json = (
+                json.dumps(result.review_target_modules)
+                if result.review_target_modules
+                else None
+            )
+            failure_category = None
+            failure_zone = None
+            is_retryable = None
+            is_transient = None
+            if result.status != "succeeded" and result.failure_code:
+                classification = None
                 if isinstance(result.outputs, Mapping):
-                    stdout_preview = str(result.outputs.get("stderr", "") or "")
-                classification = project_failure_classification(
-                    failure_category=result.failure_code,
-                    is_transient=_safe_bool(
-                        result.outputs.get("is_transient")
-                        if isinstance(result.outputs, Mapping)
-                        else False
-                    ),
-                    stdout_preview=stdout_preview,
-                )
-            if classification:
-                failure_category = str(
-                    classification.get("category") or result.failure_code or None
-                )
-                failure_zone = _failure_zone_for_category(failure_category)
-                is_retryable = classification.get("is_retryable")
-                is_transient = classification.get("is_transient")
-        cache_read_tokens = 0
-        cache_creation_tokens = 0
-        duration_api_ms = 0
-        tool_use_count = 0
-        if isinstance(result.outputs, Mapping):
-            cache_read_tokens = _safe_int(result.outputs.get("cache_read_tokens"))
-            cache_creation_tokens = _safe_int(result.outputs.get("cache_creation_tokens"))
-            duration_api_ms = _safe_int(
-                result.outputs.get("duration_api_ms")
-                or result.outputs.get("api_duration_ms")
-                or result.outputs.get("duration_ms")
-            )
-            tool_use_count = _tool_use_count(result.outputs)
-            raw_json = result.outputs.get("raw_json")
-            if isinstance(raw_json, dict):
-                usage = raw_json.get("usage")
-                if isinstance(usage, dict):
-                    cache_read_tokens = cache_read_tokens or _safe_int(usage.get("cache_read_tokens"))
-                    cache_creation_tokens = cache_creation_tokens or _safe_int(usage.get("cache_creation_tokens"))
-                    duration_api_ms = duration_api_ms or _safe_int(
-                        raw_json.get("duration_api_ms") or raw_json.get("duration_ms")
+                    raw_classification = result.outputs.get("failure_classification")
+                    if isinstance(raw_classification, dict):
+                        classification = dict(raw_classification)
+                if classification is None:
+                    stdout_preview = ""
+                    if isinstance(result.outputs, Mapping):
+                        stdout_preview = str(result.outputs.get("stderr", "") or "")
+                    classification = project_failure_classification(
+                        failure_category=result.failure_code,
+                        is_transient=_safe_bool(
+                            result.outputs.get("is_transient")
+                            if isinstance(result.outputs, Mapping)
+                            else False
+                        ),
+                        stdout_preview=stdout_preview,
                     )
+                if classification:
+                    failure_category = str(
+                        classification.get("category") or result.failure_code or None
+                    )
+                    failure_zone = _failure_zone_for_category(failure_category)
+                    is_retryable = classification.get("is_retryable")
+                    is_transient = classification.get("is_transient")
+            cache_read_tokens = 0
+            cache_creation_tokens = 0
+            duration_api_ms = 0
+            tool_use_count = 0
+            if isinstance(result.outputs, Mapping):
+                cache_read_tokens = _safe_int(result.outputs.get("cache_read_tokens"))
+                cache_creation_tokens = _safe_int(result.outputs.get("cache_creation_tokens"))
+                duration_api_ms = _safe_int(
+                    result.outputs.get("duration_api_ms")
+                    or result.outputs.get("api_duration_ms")
+                    or result.outputs.get("duration_ms")
+                )
+                tool_use_count = _tool_use_count(result.outputs)
+                raw_json = result.outputs.get("raw_json")
+                if isinstance(raw_json, dict):
+                    usage = raw_json.get("usage")
+                    if isinstance(usage, dict):
+                        cache_read_tokens = cache_read_tokens or _safe_int(usage.get("cache_read_tokens"))
+                        cache_creation_tokens = cache_creation_tokens or _safe_int(usage.get("cache_creation_tokens"))
+                        duration_api_ms = duration_api_ms or _safe_int(
+                            raw_json.get("duration_api_ms") or raw_json.get("duration_ms")
+                        )
 
-        author_model = result.author_model
-        if author_model is None and result.provider_slug and result.model_slug:
-            author_model = f"{result.provider_slug}/{result.model_slug}"
+            author_model = result.author_model
+            if author_model is None and result.provider_slug and result.model_slug:
+                author_model = f"{result.provider_slug}/{result.model_slug}"
 
-        parent_run_id = result.parent_run_id or result.reviews_workflow_id
+            parent_run_id = result.parent_run_id or result.reviews_workflow_id
 
-        await conn.execute(
-            """
-            INSERT INTO workflow_metrics (
-                run_id, parent_run_id, reviews_workflow_id, review_target_modules,
-                author_model, provider_slug, model_slug,
-                status, failure_code, failure_category, failure_zone,
-                is_retryable, is_transient, latency_ms, cost_usd,
-                input_tokens, output_tokens, attempts, retry_count,
-                tool_use_count, cache_read_tokens, cache_creation_tokens,
-                duration_api_ms, task_type, workflow_label, capabilities,
-                label, adapter_type, created_at
+            await conn.execute(
+                """
+                INSERT INTO workflow_metrics (
+                    run_id, parent_run_id, reviews_workflow_id, review_target_modules,
+                    author_model, provider_slug, model_slug,
+                    status, failure_code, failure_category, failure_zone,
+                    is_retryable, is_transient, latency_ms, cost_usd,
+                    input_tokens, output_tokens, attempts, retry_count,
+                    tool_use_count, cache_read_tokens, cache_creation_tokens,
+                    duration_api_ms, task_type, workflow_label, capabilities,
+                    label, adapter_type, created_at
+                )
+                VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+                    $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26,
+                    $27, $28, $29
+                )
+                ON CONFLICT (run_id) DO NOTHING
+                """,
+                result.run_id,
+                parent_run_id,
+                result.reviews_workflow_id,
+                review_modules_json,
+                author_model,
+                result.provider_slug,
+                result.model_slug,
+                result.status,
+                result.failure_code,
+                failure_category,
+                failure_zone,
+                is_retryable,
+                is_transient,
+                result.latency_ms,
+                cost_usd,
+                input_tokens,
+                output_tokens,
+                result.attempts,
+                max(result.attempts - 1, 0),
+                tool_use_count,
+                cache_read_tokens,
+                cache_creation_tokens,
+                duration_api_ms,
+                result.task_type,
+                result.label,
+                capabilities_json,
+                result.label,
+                result.adapter_type,
+                _utc_now(),
             )
-            VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-                $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26,
-                $27, $28, $29
-            )
-            ON CONFLICT (run_id) DO NOTHING
-            """,
-            result.run_id,
-            parent_run_id,
-            result.reviews_workflow_id,
-            review_modules_json,
-            author_model,
-            result.provider_slug,
-            result.model_slug,
-            result.status,
-            result.failure_code,
-            failure_category,
-            failure_zone,
-            is_retryable,
-            is_transient,
-            result.latency_ms,
-            cost_usd,
-            input_tokens,
-            output_tokens,
-            result.attempts,
-            max(result.attempts - 1, 0),
-            tool_use_count,
-            cache_read_tokens,
-            cache_creation_tokens,
-            duration_api_ms,
-            result.task_type,
-            result.label,
-            capabilities_json,
-            result.label,
-            result.adapter_type,
-            _utc_now(),
-        )
-        
 
     def record_workflow(self, result: WorkflowResult) -> None:
         """Synchronous wrapper for record_workflow_async.
@@ -428,31 +438,30 @@ class WorkflowMetricsView:
             List of dicts with keys: provider_slug, model_slug, total_workflows,
             succeeded, failed, pass_rate.
         """
-        await self._ensure_schema()
-        conn = await self._get_connection()
-
-        cutoff = _utc_now() - timedelta(days=days)
-        rows = await conn.fetch(
-            """
-            SELECT
-                provider_slug,
-                model_slug,
-                COUNT(*) as total_workflows,
-                SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) as succeeded,
-                SUM(CASE WHEN status != 'succeeded' THEN 1 ELSE 0 END) as failed,
-                ROUND(
-                    100.0 * SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) /
-                    NULLIF(COUNT(*), 0),
-                    2
-                ) as pass_rate
-            FROM workflow_metrics
-            WHERE created_at >= $1
-            GROUP BY provider_slug, model_slug
-            ORDER BY pass_rate DESC, total_workflows DESC
-            """,
-            cutoff,
-        )
-        return [dict(row) for row in rows]
+        async with self._connection() as conn:
+            await self._ensure_schema(conn=conn)
+            cutoff = _utc_now() - timedelta(days=days)
+            rows = await conn.fetch(
+                """
+                SELECT
+                    provider_slug,
+                    model_slug,
+                    COUNT(*) as total_workflows,
+                    SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) as succeeded,
+                    SUM(CASE WHEN status != 'succeeded' THEN 1 ELSE 0 END) as failed,
+                    ROUND(
+                        100.0 * SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) /
+                        NULLIF(COUNT(*), 0),
+                        2
+                    ) as pass_rate
+                FROM workflow_metrics
+                WHERE created_at >= $1
+                GROUP BY provider_slug, model_slug
+                ORDER BY pass_rate DESC, total_workflows DESC
+                """,
+                cutoff,
+            )
+            return [dict(row) for row in rows]
 
     def pass_rate_by_model(
         self,
@@ -480,27 +489,26 @@ class WorkflowMetricsView:
             List of dicts with keys: provider_slug, total_cost_usd, num_workflows,
             avg_cost_per_workflow.
         """
-        await self._ensure_schema()
-        conn = await self._get_connection()
-
-        cutoff = _utc_now() - timedelta(days=days)
-        rows = await conn.fetch(
-            """
-            SELECT
-                provider_slug,
-                COALESCE(model_slug, 'unknown') as model_slug,
-                provider_slug || '/' || COALESCE(model_slug, 'unknown') as agent_slug,
-                ROUND(SUM(cost_usd)::NUMERIC, 4) as total_cost_usd,
-                COUNT(*) as num_workflows,
-                ROUND((SUM(cost_usd) / NULLIF(COUNT(*), 0))::NUMERIC, 6) as avg_cost_per_workflow
-            FROM workflow_metrics
-            WHERE created_at >= $1
-            GROUP BY provider_slug, model_slug
-            ORDER BY total_cost_usd DESC
-            """,
-            cutoff,
-        )
-        return [dict(row) for row in rows]
+        async with self._connection() as conn:
+            await self._ensure_schema(conn=conn)
+            cutoff = _utc_now() - timedelta(days=days)
+            rows = await conn.fetch(
+                """
+                SELECT
+                    provider_slug,
+                    COALESCE(model_slug, 'unknown') as model_slug,
+                    provider_slug || '/' || COALESCE(model_slug, 'unknown') as agent_slug,
+                    ROUND(SUM(cost_usd)::NUMERIC, 4) as total_cost_usd,
+                    COUNT(*) as num_workflows,
+                    ROUND((SUM(cost_usd) / NULLIF(COUNT(*), 0))::NUMERIC, 6) as avg_cost_per_workflow
+                FROM workflow_metrics
+                WHERE created_at >= $1
+                GROUP BY provider_slug, model_slug
+                ORDER BY total_cost_usd DESC
+                """,
+                cutoff,
+            )
+            return [dict(row) for row in rows]
 
     def cost_by_agent(
         self,
@@ -531,38 +539,37 @@ class WorkflowMetricsView:
         Returns:
             Dict with keys: p50, p95, p99 (all in milliseconds).
         """
-        await self._ensure_schema()
-        conn = await self._get_connection()
+        async with self._connection() as conn:
+            await self._ensure_schema(conn=conn)
+            cutoff = _utc_now() - timedelta(days=days)
 
-        cutoff = _utc_now() - timedelta(days=days)
+            query = """
+                SELECT
+                    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY latency_ms) as p50,
+                    PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY latency_ms) as p95,
+                    PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY latency_ms) as p99
+                FROM workflow_metrics
+                WHERE created_at >= $1
+            """
 
-        query = """
-            SELECT
-                PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY latency_ms) as p50,
-                PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY latency_ms) as p95,
-                PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY latency_ms) as p99
-            FROM workflow_metrics
-            WHERE created_at >= $1
-        """
+            params = [cutoff]
+            if agent_slug and "/" in agent_slug:
+                p, m = agent_slug.split("/", 1)
+                query += " AND provider_slug = $2 AND model_slug = $3"
+                params.extend([p, m])
+            elif provider:
+                query += " AND provider_slug = $2"
+                params.append(provider)
 
-        params = [cutoff]
-        if agent_slug and "/" in agent_slug:
-            p, m = agent_slug.split("/", 1)
-            query += " AND provider_slug = $2 AND model_slug = $3"
-            params.extend([p, m])
-        elif provider:
-            query += " AND provider_slug = $2"
-            params.append(provider)
+            row = await conn.fetchrow(query, *params)
+            if not row:
+                return {"p50": 0, "p95": 0, "p99": 0}
 
-        row = await conn.fetchrow(query, *params)
-        if not row:
-            return {"p50": 0, "p95": 0, "p99": 0}
-
-        return {
-            "p50": int(row["p50"] or 0),
-            "p95": int(row["p95"] or 0),
-            "p99": int(row["p99"] or 0),
-        }
+            return {
+                "p50": int(row["p50"] or 0),
+                "p95": int(row["p95"] or 0),
+                "p99": int(row["p99"] or 0),
+            }
 
     def latency_percentiles(
         self,
@@ -592,26 +599,25 @@ class WorkflowMetricsView:
         Returns:
             List of dicts with keys: failure_code, agent_slug, provider_slug, model_slug, count.
         """
-        await self._ensure_schema()
-        conn = await self._get_connection()
-
-        cutoff = _utc_now() - timedelta(days=days)
-        rows = await conn.fetch(
-            """
-            SELECT
-                COALESCE(failure_code, 'no_error') as failure_code,
-                provider_slug,
-                COALESCE(model_slug, 'unknown') as model_slug,
-                provider_slug || '/' || COALESCE(model_slug, 'unknown') as agent_slug,
-                COUNT(*) as count
-            FROM workflow_metrics
-            WHERE created_at >= $1 AND status != 'succeeded'
-            GROUP BY failure_code, provider_slug, model_slug
-            ORDER BY count DESC
-            """,
-            cutoff,
-        )
-        return [dict(row) for row in rows]
+        async with self._connection() as conn:
+            await self._ensure_schema(conn=conn)
+            cutoff = _utc_now() - timedelta(days=days)
+            rows = await conn.fetch(
+                """
+                SELECT
+                    COALESCE(failure_code, 'no_error') as failure_code,
+                    provider_slug,
+                    COALESCE(model_slug, 'unknown') as model_slug,
+                    provider_slug || '/' || COALESCE(model_slug, 'unknown') as agent_slug,
+                    COUNT(*) as count
+                FROM workflow_metrics
+                WHERE created_at >= $1 AND status != 'succeeded'
+                GROUP BY failure_code, provider_slug, model_slug
+                ORDER BY count DESC
+                """,
+                cutoff,
+            )
+            return [dict(row) for row in rows]
 
     def failure_heatmap(
         self,
@@ -631,34 +637,33 @@ class WorkflowMetricsView:
         days: int = 7,
     ) -> list[dict[str, Any]]:
         """Summarize failures by canonical failure category and zone."""
-        await self._ensure_schema()
-        conn = await self._get_connection()
-
-        cutoff = _utc_now() - timedelta(days=days)
-        rows = await conn.fetch(
-            """
-            WITH normalized AS (
+        async with self._connection() as conn:
+            await self._ensure_schema(conn=conn)
+            cutoff = _utc_now() - timedelta(days=days)
+            rows = await conn.fetch(
+                """
+                WITH normalized AS (
+                    SELECT
+                        COALESCE(NULLIF(failure_category, ''), COALESCE(NULLIF(failure_code, ''), 'unknown')) AS failure_category,
+                        COALESCE(
+                            NULLIF(failure_zone, ''),
+                            COALESCE(NULLIF(failure_category, ''), COALESCE(NULLIF(failure_code, ''), 'unknown'))
+                        ) AS failure_zone
+                    FROM workflow_metrics
+                    WHERE created_at >= $1 AND status != 'succeeded'
+                )
                 SELECT
-                    COALESCE(NULLIF(failure_category, ''), COALESCE(NULLIF(failure_code, ''), 'unknown')) AS failure_category,
-                    COALESCE(
-                        NULLIF(failure_zone, ''),
-                        COALESCE(NULLIF(failure_category, ''), COALESCE(NULLIF(failure_code, ''), 'unknown'))
-                    ) AS failure_zone
-                FROM workflow_metrics
-                WHERE created_at >= $1 AND status != 'succeeded'
+                    failure_category,
+                    failure_zone,
+                    COUNT(*) as count,
+                    ROUND(100.0 * COUNT(*) / NULLIF(SUM(COUNT(*)) OVER (), 0), 2) as pct
+                FROM normalized
+                GROUP BY failure_category, failure_zone
+                ORDER BY count DESC, failure_category ASC
+                """,
+                cutoff,
             )
-            SELECT
-                failure_category,
-                failure_zone,
-                COUNT(*) as count,
-                ROUND(100.0 * COUNT(*) / NULLIF(SUM(COUNT(*)) OVER (), 0), 2) as pct
-            FROM normalized
-            GROUP BY failure_category, failure_zone
-            ORDER BY count DESC, failure_category ASC
-            """,
-            cutoff,
-        )
-        return [dict(row) for row in rows]
+            return [dict(row) for row in rows]
 
     def failure_category_breakdown(
         self,
@@ -680,64 +685,63 @@ class WorkflowMetricsView:
         days: int = 7,
     ) -> dict[str, Any]:
         """Return a compact SLI summary for recent workflow activity."""
-        await self._ensure_schema()
-        conn = await self._get_connection()
+        async with self._connection() as conn:
+            await self._ensure_schema(conn=conn)
+            cutoff = _utc_now() - timedelta(days=days)
+            row = await conn.fetchrow(
+                """
+                SELECT
+                    COUNT(*) AS total_workflows,
+                    SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) AS succeeded,
+                    SUM(CASE WHEN status != 'succeeded' THEN 1 ELSE 0 END) AS failed,
+                    SUM(CASE WHEN status = 'succeeded' AND attempts = 1 THEN 1 ELSE 0 END) AS first_pass_successes,
+                    SUM(CASE WHEN status = 'succeeded' AND attempts > 1 THEN 1 ELSE 0 END) AS retry_successes,
+                    SUM(CASE WHEN attempts > 1 THEN 1 ELSE 0 END) AS retried_workflows,
+                    SUM(cost_usd) AS total_cost_usd,
+                    SUM(latency_ms) AS total_latency_ms,
+                    SUM(input_tokens) AS total_input_tokens,
+                    SUM(output_tokens) AS total_output_tokens,
+                    SUM(tool_use_count) AS total_tool_uses
+                FROM workflow_metrics
+                WHERE created_at >= $1
+                """,
+                cutoff,
+            )
+            if not row:
+                return {
+                    "total_workflows": 0,
+                    "succeeded": 0,
+                    "failed": 0,
+                    "first_pass_success_rate": 0.0,
+                    "retry_success_rate": 0.0,
+                    "cost_per_success_usd": 0.0,
+                    "tokens_per_success": 0.0,
+                    "avg_latency_ms": 0.0,
+                    "avg_tool_uses": 0.0,
+                }
 
-        cutoff = _utc_now() - timedelta(days=days)
-        row = await conn.fetchrow(
-            """
-            SELECT
-                COUNT(*) AS total_workflows,
-                SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) AS succeeded,
-                SUM(CASE WHEN status != 'succeeded' THEN 1 ELSE 0 END) AS failed,
-                SUM(CASE WHEN status = 'succeeded' AND attempts = 1 THEN 1 ELSE 0 END) AS first_pass_successes,
-                SUM(CASE WHEN status = 'succeeded' AND attempts > 1 THEN 1 ELSE 0 END) AS retry_successes,
-                SUM(CASE WHEN attempts > 1 THEN 1 ELSE 0 END) AS retried_workflows,
-                SUM(cost_usd) AS total_cost_usd,
-                SUM(latency_ms) AS total_latency_ms,
-                SUM(input_tokens) AS total_input_tokens,
-                SUM(output_tokens) AS total_output_tokens,
-                SUM(tool_use_count) AS total_tool_uses
-            FROM workflow_metrics
-            WHERE created_at >= $1
-            """,
-            cutoff,
-        )
-        if not row:
+            total = _safe_int(row["total_workflows"])
+            succeeded = _safe_int(row["succeeded"])
+            failed = _safe_int(row["failed"])
+            first_pass_successes = _safe_int(row["first_pass_successes"])
+            retry_successes = _safe_int(row["retry_successes"])
+            retried_workflows = _safe_int(row["retried_workflows"])
+            total_cost_usd = _safe_float(row["total_cost_usd"])
+            total_latency_ms = _safe_float(row["total_latency_ms"])
+            total_tokens = _safe_int(row["total_input_tokens"]) + _safe_int(row["total_output_tokens"])
+            total_tool_uses = _safe_int(row["total_tool_uses"])
+
             return {
-                "total_workflows": 0,
-                "succeeded": 0,
-                "failed": 0,
-                "first_pass_success_rate": 0.0,
-                "retry_success_rate": 0.0,
-                "cost_per_success_usd": 0.0,
-                "tokens_per_success": 0.0,
-                "avg_latency_ms": 0.0,
-                "avg_tool_uses": 0.0,
+                "total_workflows": total,
+                "succeeded": succeeded,
+                "failed": failed,
+                "first_pass_success_rate": round(first_pass_successes / total, 4) if total else 0.0,
+                "retry_success_rate": round(retry_successes / retried_workflows, 4) if retried_workflows else 0.0,
+                "cost_per_success_usd": round(total_cost_usd / succeeded, 6) if succeeded else 0.0,
+                "tokens_per_success": round(total_tokens / succeeded, 2) if succeeded else 0.0,
+                "avg_latency_ms": round(total_latency_ms / total, 2) if total else 0.0,
+                "avg_tool_uses": round(total_tool_uses / total, 2) if total else 0.0,
             }
-
-        total = _safe_int(row["total_workflows"])
-        succeeded = _safe_int(row["succeeded"])
-        failed = _safe_int(row["failed"])
-        first_pass_successes = _safe_int(row["first_pass_successes"])
-        retry_successes = _safe_int(row["retry_successes"])
-        retried_workflows = _safe_int(row["retried_workflows"])
-        total_cost_usd = _safe_float(row["total_cost_usd"])
-        total_latency_ms = _safe_float(row["total_latency_ms"])
-        total_tokens = _safe_int(row["total_input_tokens"]) + _safe_int(row["total_output_tokens"])
-        total_tool_uses = _safe_int(row["total_tool_uses"])
-
-        return {
-            "total_workflows": total,
-            "succeeded": succeeded,
-            "failed": failed,
-            "first_pass_success_rate": round(first_pass_successes / total, 4) if total else 0.0,
-            "retry_success_rate": round(retry_successes / retried_workflows, 4) if retried_workflows else 0.0,
-            "cost_per_success_usd": round(total_cost_usd / succeeded, 6) if succeeded else 0.0,
-            "tokens_per_success": round(total_tokens / succeeded, 2) if succeeded else 0.0,
-            "avg_latency_ms": round(total_latency_ms / total, 2) if total else 0.0,
-            "avg_tool_uses": round(total_tool_uses / total, 2) if total else 0.0,
-        }
 
     def efficiency_summary(
         self,
@@ -757,48 +761,47 @@ class WorkflowMetricsView:
         run_id: str,
     ) -> list[dict[str, Any]]:
         """Return the run tree rooted at *run_id*."""
-        await self._ensure_schema()
-        conn = await self._get_connection()
-
-        rows = await conn.fetch(
-            """
-            WITH RECURSIVE lineage AS (
-                SELECT
-                    0 AS depth,
-                    run_id, parent_run_id, reviews_workflow_id,
-                    review_target_modules, author_model, provider_slug, model_slug,
-                    status, failure_code, failure_category, failure_zone,
-                    is_retryable, is_transient, latency_ms, cost_usd,
-                    input_tokens, output_tokens, attempts, retry_count,
-                    tool_use_count, cache_read_tokens, cache_creation_tokens,
-                    duration_api_ms, task_type, workflow_label, capabilities,
-                    label, adapter_type, created_at
-                FROM workflow_metrics
-                WHERE run_id = $1
-                UNION ALL
-                SELECT
-                    parent.depth + 1 AS depth,
-                    child.run_id, child.parent_run_id, child.reviews_workflow_id,
-                    child.review_target_modules, child.author_model, child.provider_slug,
-                    child.model_slug, child.status, child.failure_code,
-                    child.failure_category, child.failure_zone, child.is_retryable,
-                    child.is_transient, child.latency_ms, child.cost_usd,
-                    child.input_tokens, child.output_tokens, child.attempts,
-                    child.retry_count, child.tool_use_count,
-                    child.cache_read_tokens, child.cache_creation_tokens,
-                    child.duration_api_ms, child.task_type, child.workflow_label,
-                    child.capabilities, child.label, child.adapter_type,
-                    child.created_at
-                FROM workflow_metrics child
-                JOIN lineage parent ON child.parent_run_id = parent.run_id
+        async with self._connection() as conn:
+            await self._ensure_schema(conn=conn)
+            rows = await conn.fetch(
+                """
+                WITH RECURSIVE lineage AS (
+                    SELECT
+                        0 AS depth,
+                        run_id, parent_run_id, reviews_workflow_id,
+                        review_target_modules, author_model, provider_slug, model_slug,
+                        status, failure_code, failure_category, failure_zone,
+                        is_retryable, is_transient, latency_ms, cost_usd,
+                        input_tokens, output_tokens, attempts, retry_count,
+                        tool_use_count, cache_read_tokens, cache_creation_tokens,
+                        duration_api_ms, task_type, workflow_label, capabilities,
+                        label, adapter_type, created_at
+                    FROM workflow_metrics
+                    WHERE run_id = $1
+                    UNION ALL
+                    SELECT
+                        parent.depth + 1 AS depth,
+                        child.run_id, child.parent_run_id, child.reviews_workflow_id,
+                        child.review_target_modules, child.author_model, child.provider_slug,
+                        child.model_slug, child.status, child.failure_code,
+                        child.failure_category, child.failure_zone, child.is_retryable,
+                        child.is_transient, child.latency_ms, child.cost_usd,
+                        child.input_tokens, child.output_tokens, child.attempts,
+                        child.retry_count, child.tool_use_count,
+                        child.cache_read_tokens, child.cache_creation_tokens,
+                        child.duration_api_ms, child.task_type, child.workflow_label,
+                        child.capabilities, child.label, child.adapter_type,
+                        child.created_at
+                    FROM workflow_metrics child
+                    JOIN lineage parent ON child.parent_run_id = parent.run_id
+                )
+                SELECT *
+                FROM lineage
+                ORDER BY depth ASC, created_at ASC
+                """,
+                run_id,
             )
-            SELECT *
-            FROM lineage
-            ORDER BY depth ASC, created_at ASC
-            """,
-            run_id,
-        )
-        return [dict(row) for row in rows]
+            return [dict(row) for row in rows]
 
     def workflow_lineage(
         self,
@@ -825,29 +828,28 @@ class WorkflowMetricsView:
         Returns:
             List of dicts with keys: hour, count.
         """
-        await self._ensure_schema()
-        conn = await self._get_connection()
-
-        cutoff = _utc_now() - timedelta(days=days)
-        rows = await conn.fetch(
-            """
-            SELECT
-                DATE_TRUNC('hour', created_at) as hour,
-                COUNT(*) as count
-            FROM workflow_metrics
-            WHERE created_at >= $1
-            GROUP BY DATE_TRUNC('hour', created_at)
-            ORDER BY hour DESC
-            """,
-            cutoff,
-        )
-        return [
-            {
-                "hour": row["hour"].isoformat() if row["hour"] else None,
-                "count": row["count"],
-            }
-            for row in rows
-        ]
+        async with self._connection() as conn:
+            await self._ensure_schema(conn=conn)
+            cutoff = _utc_now() - timedelta(days=days)
+            rows = await conn.fetch(
+                """
+                SELECT
+                    DATE_TRUNC('hour', created_at) as hour,
+                    COUNT(*) as count
+                FROM workflow_metrics
+                WHERE created_at >= $1
+                GROUP BY DATE_TRUNC('hour', created_at)
+                ORDER BY hour DESC
+                """,
+                cutoff,
+            )
+            return [
+                {
+                    "hour": row["hour"].isoformat() if row["hour"] else None,
+                    "count": row["count"],
+                }
+                for row in rows
+            ]
 
     def hourly_workflow_volume(
         self,
@@ -874,23 +876,27 @@ class WorkflowMetricsView:
         Returns:
             List of dicts with keys: capability, count.
         """
-        await self._ensure_schema()
-        conn = await self._get_connection()
-
-        cutoff = _utc_now() - timedelta(days=days)
-        rows = await conn.fetch(
-            """
-            SELECT
-                jsonb_array_elements_text(capabilities) as capability,
-                COUNT(*) as count
-            FROM workflow_metrics
-            WHERE created_at >= $1 AND capabilities IS NOT NULL
-            GROUP BY capability
-            ORDER BY count DESC
-            """,
-            cutoff,
-        )
-        return [dict(row) for row in rows]
+        async with self._connection() as conn:
+            await self._ensure_schema(conn=conn)
+            cutoff = _utc_now() - timedelta(days=days)
+            rows = await conn.fetch(
+                """
+                SELECT
+                    jsonb_array_elements_text(
+                        CASE
+                            WHEN NULLIF(BTRIM(capabilities::text), '') IS NULL THEN '[]'::jsonb
+                            ELSE capabilities::jsonb
+                        END
+                    ) as capability,
+                    COUNT(*) as count
+                FROM workflow_metrics
+                WHERE created_at >= $1 AND capabilities IS NOT NULL
+                GROUP BY capability
+                ORDER BY count DESC
+                """,
+                cutoff,
+            )
+            return [dict(row) for row in rows]
 
     def capability_distribution(
         self,

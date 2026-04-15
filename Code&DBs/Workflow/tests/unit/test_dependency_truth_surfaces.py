@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from surfaces.api.handlers import workflow_admin
+from surfaces.mcp.catalog import get_tool_catalog
 
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -62,6 +63,21 @@ def test_orient_includes_dependency_truth(monkeypatch) -> None:
             "lane_recommendation": {},
         },
     )
+    monkeypatch.setattr(
+        workflow_admin,
+        "build_code_hotspots",
+        lambda **kwargs: {"authority": "code_hotspots", "kwargs": kwargs},
+    )
+    monkeypatch.setattr(
+        workflow_admin,
+        "build_bug_scoreboard",
+        lambda **kwargs: {"authority": "bug_scoreboard", "kwargs": kwargs},
+    )
+    monkeypatch.setattr(
+        workflow_admin,
+        "build_platform_observability",
+        lambda **kwargs: {"authority": "platform_observability", "kwargs": kwargs},
+    )
 
     result = workflow_admin._handle_orient(_FakeSubsystems(), {})
 
@@ -71,6 +87,9 @@ def test_orient_includes_dependency_truth(monkeypatch) -> None:
         "pass_rate": 1.0,
         "top_failure_codes": [],
     }
+    assert result["engineering_observability"]["code_hotspots"]["authority"] == "code_hotspots"
+    assert result["engineering_observability"]["bug_scoreboard"]["authority"] == "bug_scoreboard"
+    assert result["engineering_observability"]["platform_observability"]["authority"] == "platform_observability"
 
 
 def test_orient_advertises_catalog_backed_cli(monkeypatch) -> None:
@@ -105,8 +124,9 @@ def test_orient_advertises_catalog_backed_cli(monkeypatch) -> None:
     assert "graph traversal" in knowledge_graph
 
     cli_surface = result["cli_surface"]
+    tool_count = len(get_tool_catalog())
     assert cli_surface["preferred"] is True
-    assert cli_surface["tool_count"] == 42
+    assert cli_surface["tool_count"] == tool_count
     discovery_commands = {item["command"]: item for item in cli_surface["discovery_commands"]}
     assert "workflow tools list" in discovery_commands
     assert "failure" in discovery_commands["workflow tools search <text>"]["examples"][0]
@@ -120,10 +140,10 @@ def test_orient_advertises_catalog_backed_cli(monkeypatch) -> None:
 
     instructions = result["instructions"]
     assert "Prefer the catalog-backed `workflow` CLI" in instructions
-    assert "There are currently 42 catalog-backed tools" in instructions
+    assert f"There are currently {tool_count} catalog-backed tools" in instructions
     assert "workflow tools list" in instructions
     assert "workflow health" in instructions
-    assert "workflow tools call <tool>" in instructions
+    assert "workflow tools call <tool|alias>" in instructions
     assert "write/dispatch flows require `--yes`" in instructions
     assert "workflow query" in instructions
     assert "workflow architecture scan" in instructions
@@ -165,7 +185,6 @@ def test_praxis_ctl_doctor_includes_dependency_truth(monkeypatch, tmp_path: Path
             "mcp_bridge_ready": True,
             "ui_ready": True,
             "launch_url": "http://127.0.0.1:8420/app",
-            "helm_url": "http://127.0.0.1:8420/app/helm",
             "dashboard_url": "http://127.0.0.1:8420/app",
             "api_docs_url": "http://127.0.0.1:8420/docs",
         },
@@ -184,7 +203,6 @@ def test_praxis_ctl_doctor_includes_dependency_truth(monkeypatch, tmp_path: Path
     assert payload["mcp_bridge_ready"] is True
     assert payload["ui_ready"] is True
     assert payload["launch_url"] == "http://127.0.0.1:8420/app"
-    assert payload["helm_url"] == "http://127.0.0.1:8420/app/helm"
 
 
 def test_probe_frontdoor_semantics_uses_ui_header_for_workflow_probes(monkeypatch) -> None:

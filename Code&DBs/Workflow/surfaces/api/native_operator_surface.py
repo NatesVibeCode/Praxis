@@ -69,7 +69,7 @@ from ._operator_helpers import (
     _run_async as _shared_run_async,
 )
 from .frontdoor import status as frontdoor_status
-from .operator_read import query_operator_surface
+from .operator_read import NativeOperatorQueryFrontdoor, query_operator_surface
 
 __all__ = [
     "NativeOperatorSurfaceError",
@@ -101,6 +101,7 @@ _BOUNDED_FORK_OWNERSHIP_REUSE_REASON_CODE = "packet.authoritative_fork"
 _BOUNDED_FORK_OWNERSHIP_SELECTION_PATH = "bounded_authoritative_fork"
 _NATIVE_SMOKE_WORKFLOW_ID_PREFIX = "workflow.native-self-hosted-smoke"
 _SMOKE_FRESHNESS_SLO_SECONDS = 24 * 60 * 60
+_DEFAULT_QUERY_OPERATOR_SURFACE = query_operator_surface
 
 
 def _run_async(awaitable: Awaitable[Any]) -> Any:
@@ -1525,6 +1526,49 @@ class NativeOperatorSurfaceFrontdoor:
             if should_close:
                 await conn.close()
 
+    async def _load_query_payload(
+        self,
+        *,
+        env: Mapping[str, str] | None,
+        as_of: datetime,
+        run_id: str,
+        bug_ids: Sequence[str] | None,
+        roadmap_item_ids: Sequence[str] | None,
+        cutover_gate_ids: Sequence[str] | None,
+        query_binding_ids: tuple[str, ...] | None,
+        prefetched_work_bindings: tuple[WorkItemWorkflowBindingRecord, ...],
+    ) -> Mapping[str, Any]:
+        if query_operator_surface is not _DEFAULT_QUERY_OPERATOR_SURFACE:
+            return query_operator_surface(
+                env=env,
+                as_of=as_of,
+                bug_ids=bug_ids,
+                roadmap_item_ids=roadmap_item_ids,
+                cutover_gate_ids=cutover_gate_ids,
+                work_item_workflow_binding_ids=query_binding_ids,
+                workflow_run_ids=[run_id],
+            )
+
+        conn, should_close = await self._open_request_connection(env=env)
+        try:
+            query_frontdoor = NativeOperatorQueryFrontdoor(
+                connect_database=self.connect_database,
+            )
+            return await query_frontdoor.query_operator_surface_async(
+                env=env,
+                as_of=as_of,
+                bug_ids=bug_ids,
+                roadmap_item_ids=roadmap_item_ids,
+                cutover_gate_ids=cutover_gate_ids,
+                work_item_workflow_binding_ids=query_binding_ids,
+                workflow_run_ids=[run_id],
+                conn=conn,
+                prefetched_work_item_workflow_bindings=prefetched_work_bindings,
+            )
+        finally:
+            if should_close:
+                await conn.close()
+
     async def _load_persona_activation(
         self,
         *,
@@ -2156,14 +2200,15 @@ class NativeOperatorSurfaceFrontdoor:
                 run_id=run_id,
                 as_of=as_of,
             )
-            raw_query_payload = query_operator_surface(
+            raw_query_payload = await self._load_query_payload(
                 env=source,
                 as_of=as_of,
+                run_id=run_id,
                 bug_ids=bug_ids,
                 roadmap_item_ids=roadmap_item_ids,
                 cutover_gate_ids=cutover_gate_ids,
-                work_item_workflow_binding_ids=query_binding_ids,
-                workflow_run_ids=[run_id],
+                query_binding_ids=query_binding_ids,
+                prefetched_work_bindings=authoritative_work_bindings,
             )
             query_payload = _normalize_query_payload(
                 raw_query_payload,

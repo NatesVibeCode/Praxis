@@ -73,6 +73,114 @@ def _unique_operation_id(route: APIRoute) -> str:
     return f"{route.name}_{normalized_path}_{methods}"
 
 
+def _api_route_record(route: APIRoute) -> dict[str, Any]:
+    methods = sorted(method for method in (route.methods or set()) if method != "HEAD")
+    description = (route.description or "").strip()
+    summary = (route.summary or "").strip()
+    return {
+        "path": route.path,
+        "name": route.name,
+        "methods": methods,
+        "summary": summary,
+        "description": description,
+        "tags": list(route.tags or ()),
+        "include_in_schema": bool(route.include_in_schema),
+        "operation_id": route.operation_id,
+    }
+
+
+def _normalize_route_filter(value: str | None) -> str:
+    return str(value or "").strip().lower()
+
+
+def _route_matches(
+    route: dict[str, Any],
+    *,
+    search: str | None = None,
+    method: str | None = None,
+    tag: str | None = None,
+    path_prefix: str | None = None,
+) -> bool:
+    search_text = _normalize_route_filter(search)
+    method_text = _normalize_route_filter(method)
+    tag_text = _normalize_route_filter(tag)
+    path_prefix_text = str(path_prefix or "").strip()
+
+    if path_prefix_text and not str(route.get("path") or "").startswith(path_prefix_text):
+        return False
+
+    methods = {str(item).strip().lower() for item in route.get("methods", [])}
+    if method_text and method_text not in methods:
+        return False
+
+    tags = {str(item).strip().lower() for item in route.get("tags", [])}
+    if tag_text and tag_text not in tags:
+        return False
+
+    if search_text:
+        searchable = " ".join(
+            str(part)
+            for part in (
+                route.get("path"),
+                route.get("name"),
+                route.get("summary"),
+                route.get("description"),
+                " ".join(str(item) for item in route.get("tags", [])),
+            )
+            if part
+        ).lower()
+        if search_text not in searchable:
+            return False
+
+    return True
+
+
+def list_api_routes(
+    *,
+    search: str | None = None,
+    method: str | None = None,
+    tag: str | None = None,
+    path_prefix: str | None = None,
+) -> dict[str, Any]:
+    """Return the live FastAPI route catalog for discovery surfaces."""
+
+    routes = [
+        _api_route_record(route)
+        for route in app.routes
+        if isinstance(route, APIRoute)
+    ]
+    routes.sort(key=lambda item: (str(item["path"]), ",".join(item["methods"])))
+    filtered_routes = [
+        route
+        for route in routes
+        if _route_matches(
+            route,
+            search=search,
+            method=method,
+            tag=tag,
+            path_prefix=path_prefix,
+        )
+    ]
+    filters = {
+        key: value
+        for key, value in {
+            "search": str(search or "").strip() or None,
+            "method": str(method or "").strip().upper() or None,
+            "tag": str(tag or "").strip() or None,
+            "path_prefix": str(path_prefix or "").strip() or None,
+        }.items()
+        if value is not None
+    }
+    return {
+        "count": len(filtered_routes),
+        "docs_url": app.docs_url,
+        "openapi_url": app.openapi_url,
+        "redoc_url": app.redoc_url,
+        "filters": filters,
+        "routes": filtered_routes,
+    }
+
+
 def _ensure_shared_subsystems(target_app: FastAPI) -> _Subsystems | None:
     """Instantiate the shared subsystem container once for API startup wiring."""
     subsystems = getattr(target_app.state, "shared_subsystems", None)
@@ -503,14 +611,6 @@ def launcher_recover(req: LauncherRecoverRequest) -> JSONResponse:
     except launcher_handlers.LauncherAuthorityError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return JSONResponse(status_code=status_code, content=payload)
-
-
-@app.get("/api/dashboard")
-def get_dashboard() -> dict[str, Any]:
-    """Return the full consolidated dashboard JSON."""
-    from runtime.dashboard import build_dashboard as _build_dashboard
-
-    return _build_dashboard()
 
 
 @app.get("/api/leaderboard")
@@ -1066,6 +1166,10 @@ async def workflows_post(request: Request) -> Response:
 async def workflows_path_get(request: Request, rest_of_path: str) -> Response:
     return await _route_to_handler(request)
 
+@app.get("/api/dashboard")
+async def dashboard_get(request: Request) -> Response:
+    return await _route_to_handler(request)
+
 @app.put("/api/workflows/{rest_of_path:path}")
 async def workflows_path_put(request: Request, rest_of_path: str) -> Response:
     return await _route_to_handler(request)
@@ -1295,6 +1399,10 @@ async def bugs_replay_ready_get(request: Request) -> Response:
 # -- Workflow execution (browser-initiated, routed through handler system) --
 @app.post("/api/workflow-runs")
 async def workflow_runs_handler_post(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+@app.post("/api/workflow-runs/spawn")
+async def workflow_runs_spawn_post(request: Request) -> Response:
     return await _route_to_handler(request)
 
 @app.get("/api/workflow-runs/{run_id}/stream")
@@ -2012,6 +2120,18 @@ def resolve_scope_endpoint(
             for s in resolution.context_sections
         ],
     }
+
+
+@app.get("/api/routes")
+def get_routes(
+    search: str | None = Query(default=None, description="Substring search across route path, name, summary, description, and tags."),
+    method: str | None = Query(default=None, description="Filter to one HTTP method such as GET or POST."),
+    tag: str | None = Query(default=None, description="Filter to routes carrying a specific FastAPI tag."),
+    path_prefix: str | None = Query(default=None, description="Filter to routes whose path starts with this prefix."),
+) -> dict[str, Any]:
+    """Return the live HTTP route catalog for CLI and API discovery."""
+
+    return list_api_routes(search=search, method=method, tag=tag, path_prefix=path_prefix)
 
 
 @app.get("/api/catalog")

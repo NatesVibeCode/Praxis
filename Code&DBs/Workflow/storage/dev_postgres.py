@@ -52,6 +52,13 @@ class DevPostgresError(PostgresStorageError):
     """Raised when repo-local developer Postgres helpers fail safely."""
 
 
+def _native_postgres_disabled() -> DevPostgresError:
+    return DevPostgresError(
+        "dev_postgres.disabled",
+        "Native repo-local Postgres helpers are disabled; use Docker or Cloudflare runtime authority only.",
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class DevPostgresConfig:
     """Explicit repo-local settings for the developer Postgres cluster."""
@@ -524,129 +531,35 @@ def local_postgres_health(
     env: Mapping[str, str] | None = None,
 ) -> DevPostgresStatus:
     """Return the explicit read-only health snapshot for the repo-local cluster."""
-
-    config = resolve_local_postgres_config(env=env)
-    return _collect_local_postgres_health(config)
+    raise _native_postgres_disabled()
 
 
 def local_postgres_up(
     env: Mapping[str, str] | None = None,
 ) -> DevPostgresStatus:
     """Start the repo-local cluster if it is not already running."""
-
-    config = resolve_local_postgres_config(env=env)
-    process_running, _ = _pg_ctl_status(config)
-    if not process_running:
-        config.log_file.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            subprocess.run(
-                [
-                    config.pg_ctl,
-                    "-D",
-                    str(config.data_dir),
-                    "-l",
-                    str(config.log_file),
-                    "-w",
-                    "start",
-                ],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-        except subprocess.CalledProcessError as exc:
-            raise DevPostgresError(
-                "dev_postgres.command_failed",
-                "failed to start the repo-local Postgres cluster",
-                details={
-                    "command": [config.pg_ctl, "-D", str(config.data_dir), "start"],
-                    "exit_code": exc.returncode,
-                    "stdout": exc.stdout,
-                    "stderr": exc.stderr,
-                },
-            ) from exc
-    return local_postgres_health(env=env)
+    raise _native_postgres_disabled()
 
 
 def local_postgres_down(
     env: Mapping[str, str] | None = None,
 ) -> DevPostgresStatus:
     """Stop the repo-local cluster if it is running."""
-
-    config = resolve_local_postgres_config(env=env)
-    process_running, _ = _pg_ctl_status(config)
-    if process_running:
-        try:
-            subprocess.run(
-                [
-                    config.pg_ctl,
-                    "-D",
-                    str(config.data_dir),
-                    "-w",
-                    "-m",
-                    "fast",
-                    "stop",
-                ],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-        except subprocess.CalledProcessError as exc:
-            raise DevPostgresError(
-                "dev_postgres.command_failed",
-                "failed to stop the repo-local Postgres cluster",
-                details={
-                    "command": [config.pg_ctl, "-D", str(config.data_dir), "stop"],
-                    "exit_code": exc.returncode,
-                    "stdout": exc.stdout,
-                    "stderr": exc.stderr,
-                },
-            ) from exc
-    return local_postgres_health(env=env)
+    raise _native_postgres_disabled()
 
 
 def local_postgres_bootstrap(
     env: Mapping[str, str] | None = None,
 ) -> DevPostgresStatus:
     """Apply the canonical workflow schema to the explicit local database."""
-
-    config = resolve_local_postgres_config(env=env)
-    process_running, _ = _pg_ctl_status(config)
-    if not process_running:
-        raise DevPostgresError(
-            "dev_postgres.not_running",
-            "local Postgres must be running before bootstrap",
-            details={"data_dir": str(config.data_dir)},
-        )
-
-    async def _bootstrap() -> None:
-        conn = await _connect_verified_database(config)
-        try:
-            await bootstrap_workflow_schema(conn)
-        except PostgresConfigurationError:
-            raise
-        except Exception as exc:
-            raise DevPostgresError(
-                "dev_postgres.bootstrap_failed",
-                "failed to bootstrap the local Postgres schema",
-                details={
-                    "database_url": config.database_url,
-                    "data_dir": str(config.data_dir),
-                },
-            ) from exc
-        finally:
-            await conn.close()
-
-    _run_coroutine(_bootstrap())
-    return local_postgres_health(env=env)
+    raise _native_postgres_disabled()
 
 
 def local_postgres_restart(
     env: Mapping[str, str] | None = None,
 ) -> DevPostgresStatus:
     """Restart the local cluster without mutating schema."""
-
-    local_postgres_down(env=env)
-    return local_postgres_up(env=env)
+    raise _native_postgres_disabled()
 
 
 def _print_status(status: DevPostgresStatus) -> None:

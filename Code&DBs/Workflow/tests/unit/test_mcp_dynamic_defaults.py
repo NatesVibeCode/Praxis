@@ -8,7 +8,7 @@ from types import SimpleNamespace
 _WORKFLOW_ROOT = Path(__file__).resolve().parents[2]
 if str(_WORKFLOW_ROOT) not in sys.path:
     sys.path.insert(0, str(_WORKFLOW_ROOT))
-os.environ.setdefault("WORKFLOW_DATABASE_URL", "postgresql://localhost:5432/praxis")
+os.environ.setdefault("WORKFLOW_DATABASE_URL", "postgresql://postgres@localhost:5432/praxis")
 
 from runtime.wave_orchestrator import WaveOrchestrator
 from surfaces.mcp.tools import artifacts as artifacts_tools

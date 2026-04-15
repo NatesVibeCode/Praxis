@@ -5,6 +5,7 @@ import { world } from '../world';
 import { useSlice } from '../hooks/useSlice';
 import { QuadrantManifest } from './QuadrantGrid';
 import { useToast } from '../primitives/Toast';
+import './SaveLayoutBar.css';
 
 interface SaveLayoutTarget {
   manifestId: string;
@@ -148,76 +149,57 @@ export function SaveLayoutBar({
   };
 
   return (
-    <div style={{
-      display: 'flex',
-      alignItems: 'center',
-      gap: 'var(--space-sm, 8px)',
-      padding: 'var(--space-md, 16px)',
-      backgroundColor: 'var(--surface-sunken, #f9fafb)',
-      border: '1px solid var(--border-color, #e5e7eb)',
-      borderRadius: '8px',
-      marginBottom: 'var(--space-lg, 24px)'
-    }}>
-      <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-color, #111827)' }}>
-        Unsaved Layout Changes
-      </span>
-      <div style={{ flex: 1 }} />
-      
+    <div className="grid-save-bar">
+      <div className="grid-save-bar__status">
+        <span className="grid-save-bar__kicker">Workspace change</span>
+        <span className="grid-save-bar__title">Unsaved layout changes</span>
+      </div>
+      <div className="grid-save-bar__spacer" />
+
       {!isSaveAs ? (
-        <>
-          <button 
+        <div className="grid-save-bar__actions">
+          <button
+            type="button"
             onClick={() => setIsSaveAs(true)}
             disabled={isSaving}
-            style={{ 
-              padding: '6px 12px', cursor: 'pointer', background: 'transparent', 
-              border: '1px solid var(--border-color, #d1d5db)', borderRadius: '4px',
-              fontSize: 14
-            }}
+            className="grid-save-bar__button grid-save-bar__button--ghost"
           >
-            Save As
+            Save as
           </button>
-          <button 
-            onClick={handleSave} 
+          <button
+            type="button"
+            onClick={handleSave}
             disabled={isSaving}
-            style={{ 
-              padding: '6px 12px', cursor: 'pointer', background: 'var(--primary, #3b82f6)', 
-              color: 'white', border: 'none', borderRadius: '4px', fontSize: 14
-            }}
+            className="grid-save-bar__button grid-save-bar__button--primary"
+            aria-busy={isSaving}
           >
-            {isSaving ? 'Saving...' : 'Save'}
+            {isSaving ? 'Saving...' : 'Save layout'}
           </button>
-        </>
+        </div>
       ) : (
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          <input 
-            type="text" 
-            placeholder="New manifest name" 
+        <div className="grid-save-bar__save-as">
+          <input
+            type="text"
+            placeholder="New manifest name"
             value={saveAsName}
             onChange={e => setSaveAsName(e.target.value)}
             disabled={isSaving}
-            style={{ 
-              padding: '6px 8px', borderRadius: '4px', border: '1px solid var(--border-color, #d1d5db)',
-              fontSize: 14
-            }}
+            className="grid-save-bar__input"
             autoFocus
           />
-          <button 
+          <button
+            type="button"
             onClick={handleSaveAs}
             disabled={isSaving}
-            style={{ 
-              padding: '6px 12px', cursor: 'pointer', background: 'var(--primary, #3b82f6)', 
-              color: 'white', border: 'none', borderRadius: '4px', fontSize: 14
-            }}
+            className="grid-save-bar__button grid-save-bar__button--primary"
           >
             Confirm
           </button>
-          <button 
+          <button
+            type="button"
             onClick={() => setIsSaveAs(false)}
             disabled={isSaving}
-            style={{ 
-              padding: '6px 12px', cursor: 'pointer', background: 'transparent', 
-              border: '1px solid var(--border-color, #d1d5db)', borderRadius: '4px', fontSize: 14
-            }}
+            className="grid-save-bar__button grid-save-bar__button--ghost"
           >
             Cancel
           </button>

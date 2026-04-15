@@ -5,6 +5,19 @@
 import type { GlyphType } from './moonBuildPresenter';
 import type { DragDropKind } from './moonBuildReducer';
 
+export interface CatalogTruthPayload {
+  category: 'runtime' | 'persisted' | 'alias' | 'partial' | 'coming_soon';
+  badge: string;
+  detail: string;
+}
+
+export interface CatalogSurfacePolicyPayload {
+  tier: 'primary' | 'advanced' | 'hidden';
+  badge: string;
+  detail: string;
+  hardChoice?: string;
+}
+
 export interface CatalogItem {
   id: string;
   label: string;
@@ -17,10 +30,14 @@ export interface CatalogItem {
   actionValue?: string;
   /** The gate family name sent when applied to an edge */
   gateFamily?: string;
-  /** Where this item came from: static, capability, or integration */
-  source?: 'static' | 'capability' | 'integration';
+  /** Where this item came from: static, capability, integration, or connector */
+  source?: 'static' | 'capability' | 'integration' | 'connector';
   /** For integration items: connection status */
   connectionStatus?: string;
+  /** Backend-authored truth metadata when available */
+  truth?: CatalogTruthPayload;
+  /** Backend-authored surface policy when available */
+  surfacePolicy?: CatalogSurfacePolicyPayload;
 }
 
 // Static items — real engine primitives that exist independent of registries.
@@ -38,7 +55,8 @@ const STATIC_ITEMS: CatalogItem[] = [
   // ── Think ────────────────────────────────────────────────────────────
   { id: 'think-classify',    label: 'Classify',       icon: 'classify', family: 'think',   status: 'ready', dropKind: 'node', actionValue: 'auto/classify',    description: 'Score, triage, or categorize' },
   { id: 'think-draft',       label: 'Draft',          icon: 'draft',    family: 'think',   status: 'ready', dropKind: 'node', actionValue: 'auto/draft',       description: 'Generate or compose content' },
-  { id: 'think-fan-out',     label: 'Fan Out',        icon: 'classify', family: 'think',   status: 'ready', dropKind: 'node', actionValue: 'auto/fan-out',     description: 'Split into parallel sub-tasks and aggregate' },
+  { id: 'think-fan-out',     label: 'Fan Out',        icon: 'classify', family: 'think',   status: 'ready', dropKind: 'node', actionValue: 'workflow.fanout',  description: 'Split into parallel sub-tasks and aggregate' },
+  { id: 'think-fan-out-legacy', label: 'Fan Out (Legacy)', icon: 'classify', family: 'think', status: 'ready', dropKind: 'node', actionValue: 'auto/fan-out', description: 'Legacy fan-out token kept for older saved graphs' },
 
   // ── Act ──────────────────────────────────────────────────────────────
   { id: 'act-notify',        label: 'Notify',         icon: 'notify',   family: 'act',     status: 'ready', dropKind: 'node', actionValue: '@notifications/send', description: 'Send notification (Slack, email, etc.)' },

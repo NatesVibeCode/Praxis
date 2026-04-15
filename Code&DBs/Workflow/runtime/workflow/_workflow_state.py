@@ -55,16 +55,23 @@ def _ensure_workflow_authority(
     raw_snapshot: dict,
     now: datetime,
     parent_run_id: str | None,
+    parent_job_label: str | None = None,
+    dispatch_reason: str | None = None,
     trigger_depth: int,
+    lineage_depth: int | None = None,
 ) -> dict[str, str]:
     workflow_id = _workflow_id_for_spec(spec)
     request_envelope = _build_request_envelope(
         spec,
+        run_id=run_id,
         raw_snapshot=raw_snapshot,
         workflow_id=workflow_id,
         total_jobs=len(spec.jobs),
         parent_run_id=parent_run_id,
+        parent_job_label=parent_job_label,
+        dispatch_reason=dispatch_reason,
         trigger_depth=trigger_depth,
+        lineage_depth=lineage_depth,
     )
     definition_hash = hashlib.sha256(
         json.dumps(raw_snapshot, sort_keys=True, default=str).encode("utf-8")

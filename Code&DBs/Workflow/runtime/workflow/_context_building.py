@@ -879,6 +879,14 @@ def _build_execution_packet(
         "trigger_depth": trigger_depth,
         "source_authority": spec_authority_inputs,
     }
+    json_file_inputs = json.loads(json.dumps(file_inputs, default=str))
+    json_authority_inputs = json.loads(json.dumps(authority_inputs, default=str))
+    lineage_file_inputs = json.loads(json.dumps(json_file_inputs, default=str))
+    execution_bundles_for_lineage = lineage_file_inputs.get("execution_bundles")
+    if isinstance(execution_bundles_for_lineage, dict):
+        for bundle in execution_bundles_for_lineage.values():
+            if isinstance(bundle, dict):
+                bundle.pop("run_id", None)
     packet_payload: dict[str, object] = {
         "definition_revision": definition_revision,
         "plan_revision": plan_revision,
@@ -892,8 +900,8 @@ def _build_execution_packet(
         "reference_bindings": json.loads(json.dumps(reference_bindings, default=str)),
         "capability_bindings": json.loads(json.dumps(capability_bindings, default=str)),
         "verify_refs": json.loads(json.dumps(verify_refs, default=str)),
-        "authority_inputs": authority_inputs,
-        "file_inputs": file_inputs,
+        "authority_inputs": json_authority_inputs,
+        "file_inputs": json_file_inputs,
         "compile_provenance": {
             "artifact_kind": "packet_lineage",
             "input_fingerprint": "",
@@ -903,7 +911,7 @@ def _build_execution_packet(
             "workflow_id": workflow_id,
             "spec_name": str(spec.name),
             "source_kind": str(provenance.get("source_kind") or "workflow_submit"),
-            "file_inputs": json.loads(json.dumps(file_inputs, default=str)),
+            "file_inputs": lineage_file_inputs,
             "authority_inputs": json.loads(
                 json.dumps(
                     {
@@ -947,7 +955,7 @@ def _build_execution_packet(
         reference_bindings=list(packet_payload["reference_bindings"]),
         capability_bindings=list(packet_payload["capability_bindings"]),
         verify_refs=list(packet_payload["verify_refs"]),
-        file_inputs=dict(file_inputs),
+        file_inputs=dict(lineage_file_inputs),
         provenance=provenance,
         packet_payload=packet_payload,
     )

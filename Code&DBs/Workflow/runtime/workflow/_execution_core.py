@@ -535,7 +535,9 @@ def _build_platform_context(repo_root: str) -> str:
     """Minimal platform context injected into prompts."""
     database_url = os.environ.get("WORKFLOW_DATABASE_URL", "unavailable")
     return f"""--- PLATFORM CONTEXT ---
-Repository root: {repo_root}
+Host repo root (persistence/output authority): {repo_root}
+Command workspace: sandboxed workflow execution typically runs inside a hydrated workspace such as /workspace.
+Use the live command workspace for shell commands and relative paths; do not assume the host repo path exists inside the sandbox.
 Database: {database_url}
 --- END PLATFORM CONTEXT ---"""
 

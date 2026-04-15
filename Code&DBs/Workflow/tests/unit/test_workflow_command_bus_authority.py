@@ -286,7 +286,7 @@ def test_submit_surfaces_converge_on_request_control_command_authority(tmp_path,
     mcp_result = mcp_workflow.tool_praxis_workflow({"spec_path": spec_path, "dry_run": False})
     api_run_result = workflow_run._handle_workflow(
         subsystems,
-        {"spec_path": spec_path, "dry_run": False},
+        {"spec_path": spec_path, "dry_run": False, "run_id": "api_run_123"},
     )
     queue_result = rest.submit_queue_job(
         rest.QueueSubmitRequest(
@@ -343,6 +343,7 @@ def test_submit_surfaces_converge_on_request_control_command_authority(tmp_path,
     assert recorder.request_calls[2]["payload"] == {
         "spec_path": spec_path,
         "repo_root": str(tmp_path),
+        "run_id": "api_run_123",
     }
 
     assert recorder.request_calls[3]["requested_by_kind"] == "http"
@@ -365,11 +366,12 @@ def test_submit_surfaces_converge_on_request_control_command_authority(tmp_path,
             }
         ],
     }
-    assert recorder.request_calls[4]["requested_by_kind"] == "mcp"
-    assert recorder.request_calls[4]["requested_by_ref"] == "praxis_workflow.run"
+    assert recorder.request_calls[4]["requested_by_kind"] == "cli"
+    assert recorder.request_calls[4]["requested_by_ref"] == "workflow_cli.run"
     assert recorder.request_calls[4]["payload"] == {
         "spec_path": cli_spec_path,
         "repo_root": str(tmp_path),
+        "run_id": "dispatch_cli_submit",
     }
     assert cli_result["run_id"] == "dispatch_request_005"
     assert cli_result["status"] == "queued"
@@ -456,6 +458,25 @@ def test_run_submit_surfaces_share_the_same_queued_envelope(tmp_path, monkeypatc
     monkeypatch.setattr(
         "runtime.control_commands.request_control_command",
         lambda *_args, **_kwargs: shared_command,
+    )
+    monkeypatch.setattr(
+        workflow_cli,
+        "run_cli_tool",
+        lambda *_args, **_kwargs: (
+            0,
+            {
+                "run_id": "dispatch_shared",
+                "status": "queued",
+                "spec_name": "sample",
+                "total_jobs": 1,
+                "command_id": "control.command.submit.shared",
+                "command_status": "succeeded",
+                "approval_required": False,
+                "stream_url": "/api/workflow-runs/dispatch_shared/stream",
+                "status_url": "/api/workflow-runs/dispatch_shared/status",
+                "result_ref": "workflow_run:dispatch_shared",
+            },
+        ),
     )
 
     api_result = workflow_run._submit_workflow_via_service_bus(

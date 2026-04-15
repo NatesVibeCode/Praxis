@@ -38,6 +38,7 @@ export function useBuildPayload(workflowId: string | null) {
     try {
       const result = await postBuildMutation(workflowId, subpath, body);
       setPayload(result);
+      return result;
     } catch (e: any) {
       setError(e.message || 'Mutation failed');
       throw e;

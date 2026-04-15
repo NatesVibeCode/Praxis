@@ -32,7 +32,7 @@ class _FakeConn:
             return [dict(row) for row in claimed]
 
         if normalized.startswith(
-            "SELECT id, run_id, job_label, spec_name, agent_slug, status, failure_code, duration_seconds, created_at FROM workflow_notifications WHERE delivered = false"
+            "SELECT id, run_id, job_label, spec_name, agent_slug, status, failure_code, duration_seconds, cpu_percent, mem_bytes, created_at FROM workflow_notifications WHERE delivered = false"
         ):
             limit = int(args[0])
             return [dict(row) for row in self._undelivered_rows()[:limit]]
@@ -43,7 +43,7 @@ class _FakeConn:
             return [{"c": len(self._undelivered_rows())}]
 
         if normalized.startswith(
-            "SELECT id, run_id, job_label, spec_name, agent_slug, status, failure_code, duration_seconds, created_at FROM workflow_notifications WHERE run_id = $1 AND id NOT IN ( SELECT unnest($2::int[]) ) ORDER BY created_at ASC"
+            "SELECT id, run_id, job_label, spec_name, agent_slug, status, failure_code, duration_seconds, cpu_percent, mem_bytes, created_at FROM workflow_notifications WHERE run_id = $1 AND id NOT IN ( SELECT unnest($2::int[]) ) ORDER BY created_at ASC"
         ):
             run_id = str(args[0])
             excluded_ids = {int(value) for value in args[1]}
@@ -102,6 +102,8 @@ def _notification_row(
         "status": "succeeded",
         "failure_code": "",
         "duration_seconds": 1.5,
+        "cpu_percent": None,
+        "mem_bytes": None,
         "created_at": created_at,
         "delivered": delivered,
     }

@@ -4,6 +4,7 @@ This module owns explicit, Postgres-backed command rows and the deterministic
 execution boundary for the boring control paths:
 
 - workflow.submit
+- workflow.spawn
 - workflow.retry
 - workflow.cancel
 - sync.repair
@@ -41,8 +42,10 @@ from runtime.command_handlers import (
     render_control_command_failure,
     render_control_command_response,
     render_workflow_chain_submit_response,
+    render_workflow_spawn_response,
     render_workflow_submit_response,
     request_workflow_chain_submit_command,
+    request_workflow_spawn_command,
     request_workflow_submit_command,
     workflow_cancel_proof,
 )
@@ -114,6 +117,52 @@ unified_dispatch = _LazyUnifiedDispatchProxy()
 
 def _resolve_unified_dispatch_attr(name: str):
     return unified_dispatch._resolve_attr(name)
+
+
+def submit_workflow_command(
+    conn: "SyncPostgresConnection",
+    *,
+    requested_by_kind: str,
+    requested_by_ref: str,
+    spec_path: str | None = None,
+    inline_spec: Mapping[str, Any] | None = None,
+    repo_root: str | None = None,
+    run_id: str | None = None,
+    parent_run_id: str | None = None,
+    parent_job_label: str | None = None,
+    dispatch_reason: str | None = None,
+    lineage_depth: int | None = None,
+    force_fresh_run: bool = False,
+    spec_name: str | None = None,
+    total_jobs: int | None = None,
+    idempotency_key: str | None = None,
+    command_id: str | None = None,
+    requested_at: Any = None,
+) -> dict[str, Any]:
+    """Request and render one workflow.submit command in a single step."""
+
+    command = request_workflow_submit_command(
+        conn,
+        requested_by_kind=requested_by_kind,
+        requested_by_ref=requested_by_ref,
+        spec_path=spec_path,
+        inline_spec=inline_spec,
+        repo_root=repo_root,
+        run_id=run_id,
+        parent_run_id=parent_run_id,
+        parent_job_label=parent_job_label,
+        dispatch_reason=dispatch_reason,
+        lineage_depth=lineage_depth,
+        force_fresh_run=force_fresh_run,
+        idempotency_key=idempotency_key,
+        command_id=command_id,
+        requested_at=requested_at,
+    )
+    return render_workflow_submit_response(
+        command,
+        spec_name=spec_name,
+        total_jobs=total_jobs,
+    )
 
 # 040 creates the table; 042 performs the explicit workflow.* type cutover.
 _SCHEMA_FILENAMES = (
@@ -192,6 +241,7 @@ class ControlCommandExecutionError(ControlCommandError):
 
 class ControlCommandType(str, Enum):
     WORKFLOW_SUBMIT = "workflow.submit"
+    WORKFLOW_SPAWN = "workflow.spawn"
     WORKFLOW_CHAIN_SUBMIT = "workflow.chain.submit"
     WORKFLOW_RETRY = "workflow.retry"
     WORKFLOW_CANCEL = "workflow.cancel"
@@ -224,6 +274,7 @@ _RISK_LEVELS = frozenset(item.value for item in ControlRiskLevel)
 _SAFE_AUTO_EXECUTE_TYPES = frozenset(
     {
         ControlCommandType.WORKFLOW_SUBMIT.value,
+        ControlCommandType.WORKFLOW_SPAWN.value,
         ControlCommandType.WORKFLOW_CHAIN_SUBMIT.value,
         ControlCommandType.SYNC_REPAIR.value,
     }
@@ -231,6 +282,7 @@ _SAFE_AUTO_EXECUTE_TYPES = frozenset(
 _UNSET = object()
 _DEFAULT_RISK_LEVELS = {
     ControlCommandType.WORKFLOW_SUBMIT.value: ControlRiskLevel.LOW.value,
+    ControlCommandType.WORKFLOW_SPAWN.value: ControlRiskLevel.LOW.value,
     ControlCommandType.WORKFLOW_CHAIN_SUBMIT.value: ControlRiskLevel.LOW.value,
     ControlCommandType.WORKFLOW_RETRY.value: ControlRiskLevel.MEDIUM.value,
     ControlCommandType.WORKFLOW_CANCEL.value: ControlRiskLevel.HIGH.value,
@@ -1109,8 +1161,11 @@ __all__ = [
     "request_control_command",
     "render_workflow_chain_submit_response",
     "request_workflow_chain_submit_command",
+    "render_workflow_spawn_response",
+    "request_workflow_spawn_command",
     "render_workflow_submit_response",
     "request_workflow_submit_command",
+    "submit_workflow_command",
     "requires_confirmation",
     "start_control_command",
     "workflow_cancel_proof",

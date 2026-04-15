@@ -32,11 +32,17 @@ class _FakeConn:
 
 
 class _FakeAsyncPGModule:
-    def __init__(self, conn: _FakeConn) -> None:
+    def __init__(
+        self,
+        conn: _FakeConn,
+        *,
+        expected_dsn: str = "postgresql://test@localhost:5432/praxis_test",
+    ) -> None:
         self._conn = conn
+        self._expected_dsn = expected_dsn
 
     async def connect(self, dsn: str) -> _FakeConn:
-        assert dsn == "postgresql://test@localhost:5432/praxis_test"
+        assert dsn == self._expected_dsn
         return self._conn
 
 
@@ -94,7 +100,11 @@ def test_load_from_db_does_not_bootstrap_platform_config_schema(
         ]
     )
     monkeypatch.setenv("WORKFLOW_DATABASE_URL", "postgresql://test@localhost:5432/praxis_test")
-    monkeypatch.setitem(sys.modules, "asyncpg", _FakeAsyncPGModule(fake_conn))
+    monkeypatch.setitem(
+        sys.modules,
+        "asyncpg",
+        _FakeAsyncPGModule(fake_conn),
+    )
 
     registry = ConfigRegistry()
     assert registry.get("context.budget_ratio") == 0.5
@@ -117,4 +127,37 @@ def test_set_writes_only_to_existing_platform_config_rows(
     assert fake_conn.execute_calls
     assert all("CREATE TABLE" not in sql for sql, _args in fake_conn.execute_calls)
     assert any(sql.lstrip().startswith("INSERT INTO platform_config") for sql, _args in fake_conn.execute_calls)
+    assert fake_conn.closed is True
+
+
+def test_get_normalizes_missing_user_in_workflow_database_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_conn = _FakeConn(
+        rows=[
+            {
+                "config_key": "context.budget_ratio",
+                "config_value": "0.5",
+                "value_type": "float",
+                "category": "context",
+                "description": "budget ratio",
+                "min_value": None,
+                "max_value": None,
+                "updated_at": object(),
+            }
+        ]
+    )
+    monkeypatch.setenv("WORKFLOW_DATABASE_URL", "postgresql://localhost:5432/praxis_test")
+    monkeypatch.setitem(
+        sys.modules,
+        "asyncpg",
+        _FakeAsyncPGModule(
+            fake_conn,
+            expected_dsn="postgresql://postgres@localhost:5432/praxis_test",
+        ),
+    )
+
+    registry = ConfigRegistry()
+
+    assert registry.get("context.budget_ratio") == 0.5
     assert fake_conn.closed is True

@@ -25,6 +25,7 @@ BEGIN
             CHECK (
                 command_type IN (
                     'workflow.submit',
+                    'workflow.spawn',
                     'workflow.chain.submit',
                     'workflow.retry',
                     'workflow.cancel',

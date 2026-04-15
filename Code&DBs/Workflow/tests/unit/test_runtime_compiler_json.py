@@ -13,6 +13,7 @@ import pytest
 from runtime.compile_artifacts import CompileArtifactError, CompileArtifactRecord
 import runtime.compile_index as compile_index
 import runtime.compiler as compiler
+import runtime.compiler_semantic as compiler_semantic
 
 _REPO_ROOT = str(Path(__file__).resolve().parents[4])
 
@@ -79,8 +80,8 @@ class _StubEmbedder:
 
 @pytest.fixture(autouse=True)
 def _stub_compiler_embedder(monkeypatch) -> None:
-    monkeypatch.setattr(compiler, "_COMPILER_EMBEDDER", _StubEmbedder())
-    monkeypatch.setattr(compiler, "_COMPILER_EMBEDDER_ERROR", None)
+    monkeypatch.setattr(compiler_semantic, "_COMPILER_EMBEDDER", _StubEmbedder())
+    monkeypatch.setattr(compiler_semantic, "_COMPILER_EMBEDDER_ERROR", None)
 
 
 def _compile_index_snapshot(

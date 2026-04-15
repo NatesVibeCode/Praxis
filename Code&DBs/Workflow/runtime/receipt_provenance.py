@@ -66,6 +66,7 @@ def build_workspace_provenance(
     workspace_root: str | Path | None,
     workspace_ref: str | None = None,
     runtime_profile_ref: str | None = None,
+    workspace_snapshot_ref: str | None = None,
     packet_provenance: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     resolved_root = Path(workspace_root).resolve() if workspace_root else None
@@ -75,6 +76,8 @@ def build_workspace_provenance(
         "runtime_profile_ref": str(runtime_profile_ref or ""),
         "captured_at": _utc_now().isoformat(),
     }
+    if str(workspace_snapshot_ref or "").strip():
+        payload["workspace_snapshot_ref"] = str(workspace_snapshot_ref).strip()
     if isinstance(packet_provenance, dict) and packet_provenance:
         payload["packet_provenance"] = _json_safe(packet_provenance)
     return payload

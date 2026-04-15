@@ -17,10 +17,11 @@ def test_repo_claude_guidance_uses_catalog_driven_cli() -> None:
     repo_root = Path(__file__).resolve().parents[4]
     text = (repo_root / ".claude" / "CLAUDE.md").read_text(encoding="utf-8")
 
-    assert "42 catalog-backed tools" in text
+    assert "catalog-backed tools" in text
     assert "workflow tools list" in text
     assert "workflow query \"status\"" in text
     assert 'praxis_query("status")' not in text
+    assert "42 catalog-backed tools" not in text
     assert "38 tools organized by surface" not in text
     assert "No second call needed" not in text
 

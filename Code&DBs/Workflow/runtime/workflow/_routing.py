@@ -129,14 +129,35 @@ def _derive_touch_keys(job: dict) -> list[dict[str, str]]:
 def _build_request_envelope(
     spec,
     *,
+    run_id: str,
     raw_snapshot: dict,
     workflow_id: str,
     total_jobs: int,
     parent_run_id: str | None,
+    parent_job_label: str | None = None,
+    dispatch_reason: str | None = None,
     trigger_depth: int,
+    lineage_depth: int | None = None,
 ) -> dict:
     workspace_ref = _workspace_ref_from_spec(spec)
     runtime_profile_ref = _runtime_profile_ref_from_spec(spec)
+    normalized_parent_job_label = str(parent_job_label or "").strip() or None
+    normalized_dispatch_reason = str(dispatch_reason or "").strip() or None
+    if lineage_depth is None:
+        normalized_lineage_depth = max(int(trigger_depth or 0), 0) + (1 if parent_run_id else 0)
+    else:
+        normalized_lineage_depth = max(int(lineage_depth), 0)
+    lineage = {
+        "child_run_id": run_id,
+        "child_workflow_id": workflow_id,
+        "lineage_depth": normalized_lineage_depth,
+    }
+    if parent_run_id:
+        lineage["parent_run_id"] = parent_run_id
+    if normalized_parent_job_label:
+        lineage["parent_job_label"] = normalized_parent_job_label
+    if normalized_dispatch_reason:
+        lineage["dispatch_reason"] = normalized_dispatch_reason
     envelope = {
         "name": getattr(spec, "name", ""),
         "workflow_id": workflow_id,
@@ -145,11 +166,15 @@ def _build_request_envelope(
         "outcome_goal": getattr(spec, "outcome_goal", ""),
         "output_dir": getattr(spec, "output_dir", "") or "",
         "parent_run_id": parent_run_id,
+        "parent_job_label": normalized_parent_job_label,
+        "dispatch_reason": normalized_dispatch_reason,
         "trigger_depth": trigger_depth,
+        "lineage_depth": normalized_lineage_depth,
         "verify_refs": getattr(spec, "verify_refs", []),
         "spec_snapshot": raw_snapshot,
         "workspace_ref": workspace_ref,
         "runtime_profile_ref": runtime_profile_ref,
+        "lineage": lineage,
     }
     if isinstance(raw_snapshot, dict):
         adoption_key = str(raw_snapshot.get("queue_id") or "").strip()

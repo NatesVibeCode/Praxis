@@ -7,11 +7,17 @@ import { useManifestOverlay } from '../hooks/useManifestOverlay';
 import { world } from '../world';
 import { ModulePalette } from './ModulePalette';
 import { SaveLayoutBar } from './SaveLayoutBar';
-import { Toast } from '../primitives/Toast';
-import { ContextMenu } from './ContextMenu';
+import { Toast, useToast } from '../primitives/Toast';
 import { DetailSlidePanel } from './DetailSlidePanel';
 import { useGridDrag, type GridDragPayload, type GridDragValidator } from './useGridDrag';
+import { ModuleActionMenu } from './ModuleActionMenu';
+import { UiActionFeed } from '../control/UiActionFeed';
+import type { UiActionTarget } from '../control/uiActionLedger';
+import { runUiAction, undoUiAction } from '../control/uiActionLedger';
+import { gridFieldLabel } from './moduleConfigMetadata';
 import './QuadrantGrid.css';
+
+const GRID_UNDO_SCOPE = 'grid.layout';
 
 export interface QuadrantManifest {
   version: number;
@@ -55,6 +61,61 @@ class ModuleErrorBoundary extends React.Component<
   }
 }
 
+function moduleDisplayName(moduleId: string): string {
+  return resolveModule(moduleId)?.name ?? moduleId;
+}
+
+function quadrantTarget(quadrantId: string, moduleId?: string): UiActionTarget {
+  return {
+    kind: 'quadrant',
+    label: moduleId ? `${quadrantId} · ${moduleDisplayName(moduleId)}` : quadrantId,
+    id: quadrantId,
+  };
+}
+
+function configValuesEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false;
+    return left.every((value, index) => configValuesEqual(value, right[index]));
+  }
+  if (
+    left
+    && right
+    && typeof left === 'object'
+    && typeof right === 'object'
+  ) {
+    const leftEntries = Object.entries(left as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b));
+    const rightEntries = Object.entries(right as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b));
+    if (leftEntries.length !== rightEntries.length) return false;
+    return leftEntries.every(([key, value], index) => (
+      key === rightEntries[index]?.[0]
+      && configValuesEqual(value, rightEntries[index]?.[1])
+    ));
+  }
+  return false;
+}
+
+function summarizeConfigChanges(
+  previousConfig: Record<string, unknown> | undefined,
+  nextConfig: Record<string, unknown>,
+): string[] {
+  const previousKeys = new Set(Object.keys(previousConfig || {}));
+  const nextKeys = new Set(Object.keys(nextConfig));
+  const changedKeys = new Set<string>();
+
+  for (const key of nextKeys) {
+    const before = previousConfig?.[key];
+    const after = nextConfig[key];
+    if (!configValuesEqual(before, after)) changedKeys.add(key);
+  }
+  for (const key of previousKeys) {
+    if (!nextKeys.has(key)) changedKeys.add(key);
+  }
+
+  return Array.from(changedKeys).map(gridFieldLabel).slice(0, 3);
+}
+
 export function QuadrantGrid({
   manifest: initialManifest,
   saveTarget,
@@ -64,15 +125,117 @@ export function QuadrantGrid({
 }) {
   const manifest = useManifestOverlay(initialManifest);
   const occupied = getOccupiedCells(manifest.quadrants);
-  const [editingQuadrant, setEditingQuadrant] = useState<string | null>(null);
+  const [editingQuadrant, setEditingQuadrant] = useState<{ quadrantId: string; focusKey?: string | null } | null>(null);
   const [showPalette, setShowPalette] = useState(false);
   const [justPlaced, setJustPlaced] = useState<string | null>(null);
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; quadrantId: string; moduleId: string; moduleType: string } | null>(null);
+  const [actionMenu, setActionMenu] = useState<{
+    anchorRect: DOMRect | null;
+    quadrantId: string;
+    moduleId: string;
+    moduleType: string;
+  } | null>(null);
+  const { show } = useToast();
 
-  const handleContextMenuAction = (instruction: string) => {
-    window.dispatchEvent(new CustomEvent('fill-refinement', { detail: instruction }));
-    setContextMenu(null);
-  };
+  const applyQuadrantMutation = useCallback((details: {
+    label: string;
+    reason: string;
+    outcome: string;
+    nextQuadrants: QuadrantManifest['quadrants'];
+    target?: UiActionTarget | null;
+    changeSummary?: string[];
+    afterApply?: () => void;
+  }) => {
+    void (async () => {
+      const previousQuadrants = structuredClone(manifest.quadrants);
+      const nextQuadrants = structuredClone(details.nextQuadrants);
+      const entry = await runUiAction({
+        surface: 'grid',
+        undoScope: GRID_UNDO_SCOPE,
+        category: 'layout',
+        label: details.label,
+        authority: 'ui.layout.quadrants',
+        reason: details.reason,
+        outcome: details.outcome,
+        target: details.target ?? null,
+        changeSummary: details.changeSummary,
+        apply: () => {
+          world.propose('ui.layout.quadrants', nextQuadrants);
+          details.afterApply?.();
+        },
+        undoDescriptor: {
+          kind: 'world.propose',
+          path: 'ui.layout.quadrants',
+          value: previousQuadrants,
+        },
+        onUndone: () => {
+          setActionMenu(null);
+        },
+      });
+
+      show(`${details.label}: ${details.outcome}`, 'info', {
+        actionLabel: 'Undo',
+        durationMs: 5000,
+        onAction: () => {
+          void (async () => {
+            const result = await undoUiAction(entry.id);
+            if (!result.ok) {
+              show(result.error || 'Undo failed.', 'error');
+              return;
+            }
+            show(`Undid ${details.label}.`, 'success');
+          })();
+        },
+      });
+    })();
+  }, [manifest.quadrants, show]);
+
+  const saveQuadrantConfig = useCallback((
+    quadrantId: string,
+    nextConfig: Record<string, unknown>,
+    meta?: {
+      label: string;
+      reason: string;
+      outcome: string;
+      target?: UiActionTarget | null;
+      changeSummary?: string[];
+    },
+  ) => {
+    const current = manifest.quadrants[quadrantId];
+    if (!current) return;
+    applyQuadrantMutation({
+      label: meta?.label ?? 'Update module config',
+      reason: meta?.reason ?? `Update settings for quadrant ${quadrantId}.`,
+      outcome: meta?.outcome ?? `Quadrant ${quadrantId} now uses the new config draft.`,
+      nextQuadrants: {
+        ...manifest.quadrants,
+        [quadrantId]: {
+          ...current,
+          config: nextConfig,
+        },
+      },
+      target: meta?.target ?? quadrantTarget(quadrantId, current.module),
+      changeSummary: meta?.changeSummary ?? summarizeConfigChanges(current.config, nextConfig),
+    });
+  }, [applyQuadrantMutation, manifest.quadrants]);
+
+  const removeQuadrant = useCallback((quadrantId: string) => {
+    const existing = manifest.quadrants[quadrantId];
+    if (!existing) return;
+    const updated = { ...manifest.quadrants };
+    delete updated[quadrantId];
+    applyQuadrantMutation({
+      label: 'Remove module',
+      reason: `Clear quadrant ${quadrantId} and remove ${existing.module}.`,
+      outcome: `Quadrant ${quadrantId} is empty again.`,
+      nextQuadrants: updated,
+      target: quadrantTarget(quadrantId, existing.module),
+      changeSummary: ['Removed module'],
+      afterApply: () => {
+        setActionMenu(null);
+        setEditingQuadrant((current) => (current?.quadrantId === quadrantId ? null : current));
+      },
+    });
+  }, [applyQuadrantMutation, manifest.quadrants]);
 
   // Span-aware validation: checks if a payload's span fits at the target cell
   const validateDrop: GridDragValidator = useCallback((payload, targetCellId) => {
@@ -114,31 +277,54 @@ export function QuadrantGrid({
 
   const handleDrop = useCallback((payload: GridDragPayload, targetId: string) => {
     if (payload.kind === 'preset') {
+      const moduleId = payload.data.module as string;
+      const moduleName = resolveModule(moduleId)?.name ?? moduleId;
       const updated = { ...manifest.quadrants };
       updated[targetId] = {
-        module: payload.data.module as string,
+        module: moduleId,
         span: payload.data.span as string,
         config: payload.data.config as Record<string, unknown>,
       };
-      world.propose('ui.layout.quadrants', updated);
-      setShowPalette(false);
-      setJustPlaced(targetId);
+      applyQuadrantMutation({
+        label: 'Add module',
+        reason: `Place ${moduleName} in quadrant ${targetId}.`,
+        outcome: `${moduleName} now occupies ${targetId}.`,
+        nextQuadrants: updated,
+        target: quadrantTarget(targetId, moduleId),
+        changeSummary: ['Placed module', `Span ${(payload.data.span as string) || '1x1'}`],
+        afterApply: () => {
+          setShowPalette(false);
+          setJustPlaced(targetId);
+        },
+      });
       return;
     }
 
     if (payload.kind === 'palette') {
+      const moduleId = payload.data.module as string;
+      const moduleName = resolveModule(moduleId)?.name ?? moduleId;
       const updated = { ...manifest.quadrants };
       updated[targetId] = {
-        module: payload.data.module as string,
+        module: moduleId,
         span: payload.data.span as string,
       };
-      world.propose('ui.layout.quadrants', updated);
-      setShowPalette(false);
-      setJustPlaced(targetId);
+      applyQuadrantMutation({
+        label: 'Add module',
+        reason: `Place ${moduleName} in quadrant ${targetId}.`,
+        outcome: `${moduleName} now occupies ${targetId}.`,
+        nextQuadrants: updated,
+        target: quadrantTarget(targetId, moduleId),
+        changeSummary: ['Placed module', `Span ${(payload.data.span as string) || '1x1'}`],
+        afterApply: () => {
+          setShowPalette(false);
+          setJustPlaced(targetId);
+        },
+      });
       return;
     }
 
     if (payload.kind === 'object') {
+      const objectName = String(payload.data.objectName ?? payload.data.objectTypeId ?? 'object');
       const updated = { ...manifest.quadrants };
       updated[targetId] = {
         module: (payload.data.module as string) || 'object-view',
@@ -148,9 +334,18 @@ export function QuadrantGrid({
           objectName: payload.data.objectName,
         },
       };
-      world.propose('ui.layout.quadrants', updated);
-      setShowPalette(false);
-      setJustPlaced(targetId);
+      applyQuadrantMutation({
+        label: 'Add object module',
+        reason: `Place ${objectName} in quadrant ${targetId}.`,
+        outcome: `${targetId} now opens ${objectName}.`,
+        nextQuadrants: updated,
+        target: quadrantTarget(targetId, (payload.data.module as string) || 'object-view'),
+        changeSummary: ['Bound object type', objectName],
+        afterApply: () => {
+          setShowPalette(false);
+          setJustPlaced(targetId);
+        },
+      });
       return;
     }
 
@@ -161,19 +356,42 @@ export function QuadrantGrid({
       const updated = { ...manifest.quadrants };
       const sourceDef = updated[sourceId];
       const targetDef = updated[targetId];
+      if (!sourceDef) return;
 
       if (targetDef) {
         updated[sourceId] = { ...targetDef };
         updated[targetId] = { ...sourceDef };
+        const sourceName = resolveModule(sourceDef.module)?.name ?? sourceDef.module;
+        const targetName = resolveModule(targetDef.module)?.name ?? targetDef.module;
+        applyQuadrantMutation({
+          label: 'Swap modules',
+          reason: `Swap ${sourceName} in ${sourceId} with ${targetName} in ${targetId}.`,
+          outcome: `${sourceName} and ${targetName} traded quadrants.`,
+          nextQuadrants: updated,
+          target: {
+            kind: 'quadrants',
+            label: `${sourceId} ↔ ${targetId}`,
+            id: `${sourceId}:${targetId}`,
+          },
+          changeSummary: [sourceName, targetName],
+          afterApply: () => setJustPlaced(targetId),
+        });
       } else {
         updated[targetId] = { ...sourceDef };
         delete updated[sourceId];
+        const sourceName = resolveModule(sourceDef.module)?.name ?? sourceDef.module;
+        applyQuadrantMutation({
+          label: 'Move module',
+          reason: `Move ${sourceName} from ${sourceId} to ${targetId}.`,
+          outcome: `${sourceName} now occupies ${targetId}.`,
+          nextQuadrants: updated,
+          target: quadrantTarget(targetId, sourceDef.module),
+          changeSummary: [`Moved from ${sourceId}`, `Into ${targetId}`],
+          afterApply: () => setJustPlaced(targetId),
+        });
       }
-
-      world.propose('ui.layout.quadrants', updated);
-      setJustPlaced(targetId);
     }
-  }, [manifest.quadrants]);
+  }, [applyQuadrantMutation, manifest.quadrants]);
 
   // Clear justPlaced after animation completes
   useEffect(() => {
@@ -221,6 +439,11 @@ export function QuadrantGrid({
       </div>
 
       <SaveLayoutBar manifest={initialManifest} saveTarget={saveTarget} />
+      <UiActionFeed
+        surface="grid"
+        scope={GRID_UNDO_SCOPE}
+        subtitle="Latest grid actions with their authority, reason, outcome, and recovery status."
+      />
 
       <ModulePalette isOpen={showPalette} onClose={() => setShowPalette(false)} startDrag={startDrag} />
 
@@ -263,6 +486,14 @@ export function QuadrantGrid({
 
           const moduleDef = resolveModule(def.module);
           const Module = moduleDef?.component;
+          const openModuleActions = (anchorRect: DOMRect | null) => {
+            setActionMenu({
+              anchorRect,
+              quadrantId: cellId,
+              moduleId: def.module,
+              moduleType: moduleDef?.type ?? 'display',
+            });
+          };
 
           return (
             <div
@@ -291,11 +522,25 @@ export function QuadrantGrid({
                   data: { cellId, span: def.span || '1x1' },
                 });
               }}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                openModuleActions(new DOMRect(event.clientX, event.clientY, 1, 1));
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+                  event.preventDefault();
+                  openModuleActions((event.currentTarget as HTMLDivElement).getBoundingClientRect());
+                }
+              }}
             >
               <button
                 type="button"
                 className="gear-icon"
-                onClick={() => setEditingQuadrant(cellId)}
+                aria-label={`Open actions for ${moduleDef?.name ?? def.module}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  openModuleActions((event.currentTarget as HTMLButtonElement).getBoundingClientRect());
+                }}
                 style={{
                   position: 'absolute',
                   top: 'var(--space-sm)',
@@ -309,16 +554,21 @@ export function QuadrantGrid({
                   fontSize: 16
                 }}
               >
-                ⚙️
+                ⋯
               </button>
-              {editingQuadrant === cellId && (
+              {editingQuadrant?.quadrantId === cellId && (
                 <div style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 20 }}>
                   <ConfigEditorPanel
                     quadrantId={cellId}
                     moduleId={def.module}
                     config={def.config || {}}
+                    focusKey={editingQuadrant.focusKey}
                     onSave={(newConfig) => {
-                      world.propose(`ui.layout.quadrants.${cellId}.config`, newConfig);
+                      saveQuadrantConfig(cellId, newConfig, {
+                        label: 'Save module config',
+                        reason: `Commit the config editor changes for quadrant ${cellId}.`,
+                        outcome: `Quadrant ${cellId} now reflects the edited settings.`,
+                      });
                       setEditingQuadrant(null);
                     }}
                     onClose={() => setEditingQuadrant(null)}
@@ -361,15 +611,23 @@ export function QuadrantGrid({
         </div>
       )}
 
-      {contextMenu && (
-        <ContextMenu
-          x={contextMenu.x}
-          y={contextMenu.y}
-          moduleId={contextMenu.moduleId}
-          moduleType={contextMenu.moduleType}
-          quadrantId={contextMenu.quadrantId}
-          onAction={handleContextMenuAction}
-          onClose={() => setContextMenu(null)}
+      {actionMenu && manifest.quadrants[actionMenu.quadrantId] && (
+        <ModuleActionMenu
+          open
+          anchorRect={actionMenu.anchorRect}
+          quadrantId={actionMenu.quadrantId}
+          moduleId={actionMenu.moduleId}
+          moduleType={actionMenu.moduleType}
+          config={manifest.quadrants[actionMenu.quadrantId]?.config || {}}
+          onClose={() => setActionMenu(null)}
+          onOpenConfig={(focusKey) => {
+            setActionMenu(null);
+            setEditingQuadrant({ quadrantId: actionMenu.quadrantId, focusKey });
+          }}
+          onUpdateConfig={(nextConfig, meta) => {
+            saveQuadrantConfig(actionMenu.quadrantId, nextConfig, meta);
+          }}
+          onRemoveModule={() => removeQuadrant(actionMenu.quadrantId)}
         />
       )}
       <Toast />

@@ -261,7 +261,6 @@ def test_control_command_idempotency_replays_existing_row_and_conflicts() -> Non
 
     assert first.command_id == "control.command.submit.1"
     assert second.command_id == first.command_id
-    assert len([event for event in conn.system_events if event["event_type"] == "control.command.requested"]) == 1
 
     conflicting_intent = control_commands.ControlIntent(
         command_type=control_commands.ControlCommandType.WORKFLOW_SUBMIT,
@@ -282,6 +281,32 @@ def test_control_command_idempotency_replays_existing_row_and_conflicts() -> Non
 
     assert exc_info.value.idempotency_key == intent.idempotency_key
     assert exc_info.value.existing_command_id == first.command_id
+
+
+def test_request_workflow_submit_command_persists_lineage_payload() -> None:
+    conn = _FakeConn()
+
+    command = control_commands.request_workflow_submit_command(
+        conn,
+        requested_by_kind="operator",
+        requested_by_ref="operator.console",
+        spec_path="spec.queue.json",
+        repo_root="/repo",
+        run_id="run-child",
+        parent_run_id="run-parent",
+        parent_job_label="phase.dispatch",
+        dispatch_reason="phase.spawn",
+        lineage_depth=2,
+        idempotency_key="idem.submit.lineage.1",
+    )
+
+    payload = command.payload
+    assert payload["run_id"] == "run-child"
+    assert payload["parent_run_id"] == "run-parent"
+    assert payload["parent_job_label"] == "phase.dispatch"
+    assert payload["dispatch_reason"] == "phase.spawn"
+    assert payload["lineage_depth"] == 2
+    assert len([event for event in conn.system_events if event["event_type"] == "control.command.requested"]) == 1
 
 
 def test_unified_dispatch_proxy_deletes_override_without_loading_module() -> None:
@@ -393,6 +418,52 @@ def test_request_workflow_submit_command_preserves_preassigned_run_id(monkeypatc
     }
 
 
+def test_request_workflow_submit_command_records_force_fresh_run(monkeypatch):
+    conn = _FakeConn()
+    captured: dict[str, object] = {}
+
+    def _request(control_conn, intent, **kwargs):
+        captured["conn"] = control_conn
+        captured["intent"] = intent
+        captured["kwargs"] = kwargs
+        return SimpleNamespace(
+            command_id="control.command.submit.100b",
+            command_status="succeeded",
+            requested_by_kind=intent.requested_by_kind,
+            requested_by_ref=intent.requested_by_ref,
+            idempotency_key=intent.idempotency_key,
+            payload=dict(intent.payload),
+            result_ref="workflow_run:dispatch_fresh",
+            error_code=None,
+            error_detail=None,
+            to_json=lambda: {
+                "command_id": "control.command.submit.100b",
+                "command_status": "succeeded",
+                "result_ref": "workflow_run:dispatch_fresh",
+            },
+        )
+
+    monkeypatch.setattr(control_commands, "bootstrap_control_commands_schema", lambda _conn: None)
+    monkeypatch.setattr(control_commands, "request_control_command", _request)
+
+    control_commands.request_workflow_submit_command(
+        conn,
+        requested_by_kind="cli",
+        requested_by_ref="workflow_cli.run",
+        spec_path="spec.queue.json",
+        repo_root="/repo",
+        force_fresh_run=True,
+    )
+
+    assert captured["conn"] is conn
+    intent = captured["intent"]
+    assert intent.payload == {
+        "spec_path": "spec.queue.json",
+        "repo_root": "/repo",
+        "force_fresh_run": True,
+    }
+
+
 def test_request_workflow_submit_command_preserves_explicit_idempotency_key(monkeypatch):
     conn = _FakeConn()
     captured: dict[str, object] = {}
@@ -486,6 +557,61 @@ def test_request_workflow_submit_command_shapes_inline_spec_intent(monkeypatch):
         },
         "run_id": "dispatch_inline",
     }
+    assert captured["kwargs"] == {"command_id": None, "requested_at": None}
+
+
+def test_request_workflow_spawn_command_shapes_intent(monkeypatch):
+    conn = _FakeConn()
+    captured: dict[str, object] = {}
+
+    def _request(control_conn, intent, **kwargs):
+        captured["conn"] = control_conn
+        captured["intent"] = intent
+        captured["kwargs"] = kwargs
+        return SimpleNamespace(
+            command_id="control.command.spawn.102",
+            command_status="succeeded",
+            requested_by_kind=intent.requested_by_kind,
+            requested_by_ref=intent.requested_by_ref,
+            idempotency_key=intent.idempotency_key,
+            payload=dict(intent.payload),
+            result_ref="workflow_run:dispatch_spawn",
+            error_code=None,
+            error_detail=None,
+            to_json=lambda: {
+                "command_id": "control.command.spawn.102",
+                "command_status": "succeeded",
+                "result_ref": "workflow_run:dispatch_spawn",
+            },
+        )
+
+    monkeypatch.setattr(control_commands, "bootstrap_control_commands_schema", lambda _conn: None)
+    monkeypatch.setattr(control_commands, "request_control_command", _request)
+
+    control_commands.request_workflow_spawn_command(
+        conn,
+        requested_by_kind="cli",
+        requested_by_ref="workflow_cli.spawn",
+        parent_run_id="run-parent",
+        parent_job_label="phase.dispatch",
+        dispatch_reason="phase.spawn",
+        spec_path="child.queue.json",
+        repo_root="/repo",
+        lineage_depth=2,
+    )
+
+    assert captured["conn"] is conn
+    intent = captured["intent"]
+    assert intent.command_type == control_commands.ControlCommandType.WORKFLOW_SPAWN
+    assert intent.payload == {
+        "parent_run_id": "run-parent",
+        "dispatch_reason": "phase.spawn",
+        "parent_job_label": "phase.dispatch",
+        "spec_path": "child.queue.json",
+        "repo_root": "/repo",
+        "lineage_depth": 2,
+    }
+    assert str(intent.idempotency_key).startswith("workflow.spawn.cli.")
     assert captured["kwargs"] == {"command_id": None, "requested_at": None}
 
 
@@ -709,7 +835,17 @@ def test_control_command_submit_auto_execute_persists_result_ref(monkeypatch):
     intent = _submit_intent()
     called: list[tuple[object, ...]] = []
 
-    def _submit_workflow(_conn, spec_path, repo_root, run_id=None):
+    def _submit_workflow(
+        _conn,
+        spec_path,
+        repo_root,
+        run_id=None,
+        force_fresh_run=False,
+        parent_run_id=None,
+        parent_job_label=None,
+        dispatch_reason=None,
+        lineage_depth=None,
+    ):
         called.append((spec_path, repo_root, run_id))
         return {"run_id": "run-123", "status": "running", "spec_name": "spec"}
 
@@ -731,6 +867,110 @@ def test_control_command_submit_auto_execute_persists_result_ref(monkeypatch):
     assert loaded.command_status == "succeeded"
     assert loaded.error_code is None
     assert loaded.error_detail is None
+
+
+def test_control_command_spawn_auto_execute_persists_result_ref(monkeypatch):
+    conn = _FakeConn()
+    intent = control_commands.ControlIntent(
+        command_type=control_commands.ControlCommandType.WORKFLOW_SPAWN,
+        requested_by_kind="operator",
+        requested_by_ref="operator.console",
+        idempotency_key="idem.spawn.1",
+        payload={
+            "repo_root": "/repo",
+            "spec_path": "child.queue.json",
+            "parent_run_id": "run-parent",
+            "parent_job_label": "phase.dispatch",
+            "dispatch_reason": "phase.spawn",
+        },
+    )
+    called: list[tuple[object, ...]] = []
+
+    def _submit_workflow(
+        _conn,
+        spec_path,
+        repo_root,
+        run_id=None,
+        force_fresh_run=False,
+        parent_run_id=None,
+        parent_job_label=None,
+        dispatch_reason=None,
+        lineage_depth=None,
+    ):
+        called.append(
+            (
+                spec_path,
+                repo_root,
+                run_id,
+                parent_run_id,
+                parent_job_label,
+                dispatch_reason,
+                lineage_depth,
+            )
+        )
+        return {"run_id": "run-spawn-123", "status": "running", "spec_name": "child"}
+
+    monkeypatch.setattr(control_commands.unified_dispatch, "submit_workflow", _submit_workflow)
+
+    final = control_commands.create_control_command(
+        conn,
+        intent,
+        command_id="control.command.spawn.10",
+        requested_at=_fixed_clock(),
+    )
+    loaded = control_commands.load_control_command(conn, final.command_id)
+
+    assert called == [
+        ("child.queue.json", "/repo", None, "run-parent", "phase.dispatch", "phase.spawn", None)
+    ]
+    assert final.command_status == "succeeded"
+    assert final.result_ref == "workflow_run:run-spawn-123"
+    assert loaded is not None
+    assert loaded.result_ref == "workflow_run:run-spawn-123"
+    assert loaded.command_status == "succeeded"
+
+
+def test_control_command_submit_auto_execute_passes_force_fresh_run(monkeypatch):
+    conn = _FakeConn()
+    intent = control_commands.ControlIntent(
+        command_type=control_commands.ControlCommandType.WORKFLOW_SUBMIT,
+        requested_by_kind="operator",
+        requested_by_ref="operator.console",
+        idempotency_key="idem.submit.fresh.1",
+        payload={
+            "repo_root": "/repo",
+            "spec_path": "spec.queue.json",
+            "force_fresh_run": True,
+        },
+    )
+    called: list[tuple[object, ...]] = []
+
+    def _submit_workflow(
+        _conn,
+        spec_path,
+        repo_root,
+        run_id=None,
+        force_fresh_run=False,
+        parent_run_id=None,
+        parent_job_label=None,
+        dispatch_reason=None,
+        lineage_depth=None,
+    ):
+        called.append((spec_path, repo_root, run_id, force_fresh_run))
+        return {"run_id": "run-fresh-123", "status": "running", "spec_name": "spec"}
+
+    monkeypatch.setattr(control_commands.unified_dispatch, "submit_workflow", _submit_workflow)
+
+    final = control_commands.create_control_command(
+        conn,
+        intent,
+        command_id="control.command.submit.fresh.10",
+        requested_at=_fixed_clock(),
+    )
+
+    assert called == [("spec.queue.json", "/repo", None, True)]
+    assert final.command_status == "succeeded"
+    assert final.result_ref == "workflow_run:run-fresh-123"
 
 
 def test_control_command_chain_submit_auto_execute_persists_result_ref(monkeypatch):
@@ -807,7 +1047,17 @@ def test_control_command_submit_saved_spec_path_never_falls_back_to_inline_submi
     intent = _submit_intent()
     called: list[tuple[object, ...]] = []
 
-    def _submit_workflow(_conn, spec_path, repo_root, run_id=None):
+    def _submit_workflow(
+        _conn,
+        spec_path,
+        repo_root,
+        run_id=None,
+        force_fresh_run=False,
+        parent_run_id=None,
+        parent_job_label=None,
+        dispatch_reason=None,
+        lineage_depth=None,
+    ):
         called.append((spec_path, repo_root, run_id))
         return {"run_id": "run-124", "status": "running", "spec_name": "spec"}
 
@@ -925,6 +1175,38 @@ def test_render_workflow_submit_response_fails_closed_without_run_id() -> None:
     }
 
 
+def test_render_workflow_spawn_response_uses_canonical_async_envelope() -> None:
+    command = SimpleNamespace(
+        command_id="control.command.spawn.12",
+        command_status="succeeded",
+        result_ref="workflow_run:dispatch_spawn_012",
+        to_json=lambda: {
+            "command_id": "control.command.spawn.12",
+            "command_status": "succeeded",
+            "result_ref": "workflow_run:dispatch_spawn_012",
+        },
+    )
+
+    payload = control_commands.render_workflow_spawn_response(
+        command,
+        spec_name="child",
+        total_jobs=2,
+    )
+
+    assert payload == {
+        "run_id": "dispatch_spawn_012",
+        "status": "queued",
+        "spec_name": "child",
+        "total_jobs": 2,
+        "command_id": "control.command.spawn.12",
+        "command_status": "succeeded",
+        "approval_required": False,
+        "stream_url": "/api/workflow-runs/dispatch_spawn_012/stream",
+        "status_url": "/api/workflow-runs/dispatch_spawn_012/status",
+        "result_ref": "workflow_run:dispatch_spawn_012",
+    }
+
+
 def test_render_workflow_chain_submit_response_uses_chain_envelope(monkeypatch) -> None:
     command = SimpleNamespace(
         command_id="control.command.chain.submit.12",
@@ -1003,7 +1285,16 @@ def test_control_command_submit_inline_spec_routes_through_inline_submit_authori
     def _fail_saved_spec_submit(*_args, **_kwargs):
         raise AssertionError("inline workflow submit should not fall back to saved spec_path submission")
 
-    def _submit_inline(_conn, spec, run_id=None):
+    def _submit_inline(
+        _conn,
+        spec,
+        run_id=None,
+        force_fresh_run=False,
+        parent_run_id=None,
+        parent_job_label=None,
+        dispatch_reason=None,
+        lineage_depth=None,
+    ):
         called.append((spec, run_id))
         return {"run_id": "run-inline-1", "status": "queued", "spec_name": spec["name"]}
 

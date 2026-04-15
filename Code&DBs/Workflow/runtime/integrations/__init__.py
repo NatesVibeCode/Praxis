@@ -27,9 +27,20 @@ IntegrationHandler = Callable[[dict, Any], IntegrationResult]
 def _build_bindings() -> dict[tuple[str, str], IntegrationHandler]:
     bindings: dict[tuple[str, str], IntegrationHandler] = {}
     try:
-        from .platform import execute_notification, execute_workflow_invoke
+        from .platform import (
+            execute_check_status,
+            execute_dispatch_job,
+            execute_notification,
+            execute_search_receipts,
+            execute_workflow_cancel,
+            execute_workflow_invoke,
+        )
         bindings[("notifications", "send")] = execute_notification
+        bindings[("praxis-dispatch", "dispatch_job")] = execute_dispatch_job
+        bindings[("praxis-dispatch", "check_status")] = execute_check_status
+        bindings[("praxis-dispatch", "search_receipts")] = execute_search_receipts
         bindings[("workflow", "invoke")] = execute_workflow_invoke
+        bindings[("workflow", "cancel")] = execute_workflow_cancel
     except Exception as exc:  # pragma: no cover
         logger.warning("platform integration handlers unavailable: %s", exc)
     try:

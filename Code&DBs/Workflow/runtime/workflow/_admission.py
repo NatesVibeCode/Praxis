@@ -8,6 +8,7 @@ import logging
 import os
 import time
 import uuid
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -86,6 +87,60 @@ class IdempotencyConflict(Exception):
         self.first_seen_at = first_seen_at
 
 
+_QUEUE_ADMISSION_CRITICAL_THRESHOLD = 1000
+
+
+def _queue_depth_from_workflow_jobs(conn: SyncPostgresConnection) -> int:
+    rows = conn.execute(
+        "SELECT COUNT(*) FROM workflow_jobs WHERE status IN ('pending', 'ready')"
+    )
+    if not rows:
+        return 0
+    row = rows[0]
+    keys = None
+    if isinstance(row, dict):
+        keys = row.keys()
+    else:
+        try:
+            keys = row.keys()
+        except Exception:
+            keys = None
+    if keys is not None:
+        try:
+            if "count" in keys:
+                return int(row["count"] or 0)
+            if "?column?" in keys:
+                return int(row["?column?"] or 0)
+        except Exception:
+            pass
+    if isinstance(row, (tuple, list)):
+        return int(row[0] or 0) if row else 0
+    try:
+        return int(row or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _enforce_queue_admission(
+    conn: SyncPostgresConnection,
+    *,
+    job_count: int = 1,
+    critical_threshold: int = _QUEUE_ADMISSION_CRITICAL_THRESHOLD,
+) -> int:
+    """Fail closed when admitting more jobs would overflow the queue."""
+    queue_depth = _queue_depth_from_workflow_jobs(conn)
+    projected_depth = queue_depth + max(0, int(job_count))
+    if queue_depth >= critical_threshold or projected_depth > critical_threshold:
+        message = (
+            f"queue admission rejected: queue depth {queue_depth} "
+            f"with {max(0, int(job_count))} new job(s) would exceed critical threshold "
+            f"{critical_threshold}"
+        )
+        logger.warning(message)
+        raise RuntimeError(message)
+    return queue_depth
+
+
 _DEFAULT_WORKSPACE_REF, _DEFAULT_RUNTIME_PROFILE_REF = default_native_authority_refs()
 
 
@@ -102,6 +157,13 @@ def _run_async(coro):
         import asyncio
 
         return pool.submit(asyncio.run, coro).result()
+
+
+def _submit_transaction(conn: SyncPostgresConnection):
+    transaction = getattr(conn, "transaction", None)
+    if callable(transaction):
+        return transaction()
+    return nullcontext(conn)
 
 
 def _graph_request_envelope(request: WorkflowRequest) -> dict[str, object]:
@@ -394,8 +456,13 @@ def _do_submit_workflow(
     conn: SyncPostgresConnection,
     spec,
     run_id: str,
+    *,
+    force_fresh_run: bool = False,
     parent_run_id: str | None = None,
+    parent_job_label: str | None = None,
+    dispatch_reason: str | None = None,
     trigger_depth: int = 0,
+    lineage_depth: int | None = None,
     packet_provenance: dict[str, object] | None = None,
 ) -> dict:
     """Core submission logic: INSERT workflow_runs + workflow_jobs rows.
@@ -434,7 +501,10 @@ def _do_submit_workflow(
         raw_snapshot=raw_snapshot,
         now=now,
         parent_run_id=parent_run_id,
+        parent_job_label=parent_job_label,
+        dispatch_reason=dispatch_reason,
         trigger_depth=trigger_depth,
+        lineage_depth=lineage_depth,
     )
 
     # 2. Build label → job_id mapping for dependency wiring
@@ -490,21 +560,24 @@ def _do_submit_workflow(
             "prompt_hash": prompt_hash,
         }
         payload_hash = canonical_hash(payload)
-        result = check_idempotency(
-            conn,
-            "workflow.run",
-            ledger_idempotency_key,
-            payload_hash,
-            replayable_run_states=_WORKFLOW_REPLAYABLE_RUN_STATES,
-        )
-        if result.is_replay:
-            logger.info("Idempotent replay: returning existing run_id=%s", result.existing_run_id)
-            replayed_labels.add(label)
-            replayed_jobs.append({"label": label, "existing_run_id": result.existing_run_id})
-            continue
-        if result.is_conflict:
-            logger.warning("Idempotency conflict: key=%s exists with different payload", ledger_idempotency_key)
-            raise IdempotencyConflict(ledger_idempotency_key, result.existing_run_id, result.created_at)
+        if not force_fresh_run:
+            result = check_idempotency(
+                conn,
+                "workflow.run",
+                ledger_idempotency_key,
+                payload_hash,
+                replayable_run_states=_WORKFLOW_REPLAYABLE_RUN_STATES,
+            )
+            if result.is_replay:
+                logger.info("Idempotent replay: returning existing run_id=%s", result.existing_run_id)
+                replayed_labels.add(label)
+                replayed_jobs.append({"label": label, "existing_run_id": result.existing_run_id})
+                continue
+            if result.is_conflict:
+                logger.warning("Idempotency conflict: key=%s exists with different payload", ledger_idempotency_key)
+                raise IdempotencyConflict(ledger_idempotency_key, result.existing_run_id, result.created_at)
+
+        _enforce_queue_admission(conn, job_count=1)
 
         rows = conn.execute(
             """INSERT INTO workflow_jobs
@@ -535,7 +608,7 @@ def _do_submit_workflow(
         job_id = rows[0]["id"]
         record_idempotency(conn, "workflow.run", ledger_idempotency_key, payload_hash, run_id=run_id)
         label_to_id[label] = job_id
-        job_rows.append((job_id, label, job.get("depends_on", [])))
+        job_rows.append((job_id, label, tuple(depends_on)))
 
     if not job_rows and replayed_jobs:
         existing_run_ids = sorted(
@@ -644,6 +717,7 @@ def _do_submit_workflow(
         )
 
     # 3. Wire dependency edges
+    expected_edges: set[tuple[int, int]] = set()
     for job_id, label, depends_on in job_rows:
         remaining_depends_on = [dep for dep in depends_on if dep not in replayed_labels]
         if not remaining_depends_on:
@@ -654,11 +728,18 @@ def _do_submit_workflow(
             continue
         for dep_label in remaining_depends_on:
             parent_id = label_to_id.get(dep_label)
-            if parent_id:
-                conn.execute(
-                    "INSERT INTO workflow_job_edges (parent_id, child_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-                    parent_id, job_id,
+            if not parent_id:
+                raise RuntimeError(
+                    "workflow submit failed closed while wiring dependency edges: "
+                    f"missing parent mapping for {dep_label!r} -> {label!r}",
                 )
+            expected_edges.add((parent_id, job_id))
+            conn.execute(
+                "INSERT INTO workflow_job_edges (parent_id, child_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+                parent_id, job_id,
+            )
+
+    _assert_dependency_edges_persisted(conn, expected_edges=expected_edges)
 
     _recompute_workflow_run_state(conn, run_id)
 
@@ -676,11 +757,44 @@ def _do_submit_workflow(
     }
 
 
+def _assert_dependency_edges_persisted(
+    conn: SyncPostgresConnection,
+    *,
+    expected_edges: set[tuple[int, int]],
+) -> None:
+    if not expected_edges:
+        return
+
+    child_ids = sorted({child_id for _, child_id in expected_edges})
+    rows = conn.execute(
+        """SELECT parent_id, child_id
+           FROM workflow_job_edges
+           WHERE child_id = ANY($1::bigint[])""",
+        child_ids,
+    )
+    actual_edges = {
+        (int(row["parent_id"]), int(row["child_id"]))
+        for row in rows or []
+    }
+    missing = sorted(expected_edges - actual_edges)
+    if missing:
+        sample = ", ".join(f"{parent}->{child}" for parent, child in missing[:5])
+        raise RuntimeError(
+            "workflow submit failed closed because dependency edges were not persisted"
+            + (f": {sample}" if sample else ""),
+        )
+
+
 def submit_workflow(
     conn: SyncPostgresConnection,
     spec_path: str,
     repo_root: str,
     run_id: str | None = None,
+    force_fresh_run: bool = False,
+    parent_run_id: str | None = None,
+    parent_job_label: str | None = None,
+    dispatch_reason: str | None = None,
+    lineage_depth: int | None = None,
 ) -> dict:
     """Parse a workflow spec file and submit it."""
     from runtime.workflow_spec import WorkflowSpec
@@ -744,6 +858,7 @@ def submit_workflow(
             if label in auto_deps and not job.get("depends_on"):
                 job["depends_on"] = sorted(auto_deps[label])
 
+    force_fresh_run = bool(force_fresh_run or run_id is not None)
     run_id = run_id or f"workflow_{uuid.uuid4().hex[:12]}"
     if spec_uses_graph_runtime(spec._raw):
         try:
@@ -756,25 +871,35 @@ def submit_workflow(
             raise RuntimeError(
                 f"graph-capable workflow submit failed closed: {exc}",
             ) from exc
-    return _do_submit_workflow(
-        conn,
-        spec,
-        run_id,
-        packet_provenance={
-            "source_kind": "file_submit",
-            "spec_path": full_path,
-            "repo_root": repo_root,
-            "file_inputs": spec._raw,
-        },
-    )
+    with _submit_transaction(conn) as submit_conn:
+        return _do_submit_workflow(
+            submit_conn,
+            spec,
+            run_id,
+            force_fresh_run=force_fresh_run,
+            parent_run_id=parent_run_id,
+            parent_job_label=parent_job_label,
+            dispatch_reason=dispatch_reason,
+            lineage_depth=lineage_depth,
+            packet_provenance={
+                "source_kind": "file_submit",
+                "spec_path": full_path,
+                "repo_root": repo_root,
+                "file_inputs": spec._raw,
+            },
+        )
 
 
 def submit_workflow_inline(
     conn: SyncPostgresConnection,
     spec_dict: dict,
     run_id: str | None = None,
+    force_fresh_run: bool = False,
     parent_run_id: str | None = None,
+    parent_job_label: str | None = None,
+    dispatch_reason: str | None = None,
     trigger_depth: int = 0,
+    lineage_depth: int | None = None,
     packet_provenance: dict[str, object] | None = None,
 ) -> dict:
     """Submit a workflow from an in-memory spec dict (no file required).
@@ -796,6 +921,7 @@ def submit_workflow_inline(
                 f"graph-capable workflow submit failed closed: {exc}",
             ) from exc
 
+    force_fresh_run = bool(force_fresh_run or run_id is not None)
     run_id = run_id or f"workflow_{uuid.uuid4().hex[:12]}"
 
     # Build a lightweight spec object with the attributes _do_submit needs
@@ -808,18 +934,23 @@ def submit_workflow_inline(
         "_raw": spec_dict,
     })()
 
-    return _do_submit_workflow(
-        conn,
-        spec,
-        run_id,
-        parent_run_id=parent_run_id,
-        trigger_depth=trigger_depth,
-        packet_provenance=packet_provenance
-        or {
-            "source_kind": "inline_submit",
-            "file_inputs": spec_dict,
-        },
-    )
+    with _submit_transaction(conn) as submit_conn:
+        return _do_submit_workflow(
+            submit_conn,
+            spec,
+            run_id,
+            force_fresh_run=force_fresh_run,
+            parent_run_id=parent_run_id,
+            parent_job_label=parent_job_label,
+            dispatch_reason=dispatch_reason,
+            trigger_depth=trigger_depth,
+            lineage_depth=lineage_depth,
+            packet_provenance=packet_provenance
+            or {
+                "source_kind": "inline_submit",
+                "file_inputs": spec_dict,
+            },
+        )
 
 
 def load_execution_packets(

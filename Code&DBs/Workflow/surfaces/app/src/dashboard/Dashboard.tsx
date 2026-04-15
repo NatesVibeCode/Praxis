@@ -1,14 +1,13 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { APP_CONFIG } from '../config';
 import praxisSymbol from '../assets/praxis-symbol-inverse.svg';
-import { useSystemStatus } from '../workspace/useSystemStatus';
 import './dashboard.css';
 
 interface Workflow {
   id: string;
   name: string;
   description?: string;
-  definition_type?: string;  // 'operating_model' | 'pipeline' | undefined
+  definition_type?: string;
   latest_run?: {
     run_id: string;
     spec_name?: string;
@@ -20,6 +19,12 @@ interface Workflow {
   invocation_count?: number;
   last_invoked_at?: string;
   is_template?: boolean;
+  dashboard_bucket?: 'live' | 'saved' | 'draft';
+  dashboard_badge?: {
+    label: string;
+    tone: string;
+    class_name: string;
+  };
   trigger?: {
     id: string;
     event_type: string;
@@ -28,6 +33,58 @@ interface Workflow {
     last_fired_at?: string;
     fire_count: number;
   } | null;
+}
+
+interface RecentRun {
+  run_id: string;
+  spec_name: string;
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+  total_jobs: number;
+  completed_jobs: number;
+  total_cost: number;
+  created_at: string | null;
+  finished_at: string | null;
+}
+
+interface DashboardSnapshot {
+  generated_at: string;
+  summary: {
+    workflow_counts: {
+      total: number;
+      live: number;
+      saved: number;
+      draft: number;
+    };
+    health: {
+      readiness: string;
+      label: string;
+      tone: 'neutral' | 'healthy' | 'warning' | 'danger';
+      copy: string;
+    };
+    runs_24h: number;
+    active_runs: number;
+    pass_rate_24h: number | null;
+    total_cost_24h: number;
+    top_agent: string | null;
+    models_online: number;
+    queue: {
+      depth: number;
+      status: 'ok' | 'warning' | 'critical' | 'unknown';
+      utilization_pct: number;
+      pending: number;
+      ready: number;
+      claimed: number;
+      running: number;
+      error: string | null;
+    };
+  };
+  sections: Array<{
+    key: 'live' | 'saved' | 'draft';
+    count: number;
+    workflow_ids: string[];
+  }>;
+  workflows: Workflow[];
+  recent_runs: RecentRun[];
 }
 
 interface DashboardProps {
@@ -39,33 +96,44 @@ interface DashboardProps {
   onDescribe: () => void;
 }
 
-function useWorkflows() {
-  const [workflows, setWorkflows] = useState<Workflow[]>([]);
+interface WorkflowSection {
+  key: string;
+  title: string;
+  eyebrow: string;
+  description: string;
+  emptyTitle: string;
+  emptyCopy: string;
+  count: number;
+  workflows: Workflow[];
+  tone: 'live' | 'saved' | 'draft';
+}
+
+function useDashboardSnapshot() {
+  const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
-      const res = await fetch('/api/workflows').then(r => r.ok ? r.json() : null).catch(() => null);
-      setWorkflows((res?.workflows ?? []) as Workflow[]);
-    } catch { /* silent */ }
-    finally { setLoading(false); }
+      setError(null);
+      const res = await fetch('/api/dashboard').then((response) => (response.ok ? response.json() : null)).catch(() => null);
+      setSnapshot((res ?? null) as DashboardSnapshot | null);
+    } catch {
+      setError('Dashboard snapshot is unavailable.');
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
     refresh();
-    const t = setInterval(() => { if (!document.hidden) refresh(); }, 15000);
-    return () => clearInterval(t);
+    const timer = setInterval(() => {
+      if (!document.hidden) refresh();
+    }, 15000);
+    return () => clearInterval(timer);
   }, [refresh]);
 
-  return { workflows, loading, refresh };
-}
-
-function getStatusBadge(wf: Workflow): { label: string; className: string } {
-  if (wf.trigger?.enabled && wf.trigger.cron_expression) return { label: 'SCHEDULED', className: 'wf-card__badge--scheduled' };
-  if (wf.trigger?.enabled) return { label: 'LIVE', className: 'wf-card__badge--live' };
-  if (wf.trigger && !wf.trigger.enabled) return { label: 'PAUSED', className: 'wf-card__badge--paused' };
-  if ((wf.invocation_count ?? 0) > 0) return { label: 'ACTIVE', className: 'wf-card__badge--live' };
-  return { label: 'READY', className: 'wf-card__badge--draft' };
+  return { snapshot, loading, error, refresh };
 }
 
 function timeAgo(dateStr: string | undefined): string {
@@ -77,116 +145,230 @@ function timeAgo(dateStr: string | undefined): string {
   return `${Math.floor(diff / 86400000)}d ago`;
 }
 
-function StepChain({ spec }: { spec: any }) {
-  if (!spec?.jobs?.length) return null;
-  const jobs = spec.jobs as Array<{ label: string; agent: string }>;
-
-  const getStepClass = (agent: string) => {
-    if (agent.includes('integration/')) return 'wf-card__step--integration';
-    if (agent.includes('review')) return 'wf-card__step--check';
-    if (agent.includes('wiring')) return 'wf-card__step--api';
-    if (agent.includes('human') || agent.includes('notification')) return 'wf-card__step--human';
-    return 'wf-card__step--agent';
-  };
-
-  return (
-    <div className="wf-card__chain">
-      {jobs.map((job, i) => (
-        <React.Fragment key={job.label}>
-          {i > 0 && <span className="wf-card__arrow">→</span>}
-          <span className={`wf-card__step ${getStepClass(job.agent)}`}>
-            {job.label.replace(/^ps_\w+_\d+$/, `Step ${i + 1}`).replace(/_/g, ' ')}
-          </span>
-        </React.Fragment>
-      ))}
-    </div>
-  );
+function formatPassRate(value: number | null): string {
+  if (value === null || Number.isNaN(value)) return 'No receipts yet';
+  return `${Math.round(value * 100)}%`;
 }
 
-function WorkflowCard({ wf, onEdit, onViewRun, onRunNow, onDelete }: {
+function formatCurrency(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '$0.00';
+  if (value >= 100) return `$${value.toFixed(0)}`;
+  if (value >= 10) return `$${value.toFixed(2)}`;
+  return `$${value.toFixed(3)}`;
+}
+
+function formatAgentName(value: string | null): string {
+  if (!value) return 'No leaderboard data yet';
+  const [provider, model] = value.split('/');
+  return model ? `${provider} / ${model}` : value;
+}
+
+function latestRunCopy(wf: Workflow): string {
+  if (!wf.latest_run?.run_id) return 'No run history yet';
+  const status = wf.latest_run.status ? wf.latest_run.status.toUpperCase() : 'RECORDED';
+  return `${status} ${timeAgo(wf.latest_run.finished_at ?? wf.latest_run.created_at)}`;
+}
+
+function scheduleCopy(wf: Workflow): string {
+  if (wf.trigger?.cron_expression) return wf.trigger.cron_expression;
+  if (wf.trigger?.enabled) return wf.trigger.event_type || 'Live trigger enabled';
+  return 'Manual launch';
+}
+
+function WorkflowCard({
+  wf,
+  onEdit,
+  onViewRun,
+  onRunNow,
+  onDelete,
+}: {
   wf: Workflow;
   onEdit: () => void;
   onViewRun: () => void;
   onRunNow: () => void;
   onDelete: () => void;
 }) {
-  const badge = getStatusBadge(wf);
+  const badge = wf.dashboard_badge || { label: 'Draft', class_name: 'wf-card__badge--draft' };
+  const workflowKind = wf.definition_type === 'operating_model' ? 'Operating model' : 'Workflow';
+  const hasRun = Boolean(wf.latest_run?.run_id);
 
   return (
-    <div className="wf-card">
+    <article className="wf-card">
       <div className="wf-card__header">
-        <div>
+        <div className="wf-card__identity">
+          <div className="wf-card__eyebrow">{workflowKind}</div>
           <div className="wf-card__name">{wf.name}</div>
-          {wf.description && <div className="wf-card__desc">{wf.description}</div>}
         </div>
-        <span className={`wf-card__badge ${badge.className}`}>{badge.label}</span>
+        <span className={`wf-card__badge ${badge.class_name}`}>{badge.label}</span>
       </div>
 
-      <div className="wf-card__meta">
-        {(wf.invocation_count ?? 0) > 0 && <span>{wf.invocation_count} runs</span>}
-        {wf.last_invoked_at && <span>Last: {timeAgo(wf.last_invoked_at)}</span>}
-        {wf.trigger?.cron_expression && <span>Cron: {wf.trigger.cron_expression}</span>}
-        {wf.trigger?.fire_count ? <span>{wf.trigger.fire_count} triggered</span> : null}
+      <div className="wf-card__desc">
+        {wf.description || 'No description yet. Use the editor to define authority, state, and execution rules.'}
+      </div>
+
+      <div className="wf-card__stat-grid">
+        <div className="wf-card__stat">
+          <span className="wf-card__stat-label">Latest run</span>
+          <strong>{latestRunCopy(wf)}</strong>
+        </div>
+        <div className="wf-card__stat">
+          <span className="wf-card__stat-label">Launch mode</span>
+          <strong>{scheduleCopy(wf)}</strong>
+        </div>
+        <div className="wf-card__stat">
+          <span className="wf-card__stat-label">Runs</span>
+          <strong>{wf.invocation_count ?? 0}</strong>
+        </div>
+        <div className="wf-card__stat">
+          <span className="wf-card__stat-label">Last activity</span>
+          <strong>{timeAgo(wf.last_invoked_at)}</strong>
+        </div>
       </div>
 
       <div className="wf-card__actions">
-        {wf.latest_run?.run_id && (
-          <button type="button" className="wf-card__btn" onClick={onViewRun}>View Results</button>
+        <button type="button" className="wf-card__btn wf-card__btn--primary" onClick={onEdit}>
+          Open
+        </button>
+        <button type="button" className="wf-card__btn" onClick={onRunNow}>
+          Run now
+        </button>
+        {hasRun && (
+          <button type="button" className="wf-card__btn" onClick={onViewRun}>
+            View latest
+          </button>
         )}
-        <button type="button" className="wf-card__btn" onClick={onEdit}>Edit</button>
-        <button type="button" className="wf-card__btn wf-card__btn--primary" onClick={onRunNow}>Run Now</button>
-        <button
-          type="button"
-          className="wf-card__btn"
-          onClick={onDelete}
-          style={{ color: 'var(--danger)', borderColor: 'rgba(248,81,73,0.3)' }}
-        >
+        <button type="button" className="wf-card__btn wf-card__btn--danger" onClick={onDelete}>
           Delete
         </button>
       </div>
-    </div>
+    </article>
   );
 }
 
-export function Dashboard({ onEditWorkflow, onEditModel, onViewRun, onNewWorkflow, onChat, onDescribe }: DashboardProps) {
-  const { workflows, loading, refresh } = useWorkflows();
-  const sys = useSystemStatus();
+function WorkflowSectionBlock({
+  section,
+  loading,
+  onPrimaryAction,
+  onEditWorkflow,
+  onEditModel,
+  onViewRun,
+  onRunNow,
+  onDelete,
+}: {
+  section: WorkflowSection;
+  loading: boolean;
+  onPrimaryAction: () => void;
+  onEditWorkflow: (id: string) => void;
+  onEditModel: (id: string) => void;
+  onViewRun: (runId: string) => void;
+  onRunNow: (workflowId: string) => void;
+  onDelete: (workflowId: string) => void;
+}) {
+  return (
+    <section className={`dash-section dash-section--${section.tone}`}>
+      <div className="dash-section__header">
+        <div>
+          <div className="dash-section__eyebrow">{section.eyebrow}</div>
+          <h2 className="dash-section__title">{section.title}</h2>
+          <p className="dash-section__copy">{section.description}</p>
+        </div>
+        <div className="dash-section__count">{loading ? '...' : section.count}</div>
+      </div>
+
+      {loading && section.count === 0 ? (
+        <div className="dash-section__loading">Refreshing workflow inventory...</div>
+      ) : section.count > 0 ? (
+        <div className="dash-section__grid">
+          {section.workflows.map((workflow) => (
+            <WorkflowCard
+              key={workflow.id}
+              wf={workflow}
+              onEdit={() => (workflow.definition_type === 'operating_model' ? onEditModel : onEditWorkflow)(workflow.id)}
+              onViewRun={() => workflow.latest_run?.run_id && onViewRun(workflow.latest_run.run_id)}
+              onRunNow={() => onRunNow(workflow.id)}
+              onDelete={() => onDelete(workflow.id)}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="dash-empty">
+          <div className="dash-empty__title">{section.emptyTitle}</div>
+          <div className="dash-empty__copy">{section.emptyCopy}</div>
+          <button type="button" className="dash-empty__action" onClick={onPrimaryAction}>
+            Create from here
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+export function Dashboard({
+  onEditWorkflow,
+  onEditModel,
+  onViewRun,
+  onNewWorkflow,
+  onChat,
+  onDescribe,
+}: DashboardProps) {
+  const { snapshot, loading, error, refresh } = useDashboardSnapshot();
   const [instanceFiles, setInstanceFiles] = useState<Array<{ id: string; filename: string }>>([]);
   const instanceFileRef = useRef<HTMLInputElement>(null);
-
-  const liveWorkflows = workflows.filter(w => w.trigger?.enabled);
-  const savedWorkflows = workflows.filter(w => !w.trigger?.enabled && (w.invocation_count ?? 0) > 0);
-  const draftWorkflows = workflows.filter(w => !w.trigger?.enabled && (w.invocation_count ?? 0) === 0);
+  const workflows = snapshot?.workflows ?? [];
+  const workflowById = new Map(workflows.map((workflow) => [workflow.id, workflow] as const));
+  const summary = snapshot?.summary ?? {
+    workflow_counts: { total: 0, live: 0, saved: 0, draft: 0 },
+    health: { readiness: 'calibrating', label: 'Calibrating', tone: 'neutral' as const, copy: 'Metrics will harden as receipts and leaderboard data accumulate.' },
+    runs_24h: 0,
+    active_runs: 0,
+    pass_rate_24h: null,
+    total_cost_24h: 0,
+    top_agent: null,
+    models_online: 0,
+    queue: {
+      depth: 0,
+      status: 'unknown' as const,
+      utilization_pct: 0,
+      pending: 0,
+      ready: 0,
+      claimed: 0,
+      running: 0,
+      error: null,
+    },
+  };
+  const health = summary.health;
 
   useEffect(() => {
     fetch('/api/files?scope=instance')
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
         if (data?.files) setInstanceFiles(data.files);
         else if (Array.isArray(data)) setInstanceFiles(data);
       })
       .catch(() => {});
   }, []);
 
-  const handleRunNow = async (wfId: string) => {
+  const handleRunNow = async (workflowId: string) => {
     try {
-      await fetch(`/api/trigger/${wfId}`, { method: 'POST' });
+      await fetch(`/api/trigger/${workflowId}`, { method: 'POST' });
       await refresh();
-    } catch { /* silent */ }
+    } catch {
+      // Silent: run state will settle on the next refresh tick.
+    }
   };
 
-  const handleDelete = async (wfId: string) => {
+  const handleDelete = async (workflowId: string) => {
     if (!window.confirm('Delete this workflow? This cannot be undone.')) return;
     try {
-      const res = await fetch(`/api/workflows/delete/${wfId}`, { method: 'DELETE' });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        console.error('Delete failed:', err);
+      const response = await fetch(`/api/workflows/delete/${workflowId}`, { method: 'DELETE' });
+      if (!response.ok) {
+        const errorPayload = await response.json().catch(() => ({}));
+        console.error('Delete failed:', errorPayload);
         return;
       }
       await refresh();
-    } catch (err) {
-      console.error('Delete error:', err);
+    } catch (error) {
+      console.error('Delete error:', error);
     }
   };
 
@@ -220,10 +402,10 @@ export function Dashboard({ onEditWorkflow, onEditModel, onViewRun, onNewWorkflo
 
       const data = response.ok ? await response.json() : null;
       if (data?.file?.id && data?.file?.filename) {
-        setInstanceFiles(current => [{ id: data.file.id, filename: data.file.filename }, ...current]);
+        setInstanceFiles((current) => [{ id: data.file.id, filename: data.file.filename }, ...current]);
       }
     } catch {
-      /* silent */
+      // Silent: upload failures should not destabilize the dashboard surface.
     } finally {
       event.target.value = '';
     }
@@ -233,197 +415,397 @@ export function Dashboard({ onEditWorkflow, onEditModel, onViewRun, onNewWorkflo
     try {
       const response = await fetch(`/api/files/${fileId}`, { method: 'DELETE' });
       if (response.ok) {
-        setInstanceFiles(current => current.filter(file => file.id !== fileId));
+        setInstanceFiles((current) => current.filter((file) => file.id !== fileId));
       }
     } catch {
-      /* silent */
+      // Silent by design.
     }
   };
 
+  const visibleRuns = (snapshot?.recent_runs ?? []).filter(
+    (run) => !run.spec_name?.startsWith('compile_')
+      && !run.spec_name?.startsWith('fix_bugs')
+      && !run.spec_name?.startsWith('hardening_'),
+  );
+  const hasWorkflows = summary.workflow_counts.total > 0;
+  const heroTitle = hasWorkflows
+    ? 'Operate workflows with explicit control.'
+    : 'Build the first workflow lane with real state authority.';
+  const heroCopy = hasWorkflows
+    ? 'Live lanes, saved builders, drafts, and recent executions stay visible in one control surface.'
+    : 'Describe the operating model if you know the intent, or start from scratch if you want hands-on control over every step.';
+
+  const sectionMeta: Record<'live' | 'saved' | 'draft', Omit<WorkflowSection, 'count' | 'workflows'>> = {
+    live: {
+      key: 'live',
+      title: 'Live Lanes',
+      eyebrow: 'Active execution',
+      description: 'Workflows with a trigger or schedule already wired into the world.',
+      emptyTitle: 'No live lanes yet',
+      emptyCopy: 'Promote a validated workflow into a live lane once you trust the execution path.',
+      tone: 'live',
+    },
+    saved: {
+      key: 'saved',
+      title: 'Validated Workflows',
+      eyebrow: 'Reusable build assets',
+      description: 'Saved workflows with history behind them, ready to inspect, rerun, or evolve.',
+      emptyTitle: 'No validated workflows yet',
+      emptyCopy: 'Run a workflow once to turn the draft into a reusable operating asset.',
+      tone: 'saved',
+    },
+    draft: {
+      key: 'draft',
+      title: 'Draft Bench',
+      eyebrow: 'Work in progress',
+      description: 'Early models and builders that have not seen execution yet.',
+      emptyTitle: 'The draft bench is empty',
+      emptyCopy: 'Start a fresh workflow or describe an operating model to seed the first draft.',
+      tone: 'draft',
+    },
+  };
+
+  const workflowSections: WorkflowSection[] = (snapshot?.sections ?? [
+    { key: 'live', count: 0, workflow_ids: [] },
+    { key: 'saved', count: 0, workflow_ids: [] },
+    { key: 'draft', count: 0, workflow_ids: [] },
+  ]).map((section) => ({
+    ...sectionMeta[section.key],
+    count: section.count,
+    workflows: section.workflow_ids
+      .map((workflowId) => workflowById.get(workflowId))
+      .filter((workflow): workflow is Workflow => workflow !== undefined),
+  }));
+
+  const summaryCards = [
+    {
+      eyebrow: 'Runs today',
+      value: loading ? '...' : String(summary.runs_24h),
+      detail: summary.active_runs > 0 ? `${summary.active_runs} running right now` : 'No active runs at the moment',
+      tone: 'accent',
+    },
+    {
+      eyebrow: 'Queue depth',
+      value: loading ? '...' : String(summary.queue.depth),
+      detail: summary.queue.error
+        ? `Queue probe error: ${summary.queue.error}`
+        : summary.queue.status === 'critical'
+          ? `${summary.queue.utilization_pct}% of the critical threshold is in use`
+          : summary.queue.status === 'warning'
+            ? `${summary.queue.utilization_pct}% of the critical threshold is in use`
+            : summary.queue.depth > 0
+              ? `${summary.queue.pending} pending and ${summary.queue.ready} ready`
+              : 'No pending or ready jobs',
+      tone: summary.queue.status === 'critical' ? 'danger' : summary.queue.status === 'warning' ? 'warning' : 'neutral',
+    },
+    {
+      eyebrow: 'Pass rate',
+      value: loading ? '...' : formatPassRate(summary.pass_rate_24h),
+      detail: health.copy,
+      tone: health.tone,
+    },
+    {
+      eyebrow: 'Top agent',
+      value: loading ? '...' : formatAgentName(summary.top_agent),
+      detail: summary.models_online > 0 ? `${summary.models_online} leaderboard entries visible` : 'Waiting on leaderboard data',
+      tone: 'neutral',
+    },
+    {
+      eyebrow: 'Knowledge base',
+      value: `${instanceFiles.length}`,
+      detail: instanceFiles.length > 0 ? 'Reference files attached to this surface' : 'No instance files attached yet',
+      tone: 'neutral',
+    },
+  ];
+
   return (
     <div className="dash-page">
-      {/* Sidebar */}
-      <div className="dash-sidebar">
+      <aside className="dash-sidebar">
         <div className="dash-sidebar__brand">
           <img className="dash-sidebar__logo" src={praxisSymbol} alt="Praxis symbol" />
-          {APP_CONFIG.name}
+          <div className="dash-sidebar__brand-copy">
+            <span>Command Surface</span>
+            <strong>{APP_CONFIG.name}</strong>
+          </div>
         </div>
 
-        {liveWorkflows.length > 0 && (
-          <>
-            <div className="dash-sidebar__section">LIVE</div>
-            {liveWorkflows.map(w => (
-              <button key={w.id} className="dash-sidebar__item" onClick={() => (w.definition_type === 'operating_model' ? onEditModel : onEditWorkflow)(w.id)}>
-                <span className="dash-sidebar__dot dash-sidebar__dot--live" />
-                <span className="dash-sidebar__title">{w.name}</span>
-                {(w.invocation_count ?? 0) > 0 && <span className="dash-sidebar__count">{w.invocation_count}</span>}
-              </button>
-            ))}
-          </>
-        )}
+        <div className="dash-sidebar__overview">
+          <div className="dash-sidebar__overview-kicker">State authority</div>
+          <div className="dash-sidebar__overview-title">{APP_CONFIG.engineName}</div>
+          <div className="dash-sidebar__overview-copy">
+            One visible place to launch, inspect, and recover workflow lanes without losing the shape of the system.
+          </div>
+          <div className="dash-sidebar__overview-grid">
+            <div className="dash-sidebar__overview-stat">
+              <span>Live</span>
+              <strong>{summary.workflow_counts.live}</strong>
+            </div>
+            <div className="dash-sidebar__overview-stat">
+              <span>Saved</span>
+              <strong>{summary.workflow_counts.saved}</strong>
+            </div>
+            <div className="dash-sidebar__overview-stat">
+              <span>Drafts</span>
+              <strong>{summary.workflow_counts.draft}</strong>
+            </div>
+            <div className="dash-sidebar__overview-stat">
+              <span>Files</span>
+              <strong>{instanceFiles.length}</strong>
+            </div>
+          </div>
+        </div>
 
-        {(savedWorkflows.length > 0 || draftWorkflows.length > 0) && (
-          <>
-            <div className="dash-sidebar__section">WORKFLOWS</div>
-            {[...savedWorkflows, ...draftWorkflows].map(w => (
-              <button key={w.id} className="dash-sidebar__item" onClick={() => (w.definition_type === 'operating_model' ? onEditModel : onEditWorkflow)(w.id)}>
-                <span className={`dash-sidebar__dot ${(w.invocation_count ?? 0) > 0 ? 'dash-sidebar__dot--done' : 'dash-sidebar__dot--draft'}`} />
-                <span className="dash-sidebar__title">{w.name}</span>
-              </button>
-            ))}
-          </>
-        )}
+        <div className="dash-sidebar__stack">
+          {workflowSections[0]?.workflows.length > 0 && (
+            <div className="dash-sidebar__cluster">
+              <div className="dash-sidebar__section">Live lanes</div>
+              {workflowSections[0].workflows.map((workflow) => (
+                <button
+                  key={workflow.id}
+                  className="dash-sidebar__item dash-sidebar__item--live"
+                  onClick={() => (workflow.definition_type === 'operating_model' ? onEditModel : onEditWorkflow)(workflow.id)}
+                >
+                  <span className="dash-sidebar__dot dash-sidebar__dot--live" />
+                  <span className="dash-sidebar__title">{workflow.name}</span>
+                  {(workflow.invocation_count ?? 0) > 0 && (
+                    <span className="dash-sidebar__count">{workflow.invocation_count}</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {(workflowSections[1]?.workflows.length > 0 || workflowSections[2]?.workflows.length > 0) && (
+            <div className="dash-sidebar__cluster">
+              <div className="dash-sidebar__section">Workbench</div>
+              {[...(workflowSections[1]?.workflows ?? []), ...(workflowSections[2]?.workflows ?? [])].map((workflow) => (
+                <button
+                  key={workflow.id}
+                  className="dash-sidebar__item"
+                  onClick={() => (workflow.definition_type === 'operating_model' ? onEditModel : onEditWorkflow)(workflow.id)}
+                >
+                  <span
+                    className={`dash-sidebar__dot ${
+                      (workflow.invocation_count ?? 0) > 0 ? 'dash-sidebar__dot--done' : 'dash-sidebar__dot--draft'
+                    }`}
+                  />
+                  <span className="dash-sidebar__title">{workflow.name}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
 
         <div className="dash-sidebar__actions">
-          <button className="dash-sidebar__action-btn" onClick={onDescribe}>+ New Operating Model</button>
-          <button className="dash-sidebar__action-btn" onClick={onNewWorkflow}>+ Workflow Builder</button>
+          <button className="dash-sidebar__action-btn dash-sidebar__action-btn--primary" onClick={onDescribe}>
+            New operating model
+          </button>
+          <button className="dash-sidebar__action-btn" onClick={onNewWorkflow}>
+            Workflow builder
+          </button>
         </div>
 
         <div className="dash-sidebar__bottom">
-          <div className="dash-sidebar__section">ASK ANYTHING</div>
+          <div className="dash-sidebar__section">Operator lane</div>
           <button className="dash-sidebar__ask" onClick={onChat}>
             Ask anything...
           </button>
-
-          {instanceFiles.length > 0 && (
-            <>
-              <div className="dash-sidebar__section" style={{ marginTop: 16 }}>KNOWLEDGE BASE</div>
-              {instanceFiles.map(f => (
-                <div key={f.id} className="dash-sidebar__item" style={{ cursor: 'default' }}>
-                  <span className="dash-sidebar__title">{f.filename}</span>
-                  <button
-                    type="button"
-                    onClick={() => deleteInstanceFile(f.id)}
-                    className="dash-sidebar__count"
-                    style={{ cursor: 'pointer', background: 'none', border: 'none', color: 'var(--text-muted)' }}
-                  >
-                    x
-                  </button>
-                </div>
-              ))}
-            </>
-          )}
-          <button
-            type="button"
-            className="dash-sidebar__action-btn"
-            onClick={() => instanceFileRef.current?.click()}
-            style={{ fontSize: 11, opacity: 0.7 }}
-          >
-            + Add to Knowledge Base
+          <button type="button" className="dash-sidebar__upload" onClick={() => instanceFileRef.current?.click()}>
+            Add knowledge file
           </button>
           <input ref={instanceFileRef} type="file" hidden onChange={handleInstanceFileUpload} />
         </div>
-      </div>
+      </aside>
 
-      {/* Main content */}
-      <div className="dash-main">
+      <main className="dash-main">
         <div className="dash-content">
-          {/* Header */}
-          <div className="dash-header">
-            <h1 className="dash-header__title">{APP_CONFIG.name} Workflows</h1>
-            {!sys.loading && sys.totalRuns24h > 0 && (
-              <div className="dash-header__stats">
-                <span>{sys.totalRuns24h} workflows today</span>
-                {sys.activeRuns > 0 && <span className="dash-header__active">● {sys.activeRuns} running</span>}
+          <section className="dash-hero">
+            <div className="dash-hero__copy">
+              <div className="dash-hero__eyebrow">Workflow command center</div>
+              <h1 className="dash-hero__title">{heroTitle}</h1>
+              <p className="dash-hero__desc">{heroCopy}</p>
+
+              <div className="dash-hero__actions">
+                <button type="button" className="dash-hero__primary" onClick={onDescribe}>
+                  Describe it
+                </button>
+                <button type="button" className="dash-hero__secondary" onClick={onNewWorkflow}>
+                  Start from scratch
+                </button>
+                <button type="button" className="dash-hero__secondary" onClick={onChat}>
+                  Open chat
+                </button>
               </div>
-            )}
-          </div>
 
-          {/* Quick actions */}
-          <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
-            <button
-              className="wf-card__btn wf-card__btn--primary"
-              onClick={onDescribe}
-              style={{ padding: '10px 20px', fontSize: 14 }}
-            >
-              Describe It
-            </button>
-            <button
-              className="wf-card__btn"
-              onClick={onNewWorkflow}
-              style={{ padding: '10px 20px', fontSize: 14 }}
-            >
-              Start from Scratch
-            </button>
-          </div>
+              <div className="dash-hero__chips">
+                <span className="dash-chip">{summary.workflow_counts.total} workflows in scope</span>
+                <span className="dash-chip">{summary.workflow_counts.live} live lanes</span>
+                <span className="dash-chip">{instanceFiles.length} knowledge files</span>
+                <span className={`dash-pill dash-pill--${health.tone}`}>{health.label}</span>
+              </div>
 
-          {/* Workflow cards */}
-          {loading ? (
-            <div className="dash-loading">Loading workflows...</div>
-          ) : (
-            <>
-              {/* Live workflows first */}
-              {liveWorkflows.map(w => (
-                <WorkflowCard
-                  key={w.id}
-                  wf={w}
-                  onEdit={() => (w.definition_type === 'operating_model' ? onEditModel : onEditWorkflow)(w.id)}
-                  onViewRun={() => w.latest_run?.run_id && onViewRun(w.latest_run.run_id)}
-                  onRunNow={() => handleRunNow(w.id)}
-                  onDelete={() => handleDelete(w.id)}
-                />
-              ))}
-
-              {/* Active workflows */}
-              {savedWorkflows.map(w => (
-                <WorkflowCard
-                  key={w.id}
-                  wf={w}
-                  onEdit={() => (w.definition_type === 'operating_model' ? onEditModel : onEditWorkflow)(w.id)}
-                  onViewRun={() => w.latest_run?.run_id && onViewRun(w.latest_run.run_id)}
-                  onRunNow={() => handleRunNow(w.id)}
-                  onDelete={() => handleDelete(w.id)}
-                />
-              ))}
-
-              {/* Draft workflows */}
-              {draftWorkflows.map(w => (
-                <WorkflowCard
-                  key={w.id}
-                  wf={w}
-                  onEdit={() => (w.definition_type === 'operating_model' ? onEditModel : onEditWorkflow)(w.id)}
-                  onViewRun={() => w.latest_run?.run_id && onViewRun(w.latest_run.run_id)}
-                  onRunNow={() => handleRunNow(w.id)}
-                  onDelete={() => handleDelete(w.id)}
-                />
-              ))}
-
-              {/* Recent runs — clickable, shown first */}
-              {(() => {
-                const visibleRuns = sys.recentRuns.filter(r =>
-                  !r.spec_name?.startsWith('compile_') &&
-                  !r.spec_name?.startsWith('fix_bugs') &&
-                  !r.spec_name?.startsWith('hardening_')
-                );
-                return visibleRuns.length > 0 && (
-                <div className="dash-activity" style={{ marginBottom: 20 }}>
-                  <h2 className="dash-activity__title">Recent Runs</h2>
-                  {visibleRuns.slice(0, 10).map(r => (
-                    <button
-                      key={r.run_id}
-                      className="dash-activity__item"
-                      onClick={() => onViewRun(r.run_id)}
-                      style={{ cursor: 'pointer', width: '100%', textAlign: 'left', background: 'none', border: 'none', font: 'inherit', color: 'inherit', padding: '8px 0', display: 'flex', alignItems: 'center', gap: 8 }}
-                    >
-                      <span className={`dash-activity__dot dash-activity__dot--${r.status}`} />
-                      <span className="dash-activity__name" style={{ flex: 1 }}>{
-                        (r.spec_name || r.run_id.slice(0, 12))
-                          .replace(/[_-]+/g, ' ')
-                          .replace(/\b\w/g, (c: string) => c.toUpperCase())
-                      }</span>
-                      <span className="dash-activity__status">{r.status}</span>
-                      <span className="dash-activity__time">{r.created_at ? timeAgo(r.created_at) : ''}</span>
-                    </button>
-                  ))}
+              {error && (
+                <div className="dash-inline-alert">
+                  Live metrics are unavailable right now. The workflow inventory still works, but health data is stale.
                 </div>
-              );
-              })()}
+              )}
+            </div>
 
-              {/* Create CTA removed — action buttons are at the top */}
-            </>
-          )}
+            <div className="dash-hero__rail">
+              <div className="dash-hero-card dash-hero-card--spotlight">
+                <div className="dash-hero-card__eyebrow">System read</div>
+                <div className="dash-hero-card__title">{health.label}</div>
+                <div className="dash-hero-card__copy">{health.copy}</div>
+                <div className="dash-hero-card__grid">
+                  <div className="dash-hero-card__stat">
+                    <span>Pass rate</span>
+                    <strong>{loading ? '...' : formatPassRate(summary.pass_rate_24h)}</strong>
+                  </div>
+                  <div className="dash-hero-card__stat">
+                    <span>Runs today</span>
+                    <strong>{loading ? '...' : summary.runs_24h}</strong>
+                  </div>
+                  <div className="dash-hero-card__stat">
+                    <span>Spend</span>
+                    <strong>{loading ? '...' : formatCurrency(summary.total_cost_24h)}</strong>
+                  </div>
+                  <div className="dash-hero-card__stat">
+                    <span>Leaderboard</span>
+                    <strong>{loading ? '...' : summary.models_online}</strong>
+                  </div>
+                  <div className="dash-hero-card__stat">
+                    <span>Queue</span>
+                    <strong>{loading ? '...' : summary.queue.depth}</strong>
+                  </div>
+                </div>
+              </div>
+
+              <div className="dash-hero-card">
+                <div className="dash-hero-card__eyebrow">High-signal defaults</div>
+                <div className="dash-guidance">
+                  <div className="dash-guidance__item">
+                    <strong>Describe first</strong>
+                    <span>Use the operating model path when you know the outcome but not the implementation.</span>
+                  </div>
+                  <div className="dash-guidance__item">
+                    <strong>Builder second</strong>
+                    <span>Open the builder when you want to author steps and execution rules directly.</span>
+                  </div>
+                  <div className="dash-guidance__item">
+                    <strong>Attach context</strong>
+                    <span>Drop reference files into the knowledge base so the workspace can act with context.</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="dash-metrics">
+            {summaryCards.map((card) => (
+              <article key={card.eyebrow} className={`dash-metric dash-metric--${card.tone}`}>
+                <div className="dash-metric__eyebrow">{card.eyebrow}</div>
+                <div className="dash-metric__value">{card.value}</div>
+                <div className="dash-metric__detail">{card.detail}</div>
+              </article>
+            ))}
+          </section>
+
+          <div className="dash-board">
+            <div className="dash-board__main">
+              {workflowSections.map((section) => (
+                <WorkflowSectionBlock
+                  key={section.key}
+                  section={section}
+                  loading={loading}
+                  onPrimaryAction={section.key === 'draft' ? onNewWorkflow : onDescribe}
+                  onEditWorkflow={onEditWorkflow}
+                  onEditModel={onEditModel}
+                  onViewRun={onViewRun}
+                  onRunNow={handleRunNow}
+                  onDelete={handleDelete}
+                />
+              ))}
+            </div>
+
+            <aside className="dash-board__rail">
+              <section className="dash-panel">
+                <div className="dash-panel__header">
+                  <div>
+                    <div className="dash-panel__eyebrow">Recent execution</div>
+                    <h2 className="dash-panel__title">Recent Runs</h2>
+                  </div>
+                </div>
+
+                {visibleRuns.length > 0 ? (
+                  <div className="dash-run-list">
+                    {visibleRuns.slice(0, 8).map((run) => (
+                      <button
+                        key={run.run_id}
+                        type="button"
+                        className="dash-run"
+                        onClick={() => onViewRun(run.run_id)}
+                      >
+                        <div className={`dash-run__status dash-run__status--${run.status}`} />
+                        <div className="dash-run__body">
+                          <div className="dash-run__title">
+                            {(run.spec_name || run.run_id.slice(0, 12))
+                              .replace(/[_-]+/g, ' ')
+                              .replace(/\b\w/g, (character: string) => character.toUpperCase())}
+                          </div>
+                          <div className="dash-run__meta">
+                            <span>{run.status}</span>
+                            <span>{run.total_jobs > 0 ? `${run.completed_jobs}/${run.total_jobs} jobs` : 'Awaiting jobs'}</span>
+                            <span>{run.created_at ? timeAgo(run.created_at) : 'Queued now'}</span>
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="dash-empty dash-empty--compact">
+                    <div className="dash-empty__title">No recent runs</div>
+                    <div className="dash-empty__copy">
+                      Trigger a workflow and the latest executions will appear here with one-click inspection.
+                    </div>
+                  </div>
+                )}
+              </section>
+
+              <section className="dash-panel">
+                <div className="dash-panel__header">
+                  <div>
+                    <div className="dash-panel__eyebrow">Attached context</div>
+                    <h2 className="dash-panel__title">Knowledge Base</h2>
+                  </div>
+                  <button type="button" className="dash-panel__action" onClick={() => instanceFileRef.current?.click()}>
+                    Add file
+                  </button>
+                </div>
+
+                {instanceFiles.length > 0 ? (
+                  <div className="dash-file-list">
+                    {instanceFiles.map((file) => (
+                      <div key={file.id} className="dash-file">
+                        <div className="dash-file__name">{file.filename}</div>
+                        <button type="button" className="dash-file__remove" onClick={() => deleteInstanceFile(file.id)}>
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="dash-empty dash-empty--compact">
+                    <div className="dash-empty__title">No files attached</div>
+                    <div className="dash-empty__copy">
+                      Upload briefs, notes, or source files so the workspace can reason over them during execution.
+                    </div>
+                  </div>
+                )}
+              </section>
+            </aside>
+          </div>
         </div>
-      </div>
+      </main>
     </div>
   );
 }

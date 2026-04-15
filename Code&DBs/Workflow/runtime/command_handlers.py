@@ -146,17 +146,68 @@ def _workflow_chain_id_from_result_ref(result_ref: str | None) -> str | None:
 # Per-command-type handlers
 # ---------------------------------------------------------------------------
 
-def _workflow_submit(conn: "SyncPostgresConnection", command: Any) -> str:
+def _workflow_submit_dispatch(
+    conn: "SyncPostgresConnection",
+    command: Any,
+    *,
+    require_parent: bool,
+) -> str:
     from runtime.control_commands import ControlCommandExecutionError
     from runtime._helpers import _json_compatible as _jc  # noqa: F401 (unused but harmless)
     from runtime.control_commands import _normalize_text, _normalize_bool  # noqa: F401
 
     # Normalise helpers are still in control_commands for now — import lazily.
-    from runtime.control_commands import _normalize_payload as _np, _normalize_text as _nt
+    from runtime.control_commands import _normalize_bool as _nb, _normalize_payload as _np, _normalize_text as _nt
 
     run_id = command.payload.get("run_id")
     if run_id is not None:
         run_id = _nt(run_id, field_name="payload.run_id")
+    parent_run_id = command.payload.get("parent_run_id")
+    if parent_run_id is not None:
+        parent_run_id = _nt(parent_run_id, field_name="payload.parent_run_id")
+    parent_job_label = command.payload.get("parent_job_label")
+    if parent_job_label is not None:
+        parent_job_label = _nt(parent_job_label, field_name="payload.parent_job_label")
+    dispatch_reason = command.payload.get("dispatch_reason")
+    if dispatch_reason is not None:
+        dispatch_reason = _nt(dispatch_reason, field_name="payload.dispatch_reason")
+    lineage_depth = command.payload.get("lineage_depth")
+    if lineage_depth is not None:
+        try:
+            lineage_depth = max(int(lineage_depth), 0)
+        except (TypeError, ValueError) as exc:
+            raise ControlCommandExecutionError(
+                "control.command.workflow_submit_invalid_payload",
+                "payload.lineage_depth must be an integer >= 0",
+                details={
+                    "command_id": command.command_id,
+                    "command_type": command.command_type,
+                    "lineage_depth": lineage_depth,
+                },
+            ) from exc
+    if require_parent and parent_run_id is None:
+        raise ControlCommandExecutionError(
+            "control.command.workflow_spawn_invalid_payload",
+            "workflow.spawn requires payload.parent_run_id",
+            details={
+                "command_id": command.command_id,
+                "command_type": command.command_type,
+            },
+        )
+    if require_parent and dispatch_reason is None:
+        raise ControlCommandExecutionError(
+            "control.command.workflow_spawn_invalid_payload",
+            "workflow.spawn requires payload.dispatch_reason",
+            details={
+                "command_id": command.command_id,
+                "command_type": command.command_type,
+            },
+        )
+    force_fresh_run = _nb(
+        command.payload.get("force_fresh_run"),
+        field_name="payload.force_fresh_run",
+        default_value=False,
+    )
 
     inline_spec_field = None
     inline_spec_payload = None
@@ -188,15 +239,25 @@ def _workflow_submit(conn: "SyncPostgresConnection", command: Any) -> str:
                 conn,
                 inline_spec,
                 run_id=run_id,
+                force_fresh_run=force_fresh_run,
+                parent_run_id=parent_run_id,
+                parent_job_label=parent_job_label,
+                dispatch_reason=dispatch_reason,
+                lineage_depth=lineage_depth,
             )
         except Exception as exc:
             raise ControlCommandExecutionError(
-                "control.command.workflow_submit_failed",
+                "control.command.workflow_spawn_failed" if require_parent else "control.command.workflow_submit_failed",
                 str(exc),
                 details={
                     "command_id": command.command_id,
                     "inline_spec_field": inline_spec_field,
                     "run_id": run_id,
+                    "parent_run_id": parent_run_id,
+                    "parent_job_label": parent_job_label,
+                    "dispatch_reason": dispatch_reason,
+                    "lineage_depth": lineage_depth,
+                    "force_fresh_run": force_fresh_run,
                 },
             ) from exc
     else:
@@ -214,29 +275,47 @@ def _workflow_submit(conn: "SyncPostgresConnection", command: Any) -> str:
                 spec_path,
                 repo_root,
                 run_id=run_id,
+                force_fresh_run=force_fresh_run,
+                parent_run_id=parent_run_id,
+                parent_job_label=parent_job_label,
+                dispatch_reason=dispatch_reason,
+                lineage_depth=lineage_depth,
             )
         except Exception as exc:
             raise ControlCommandExecutionError(
-                "control.command.workflow_submit_failed",
+                "control.command.workflow_spawn_failed" if require_parent else "control.command.workflow_submit_failed",
                 str(exc),
                 details={
                     "command_id": command.command_id,
                     "spec_path": spec_path,
                     "repo_root": repo_root,
                     "run_id": run_id,
+                    "parent_run_id": parent_run_id,
+                    "parent_job_label": parent_job_label,
+                    "dispatch_reason": dispatch_reason,
+                    "lineage_depth": lineage_depth,
+                    "force_fresh_run": force_fresh_run,
                 },
             ) from exc
     result_run_id = result.get("run_id")
     if not result_run_id:
         raise ControlCommandExecutionError(
-            "control.command.workflow_submit_failed",
-            "workflow.submit did not return a run_id",
+            "control.command.workflow_spawn_failed" if require_parent else "control.command.workflow_submit_failed",
+            "workflow.spawn did not return a run_id" if require_parent else "workflow.submit did not return a run_id",
             details={
                 "command_id": command.command_id,
                 "result": result,
             },
         )
     return f"workflow_run:{result_run_id}"
+
+
+def _workflow_submit(conn: "SyncPostgresConnection", command: Any) -> str:
+    return _workflow_submit_dispatch(conn, command, require_parent=False)
+
+
+def _workflow_spawn(conn: "SyncPostgresConnection", command: Any) -> str:
+    return _workflow_submit_dispatch(conn, command, require_parent=True)
 
 
 def _workflow_chain_submit(conn: "SyncPostgresConnection", command: Any) -> str:
@@ -418,6 +497,7 @@ def _run_command_handler(
 
     handlers = {
         ControlCommandType.WORKFLOW_SUBMIT.value: _workflow_submit,
+        ControlCommandType.WORKFLOW_SPAWN.value: _workflow_spawn,
         ControlCommandType.WORKFLOW_CHAIN_SUBMIT.value: _workflow_chain_submit,
         ControlCommandType.WORKFLOW_RETRY.value: _workflow_retry,
         ControlCommandType.WORKFLOW_CANCEL.value: _workflow_cancel,
@@ -542,7 +622,7 @@ def render_control_command_response(
             _json_compatible(_base_payload("approval_required")),
         )
 
-    if action == "run":
+    if action in {"run", "spawn"}:
         status = "queued" if effective_run_id else command_status
     elif action == "retry":
         status = "requeued"
@@ -641,6 +721,11 @@ def request_workflow_submit_command(
     repo_root: str | None = None,
     inline_spec: Mapping[str, Any] | None = None,
     run_id: str | None = None,
+    parent_run_id: str | None = None,
+    parent_job_label: str | None = None,
+    dispatch_reason: str | None = None,
+    lineage_depth: int | None = None,
+    force_fresh_run: bool = False,
     idempotency_key: str | None = None,
     command_id: str | None = None,
     requested_at: Any = None,
@@ -652,6 +737,7 @@ def request_workflow_submit_command(
         ControlCommandType,
         ControlIntent,
         _normalize_payload as _np,
+        _normalize_bool as _nb,
         _normalize_text as _nt,
         request_control_command,
     )
@@ -659,6 +745,11 @@ def request_workflow_submit_command(
     n_kind = _nt(requested_by_kind, field_name="requested_by_kind")
     n_ref = _nt(requested_by_ref, field_name="requested_by_ref")
     n_run_id = None if run_id is None else _nt(run_id, field_name="run_id")
+    n_parent_run_id = None if parent_run_id is None else _nt(parent_run_id, field_name="parent_run_id")
+    n_parent_job_label = None if parent_job_label is None else _nt(parent_job_label, field_name="parent_job_label")
+    n_dispatch_reason = None if dispatch_reason is None else _nt(dispatch_reason, field_name="dispatch_reason")
+    n_lineage_depth = None if lineage_depth is None else max(int(lineage_depth), 0)
+    n_force_fresh_run = _nb(force_fresh_run, field_name="force_fresh_run", default_value=False)
     n_ikey = None if idempotency_key is None else _nt(idempotency_key, field_name="idempotency_key")
     has_spec_path = spec_path is not None
     has_inline_spec = inline_spec is not None
@@ -684,6 +775,16 @@ def request_workflow_submit_command(
         _payload = {"spec_path": n_spec, "repo_root": n_root}
     if n_run_id is not None:
         _payload["run_id"] = n_run_id
+    if n_parent_run_id is not None:
+        _payload["parent_run_id"] = n_parent_run_id
+    if n_parent_job_label is not None:
+        _payload["parent_job_label"] = n_parent_job_label
+    if n_dispatch_reason is not None:
+        _payload["dispatch_reason"] = n_dispatch_reason
+    if n_lineage_depth is not None:
+        _payload["lineage_depth"] = n_lineage_depth
+    if n_force_fresh_run:
+        _payload["force_fresh_run"] = True
 
     intent = ControlIntent(
         command_type=ControlCommandType.WORKFLOW_SUBMIT,
@@ -693,6 +794,131 @@ def request_workflow_submit_command(
         payload=_payload,
     )
     return request_control_command(conn, intent, command_id=command_id, requested_at=requested_at)
+
+
+def request_workflow_spawn_command(
+    conn: "SyncPostgresConnection",
+    *,
+    requested_by_kind: str,
+    requested_by_ref: str,
+    parent_run_id: str,
+    dispatch_reason: str,
+    spec_path: str | None = None,
+    repo_root: str | None = None,
+    inline_spec: Mapping[str, Any] | None = None,
+    parent_job_label: str | None = None,
+    run_id: str | None = None,
+    lineage_depth: int | None = None,
+    force_fresh_run: bool = False,
+    idempotency_key: str | None = None,
+    command_id: str | None = None,
+    requested_at: Any = None,
+) -> Any:
+    """Create and auto-execute one durable workflow.spawn command."""
+    import uuid as _uuid
+    from runtime.control_commands import (
+        ControlCommandError,
+        ControlCommandType,
+        ControlIntent,
+        _normalize_payload as _np,
+        _normalize_bool as _nb,
+        _normalize_text as _nt,
+        request_control_command,
+    )
+
+    n_kind = _nt(requested_by_kind, field_name="requested_by_kind")
+    n_ref = _nt(requested_by_ref, field_name="requested_by_ref")
+    n_parent_run_id = _nt(parent_run_id, field_name="parent_run_id")
+    n_dispatch_reason = _nt(dispatch_reason, field_name="dispatch_reason")
+    n_parent_job_label = None if parent_job_label is None else _nt(parent_job_label, field_name="parent_job_label")
+    n_run_id = None if run_id is None else _nt(run_id, field_name="run_id")
+    n_lineage_depth = None if lineage_depth is None else max(int(lineage_depth), 0)
+    n_force_fresh_run = _nb(force_fresh_run, field_name="force_fresh_run", default_value=False)
+    n_ikey = None if idempotency_key is None else _nt(idempotency_key, field_name="idempotency_key")
+    has_spec_path = spec_path is not None
+    has_inline_spec = inline_spec is not None
+
+    if has_spec_path == has_inline_spec:
+        raise ControlCommandError(
+            "control.command.invalid_value",
+            "request_workflow_spawn_command requires exactly one of spec_path or inline_spec",
+            details={
+                "spec_path_provided": has_spec_path,
+                "inline_spec_provided": has_inline_spec,
+            },
+        )
+
+    payload: dict[str, Any] = {
+        "parent_run_id": n_parent_run_id,
+        "dispatch_reason": n_dispatch_reason,
+    }
+    if n_parent_job_label is not None:
+        payload["parent_job_label"] = n_parent_job_label
+    if has_inline_spec:
+        payload["inline_spec"] = _np(inline_spec, field_name="inline_spec")
+        if repo_root is not None:
+            payload["repo_root"] = _nt(repo_root, field_name="repo_root")
+    else:
+        payload["spec_path"] = _nt(spec_path, field_name="spec_path")
+        payload["repo_root"] = _nt(repo_root, field_name="repo_root")
+    if n_run_id is not None:
+        payload["run_id"] = n_run_id
+    if n_lineage_depth is not None:
+        payload["lineage_depth"] = n_lineage_depth
+    if n_force_fresh_run:
+        payload["force_fresh_run"] = True
+
+    intent = ControlIntent(
+        command_type=ControlCommandType.WORKFLOW_SPAWN,
+        requested_by_kind=n_kind,
+        requested_by_ref=n_ref,
+        idempotency_key=n_ikey or f"workflow.spawn.{n_kind}.{_uuid.uuid4().hex}",
+        payload=payload,
+    )
+    return request_control_command(conn, intent, command_id=command_id, requested_at=requested_at)
+
+
+def render_workflow_spawn_response(
+    command: Any,
+    *,
+    spec_name: str | None = None,
+    total_jobs: int | None = None,
+) -> dict[str, Any]:
+    """Render the canonical queued-run response for workflow.spawn surfaces."""
+
+    command_json = command.to_json() if hasattr(command, "to_json") else dict(command)
+    payload = render_control_command_response(
+        None,
+        command,
+        action="spawn",
+        spec_name=spec_name,
+        total_jobs=total_jobs,
+    )
+    if payload.get("status") in {"failed", "approval_required"}:
+        return payload
+    if payload.get("run_id"):
+        return payload
+
+    failed_payload: dict[str, Any] = {
+        "status": "failed",
+        "command_status": str(command_json.get("command_status") or "failed"),
+        "approval_required": False,
+        "error": "workflow spawn command did not produce a workflow run",
+        "error_code": "control.command.workflow_spawn_missing_run_id",
+        "error_detail": "workflow spawn command did not produce a workflow run",
+        "command": command_json,
+    }
+    cmd_id = command_json.get("command_id")
+    if cmd_id:
+        failed_payload["command_id"] = str(cmd_id)
+    result_ref = command_json.get("result_ref")
+    if result_ref:
+        failed_payload["result_ref"] = str(result_ref)
+    if spec_name is not None:
+        failed_payload["spec_name"] = spec_name
+    if total_jobs is not None:
+        failed_payload["total_jobs"] = total_jobs
+    return cast(dict[str, Any], _json_compatible(failed_payload))
 
 
 def request_workflow_chain_submit_command(

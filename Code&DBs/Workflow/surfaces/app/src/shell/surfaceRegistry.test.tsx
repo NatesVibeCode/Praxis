@@ -1,0 +1,61 @@
+import { vi } from 'vitest';
+
+import { buildShellNavigationItems, buildShellTabs, resolveActiveShellSurface } from './surfaceRegistry';
+import { createDefaultShellState, runDetailShellId } from './state';
+
+describe('surfaceRegistry', () => {
+  test('drives tabs, navigate items, and active context from the same surface definitions', () => {
+    const state = {
+      ...createDefaultShellState(),
+      activeTabId: runDetailShellId('run_123'),
+      buildWorkflowId: 'wf_alpha',
+      dynamicTabs: [
+        {
+          id: runDetailShellId('run_123'),
+          kind: 'run-detail' as const,
+          label: 'Run run_123',
+          closable: true as const,
+          runId: 'run_123',
+        },
+      ],
+    };
+    const activeDynamicTab = state.dynamicTabs[0];
+
+    const tabs = buildShellTabs(state);
+    expect(tabs).toEqual([
+      { id: 'dashboard', label: 'Overview', kind: 'Suite', closable: false },
+      { id: 'build', label: 'Workflow workspace', kind: 'Build', closable: false },
+      { id: 'run-detail:run_123', label: 'Run run_123', kind: 'Run', closable: true },
+    ]);
+
+    const activateTab = vi.fn();
+    const setChatOpen = vi.fn();
+    const navigateItems = buildShellNavigationItems({
+      state,
+      chatOpen: false,
+      activateTab,
+      setChatOpen,
+    });
+
+    expect(navigateItems.find((item) => item.id === 'navigate:build')).toMatchObject({
+      label: 'Workflow workspace',
+      description: 'Jump back into Moon Build.',
+      selected: false,
+    });
+    expect(navigateItems.find((item) => item.id === 'tab:run-detail:run_123')).toMatchObject({
+      label: 'Run run_123',
+      description: 'Open the run detail tab.',
+      selected: true,
+    });
+
+    const activeSurface = resolveActiveShellSurface(state, activeDynamicTab);
+    expect(activeSurface).toMatchObject({
+      category: 'dynamic',
+      kind: 'run-detail',
+      context: {
+        label: 'Run detail',
+        detail: 'Trace execution, inspect jobs, and jump back into the builder without losing context.',
+      },
+    });
+  });
+});

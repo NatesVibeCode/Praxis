@@ -47,7 +47,7 @@ def test_discover_database_url_prefers_legacy_launch_agent_value(monkeypatch, tm
         plistlib.dumps(
             {
                 "EnvironmentVariables": {
-                    "WORKFLOW_DATABASE_URL": "postgresql://test@localhost:5432/praxis_test",
+                    "WORKFLOW_DATABASE_URL": "postgresql://localhost:5432/praxis_test",
                 }
             }
         )
@@ -55,9 +55,21 @@ def test_discover_database_url_prefers_legacy_launch_agent_value(monkeypatch, tm
 
     monkeypatch.delenv("WORKFLOW_DATABASE_URL", raising=False)
     monkeypatch.setattr(praxis_supervisor.Path, "home", classmethod(lambda cls: home_dir))
+    monkeypatch.setattr(
+        praxis_supervisor,
+        "_database_exists",
+        lambda name: name == "praxis_test",
+    )
+
+    assert praxis_supervisor.discover_database_url(tmp_path / "repo") == "postgresql://postgres@localhost:5432/praxis_test"
+
+
+def test_discover_database_url_normalizes_missing_user_authority(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("WORKFLOW_DATABASE_URL", raising=False)
+    monkeypatch.setattr(praxis_supervisor.Path, "home", classmethod(lambda cls: tmp_path / "home"))
     monkeypatch.setattr(praxis_supervisor, "_database_exists", lambda name: name == "praxis")
 
-    assert praxis_supervisor.discover_database_url(tmp_path / "repo") == "postgresql://test@localhost:5432/praxis_test"
+    assert praxis_supervisor.discover_database_url(tmp_path / "repo") == "postgresql://postgres@localhost:5432/praxis"
 
 
 def test_apply_control_action_updates_desired_state_and_restart_tokens(monkeypatch, tmp_path: Path) -> None:

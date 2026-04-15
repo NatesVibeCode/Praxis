@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 from pathlib import Path
 import tempfile
@@ -21,6 +22,7 @@ from storage.postgres.workflow_runtime_repository import (
     update_workflow_record,
     upsert_workflow_trigger_record,
 )
+from runtime.edge_release import edge_gate_entry_from_edge
 
 
 class WorkflowRuntimeBoundaryError(RuntimeError):
@@ -53,6 +55,24 @@ _TRIGGER_MANUAL_ROUTE = "trigger"
 _TRIGGER_SCHEDULE_ROUTE = "trigger/schedule"
 _TRIGGER_WEBHOOK_ROUTE = "trigger/webhook"
 _WEBHOOK_TRIGGER_EVENT_TYPE = "db.webhook_events.insert"
+
+
+def _build_graph_definition_revision(build_graph: dict[str, Any]) -> str:
+    explicit_revision = _text(build_graph.get("definition_revision"))
+    if explicit_revision:
+        return explicit_revision
+    fingerprint = hashlib.sha1(
+        json.dumps(
+            {
+                "nodes": build_graph.get("nodes") if isinstance(build_graph.get("nodes"), list) else [],
+                "edges": build_graph.get("edges") if isinstance(build_graph.get("edges"), list) else [],
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8")
+    ).hexdigest()
+    return f"def_graph_{fingerprint[:12]}"
 
 
 def _is_trigger_route(route: str) -> bool:
@@ -125,25 +145,149 @@ def _build_graph_trigger_intent(
     return payload
 
 
+def materialize_definition_from_build_graph(
+    definition: dict[str, Any] | None,
+    *,
+    build_graph: dict[str, Any],
+) -> dict[str, Any]:
+    base_definition = _json_clone(definition) if isinstance(definition, dict) else {}
+    base_definition["definition_revision"] = (
+        _text(build_graph.get("definition_revision"))
+        or _text(base_definition.get("definition_revision"))
+        or _build_graph_definition_revision(build_graph)
+    )
+    nodes = build_graph.get("nodes") if isinstance(build_graph.get("nodes"), list) else []
+    edges = build_graph.get("edges") if isinstance(build_graph.get("edges"), list) else []
+    node_routes = {
+        _text(node.get("node_id") or node.get("id")): _text(node.get("route"))
+        for node in nodes
+        if isinstance(node, dict) and _text(node.get("node_id") or node.get("id"))
+    }
+
+    # Build dependency map from sequence edges (skip gate/state edges).
+    # Trigger nodes are valid dependency sources for graph authoring.
+    # We only reject edges that point into trigger nodes because those
+    # collapse the trigger authority model on rebuild.
+    incoming: dict[str, list[str]] = {}
+    for edge in edges:
+        if not isinstance(edge, dict):
+            continue
+        if _text(edge.get("kind") or "") == "authority_gate":
+            continue
+        to_id = _text(edge.get("to_node_id"))
+        from_id = _text(edge.get("from_node_id"))
+        if _is_trigger_route(node_routes.get(to_id, "")):
+            continue
+        if to_id and from_id:
+            incoming.setdefault(to_id, []).append(from_id)
+
+    # Preserve existing phase metadata (prompts, inputs, outputs, etc.)
+    existing_phases: dict[str, dict[str, Any]] = {}
+    existing_setup = base_definition.get("execution_setup") if isinstance(base_definition.get("execution_setup"), dict) else {}
+    for phase in (existing_setup.get("phases") or []):
+        if isinstance(phase, dict) and _text(phase.get("step_id")):
+            existing_phases[_text(phase.get("step_id"))] = dict(phase)
+    existing_triggers: dict[str, dict[str, Any]] = {}
+    for trigger in base_definition.get("trigger_intent", []) if isinstance(base_definition.get("trigger_intent"), list) else []:
+        if not isinstance(trigger, dict):
+            continue
+        source_node_id = _text(trigger.get("source_node_id"))
+        if source_node_id:
+            existing_triggers[source_node_id] = dict(trigger)
+
+    draft_flow: list[dict[str, Any]] = []
+    new_phases: list[dict[str, Any]] = []
+    new_triggers: list[dict[str, Any]] = []
+    for i, node in enumerate(nodes):
+        if not isinstance(node, dict):
+            continue
+        node_id = _text(node.get("node_id") or node.get("id"))
+        if not node_id:
+            continue
+        if _text(node.get("kind") or "step") not in ("step", ""):
+            continue
+        route = _text(node.get("route"))
+        if _is_trigger_route(route):
+            new_triggers.append(
+                _build_graph_trigger_intent(
+                    node,
+                    index=len(new_triggers) + 1,
+                    existing_trigger=existing_triggers.get(node_id),
+                )
+            )
+            continue
+        draft_flow.append({
+            "id": node_id,
+            "order": i,
+            "title": _text(node.get("title")) or f"Step {i + 1}",
+            "summary": _text(node.get("summary")) or "",
+            "depends_on": incoming.get(node_id, []),
+            "source_block_ids": [s for s in (node.get("source_block_ids") or []) if isinstance(s, str)],
+        })
+        if route:
+            phase = dict(existing_phases.get(node_id, {}))
+            phase["step_id"] = node_id
+            phase["agent_route"] = route
+            phase["system_prompt"] = _text(node.get("prompt"))
+            phase["required_inputs"] = [value for value in (_text(item) for item in (node.get("required_inputs") or [])) if value]
+            phase["outputs"] = [value for value in (_text(item) for item in (node.get("outputs") or [])) if value]
+            phase["persistence_targets"] = [value for value in (_text(item) for item in (node.get("persistence_targets") or [])) if value]
+            phase["handoff_target"] = _text(node.get("handoff_target")) or None
+            if isinstance(node.get("integration_args"), dict):
+                phase["integration_args"] = _json_clone(node.get("integration_args"))
+            else:
+                phase.pop("integration_args", None)
+            new_phases.append(phase)
+
+    base_definition["draft_flow"] = draft_flow
+    base_definition["trigger_intent"] = new_triggers
+    if not isinstance(base_definition.get("execution_setup"), dict):
+        base_definition["execution_setup"] = {}
+    base_definition["execution_setup"]["phases"] = new_phases
+
+    edge_gates: list[dict[str, Any]] = []
+    for edge in edges:
+        if not isinstance(edge, dict):
+            continue
+        gate_entry = edge_gate_entry_from_edge(edge)
+        if gate_entry is not None:
+            edge_gates.append(gate_entry)
+    base_definition["execution_setup"]["edge_gates"] = edge_gates
+    return base_definition
+
+
 def commit_workflow(
     conn: Any,
     *,
     title: str,
-    definition: dict[str, Any],
+    definition: dict[str, Any] | None,
     compiled_spec: dict[str, Any] | None,
     workflow_id: str | None = None,
+    build_graph: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     from runtime.operating_model_planner import current_compiled_spec
 
     normalized_title = _text(title)
     if not normalized_title:
         raise WorkflowRuntimeBoundaryError("title is required")
+    normalized_workflow_id = _text(workflow_id) or ("wf_" + uuid.uuid4().hex[:12])
+    if build_graph is not None and not isinstance(build_graph, dict):
+        raise WorkflowRuntimeBoundaryError("build_graph must be an object")
+    if build_graph is not None:
+        existing_definition = definition if isinstance(definition, dict) else {}
+        if workflow_id:
+            current_row = load_workflow_record(conn, workflow_id=normalized_workflow_id)
+            if current_row is not None:
+                existing_definition = _parse_json_field(current_row.get("definition")) or existing_definition
+        definition = materialize_definition_from_build_graph(
+            existing_definition,
+            build_graph=build_graph,
+        )
     if not isinstance(definition, dict):
         raise WorkflowRuntimeBoundaryError("definition is required and must be an object")
     if compiled_spec is not None and not isinstance(compiled_spec, dict):
         raise WorkflowRuntimeBoundaryError("compiled_spec must be an object")
 
-    normalized_workflow_id = _text(workflow_id) or ("wf_" + uuid.uuid4().hex[:12])
     persisted_compiled_spec = current_compiled_spec(definition, compiled_spec)
     description_source = definition.get("compiled_prose") or definition.get("source_prose") or normalized_title
     description = (
@@ -182,11 +326,19 @@ def save_workflow(
 ) -> dict[str, Any]:
     from runtime.operating_model_planner import current_compiled_spec
 
+    if "build_graph" in body and body.get("build_graph") is not None and not isinstance(body.get("build_graph"), dict):
+        raise WorkflowRuntimeBoundaryError("build_graph must be an object")
+
     if workflow_id is None:
         normalized_workflow_id = _text(body.get("id")) or ("wf_" + uuid.uuid4().hex[:12])
         definition = body.get("definition")
+        if isinstance(body.get("build_graph"), dict):
+            definition = materialize_definition_from_build_graph(
+                definition if isinstance(definition, dict) else {},
+                build_graph=body.get("build_graph"),
+            )
         if not isinstance(definition, dict):
-            raise WorkflowRuntimeBoundaryError("definition is required and must be an object")
+            raise WorkflowRuntimeBoundaryError("definition or build_graph is required and must be an object")
         row = persist_workflow_record(
             conn,
             workflow_id=normalized_workflow_id,
@@ -211,14 +363,22 @@ def save_workflow(
     if current_row is None:
         raise WorkflowRuntimeBoundaryError(f"Workflow not found: {normalized_workflow_id}", status_code=404)
 
-    should_refresh_compiled_spec = "definition" in body or "compiled_spec" in body
+    has_build_graph = isinstance(body.get("build_graph"), dict)
+    should_refresh_compiled_spec = "definition" in body or "compiled_spec" in body or has_build_graph
     persisted_compiled_spec: dict[str, Any] | None | object = _UNSET
+    next_definition: dict[str, Any] | None = None
     if should_refresh_compiled_spec:
         current_definition = (
             body["definition"]
             if "definition" in body and isinstance(body.get("definition"), dict)
             else _parse_json_field(current_row.get("definition")) or {}
         )
+        if has_build_graph:
+            current_definition = materialize_definition_from_build_graph(
+                current_definition,
+                build_graph=body.get("build_graph"),
+            )
+        next_definition = current_definition
         current_compiled_spec_row = (
             body.get("compiled_spec")
             if "compiled_spec" in body
@@ -234,7 +394,9 @@ def save_workflow(
         kwargs["name"] = _text(body.get("name"))
     if "description" in body:
         kwargs["description"] = body.get("description")
-    if "definition" in body:
+    if next_definition is not None:
+        kwargs["definition"] = next_definition
+    elif "definition" in body:
         kwargs["definition"] = body.get("definition")
     if persisted_compiled_spec is not _UNSET:
         kwargs["compiled_spec"] = persisted_compiled_spec
@@ -346,6 +508,10 @@ def mutate_workflow_build(
     from runtime.build_authority import (
         admit_import_snapshot,
         attach_authority,
+        build_mutation_undo_receipt,
+        restore_attachment,
+        restore_binding,
+        restore_import_snapshot,
         stage_import_snapshot,
         upsert_binding,
     )
@@ -354,6 +520,12 @@ def mutate_workflow_build(
     if row is None:
         raise WorkflowRuntimeBoundaryError(f"Workflow not found: {workflow_id}", status_code=404)
     definition = _parse_json_field(row.get("definition")) or {}
+    undo_receipt = build_mutation_undo_receipt(
+        definition,
+        workflow_id=workflow_id,
+        subpath=subpath,
+        body=body,
+    )
 
     if subpath == "attachments":
         node_id = _text(body.get("node_id"))
@@ -370,6 +542,18 @@ def mutate_workflow_build(
             role=role,
             label=_text(body.get("label")) or None,
             promote_to_state=bool(body.get("promote_to_state")),
+        )
+    elif subpath.startswith("attachments/") and subpath.endswith("/restore"):
+        attachment_id = subpath[len("attachments/") : -len("/restore")].strip("/")
+        if not attachment_id:
+            raise WorkflowRuntimeBoundaryError("attachment id is required")
+        attachment = body.get("attachment")
+        if attachment is not None and not isinstance(attachment, dict):
+            raise WorkflowRuntimeBoundaryError("attachment must be an object or null")
+        definition = restore_attachment(
+            definition,
+            attachment_id=attachment_id,
+            attachment=attachment,
         )
     elif subpath.startswith("bindings/") and subpath.endswith("/accept"):
         binding_id = subpath[len("bindings/") : -len("/accept")].strip("/")
@@ -407,6 +591,18 @@ def mutate_workflow_build(
             candidate_targets=body.get("candidate_targets") if isinstance(body.get("candidate_targets"), list) else None,
             rationale=_text(body.get("rationale")) or "Replaced in build workspace.",
         )
+    elif subpath.startswith("bindings/") and subpath.endswith("/restore"):
+        binding_id = subpath[len("bindings/") : -len("/restore")].strip("/")
+        if not binding_id:
+            raise WorkflowRuntimeBoundaryError("binding id is required")
+        binding = body.get("binding")
+        if binding is not None and not isinstance(binding, dict):
+            raise WorkflowRuntimeBoundaryError("binding must be an object or null")
+        definition = restore_binding(
+            definition,
+            binding_id=binding_id,
+            binding=binding,
+        )
     elif subpath == "imports":
         source_locator = _text(body.get("source_locator"))
         if not source_locator:
@@ -429,6 +625,18 @@ def mutate_workflow_build(
             definition,
             snapshot_id=snapshot_id,
             admitted_target=admitted_target,
+        )
+    elif subpath.startswith("imports/") and subpath.endswith("/restore"):
+        snapshot_id = subpath[len("imports/") : -len("/restore")].strip("/")
+        if not snapshot_id:
+            raise WorkflowRuntimeBoundaryError("snapshot id is required")
+        snapshot = body.get("snapshot")
+        if snapshot is not None and not isinstance(snapshot, dict):
+            raise WorkflowRuntimeBoundaryError("snapshot must be an object or null")
+        definition = restore_import_snapshot(
+            definition,
+            snapshot_id=snapshot_id,
+            snapshot=snapshot,
         )
     elif subpath == "materialize-here":
         node_id = _text(body.get("node_id"))
@@ -470,112 +678,13 @@ def mutate_workflow_build(
                 promote_to_state=bool(body.get("promote_to_state")),
             )
     elif subpath == "build_graph":
-        nodes = body.get("nodes") if isinstance(body.get("nodes"), list) else []
-        edges = body.get("edges") if isinstance(body.get("edges"), list) else []
-        node_routes = {
-            _text(node.get("node_id") or node.get("id")): _text(node.get("route"))
-            for node in nodes
-            if isinstance(node, dict) and _text(node.get("node_id") or node.get("id"))
-        }
-
-        # Build dependency map from sequence edges (skip gate/state edges).
-        # Trigger nodes are valid dependency sources for graph authoring.
-        # We only reject edges that point *into* trigger nodes because those
-        # collapse the trigger authority model on rebuild.
-        incoming: dict[str, list[str]] = {}
-        for edge in edges:
-            if not isinstance(edge, dict):
-                continue
-            if _text(edge.get("kind") or "") == "authority_gate":
-                continue
-            to_id = _text(edge.get("to_node_id"))
-            from_id = _text(edge.get("from_node_id"))
-            if _is_trigger_route(node_routes.get(to_id, "")):
-                continue
-            if to_id and from_id:
-                incoming.setdefault(to_id, []).append(from_id)
-
-        # Preserve existing phase metadata (prompts, inputs, outputs, etc.)
-        existing_phases: dict[str, dict[str, Any]] = {}
-        existing_setup = definition.get("execution_setup") if isinstance(definition.get("execution_setup"), dict) else {}
-        for phase in (existing_setup.get("phases") or []):
-            if isinstance(phase, dict) and _text(phase.get("step_id")):
-                existing_phases[_text(phase.get("step_id"))] = dict(phase)
-        existing_triggers: dict[str, dict[str, Any]] = {}
-        for trigger in definition.get("trigger_intent", []) if isinstance(definition.get("trigger_intent"), list) else []:
-            if not isinstance(trigger, dict):
-                continue
-            source_node_id = _text(trigger.get("source_node_id"))
-            if source_node_id:
-                existing_triggers[source_node_id] = dict(trigger)
-
-        draft_flow: list[dict[str, Any]] = []
-        new_phases: list[dict[str, Any]] = []
-        new_triggers: list[dict[str, Any]] = []
-        for i, node in enumerate(nodes):
-            if not isinstance(node, dict):
-                continue
-            node_id = _text(node.get("node_id") or node.get("id"))
-            if not node_id:
-                continue
-            if _text(node.get("kind") or "step") not in ("step", ""):
-                continue  # skip gate and state nodes
-            route = _text(node.get("route"))
-            if _is_trigger_route(route):
-                new_triggers.append(
-                    _build_graph_trigger_intent(
-                        node,
-                        index=len(new_triggers) + 1,
-                        existing_trigger=existing_triggers.get(node_id),
-                    )
-                )
-                continue
-            draft_flow.append({
-                "id": node_id,
-                "order": i,
-                "title": _text(node.get("title")) or f"Step {i + 1}",
-                "summary": _text(node.get("summary")) or "",
-                "depends_on": incoming.get(node_id, []),
-                "source_block_ids": [s for s in (node.get("source_block_ids") or []) if isinstance(s, str)],
-            })
-            phase = dict(existing_phases.get(node_id, {}))
-            phase["step_id"] = node_id
-            if route:
-                phase["agent_route"] = route
-            if phase.get("agent_route"):
-                new_phases.append(phase)
-
-        definition["draft_flow"] = draft_flow
-        definition["trigger_intent"] = new_triggers
-        if not isinstance(definition.get("execution_setup"), dict):
-            definition["execution_setup"] = {}
-        definition["execution_setup"]["phases"] = new_phases
-
-        # Persist edge gate rules (from UI gate chips on sequence edges)
-        edge_gates: list[dict[str, Any]] = []
-        for edge in edges:
-            if not isinstance(edge, dict):
-                continue
-            gate = edge.get("gate")
-            if not isinstance(gate, dict) or not _text(gate.get("family")):
-                continue
-            from_id = _text(edge.get("from_node_id"))
-            to_id = _text(edge.get("to_node_id"))
-            if from_id and to_id:
-                gate_entry = {
-                    "edge_id": _text(edge.get("edge_id")) or f"edge-{from_id}-{to_id}",
-                    "from_node_id": from_id,
-                    "to_node_id": to_id,
-                    "family": _text(gate.get("family")),
-                    "label": _text(gate.get("label")) or "",
-                }
-                branch_reason = _text(edge.get("branch_reason"))
-                if branch_reason:
-                    gate_entry["branch_reason"] = branch_reason
-                if isinstance(gate.get("config"), dict):
-                    gate_entry["config"] = _json_clone(gate.get("config"))
-                edge_gates.append(gate_entry)
-        definition["execution_setup"]["edge_gates"] = edge_gates
+        definition = materialize_definition_from_build_graph(
+            definition,
+            build_graph={
+                "nodes": body.get("nodes") if isinstance(body.get("nodes"), list) else [],
+                "edges": body.get("edges") if isinstance(body.get("edges"), list) else [],
+            },
+        )
     else:
         raise WorkflowRuntimeBoundaryError(
             f"Unknown build endpoint: /api/workflows/{workflow_id}/build/{subpath}",
@@ -619,6 +728,7 @@ def mutate_workflow_build(
         "compiled_spec": compiled_spec,
         "build_bundle": build_bundle,
         "planning_notes": planning_notes,
+        "undo_receipt": undo_receipt,
     }
 
 

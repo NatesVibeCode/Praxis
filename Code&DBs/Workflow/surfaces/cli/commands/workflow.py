@@ -6,10 +6,12 @@ import contextlib
 import os
 import json
 import tempfile
+from types import SimpleNamespace
 from typing import TextIO
 
-from surfaces.cli.mcp_tools import load_json_file, print_json
+from surfaces.cli.mcp_tools import load_json_file, print_json, run_cli_tool
 from surfaces.cli import workflow_cli
+from runtime.spec_compiler import compile_prompt_launch_spec
 
 
 def _workflow_tool(params: dict[str, object]) -> dict[str, object]:
@@ -93,23 +95,51 @@ def _render_templated_spec_to_temp_file(spec_path: str, variables: dict[str, str
         return handle.name
 
 
-def _write_temp_json(payload: dict[str, object]) -> str:
-    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as handle:
-        json.dump(payload, handle, indent=2)
-        handle.write("\n")
-        return handle.name
+def _extract_common_run_options(
+    args: list[str],
+    *,
+    stdout: TextIO,
+) -> tuple[dict[str, object], list[str]] | None:
+    options: dict[str, object] = {
+        "dry_run": False,
+        "fresh": False,
+        "job_id": None,
+        "run_id": None,
+        "result_file": None,
+    }
+    remaining: list[str] = []
+    i = 0
+    while i < len(args):
+        token = args[i]
+        if token == "--dry-run":
+            options["dry_run"] = True
+            i += 1
+            continue
+        if token == "--fresh":
+            options["fresh"] = True
+            i += 1
+            continue
+        if token in {"--job-id", "--run-id", "--result-file"}:
+            if i + 1 >= len(args):
+                stdout.write(f"error: {token} requires a value\n")
+                return None
+            options[token[2:].replace("-", "_")] = args[i + 1]
+            i += 2
+            continue
+        remaining.append(token)
+        i += 1
+    return options, remaining
 
 
 def _run_command(args: list[str], *, stdout: TextIO) -> int:
     """Handle `workflow run <spec.json>` or `workflow run -p <prompt>`.
 
-    The launch now goes through `workflow_cli.cmd_run`, which in turn goes
-    through the MCP `praxis_workflow` tool. That keeps the launch authority on
-    one frontdoor instead of jumping straight into runtime helpers.
+    File-backed launches still go through `workflow_cli.cmd_run`. Prompt-backed
+    launches use the same authority helper directly so we do not synthesize a
+    throwaway spec file just to submit one inline workflow.
     """
 
     import json as _json
-    from types import SimpleNamespace
 
     from runtime.workflow_spec import is_batch_spec, load_raw
 
@@ -133,6 +163,11 @@ def _run_command(args: list[str], *, stdout: TextIO) -> int:
             '  workflow run -p "review this code" \\\n'
             "    --context src/main.py,src/utils.py \\\n"
             "    --task-type code_review\n"
+            "\n"
+            "extra launch controls:\n"
+            "  --fresh              Force a fresh run while letting Praxis mint the run_id\n"
+            "  --job-id <id>        Attach a caller-facing tracking id to the result file\n"
+            "  --result-file <path> Write the queued submit payload to disk\n"
         )
         return 2
 
@@ -153,6 +188,13 @@ def _run_command(args: list[str], *, stdout: TextIO) -> int:
             i += 1
     args = filtered_args
     variables = variables or None
+    parsed_common = _extract_common_run_options(args, stdout=stdout)
+    if parsed_common is None:
+        return 2
+    common_options, args = parsed_common
+    if not args:
+        stdout.write("error: workflow run requires a spec path or -p <prompt>\n")
+        return 2
 
     if args[0] in {"-p", "--prompt"}:
         if len(args) < 2:
@@ -170,6 +212,7 @@ def _run_command(args: list[str], *, stdout: TextIO) -> int:
                 "  --task-type <type>   Task type for routing: code_generation, review, etc.\n"
                 "  --system <prompt>    System prompt override\n"
                 "  --dry-run            Parse and show the spec without executing\n"
+                "  --fresh              Force a fresh run while letting Praxis mint the run_id\n"
             )
             return 2
 
@@ -183,7 +226,6 @@ def _run_command(args: list[str], *, stdout: TextIO) -> int:
         timeout = 300
         task_type = None
         system_prompt = None
-        dry_run = False
         clean_args: list[str] = []
         i = 1
         while i < len(args):
@@ -217,82 +259,36 @@ def _run_command(args: list[str], *, stdout: TextIO) -> int:
             elif args[i] == "--system" and i + 1 < len(args):
                 system_prompt = args[i + 1]
                 i += 2
-            elif args[i] == "--dry-run":
-                dry_run = True
-                i += 1
             else:
                 clean_args.append(args[i])
                 i += 1
         prompt = " ".join(clean_args)
-
-        if scope_write and not workdir:
-            workdir = os.getcwd()
-
-        context_sections = None
-        if context_files or scope_write:
-            context_sections = []
-            all_paths = list(context_files or []) + list(scope_write or [])
-            for fpath in all_paths:
-                abs_path = os.path.join(workdir or ".", fpath)
-                try:
-                    with open(abs_path) as fh:
-                        content = fh.read()
-                    context_sections.append(
-                        {
-                            "name": f"FILE: {fpath}",
-                            "content": content,
-                        }
-                    )
-                except OSError:
-                    pass
-
-        if scope_write:
-            prompt += (
-                "\n\nReturn your response as JSON with this schema:\n"
-                '{"code_blocks": [{"file_path": "<path>", '
-                '"content": "<FULL FILE>", "language": "python", '
-                '"action": "replace"}], '
-                '"explanation": "<what you changed>"}'
+        if scope_write and system_prompt is None:
+            system_prompt = "You are a code editor. Return ONLY valid JSON structured output."
+        prompt_launch_spec = compile_prompt_launch_spec(
+            prompt=prompt,
+            provider_slug=provider,
+            model_slug=model,
+            tier=tier,
+            adapter_type=adapter,
+            scope_write=scope_write,
+            workdir=workdir,
+            context_files=context_files,
+            timeout=timeout,
+            task_type=task_type,
+            system_prompt=system_prompt,
+        )
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stdout):
+            return workflow_cli._submit_workflow_launch(
+                prompt_launch_spec=prompt_launch_spec,
+                dry_run=bool(common_options["dry_run"]),
+                fresh=bool(common_options["fresh"]),
+                job_id=common_options["job_id"],
+                run_id=common_options["run_id"],
+                result_file=common_options["result_file"],
+                requested_by_kind="cli",
+                requested_by_ref="workflow.run.prompt",
             )
-            if not system_prompt:
-                system_prompt = "You are a code editor. Return ONLY valid JSON structured output."
-
-        prompt_spec = {
-            "name": prompt[:80] or "workflow cli prompt",
-            "workflow_id": "workflow_cli_prompt",
-            "phase": "execute",
-            "jobs": [
-                {
-                    "label": "run",
-                    "agent": f"{provider}/{model}" if model else provider,
-                    "prompt": prompt,
-                    "adapter_type": adapter,
-                    "tier": tier,
-                    "timeout": timeout,
-                    "workdir": workdir,
-                    "context_sections": context_sections or [],
-                    "system_prompt": system_prompt,
-                    "task_type": task_type,
-                }
-            ],
-        }
-        rendered_prompt_path = _write_temp_json(prompt_spec)
-        try:
-            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stdout):
-                return workflow_cli.cmd_run(
-                    SimpleNamespace(
-                        spec=rendered_prompt_path,
-                        dry_run=dry_run,
-                        job_id=None,
-                        run_id=None,
-                        result_file=None,
-                    )
-                )
-        finally:
-            try:
-                os.unlink(rendered_prompt_path)
-            except OSError:
-                pass
 
     spec_path = args[0]
 
@@ -317,10 +313,11 @@ def _run_command(args: list[str], *, stdout: TextIO) -> int:
             return workflow_cli.cmd_run(
                 SimpleNamespace(
                     spec=rendered_path,
-                    dry_run=False,
-                    job_id=None,
-                    run_id=None,
-                    result_file=None,
+                    dry_run=bool(common_options["dry_run"]),
+                    fresh=bool(common_options["fresh"]),
+                    job_id=common_options["job_id"],
+                    run_id=common_options["run_id"],
+                    result_file=common_options["result_file"],
                 )
             )
     finally:
@@ -1375,6 +1372,146 @@ def _repair_command(args: list[str], *, stdout: TextIO) -> int:
         exit_code = workflow_cli.cmd_repair(SimpleNamespace(run_id=run_id))
     stdout.write(buffer.getvalue())
     return exit_code
+
+
+def _work_command(args: list[str], *, stdout: TextIO) -> int:
+    """Handle `workflow work <claim|acknowledge>` for worker subscription state."""
+
+    if not args or args[0] in {"-h", "--help"}:
+        stdout.write(
+            "usage: workflow work <claim|acknowledge> [options]\n"
+            "\n"
+            "  claim         Read claimable worker work for a subscription/run pair\n"
+            "  acknowledge   Commit a worker batch acknowledgement checkpoint\n"
+            "\n"
+            "  claim options:\n"
+            "    --subscription-id <id>        Durable subscription id\n"
+            "    --run-id <run_id>             Workflow run id\n"
+            "    --last-acked-evidence-seq N    Optional last acknowledged evidence seq\n"
+            "    --limit N                     Max facts to read (default: 100)\n"
+            "\n"
+            "  acknowledge options:\n"
+            "    --work-json <json>             Serialized claim payload from workflow work claim\n"
+            "    --work-file <path>             Read the serialized claim payload from a file\n"
+            "    --through-evidence-seq N       Optional explicit ack watermark\n"
+            "    --yes                         Required to commit the acknowledgement\n"
+        )
+        return 2
+
+    subcommand = args[0]
+    tail = args[1:]
+
+    if subcommand == "claim":
+        subscription_id = ""
+        run_id = ""
+        last_acked_evidence_seq = None
+        limit = 100
+        i = 0
+        while i < len(tail):
+            if tail[i] == "--subscription-id" and i + 1 < len(tail):
+                subscription_id = tail[i + 1]
+                i += 2
+            elif tail[i] == "--run-id" and i + 1 < len(tail):
+                run_id = tail[i + 1]
+                i += 2
+            elif tail[i] == "--last-acked-evidence-seq" and i + 1 < len(tail):
+                try:
+                    last_acked_evidence_seq = int(tail[i + 1])
+                except ValueError:
+                    stdout.write(
+                        f"error: --last-acked-evidence-seq must be an integer, got: {tail[i + 1]}\n"
+                    )
+                    return 2
+                i += 2
+            elif tail[i] == "--limit" and i + 1 < len(tail):
+                try:
+                    limit = int(tail[i + 1])
+                except ValueError:
+                    stdout.write(f"error: --limit must be an integer, got: {tail[i + 1]}\n")
+                    return 2
+                i += 2
+            else:
+                stdout.write(f"error: unknown argument: {tail[i]}\n")
+                return 2
+
+        if not subscription_id or not run_id:
+            stdout.write(
+                "usage: workflow work claim --subscription-id <id> --run-id <run_id> [--last-acked-evidence-seq N] [--limit N]\n"
+            )
+            return 2
+
+        exit_code, payload = run_cli_tool(
+            "praxis_workflow",
+            {
+                "action": "claim",
+                "subscription_id": subscription_id,
+                "run_id": run_id,
+                "last_acked_evidence_seq": last_acked_evidence_seq,
+                "limit": limit,
+            },
+        )
+        print_json(stdout, payload)
+        return exit_code
+
+    if subcommand in {"ack", "acknowledge"}:
+        work_json: str | None = None
+        work_file: str | None = None
+        through_evidence_seq = None
+        yes = False
+        i = 0
+        while i < len(tail):
+            if tail[i] == "--work-json" and i + 1 < len(tail):
+                work_json = tail[i + 1]
+                i += 2
+            elif tail[i] == "--work-file" and i + 1 < len(tail):
+                work_file = tail[i + 1]
+                i += 2
+            elif tail[i] == "--through-evidence-seq" and i + 1 < len(tail):
+                try:
+                    through_evidence_seq = int(tail[i + 1])
+                except ValueError:
+                    stdout.write(
+                        f"error: --through-evidence-seq must be an integer, got: {tail[i + 1]}\n"
+                    )
+                    return 2
+                i += 2
+            elif tail[i] == "--yes":
+                yes = True
+                i += 1
+            else:
+                stdout.write(f"error: unknown argument: {tail[i]}\n")
+                return 2
+
+        if not yes:
+            stdout.write("error: --yes is required to acknowledge worker work\n")
+            return 2
+
+        if work_json is not None and work_file is not None:
+            stdout.write("error: pass only one of --work-json or --work-file\n")
+            return 2
+        if work_json is not None:
+            work_payload = json.loads(work_json)
+        elif work_file is not None:
+            work_payload = load_json_file(work_file)
+        else:
+            stdout.write(
+                "usage: workflow work acknowledge --work-json <json> | --work-file <path> [--through-evidence-seq N] --yes\n"
+            )
+            return 2
+
+        exit_code, payload = run_cli_tool(
+            "praxis_workflow",
+            {
+                "action": "acknowledge",
+                "work": work_payload,
+                "through_evidence_seq": through_evidence_seq,
+            },
+        )
+        print_json(stdout, payload)
+        return exit_code
+
+    stdout.write(f"unknown work subcommand: {subcommand}\n")
+    return 2
 
 
 def _active_command(*, stdout: TextIO) -> int:

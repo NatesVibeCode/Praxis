@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import json
 import sys
 import types
@@ -23,6 +24,7 @@ import registry.reference_catalog_sync as reference_catalog_mod
 import runtime.capability_catalog as capability_catalog_mod
 from registry.integration_registry_sync import sync_integration_registry
 from storage.postgres import PostgresConfigurationError
+from surfaces.api.handlers import _subsystems as api_subsystems
 from surfaces.mcp import subsystems as mcp_subsystems
 
 
@@ -286,7 +288,7 @@ def test_mcp_workflow_database_env_falls_back_to_repo_local_default(monkeypatch,
     monkeypatch.setattr(mcp_subsystems, "_REPO_ROOT", tmp_path)
 
     assert mcp_subsystems.workflow_database_env() == {
-        "WORKFLOW_DATABASE_URL": "postgresql://localhost:5432/praxis",
+        "WORKFLOW_DATABASE_URL": "postgresql://postgres@localhost:5432/praxis",
         "PATH": "/usr/bin:/bin",
     }
 
@@ -298,6 +300,53 @@ def test_mcp_workflow_database_env_prefers_repo_env_file(monkeypatch, tmp_path: 
     monkeypatch.setattr(mcp_subsystems, "_REPO_ROOT", tmp_path)
 
     assert mcp_subsystems.workflow_database_env() == {
-        "WORKFLOW_DATABASE_URL": "postgresql://repo.test/workflow",
+        "WORKFLOW_DATABASE_URL": "postgresql://postgres@repo.test/workflow",
+        "PATH": "/usr/bin:/bin",
+    }
+
+
+def test_mcp_workflow_database_env_ignores_invalid_preimport_env(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("WORKFLOW_DATABASE_URL", "praxis_test")
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    importlib.reload(mcp_subsystems)
+    monkeypatch.setattr(mcp_subsystems, "_REPO_ROOT", tmp_path)
+
+    assert mcp_subsystems.workflow_database_env() == {
+        "WORKFLOW_DATABASE_URL": "postgresql://postgres@localhost:5432/praxis",
+        "PATH": "/usr/bin:/bin",
+    }
+
+
+def test_api_workflow_database_env_falls_back_to_repo_local_default(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("WORKFLOW_DATABASE_URL", raising=False)
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    monkeypatch.setattr(api_subsystems, "REPO_ROOT", tmp_path)
+
+    assert api_subsystems.workflow_database_env() == {
+        "WORKFLOW_DATABASE_URL": "postgresql://postgres@localhost:5432/praxis",
+        "PATH": "/usr/bin:/bin",
+    }
+
+
+def test_api_workflow_database_env_prefers_repo_env_file(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("WORKFLOW_DATABASE_URL", raising=False)
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    (tmp_path / ".env").write_text("WORKFLOW_DATABASE_URL=postgresql://repo.test/workflow\n", encoding="utf-8")
+    monkeypatch.setattr(api_subsystems, "REPO_ROOT", tmp_path)
+
+    assert api_subsystems.workflow_database_env() == {
+        "WORKFLOW_DATABASE_URL": "postgresql://postgres@repo.test/workflow",
+        "PATH": "/usr/bin:/bin",
+    }
+
+
+def test_api_workflow_database_env_ignores_invalid_preimport_env(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("WORKFLOW_DATABASE_URL", "praxis_test")
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    importlib.reload(api_subsystems)
+    monkeypatch.setattr(api_subsystems, "REPO_ROOT", tmp_path)
+
+    assert api_subsystems.workflow_database_env() == {
+        "WORKFLOW_DATABASE_URL": "postgresql://postgres@localhost:5432/praxis",
         "PATH": "/usr/bin:/bin",
     }

@@ -160,6 +160,19 @@ def test_build_modules_include_orchestrator_when_conn(tmp_path, monkeypatch):
     assert "trigger_evaluator" in module_names
 
 
+def test_build_modules_include_rate_limit_prober_when_conn(tmp_path, monkeypatch):
+    monkeypatch.setattr(heartbeat_runner, "MemoryEngine", _Engine)
+    runner = heartbeat_runner.HeartbeatRunner(
+        engine_db_path=str(tmp_path / "test.db"),
+        results_dir=str(tmp_path / "results"),
+        conn=_Conn([]),
+    )
+
+    module_names = {getattr(module, "name", "") for module in runner.build_modules()}
+
+    assert "rate_limit_prober" in module_names
+
+
 def test_trigger_evaluator_module_runs_runtime_trigger_loop(monkeypatch):
     fake_triggers = types.ModuleType("runtime.triggers")
     calls: list[object] = []

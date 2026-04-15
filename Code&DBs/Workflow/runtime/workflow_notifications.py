@@ -6,6 +6,7 @@ notifications exist in Postgres regardless of which process reads them.
 """
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from dataclasses import dataclass
@@ -14,6 +15,8 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from storage.postgres.connection import SyncPostgresConnection
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -301,3 +304,100 @@ class WorkflowNotificationConsumer:
                 lines.append(f"  {n.summary()}")
 
         return "\n".join(lines)
+
+
+class WorkflowRunWakeupListener:
+    """Background LISTEN/NOTIFY consumer that wakes run observers quickly."""
+
+    def __init__(
+        self,
+        *,
+        database_url: str,
+        run_id: str,
+        wakeup_event: threading.Event,
+        channels: tuple[str, ...] = ("job_completed", "run_complete"),
+        reconnect_delay: float = 2.0,
+    ) -> None:
+        self._database_url = database_url
+        self._run_id = run_id
+        self._channels = channels
+        self._wakeup_event = wakeup_event
+        self._reconnect_delay = reconnect_delay
+        self._stop_event = threading.Event()
+        self._thread = threading.Thread(
+            target=self._run,
+            daemon=True,
+            name="workflow-run-wakeup-listener",
+        )
+
+    def start(self) -> None:
+        import asyncpg  # noqa: F401
+
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        self._wakeup_event.set()
+        self._thread.join(timeout=5)
+
+    def _on_notify(self, _connection, _pid, channel: str, payload: str) -> None:
+        if payload and payload != self._run_id:
+            return
+        logger.debug("Workflow run notification received on %s: %s", channel, payload)
+        self._wakeup_event.set()
+
+    def _run(self) -> None:
+        import asyncio
+        import asyncpg
+
+        async def _listen() -> None:
+            while not self._stop_event.is_set():
+                conn = None
+                try:
+                    conn = await asyncpg.connect(self._database_url, timeout=5.0)
+                    for channel in self._channels:
+                        await conn.add_listener(channel, self._on_notify)
+                    while not self._stop_event.is_set():
+                        await asyncio.sleep(1.0)
+                except Exception as exc:
+                    if not self._stop_event.is_set():
+                        logger.debug("Workflow LISTEN loop error, reconnecting: %s", exc)
+                        await asyncio.sleep(self._reconnect_delay)
+                finally:
+                    if conn is not None:
+                        await conn.close()
+
+        asyncio.run(_listen())
+
+
+def start_run_wakeup_listener(
+    *,
+    run_id: str,
+    wakeup_event: threading.Event,
+    database_url: str | None = None,
+    channels: tuple[str, ...] = ("job_completed", "run_complete"),
+) -> WorkflowRunWakeupListener | None:
+    """Start a best-effort LISTEN helper for one run."""
+    from storage.postgres.connection import (
+        PostgresConfigurationError,
+        resolve_workflow_database_url,
+    )
+
+    try:
+        resolved_database_url = str(database_url or resolve_workflow_database_url()).strip()
+    except (PostgresConfigurationError, RuntimeError):
+        return None
+    if not resolved_database_url:
+        return None
+    try:
+        listener = WorkflowRunWakeupListener(
+            database_url=resolved_database_url,
+            run_id=run_id,
+            wakeup_event=wakeup_event,
+            channels=channels,
+        )
+        listener.start()
+        return listener
+    except Exception as exc:
+        logger.debug("Workflow run wakeup unavailable for %s: %s", run_id, exc)
+        return None

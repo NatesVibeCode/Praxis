@@ -26,7 +26,7 @@ class _FakeResponse:
 def test_execute_webhook_uses_connector_endpoint_map_and_bearer_auth(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    def _fake_resolve_credential(ref: str):
+    def _fake_resolve_credential(ref: str, **_: object):
         assert ref == "secret.demo.connector"
         return SimpleNamespace(api_key="test-token")
 
@@ -79,7 +79,7 @@ def test_execute_webhook_uses_connector_endpoint_map_and_bearer_auth(monkeypatch
 def test_execute_webhook_supports_api_key_query_auth(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    def _fake_resolve_credential(ref: str):
+    def _fake_resolve_credential(ref: str, **_: object):
         assert ref == "secret.demo.query"
         return SimpleNamespace(api_key="query-token")
 
@@ -113,7 +113,7 @@ def test_execute_webhook_supports_api_key_query_auth(monkeypatch) -> None:
 def test_execute_webhook_fails_when_auth_cannot_be_resolved(monkeypatch) -> None:
     import runtime.integrations.webhook as webhook_mod
 
-    def _fake_resolve_credential(ref: str):
+    def _fake_resolve_credential(ref: str, **_: object):
         raise webhook_mod.CredentialResolutionError("missing", "no credential found")
 
     monkeypatch.setattr(webhook_mod, "resolve_credential", _fake_resolve_credential)
@@ -137,7 +137,7 @@ def test_execute_webhook_fails_when_auth_cannot_be_resolved(monkeypatch) -> None
 def test_execute_webhook_supports_api_key_header_and_endpoint_body_template(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    def _fake_resolve_credential(ref: str):
+    def _fake_resolve_credential(ref: str, **_: object):
         assert ref == "secret.demo.header"
         return SimpleNamespace(api_key="header-token")
 
@@ -247,6 +247,36 @@ def test_execute_webhook_supports_none_auth_with_first_endpoint_fallback(monkeyp
     assert captured["method"] == "GET"
     assert "authorization" not in captured["headers"]
     assert "x-api-key" not in captured["headers"]
+
+
+def test_execute_webhook_drops_stale_body_for_get_requests(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_urlopen(request, timeout=0):
+        del timeout
+        captured["url"] = request.full_url
+        captured["method"] = request.get_method()
+        captured["body"] = request.data
+        return _FakeResponse({"ok": True})
+
+    import urllib.request
+
+    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+
+    result = execute_webhook(
+        {
+            "endpoint": "https://api.example.com/v1/items",
+            "method": "GET",
+            "body": {"stale": True},
+            "headers": {"Accept": "application/json"},
+        },
+        pg=None,
+    )
+
+    assert result["status"] == "succeeded"
+    assert captured["url"] == "https://api.example.com/v1/items"
+    assert captured["method"] == "GET"
+    assert captured["body"] is None
 
 
 def test_execute_webhook_prefers_explicit_endpoint_over_connector_map(monkeypatch) -> None:
