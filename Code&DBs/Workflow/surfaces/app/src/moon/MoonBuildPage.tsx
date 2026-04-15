@@ -1053,6 +1053,9 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
             surface="moon"
             scope={moonUndoScope}
             subtitle="Authority, outcome, and undo state."
+            maxHeight="min(34vh, 260px)"
+            maxVisibleEntries={2}
+            variant="compact"
           />
         </div>
         {/* Middle row */}

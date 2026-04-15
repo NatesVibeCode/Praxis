@@ -255,6 +255,7 @@ def _result_payload(result, *, timeout: int, parse_json_output: bool) -> dict[st
         "started_at": result.started_at,
         "finished_at": result.finished_at,
         "workspace_snapshot_ref": getattr(result, "workspace_snapshot_ref", ""),
+        "workspace_snapshot_cache_hit": bool(getattr(result, "workspace_snapshot_cache_hit", False)),
         "network_policy": result.network_policy,
         "provider_latency_ms": result.provider_latency_ms,
         "container_cpu_percent": result.container_cpu_percent,

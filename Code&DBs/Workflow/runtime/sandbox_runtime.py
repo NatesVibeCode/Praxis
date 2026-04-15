@@ -28,6 +28,7 @@ from .docker_image_authority import DOCKER_IMAGE_ENV, resolve_docker_image
 _DOCKER_MEMORY_ENV = "PRAXIS_DOCKER_MEMORY"
 _DOCKER_CPUS_ENV = "PRAXIS_DOCKER_CPUS"
 _CLI_AUTH_HOME_ENV = "PRAXIS_CLI_AUTH_HOME"
+_SNAPSHOT_CACHE_ROOT_ENV = "PRAXIS_SANDBOX_SNAPSHOT_CACHE_DIR"
 
 
 def _parse_docker_mem_str(mem_str: str) -> int:
@@ -240,6 +241,7 @@ class HydrationReceipt:
     hydrated_files: int
     workspace_materialization: str
     workspace_snapshot_ref: str = ""
+    workspace_snapshot_cache_hit: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -292,8 +294,19 @@ class SandboxExecutionResult:
     execution_mode: str
     workspace_root: str
     workspace_snapshot_ref: str = ""
+    workspace_snapshot_cache_hit: bool = False
     container_cpu_percent: float | None = None
     container_mem_bytes: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspaceSnapshotArchive:
+    """Host-side cached archive for one workspace snapshot."""
+
+    workspace_snapshot_ref: str
+    archive_path: str
+    hydrated_files: int
+    cache_hit: bool
 
 
 class SandboxProviderAdapter(Protocol):
@@ -416,6 +429,102 @@ def _workspace_snapshot_ref(root: str) -> str:
     return f"workspace_snapshot:{digest}"
 
 
+def _workspace_snapshot_cache_root() -> str:
+    configured = os.environ.get(_SNAPSHOT_CACHE_ROOT_ENV, "").strip()
+    if configured:
+        return os.path.realpath(configured)
+    return os.path.realpath(os.path.join(tempfile.gettempdir(), "praxis-workspace-snapshots"))
+
+
+def _workspace_snapshot_cache_dir(workspace_snapshot_ref: str) -> str:
+    digest = hashlib.sha1(workspace_snapshot_ref.encode("utf-8")).hexdigest()[:16]
+    return os.path.join(_workspace_snapshot_cache_root(), digest)
+
+
+def _read_snapshot_archive_metadata(metadata_path: str) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(Path(metadata_path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _write_workspace_snapshot_archive(source_root: str, archive_path: str) -> int:
+    source = Path(source_root)
+    if not source.exists():
+        raise RuntimeError(f"workspace snapshot source root is missing: {source_root}")
+
+    archive_target = Path(archive_path)
+    archive_target.parent.mkdir(parents=True, exist_ok=True)
+    hydrated_files = 0
+    with tarfile.open(archive_target, mode="w:gz") as archive:
+        archive.add(source_root, arcname="workspace", recursive=False)
+        for dirpath, dirnames, filenames in os.walk(source_root):
+            dirnames[:] = sorted(name for name in dirnames if name not in _IGNORED_MANIFEST_DIRS)
+            filenames = sorted(filenames)
+            current_dir = Path(dirpath)
+            relative_dir = current_dir.relative_to(source)
+            if relative_dir != Path("."):
+                archive.add(
+                    str(current_dir),
+                    arcname=str(PurePosixPath("workspace") / relative_dir.as_posix()),
+                    recursive=False,
+                )
+            for filename in filenames:
+                absolute = current_dir / filename
+                archive.add(
+                    str(absolute),
+                    arcname=str(PurePosixPath("workspace") / absolute.relative_to(source).as_posix()),
+                    recursive=False,
+                )
+                hydrated_files += 1
+    return hydrated_files
+
+
+def _cached_workspace_snapshot_archive(snapshot: WorkspaceSnapshot) -> WorkspaceSnapshotArchive:
+    snapshot_ref = str(
+        getattr(snapshot, "workspace_snapshot_ref", "") or _workspace_snapshot_ref(snapshot.source_root)
+    ).strip()
+    if not snapshot_ref:
+        raise RuntimeError("workspace_snapshot_ref must be resolved before hydration")
+
+    cache_dir = Path(_workspace_snapshot_cache_dir(snapshot_ref))
+    archive_path = cache_dir / "workspace.tar.gz"
+    metadata_path = cache_dir / "metadata.json"
+
+    metadata = _read_snapshot_archive_metadata(str(metadata_path))
+    if archive_path.is_file() and metadata is not None:
+        return WorkspaceSnapshotArchive(
+            workspace_snapshot_ref=snapshot_ref,
+            archive_path=str(archive_path),
+            hydrated_files=int(metadata.get("hydrated_files") or 0),
+            cache_hit=True,
+        )
+
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    temp_archive = cache_dir / f".{uuid4().hex}.tar.gz"
+    temp_metadata = cache_dir / f".{uuid4().hex}.json"
+    hydrated_files = _write_workspace_snapshot_archive(snapshot.source_root, str(temp_archive))
+    temp_metadata.write_text(
+        json.dumps(
+            {
+                "workspace_snapshot_ref": snapshot_ref,
+                "hydrated_files": hydrated_files,
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    os.replace(temp_archive, archive_path)
+    os.replace(temp_metadata, metadata_path)
+    return WorkspaceSnapshotArchive(
+        workspace_snapshot_ref=snapshot_ref,
+        archive_path=str(archive_path),
+        hydrated_files=hydrated_files,
+        cache_hit=False,
+    )
+
+
 def _hydrate_copy(source_root: str, destination_root: str) -> int:
     copied = 0
     source = Path(source_root)
@@ -494,16 +603,19 @@ class DockerLocalSandboxProvider:
         session: SandboxSession,
         snapshot: WorkspaceSnapshot,
     ) -> HydrationReceipt:
-        snapshot_ref = str(
-            getattr(snapshot, "workspace_snapshot_ref", "") or _workspace_snapshot_ref(snapshot.source_root)
-        ).strip()
-        copied = _hydrate_copy(snapshot.source_root, session.workspace_root)
+        cached_snapshot = _cached_workspace_snapshot_archive(snapshot)
+        workspace_root = Path(session.workspace_root)
+        shutil.rmtree(workspace_root, ignore_errors=True)
+        workspace_root.parent.mkdir(parents=True, exist_ok=True)
+        with tarfile.open(cached_snapshot.archive_path, mode="r:gz") as archive:
+            archive.extractall(workspace_root.parent)
         return HydrationReceipt(
             sandbox_session_id=session.sandbox_session_id,
             workspace_root=session.workspace_root,
-            hydrated_files=copied,
+            hydrated_files=cached_snapshot.hydrated_files,
             workspace_materialization=snapshot.materialization,
-            workspace_snapshot_ref=snapshot_ref,
+            workspace_snapshot_ref=cached_snapshot.workspace_snapshot_ref,
+            workspace_snapshot_cache_hit=cached_snapshot.cache_hit,
         )
 
     def exec(self, session: SandboxSession, request: SandboxExecRequest) -> SandboxExecutionResult:
@@ -620,6 +732,7 @@ class DockerLocalSandboxProvider:
             execution_mode=self.provider_name,
             workspace_root=session.workspace_root,
             workspace_snapshot_ref="",
+            workspace_snapshot_cache_hit=False,
             container_cpu_percent=peak_cpu[0] if peak_cpu[0] > 0 else None,
             container_mem_bytes=peak_mem[0] if peak_mem[0] > 0 else None,
         )
@@ -721,24 +834,22 @@ class CloudflareRemoteSandboxProvider:
         session: SandboxSession,
         snapshot: WorkspaceSnapshot,
     ) -> HydrationReceipt:
-        snapshot_ref = str(
-            getattr(snapshot, "workspace_snapshot_ref", "") or _workspace_snapshot_ref(snapshot.source_root)
-        ).strip()
-        buffer = io.BytesIO()
-        with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
-            archive.add(snapshot.source_root, arcname="workspace")
+        cached_snapshot = _cached_workspace_snapshot_archive(snapshot)
         payload = {
-            "archive_base64": base64.b64encode(buffer.getvalue()).decode("ascii"),
+            "archive_base64": base64.b64encode(Path(cached_snapshot.archive_path).read_bytes()).decode("ascii"),
             "workspace_materialization": snapshot.materialization,
-            "workspace_snapshot_ref": snapshot_ref,
+            "workspace_snapshot_ref": cached_snapshot.workspace_snapshot_ref,
         }
         response = self._request(f"/sessions/{session.provider_session_id}/hydrate", payload)
         return HydrationReceipt(
             sandbox_session_id=session.sandbox_session_id,
             workspace_root=session.workspace_root,
-            hydrated_files=int(response.get("hydrated_files") or 0),
+            hydrated_files=int(response.get("hydrated_files") or cached_snapshot.hydrated_files),
             workspace_materialization=snapshot.materialization,
-            workspace_snapshot_ref=str(response.get("workspace_snapshot_ref") or snapshot_ref),
+            workspace_snapshot_ref=str(
+                response.get("workspace_snapshot_ref") or cached_snapshot.workspace_snapshot_ref
+            ),
+            workspace_snapshot_cache_hit=cached_snapshot.cache_hit,
         )
 
     def exec(self, session: SandboxSession, request: SandboxExecRequest) -> SandboxExecutionResult:
@@ -772,6 +883,7 @@ class CloudflareRemoteSandboxProvider:
             execution_mode=self.provider_name,
             workspace_root=session.workspace_root,
             workspace_snapshot_ref="",
+            workspace_snapshot_cache_hit=False,
         )
 
     def collect_artifacts(
@@ -947,6 +1059,10 @@ class SandboxRuntime:
                     hydration_receipt.workspace_snapshot_ref
                     or workspace_snapshot_ref
                     or result.workspace_snapshot_ref
+                ),
+                workspace_snapshot_cache_hit=(
+                    hydration_receipt.workspace_snapshot_cache_hit
+                    or result.workspace_snapshot_cache_hit
                 ),
             )
         except Exception:

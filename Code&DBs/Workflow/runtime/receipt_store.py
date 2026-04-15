@@ -806,6 +806,7 @@ def write_receipt(receipt_dict: dict[str, Any], *, conn=None) -> None:
         "verification_bindings",
         "verification_status",
         "verified_paths",
+        "workspace_snapshot_cache_hit",
         "write_manifest",
         "mutation_provenance",
         "git_provenance",

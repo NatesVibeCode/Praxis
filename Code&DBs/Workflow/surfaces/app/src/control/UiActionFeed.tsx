@@ -79,6 +79,9 @@ interface UiActionFeedProps {
   scope?: string;
   title?: string;
   subtitle?: string;
+  maxHeight?: number | string;
+  maxVisibleEntries?: number;
+  variant?: 'default' | 'compact';
 }
 
 const CATEGORY_ORDER: UiActionEntry['category'][] = ['layout', 'graph', 'authority', 'control'];
@@ -89,6 +92,9 @@ export function UiActionFeed({
   scope,
   title = 'Recent Control',
   subtitle = 'Latest control actions with their authority, reason, and outcome.',
+  maxHeight,
+  maxVisibleEntries = 3,
+  variant = 'default',
 }: UiActionFeedProps) {
   const entries = ((useSlice(world, UI_ACTION_LOG_PATH) as UiActionEntry[] | null) ?? [])
     .filter((entry) => (!surface || entry.surface === surface) && (!scope || entry.undoScope === scope));
@@ -111,6 +117,7 @@ export function UiActionFeed({
   );
   const [categoryFilter, setCategoryFilter] = useState<FeedCategoryFilter>('all');
   const [showOlderHistory, setShowOlderHistory] = useState(false);
+  const [expandedEntryId, setExpandedEntryId] = useState<string | null>(null);
 
   useEffect(() => {
     if (categoryFilter !== 'all' && !availableCategories.includes(categoryFilter)) {
@@ -127,14 +134,14 @@ export function UiActionFeed({
     [categoryFilter, entries],
   );
   const collapsedEntries = useMemo(
-    () => filteredEntries.filter((entry, index) => index >= 3 && entry.recovery !== 'undo_ready'),
-    [filteredEntries],
+    () => filteredEntries.filter((entry, index) => index >= maxVisibleEntries && entry.recovery !== 'undo_ready'),
+    [filteredEntries, maxVisibleEntries],
   );
   const visibleEntries = useMemo(
     () => (showOlderHistory
       ? filteredEntries
-      : filteredEntries.filter((entry, index) => index < 3 || entry.recovery === 'undo_ready')),
-    [filteredEntries, showOlderHistory],
+      : filteredEntries.filter((entry, index) => index < maxVisibleEntries || entry.recovery === 'undo_ready')),
+    [filteredEntries, maxVisibleEntries, showOlderHistory],
   );
   const summary = filteredEntries.reduce(
     (counts, entry) => {
@@ -148,6 +155,15 @@ export function UiActionFeed({
       undone: 0,
     },
   );
+
+  const compact = variant === 'compact';
+  const resolvedMaxHeight = typeof maxHeight === 'number' ? `${maxHeight}px` : maxHeight;
+
+  useEffect(() => {
+    if (expandedEntryId && !visibleEntries.some((entry) => entry.id === expandedEntryId)) {
+      setExpandedEntryId(null);
+    }
+  }, [expandedEntryId, visibleEntries]);
 
   if (entries.length === 0) return null;
 
@@ -163,6 +179,8 @@ export function UiActionFeed({
         display: 'flex',
         flexDirection: 'column',
         gap: 'var(--space-sm)',
+        minHeight: 0,
+        maxHeight: resolvedMaxHeight,
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-sm)' }}>
@@ -254,148 +272,223 @@ export function UiActionFeed({
           ) : null}
         </div>
       ) : null}
-      {visibleEntries.map((entry) => {
-        const recovery = recoveryMeta(entry);
-        return (
-          <article
-            key={entry.id}
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'minmax(0, 1fr) auto',
-              gap: 'var(--space-sm)',
-              alignItems: 'start',
-              padding: '12px 14px',
-              borderRadius: 10,
-              border: `1px solid ${recovery.border}`,
-              background: recovery.background,
-            }}
-          >
-            <div style={{ minWidth: 0 }}>
-              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                <strong style={{ fontSize: 14 }}>{entry.label}</strong>
-                <span
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 'var(--space-sm)',
+          minHeight: 0,
+          overflowY: resolvedMaxHeight ? 'auto' : 'visible',
+          overscrollBehavior: 'contain',
+          paddingRight: resolvedMaxHeight ? 4 : 0,
+        }}
+      >
+        {visibleEntries.map((entry) => {
+          const recovery = recoveryMeta(entry);
+          const expanded = !compact || expandedEntryId === entry.id;
+          const summaryText = `${entry.reason} ${entry.outcome}`.trim();
+          const targetLabel = formatTarget(entry);
+          const visibleChangeSummary = compact ? entry.changeSummary.slice(0, 2) : entry.changeSummary;
+          return (
+            <article
+              key={entry.id}
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'minmax(0, 1fr) auto',
+                gap: 'var(--space-sm)',
+                alignItems: 'start',
+                padding: compact ? '10px 12px' : '12px 14px',
+                borderRadius: 10,
+                border: `1px solid ${recovery.border}`,
+                background: recovery.background,
+              }}
+            >
+              <div style={{ minWidth: 0 }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: compact ? 4 : 6 }}>
+                  <strong style={{ fontSize: compact ? 13 : 14 }}>{entry.label}</strong>
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 700,
+                      letterSpacing: '0.04em',
+                      textTransform: 'uppercase',
+                      color: 'var(--accent)',
+                    }}
+                  >
+                    {formatCategoryLabel(entry.category)}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 700,
+                      letterSpacing: '0.04em',
+                      textTransform: 'uppercase',
+                      color: 'var(--text-muted)',
+                    }}
+                  >
+                    {formatSurfaceLabel(entry.surface)}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 700,
+                      letterSpacing: '0.04em',
+                      textTransform: 'uppercase',
+                      color: recovery.color,
+                    }}
+                  >
+                    {recovery.label}
+                  </span>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{formatActionTime(entry.occurredAt)}</span>
+                </div>
+                <div
                   style={{
-                    fontSize: 11,
-                    fontWeight: 700,
-                    letterSpacing: '0.04em',
-                    textTransform: 'uppercase',
-                    color: 'var(--accent)',
-                  }}
-                >
-                  {formatCategoryLabel(entry.category)}
-                </span>
-                <span
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 700,
-                    letterSpacing: '0.04em',
-                    textTransform: 'uppercase',
+                    fontSize: 12,
                     color: 'var(--text-muted)',
+                    marginBottom: compact ? 6 : 4,
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: 10,
                   }}
                 >
-                  {formatSurfaceLabel(entry.surface)}
-                </span>
-                <span
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 700,
-                    letterSpacing: '0.04em',
-                    textTransform: 'uppercase',
-                    color: recovery.color,
-                  }}
-                >
-                  {recovery.label}
-                </span>
-                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{formatActionTime(entry.occurredAt)}</span>
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>
-                Authority: <code>{entry.authority}</code>
-              </div>
-              {formatTarget(entry) ? (
-                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>
-                  Touched: <strong>{formatTarget(entry)}</strong>
-                </div>
-              ) : null}
-              {entry.changeSummary.length > 0 ? (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
-                  {entry.changeSummary.map((item) => (
-                    <span
-                      key={item}
-                      style={{
-                        fontSize: 11,
-                        color: 'var(--text-secondary, var(--text-muted))',
-                        border: '1px solid color-mix(in srgb, var(--border) 76%, transparent)',
-                        borderRadius: 999,
-                        padding: '3px 8px',
-                        background: 'color-mix(in srgb, var(--bg-card) 88%, transparent)',
-                      }}
-                    >
-                      {item}
+                  <span>
+                    Authority: <code>{entry.authority}</code>
+                  </span>
+                  {targetLabel ? (
+                    <span>
+                      Touched: <strong>{targetLabel}</strong>
                     </span>
-                  ))}
+                  ) : null}
                 </div>
-              ) : null}
-              <div style={{ fontSize: 13, marginBottom: 4 }}>
-                <strong>Reason:</strong> {entry.reason}
+                {visibleChangeSummary.length > 0 ? (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: compact ? 6 : 6 }}>
+                    {visibleChangeSummary.map((item) => (
+                      <span
+                        key={item}
+                        style={{
+                          fontSize: 11,
+                          color: 'var(--text-secondary, var(--text-muted))',
+                          border: '1px solid color-mix(in srgb, var(--border) 76%, transparent)',
+                          borderRadius: 999,
+                          padding: '3px 8px',
+                          background: 'color-mix(in srgb, var(--bg-card) 88%, transparent)',
+                        }}
+                      >
+                        {item}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+                {compact && !expanded ? (
+                  <div
+                    style={{
+                      fontSize: 12,
+                      lineHeight: 1.45,
+                      color: 'var(--text-secondary, var(--text-muted))',
+                      display: '-webkit-box',
+                      WebkitBoxOrient: 'vertical',
+                      WebkitLineClamp: 2,
+                      overflow: 'hidden',
+                    }}
+                  >
+                    {summaryText}
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 13, marginBottom: 4 }}>
+                      <strong>Reason:</strong> {entry.reason}
+                    </div>
+                    <div style={{ fontSize: 13, color: 'var(--text-secondary, var(--text-muted))' }}>
+                      <strong>Outcome:</strong> {entry.outcome}
+                    </div>
+                    <div style={{ fontSize: 12, color: recovery.color, marginTop: 6 }}>
+                      {recovery.detail}
+                    </div>
+                  </>
+                )}
               </div>
-              <div style={{ fontSize: 13, color: 'var(--text-secondary, var(--text-muted))' }}>
-                <strong>Outcome:</strong> {entry.outcome}
-              </div>
-              <div style={{ fontSize: 12, color: recovery.color, marginTop: 6 }}>
-                {recovery.detail}
-              </div>
-            </div>
-            {entry.recovery === 'undo_ready' && entry.status === 'applied' ? (
-              <button
-                type="button"
-                onClick={() => {
-                  void (async () => {
-                    const result = await undoUiAction(entry.id);
-                    if (!result.ok) {
-                      show(result.error || 'Undo failed.', 'error');
-                      return;
-                    }
-                    show(`Undid ${entry.label}.`, 'success');
-                  })();
-                }}
+              <div
                 style={{
-                  border: '1px solid var(--border)',
-                  background: 'var(--bg-card)',
-                  borderRadius: 999,
-                  padding: '6px 12px',
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: 'pointer',
+                  display: 'flex',
+                  flexDirection: compact ? 'column' : 'row',
+                  alignItems: compact ? 'stretch' : 'flex-start',
+                  gap: 8,
                 }}
               >
-                Undo
-              </button>
-            ) : (
-              <span
-                style={{
-                  alignSelf: 'start',
-                  borderRadius: 999,
-                  padding: '6px 10px',
-                  fontSize: 11,
-                  fontWeight: 700,
-                  letterSpacing: '0.04em',
-                  textTransform: 'uppercase',
-                  color: recovery.color,
-                  border: `1px solid ${recovery.border}`,
-                  background: 'color-mix(in srgb, var(--bg-card) 88%, transparent)',
-                }}
-              >
-                {recovery.label}
-              </span>
-            )}
-          </article>
-        );
-      })}
-      {!showOlderHistory && collapsedEntries.length > 0 ? (
-        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-          Older locked and recorded actions are hidden so the active control lane stays visible.
-        </div>
-      ) : null}
+                {compact ? (
+                  <button
+                    type="button"
+                    onClick={() => setExpandedEntryId((current) => (current === entry.id ? null : entry.id))}
+                    style={{
+                      border: '1px solid var(--border)',
+                      background: 'var(--bg-card)',
+                      borderRadius: 999,
+                      padding: '6px 10px',
+                      fontSize: 11,
+                      fontWeight: 700,
+                      letterSpacing: '0.04em',
+                      textTransform: 'uppercase',
+                      color: 'var(--text-secondary, var(--text-muted))',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {expanded ? 'Hide' : 'Details'}
+                  </button>
+                ) : null}
+                {entry.recovery === 'undo_ready' && entry.status === 'applied' ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void (async () => {
+                        const result = await undoUiAction(entry.id);
+                        if (!result.ok) {
+                          show(result.error || 'Undo failed.', 'error');
+                          return;
+                        }
+                        show(`Undid ${entry.label}.`, 'success');
+                      })();
+                    }}
+                    style={{
+                      border: '1px solid var(--border)',
+                      background: 'var(--bg-card)',
+                      borderRadius: 999,
+                      padding: '6px 12px',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Undo
+                  </button>
+                ) : (
+                  <span
+                    style={{
+                      alignSelf: compact ? 'stretch' : 'start',
+                      textAlign: 'center',
+                      borderRadius: 999,
+                      padding: '6px 10px',
+                      fontSize: 11,
+                      fontWeight: 700,
+                      letterSpacing: '0.04em',
+                      textTransform: 'uppercase',
+                      color: recovery.color,
+                      border: `1px solid ${recovery.border}`,
+                      background: 'color-mix(in srgb, var(--bg-card) 88%, transparent)',
+                    }}
+                  >
+                    {recovery.label}
+                  </span>
+                )}
+              </div>
+            </article>
+          );
+        })}
+        {!showOlderHistory && collapsedEntries.length > 0 ? (
+          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            Older locked and recorded actions are hidden so the active control lane stays visible.
+          </div>
+        ) : null}
+      </div>
     </section>
   );
 }

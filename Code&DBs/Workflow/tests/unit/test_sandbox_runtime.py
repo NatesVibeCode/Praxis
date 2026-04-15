@@ -16,6 +16,7 @@ from runtime.sandbox_runtime import (
     SandboxRuntime,
     SandboxSession,
     TeardownReceipt,
+    WorkspaceSnapshot,
     derive_sandbox_identity,
 )
 
@@ -436,6 +437,59 @@ def test_cloudflare_remote_provider_emits_expected_bridge_requests(monkeypatch, 
     ]
 
 
+def test_docker_local_hydrate_workspace_reuses_cached_snapshot_archive(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("PRAXIS_SANDBOX_SNAPSHOT_CACHE_DIR", str(tmp_path / "snapshot-cache"))
+    monkeypatch.setattr("runtime.sandbox_runtime._docker_available", lambda: True)
+
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    (source_root / "seed.txt").write_text("seed", encoding="utf-8")
+    snapshot_ref = sandbox_runtime._workspace_snapshot_ref(str(source_root))
+
+    provider = DockerLocalSandboxProvider()
+    spec = type(
+        "Spec",
+        (),
+        {
+            "sandbox_session_id": "sandbox_session:run.alpha:job.alpha",
+            "sandbox_group_id": "group:run.alpha",
+            "network_policy": "provider_only",
+            "workspace_materialization": "copy",
+            "timeout_seconds": 30,
+            "metadata": {},
+        },
+    )()
+
+    first_session = provider.create_session(spec)
+    first_receipt = provider.hydrate_workspace(
+        first_session,
+        WorkspaceSnapshot(
+            source_root=str(source_root),
+            materialization="copy",
+            workspace_snapshot_ref=snapshot_ref,
+        ),
+    )
+    assert first_receipt.workspace_snapshot_cache_hit is False
+    assert (Path(first_session.workspace_root) / "seed.txt").read_text(encoding="utf-8") == "seed"
+    provider.destroy_session(first_session, "completed")
+
+    (source_root / "seed.txt").unlink()
+
+    second_session = provider.create_session(spec)
+    second_receipt = provider.hydrate_workspace(
+        second_session,
+        WorkspaceSnapshot(
+            source_root=str(source_root),
+            materialization="copy",
+            workspace_snapshot_ref=snapshot_ref,
+        ),
+    )
+
+    assert second_receipt.workspace_snapshot_cache_hit is True
+    assert (Path(second_session.workspace_root) / "seed.txt").read_text(encoding="utf-8") == "seed"
+    provider.destroy_session(second_session, "completed")
+
+
 def test_cloudflare_remote_syncs_artifacts_for_capture(monkeypatch, tmp_path) -> None:
     requests: list[tuple[str, dict]] = []
 
@@ -509,6 +563,80 @@ def test_cloudflare_remote_syncs_artifacts_for_capture(monkeypatch, tmp_path) ->
         ("changed.txt", "updated remotely", "sandbox_session:run.alpha:job.alpha")
     ]
     assert requests[3][1] == {"include_content": True}
+
+
+def test_cloudflare_remote_hydrate_workspace_reuses_cached_snapshot_archive(monkeypatch, tmp_path) -> None:
+    requests: list[tuple[str, dict]] = []
+
+    class _FakeResponse:
+        def __init__(self, payload: dict) -> None:
+            self._payload = json.dumps(payload).encode("utf-8")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self) -> bytes:
+            return self._payload
+
+    responses = iter(
+        [
+            {"hydrated_files": 1, "workspace_snapshot_ref": "workspace_snapshot:test"},
+            {"hydrated_files": 1, "workspace_snapshot_ref": "workspace_snapshot:test"},
+        ]
+    )
+
+    def _fake_urlopen(request, timeout):
+        del timeout
+        requests.append((request.full_url, json.loads(request.data.decode("utf-8"))))
+        return _FakeResponse(next(responses))
+
+    monkeypatch.setenv("PRAXIS_CLOUDFLARE_SANDBOX_URL", "https://sandbox.example")
+    monkeypatch.setenv("PRAXIS_SANDBOX_SNAPSHOT_CACHE_DIR", str(tmp_path / "snapshot-cache"))
+    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    (source_root / "seed.txt").write_text("seed", encoding="utf-8")
+    snapshot_ref = sandbox_runtime._workspace_snapshot_ref(str(source_root))
+
+    provider = CloudflareRemoteSandboxProvider()
+    session = SandboxSession(
+        sandbox_session_id="sandbox_session:run.alpha:job.alpha",
+        sandbox_group_id="group:run.alpha",
+        provider="cloudflare_remote",
+        provider_session_id="cf-session",
+        workspace_root=str(tmp_path / "local-mirror"),
+        network_policy="provider_only",
+        workspace_materialization="copy",
+        metadata={},
+    )
+
+    first_receipt = provider.hydrate_workspace(
+        session,
+        WorkspaceSnapshot(
+            source_root=str(source_root),
+            materialization="copy",
+            workspace_snapshot_ref=snapshot_ref,
+        ),
+    )
+    assert first_receipt.workspace_snapshot_cache_hit is False
+
+    (source_root / "seed.txt").unlink()
+
+    second_receipt = provider.hydrate_workspace(
+        session,
+        WorkspaceSnapshot(
+            source_root=str(source_root),
+            materialization="copy",
+            workspace_snapshot_ref=snapshot_ref,
+        ),
+    )
+
+    assert second_receipt.workspace_snapshot_cache_hit is True
+    assert requests[0][1]["archive_base64"] == requests[1][1]["archive_base64"]
 
 
 def test_cloudflare_remote_rejects_invalid_artifact_paths(monkeypatch, tmp_path) -> None:

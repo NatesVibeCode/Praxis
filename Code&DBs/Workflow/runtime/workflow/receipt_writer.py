@@ -322,6 +322,10 @@ def write_job_receipt(
         receipt_outputs["verified_paths"] = verified_paths
     if verification_error:
         receipt_outputs["verification_error"] = verification_error[:500]
+    if "workspace_snapshot_cache_hit" in result:
+        receipt_outputs["workspace_snapshot_cache_hit"] = bool(
+            result.get("workspace_snapshot_cache_hit")
+        )
     if isinstance(submission, Mapping):
         submission_id = str(submission.get("submission_id") or "").strip()
         if submission_id:

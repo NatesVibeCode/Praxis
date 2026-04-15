@@ -39,6 +39,7 @@ def _sandbox_result(**overrides):
         "started_at": "2026-04-09T00:00:00+00:00",
         "finished_at": "2026-04-09T00:00:01+00:00",
         "workspace_snapshot_ref": "workspace_snapshot:test1234",
+        "workspace_snapshot_cache_hit": True,
         "network_policy": "provider_only",
         "provider_latency_ms": 12,
         "workspace_root": "/tmp/workspace",
@@ -92,6 +93,7 @@ def test_execute_cli_routes_through_sandbox_runtime(monkeypatch, tmp_path) -> No
     assert result["sandbox_provider"] == "docker_local"
     assert result["artifact_refs"] == ["README.md"]
     assert result["workspace_snapshot_ref"] == "workspace_snapshot:test1234"
+    assert result["workspace_snapshot_cache_hit"] is True
 
 
 def test_execute_cli_exports_ripgrep_config_path(monkeypatch, tmp_path) -> None:
@@ -307,6 +309,7 @@ def test_execute_api_routes_through_sandbox_runtime(monkeypatch, tmp_path) -> No
     assert result["status"] == "succeeded"
     assert result["stdout"] == "api output"
     assert result["workspace_snapshot_ref"] == "workspace_snapshot:test1234"
+    assert result["workspace_snapshot_cache_hit"] is True
 
 
 def test_execute_api_uses_stable_adhoc_sandbox_identity(monkeypatch, tmp_path) -> None:

@@ -2329,6 +2329,7 @@ def test_write_job_receipt_writes_authority_receipt_and_notification():
             "token_output": 2,
             "cost_usd": 0.5,
             "workspace_snapshot_ref": "workspace_snapshot:abc123",
+            "workspace_snapshot_cache_hit": True,
         },
         2500,
         repo_root="/repo",
@@ -2375,6 +2376,7 @@ def test_write_job_receipt_writes_authority_receipt_and_notification():
     assert receipt_outputs["verification"]["failed"] == 1
     assert receipt_outputs["workspace_provenance"]["workspace_root"] == "/repo"
     assert receipt_outputs["workspace_provenance"]["workspace_snapshot_ref"] == "workspace_snapshot:abc123"
+    assert receipt_outputs["workspace_snapshot_cache_hit"] is True
     assert receipt_outputs["git_provenance"]["available"] is False
     assert receipt_outputs["write_manifest"]["total_files"] == 1
     assert receipt_outputs["mutation_provenance"]["write_paths"] == ["runtime/example.py"]
