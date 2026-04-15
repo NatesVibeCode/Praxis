@@ -120,6 +120,14 @@ def _parse_manual_override(row: Any) -> ManualCircuitOverride | None:
     )
 
 
+def _provider_slug_from_decision_key(decision_key: str) -> str | None:
+    if not decision_key.startswith(_OVERRIDE_DECISION_PREFIX):
+        return None
+    suffix = decision_key[len(_OVERRIDE_DECISION_PREFIX):]
+    provider_slug = suffix.split("::", 1)[0].strip().lower()
+    return provider_slug or None
+
+
 # ---------------------------------------------------------------------------
 # State enum
 # ---------------------------------------------------------------------------
@@ -451,11 +459,18 @@ class CircuitBreakerRegistry:
             """
         )
         overrides: dict[str, ManualCircuitOverride] = {}
+        seen_providers: set[str] = set()
         for row in rows:
+            provider_slug = _provider_slug_from_decision_key(
+                str(row.get("decision_key") or "").strip()
+            )
+            if not provider_slug or provider_slug in seen_providers:
+                continue
+            seen_providers.add(provider_slug)
+            if str(row.get("decision_kind") or "").strip() == "circuit_breaker_reset":
+                continue
             override = _parse_manual_override(row)
             if override is None:
-                continue
-            if override.provider_slug in overrides:
                 continue
             overrides[override.provider_slug] = override
         return overrides
