@@ -1143,7 +1143,9 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
               <MoonActionDock
                 workflowId={workflowId}
                 payload={payload}
+                selectedNodeId={state.selectedNodeId}
                 onReload={reload}
+
                 onClose={() => dispatch({ type: 'CLOSE_DOCK' })}
                 onStartCatalogDrag={startCatalogDrag}
                 onPayloadChange={(nextPayload) => setPayload(nextPayload)}

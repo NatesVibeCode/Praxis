@@ -33,3 +33,21 @@ the planning authority; these artifacts are the packet surface and proof pack.
   with row refs and absorbed bug metadata.
 - The same script closes stale/noise bugs that are no longer first-class backlog
   inputs.
+
+### Run Writeback
+
+- `source "scripts/_workflow_env.sh" && workflow_load_repo_env`
+- `psql "$WORKFLOW_DATABASE_URL" -v ON_ERROR_STOP=1 -f "artifacts/workflow/db_only_phase/db_only_phase_writeback.sql"`
+
+### Check Clustering Quickly
+
+- `psql "$WORKFLOW_DATABASE_URL" -f "artifacts/workflow/db_only_phase/roadmap_cluster_discovery.sql"`
+- Render one cluster tree directly:
+  - `python -m surfaces.cli.main native-operator roadmap-view roadmap_item.platform.live_graph_intelligence`
+  - `python -m surfaces.cli.main native-operator roadmap-view roadmap_item.platform.cqrs.intelligence.program`
+
+### Zero-Context Prompt For Another Model
+
+Use this exact prompt:
+
+`Read artifacts/workflow/db_only_phase/README.md, then run roadmap_cluster_discovery.sql, then pick one active cluster root and propose 3-5 sibling tasks that can run in parallel with minimal dependency risk.`

@@ -18,6 +18,9 @@ from runtime.receipt_provenance import (
     build_write_manifest,
     extract_write_paths,
 )
+from runtime.failure_classifier import classify_failure
+from runtime.friction_ledger import FrictionLedger, FrictionType
+from runtime.bug_tracker import BugTracker, BugCategory, BugSeverity, build_failure_signature
 from storage.postgres.receipt_repository import PostgresReceiptRepository
 
 _log = logging.getLogger("receipt_store")
@@ -33,6 +36,7 @@ _COMPACT_GIT_PROVENANCE_KEYS = frozenset(
     }
 )
 _ATTEMPTED_VERIFICATION_STATUSES = frozenset({"passed", "failed", "error"})
+_AUTO_BUG_THRESHOLD = 3
 
 
 @dataclass(frozen=True)
@@ -213,6 +217,158 @@ def _derive_agent(inputs: dict[str, Any], outputs: dict[str, Any], executor_type
         if text:
             return text
     return "unknown"
+
+
+def _normalize_tag_value(value: object) -> str:
+    text = str(value or "").strip().lower()
+    chars = []
+    for ch in text:
+        if ch.isalnum() or ch in "._:/-":
+            chars.append(ch)
+        else:
+            chars.append("-")
+    normalized = "".join(chars).strip("-")
+    return normalized or "none"
+
+
+def _receipt_failure_category(payload: dict[str, Any]) -> str:
+    direct = str(payload.get("failure_category") or "").strip().lower()
+    if direct:
+        return direct
+    outputs = payload.get("outputs")
+    if isinstance(outputs, dict):
+        failure_classification = outputs.get("failure_classification")
+        if isinstance(failure_classification, dict):
+            category = str(failure_classification.get("category") or "").strip().lower()
+            if category:
+                return category
+    failure_code = str(payload.get("failure_code") or "").strip()
+    if not failure_code:
+        return ""
+    classification = classify_failure(failure_code, outputs=payload.get("outputs"))
+    return classification.category.value
+
+
+def _source_slug(payload: dict[str, Any]) -> str:
+    provider = str(payload.get("provider_slug") or "").strip()
+    model = str(payload.get("model_slug") or "").strip()
+    if provider and model:
+        return f"{provider}/{model}"
+    if provider:
+        return provider
+    return str(payload.get("agent") or "unknown")
+
+
+def _run_post_receipt_hooks(payload: dict[str, Any], *, conn) -> None:
+    status = str(payload.get("status") or "").strip().lower()
+    failure_code = str(payload.get("failure_code") or "").strip()
+    if status in {"succeeded", "success", "passed"} or not failure_code:
+        return
+
+    failure_category = _receipt_failure_category(payload)
+    source_kind = _source_slug(payload)
+    label = str(payload.get("job_label") or payload.get("label") or payload.get("node_id") or "").strip()
+    run_id = str(payload.get("run_id") or "").strip()
+    receipt_id = str(payload.get("receipt_id") or "").strip()
+
+    # 1) Project failures into friction ledger for every persisted failure receipt.
+    try:
+        classification = classify_failure(failure_code, outputs=payload.get("outputs"))
+        friction_type = (
+            FrictionType.GUARDRAIL_BOUNCE
+            if classification.is_retryable
+            else FrictionType.HARD_FAILURE
+        )
+        FrictionLedger(conn).record(
+            friction_type=friction_type,
+            source=source_kind,
+            job_label=label or "receipt",
+            message=f"{failure_category or classification.category.value}: {failure_code}",
+        )
+    except Exception:
+        pass
+
+    # 2) Run canonical bug-threshold aggregation from receipts table.
+    try:
+        signature = build_failure_signature(
+            failure_code=failure_code,
+            job_label=label or None,
+            node_id=str(payload.get("node_id") or "").strip() or None,
+            failure_category=failure_category or None,
+            agent=str(payload.get("agent") or "").strip() or None,
+            provider_slug=str(payload.get("provider_slug") or "").strip() or None,
+            model_slug=str(payload.get("model_slug") or "").strip() or None,
+            source_kind="receipt_store",
+        )
+        tracker = BugTracker(conn)
+        signature_tags = (
+            "auto-filed",
+            f"failure_code:{_normalize_tag_value(failure_code)}",
+            f"job_label:{_normalize_tag_value(label or 'unknown')}",
+            f"failure_category:{_normalize_tag_value(failure_category or 'unknown')}",
+            f"provider:{_normalize_tag_value(str(payload.get('provider_slug') or 'unknown'))}",
+            f"model:{_normalize_tag_value(str(payload.get('model_slug') or 'unknown'))}",
+            f"signature:{_normalize_tag_value(str(signature.get('fingerprint') or 'unknown'))}",
+        )
+        existing = tracker.list_bugs(open_only=True, tags=signature_tags, limit=1)
+        failure_count = int(
+            conn.fetchval(
+                """
+                SELECT COUNT(*) AS total
+                FROM receipts
+                WHERE lower(status) IN ('failed', 'error')
+                  AND COALESCE(failure_code, '') = $1
+                  AND COALESCE(node_id, '') = $2
+                """,
+                failure_code,
+                label,
+            )
+            or 0
+        )
+        bug_id = existing[0].bug_id if existing else ""
+        if not bug_id and failure_count >= _AUTO_BUG_THRESHOLD:
+            bug, _similar = tracker.file_bug(
+                title=f"Repeated receipt failure: {failure_code}",
+                severity=BugSeverity.P2,
+                category=BugCategory.RUNTIME,
+                description=(
+                    f"Failure code '{failure_code}' occurred {failure_count} times"
+                    f" for node '{label or 'unknown'}' in persisted receipts."
+                ),
+                filed_by="receipt_store",
+                source_kind="receipt_store",
+                discovered_in_run_id=run_id or None,
+                discovered_in_receipt_id=receipt_id or None,
+                tags=signature_tags,
+            )
+            bug_id = bug.bug_id
+        if bug_id:
+            if receipt_id:
+                try:
+                    tracker.link_evidence(
+                        bug_id,
+                        evidence_kind="receipt",
+                        evidence_ref=receipt_id,
+                        evidence_role="observed_in",
+                        created_by="receipt_store",
+                        notes=f"Observed failure {failure_code}.",
+                    )
+                except Exception:
+                    pass
+            if run_id:
+                try:
+                    tracker.link_evidence(
+                        bug_id,
+                        evidence_kind="run",
+                        evidence_ref=run_id,
+                        evidence_role="observed_in",
+                        created_by="receipt_store",
+                        notes=f"Observed failing run {run_id}.",
+                    )
+                except Exception:
+                    pass
+    except Exception:
+        pass
 
 
 
@@ -862,4 +1018,22 @@ def write_receipt(receipt_dict: dict[str, Any], *, conn=None) -> None:
         artifacts=artifacts,
         failure_code=str(normalized.get("failure_code") or normalized.get("error_code") or ""),
         decision_refs=[dict(item) for item in decision_refs if isinstance(item, dict)],
+    )
+    _run_post_receipt_hooks(
+        {
+            **normalized,
+            "receipt_id": receipt_id,
+            "job_label": label,
+            "label": label,
+            "node_id": label,
+            "agent": agent or _derive_agent(inputs, outputs, ""),
+            "failure_category": _receipt_failure_category(
+                {
+                    **normalized,
+                    "outputs": outputs,
+                    "failure_code": str(normalized.get("failure_code") or ""),
+                }
+            ),
+        },
+        conn=conn,
     )

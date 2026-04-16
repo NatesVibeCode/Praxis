@@ -5,8 +5,7 @@ from ..registry import registry
 
 class SuggestNextNodesCommand(BaseModel):
     workflow_id: str
-    node_id: str
-    build_graph: dict[str, Any]
+    body: dict[str, Any]
 
 def handle_suggest_next_nodes(command: SuggestNextNodesCommand, subsystems: Any) -> dict[str, Any]:
     from runtime.capability_catalog import load_capability_catalog
@@ -14,11 +13,14 @@ def handle_suggest_next_nodes(command: SuggestNextNodesCommand, subsystems: Any)
     conn = subsystems.get_pg_conn()
     catalog = load_capability_catalog(conn)
     
-    nodes = command.build_graph.get("nodes", [])
-    edges = command.build_graph.get("edges", [])
+    node_id = command.body.get("node_id")
+    build_graph = command.body.get("build_graph", {})
+    
+    nodes = build_graph.get("nodes", [])
+    edges = build_graph.get("edges", [])
     
     # 1. Find the current node
-    current_node = next((n for n in nodes if n.get("node_id") == command.node_id or n.get("id") == command.node_id), None)
+    current_node = next((n for n in nodes if n.get("node_id") == node_id or n.get("id") == node_id), None)
     
     # 2. Extract context from the current node to inform our suggestions
     current_title = str(current_node.get("title", "")).lower() if current_node else ""

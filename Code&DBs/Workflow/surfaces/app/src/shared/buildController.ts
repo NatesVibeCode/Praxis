@@ -166,6 +166,14 @@ export async function triggerWorkflow(workflowId: string): Promise<{ run_id: str
   }));
 }
 
+export async function suggestNextSteps(workflowId: string, nodeId: string, buildGraph: Record<string, unknown>): Promise<{ likely_next_steps: any[], possible_next_steps: any[] }> {
+  return _json(await fetch(`/api/workflows/${workflowId}/build/suggest-next`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ node_id: nodeId, build_graph: buildGraph }),
+  }));
+}
+
 export async function postBuildMutation(
   workflowId: string,
   subpath: string,

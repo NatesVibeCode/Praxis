@@ -464,6 +464,73 @@
   font-size: 11px;
   line-height: 1.45;
 }
+.moon-trigger-pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.moon-trigger-pill {
+  min-height: 32px;
+  max-width: 100%;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(139, 147, 157, 0.28);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--moon-fg);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.moon-trigger-pill:hover {
+  border-color: var(--moon-accent);
+}
+.moon-trigger-pill--active {
+  border-color: var(--moon-accent);
+  background: rgba(108, 182, 255, 0.1);
+}
+.moon-trigger-pill--add {
+  border-style: dashed;
+  color: var(--moon-accent);
+}
+.moon-trigger-pill__label {
+  font-weight: 600;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.moon-trigger-pill-editor {
+  border: 1px solid rgba(139, 147, 157, 0.2);
+  border-radius: 12px;
+  padding: 10px;
+  margin-bottom: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.moon-trigger-pill-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.moon-trigger-pill-suggestion {
+  min-height: 24px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(108, 182, 255, 0.35);
+  background: rgba(108, 182, 255, 0.08);
+  color: var(--moon-accent);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+.moon-trigger-pill-suggestion:hover {
+  border-color: var(--moon-accent);
+  background: rgba(108, 182, 255, 0.16);
+}
 .moon-failure-path {
   display: grid;
   grid-template-columns: 1fr 1fr;

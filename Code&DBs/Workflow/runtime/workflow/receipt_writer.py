@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Callable
 
 from runtime.native_authority import default_native_authority_refs
+from runtime.receipt_store import _receipt_failure_category, _run_post_receipt_hooks
 from runtime.receipt_provenance import (
     build_git_provenance,
     build_mutation_provenance,
@@ -443,6 +444,28 @@ def write_job_receipt(
         outputs=_json_safe(receipt_outputs),
         artifacts=_json_safe(receipt_artifacts),
         failure_code=error_code or None,
+    )
+    _run_post_receipt_hooks(
+        {
+            "receipt_id": receipt_id,
+            "run_id": run_id,
+            "status": status,
+            "failure_code": error_code or "",
+            "job_label": label,
+            "label": label,
+            "node_id": label,
+            "agent": agent_slug,
+            "provider_slug": str(result.get("provider_slug") or "").strip(),
+            "model_slug": str(result.get("model_slug") or "").strip(),
+            "outputs": _json_safe(receipt_outputs),
+            "failure_category": _receipt_failure_category(
+                {
+                    "failure_code": error_code or "",
+                    "outputs": _json_safe(receipt_outputs),
+                }
+            ),
+        },
+        conn=conn,
     )
 
     repository.insert_workflow_notification_if_absent(

@@ -88,6 +88,7 @@ from .commands.query import (
     _trends_command,
     _trust_command,
 )
+from .commands.roadmap import _roadmap_command
 from .commands.tools import _tools_command, _tools_quickstart_text
 from .render import (
     render_graph_lineage,
@@ -311,6 +312,7 @@ _ARG_COMMANDS: dict[str, ArgsCommandHandler] = {
     "triggers": _triggers_command,
     "repair": _repair_command,
     "work": _work_command,
+    "roadmap": _roadmap_command,
 }
 
 _STDOUT_COMMANDS: dict[str, StdoutCommandHandler] = {
@@ -412,6 +414,7 @@ def _commands_index_text() -> str:
             "  workflow health|health-map|metrics|events|cache|circuits|slots|params|config|notifications|dashboard|api|supervisor|capabilities|work",
             "                                                  Operator and platform surfaces",
             "  workflow native-operator <subcommand>           Repo-local operator surface",
+            "  workflow roadmap <subcommand>                   CQRS-native roadmap query/command frontdoor",
             "  workflow compile|github                        Build and repository automation",
             "",
             "Tip: run `workflow help <command>` or `workflow <command> --help` for command-specific usage.",
@@ -449,6 +452,7 @@ def _help_text() -> str:
             "  workflow replay <run_id>",
             "  workflow routes",
             "  workflow native-operator instance",
+            "  workflow roadmap view",
             "",
             "Command groups:",
             "  workflow tools [list|search|describe|call]",
@@ -459,6 +463,7 @@ def _help_text() -> str:
             "  workflow inspect|replay|graph-topology|graph-lineage|topology|lineage",
             "  workflow health|health-map|metrics|events|cache|circuits|slots|params|config|notifications|dashboard|api [routes|--host|--port]|routes|supervisor|capabilities|work",
             "  workflow native-operator instance|health|db-health|bootstrap|db-bootstrap|smoke|inspect|status|graph-topology|graph-lineage|cockpit|route-disable|roadmap-write|work-item-closeout|roadmap-view|provider-onboard|native-primary-cutover-gate",
+            "  workflow roadmap view|status|scoreboard|graph|write|closeout",
             "  workflow compile|github",
             "",
             "Tip: run `workflow commands` or `workflow help commands` for the full command index.",

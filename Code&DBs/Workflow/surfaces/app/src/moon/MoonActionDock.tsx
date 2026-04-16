@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
-import { compileDefinition, refineDefinition, commitDefinition, createWorkflow } from '../shared/buildController';
+import { compileDefinition, refineDefinition, commitDefinition, createWorkflow, suggestNextSteps } from '../shared/buildController';
 import type { BuildPayload } from '../shared/types';
 import { loadCatalogEnvelope, refreshCatalogEnvelope, getCatalogEnvelope, FAMILY_LABELS } from './catalog';
 import type { CatalogEnvelope, CatalogItem, CatalogFamily } from './catalog';
@@ -16,6 +16,7 @@ import { MoonSurfaceReviewPanel } from './MoonSurfaceReviewPanel';
 interface Props {
   workflowId: string | null;
   payload: BuildPayload | null;
+  selectedNodeId?: string | null;
   onReload: () => void;
   onClose: () => void;
   onStartCatalogDrag: (event: React.PointerEvent, item: CatalogItem) => void;
@@ -29,6 +30,7 @@ const DOCK_FAMILIES: CatalogFamily[] = ['trigger', 'gather', 'think', 'act', 'co
 export function MoonActionDock({
   workflowId,
   payload,
+  selectedNodeId,
   onReload,
   onClose,
   onStartCatalogDrag,
@@ -43,6 +45,28 @@ export function MoonActionDock({
   const [success, setSuccess] = useState<string | null>(null);
   const [catalogEnvelope, setCatalogEnvelope] = useState<CatalogEnvelope>(getCatalogEnvelope());
   const [familyFilter, setFamilyFilter] = useState<CatalogFamily | null>(null);
+
+  const [suggestedCatalogIds, setSuggestedCatalogIds] = useState<string[]>([]);
+  const [suggestedLoading, setSuggestedLoading] = useState(false);
+
+  useEffect(() => {
+    if (!workflowId || !selectedNodeId || !payload?.build_graph) {
+      setSuggestedCatalogIds([]);
+      return undefined;
+    }
+    let cancelled = false;
+    setSuggestedLoading(true);
+    suggestNextSteps(workflowId, selectedNodeId, payload.build_graph as any)
+      .then((res: any) => {
+        if (cancelled) return;
+        setSuggestedCatalogIds(res.likely_next_steps.map((s: any) => s.capability_ref || s.id));
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setSuggestedLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [workflowId, selectedNodeId, payload?.build_graph]);
 
   useEffect(() => {
     loadCatalogEnvelope().then((nextEnvelope) => {
@@ -297,6 +321,26 @@ export function MoonActionDock({
             >{FAMILY_LABELS[f]}</button>
           ))}
         </div>
+        
+        {suggestedLoading && (
+          <div className="moon-dock__item-desc" style={{ padding: '8px 0' }}>
+            <span className="moon-spinner" /> Finding suggestions...
+          </div>
+        )}
+        {suggestedCatalogIds.length > 0 && !familyFilter && (
+          <div style={{ marginBottom: 20, padding: 12, background: 'rgba(108, 182, 255, 0.05)', borderRadius: 8, border: '1px solid rgba(108, 182, 255, 0.1)' }}>
+            <div className="moon-dock__section-label" style={{ color: '#6CB6FF' }}>★ Suggested next steps</div>
+            <div className="moon-dock__item-desc" style={{ marginBottom: 12 }}>Based on your selected step. Drag onto the canvas.</div>
+            <div className="moon-dock__catalog-grid">
+              {suggestedCatalogIds.map(id => {
+                const model = primaryCatalog.find(m => m.item.id === id || m.item.actionValue === id || m.item.id.includes(id));
+                if (!model) return null;
+                return renderCatalogButton(model.item, model.policy.detail, model.truth.badge, model.truth.category);
+              })}
+            </div>
+          </div>
+        )}
+
         {primaryCatalog.length > 0 && (
           <>
             <div className="moon-dock__section-label">Core now</div>

@@ -1268,12 +1268,7 @@ UPDATE roadmap_items
 SET
     acceptance_criteria = COALESCE(acceptance_criteria, '{}'::jsonb) || jsonb_build_object(
         'architecture_style', 'cqrs',
-        'program_scope', 'live_graph_intelligence',
-        'command_side_required', true,
-        'query_side_required', true,
-        'projection_required', true,
-        'idempotency_required', true,
-        'replay_required', true
+        'program_scope', 'live_graph_intelligence'
     ),
     updated_at = now()
 WHERE roadmap_item_id LIKE 'roadmap_item.platform.live_graph_intelligence%';
@@ -1282,16 +1277,7 @@ UPDATE roadmap_items
 SET
     acceptance_criteria = COALESCE(acceptance_criteria, '{}'::jsonb) || jsonb_build_object(
         'lane', 'command_and_projection',
-        'handler_kind', 'command_handler_and_projector',
-        'command_contract', 'append_only_graph_events',
-        'projection_contract', 'deterministic_projection_from_event_log',
-        'query_contract', 'n/a',
-        'replay_contract', 'projection_rebuild_from_checkpoint_zero',
-        'verification', jsonb_build_array(
-            'command_contract_test',
-            'projection_idempotency_test',
-            'checkpoint_replay_test'
-        )
+        'verification', jsonb_build_array('command_contract_test', 'checkpoint_replay_test')
     ),
     updated_at = now()
 WHERE roadmap_item_id LIKE 'roadmap_item.platform.live_graph_intelligence.ingestion_spine%'
@@ -1301,16 +1287,7 @@ UPDATE roadmap_items
 SET
     acceptance_criteria = COALESCE(acceptance_criteria, '{}'::jsonb) || jsonb_build_object(
         'lane', 'projection_and_query',
-        'handler_kind', 'projector_and_query_handler',
-        'command_contract', 'n/a',
-        'projection_contract', 'write_optimized_graph_projection',
-        'query_contract', 'stable_filterable_graph_read_contract',
-        'replay_contract', 'read_model_rebuild_from_event_stream',
-        'verification', jsonb_build_array(
-            'query_contract_test',
-            'read_model_consistency_test',
-            'temporal_slice_regression_test'
-        )
+        'verification', jsonb_build_array('query_contract_test', 'temporal_slice_regression_test')
     ),
     updated_at = now()
 WHERE roadmap_item_id LIKE 'roadmap_item.platform.live_graph_intelligence.projection_api%';
@@ -1319,16 +1296,7 @@ UPDATE roadmap_items
 SET
     acceptance_criteria = COALESCE(acceptance_criteria, '{}'::jsonb) || jsonb_build_object(
         'lane', 'query_consumer',
-        'handler_kind', 'ui_query_consumer',
-        'command_contract', 'graph_ui_actions_emit_commands',
-        'projection_contract', 'consume_projection_api_only',
-        'query_contract', 'ui_graph_query_surface',
-        'replay_contract', 'timeline_replay_uses_temporal_query_api',
-        'verification', jsonb_build_array(
-            'ui_graph_smoke_test',
-            'ui_query_contract_snapshot',
-            'timeline_replay_e2e_test'
-        )
+        'verification', jsonb_build_array('ui_graph_smoke_test', 'timeline_replay_e2e_test')
     ),
     updated_at = now()
 WHERE roadmap_item_id LIKE 'roadmap_item.platform.live_graph_intelligence.operator_ui%';
@@ -1337,16 +1305,7 @@ UPDATE roadmap_items
 SET
     acceptance_criteria = COALESCE(acceptance_criteria, '{}'::jsonb) || jsonb_build_object(
         'lane', 'command_orchestration',
-        'handler_kind', 'command_handler',
-        'command_contract', 'governed_graph_actions',
-        'projection_contract', 'action_audit_projection',
-        'query_contract', 'action_eligibility_query',
-        'replay_contract', 'action_decision_replayable_from_evidence',
-        'verification', jsonb_build_array(
-            'policy_gate_test',
-            'dry_run_guardrail_test',
-            'action_audit_trace_test'
-        )
+        'verification', jsonb_build_array('policy_gate_test', 'dry_run_guardrail_test')
     ),
     updated_at = now()
 WHERE roadmap_item_id LIKE 'roadmap_item.platform.live_graph_intelligence.action_layer%';
@@ -1792,9 +1751,7 @@ SELECT
     i.roadmap_item_id, i.roadmap_key, i.title, i.item_kind, i.status, i.priority,
     i.parent_roadmap_item_id, NULL, i.summary,
     i.acceptance_criteria || jsonb_build_object(
-        'architecture_style', 'cqrs',
-        'granularity', 'micro_task',
-        'verification', jsonb_build_array('unit_test', 'integration_smoke', 'replay_or_idempotency_check')
+        'verification', jsonb_build_array('unit_test', 'integration_smoke')
     ),
     'decision.2026-04-15.live-graph-intelligence', NULL, NULL, NULL, now(), now()
 FROM cqrs_intelligence_micro_items AS i
@@ -1909,13 +1866,10 @@ SELECT
     NULL,
     r.step_summary || ' Parent context: ' || coalesce(r.parent_summary, ''),
     jsonb_build_object(
-        'architecture_style', 'cqrs',
-        'granularity', 'auto_micro_task',
         'auto_breakdown', true,
-        'lane', r.step_lane,
         'phase_order', 'auto.' || r.phase_suffix,
         'outcome_gate', 'auto_micro_' || r.suffix || '_ready',
-        'verification', jsonb_build_array('unit_test', 'integration_smoke', 'operator_evidence_note')
+        'verification', jsonb_build_array('unit_test', 'integration_smoke')
     ),
     'decision.2026-04-15.roadmap-auto-micro-breakdown',
     NULL, NULL, NULL, now(), now()
@@ -1981,6 +1935,189 @@ SELECT
     d.roadmap_item_dependency_id, d.roadmap_item_id, d.depends_on_roadmap_item_id,
     d.dependency_kind, 'decision.2026-04-15.roadmap-auto-micro-breakdown', now()
 FROM auto_micro_dependency_rows AS d
+ON CONFLICT (roadmap_item_dependency_id) DO UPDATE
+SET
+    roadmap_item_id = EXCLUDED.roadmap_item_id,
+    depends_on_roadmap_item_id = EXCLUDED.depends_on_roadmap_item_id,
+    dependency_kind = EXCLUDED.dependency_kind,
+    decision_ref = EXCLUDED.decision_ref;
+
+-- Remove stale roadmap placeholders and explicit stale/deprecated rows.
+WITH stale_roadmap_items AS (
+    SELECT r.roadmap_item_id
+    FROM roadmap_items AS r
+    WHERE r.roadmap_item_id ~ '^roadmap_item[.][a-f0-9]{10}[.]query$'
+       OR lower(coalesce(r.status, '')) IN ('stale', 'deprecated')
+       OR lower(coalesce(r.title, '')) LIKE '%stale%'
+)
+DELETE FROM roadmap_item_dependencies AS d
+USING stale_roadmap_items AS s
+WHERE d.roadmap_item_id = s.roadmap_item_id
+   OR d.depends_on_roadmap_item_id = s.roadmap_item_id;
+
+WITH stale_roadmap_items AS (
+    SELECT r.roadmap_item_id
+    FROM roadmap_items AS r
+    WHERE r.roadmap_item_id ~ '^roadmap_item[.][a-f0-9]{10}[.]query$'
+       OR lower(coalesce(r.status, '')) IN ('stale', 'deprecated')
+       OR lower(coalesce(r.title, '')) LIKE '%stale%'
+)
+DELETE FROM roadmap_items AS r
+USING stale_roadmap_items AS s
+WHERE r.roadmap_item_id = s.roadmap_item_id;
+
+-- Remove orphan micro items whose parent no longer exists.
+WITH orphan_micro_items AS (
+    SELECT c.roadmap_item_id
+    FROM roadmap_items AS c
+    LEFT JOIN roadmap_items AS p
+      ON p.roadmap_item_id = c.parent_roadmap_item_id
+    WHERE c.roadmap_item_id LIKE '%.micro.%'
+      AND p.roadmap_item_id IS NULL
+)
+DELETE FROM roadmap_item_dependencies AS d
+USING orphan_micro_items AS o
+WHERE d.roadmap_item_id = o.roadmap_item_id
+   OR d.depends_on_roadmap_item_id = o.roadmap_item_id;
+
+WITH orphan_micro_items AS (
+    SELECT c.roadmap_item_id
+    FROM roadmap_items AS c
+    LEFT JOIN roadmap_items AS p
+      ON p.roadmap_item_id = c.parent_roadmap_item_id
+    WHERE c.roadmap_item_id LIKE '%.micro.%'
+      AND p.roadmap_item_id IS NULL
+)
+DELETE FROM roadmap_items AS c
+USING orphan_micro_items AS o
+WHERE c.roadmap_item_id = o.roadmap_item_id;
+
+-- Rebuild deterministic cluster metadata for active roadmap discovery.
+WITH RECURSIVE cluster_tree AS (
+    SELECT
+        r.roadmap_item_id,
+        r.parent_roadmap_item_id,
+        r.roadmap_item_id AS cluster_root_id,
+        0 AS cluster_depth,
+        r.roadmap_item_id::text AS cluster_path
+    FROM roadmap_items AS r
+    WHERE r.parent_roadmap_item_id IS NULL
+
+    UNION ALL
+
+    SELECT
+        c.roadmap_item_id,
+        c.parent_roadmap_item_id,
+        t.cluster_root_id,
+        t.cluster_depth + 1,
+        (t.cluster_path || ' > ' || c.roadmap_item_id)::text
+    FROM roadmap_items AS c
+    JOIN cluster_tree AS t
+      ON c.parent_roadmap_item_id = t.roadmap_item_id
+),
+clustered AS (
+    SELECT
+        t.roadmap_item_id,
+        t.parent_roadmap_item_id,
+        t.cluster_root_id,
+        t.cluster_depth,
+        t.cluster_path,
+        split_part(t.cluster_root_id, '.', 3) AS cluster_family
+    FROM cluster_tree AS t
+)
+UPDATE roadmap_items AS r
+SET
+    acceptance_criteria = COALESCE(r.acceptance_criteria, '{}'::jsonb) || jsonb_build_object(
+        'cluster_root_id', c.cluster_root_id,
+        'cluster_parent_id', c.parent_roadmap_item_id,
+        'cluster_depth', c.cluster_depth,
+        'cluster_path', c.cluster_path,
+        'cluster_family', c.cluster_family
+    ),
+    updated_at = now()
+FROM clustered AS c
+WHERE r.roadmap_item_id = c.roadmap_item_id
+  AND lower(r.status) = 'active';
+
+-- Replace matrix row with concrete phase rows (1..100).
+DELETE FROM roadmap_items
+WHERE roadmap_item_id = 'roadmap_item.phase_program.current_functionality_gap_matrix';
+
+WITH phase_rows AS (
+    SELECT
+        gs AS phase_number,
+        format('roadmap_item.phase_program.build_closure.phase_%s', lpad(gs::text, 3, '0')) AS roadmap_item_id,
+        format('roadmap.phase_program.build_closure.phase_%s', lpad(gs::text, 3, '0')) AS roadmap_key
+    FROM generate_series(1, 100) AS gs
+)
+INSERT INTO roadmap_items (
+    roadmap_item_id, roadmap_key, title, item_kind, status, priority,
+    parent_roadmap_item_id, source_bug_id, summary, acceptance_criteria,
+    decision_ref, target_start_at, target_end_at, completed_at, created_at, updated_at
+)
+SELECT
+    p.roadmap_item_id,
+    p.roadmap_key,
+    format('Phase %s Build Closure', lpad(p.phase_number::text, 3, '0')),
+    'task',
+    'active',
+    'p1',
+    NULL,
+    NULL,
+    format('Fail-closed backlog row for phase %s. Keep active until explicit phase-owned implementation proof and passing verification evidence are recorded.', p.phase_number),
+    jsonb_build_object(
+        'phase_number', p.phase_number,
+        'build_state', 'needs_build',
+        'evidence_required', jsonb_build_array(
+            'phase_owned_implementation',
+            'passing_verification',
+            'runtime_authority_wiring'
+        )
+    ),
+    'decision.2026-04-15.phase-program-rows',
+    NULL,
+    NULL,
+    NULL,
+    now(),
+    now()
+FROM phase_rows AS p
+ON CONFLICT (roadmap_item_id) DO UPDATE
+SET
+    roadmap_key = EXCLUDED.roadmap_key,
+    title = EXCLUDED.title,
+    item_kind = EXCLUDED.item_kind,
+    status = EXCLUDED.status,
+    priority = EXCLUDED.priority,
+    parent_roadmap_item_id = EXCLUDED.parent_roadmap_item_id,
+    summary = EXCLUDED.summary,
+    acceptance_criteria = EXCLUDED.acceptance_criteria,
+    decision_ref = EXCLUDED.decision_ref,
+    updated_at = now();
+
+WITH phase_deps AS (
+    SELECT
+        gs AS phase_number,
+        format(
+            'roadmap_item_dependency.phase_program.build_closure.phase_%s_after_%s',
+            lpad(gs::text, 3, '0'),
+            lpad((gs - 1)::text, 3, '0')
+        ) AS roadmap_item_dependency_id,
+        format('roadmap_item.phase_program.build_closure.phase_%s', lpad(gs::text, 3, '0')) AS roadmap_item_id,
+        format('roadmap_item.phase_program.build_closure.phase_%s', lpad((gs - 1)::text, 3, '0')) AS depends_on_roadmap_item_id
+    FROM generate_series(2, 100) AS gs
+)
+INSERT INTO roadmap_item_dependencies (
+    roadmap_item_dependency_id, roadmap_item_id, depends_on_roadmap_item_id,
+    dependency_kind, decision_ref, created_at
+)
+SELECT
+    d.roadmap_item_dependency_id,
+    d.roadmap_item_id,
+    d.depends_on_roadmap_item_id,
+    'blocks',
+    'decision.2026-04-15.phase-program-rows',
+    now()
+FROM phase_deps AS d
 ON CONFLICT (roadmap_item_dependency_id) DO UPDATE
 SET
     roadmap_item_id = EXCLUDED.roadmap_item_id,

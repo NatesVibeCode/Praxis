@@ -75,6 +75,8 @@ const TRIGGER_WEBHOOK_ROUTE = 'trigger/webhook';
 const WEBHOOK_TRIGGER_EVENT = 'db.webhook_events.insert';
 type BranchConditionMode = 'simple' | 'json';
 type BranchComposerOp = typeof BRANCH_OP_OPTIONS[number]['value'];
+type TriggerFilterMode = 'pills' | 'json';
+type TriggerFilterValueType = 'string' | 'number' | 'boolean' | 'null' | 'json';
 
 const BRANCH_OP_OPTIONS = [
   { value: 'equals', label: 'Equals', expectsValue: true },
@@ -93,6 +95,25 @@ const BRANCH_OP_OPTIONS = [
 ] as const;
 
 const BRANCH_OP_LABELS = new Map(BRANCH_OP_OPTIONS.map((option) => [option.value, option.label]));
+
+interface TriggerFilterFieldRow {
+  id: string;
+  key: string;
+  valueType: TriggerFilterValueType;
+  valueText: string;
+}
+
+const TRIGGER_FILTER_SUGGESTIONS: Array<{
+  label: string;
+  key: string;
+  valueType: TriggerFilterValueType;
+  valueText: string;
+}> = [
+  { label: 'env: prod', key: 'env', valueType: 'string', valueText: 'prod' },
+  { label: 'dry_run: false', key: 'dry_run', valueType: 'boolean', valueText: 'false' },
+  { label: 'priority: high', key: 'priority', valueType: 'string', valueText: 'high' },
+  { label: 'source: api', key: 'source', valueType: 'string', valueText: 'api' },
+];
 
 function nodeTarget(node: OrbitNode | null | undefined): UiActionTarget | null {
   if (!node?.id) return null;
@@ -126,10 +147,6 @@ function normalizeTriggerFilter(filter: unknown): Record<string, unknown> {
     : {};
 }
 
-function formatTriggerFilter(filter: unknown): string {
-  return JSON.stringify(normalizeTriggerFilter(filter), null, 2);
-}
-
 function parseTriggerFilter(text: string): Record<string, unknown> {
   if (!text.trim()) return {};
   let parsed: unknown;
@@ -142,6 +159,91 @@ function parseTriggerFilter(text: string): Record<string, unknown> {
     throw new Error('Trigger filter must be a JSON object.');
   }
   return parsed as Record<string, unknown>;
+}
+
+function triggerFilterValueTypeFor(value: unknown): TriggerFilterValueType {
+  if (value === null) return 'null';
+  if (typeof value === 'number') return 'number';
+  if (typeof value === 'boolean') return 'boolean';
+  if (typeof value === 'string') return 'string';
+  return 'json';
+}
+
+function formatTriggerFilterValueText(value: unknown, valueType: TriggerFilterValueType): string {
+  if (valueType === 'null') return '';
+  if (valueType === 'string') return typeof value === 'string' ? value : String(value ?? '');
+  if (valueType === 'number' || valueType === 'boolean') return String(value);
+  return formatJsonValue(value);
+}
+
+function triggerFilterRowsFromObject(filter: Record<string, unknown>): TriggerFilterFieldRow[] {
+  const entries = Object.entries(filter);
+  if (entries.length === 0) return [{ id: 'trigger-filter-1', key: '', valueType: 'string', valueText: '' }];
+  return entries.map(([key, value], index) => {
+    const valueType = triggerFilterValueTypeFor(value);
+    return {
+      id: `trigger-filter-${index + 1}`,
+      key,
+      valueType,
+      valueText: formatTriggerFilterValueText(value, valueType),
+    };
+  });
+}
+
+function triggerFilterHasComplexValue(filter: Record<string, unknown>): boolean {
+  return Object.values(filter).some((value) => (
+    Array.isArray(value)
+    || (value != null && typeof value === 'object')
+  ));
+}
+
+function parseTriggerFilterRows(rows: TriggerFilterFieldRow[]): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const row of rows) {
+    const key = row.key.trim();
+    if (!key) continue;
+    if (key in result) {
+      throw new Error(`Trigger filter has duplicate key "${key}".`);
+    }
+    if (row.valueType === 'null') {
+      result[key] = null;
+      continue;
+    }
+    if (row.valueType === 'string') {
+      result[key] = row.valueText;
+      continue;
+    }
+    if (row.valueType === 'number') {
+      const parsed = Number(row.valueText.trim());
+      if (!Number.isFinite(parsed)) {
+        throw new Error(`Trigger filter key "${key}" must be a valid number.`);
+      }
+      result[key] = parsed;
+      continue;
+    }
+    if (row.valueType === 'boolean') {
+      const normalized = row.valueText.trim().toLowerCase();
+      if (normalized !== 'true' && normalized !== 'false') {
+        throw new Error(`Trigger filter key "${key}" must be true or false.`);
+      }
+      result[key] = normalized === 'true';
+      continue;
+    }
+    try {
+      result[key] = row.valueText.trim() ? JSON.parse(row.valueText) : {};
+    } catch {
+      throw new Error(`Trigger filter key "${key}" JSON value is invalid.`);
+    }
+  }
+  return result;
+}
+
+function triggerFilterChipText(row: TriggerFilterFieldRow): string {
+  const key = row.key.trim() || 'new_filter';
+  if (row.valueType === 'null') return `${key}: null`;
+  if (!row.valueText.trim()) return `${key}: value`;
+  if (row.valueType === 'string') return `${key}: "${row.valueText.trim()}"`;
+  return `${key}: ${row.valueText.trim()}`;
 }
 
 function formatJsonObject(value: unknown): string {
@@ -299,6 +401,11 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
   const [triggerCronExpression, setTriggerCronExpression] = useState('@daily');
   const [triggerSourceRef, setTriggerSourceRef] = useState('');
   const [triggerFilterText, setTriggerFilterText] = useState('{}');
+  const [triggerFilterMode, setTriggerFilterMode] = useState<TriggerFilterMode>('pills');
+  const [triggerFilterRows, setTriggerFilterRows] = useState<TriggerFilterFieldRow[]>([
+    { id: 'trigger-filter-1', key: '', valueType: 'string', valueText: '' },
+  ]);
+  const [activeTriggerFilterId, setActiveTriggerFilterId] = useState<string | null>('trigger-filter-1');
   const [triggerLoading, setTriggerLoading] = useState(false);
   const [triggerError, setTriggerError] = useState<string | null>(null);
   const [edgeConditionText, setEdgeConditionText] = useState('{}');
@@ -350,7 +457,6 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
   );
   const triggerRoute = buildNode?.route || node?.route || '';
   const triggerConfig = buildNode?.trigger;
-  const triggerFilterJson = formatTriggerFilter(triggerConfig?.filter);
   const isTriggerNode = Boolean(node && isTriggerRoute(triggerRoute));
   const isConditionalEdge = Boolean(selectedEdge && buildEdgeRelease?.family === 'conditional');
   const isFailureEdge = Boolean(selectedEdge && buildEdgeRelease?.family === 'after_failure');
@@ -430,18 +536,22 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
 
   useEffect(() => {
     if (!isTriggerNode) return;
+    const normalizedFilter = normalizeTriggerFilter(triggerConfig?.filter);
     setTriggerCronExpression(
       (typeof triggerConfig?.cron_expression === 'string' && triggerConfig.cron_expression.trim()) || '@daily',
     );
     setTriggerSourceRef(typeof triggerConfig?.source_ref === 'string' ? triggerConfig.source_ref : '');
-    setTriggerFilterText(triggerFilterJson);
+    setTriggerFilterText(JSON.stringify(normalizedFilter, null, 2));
+    const rows = triggerFilterRowsFromObject(normalizedFilter);
+    setTriggerFilterRows(rows);
+    setTriggerFilterMode(triggerFilterHasComplexValue(normalizedFilter) ? 'json' : 'pills');
+    setActiveTriggerFilterId(rows[0]?.id || null);
     setTriggerError(null);
   }, [
     isTriggerNode,
     node?.id,
     triggerConfig?.cron_expression,
     triggerConfig?.source_ref,
-    triggerFilterJson,
   ]);
 
   useEffect(() => {
@@ -733,7 +843,9 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
     setTriggerLoading(true);
     setTriggerError(null);
     try {
-      const filter = parseTriggerFilter(triggerFilterText);
+      const filter = triggerFilterMode === 'json'
+        ? parseTriggerFilter(triggerFilterText)
+        : parseTriggerFilterRows(triggerFilterRows);
       const nodes = [...(buildGraph.nodes || [])];
       const idx = nodes.findIndex(graphNode => graphNode.node_id === node.id);
       if (idx < 0) return;
@@ -787,8 +899,89 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
     triggerRoute,
     triggerCronExpression,
     triggerSourceRef,
+    triggerFilterMode,
+    triggerFilterRows,
     triggerFilterText,
   ]);
+
+  const handleTriggerFilterModeChange = useCallback((nextMode: TriggerFilterMode) => {
+    if (nextMode === triggerFilterMode) return;
+    if (nextMode === 'json') {
+      try {
+        const fromRows = parseTriggerFilterRows(triggerFilterRows);
+        setTriggerFilterText(JSON.stringify(fromRows, null, 2));
+      } catch {
+        // Keep existing JSON draft if field rows are incomplete.
+      }
+      setTriggerFilterMode('json');
+      setTriggerError(null);
+      return;
+    }
+    try {
+      const parsed = parseTriggerFilter(triggerFilterText);
+      const rows = triggerFilterRowsFromObject(parsed);
+      setTriggerFilterRows(rows);
+      setTriggerFilterMode('pills');
+      setActiveTriggerFilterId(rows[0]?.id || null);
+      setTriggerError(null);
+    } catch (error: any) {
+      setTriggerError(error.message || 'Unable to switch trigger filter mode.');
+    }
+  }, [triggerFilterMode, triggerFilterRows, triggerFilterText]);
+
+  const activeTriggerFilterRow = useMemo(
+    () => triggerFilterRows.find((row) => row.id === activeTriggerFilterId) || null,
+    [activeTriggerFilterId, triggerFilterRows],
+  );
+
+  const updateTriggerFilterRow = useCallback((id: string, patch: Partial<TriggerFilterFieldRow>) => {
+    setTriggerFilterRows((previous) => previous.map((entry) => (
+      entry.id === id
+        ? { ...entry, ...patch }
+        : entry
+    )));
+  }, []);
+
+  const addTriggerFilterRow = useCallback(() => {
+    const next = { id: `trigger-filter-${Date.now()}`, key: '', valueType: 'string' as const, valueText: '' };
+    setTriggerFilterRows((previous) => [...previous, next]);
+    setActiveTriggerFilterId(next.id);
+  }, []);
+
+  const removeTriggerFilterRow = useCallback((id: string) => {
+    setTriggerFilterRows((previous) => {
+      const next = previous.filter((entry) => entry.id !== id);
+      if (next.length > 0) {
+        setActiveTriggerFilterId((current) => (current === id ? next[0].id : current));
+        return next;
+      }
+      const fallback = { id: `trigger-filter-${Date.now()}`, key: '', valueType: 'string' as const, valueText: '' };
+      setActiveTriggerFilterId(fallback.id);
+      return [fallback];
+    });
+  }, []);
+
+  const applyTriggerFilterSuggestion = useCallback((suggestion: typeof TRIGGER_FILTER_SUGGESTIONS[number]) => {
+    setTriggerFilterRows((previous) => {
+      const existing = previous.find((entry) => entry.key.trim() === suggestion.key);
+      if (existing) {
+        setActiveTriggerFilterId(existing.id);
+        return previous.map((entry) => (
+          entry.id === existing.id
+            ? { ...entry, valueType: suggestion.valueType, valueText: suggestion.valueText }
+            : entry
+        ));
+      }
+      const next = {
+        id: `trigger-filter-${Date.now()}`,
+        key: suggestion.key,
+        valueType: suggestion.valueType,
+        valueText: suggestion.valueText,
+      };
+      setActiveTriggerFilterId(next.id);
+      return [...previous, next];
+    });
+  }, []);
 
   const handleHttpRequestPresetChange = useCallback((nextPreset: HttpRequestPreset) => {
     const presetDefinition = httpRequestPresetDefinition(nextPreset);
@@ -1264,14 +1457,137 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
                   placeholder="Source ref (optional)"
                 />
               )}
-              <textarea
-                className="moon-dock-form__input"
-                value={triggerFilterText}
-                onChange={e => setTriggerFilterText(e.target.value)}
-                placeholder="Trigger filter JSON"
-                rows={6}
-                style={{ minHeight: 110, resize: 'vertical' }}
-              />
+              <div className="moon-branch-editor__control">
+                <label className="moon-dock-form__label" htmlFor="moon-trigger-filter-mode">Filter mode</label>
+                <div className="moon-dock-form__row">
+                  <select
+                    id="moon-trigger-filter-mode"
+                    className="moon-dock-form__select"
+                    value={triggerFilterMode}
+                    onChange={e => handleTriggerFilterModeChange(e.target.value as TriggerFilterMode)}
+                  >
+                    <option value="pills">Pills</option>
+                    <option value="json">JSON</option>
+                  </select>
+                </div>
+              </div>
+              {triggerFilterMode === 'pills' ? (
+                <>
+                  <div className="moon-trigger-pill-row">
+                    {triggerFilterRows.map((row) => (
+                      <button
+                        key={row.id}
+                        type="button"
+                        className={`moon-trigger-pill${activeTriggerFilterId === row.id ? ' moon-trigger-pill--active' : ''}`}
+                        onClick={() => setActiveTriggerFilterId(row.id)}
+                      >
+                        <span className="moon-trigger-pill__label">{triggerFilterChipText(row)}</span>
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      className="moon-trigger-pill moon-trigger-pill--add"
+                      onClick={addTriggerFilterRow}
+                    >
+                      + Add filter
+                    </button>
+                  </div>
+                  <div className="moon-trigger-pill-suggestions">
+                    {TRIGGER_FILTER_SUGGESTIONS.map((suggestion) => (
+                      <button
+                        key={suggestion.label}
+                        type="button"
+                        className="moon-trigger-pill-suggestion"
+                        onClick={() => applyTriggerFilterSuggestion(suggestion)}
+                      >
+                        {suggestion.label}
+                      </button>
+                    ))}
+                  </div>
+                  {activeTriggerFilterRow && (
+                    <div className="moon-trigger-pill-editor">
+                      <div className="moon-dock-form__row" style={{ marginBottom: 4 }}>
+                        <input
+                          className="moon-dock-form__input"
+                          type="text"
+                          value={activeTriggerFilterRow.key}
+                          onChange={(event) => updateTriggerFilterRow(activeTriggerFilterRow.id, { key: event.target.value })}
+                          placeholder="Filter key"
+                          style={{ marginBottom: 0 }}
+                        />
+                        <select
+                          className="moon-dock-form__select"
+                          value={activeTriggerFilterRow.valueType}
+                          onChange={(event) => updateTriggerFilterRow(activeTriggerFilterRow.id, { valueType: event.target.value as TriggerFilterValueType })}
+                          style={{ minWidth: 110 }}
+                        >
+                          <option value="string">Text</option>
+                          <option value="number">Number</option>
+                          <option value="boolean">True/false</option>
+                          <option value="null">Null</option>
+                          <option value="json">JSON</option>
+                        </select>
+                      </div>
+                      {activeTriggerFilterRow.valueType !== 'null' && (
+                        <input
+                          className="moon-dock-form__input"
+                          type="text"
+                          value={activeTriggerFilterRow.valueText}
+                          onChange={(event) => updateTriggerFilterRow(activeTriggerFilterRow.id, { valueText: event.target.value })}
+                          placeholder={activeTriggerFilterRow.valueType === 'json' ? '{"nested": true}' : 'Value'}
+                          style={{ marginBottom: 4 }}
+                        />
+                      )}
+                      {activeTriggerFilterRow.valueType === 'boolean' && (
+                        <div className="moon-dock-form__row">
+                          <button
+                            type="button"
+                            className="moon-dock-form__btn--small"
+                            onClick={() => updateTriggerFilterRow(activeTriggerFilterRow.id, { valueText: 'true' })}
+                          >
+                            true
+                          </button>
+                          <button
+                            type="button"
+                            className="moon-dock-form__btn--small"
+                            onClick={() => updateTriggerFilterRow(activeTriggerFilterRow.id, { valueText: 'false' })}
+                          >
+                            false
+                          </button>
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        className="moon-dock-form__btn--small"
+                        onClick={() => removeTriggerFilterRow(activeTriggerFilterRow.id)}
+                      >
+                        Remove selected
+                      </button>
+                    </div>
+                  )}
+                  <div className="moon-dock-form__row">
+                    <button
+                      type="button"
+                      className="moon-dock-form__btn--small"
+                      onClick={addTriggerFilterRow}
+                    >
+                      Add another pill
+                    </button>
+                  </div>
+                  <div className="moon-branch-editor__hint">
+                    Pills are the main lane. Click a pill to edit it. JSON mode is only for advanced nested filters.
+                  </div>
+                </>
+              ) : (
+                <textarea
+                  className="moon-dock-form__input"
+                  value={triggerFilterText}
+                  onChange={e => setTriggerFilterText(e.target.value)}
+                  placeholder="Trigger filter JSON"
+                  rows={6}
+                  style={{ minHeight: 110, resize: 'vertical' }}
+                />
+              )}
               <button
                 className="moon-dock-form__btn"
                 onClick={handleSaveTrigger}
