@@ -1,44 +1,76 @@
-"""Process-local projection of DB-backed claim lifecycle transitions.
+"""Process-local projection of claim lifecycle transition authority.
 
-The durable authority lives in Postgres in
-`workflow_claim_lifecycle_transition_authority`. This module is only a
-bootstrapped mirror for synchronous consumers such as the execution state
-machine. If this mapping changes, the DB authority must change with it.
+The durable authority lives in the canonical workflow migration file and its
+Postgres materialization. This module generates the in-process mirror from the
+same migration text so execution validation does not drift from the schema.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
+from functools import lru_cache
 
-from .domain import RunState, RuntimeLifecycleError
+from storage.migrations import WorkflowMigrationError, workflow_migration_sql_text
+
+from .domain import RunState, RuntimeBoundaryError, RuntimeLifecycleError
+
+_CLAIM_LIFECYCLE_MIGRATION_FILENAME = "135_claim_lifecycle_transition_authority.sql"
+_TRANSITION_ROW_RE = re.compile(
+    r"\(\s*'[^']*'\s*,\s*'(?P<from_state>[^']+)'\s*,\s*'(?P<to_state>[^']+)'",
+    re.MULTILINE,
+)
 
 
-ALLOWED_TRANSITIONS: Mapping[RunState, frozenset[RunState]] = {
-    RunState.CLAIM_RECEIVED: frozenset({RunState.CLAIM_VALIDATING}),
-    RunState.CLAIM_VALIDATING: frozenset(
-        {
-            RunState.CLAIM_ACCEPTED,
-            RunState.CLAIM_BLOCKED,
-            RunState.CLAIM_REJECTED,
-        }
-    ),
-    RunState.CLAIM_BLOCKED: frozenset(
-        {
-            RunState.CLAIM_REJECTED,
-            RunState.CLAIM_VALIDATING,
-        }
-    ),
-    RunState.CLAIM_ACCEPTED: frozenset({RunState.LEASE_REQUESTED}),
-    RunState.LEASE_REQUESTED: frozenset({RunState.LEASE_ACTIVE, RunState.LEASE_BLOCKED}),
-    RunState.LEASE_BLOCKED: frozenset({RunState.LEASE_REQUESTED}),
-    RunState.LEASE_ACTIVE: frozenset(
-        {
-            RunState.LEASE_EXPIRED,
-            RunState.PROPOSAL_INVALID,
-            RunState.PROPOSAL_SUBMITTED,
-        }
-    ),
-}
+def _parse_transition_rows(sql_text: str) -> Mapping[RunState, frozenset[RunState]]:
+    insert_start = sql_text.find("INSERT INTO workflow_claim_lifecycle_transition_authority")
+    if insert_start == -1:
+        raise RuntimeBoundaryError(
+            "claim lifecycle transition authority migration is missing the authority table insert"
+        )
+
+    values_start = sql_text.find("VALUES", insert_start)
+    conflict_start = sql_text.find("ON CONFLICT", values_start)
+    if values_start == -1 or conflict_start == -1 or conflict_start <= values_start:
+        raise RuntimeBoundaryError(
+            "claim lifecycle transition authority migration is missing its VALUES block"
+        )
+
+    grouped: dict[RunState, set[RunState]] = {}
+    values_block = sql_text[values_start:conflict_start]
+    for match in _TRANSITION_ROW_RE.finditer(values_block):
+        try:
+            from_state = RunState(match.group("from_state"))
+            to_state = RunState(match.group("to_state"))
+        except ValueError as exc:
+            raise RuntimeBoundaryError(
+                "claim lifecycle transition authority migration contains an unknown run state"
+            ) from exc
+        grouped.setdefault(from_state, set()).add(to_state)
+
+    if not grouped:
+        raise RuntimeBoundaryError(
+            "claim lifecycle transition authority migration did not define any transitions"
+        )
+
+    return {
+        from_state: frozenset(sorted(to_states, key=lambda state: state.value))
+        for from_state, to_states in grouped.items()
+    }
+
+
+@lru_cache(maxsize=1)
+def _load_allowed_transitions() -> Mapping[RunState, frozenset[RunState]]:
+    try:
+        sql_text = workflow_migration_sql_text(_CLAIM_LIFECYCLE_MIGRATION_FILENAME)
+    except WorkflowMigrationError as exc:
+        raise RuntimeBoundaryError(
+            "claim lifecycle transition authority migration is unavailable"
+        ) from exc
+    return _parse_transition_rows(sql_text)
+
+
+ALLOWED_TRANSITIONS: Mapping[RunState, frozenset[RunState]] = _load_allowed_transitions()
 
 
 def validate_claim_lifecycle_transition(*, from_state: RunState, to_state: RunState) -> None:

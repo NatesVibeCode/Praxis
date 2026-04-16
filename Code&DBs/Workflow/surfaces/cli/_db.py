@@ -11,7 +11,7 @@ from surfaces._workflow_database import workflow_database_env_for_repo
 
 
 def cli_repo_root() -> Path:
-    return Path(__file__).resolve().parents[3]
+    return Path(__file__).resolve().parents[4]
 
 
 def cli_database_env() -> dict[str, str]:

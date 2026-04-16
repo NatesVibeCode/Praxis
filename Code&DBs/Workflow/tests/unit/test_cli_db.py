@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from surfaces.cli import _db
 
 
@@ -29,6 +31,7 @@ def test_cli_sync_conn_uses_shared_surface_database_authority(monkeypatch) -> No
 
     resolved = _db.cli_sync_conn()
 
+    assert _db.cli_repo_root() == Path(__file__).resolve().parents[4]
     assert resolved is fake_conn
     assert captured["env"] == {
         "WORKFLOW_DATABASE_URL": "postgresql://repo.test/workflow",
