@@ -1,8 +1,9 @@
-"""Compatibility projection for claim lifecycle transitions.
+"""Process-local projection of DB-backed claim lifecycle transitions.
 
-The durable runtime authority now lives in the DB-backed
-`workflow_claim_lifecycle_transition_authority` table. This module preserves a
-process-local projection for non-DB consumers that still need a pure mapping.
+The durable authority lives in Postgres in
+`workflow_claim_lifecycle_transition_authority`. This module is only a
+bootstrapped mirror for synchronous consumers such as the execution state
+machine. If this mapping changes, the DB authority must change with it.
 """
 
 from __future__ import annotations

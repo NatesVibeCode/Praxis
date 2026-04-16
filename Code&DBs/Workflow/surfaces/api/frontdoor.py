@@ -15,6 +15,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 import json
 import os
+from pathlib import Path
 from typing import Any, Protocol
 
 from contracts.domain import WorkflowEdgeContract, WorkflowNodeContract, WorkflowRequest
@@ -23,9 +24,16 @@ from observability.status_observability import build_frontdoor_observability
 from policy.domain import AdmissionDecisionRecord
 from registry.domain import RegistryResolver
 from runtime.execution import RuntimeOrchestrator
-from runtime.instance import NativeWorkflowInstance, resolve_native_instance
+from runtime.instance import (
+    PRAXIS_INSTANCE_NAME_ENV,
+    PRAXIS_RECEIPTS_DIR_ENV,
+    PRAXIS_RUNTIME_PROFILE_ENV,
+    PRAXIS_TOPOLOGY_DIR_ENV,
+    NativeInstanceResolutionError,
+    NativeWorkflowInstance,
+    resolve_native_instance,
+)
 from runtime.intake import WorkflowIntakeOutcome, WorkflowIntakePlanner
-from storage.dev_postgres import local_postgres_bootstrap, local_postgres_health
 from storage.postgres import (
     PostgresEvidenceReader,
     WorkflowAdmissionDecisionWrite,
@@ -37,6 +45,16 @@ from storage.postgres import (
     persist_workflow_admission,
 )
 
+from . import _frontdoor_health as _health
+from . import _frontdoor_status as _status
+from . import _frontdoor_submit as _submit
+from ._frontdoor_serialize import (
+    _json_loads_maybe,
+    _measured_summary,
+    _serialize_decision,
+    _serialize_inspection,
+    _submission_summary_from_row,
+)
 from ._operator_helpers import _json_compatible, _now, _run_async as _shared_run_async
 from ._payload_contract import require_text
 
@@ -217,6 +235,71 @@ def _run_async(awaitable: Awaitable[Any]) -> Any:
     )
 
 
+def _native_boundary_mismatch_if_present(
+    env: Mapping[str, str],
+    *,
+    env_name: str,
+    actual_value: str,
+) -> None:
+    expected_value = str(env.get(env_name) or "").strip()
+    if expected_value and expected_value != actual_value:
+        raise NativeInstanceResolutionError(
+            "native_instance.boundary_mismatch",
+            f"{env_name} does not match the repo-local native instance contract",
+            details={
+                "environment_variable": env_name,
+                "expected": actual_value,
+                "actual": expected_value,
+            },
+        )
+
+
+def _native_path_boundary_mismatch_if_present(
+    env: Mapping[str, str],
+    *,
+    env_name: str,
+    actual_path: Path,
+) -> None:
+    expected_value = str(env.get(env_name) or "").strip()
+    if not expected_value:
+        return
+    expected_path = Path(expected_value).expanduser().resolve()
+    if expected_path != actual_path:
+        raise NativeInstanceResolutionError(
+            "native_instance.boundary_mismatch",
+            f"{env_name} does not match the repo-local native instance contract",
+            details={
+                "environment_variable": env_name,
+                "expected": str(actual_path),
+                "actual": str(expected_path),
+            },
+        )
+
+
+def _assert_repo_local_native_contract(env: Mapping[str, str]) -> None:
+    repo_root = Path(__file__).resolve().parents[4]
+    _native_boundary_mismatch_if_present(
+        env,
+        env_name=PRAXIS_RUNTIME_PROFILE_ENV,
+        actual_value="praxis",
+    )
+    _native_boundary_mismatch_if_present(
+        env,
+        env_name=PRAXIS_INSTANCE_NAME_ENV,
+        actual_value="praxis",
+    )
+    _native_path_boundary_mismatch_if_present(
+        env,
+        env_name=PRAXIS_RECEIPTS_DIR_ENV,
+        actual_path=(repo_root / "artifacts" / "runtime_receipts").resolve(),
+    )
+    _native_path_boundary_mismatch_if_present(
+        env,
+        env_name=PRAXIS_TOPOLOGY_DIR_ENV,
+        actual_path=(repo_root / "artifacts" / "runtime_topology").resolve(),
+    )
+
+
 def _require_mapping(value: object, *, field_name: str) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
         raise NativeFrontdoorError(
@@ -225,51 +308,6 @@ def _require_mapping(value: object, *, field_name: str) -> Mapping[str, Any]:
             details={"field": field_name, "value_type": type(value).__name__},
         )
     return value
-
-
-def _json_loads_maybe(value: object, default: Any) -> Any:
-    if value is None:
-        return default
-    if isinstance(value, str):
-        try:
-            return json.loads(value)
-        except (json.JSONDecodeError, TypeError, ValueError):
-            return default
-    return value
-
-
-def _measured_summary(operation_set: object) -> dict[str, int]:
-    operations = _json_loads_maybe(operation_set, [])
-    summary = {"create": 0, "update": 0, "delete": 0, "rename": 0}
-    if not isinstance(operations, Sequence) or isinstance(operations, (str, bytes, bytearray)):
-        summary["total"] = 0
-        return summary
-    for item in operations:
-        if not isinstance(item, Mapping):
-            continue
-        action = str(item.get("action") or "").strip().lower()
-        if action in summary:
-            summary[action] += 1
-    summary["total"] = sum(summary.values())
-    return summary
-
-
-def _submission_summary_from_row(row: Mapping[str, Any]) -> dict[str, Any] | None:
-    submission_id = str(row.get("submission_id") or "").strip()
-    if not submission_id:
-        return None
-    payload: dict[str, Any] = {
-        "submission_id": submission_id,
-        "result_kind": str(row.get("submission_result_kind") or "").strip() or None,
-        "summary": str(row.get("submission_summary") or "").strip() or None,
-        "comparison_status": str(row.get("submission_comparison_status") or "").strip() or None,
-        "integrity_status": str(row.get("submission_comparison_status") or "").strip() or None,
-        "acceptance_status": str(row.get("submission_acceptance_status") or "").strip() or None,
-        "measured_summary": _measured_summary(row.get("submission_operation_set")),
-        "latest_review_decision": str(row.get("latest_submission_review_decision") or "").strip() or None,
-        "latest_review_summary": str(row.get("latest_submission_review_summary") or "").strip() or None,
-    }
-    return payload
 
 
 async def _load_run_jobs_with_submission_summary(
@@ -525,62 +563,6 @@ def _submission_from_outcome(
     return WorkflowAdmissionSubmission(decision=decision_write, run=run_write)
 
 
-def _serialize_decision(decision: AdmissionDecisionRecord) -> dict[str, Any]:
-    return {
-        "admission_decision_id": decision.admission_decision_id,
-        "workflow_id": decision.workflow_id,
-        "request_id": decision.request_id,
-        "decision": decision.decision.value,
-        "reason_code": decision.reason_code,
-        "decided_at": decision.decided_at.isoformat(),
-        "decided_by": decision.decided_by,
-        "policy_snapshot_ref": decision.policy_snapshot_ref,
-        "validation_result_ref": decision.validation_result_ref,
-        "authority_context_ref": decision.authority_context_ref,
-    }
-
-
-def _serialize_inspection(model: InspectionReadModel) -> dict[str, Any]:
-    return {
-        "run_id": model.run_id,
-        "request_id": model.request_id,
-        "current_state": model.current_state,
-        "node_timeline": list(model.node_timeline),
-        "terminal_reason": model.terminal_reason,
-        "operator_frame_source": model.operator_frame_source,
-        "operator_frames": [
-            {
-                "operator_frame_id": frame.operator_frame_id,
-                "node_id": frame.node_id,
-                "operator_kind": frame.operator_kind,
-                "frame_state": frame.frame_state,
-                "item_index": frame.item_index,
-                "iteration_index": frame.iteration_index,
-                "source_snapshot": dict(frame.source_snapshot or {}),
-                "aggregate_outputs": dict(frame.aggregate_outputs or {}),
-                "active_count": frame.active_count,
-                "stop_reason": frame.stop_reason,
-                "started_at": (
-                    frame.started_at.isoformat() if frame.started_at is not None else None
-                ),
-                "finished_at": (
-                    frame.finished_at.isoformat() if frame.finished_at is not None else None
-                ),
-            }
-            for frame in model.operator_frames
-        ],
-        "completeness": {
-            "is_complete": model.completeness.is_complete,
-            "missing_evidence_refs": list(model.completeness.missing_evidence_refs),
-        },
-        "watermark": {
-            "evidence_seq": model.watermark.evidence_seq,
-            "source": model.watermark.source,
-        },
-        "evidence_refs": list(model.evidence_refs),
-    }
-
-
 def _load_sync_status(
     run_id: str,
     *,
@@ -613,9 +595,9 @@ class NativeWorkflowFrontdoor:
     """Thin repo-local frontdoor for submit, status, and health."""
 
     registry: RegistryResolver | None = None
-    postgres_health_service: Callable[[Mapping[str, str] | None], _JsonStatus] = local_postgres_health
+    postgres_health_service: Callable[[Mapping[str, str] | None], _JsonStatus] = _health.database_status_service
     postgres_bootstrap_service: Callable[[Mapping[str, str] | None], _JsonStatus] = (
-        local_postgres_bootstrap
+        _health.database_bootstrap_service
     )
     connect_database: Callable[[Mapping[str, str] | None], Awaitable[_Connection]] = (
         connect_workflow_database
@@ -651,7 +633,24 @@ class NativeWorkflowFrontdoor:
 
     def _resolve_instance(self, *, env: Mapping[str, str] | None) -> tuple[Mapping[str, str], NativeWorkflowInstance]:
         source = env if env is not None else os.environ
+        _assert_repo_local_native_contract(source)
         return source, resolve_native_instance(env=source)
+
+    def _run_sync_submission(
+        self,
+        env: Mapping[str, str] | None,
+        *,
+        submission: WorkflowAdmissionSubmission,
+    ) -> WorkflowAdmissionWriteResult:
+        return _run_async(self._submit_submission(env, submission=submission))
+
+    def _run_sync_status_row(
+        self,
+        env: Mapping[str, str] | None,
+        *,
+        run_id: str,
+    ) -> tuple[dict[str, Any], dict[str, Any] | None, list[dict[str, Any]], _RunStatusObservabilityHints]:
+        return _run_async(self._load_run_status_row(env, run_id=run_id))
 
     def health(
         self,
@@ -659,16 +658,13 @@ class NativeWorkflowFrontdoor:
         env: Mapping[str, str] | None = None,
         bootstrap: bool = False,
     ) -> dict[str, Any]:
-        source, instance = self._resolve_instance(env=env)
-        postgres_status = (
-            self.postgres_bootstrap_service(source)
-            if bootstrap
-            else self.postgres_health_service(source)
+        return _health.build_health_payload(
+            resolve_instance=lambda current_env: self._resolve_instance(env=current_env),
+            postgres_health_service=self.postgres_health_service,
+            postgres_bootstrap_service=self.postgres_bootstrap_service,
+            env=env,
+            bootstrap=bootstrap,
         )
-        return {
-            "native_instance": instance.to_contract(),
-            "database": postgres_status.to_json(),
-        }
 
     def submit(
         self,
@@ -676,35 +672,16 @@ class NativeWorkflowFrontdoor:
         request_payload: Mapping[str, Any],
         env: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
-        source, instance = self._resolve_instance(env=env)
-        request = _request_from_mapping(request_payload)
-        requested_at = request.requested_at or _now()
-        request = replace(request, requested_at=requested_at)
-        registry = self._require_registry()
-        planner = WorkflowIntakePlanner(registry=registry)
-        outcome = planner.plan(request=request)
-        submission = _submission_from_outcome(
-            outcome=outcome,
-            requested_at=requested_at,
+        return _submit.build_submit_payload(
+            self,
+            request_payload=request_payload,
+            env=env,
+            now=_now,
+            request_from_mapping=_request_from_mapping,
+            submission_from_outcome=_submission_from_outcome,
+            serialize_decision=_serialize_decision,
+            load_sync_status=lambda run_id: _load_sync_status(run_id, env=env if env is not None else os.environ),
         )
-        write_result = _run_async(self._submit_submission(source, submission=submission))
-        sync_payload = _load_sync_status(write_result.run_id, env=source)
-        return {
-            "native_instance": instance.to_contract(),
-            "run": {
-                "run_id": write_result.run_id,
-                "workflow_id": outcome.workflow_request.workflow_id,
-                "request_id": outcome.workflow_request.request_id,
-                "current_state": outcome.current_state.value,
-                "workflow_definition_id": submission.run.workflow_definition_id,
-                "admitted_definition_hash": submission.run.admitted_definition_hash,
-                "persisted": True,
-                "sync_status": sync_payload["sync_status"],
-                "sync_cycle_id": sync_payload["sync_cycle_id"],
-                "sync_error_count": sync_payload["sync_error_count"],
-            },
-            "admission_decision": _serialize_decision(outcome.admission_decision),
-        }
 
     async def _submit_submission(
         self,
@@ -726,60 +703,19 @@ class NativeWorkflowFrontdoor:
         run_id: str,
         env: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
-        source, instance = self._resolve_instance(env=env)
-        row, packet_inspection, jobs, observability_hints = _run_async(
-            self._load_run_status_row(source, run_id=run_id),
-        )
-        inspection = None
-        inspection_payload = None
-        last_event_id = row.get("last_event_id")
-        if isinstance(last_event_id, str) and last_event_id:
-            inspection = RuntimeOrchestrator(
-                evidence_reader=self.evidence_reader_factory(source),
-            ).inspect_run(run_id=run_id)
-            inspection_payload = _serialize_inspection(inspection)
-        observability_payload = build_frontdoor_observability(
+        return _status.build_status_payload(
+            self,
             run_id=run_id,
-            run_row=row,
-            inspection=inspection,
-            jobs=jobs,
-            packet_inspection=packet_inspection,
-            packet_inspection_source=observability_hints.packet_inspection_source,
-            contract_drift_refs=observability_hints.contract_drift_refs,
-        ).to_json()
-        sync_payload = _load_sync_status(run_id, env=source)
-        payload = {
-            "native_instance": instance.to_contract(),
-            "run": {
-                "run_id": row["run_id"],
-                "workflow_id": row["workflow_id"],
-                "request_id": row["request_id"],
-                "request_digest": row["request_digest"],
-                "workflow_definition_id": row["workflow_definition_id"],
-                "admitted_definition_hash": row["admitted_definition_hash"],
-                "current_state": row["current_state"],
-                "terminal_reason_code": row["terminal_reason_code"],
-                "run_idempotency_key": row["run_idempotency_key"],
-                "context_bundle_id": row["context_bundle_id"],
-                "authority_context_digest": row["authority_context_digest"],
-                "admission_decision_id": row["admission_decision_id"],
-                "requested_at": _json_compatible(row["requested_at"]),
-                "admitted_at": _json_compatible(row["admitted_at"]),
-                "started_at": _json_compatible(row["started_at"]),
-                "finished_at": _json_compatible(row["finished_at"]),
-                "last_event_id": last_event_id,
-                "persisted": True,
-                "sync_status": sync_payload["sync_status"],
-                "sync_cycle_id": sync_payload["sync_cycle_id"],
-                "sync_error_count": sync_payload["sync_error_count"],
-                "jobs": jobs,
-            },
-            "inspection": inspection_payload,
-            "observability": observability_payload,
-        }
-        if packet_inspection is not None:
-            payload["packet_inspection"] = packet_inspection
-        return payload
+            env=env,
+            runtime_orchestrator_cls=RuntimeOrchestrator,
+            serialize_inspection=_serialize_inspection,
+            build_frontdoor_observability=build_frontdoor_observability,
+            json_compatible=_json_compatible,
+            load_sync_status=lambda current_run_id: _load_sync_status(
+                current_run_id,
+                env=env if env is not None else os.environ,
+            ),
+        )
 
     async def _load_run_row(
         self,

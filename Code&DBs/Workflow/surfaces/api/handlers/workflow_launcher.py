@@ -8,6 +8,8 @@ import subprocess
 from dataclasses import dataclass
 from typing import Any
 
+from surfaces._boot import workflow_database_status_payload
+
 from ._shared import REPO_ROOT
 
 
@@ -150,10 +152,9 @@ def launcher_status_payload() -> dict[str, Any]:
     db_ok = False
     schema_ok = False
     try:
-        from storage.dev_postgres import local_postgres_health
-        pg_health = local_postgres_health()
-        db_ok = pg_health.get("reachable", False) if isinstance(pg_health, dict) else False
-        schema_ok = pg_health.get("bootstrapped", False) if isinstance(pg_health, dict) else False
+        pg_health = workflow_database_status_payload()
+        db_ok = bool(pg_health.get("reachable", False))
+        schema_ok = bool(pg_health.get("bootstrapped", False))
     except Exception:
         pass
     # Fallback to doctor if direct check fails

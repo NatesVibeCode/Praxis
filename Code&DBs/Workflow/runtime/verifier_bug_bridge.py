@@ -33,6 +33,12 @@ def _optional_connection(conn: "SyncPostgresConnection | None" = None) -> "SyncP
         return None
 
 
+def _bug_evidence_repository(conn: "SyncPostgresConnection"):
+    from storage.postgres import PostgresBugEvidenceRepository
+
+    return PostgresBugEvidenceRepository(conn)
+
+
 def _normalize_bug_tag(value: str) -> str:
     text = re.sub(r"[^a-z0-9._:/-]+", "-", str(value).strip().lower())
     return text.strip("-") or "none"
@@ -201,29 +207,14 @@ def _link_bug_evidence(
     db = _optional_connection(conn)
     if db is None or not bug_id or not evidence_ref:
         return
-    db.execute(
-        """
-        INSERT INTO bug_evidence_links (
-            bug_evidence_link_id,
-            bug_id,
-            evidence_kind,
-            evidence_ref,
-            evidence_role,
-            created_at,
-            created_by,
-            notes
-        ) VALUES (
-            $1, $2, $3, $4, $5, NOW(), $6, $7
-        )
-        ON CONFLICT (bug_id, evidence_kind, evidence_ref, evidence_role) DO NOTHING
-        """,
-        f"bug_evidence_link:{uuid.uuid4().hex}",
-        bug_id,
-        evidence_kind,
-        evidence_ref,
-        evidence_role,
-        "verifier_authority",
-        notes,
+    _bug_evidence_repository(db).upsert_bug_evidence_link(
+        bug_id=bug_id,
+        evidence_kind=evidence_kind,
+        evidence_ref=evidence_ref,
+        evidence_role=evidence_role,
+        created_by="verifier_authority",
+        notes=notes,
+        bug_evidence_link_id=f"bug_evidence_link:{uuid.uuid4().hex}",
     )
 
 

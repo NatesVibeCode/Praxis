@@ -7,6 +7,7 @@ sync).  Call ``boot()`` once at surface startup.
 from __future__ import annotations
 
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -20,17 +21,17 @@ def ensure_workflow_on_path(workflow_root: Path) -> None:
         sys.path.insert(0, root_str)
 
 
-def _resolve_boot_env(
+def resolve_surface_env(
     *,
     repo_root: Path | None = None,
     workflow_root: Path | None = None,
-    env: dict[str, str] | None = None,
+    env: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
     if workflow_root is not None:
         ensure_workflow_on_path(workflow_root)
 
     if env is not None:
-        return env
+        return dict(env)
 
     resolved_repo_root = repo_root
     if resolved_repo_root is None:
@@ -47,7 +48,7 @@ def create_pg_conn(
     env: dict[str, str] | None = None,
 ) -> Any:
     """Create a shared Postgres connection without hidden startup side effects."""
-    resolved_env = _resolve_boot_env(
+    resolved_env = resolve_surface_env(
         repo_root=repo_root,
         workflow_root=workflow_root,
         env=env,
@@ -65,7 +66,7 @@ def bootstrap_pg_conn(
     env: dict[str, str] | None = None,
 ) -> Any:
     """Create a shared Postgres connection and explicitly bootstrap schema."""
-    resolved_env = _resolve_boot_env(
+    resolved_env = resolve_surface_env(
         repo_root=repo_root,
         workflow_root=workflow_root,
         env=env,
@@ -118,4 +119,51 @@ def sync_registries(conn: Any) -> tuple[list[str], list[str]]:
     return succeeded, skipped
 
 
-__all__ = ["bootstrap_pg_conn", "create_pg_conn", "ensure_workflow_on_path", "sync_registries"]
+def workflow_database_status(
+    *,
+    repo_root: Path | None = None,
+    workflow_root: Path | None = None,
+    env: Mapping[str, str] | None = None,
+    bootstrap: bool = False,
+) -> Any:
+    """Resolve env once and delegate to the canonical local Postgres helper."""
+
+    resolved_env = resolve_surface_env(
+        repo_root=repo_root,
+        workflow_root=workflow_root,
+        env=env,
+    )
+
+    from storage.dev_postgres import local_postgres_bootstrap, local_postgres_health
+
+    if bootstrap:
+        return local_postgres_bootstrap(env=resolved_env)
+    return local_postgres_health(env=resolved_env)
+
+
+def workflow_database_status_payload(
+    *,
+    repo_root: Path | None = None,
+    workflow_root: Path | None = None,
+    env: Mapping[str, str] | None = None,
+    bootstrap: bool = False,
+) -> dict[str, Any]:
+    """Return the JSON-safe status payload for the canonical database authority."""
+
+    return workflow_database_status(
+        repo_root=repo_root,
+        workflow_root=workflow_root,
+        env=env,
+        bootstrap=bootstrap,
+    ).to_json()
+
+
+__all__ = [
+    "bootstrap_pg_conn",
+    "create_pg_conn",
+    "ensure_workflow_on_path",
+    "resolve_surface_env",
+    "sync_registries",
+    "workflow_database_status",
+    "workflow_database_status_payload",
+]

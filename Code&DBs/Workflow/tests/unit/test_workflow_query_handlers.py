@@ -4418,6 +4418,44 @@ def test_handle_operator_view_replay_ready_bugs_returns_direct_payload() -> None
     assert result["returned_count"] == 1
 
 
+def test_handle_bugs_resolve_fixed_requires_validates_fix_evidence() -> None:
+    class _BugTracker:
+        def resolve(self, bug_id: str, status: str):
+            assert bug_id == "BUG-123"
+            assert status == "FIXED"
+            raise ValueError(
+                "resolve() status FIXED requires validates_fix evidence for BUG-123"
+            )
+
+    class _BugTrackerMod:
+        class BugStatus:
+            FIXED = "FIXED"
+            WONT_FIX = "WONT_FIX"
+            DEFERRED = "DEFERRED"
+
+    subs = SimpleNamespace(
+        get_bug_tracker=lambda: _BugTracker(),
+        get_bug_tracker_mod=lambda: _BugTrackerMod(),
+    )
+
+    try:
+        workflow_query_core.handle_bugs(
+            subs,
+            {
+                "action": "resolve",
+                "bug_id": "BUG-123",
+                "status": "FIXED",
+            },
+            parse_bug_status=lambda _mod, raw: raw,
+            parse_bug_severity=lambda _mod, raw: raw,
+            parse_bug_category=lambda _mod, raw: raw,
+        )
+    except workflow_query_core._ClientError as exc:
+        assert "validates_fix" in str(exc)
+    else:
+        raise AssertionError("expected resolve to fail closed without validates_fix evidence")
+
+
 def test_handle_operator_view_issue_backlog_returns_direct_payload(monkeypatch) -> None:
     captured: dict[str, Any] = {}
 

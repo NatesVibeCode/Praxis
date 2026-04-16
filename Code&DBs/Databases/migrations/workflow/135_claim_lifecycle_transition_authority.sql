@@ -65,132 +65,139 @@ INSERT INTO workflow_claim_lifecycle_transition_authority (
         'claim_received',
         'claim_validating',
         'Claims must validate before they can be accepted, blocked, or rejected.',
-        '2026-04-16T00:00:00+00:00',
+        '2026-01-01T00:00:00+00:00',
         NULL,
         'migration.135_claim_lifecycle_transition_authority',
-        '2026-04-16T00:00:00+00:00'
+        '2026-01-01T00:00:00+00:00'
     ),
     (
         'claim_lifecycle_transition:claim_validating:claim_accepted:v1',
         'claim_validating',
         'claim_accepted',
         'Validated claims may advance to accepted.',
-        '2026-04-16T00:00:00+00:00',
+        '2026-01-01T00:00:00+00:00',
         NULL,
         'migration.135_claim_lifecycle_transition_authority',
-        '2026-04-16T00:00:00+00:00'
+        '2026-01-01T00:00:00+00:00'
     ),
     (
         'claim_lifecycle_transition:claim_validating:claim_blocked:v1',
         'claim_validating',
         'claim_blocked',
         'Validated claims may pause in a blocked state when prerequisites are unmet.',
-        '2026-04-16T00:00:00+00:00',
+        '2026-01-01T00:00:00+00:00',
         NULL,
         'migration.135_claim_lifecycle_transition_authority',
-        '2026-04-16T00:00:00+00:00'
+        '2026-01-01T00:00:00+00:00'
     ),
     (
         'claim_lifecycle_transition:claim_validating:claim_rejected:v1',
         'claim_validating',
         'claim_rejected',
         'Validated claims may terminate as rejected.',
-        '2026-04-16T00:00:00+00:00',
+        '2026-01-01T00:00:00+00:00',
         NULL,
         'migration.135_claim_lifecycle_transition_authority',
-        '2026-04-16T00:00:00+00:00'
+        '2026-01-01T00:00:00+00:00'
     ),
     (
         'claim_lifecycle_transition:claim_blocked:claim_validating:v1',
         'claim_blocked',
         'claim_validating',
         'Blocked claims may re-enter validation when conditions change.',
-        '2026-04-16T00:00:00+00:00',
+        '2026-01-01T00:00:00+00:00',
         NULL,
         'migration.135_claim_lifecycle_transition_authority',
-        '2026-04-16T00:00:00+00:00'
+        '2026-01-01T00:00:00+00:00'
     ),
     (
         'claim_lifecycle_transition:claim_blocked:claim_rejected:v1',
         'claim_blocked',
         'claim_rejected',
         'Blocked claims may terminate as rejected.',
-        '2026-04-16T00:00:00+00:00',
+        '2026-01-01T00:00:00+00:00',
         NULL,
         'migration.135_claim_lifecycle_transition_authority',
-        '2026-04-16T00:00:00+00:00'
+        '2026-01-01T00:00:00+00:00'
     ),
     (
         'claim_lifecycle_transition:claim_accepted:lease_requested:v1',
         'claim_accepted',
         'lease_requested',
         'Accepted claims must request a lease before execution can continue.',
-        '2026-04-16T00:00:00+00:00',
+        '2026-01-01T00:00:00+00:00',
         NULL,
         'migration.135_claim_lifecycle_transition_authority',
-        '2026-04-16T00:00:00+00:00'
+        '2026-01-01T00:00:00+00:00'
     ),
     (
         'claim_lifecycle_transition:lease_requested:lease_active:v1',
         'lease_requested',
         'lease_active',
         'Lease requests may activate when capacity is granted.',
-        '2026-04-16T00:00:00+00:00',
+        '2026-01-01T00:00:00+00:00',
         NULL,
         'migration.135_claim_lifecycle_transition_authority',
-        '2026-04-16T00:00:00+00:00'
+        '2026-01-01T00:00:00+00:00'
     ),
     (
         'claim_lifecycle_transition:lease_requested:lease_blocked:v1',
         'lease_requested',
         'lease_blocked',
         'Lease requests may block when capacity is unavailable.',
-        '2026-04-16T00:00:00+00:00',
+        '2026-01-01T00:00:00+00:00',
         NULL,
         'migration.135_claim_lifecycle_transition_authority',
-        '2026-04-16T00:00:00+00:00'
+        '2026-01-01T00:00:00+00:00'
     ),
     (
         'claim_lifecycle_transition:lease_blocked:lease_requested:v1',
         'lease_blocked',
         'lease_requested',
         'Blocked lease requests may retry when capacity is reconsidered.',
-        '2026-04-16T00:00:00+00:00',
+        '2026-01-01T00:00:00+00:00',
         NULL,
         'migration.135_claim_lifecycle_transition_authority',
-        '2026-04-16T00:00:00+00:00'
+        '2026-01-01T00:00:00+00:00'
     ),
     (
         'claim_lifecycle_transition:lease_active:lease_expired:v1',
         'lease_active',
         'lease_expired',
         'Active leases may expire when their validity window closes.',
-        '2026-04-16T00:00:00+00:00',
+        '2026-01-01T00:00:00+00:00',
         NULL,
         'migration.135_claim_lifecycle_transition_authority',
-        '2026-04-16T00:00:00+00:00'
+        '2026-01-01T00:00:00+00:00'
     ),
     (
         'claim_lifecycle_transition:lease_active:proposal_submitted:v1',
         'lease_active',
         'proposal_submitted',
         'Active leases may advance to proposal submission.',
-        '2026-04-16T00:00:00+00:00',
+        '2026-01-01T00:00:00+00:00',
         NULL,
         'migration.135_claim_lifecycle_transition_authority',
-        '2026-04-16T00:00:00+00:00'
+        '2026-01-01T00:00:00+00:00'
     ),
     (
         'claim_lifecycle_transition:lease_active:proposal_invalid:v1',
         'lease_active',
         'proposal_invalid',
         'Active leases may fail closed with an invalid proposal result.',
-        '2026-04-16T00:00:00+00:00',
+        '2026-01-01T00:00:00+00:00',
         NULL,
         'migration.135_claim_lifecycle_transition_authority',
-        '2026-04-16T00:00:00+00:00'
+        '2026-01-01T00:00:00+00:00'
     )
-ON CONFLICT (workflow_claim_lifecycle_transition_id) DO NOTHING;
+ON CONFLICT (workflow_claim_lifecycle_transition_id) DO UPDATE
+SET from_state = EXCLUDED.from_state,
+    to_state = EXCLUDED.to_state,
+    rationale = EXCLUDED.rationale,
+    effective_from = EXCLUDED.effective_from,
+    effective_to = EXCLUDED.effective_to,
+    decision_ref = EXCLUDED.decision_ref,
+    created_at = EXCLUDED.created_at;
 
 COMMENT ON TABLE workflow_claim_lifecycle_transition_authority IS 'DB-backed authority for allowed claim/lease/proposal lifecycle transitions.';
 COMMENT ON COLUMN workflow_claim_lifecycle_transition_authority.decision_ref IS 'Durable provenance reference for the transition authority row.';

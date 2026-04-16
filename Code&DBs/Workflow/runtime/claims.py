@@ -28,7 +28,6 @@ from storage.postgres.claim_lifecycle_repository import (
     ClaimLifecycleAuthorityError,
     PostgresClaimLifecycleRepository,
 )
-from runtime.claim_state_machine import ALLOWED_TRANSITIONS
 
 from .domain import RouteIdentity, RunState, RuntimeBoundaryError, RuntimeLifecycleError
 from registry.persona_authority import (
@@ -1009,7 +1008,6 @@ class ClaimLeaseProposalRuntime:
 
 
 __all__ = [
-    "ALLOWED_TRANSITIONS",
     "ClaimLeaseProposalRuntime",
     "ClaimLeaseProposalSnapshot",
     "ClaimLeaseProposalTransitionRequest",

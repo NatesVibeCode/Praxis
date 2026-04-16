@@ -27,6 +27,12 @@ _ALLOWED_EVIDENCE_ROLES = frozenset({"observed_in", "attempted_fix", "validates_
 _VERIFICATION_SUCCESS_STATUSES = frozenset({"passed", "succeeded", "success", "ok"})
 
 
+def _bug_evidence_repository(conn: "SyncPostgresConnection"):
+    from storage.postgres import PostgresBugEvidenceRepository
+
+    return PostgresBugEvidenceRepository(conn)
+
+
 def _normalize_tag_value(value: object) -> str:
     text = _TAG_VALUE_PATTERN.sub("-", str(value or "").strip().lower())
     return text.strip("-") or "none"
@@ -570,6 +576,13 @@ class BugTracker:
         signature: dict[str, Any],
         limit: int = 5,
     ) -> dict[str, Any]:
+        if str(signature.get("fingerprint_scope") or "") == "bug_only":
+            return {
+                "count": 0,
+                "items": (),
+                "reason_code": "bug.historical_fixes.non_authoritative_signature",
+                "errors": (),
+            }
         failure_code = str(signature.get("failure_code") or "").strip()
         node_anchor = str(signature.get("node_id") or signature.get("job_label") or "").strip()
         if not failure_code and not node_anchor:
@@ -818,35 +831,17 @@ class BugTracker:
             evidence_kind=evidence_kind,
             evidence_ref=evidence_ref,
         )
-        rows = self._query_optional_rows(
-            """
-            INSERT INTO bug_evidence_links (
-                bug_evidence_link_id,
-                bug_id,
-                evidence_kind,
-                evidence_ref,
-                evidence_role,
-                created_at,
-                created_by,
-                notes
-            ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8
-            )
-            ON CONFLICT (bug_id, evidence_kind, evidence_ref, evidence_role)
-            DO UPDATE SET
-                notes = COALESCE(bug_evidence_links.notes, EXCLUDED.notes)
-            RETURNING *
-            """,
-            f"bug_evidence_link:{uuid.uuid4().hex}",
-            bug_id,
-            evidence_kind,
-            evidence_ref,
-            evidence_role,
-            self._now(),
-            created_by,
-            notes,
+        row = _bug_evidence_repository(self._conn).upsert_bug_evidence_link(
+            bug_id=bug_id,
+            evidence_kind=evidence_kind,
+            evidence_ref=evidence_ref,
+            evidence_role=evidence_role,
+            created_by=created_by,
+            notes=notes,
+            bug_evidence_link_id=f"bug_evidence_link:{uuid.uuid4().hex}",
+            created_at=self._now(),
         )
-        return self._row_to_evidence_link(rows[0]) if rows else None
+        return self._row_to_evidence_link(row) if row else None
 
     def list_evidence(
         self,
@@ -939,7 +934,7 @@ class BugTracker:
         failure_code = str(expected.get("failure_code") or "").strip()
         node_anchor = str(expected.get("node_id") or expected.get("job_label") or "").strip()
         if not failure_code or not node_anchor:
-            return None, "bug.replay_backfill.insufficient_signature"
+            return None, "bug.replay_backfill.non_authoritative_signature"
         receipts, error = self._find_signature_receipts(
             failure_code=failure_code,
             node_id=node_anchor,
@@ -1380,14 +1375,18 @@ class BugTracker:
             if signature_receipt is not None
             else _extract_tag_value(bug.tags, "model")
         ) or None
-        signature = build_failure_signature(
-            failure_code=failure_code,
-            job_label=job_label,
-            node_id=node_id,
-            failure_category=failure_category,
-            agent=agent,
-            provider_slug=provider_slug,
-            model_slug=model_slug,
+        signature = _bug_evidence.materialize_packet_signature(
+            build_failure_signature(
+                failure_code=failure_code,
+                job_label=job_label,
+                node_id=node_id,
+                failure_category=failure_category,
+                agent=agent,
+                provider_slug=provider_slug,
+                model_slug=model_slug,
+                source_kind=bug.source_kind,
+            ),
+            bug_id=bug.bug_id,
             source_kind=bug.source_kind,
         )
         verification_rows, verification_error = self._load_verification_rows(
@@ -1643,6 +1642,16 @@ class BugTracker:
         if status not in _RESOLVED_STATUSES:
             raise ValueError(
                 f"resolve() status must be one of {[s.value for s in _RESOLVED_STATUSES]}, got {status.value}"
+            )
+        bug = self.get(bug_id)
+        if bug is None:
+            return None
+        if status == BugStatus.FIXED and not self.list_evidence(
+            bug_id,
+            evidence_role="validates_fix",
+        ):
+            raise ValueError(
+                f"resolve() status {status.value} requires validates_fix evidence for {bug_id}"
             )
         now = self._now()
         rows = self._conn.execute(
@@ -1911,15 +1920,18 @@ class BugTracker:
             """
             SELECT COUNT(*)
               FROM bugs AS b
-             WHERE b.discovered_in_run_id IS NOT NULL
-                OR b.discovered_in_receipt_id IS NOT NULL
-                OR EXISTS (
-                    SELECT 1
-                      FROM bug_evidence_links AS bel
-                     WHERE bel.bug_id = b.bug_id
-                       AND bel.evidence_role = 'observed_in'
-                       AND bel.evidence_kind IN ('receipt', 'run')
-                )
+             WHERE UPPER(b.status) IN ('OPEN', 'IN_PROGRESS')
+               AND (
+                    b.discovered_in_run_id IS NOT NULL
+                 OR b.discovered_in_receipt_id IS NOT NULL
+                 OR EXISTS (
+                        SELECT 1
+                          FROM bug_evidence_links AS bel
+                         WHERE bel.bug_id = b.bug_id
+                           AND bel.evidence_role = 'observed_in'
+                           AND bel.evidence_kind IN ('receipt', 'run')
+                    )
+               )
             """
         )
         if packet_ready_error:

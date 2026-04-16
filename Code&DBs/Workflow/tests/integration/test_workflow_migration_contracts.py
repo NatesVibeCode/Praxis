@@ -67,7 +67,8 @@ def test_workflow_migration_manifest_includes_provider_route_health_budget_migra
     assert "127_operator_decision_architecture_policies.sql" in filenames
     assert "128_operator_decision_embedding_architecture.sql" in filenames
     assert "132_issue_backlog_authority.sql" in filenames
-    assert filenames[-1] == "132_issue_backlog_authority.sql"
+    assert "135_claim_lifecycle_transition_authority.sql" in filenames
+    assert filenames[-1] == "135_claim_lifecycle_transition_authority.sql"
 
 
 def test_every_manifest_migration_has_expected_object_contract() -> None:

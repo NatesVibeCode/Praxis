@@ -1,0 +1,74 @@
+{
+  "module": "surfaces/api/handlers/workflow_query.py",
+  "public_exports": [
+    "_handle_query",
+    "_handle_bugs",
+    "_handle_recall",
+    "_handle_ingest",
+    "_handle_graph",
+    "_handle_receipts",
+    "_handle_constraints",
+    "_handle_friction",
+    "_handle_heal",
+    "_handle_artifacts",
+    "_handle_decompose",
+    "_handle_research",
+    "_handle_operator_view",
+    "_workflow_build_payload"
+  ],
+  "importers": [
+    "surfaces/api/handlers/workflow_query_routes.py",
+    "runtime/cqrs/commands/workflow_build.py",
+    "tests/unit/test_workflow_query_handlers.py",
+    "tests/integration/test_build_planning_contract_db.py"
+  ],
+  "endpoint_families": {
+    "dashboard": [
+      "/api/dashboard",
+      "/api/status",
+      "/api/leaderboard",
+      "/api/runs/recent"
+    ],
+    "workflows": [
+      "/api/workflows",
+      "/api/workflows/*/runs",
+      "/api/workflows/*/build",
+      "/api/workflow-triggers"
+    ],
+    "catalog": [
+      "/api/catalog",
+      "/api/catalog/review-decisions",
+      "/api/references",
+      "/api/source-options",
+      "/api/models",
+      "/api/models/market",
+      "/api/search"
+    ],
+    "objects": [
+      "/api/object-types",
+      "/api/objects",
+      "/api/documents",
+      "/api/manifests",
+      "/api/manifest-heads"
+    ],
+    "files": [
+      "/api/files",
+      "/api/files/*/content"
+    ],
+    "bugs": [
+      "/bugs",
+      "/api/bugs",
+      "/api/bugs/replay-ready"
+    ]
+  },
+  "cross_module_calls": [
+    "_handle_query -> workflow_query_core.handle_query",
+    "_handle_bugs -> workflow_query_core.handle_bugs",
+    "_handle_operator_view -> workflow_query_core.handle_operator_view",
+    "route tables in workflow_query_routes.py -> workflow_query handler functions"
+  ],
+  "duplicate_helpers_to_merge": [
+    "Bug parsing and replay-state logic duplicated with surfaces/mcp/tools/bugs.py",
+    "Route dispatch knowledge split between workflow_query.py and workflow_query_routes.py"
+  ]
+}

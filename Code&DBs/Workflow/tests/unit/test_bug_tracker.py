@@ -34,6 +34,23 @@ import uuid as _uuid
 _TEST_PREFIX = _uuid.uuid4().hex[:8]
 
 
+def _link_validates_fix_evidence(
+    tracker: BugTracker,
+    bug_id: str,
+    *,
+    evidence_ref: str | None = None,
+) -> dict[str, object]:
+    reference = evidence_ref or f"verification-run-{_uuid.uuid4().hex[:8]}"
+    tracker._validate_evidence_reference = lambda **_kwargs: None
+    return tracker.link_evidence(
+        bug_id,
+        evidence_kind="verification_run",
+        evidence_ref=reference,
+        evidence_role="validates_fix",
+        created_by="test",
+    )
+
+
 @pytest.fixture
 def tracker():
     from _pg_test_conn import get_isolated_conn
@@ -138,6 +155,7 @@ class TestStatusTransitions:
 
 class TestResolve:
     def test_resolve_sets_resolved_at(self, tracker: BugTracker, sample_bug: Bug):
+        _link_validates_fix_evidence(tracker, sample_bug.bug_id)
         resolved = tracker.resolve(sample_bug.bug_id, BugStatus.FIXED)
         assert resolved is not None
         assert resolved.status == BugStatus.FIXED
@@ -162,6 +180,14 @@ class TestResolve:
         with pytest.raises(ValueError, match="resolve"):
             tracker.resolve(sample_bug.bug_id, BugStatus.IN_PROGRESS)
 
+    def test_resolve_fixed_requires_validates_fix_evidence(
+        self,
+        tracker: BugTracker,
+        sample_bug: Bug,
+    ):
+        with pytest.raises(ValueError, match="validates_fix"):
+            tracker.resolve(sample_bug.bug_id, BugStatus.FIXED)
+
 
 # ── list with filters ──────────────────────────────────────────────────
 
@@ -172,6 +198,7 @@ class TestListBugs:
         tracker.file_bug(f"Bug A [{pfx}]", BugSeverity.P0, BugCategory.SCOPE, "desc a", "alice")
         tracker.file_bug(f"Bug B [{pfx}]", BugSeverity.P1, BugCategory.RUNTIME, "desc b", "bob")
         b3, _ = tracker.file_bug(f"Bug C [{pfx}]", BugSeverity.P2, BugCategory.TEST, "desc c", "carol")
+        _link_validates_fix_evidence(tracker, b3.bug_id)
         tracker.resolve(b3.bug_id, BugStatus.FIXED)
         return pfx
 
@@ -362,6 +389,7 @@ class TestSearch:
             f"fixed bug {pfx}",
             "bob",
         )
+        _link_validates_fix_evidence(tracker, fixed_bug.bug_id)
         tracker.resolve(fixed_bug.bug_id, BugStatus.FIXED)
 
         open_results = tracker.search(pfx, status=BugStatus.OPEN)
@@ -431,6 +459,35 @@ class TestStats:
         assert stats.underlinked_count is None
         assert any("query_failed" in error for error in stats.errors)
 
+    def test_stats_scope_packet_ready_to_open_bug_population(
+        self,
+        tracker: BugTracker,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        tracker.file_bug("Open packet bug", BugSeverity.P2, BugCategory.RUNTIME, "d", "a")
+        tracker.file_bug("Blocked bug", BugSeverity.P2, BugCategory.RUNTIME, "d", "b")
+        resolved_bug, _ = tracker.file_bug("Resolved packet bug", BugSeverity.P2, BugCategory.RUNTIME, "d", "c")
+        _link_validates_fix_evidence(tracker, resolved_bug.bug_id)
+        tracker.resolve(resolved_bug.bug_id, BugStatus.FIXED)
+
+        original = tracker._query_scalar_with_error
+
+        def _query_scalar_with_error(query: str, *params: object):
+            if "FROM bugs AS b" in query and "discovered_in_run_id IS NOT NULL" in query:
+                if "UPPER(b.status) IN ('OPEN', 'IN_PROGRESS')" in query:
+                    return 1, None
+                return 5, None
+            return original(query, *params)
+
+        monkeypatch.setattr(tracker, "_query_scalar_with_error", _query_scalar_with_error)
+
+        stats = tracker.stats()
+
+        assert stats.open_count >= 2
+        assert stats.packet_ready_count == 1
+        assert stats.replay_ready_count == 1
+        assert stats.replay_blocked_count == stats.open_count - 1
+
 
 # ── MTTR ───────────────────────────────────────────────────────────────
 
@@ -441,6 +498,7 @@ class TestMTTR:
         b2, _ = tracker.file_bug("MTTR-B", BugSeverity.P2, BugCategory.TEST, "d", "b")
 
         # Resolve both immediately -- MTTR should be very small but not None
+        _link_validates_fix_evidence(tracker, b1.bug_id)
         tracker.resolve(b1.bug_id, BugStatus.FIXED)
         tracker.resolve(b2.bug_id, BugStatus.WONT_FIX)
 
@@ -452,6 +510,7 @@ class TestMTTR:
     def test_mttr_only_resolved(self, tracker: BugTracker):
         tracker.file_bug("MTTR-Open", BugSeverity.P1, BugCategory.RUNTIME, "d", "a")
         b2, _ = tracker.file_bug("MTTR-Fixed", BugSeverity.P2, BugCategory.TEST, "d", "b")
+        _link_validates_fix_evidence(tracker, b2.bug_id)
         tracker.resolve(b2.bug_id, BugStatus.FIXED)
 
         st = tracker.stats()
@@ -762,6 +821,51 @@ class TestEvidencePackets:
         assert packet is not None
         assert packet["fix_verification"]["fix_verified"] is True
         assert packet["fix_verification"]["last_validation"]["verification_run_id"] == "verification-run-b"
+
+    def test_failure_packet_marks_unanchored_manual_bugs_as_bug_local_fallbacks(
+        self,
+        tracker: BugTracker,
+    ):
+        alpha, _ = tracker.file_bug(
+            title="Manual packet alpha",
+            severity=BugSeverity.P2,
+            category=BugCategory.RUNTIME,
+            description="Filed manually with no receipt evidence or signature tags.",
+            filed_by="alice",
+            source_kind="manual",
+        )
+        beta, _ = tracker.file_bug(
+            title="Manual packet beta",
+            severity=BugSeverity.P2,
+            category=BugCategory.RUNTIME,
+            description="Different bug, same lack of provenance.",
+            filed_by="bob",
+            source_kind="manual",
+        )
+
+        alpha_packet = tracker.failure_packet(alpha.bug_id)
+        beta_packet = tracker.failure_packet(beta.bug_id)
+
+        assert alpha_packet is not None
+        assert beta_packet is not None
+        assert alpha_packet["signature"]["authority"] == "bug_record_fallback"
+        assert alpha_packet["signature"]["fingerprint_scope"] == "bug_only"
+        assert alpha_packet["signature"]["anchor_fields"] == ()
+        assert beta_packet["signature"]["authority"] == "bug_record_fallback"
+        assert beta_packet["signature"]["fingerprint_scope"] == "bug_only"
+        assert beta_packet["signature"]["anchor_fields"] == ()
+        assert (
+            alpha_packet["signature"]["fingerprint"]
+            != beta_packet["signature"]["fingerprint"]
+        )
+        assert (
+            alpha_packet["historical_fixes"]["reason_code"]
+            == "bug.historical_fixes.non_authoritative_signature"
+        )
+        assert (
+            alpha_packet["provenance_backfill"]["reason_code"]
+            == "bug.replay_backfill.non_authoritative_signature"
+        )
 
     def test_stats_report_packet_and_fix_counts(self, tracker: BugTracker):
         packet_bug, _ = tracker.file_bug(
@@ -1099,6 +1203,7 @@ class TestEvidencePackets:
             filed_by="bob",
             tags=("failure_code:timeout_exceeded", "node_id:job-a"),
         )
+        _link_validates_fix_evidence(tracker, fixed_bug.bug_id, evidence_ref="verification-run-1")
         tracker.resolve(fixed_bug.bug_id, BugStatus.FIXED)
         monkeypatch.setattr(
             tracker,

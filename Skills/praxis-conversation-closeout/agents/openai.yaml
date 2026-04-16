@@ -1,0 +1,4 @@
+interface:
+  display_name: "Conversation Closeout"
+  short_description: "Persist chat outcomes into DB authority"
+  default_prompt: "Use $praxis-conversation-closeout to turn this conversation into durable DB-backed records and save architecture decisions correctly."

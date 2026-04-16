@@ -9,7 +9,7 @@ import tempfile
 from types import SimpleNamespace
 from typing import TextIO
 
-from runtime._workflow_database import resolve_runtime_database_url
+from surfaces.cli._db import cli_sync_conn
 from surfaces.cli.mcp_tools import load_json_file, print_json, run_cli_tool
 from runtime.spec_compiler import compile_prompt_launch_spec
 
@@ -109,13 +109,7 @@ def _manifest_record_payload(row: dict[str, object]) -> dict[str, object]:
 
 
 def _workflow_runtime_conn():
-    from storage.postgres.connection import SyncPostgresConnection, get_workflow_pool
-    from runtime._workflow_database import resolve_runtime_database_url
-
-    database_url = resolve_runtime_database_url(required=True)
-    return SyncPostgresConnection(
-        get_workflow_pool(env={"WORKFLOW_DATABASE_URL": database_url})
-    )
+    return cli_sync_conn()
 
 
 def _render_templated_spec_to_temp_file(spec_path: str, variables: dict[str, str]) -> str:
@@ -686,7 +680,6 @@ def _verify_command(args: list[str], *, stdout: TextIO) -> int:
 
     from runtime.receipt_store import find_receipt_by_run_id, load_receipt
     from runtime.verification import resolve_verify_commands, run_verify, summarize_verification
-    from storage.postgres.connection import ensure_postgres_available
 
     if not args or args[0] in {"-h", "--help"}:
         stdout.write("usage: workflow verify <receipt_id_or_run_id>\n")
@@ -706,7 +699,7 @@ def _verify_command(args: list[str], *, stdout: TextIO) -> int:
         stdout.write("no verify refs found in receipt\n")
         return 1
 
-    conn = ensure_postgres_available()
+    conn = cli_sync_conn()
     verify_cmds = resolve_verify_commands(conn, verify_bindings)
     workdir = receipt.get("workdir")
     results = run_verify(verify_cmds, workdir=workdir)
@@ -943,7 +936,6 @@ def _debate_command(args: list[str], *, stdout: TextIO) -> int:
     import json as _json
 
     from runtime.debate_workflow import DebateConfig, default_personas, run_debate
-    from storage.postgres.connection import ensure_postgres_available
 
     if not args or args[0] in {"-h", "--help"}:
         stdout.write(
@@ -1014,11 +1006,7 @@ def _debate_command(args: list[str], *, stdout: TextIO) -> int:
 
     metrics_conn = None
     try:
-        metrics_conn = ensure_postgres_available(
-            env={
-                "WORKFLOW_DATABASE_URL": resolve_runtime_database_url(required=True)
-            }
-        )
+        metrics_conn = cli_sync_conn()
     except Exception:
         metrics_conn = None
 

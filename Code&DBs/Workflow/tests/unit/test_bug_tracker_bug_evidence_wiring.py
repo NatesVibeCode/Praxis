@@ -92,3 +92,44 @@ def test_bug_tracker_helpers_delegate_to_bug_evidence(monkeypatch) -> None:
 
     assert gaps == ("wired",)
     assert write_diff == {"wire": True}
+
+
+def test_link_evidence_writes_through_bug_evidence_repository(monkeypatch) -> None:
+    tracker = BugTracker(conn=object())
+    bug = _sample_bug()
+    captured: dict[str, object] = {}
+
+    class _FakeRepository:
+        def upsert_bug_evidence_link(self, **kwargs):
+            captured.update(kwargs)
+            return {
+                "bug_evidence_link_id": "bug_evidence_link:test",
+                "bug_id": kwargs["bug_id"],
+                "evidence_kind": kwargs["evidence_kind"],
+                "evidence_ref": kwargs["evidence_ref"],
+                "evidence_role": kwargs["evidence_role"],
+                "created_at": datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc),
+                "created_by": kwargs["created_by"],
+                "notes": kwargs["notes"],
+            }
+
+    monkeypatch.setattr(tracker, "get", lambda bug_id: bug if bug_id == bug.bug_id else None)
+    monkeypatch.setattr(tracker, "_validate_evidence_reference", lambda **_kwargs: None)
+    monkeypatch.setattr(_mod, "_bug_evidence_repository", lambda conn: _FakeRepository())
+
+    result = tracker.link_evidence(
+        bug.bug_id,
+        evidence_kind="receipt",
+        evidence_ref="receipt-123",
+        evidence_role="observed_in",
+        created_by="tester",
+        notes="wired through repository",
+    )
+
+    assert result is not None
+    assert captured["bug_id"] == bug.bug_id
+    assert captured["evidence_kind"] == "receipt"
+    assert captured["evidence_ref"] == "receipt-123"
+    assert captured["evidence_role"] == "observed_in"
+    assert captured["created_by"] == "tester"
+    assert result["notes"] == "wired through repository"

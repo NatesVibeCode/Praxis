@@ -60,6 +60,7 @@ from registry.control_plane_manifests import (
 )
 from surfaces.api.catalog_authority import build_catalog_payload
 from storage.postgres.validators import PostgresWriteError
+from . import _bug_surface_contract as _bug_contract
 from . import workflow_query_core as _workflow_query_core
 from ._surface_usage import record_api_route_usage as _record_api_route_usage
 from .._payload_contract import (
@@ -137,32 +138,24 @@ _SOURCE_OPTION_SEEDS: tuple[dict[str, Any], ...] = (
 )
 _DASHBOARD_SECTION_ORDER: tuple[str, ...] = ("live", "saved", "draft")
 def _parse_bug_status(bt_mod, raw_status: object):
-    if raw_status is None:
-        return None
-    status = bt_mod.BugTracker._normalize_status(raw_status, default=None)
-    if status is None:
-        raise _ClientError("status must be one of OPEN, IN_PROGRESS, FIXED, WONT_FIX, DEFERRED")
-    return status
+    try:
+        return _bug_contract.parse_bug_status(bt_mod, raw_status)
+    except ValueError as exc:
+        raise _ClientError(str(exc)) from exc
 
 
 def _parse_bug_severity(bt_mod, raw_severity: object):
-    if raw_severity is None:
-        return None
-    severity = bt_mod.BugTracker._normalize_severity(raw_severity, default=None)
-    if severity is None:
-        raise _ClientError("severity must be one of P0, P1, P2, P3")
-    return severity
+    try:
+        return _bug_contract.parse_bug_severity(bt_mod, raw_severity)
+    except ValueError as exc:
+        raise _ClientError(str(exc)) from exc
 
 
 def _parse_bug_category(bt_mod, raw_category: object):
-    if raw_category is None:
-        return None
-    category = bt_mod.BugTracker._normalize_category(raw_category, default=None)
-    if category is None:
-        raise _ClientError(
-            "category must be one of SCOPE, VERIFY, IMPORT, WIRING, ARCHITECTURE, RUNTIME, TEST, OTHER"
-        )
-    return category
+    try:
+        return _bug_contract.parse_bug_category(bt_mod, raw_category)
+    except ValueError as exc:
+        raise _ClientError(str(exc)) from exc
 
 
 def _market_review_metrics(row: dict[str, Any]) -> dict[str, Any]:

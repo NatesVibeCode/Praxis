@@ -29,6 +29,15 @@ _BUG_BLAST_RADIUS_WINDOW_SQL = "7 days"
 _ALLOWED_EVIDENCE_KINDS = frozenset({"receipt", "run", "verification_run", "healing_run"})
 _ALLOWED_EVIDENCE_ROLES = frozenset({"observed_in", "attempted_fix", "validates_fix"})
 _VERIFICATION_SUCCESS_STATUSES = frozenset({"passed", "succeeded", "success", "ok"})
+_SIGNATURE_ANCHOR_FIELDS = (
+    "failure_code",
+    "job_label",
+    "node_id",
+    "failure_category",
+    "agent",
+    "provider_slug",
+    "model_slug",
+)
 
 
 def build_failure_signature(
@@ -55,6 +64,41 @@ def build_failure_signature(
     payload["fingerprint"] = stable_fingerprint(
         {key: value for key, value in payload.items() if key != "fingerprint"}
     )
+    return payload
+
+
+def signature_anchor_fields(signature: dict[str, Any]) -> tuple[str, ...]:
+    anchors: list[str] = []
+    for field in _SIGNATURE_ANCHOR_FIELDS:
+        if str(signature.get(field) or "").strip():
+            anchors.append(field)
+    return tuple(anchors)
+
+
+def materialize_packet_signature(
+    signature: dict[str, Any],
+    *,
+    bug_id: str,
+    source_kind: str | None,
+) -> dict[str, Any]:
+    payload = dict(signature)
+    anchor_fields = signature_anchor_fields(payload)
+    if anchor_fields:
+        payload["authority"] = "evidence_or_tags"
+        payload["fingerprint_scope"] = "cross_bug"
+        payload["anchor_fields"] = anchor_fields
+        return payload
+
+    payload["fingerprint"] = stable_fingerprint(
+        {
+            "bug_id": str(bug_id or "").strip(),
+            "source_kind": str(source_kind or payload.get("source_kind") or "").strip() or None,
+            "fingerprint_scope": "bug_only",
+        }
+    )
+    payload["authority"] = "bug_record_fallback"
+    payload["fingerprint_scope"] = "bug_only"
+    payload["anchor_fields"] = ()
     return payload
 
 
@@ -116,6 +160,34 @@ def packet_summary(packet: dict[str, Any]) -> dict[str, Any]:
             if isinstance(note, str) and note.strip():
                 summary["semantic_neighbors_note"] = note.strip()
     return summary
+
+
+def replay_state_from_hint(hint: dict[str, Any] | None) -> dict[str, Any]:
+    payload = dict(hint or {})
+    return {
+        "replay_ready": bool(payload.get("available")),
+        "replay_reason_code": str(payload.get("reason_code") or "bug.replay_not_ready"),
+        "replay_run_id": payload.get("run_id"),
+        "replay_receipt_id": payload.get("receipt_id"),
+    }
+
+
+def history_summary(*, bug_id: str, packet: dict[str, Any]) -> dict[str, Any]:
+    agent_actions = _json_object(packet.get("agent_actions"))
+    replay = _json_object(agent_actions.get("replay"))
+    return {
+        "bug_id": bug_id,
+        "signature": packet.get("signature"),
+        "blast_radius": packet.get("blast_radius"),
+        "historical_fixes": packet.get("historical_fixes"),
+        "fix_verification": packet.get("fix_verification"),
+        "replay_context": packet.get("replay_context"),
+        "resume_context": packet.get("resume_context"),
+        "semantic_neighbors": packet.get("semantic_neighbors"),
+        "agent_actions": {
+            "replay": replay or None,
+        },
+    }
 
 
 def attempted_at_sort_key(item: Any) -> datetime:

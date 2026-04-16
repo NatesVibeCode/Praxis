@@ -1,0 +1,67 @@
+{
+  "module": "surfaces/api/frontdoor.py",
+  "public_exports": [
+    "NativeWorkflowFrontdoor",
+    "NativeFrontdoorError",
+    "submit",
+    "status",
+    "health"
+  ],
+  "importers": [
+    "tests/integration/test_native_frontdoor.py",
+    "tests/integration/test_native_observability_cockpit.py",
+    "surfaces/api/rest.py"
+  ],
+  "payload_shapes": {
+    "submit": [
+      "native_instance",
+      "run",
+      "admission_decision"
+    ],
+    "status": [
+      "native_instance",
+      "run",
+      "inspection",
+      "observability"
+    ],
+    "health": [
+      "native_instance",
+      "database"
+    ]
+  },
+  "cross_module_calls": [
+    "submit -> runtime.intake.WorkflowIntakePlanner.plan",
+    "submit -> storage.postgres.persist_workflow_admission",
+    "status -> runtime.execution.RuntimeOrchestrator.inspect_run",
+    "status -> observability.status_observability.build_frontdoor_observability",
+    "health -> storage.dev_postgres.local_postgres_health/bootstrap"
+  ],
+  "responsibility_clusters": {
+    "serialization": [
+      "_json_loads_maybe",
+      "_measured_summary",
+      "_submission_summary_from_row",
+      "_serialize_decision",
+      "_serialize_inspection",
+      "_load_sync_status"
+    ],
+    "submit": [
+      "_request_from_mapping",
+      "_request_envelope",
+      "_submission_from_outcome",
+      "NativeWorkflowFrontdoor.submit"
+    ],
+    "status": [
+      "_fetch_run_row",
+      "_load_run_jobs_with_submission_summary",
+      "NativeWorkflowFrontdoor.status"
+    ],
+    "health": [
+      "NativeWorkflowFrontdoor.health"
+    ]
+  },
+  "duplicate_helpers_to_merge": [
+    "Health/bootstrap database status assembly duplicated in surfaces/_boot.py, workflow_admin.py, native_ops.py",
+    "Sync-status shaping duplicated across frontdoor-facing status consumers"
+  ]
+}

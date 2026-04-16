@@ -1,0 +1,37 @@
+{
+  "modules": [
+    "surfaces/api/handlers/workflow_query_core.py",
+    "surfaces/mcp/tools/bugs.py"
+  ],
+  "shared_actions": [
+    "list",
+    "file",
+    "search",
+    "stats",
+    "packet",
+    "history",
+    "replay",
+    "backfill_replay",
+    "attach_evidence",
+    "patch_resume",
+    "resolve"
+  ],
+  "public_contracts": [
+    "workflow_query_core.handle_bugs",
+    "mcp.tools.bugs.tool_praxis_bugs"
+  ],
+  "duplicate_helpers_to_merge": [
+    "_parse_bug_status",
+    "_parse_bug_severity",
+    "_parse_bug_category",
+    "file severity normalization",
+    "tag filter parsing",
+    "replay-state annotation",
+    "history payload shaping"
+  ],
+  "differences_to_preserve": [
+    "HTTP path raises _ClientError; MCP path returns error payloads",
+    "HTTP defaults filed_by/source_kind to workflow_api; MCP defaults to mcp_workflow_server",
+    "MCP list output uses compact bug rows"
+  ]
+}

@@ -529,6 +529,112 @@ class ProviderRouteRuntimeResolution:
         return payload
 
 
+@dataclass(frozen=True, slots=True)
+class ProviderRouteRuntimeAuthorityBundle:
+    route_catalog: RouteCatalogAuthority
+    route_authority_snapshot: object
+    router: ModelRouter
+    candidate_refs: tuple[str, ...]
+    failover_bindings: tuple[ProviderFailoverBindingAuthorityRecord, ...] = ()
+
+
+class ProviderRouteRuntimeAuthorityOrchestrator:
+    """Load the bounded routing authorities behind one runtime route decision."""
+
+    def __init__(self, conn: asyncpg.Connection) -> None:
+        self._conn = conn
+        self._route_catalog_repository = PostgresRouteCatalogRepository(conn)
+
+    async def load(
+        self,
+        *,
+        runtime_profile: RuntimeProfile,
+        as_of: datetime,
+        failover_binding_scope: str | None,
+    ) -> ProviderRouteRuntimeAuthorityBundle:
+        failover_bindings: tuple[ProviderFailoverBindingAuthorityRecord, ...] = ()
+
+        async with self._conn.transaction():
+            if failover_binding_scope is not None:
+                failover_selector = ProviderFailoverAuthoritySelector(
+                    model_profile_id=runtime_profile.model_profile_id,
+                    provider_policy_id=runtime_profile.provider_policy_id,
+                    binding_scope=failover_binding_scope,
+                    as_of=as_of,
+                )
+                try:
+                    failover_authority = await load_provider_failover_and_endpoint_authority(
+                        self._conn,
+                        failover_selectors=(failover_selector,),
+                    )
+                except ProviderFailoverAndEndpointAuthorityRepositoryError as exc:
+                    raise _translate_failover_authority_failure(
+                        exc,
+                        runtime_profile=runtime_profile,
+                        binding_scope=failover_binding_scope,
+                        as_of=as_of,
+                    ) from exc
+                failover_bindings = _ordered_failover_bindings(
+                    failover_authority.resolve_provider_failover_bindings(
+                        selector=failover_selector,
+                    ),
+                    runtime_profile=runtime_profile,
+                    binding_scope=failover_binding_scope,
+                    as_of=as_of,
+                )
+
+            model_profile_records = await self._route_catalog_repository.fetch_model_profiles(
+                model_profile_ids=(runtime_profile.model_profile_id,),
+                as_of=as_of,
+            )
+            candidate_refs = _select_candidate_refs(
+                model_profile_records,
+                model_profile_id=runtime_profile.model_profile_id,
+            )
+            route_catalog = await self._route_catalog_repository.load_route_catalog(
+                model_profile_ids=(runtime_profile.model_profile_id,),
+                provider_policy_ids=(runtime_profile.provider_policy_id,),
+                candidate_refs=candidate_refs,
+                as_of=as_of,
+            )
+            if failover_bindings:
+                route_catalog = _narrow_route_catalog_to_failover_slice(
+                    route_catalog,
+                    runtime_profile=runtime_profile,
+                    failover_bindings=failover_bindings,
+                    binding_scope=failover_binding_scope,
+                    as_of=as_of,
+                )
+            control_tower = await load_provider_route_authority(
+                self._conn,
+                model_profile_ids=(runtime_profile.model_profile_id,),
+                provider_policy_ids=(runtime_profile.provider_policy_id,),
+                candidate_refs=(
+                    tuple(binding.candidate_ref for binding in failover_bindings)
+                    if failover_bindings
+                    else candidate_refs
+                ),
+            )
+
+        route_authority_snapshot = bound_provider_route_authority(
+            control_tower,
+            model_profile_id=runtime_profile.model_profile_id,
+            provider_policy_id=runtime_profile.provider_policy_id,
+            as_of=as_of,
+        )
+        router = ModelRouter.from_route_catalog(
+            route_catalog,
+            route_authority=route_authority_snapshot,
+        )
+        return ProviderRouteRuntimeAuthorityBundle(
+            route_catalog=route_catalog,
+            route_authority_snapshot=route_authority_snapshot,
+            router=router,
+            candidate_refs=candidate_refs,
+            failover_bindings=failover_bindings,
+        )
+
+
 async def resolve_provider_route_runtime(
     conn: asyncpg.Connection,
     *,
@@ -549,81 +655,15 @@ async def resolve_provider_route_runtime(
     normalized_failover_binding_scope = _normalize_failover_binding_scope(
         failover_binding_scope,
     )
-
-    route_catalog_repository = PostgresRouteCatalogRepository(conn)
-    failover_bindings: tuple[ProviderFailoverBindingAuthorityRecord, ...] = ()
-
-    async with conn.transaction():
-        if normalized_failover_binding_scope is not None:
-            failover_selector = ProviderFailoverAuthoritySelector(
-                model_profile_id=normalized_runtime_profile.model_profile_id,
-                provider_policy_id=normalized_runtime_profile.provider_policy_id,
-                binding_scope=normalized_failover_binding_scope,
-                as_of=normalized_as_of,
-            )
-            try:
-                failover_authority = await load_provider_failover_and_endpoint_authority(
-                    conn,
-                    failover_selectors=(failover_selector,),
-                )
-            except ProviderFailoverAndEndpointAuthorityRepositoryError as exc:
-                raise _translate_failover_authority_failure(
-                    exc,
-                    runtime_profile=normalized_runtime_profile,
-                    binding_scope=normalized_failover_binding_scope,
-                    as_of=normalized_as_of,
-                ) from exc
-            failover_bindings = _ordered_failover_bindings(
-                failover_authority.resolve_provider_failover_bindings(
-                    selector=failover_selector,
-                ),
-                runtime_profile=normalized_runtime_profile,
-                binding_scope=normalized_failover_binding_scope,
-                as_of=normalized_as_of,
-            )
-        model_profile_records = await route_catalog_repository.fetch_model_profiles(
-            model_profile_ids=(normalized_runtime_profile.model_profile_id,),
-            as_of=normalized_as_of,
-        )
-        candidate_refs = _select_candidate_refs(
-            model_profile_records,
-            model_profile_id=normalized_runtime_profile.model_profile_id,
-        )
-        route_catalog = await route_catalog_repository.load_route_catalog(
-            model_profile_ids=(normalized_runtime_profile.model_profile_id,),
-            provider_policy_ids=(normalized_runtime_profile.provider_policy_id,),
-            candidate_refs=candidate_refs,
-            as_of=normalized_as_of,
-        )
-        if failover_bindings:
-            route_catalog = _narrow_route_catalog_to_failover_slice(
-                route_catalog,
-                runtime_profile=normalized_runtime_profile,
-                failover_bindings=failover_bindings,
-                binding_scope=normalized_failover_binding_scope,
-                as_of=normalized_as_of,
-            )
-        control_tower = await load_provider_route_authority(
-            conn,
-            model_profile_ids=(normalized_runtime_profile.model_profile_id,),
-            provider_policy_ids=(normalized_runtime_profile.provider_policy_id,),
-            candidate_refs=(
-                tuple(binding.candidate_ref for binding in failover_bindings)
-                if failover_bindings
-                else candidate_refs
-            ),
-        )
-
-    route_authority_snapshot = bound_provider_route_authority(
-        control_tower,
-        model_profile_id=normalized_runtime_profile.model_profile_id,
-        provider_policy_id=normalized_runtime_profile.provider_policy_id,
+    authority_bundle = await ProviderRouteRuntimeAuthorityOrchestrator(conn).load(
+        runtime_profile=normalized_runtime_profile,
         as_of=normalized_as_of,
+        failover_binding_scope=normalized_failover_binding_scope,
     )
-    router = ModelRouter.from_route_catalog(
-        route_catalog,
-        route_authority=route_authority_snapshot,
-    )
+    failover_bindings = authority_bundle.failover_bindings
+    route_catalog = authority_bundle.route_catalog
+    route_authority_snapshot = authority_bundle.route_authority_snapshot
+    router = authority_bundle.router
     effective_preferred_candidate_ref = normalized_preferred_candidate_ref
     if failover_bindings:
         authoritative_candidate_ref = _select_authoritative_failover_candidate_ref(

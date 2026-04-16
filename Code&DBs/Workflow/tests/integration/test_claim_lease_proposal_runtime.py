@@ -10,6 +10,7 @@ import pytest
 
 from runtime import RouteIdentity, RunState, RuntimeBoundaryError
 from runtime import claims as runtime_claims
+from runtime.claim_state_machine import ALLOWED_TRANSITIONS as CLAIM_LIFECYCLE_ALLOWED_TRANSITIONS
 from runtime.claims import (
     ClaimLeaseProposalRuntime,
     ClaimLeaseProposalTransitionRequest,
@@ -269,6 +270,7 @@ async def _exercise_claim_lifecycle_authority() -> None:
             as_of=datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc),
         )
 
+        assert transitions == CLAIM_LIFECYCLE_ALLOWED_TRANSITIONS
         assert transitions[RunState.CLAIM_RECEIVED] == frozenset({RunState.CLAIM_VALIDATING})
         assert RunState.CLAIM_ACCEPTED not in transitions[RunState.CLAIM_RECEIVED]
         assert transitions[RunState.CLAIM_ACCEPTED] == frozenset({RunState.LEASE_REQUESTED})

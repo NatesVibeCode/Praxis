@@ -1,0 +1,40 @@
+{
+  "modules": [
+    "registry/provider_onboarding/__init__.py",
+    "registry/provider_onboarding/_spec.py",
+    "registry/provider_onboarding/_probe.py",
+    "registry/provider_onboarding/_benchmark.py",
+    "registry/provider_onboarding/_report.py",
+    "registry/provider_onboarding_repository.py",
+    "registry/provider_routing.py",
+    "registry/model_routing.py",
+    "registry/route_catalog_repository.py",
+    "runtime/provider_route_runtime.py",
+    "runtime/task_type_router.py"
+  ],
+  "public_exports": [
+    "registry.provider_onboarding.normalize_provider_onboarding_spec",
+    "registry.provider_onboarding.load_provider_onboarding_spec_from_file",
+    "registry.provider_onboarding.run_provider_onboarding",
+    "registry.provider_routing.load_provider_route_authority",
+    "registry.model_routing.ModelRouter"
+  ],
+  "importers": [
+    "surfaces/api/handlers/workflow_admin.py",
+    "surfaces/cli/native_operator.py",
+    "surfaces/mcp/tools/provider_onboard.py",
+    "runtime/provider_route_runtime.py",
+    "tests/unit/test_provider_onboarding_wizard.py",
+    "tests/unit/test_provider_onboarding_authority_boundary.py"
+  ],
+  "cross_module_calls": [
+    "provider onboarding facade -> _spec/_probe/_benchmark/_report + provider_onboarding_repository",
+    "provider_route_runtime -> route_catalog_repository + provider_routing + model_routing",
+    "task_type_router -> task_type_routing_repository + runtime profile admission"
+  ],
+  "duplicate_helpers_to_merge": [
+    "Route-catalog plus route-authority loading repeated in runtime/provider_route_runtime.py and repository call sites",
+    "Facade exports in registry/provider_onboarding currently rely on star imports plus explicit imports"
+  ],
+  "current_authority_note": "Live onboarding authority is registry/provider_onboarding plus provider_onboarding_repository; runtime/provider_onboarding.py is compatibility-only."
+}

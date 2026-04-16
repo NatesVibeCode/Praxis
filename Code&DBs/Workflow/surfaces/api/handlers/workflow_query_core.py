@@ -11,6 +11,7 @@ from storage.postgres.validators import PostgresConfigurationError
 
 from surfaces._workflow_database import workflow_database_url_for_repo
 from .._payload_contract import coerce_optional_text
+from . import _bug_surface_contract as _bug_contract
 from ._shared import _ClientError, _bug_to_dict, _matches, _serialize
 from .workflow_admin import _handle_health
 
@@ -76,20 +77,15 @@ def _annotate_bug_dicts_with_replay_state(
     receipt_limit: int = 1,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
-    annotated: list[dict[str, Any]] = []
-    for bug in bugs:
-        bug_dict = _bug_to_dict(bug)
-        hint = bt.replay_hint(bug.bug_id, receipt_limit=receipt_limit)
-        bug_dict["replay_ready"] = bool((hint or {}).get("available"))
-        bug_dict["replay_reason_code"] = str((hint or {}).get("reason_code") or "bug.replay_not_ready")
-        bug_dict["replay_run_id"] = (hint or {}).get("run_id")
-        bug_dict["replay_receipt_id"] = (hint or {}).get("receipt_id")
-        if replay_ready_only and not bug_dict["replay_ready"]:
-            continue
-        annotated.append(bug_dict)
-        if len(annotated) >= limit:
-            break
-    return annotated
+    return _bug_contract.annotate_bug_dicts_with_replay_state(
+        bt,
+        bugs,
+        serialize_bug=_bug_to_dict,
+        replay_ready_only=replay_ready_only,
+        include_replay_details=True,
+        receipt_limit=receipt_limit,
+        limit=limit,
+    )
 
 
 def handle_query(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
@@ -253,242 +249,76 @@ def handle_bugs(
         bt_mod.BugStatus.WONT_FIX,
         bt_mod.BugStatus.DEFERRED,
     }
-
-    if action == "list":
-        status = body.get("status")
-        severity = body.get("severity")
-        limit = max(1, int(body.get("limit", 50) or 50))
-        category = parse_bug_category(bt_mod, body.get("category"))
-        title_like = body.get("title_like")
-        include_replay_state = bool(body.get("include_replay_state", True))
-        replay_ready_only = bool(body.get("replay_ready_only", False))
-        raw_tags = body.get("tags")
-        raw_exclude_tags = body.get("exclude_tags")
-        open_only = bool(body.get("open_only", False))
-        tags: tuple[str, ...] | None = None
-        exclude_tags: tuple[str, ...] | None = None
-
-        if isinstance(raw_tags, str):
-            tags = tuple(tag.strip() for tag in raw_tags.split(",") if tag.strip())
-        elif isinstance(raw_tags, (list, tuple)):
-            tags = tuple(str(tag).strip() for tag in raw_tags if str(tag).strip())
-
-        if isinstance(raw_exclude_tags, str):
-            exclude_tags = tuple(tag.strip() for tag in raw_exclude_tags.split(",") if tag.strip())
-        elif isinstance(raw_exclude_tags, (list, tuple)):
-            exclude_tags = tuple(str(tag).strip() for tag in raw_exclude_tags if str(tag).strip())
-
-        parsed_status = parse_bug_status(bt_mod, status)
-        parsed_severity = parse_bug_severity(bt_mod, severity)
-        total_count = bt.count_bugs(
-            status=parsed_status,
-            severity=parsed_severity,
-            category=category,
-            title_like=title_like if isinstance(title_like, str) else None,
-            tags=tags,
-            exclude_tags=exclude_tags,
-            open_only=open_only,
-        )
-        bugs = bt.list_bugs(
-            status=parsed_status,
-            severity=parsed_severity,
-            category=category,
-            title_like=title_like if isinstance(title_like, str) else None,
-            tags=tags,
-            exclude_tags=exclude_tags,
-            open_only=open_only,
-            limit=max(total_count, limit) if replay_ready_only else limit,
-        )
-        bug_dicts = [_bug_to_dict(bug) for bug in bugs[:limit]]
-        if include_replay_state or replay_ready_only:
-            bug_dicts = _annotate_bug_dicts_with_replay_state(
-                bt,
-                bugs,
-                replay_ready_only=replay_ready_only,
-                limit=limit,
+    try:
+        if action == "list":
+            return _bug_contract.list_bugs_payload(
+                bt=bt,
+                bt_mod=bt_mod,
+                body=body,
+                serialize_bug=_bug_to_dict,
+                default_limit=50,
+                include_replay_details=True,
             )
-        return {
-            "bugs": bug_dicts[:limit],
-            "count": len(bug_dicts) if replay_ready_only else total_count,
-            "returned_count": len(bug_dicts[:limit]),
-        }
 
-    if action == "file":
-        title = body.get("title", "")
-        if not title:
-            raise _ClientError("title is required to file a bug")
-        severity = body.get("severity", "P2")
-        category = parse_bug_category(bt_mod, body.get("category")) or bt_mod.BugCategory.OTHER
-        description = body.get("description", "")
-        tags_raw = body.get("tags")
-        tags: tuple[str, ...] = ()
-        if isinstance(tags_raw, str):
-            tags = tuple(tag.strip() for tag in tags_raw.split(",") if tag.strip())
-        elif isinstance(tags_raw, (list, tuple)):
-            tags = tuple(str(tag).strip() for tag in tags_raw if str(tag).strip())
-
-        source_kind = str(body.get("source_kind") or "workflow_api").strip() or "workflow_api"
-        filed_by = str(body.get("filed_by") or "workflow_api").strip() or "workflow_api"
-        decision_ref = str(body.get("decision_ref") or "").strip()
-        discovered_in_run_id = _optional_text(body.get("discovered_in_run_id"))
-        discovered_in_receipt_id = _optional_text(body.get("discovered_in_receipt_id"))
-        owner_ref = _optional_text(body.get("owner_ref"))
-        resume_ctx = body.get("resume_context")
-        if resume_ctx is not None and not isinstance(resume_ctx, dict):
-            raise _ClientError("resume_context must be a JSON object when provided")
-        try:
-            filed = bt.file_bug(
-                title=title,
-                severity=parse_bug_severity(bt_mod, severity) or bt_mod.BugSeverity.P2,
-                category=category,
-                description=description,
-                filed_by=filed_by,
-                source_kind=source_kind,
-                decision_ref=decision_ref,
-                discovered_in_run_id=discovered_in_run_id,
-                discovered_in_receipt_id=discovered_in_receipt_id,
-                owner_ref=owner_ref,
-                tags=tags,
-                resume_context=resume_ctx if isinstance(resume_ctx, dict) else None,
+        if action == "file":
+            return _bug_contract.file_bug_payload(
+                bt=bt,
+                bt_mod=bt_mod,
+                body=body,
+                serialize_bug=_bug_to_dict,
+                filed_by_default="workflow_api",
+                source_kind_default="workflow_api",
             )
-        except ValueError as exc:
-            raise _ClientError(str(exc)) from exc
-        bug = filed[0] if isinstance(filed, tuple) else filed
-        return {"filed": True, "bug": _bug_to_dict(bug)}
 
-    if action == "search":
-        title = body.get("title", "")
-        if not title:
-            raise _ClientError("title is required for search")
-        bugs = bt.search(title, limit=20)
-        return {"bugs": [_bug_to_dict(bug) for bug in bugs], "count": len(bugs)}
-
-    if action == "stats":
-        return {"stats": _serialize(bt.stats())}
-
-    if action == "packet":
-        bug_id = str(body.get("bug_id", "")).strip()
-        if not bug_id:
-            raise _ClientError("bug_id is required to build a failure packet")
-        packet = bt.failure_packet(
-            bug_id,
-            receipt_limit=max(1, int(body.get("receipt_limit", 5) or 5)),
-        )
-        if packet is None:
-            raise _ClientError(f"bug not found: {bug_id}")
-        return {"packet": _serialize(packet)}
-
-    if action == "history":
-        bug_id = str(body.get("bug_id", "")).strip()
-        if not bug_id:
-            raise _ClientError("bug_id is required to read bug history")
-        packet = bt.failure_packet(
-            bug_id,
-            receipt_limit=max(1, int(body.get("receipt_limit", 5) or 5)),
-        )
-        if packet is None:
-            raise _ClientError(f"bug not found: {bug_id}")
-        agent_actions = _serialize(packet.get("agent_actions"))
-        return {
-            "history": _serialize(
-                {
-                    "bug_id": bug_id,
-                    "signature": packet.get("signature"),
-                    "blast_radius": packet.get("blast_radius"),
-                    "historical_fixes": packet.get("historical_fixes"),
-                    "fix_verification": packet.get("fix_verification"),
-                    "replay_context": packet.get("replay_context"),
-                    "resume_context": packet.get("resume_context"),
-                    "semantic_neighbors": packet.get("semantic_neighbors"),
-                    "agent_actions": {
-                        "replay": agent_actions.get("replay") if isinstance(agent_actions, dict) else None,
-                    },
-                }
+        if action == "search":
+            return _bug_contract.search_bugs_payload(
+                bt=bt,
+                bt_mod=bt_mod,
+                body=body,
+                serialize_bug=_bug_to_dict,
+                default_limit=20,
             )
-        }
 
-    if action == "replay":
-        bug_id = str(body.get("bug_id", "")).strip()
-        if not bug_id:
-            raise _ClientError("bug_id is required to replay a bug")
-        replay = bt.replay_bug(
-            bug_id,
-            receipt_limit=max(1, int(body.get("receipt_limit", 5) or 5)),
-        )
-        if replay is None:
-            raise _ClientError(f"bug not found: {bug_id}")
-        return {"replay": _serialize(replay)}
+        if action == "stats":
+            return _bug_contract.stats_payload(bt=bt, serialize=_serialize)
 
-    if action == "backfill_replay":
-        limit_raw = body.get("limit")
-        limit = None if limit_raw in (None, "") else max(0, int(limit_raw))
-        result = bt.bulk_backfill_replay_provenance(
-            limit=limit,
-            open_only=bool(body.get("open_only", True)),
-            receipt_limit=max(1, int(body.get("receipt_limit", 1) or 1)),
-        )
-        return {"backfill": _serialize(result)}
+        if action == "packet":
+            return _bug_contract.packet_payload(bt=bt, body=body, serialize=_serialize)
 
-    if action == "attach_evidence":
-        bug_id = str(body.get("bug_id", "")).strip()
-        evidence_kind = str(body.get("evidence_kind", "")).strip()
-        evidence_ref = str(body.get("evidence_ref", "")).strip()
-        evidence_role = str(body.get("evidence_role", "observed_in")).strip() or "observed_in"
-        if not bug_id:
-            raise _ClientError("bug_id is required to attach bug evidence")
-        if not evidence_kind:
-            raise _ClientError("evidence_kind is required to attach bug evidence")
-        if not evidence_ref:
-            raise _ClientError("evidence_ref is required to attach bug evidence")
-        try:
-            attached = bt.link_evidence(
-                bug_id,
-                evidence_kind=evidence_kind,
-                evidence_ref=evidence_ref,
-                evidence_role=evidence_role,
-                created_by=str(body.get("created_by") or "workflow_api").strip() or "workflow_api",
-                notes=_optional_text(body.get("notes")),
+        if action == "history":
+            return _bug_contract.history_payload(bt=bt, body=body, serialize=_serialize)
+
+        if action == "replay":
+            return _bug_contract.replay_payload(bt=bt, body=body, serialize=_serialize)
+
+        if action == "backfill_replay":
+            return _bug_contract.backfill_replay_payload(bt=bt, body=body, serialize=_serialize)
+
+        if action == "attach_evidence":
+            return _bug_contract.attach_evidence_payload(
+                bt=bt,
+                body=body,
+                serialize=_serialize,
+                created_by_default="workflow_api",
             )
-        except ValueError as exc:
-            raise _ClientError(str(exc)) from exc
-        if attached is None:
-            raise _ClientError("failed to attach bug evidence")
-        return {"attached": True, "evidence_link": _serialize(attached)}
 
-    if action == "resolve":
-        bug_id = str(body.get("bug_id", "")).strip()
-        if not bug_id:
-            raise _ClientError("bug_id is required to resolve a bug")
-        status = parse_bug_status(bt_mod, body.get("status"))
-        if status is None:
-            raise _ClientError("status is required to resolve a bug")
-        if status not in resolved_statuses:
-            allowed = ", ".join(sorted(item.value for item in resolved_statuses))
-            raise _ClientError(f"resolve status must be one of {allowed}")
-        try:
-            bug = bt.resolve(bug_id, status)
-        except ValueError as exc:
-            raise _ClientError(str(exc)) from exc
-        if bug is None:
-            raise _ClientError(f"bug not found: {bug_id}")
-        return {"resolved": True, "bug": _bug_to_dict(bug)}
+        if action == "resolve":
+            return _bug_contract.resolve_bug_payload(
+                bt=bt,
+                bt_mod=bt_mod,
+                body=body,
+                serialize_bug=_bug_to_dict,
+                resolved_statuses=resolved_statuses,
+            )
 
-    if action == "patch_resume":
-        bug_id = str(body.get("bug_id", "")).strip()
-        if not bug_id:
-            raise _ClientError("bug_id is required to patch resume_context")
-        raw_patch = body.get("resume_patch")
-        if raw_patch is None:
-            raw_patch = body.get("patch")
-        if not isinstance(raw_patch, dict):
-            raise _ClientError("resume_patch must be a JSON object")
-        try:
-            bug = bt.merge_resume_context(bug_id, raw_patch)
-        except ValueError as exc:
-            raise _ClientError(str(exc)) from exc
-        if bug is None:
-            raise _ClientError(f"bug not found: {bug_id}")
-        return {"updated": True, "bug": _bug_to_dict(bug)}
+        if action == "patch_resume":
+            return _bug_contract.patch_resume_payload(
+                bt=bt,
+                body=body,
+                serialize_bug=_bug_to_dict,
+            )
+    except ValueError as exc:
+        raise _ClientError(str(exc)) from exc
 
     raise _ClientError(f"Unknown bug action: {action}")
 

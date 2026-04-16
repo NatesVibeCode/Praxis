@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, TextIO
 
+from surfaces.cli._db import cli_sync_conn
+
 
 def _compile_command(args: list[str], *, stdout: TextIO) -> int:
     """Handle ``workflow compile [intent.json|--description DESC --write FILE --stage STAGE]``.
@@ -136,9 +138,7 @@ def _compile_command(args: list[str], *, stdout: TextIO) -> int:
 
     try:
         try:
-            from storage.postgres.connection import ensure_postgres_available
-
-            conn = ensure_postgres_available()
+            conn = cli_sync_conn()
         except Exception:
             conn = None
 

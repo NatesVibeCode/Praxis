@@ -11,6 +11,7 @@ from runtime.engineering_observability import (
     build_code_hotspots,
     build_platform_observability,
 )
+from surfaces._boot import resolve_surface_env, workflow_database_status
 from surfaces.api import operator_read, operator_write
 from surfaces.api.handlers import workflow_launcher
 from surfaces.mcp.catalog import get_tool_catalog
@@ -36,9 +37,15 @@ def _tool_definition(tool_name: str):
 
 def _workflow_env(subs: Any) -> dict[str, str]:
     postgres_env = getattr(subs, "_postgres_env", None)
-    if callable(postgres_env):
-        return dict(postgres_env() or {})
-    raise RuntimeError("workflow surface is missing an explicit Postgres env authority")
+    env = dict(postgres_env() or {}) if callable(postgres_env) else None
+    try:
+        return resolve_surface_env(
+            repo_root=getattr(subs, "_repo_root", None),
+            workflow_root=getattr(subs, "_workflow_root", None),
+            env=env,
+        )
+    except RuntimeError as exc:
+        raise RuntimeError("workflow surface is missing an explicit Postgres env authority") from exc
 
 
 def _tool_surface_hint(
@@ -740,9 +747,7 @@ def _handle_health(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
 
     schema_authority: dict[str, Any]
     try:
-        from storage.dev_postgres import local_postgres_health
-
-        status = local_postgres_health()
+        status = workflow_database_status(env=_workflow_env(subs))
         schema_authority = {
             "schema_bootstrapped": status.schema_bootstrapped,
             "missing_schema_objects": list(status.missing_schema_objects),

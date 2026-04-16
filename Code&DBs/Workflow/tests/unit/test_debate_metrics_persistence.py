@@ -101,10 +101,7 @@ def test_workflow_debate_command_passes_metrics_connection(monkeypatch) -> None:
     conn = object()
     captured: dict[str, object] = {}
 
-    monkeypatch.setattr(
-        "storage.postgres.connection.ensure_postgres_available",
-        lambda env=None: conn,
-    )
+    monkeypatch.setattr(workflow_commands, "cli_sync_conn", lambda: conn)
 
     def _fake_run_debate(config, *, metrics_conn=None):
         captured["topic"] = config.topic
