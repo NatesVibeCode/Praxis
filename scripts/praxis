@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 WORKFLOW_DIR="$REPO_ROOT/Code&DBs/Workflow"
+PYTHON_BIN="${PYTHON_BIN:-$(command -v python3.14 || command -v python3.13 || command -v python3)}"
 
 docker_only_usage() {
     cat <<'EOF'
@@ -198,11 +199,11 @@ else:
         print(f"  - {name}: {state}{suffix}{port_suffix}")
 PY
 
-    if active_output="$(cd "$REPO_ROOT" && ./scripts/workflow.sh active 2>/dev/null)"; then
+    if active_output="$(cd "$REPO_ROOT" && ./scripts/praxis workflow active 2>/dev/null)"; then
         if [ -n "$active_output" ]; then
-            echo ""
-            echo "Active workflows:"
-            printf '%s\n' "$active_output"
+        echo ""
+        echo "Active workflows:"
+        printf '%s\n' "$active_output"
         fi
     fi
 
@@ -222,8 +223,22 @@ fi
 if [ "${1:-}" = "workflow" ]; then
     shift
     export PYTHONPATH="$WORKFLOW_DIR${PYTHONPATH:+:$PYTHONPATH}"
-    PYTHON_BIN="${PYTHON_BIN:-$(command -v python3.14 || command -v python3.13 || command -v python3)}"
-    exec "$PYTHON_BIN" -m surfaces.cli.main workflow "$@"
+    case "${1:-help}" in
+      run|spawn|dry-run)
+        exec "$SCRIPT_DIR/workflow.sh" "$@"
+        ;;
+      run-managed)
+        shift
+        exec "$SCRIPT_DIR/workflow.sh" run "$@"
+        ;;
+      spawn-managed)
+        shift
+        exec "$SCRIPT_DIR/workflow.sh" spawn "$@"
+        ;;
+      *)
+        exec "$PYTHON_BIN" -m surfaces.cli.main workflow "$@"
+        ;;
+    esac
 fi
 
 case "${1:-}" in

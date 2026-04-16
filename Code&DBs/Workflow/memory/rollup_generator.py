@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import time
 import traceback
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 from memory.types import Edge, Entity, EntityType, RelationType
@@ -34,7 +34,6 @@ class RollupGenerator(HeartbeatModule):
     def run(self) -> HeartbeatModuleResult:
         t0 = time.monotonic()
         errors: list[str] = []
-        from datetime import timezone
         target_date = datetime.now(timezone.utc).date()
 
         for label, fn in [
@@ -69,7 +68,12 @@ class RollupGenerator(HeartbeatModule):
 
     def _daily_agent_rollups(self, target_date) -> tuple[int, int]:
         date_str = target_date.isoformat()
-        window_start = datetime(target_date.year, target_date.month, target_date.day)
+        window_start = datetime(
+            target_date.year,
+            target_date.month,
+            target_date.day,
+            tzinfo=timezone.utc,
+        )
         window_end = window_start + timedelta(days=1)
 
         rows = self._conn.execute(
@@ -96,7 +100,7 @@ class RollupGenerator(HeartbeatModule):
 
         findings = 0
         actions = 0
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         for row in rows:
             agent = row['agent']
@@ -194,7 +198,12 @@ class RollupGenerator(HeartbeatModule):
 
     def _daily_phase_rollups(self, target_date) -> tuple[int, int]:
         date_str = target_date.isoformat()
-        window_start = datetime(target_date.year, target_date.month, target_date.day)
+        window_start = datetime(
+            target_date.year,
+            target_date.month,
+            target_date.day,
+            tzinfo=timezone.utc,
+        )
         window_end = window_start + timedelta(days=1)
 
         rows = self._conn.execute(
@@ -221,7 +230,7 @@ class RollupGenerator(HeartbeatModule):
 
         findings = 0
         actions = 0
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         for row in rows:
             phase = row['phase'] or 'unknown'
@@ -271,7 +280,6 @@ class RollupGenerator(HeartbeatModule):
     # -------------------------------------------------------------------------
 
     def _weekly_platform_rollup(self) -> tuple[int, int]:
-        from datetime import timezone
         target_date = datetime.now(timezone.utc).date()
         iso_year, iso_week, iso_weekday = target_date.isocalendar()
 
@@ -281,7 +289,12 @@ class RollupGenerator(HeartbeatModule):
             return 0, 0
 
         monday = target_date - timedelta(days=iso_weekday - 1)
-        week_start = datetime(monday.year, monday.month, monday.day)
+        week_start = datetime(
+            monday.year,
+            monday.month,
+            monday.day,
+            tzinfo=timezone.utc,
+        )
         week_end = week_start + timedelta(days=7)
 
         # Dispatch aggregates
@@ -346,7 +359,7 @@ class RollupGenerator(HeartbeatModule):
         friction_events = (fr['cnt'] or 0) if fr else 0
 
         sunday = monday + timedelta(days=6)
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         entity = Entity(
             id=week_id,
             entity_type=EntityType.metric,
@@ -387,7 +400,12 @@ class RollupGenerator(HeartbeatModule):
         if self._entity_exists(entity_id):
             return 0, 0
 
-        window_start = datetime(target_date.year, target_date.month, target_date.day)
+        window_start = datetime(
+            target_date.year,
+            target_date.month,
+            target_date.day,
+            tzinfo=timezone.utc,
+        )
         window_end = window_start + timedelta(days=1)
 
         rows = self._conn.execute(
@@ -441,7 +459,7 @@ class RollupGenerator(HeartbeatModule):
         by_cost_efficiency = sorted(per_model, key=lambda x: x['cost_efficiency'], reverse=True)
         by_token_efficiency = sorted(per_model, key=lambda x: x['token_efficiency'], reverse=True)
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         entity = Entity(
             id=entity_id,
             entity_type=EntityType.metric,
@@ -492,7 +510,7 @@ class RollupGenerator(HeartbeatModule):
 
         findings = 0
         actions = 0
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         for row in rows:
             today_id = row['id']

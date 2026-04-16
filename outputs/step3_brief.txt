@@ -1,0 +1,3 @@
+Workflow: live_workflow_probe_gpt54mini_small
+Primary artifact: outputs/step2_report.md
+Verdict: healthy

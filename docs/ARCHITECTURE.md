@@ -43,9 +43,12 @@ canonical rows, not a parallel decision store.
 | --- | --- | --- | --- |
 | `architecture-policy::decision-tables::db-native-authority` | `decision_tables` | Decision tables are DB-native authority. | Durable control stays queryable and inspectable in Postgres. |
 | `architecture-policy::decision-tables::scripts-support-only` | `decision_tables` | Scripts support decision tables; they do not replace them. | Shell glue stays tooling, not architecture. |
+| `architecture-policy::sandbox-execution::docker-only-authority` | `sandbox_execution` | Workflow sandbox execution is Docker-only. | Local host-executed routes are not architectural authority. Use `docker_local` locally or admitted `cloudflare_remote`; fail closed if Docker is unavailable. |
 | `architecture-policy::embedding-runtime::service-boundary` | `embedding_runtime` | Keep semantic capability at the surface contract while moving heavy local inference out of default control-plane images. | API and worker stay lean; the semantic backend owns local `torch`. |
 | `architecture-policy::embedding-runtime::replacement-contract` | `embedding_runtime` | Do not remove semantic behavior without a validated replacement. | Lean backends must prove the same contract before becoming default. |
 | `architecture-policy::compile-authority::db-backed-enrichment` | `compile_authority` | Compile truth is DB-backed; embeddings are enrichment. | Structural compile stays authoritative even when semantic mode degrades. |
+
+Architecture-policy rows are durable operator authority. Workflow job execution now resolves scoped architecture-policy rows into execution bundles and workspace decision packs so agents see them before work begins; outside that path they remain available through `praxis_recall` and chat knowledge search rather than ambient prompt stuffing.
 
 ## DAG Execution
 

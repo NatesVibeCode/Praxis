@@ -111,6 +111,7 @@ describe('AppShell', () => {
 
     expect(screen.getByText('Builder Surface')).toBeInTheDocument();
     expect(screen.getByText('App builder')).toBeInTheDocument();
+    expect(document.querySelector('.app-shell__chrome--collapsed')).toBeInTheDocument();
   });
 
   test('prompts before leaving a dirty draft builder and stays put when cancelled', async () => {

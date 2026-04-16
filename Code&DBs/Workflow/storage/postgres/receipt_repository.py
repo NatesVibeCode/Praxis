@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+import hashlib
 from datetime import datetime, timedelta, timezone
 import json
 from typing import Any
 
+from storage.migrations import workflow_compile_authority_readiness_tables
 from .validators import (
     PostgresWriteError,
     _encode_jsonb,
@@ -16,6 +18,14 @@ from .validators import (
     _require_positive_int,
     _require_text,
     _require_utc,
+)
+
+
+_COMPILE_AUTHORITY_READINESS_OBJECTS = workflow_compile_authority_readiness_tables()
+
+_COMPILE_AUTHORITY_READINESS_SQL = ",\n                ".join(
+    f"to_regclass('public.{object_name}') IS NOT NULL AS {object_name}_ready"
+    for object_name in _COMPILE_AUTHORITY_READINESS_OBJECTS
 )
 
 
@@ -238,6 +248,175 @@ class PostgresReceiptRepository:
             _encode_jsonb([], field_name="decision_refs"),
         )
         return normalized_receipt_id
+
+    def insert_receipt_if_absent_with_deterministic_seq(
+        self,
+        *,
+        receipt_id: str,
+        receipt_type: str = "workflow_job",
+        schema_version: int = 1,
+        workflow_id: str,
+        run_id: str,
+        request_id: str,
+        node_id: str,
+        attempt_no: int,
+        started_at: datetime,
+        finished_at: datetime,
+        causation_id: str | None = None,
+        supersedes_receipt_id: str | None = None,
+        status: str,
+        inputs: Mapping[str, Any],
+        outputs: Mapping[str, Any],
+        artifacts: Mapping[str, Any],
+        failure_code: str | None,
+        executor_type: str = "workflow_unified",
+        decision_refs: Sequence[Mapping[str, Any]] | None = None,
+    ) -> int:
+        normalized_receipt_id = _require_text(receipt_id, field_name="receipt_id")
+        normalized_run_id = _require_text(run_id, field_name="run_id")
+        _require_text(workflow_id, field_name="workflow_id")
+        _require_text(request_id, field_name="request_id")
+        _require_text(node_id, field_name="node_id")
+        _require_text(receipt_type, field_name="receipt_type")
+        _require_text(executor_type, field_name="executor_type")
+
+        lock_key = int.from_bytes(
+            hashlib.blake2b(normalized_run_id.encode("utf-8"), digest_size=8).digest(),
+            "big",
+            signed=True,
+        )
+
+        row = self._fetchrow_compat(
+            """
+            WITH lock_token AS (
+                SELECT pg_advisory_xact_lock($2::bigint)
+            ),
+            existing AS (
+                SELECT evidence_seq
+                FROM receipts
+                WHERE receipt_id = $1
+            ),
+            next_seq AS (
+                SELECT CASE
+                    WHEN EXISTS (SELECT 1 FROM existing) THEN
+                        (SELECT evidence_seq FROM existing LIMIT 1)
+                    ELSE 1 + GREATEST(
+                        COALESCE((SELECT MAX(evidence_seq) FROM workflow_events WHERE run_id = $3), 0),
+                        COALESCE((SELECT MAX(evidence_seq) FROM receipts WHERE run_id = $3), 0)
+                    )
+                END AS evidence_seq
+                FROM lock_token
+            ),
+            inserted AS (
+                INSERT INTO receipts (
+                    receipt_id,
+                    receipt_type,
+                    schema_version,
+                    workflow_id,
+                    run_id,
+                    request_id,
+                    causation_id,
+                    node_id,
+                    attempt_no,
+                    supersedes_receipt_id,
+                    started_at,
+                    finished_at,
+                    evidence_seq,
+                    executor_type,
+                    status,
+                    inputs,
+                    outputs,
+                    artifacts,
+                    failure_code,
+                    decision_refs
+                )
+                SELECT
+                    $1,
+                    $4,
+                    $5,
+                    $6,
+                    $3,
+                    $7,
+                    $8,
+                    $9,
+                    $10,
+                    $11,
+                    $12,
+                    $13,
+                    next_seq.evidence_seq,
+                    $14,
+                    $15,
+                    jsonb_set(
+                        $16::jsonb,
+                        '{transition_seq}',
+                        to_jsonb(next_seq.evidence_seq::bigint),
+                        true
+                    ),
+                    $17::jsonb,
+                    $18::jsonb,
+                    $19,
+                    $20::jsonb
+                FROM next_seq
+                WHERE NOT EXISTS (SELECT 1 FROM existing)
+                ON CONFLICT (receipt_id) DO NOTHING
+                RETURNING evidence_seq
+            )
+            SELECT evidence_seq FROM inserted
+            UNION ALL
+            SELECT evidence_seq FROM existing
+            LIMIT 1;
+            """,
+            normalized_receipt_id,
+            lock_key,
+            normalized_run_id,
+            _require_text(receipt_type, field_name="receipt_type"),
+            _require_positive_int(schema_version, field_name="schema_version"),
+            _require_text(workflow_id, field_name="workflow_id"),
+            _require_text(request_id, field_name="request_id"),
+            _optional_text(causation_id, field_name="causation_id"),
+            _require_text(node_id, field_name="node_id"),
+            _require_positive_int(attempt_no, field_name="attempt_no"),
+            _optional_text(supersedes_receipt_id, field_name="supersedes_receipt_id"),
+            _require_utc(started_at, field_name="started_at"),
+            _require_utc(finished_at, field_name="finished_at"),
+            _require_text(executor_type, field_name="executor_type"),
+            _require_text(status, field_name="status"),
+            json.dumps(dict(_require_mapping(inputs, field_name="inputs")), sort_keys=True, default=str),
+            json.dumps(dict(_require_mapping(outputs, field_name="outputs")), sort_keys=True, default=str),
+            json.dumps(dict(_require_mapping(artifacts, field_name="artifacts")), sort_keys=True, default=str),
+            _optional_text(failure_code, field_name="failure_code"),
+            json.dumps(
+                [
+                    dict(_require_mapping(item, field_name=f"decision_refs[{index}]"))
+                    for index, item in enumerate(decision_refs or ())
+                ],
+                sort_keys=True,
+                default=str,
+            ),
+        )
+
+        if row is None:
+            raise PostgresWriteError(
+                "receipt_repository.allocation_failed",
+                "failed to allocate evidence sequence",
+                details={"receipt_id": normalized_receipt_id},
+            )
+
+        if isinstance(row, Mapping):
+            evidence_seq = row.get("evidence_seq")
+        elif isinstance(row, (list, tuple)):
+            evidence_seq = row[0] if row else None
+        else:
+            evidence_seq = row["evidence_seq"]
+
+        if evidence_seq is None:
+            raise PostgresWriteError(
+                "receipt_repository.invalid_evidence_seq",
+                "evidence sequence allocation returned empty result",
+                details={"receipt_id": normalized_receipt_id},
+            )
+
+        return int(evidence_seq)
 
     def insert_workflow_notification_if_absent(
         self,
@@ -584,20 +763,9 @@ class PostgresReceiptRepository:
             """
         ) or {}
         compile_row = self._conn.fetchrow(
-            """
+            f"""
             SELECT
-                to_regclass('public.compile_artifacts') IS NOT NULL AS compile_artifacts_ready,
-                to_regclass('public.capability_catalog') IS NOT NULL AS capability_catalog_ready,
-                to_regclass('public.verify_refs') IS NOT NULL AS verify_refs_ready,
-                to_regclass('public.verification_registry') IS NOT NULL AS verification_registry_ready,
-                to_regclass('public.compile_index_snapshots') IS NOT NULL AS compile_index_snapshots_ready,
-                to_regclass('public.execution_packets') IS NOT NULL AS execution_packets_ready,
-                to_regclass('public.repo_snapshots') IS NOT NULL AS repo_snapshots_ready,
-                to_regclass('public.verifier_registry') IS NOT NULL AS verifier_registry_ready,
-                to_regclass('public.healer_registry') IS NOT NULL AS healer_registry_ready,
-                to_regclass('public.verifier_healer_bindings') IS NOT NULL AS verifier_healer_bindings_ready,
-                to_regclass('public.verification_runs') IS NOT NULL AS verification_runs_ready,
-                to_regclass('public.healing_runs') IS NOT NULL AS healing_runs_ready
+                {_COMPILE_AUTHORITY_READINESS_SQL}
             """
         ) or {}
         repo_snapshot_row = (

@@ -1,0 +1,334 @@
+/* Moon Build — design tokens (single source of truth) */
+
+@layer moon-tokens {
+  .moon-page {
+    /* ---- Base geometry & rhythm ---- */
+    --moon-node-size: var(--moon-layout-node-size, 60px);
+    --moon-node-shadow: var(--moon-layout-projected-node-size, 44px);
+    --moon-node-spacing: var(--moon-layout-node-spacing, 120px);
+    --moon-canvas-pad: var(--moon-layout-canvas-pad, 120px);
+    --moon-graph-append-size: var(--moon-layout-graph-append-size, 40px);
+    --moon-label-max: 12ch;
+
+    --moon-icon-size: 22px;
+    --moon-dock-open: 33%;
+    --moon-dock-side-min: 320px;
+    --moon-dock-side-max: 430px;
+    --moon-dock-tb-min: 200px;
+    --moon-dock-pad-v: 40px;
+    --moon-dock-pad-h: 34px;
+    --moon-popout-width: 260px;
+    --moon-popout-min-h: 112px;
+    --moon-compose-width: 380px;
+    --moon-nav-clearance: 52px;
+
+    --moon-arc-weight: 2px;
+    --moon-connector-weight: 1.5px;
+
+    --moon-z-chrome: 10;
+    --moon-z-overlay: 6;
+    --moon-z-dock: 5;
+    --moon-z-arc: 3;
+
+    --moon-motion-dock: 240ms ease;
+    --moon-motion-popout: 150ms ease;
+    --moon-motion-node: 180ms ease;
+    --moon-motion-fast: 160ms ease;
+    --moon-motion-micro: 100ms ease;
+
+    --moon-font-size-xxs: 10px;
+    --moon-font-size-xs: 11px;
+    --moon-font-size-sm: 12px;
+    --moon-font-size-md: 13px;
+    --moon-font-size-lg: 14px;
+    --moon-font-size-xl: 16px;
+    --moon-font-weight-medium: 500;
+    --moon-font-weight-semibold: 600;
+    --moon-font-mono: var(--font-mono, monospace);
+
+    --moon-radius-pill: 999px;
+    --moon-radius-sm: 8px;
+    --moon-radius-md: 10px;
+    --moon-radius-lg: 12px;
+    --moon-radius-xl: 14px;
+    --moon-radius-2xl: 16px;
+    --moon-radius-3xl: 18px;
+    --moon-radius-4xl: 20px;
+
+    /* ---- Palette ---- */
+    --moon-color-white: #ffffff;
+    --moon-color-black: #000000;
+
+    --moon-palette-accent: #f3eee4;
+    --moon-palette-amber: #d29922;
+    --moon-palette-amber-strong: #f0883e;
+    --moon-palette-error: #f85149;
+    --moon-palette-error-dim: #f85149;
+    --moon-palette-success: #3fb950;
+    --moon-palette-success-bright: #7ee787;
+    --moon-palette-neutral-dark: #706b62;
+    --moon-palette-neutral-soft: #9ea7b3;
+    --moon-palette-foreground: #f4f6f8;
+    --moon-palette-foreground-muted: #8b949e;
+    --moon-palette-legacy-accent: #6cb6ff;
+
+    --moon-accent: var(--moon-palette-accent);
+    --moon-accent-alt: var(--moon-palette-legacy-accent);
+    --moon-glow: var(--moon-color-white);
+    --moon-error: var(--moon-palette-error);
+    --moon-gate-yellow: var(--moon-palette-amber);
+    --moon-gate-green: var(--moon-palette-success);
+    --moon-gate-red: var(--moon-palette-error);
+    --moon-warning: var(--moon-palette-amber);
+    --moon-text-inverse: var(--moon-color-black);
+
+    --moon-fg: var(--text);
+    --moon-fg-muted: var(--text-muted);
+    --moon-fg-dim: var(--moon-palette-neutral-dark);
+    --moon-fg-soft: var(--moon-palette-neutral-soft);
+    --moon-muted: var(--moon-fg-dim);
+
+    --moon-border: var(--moon-white-a08);
+    --moon-rule: var(--moon-white-a04);
+    --moon-surface: rgba(12, 12, 12, 0.84);
+    --moon-surface-hover: rgba(255, 255, 255, 0.04);
+
+    --moon-state-success: var(--moon-palette-success);
+    --moon-state-success-soft: var(--moon-palette-success-bright);
+    --moon-state-error: var(--moon-palette-error);
+    --moon-state-warning: var(--moon-palette-amber);
+
+    --moon-surface-card-strong: rgba(255, 255, 255, 0.025);
+    --moon-glass-bg: rgba(20, 20, 20, 0.4);
+    --moon-glass-border: rgba(255, 255, 255, 0.08);
+    --moon-glass-blur: blur(14px);
+    
+    --moon-shadow-ambient: 0 20px 50px rgba(0, 0, 0, 0.4);
+    --moon-shadow-lifted: 0 30px 70px rgba(0, 0, 0, 0.5);
+    --moon-shadow-glow: 0 0 20px rgba(255, 255, 255, 0.16);
+    --moon-surface-card-soft: rgba(255, 255, 255, 0.03);
+    --moon-surface-card-muted: rgba(255, 255, 255, 0.02);
+    --moon-surface-card-active: rgba(255, 255, 255, 0.06);
+
+    --moon-state-focus-outline: color-mix(in srgb, var(--moon-accent) 28%, var(--moon-color-black));
+    --moon-state-shadow: 0 0 0 3px var(--moon-accent);
+
+    --moon-glow-white-soft: 0 0 14px rgba(255, 255, 255, 0.10), 0 0 0 1px var(--moon-black-a20);
+    --moon-glow-white-mid: 0 0 18px rgba(255, 255, 255, 0.16), 0 0 0 1px var(--moon-black-a30);
+    --moon-glow-white-strong: 0 0 22px rgba(255, 255, 255, 0.24), 0 0 0 1px var(--moon-black-a34);
+    --moon-accent-glow-soft: 0 0 10px var(--moon-accent-a16), 0 0 0 1px var(--moon-black-a30);
+    --moon-accent-glow-mid: 0 0 16px var(--moon-accent-a28), 0 0 0 1px var(--moon-black-a34);
+    --moon-accent-glow-strong: 0 0 24px var(--moon-accent-a40), 0 0 0 2px var(--moon-black-a34);
+    --moon-success-glow-soft: 0 0 10px var(--moon-success-a16), 0 0 0 1px var(--moon-black-a30);
+    --moon-success-glow-mid: 0 0 14px var(--moon-success-a24), 0 0 0 1px var(--moon-black-a34);
+    --moon-success-glow-strong: 0 0 22px var(--moon-success-a34), 0 0 0 2px var(--moon-black-a34);
+    --moon-danger-glow-soft: 0 0 10px var(--moon-danger-a16), 0 0 0 1px var(--moon-black-a30);
+    --moon-danger-glow-mid: 0 0 14px var(--moon-danger-a24), 0 0 0 1px var(--moon-black-a34);
+    --moon-danger-glow-strong: 0 0 20px var(--moon-danger-a34), 0 0 0 2px var(--moon-black-a34);
+    --moon-neutral-glow-soft: 0 0 10px var(--moon-white-a08), 0 0 0 1px var(--moon-black-a20);
+    --moon-neutral-glow-mid: 0 0 14px var(--moon-white-a12), 0 0 0 1px var(--moon-black-a22);
+    --moon-neutral-glow-strong: 0 0 20px var(--moon-white-a16), 0 0 0 2px var(--moon-black-a22);
+
+    --moon-ring-pulse-duration: 1.2s;
+    --moon-nucleus-pulse-duration: 4s;
+    --moon-glow-pulse-duration: 1.8s;
+    --moon-glow-motion: 160ms ease;
+
+    /* ---- Reusable alpha tokens (source-of-truth for status/interaction) ---- */
+    --moon-white-a02: rgba(255, 255, 255, 0.02);
+    --moon-white-a025: rgba(255, 255, 255, 0.025);
+    --moon-white-a03: rgba(255, 255, 255, 0.03);
+    --moon-white-a04: rgba(255, 255, 255, 0.04);
+    --moon-white-a05: rgba(255, 255, 255, 0.05);
+    --moon-white-a08: rgba(255, 255, 255, 0.08);
+    --moon-white-a10: rgba(255, 255, 255, 0.1);
+    --moon-white-a12: rgba(255, 255, 255, 0.12);
+    --moon-white-a14: rgba(255, 255, 255, 0.14);
+    --moon-white-a16: rgba(255, 255, 255, 0.16);
+    --moon-white-a18: rgba(255, 255, 255, 0.18);
+    --moon-white-a20: rgba(255, 255, 255, 0.2);
+    --moon-white-a25: rgba(255, 255, 255, 0.25);
+    --moon-white-a85: rgba(255, 255, 255, 0.85);
+    --moon-black-a16: rgba(0, 0, 0, 0.16);
+    --moon-black-a18: rgba(0, 0, 0, 0.18);
+    --moon-black-a20: rgba(0, 0, 0, 0.2);
+    --moon-black-a22: rgba(0, 0, 0, 0.22);
+    --moon-black-a30: rgba(0, 0, 0, 0.3);
+    --moon-black-a34: rgba(0, 0, 0, 0.34);
+    --moon-black-a36: rgba(0, 0, 0, 0.36);
+    --moon-black-a34-shadow: 0 20px 46px rgba(0, 0, 0, 0.34);
+    --moon-black-a45: rgba(0, 0, 0, 0.45);
+    --moon-glow-outline-soft: var(--moon-black-a20);
+    --moon-glow-outline-mid: var(--moon-black-a30);
+    --moon-glow-outline-strong: var(--moon-black-a36);
+
+    --moon-accent-a03: rgba(210, 153, 34, 0.03);
+    --moon-accent-a05: rgba(210, 153, 34, 0.05);
+    --moon-accent-a06: rgba(210, 153, 34, 0.06);
+    --moon-accent-a08: rgba(210, 153, 34, 0.08);
+    --moon-accent-a10: rgba(210, 153, 34, 0.1);
+    --moon-accent-a12: rgba(210, 153, 34, 0.12);
+    --moon-accent-a16: rgba(210, 153, 34, 0.16);
+    --moon-accent-a20: rgba(210, 153, 34, 0.2);
+    --moon-accent-a24: rgba(210, 153, 34, 0.24);
+    --moon-accent-a25: rgba(210, 153, 34, 0.25);
+    --moon-accent-a28: rgba(210, 153, 34, 0.28);
+    --moon-accent-a30: rgba(210, 153, 34, 0.3);
+    --moon-accent-a32: rgba(210, 153, 34, 0.32);
+    --moon-accent-a34: rgba(210, 153, 34, 0.34);
+    --moon-accent-a35: rgba(210, 153, 34, 0.35);
+    --moon-accent-a035: rgba(210, 153, 34, 0.035);
+    --moon-accent-a40: rgba(210, 153, 34, 0.4);
+    --moon-accent-a42: rgba(210, 153, 34, 0.42);
+    --moon-accent-a44: rgba(210, 153, 34, 0.44);
+    --moon-accent-a45: rgba(210, 153, 34, 0.45);
+    --moon-accent-a48: rgba(210, 153, 34, 0.48);
+    --moon-accent-a80: rgba(210, 153, 34, 0.8);
+
+    --moon-neutral-1: rgba(139, 147, 157, 0.2);
+    --moon-neutral-2: rgba(139, 147, 157, 0.25);
+    --moon-neutral-3: rgba(139, 147, 157, 0.26);
+    --moon-neutral-4: rgba(139, 147, 157, 0.28);
+    --moon-neutral-5: rgba(139, 147, 157, 0.35);
+    --moon-neutral-6: rgba(139, 147, 157, 0.18);
+    --moon-neutral-7: rgba(139, 147, 157, 0.14);
+    --moon-neutral-8: rgba(139, 147, 157, 0.45);
+    --moon-muted-slate: #484f58;
+
+    --moon-success-a08: rgba(63, 185, 80, 0.08);
+    --moon-success-a10: rgba(63, 185, 80, 0.1);
+    --moon-success-a16: rgba(63, 185, 80, 0.16);
+    --moon-success-a24: rgba(63, 185, 80, 0.24);
+    --moon-success-a30: rgba(63, 185, 80, 0.3);
+    --moon-success-a34: rgba(63, 185, 80, 0.34);
+    --moon-success-a48: rgba(63, 185, 80, 0.48);
+
+    --moon-danger-a22: rgba(248, 81, 73, 0.22);
+    --moon-danger-a25: rgba(248, 81, 73, 0.25);
+    --moon-danger-a28: rgba(248, 81, 73, 0.28);
+    --moon-danger-a30: rgba(248, 81, 73, 0.3);
+    --moon-danger-a32: rgba(248, 81, 73, 0.32);
+    --moon-danger-a34: rgba(248, 81, 73, 0.34);
+    --moon-danger-a45: rgba(248, 81, 73, 0.45);
+    --moon-danger-a16: rgba(248, 81, 73, 0.16);
+    --moon-danger-a08: rgba(248, 81, 73, 0.08);
+    --moon-danger-a06: rgba(248, 81, 73, 0.06);
+
+    --moon-ring-strong: rgba(244, 246, 248, 0.4);
+    --moon-shell-dark: rgba(18, 18, 18, 0.25);
+    --moon-shell-slab: rgba(18, 18, 18, 0.35);
+    --moon-shell-sand: rgba(18, 18, 18, 0.45);
+    --moon-shell-overlay-start: rgba(18, 18, 18, 0.45);
+    --moon-shell-overlay-end: rgba(18, 18, 18, 0.25);
+    --moon-shell-faint: rgba(18, 18, 18, 0.6);
+    --moon-shell-mid: rgba(30, 30, 30, 0.6);
+    --moon-shell-soft: rgba(18, 18, 18, 0.84);
+    --moon-shell-strong: rgba(18, 18, 18, 0.66);
+    --moon-shell-ghost: rgba(20, 20, 20, 0.4);
+    --moon-shell-glass: rgba(20, 24, 30, 0.9);
+    --moon-shell-midnight: rgba(12, 12, 12, 0.72);
+    --moon-shell-lower: rgba(12, 12, 12, 0.52);
+    --moon-shell-surface: rgba(24, 13, 13, 0.96);
+    --moon-shell-surface-alt: rgba(40, 59, 81, 0.96);
+    --moon-surface-soft: rgba(16, 24, 33, 0.96);
+    --moon-surface-muted: rgba(15, 18, 24, 0.92);
+    --moon-surface-dense: rgba(15, 18, 24, 0.94);
+    --moon-surface-dense-2: rgba(15, 18, 24, 0.98);
+    --moon-surface-dark: rgba(26, 31, 39, 0.92);
+    --moon-surface-dark-2: rgba(26, 31, 39, 0.98);
+    --moon-shell-shadow-sm: 0 0 20px rgba(255, 255, 255, 0.08);
+    --moon-shell-shadow-lg: 0 0 30px rgba(255, 255, 255, 0.12);
+    --moon-shell-shadow-glow: 0 0 40px rgba(255, 255, 255, 0.25);
+    --moon-shell-shadow-subtle: 0 16px 40px var(--moon-black-a45);
+    --moon-shell-shadow-pop: 0 16px 40px rgba(0, 0, 0, 0.45);
+
+    --moon-theme-glow-profile: soft;
+    --moon-strict-accent-glow-soft: 0 0 6px var(--moon-accent-a06), 0 0 0 1px var(--moon-black-a30);
+    --moon-strict-accent-glow-mid: 0 0 10px var(--moon-accent-a10), 0 0 0 1px var(--moon-black-a34);
+    --moon-strict-accent-glow-strong: 0 0 14px var(--moon-accent-a16), 0 0 0 1px var(--moon-black-a34);
+    --moon-strict-success-glow-soft: 0 0 6px var(--moon-success-a08), 0 0 0 1px var(--moon-black-a30);
+    --moon-strict-success-glow-mid: 0 0 10px var(--moon-success-a10), 0 0 0 1px var(--moon-black-a30);
+    --moon-strict-success-glow-strong: 0 0 14px var(--moon-success-a14), 0 0 0 1px var(--moon-black-a34);
+    --moon-strict-danger-glow-soft: 0 0 6px var(--moon-danger-a08), 0 0 0 1px var(--moon-black-a30);
+    --moon-strict-danger-glow-mid: 0 0 10px var(--moon-danger-a12), 0 0 0 1px var(--moon-black-a30);
+    --moon-strict-danger-glow-strong: 0 0 14px var(--moon-danger-a16), 0 0 0 1px var(--moon-black-a34);
+    --moon-strict-neutral-glow-soft: 0 0 8px var(--moon-white-a06), 0 0 0 1px var(--moon-black-a16);
+    --moon-strict-neutral-glow-mid: 0 0 12px var(--moon-white-a08), 0 0 0 1px var(--moon-black-a20);
+    --moon-strict-neutral-glow-strong: 0 0 16px var(--moon-white-a10), 0 0 0 1px var(--moon-black-a22);
+    --moon-strict-white-glow-soft: 0 0 8px var(--moon-white-a06), 0 0 0 1px var(--moon-black-a16);
+    --moon-strict-white-glow-mid: 0 0 12px var(--moon-white-a10), 0 0 0 1px var(--moon-black-a18);
+    --moon-strict-white-glow-strong: 0 0 16px var(--moon-white-a14), 0 0 0 1px var(--moon-black-a20);
+    --moon-motion-glow-pulse: 2600ms;
+    --moon-motion-glow-pulse-strict: 4200ms;
+    --moon-glow-line-soft: var(--moon-glow-outline-soft);
+    --moon-glow-line-mid: var(--moon-glow-outline-mid);
+    --moon-glow-line-strong: var(--moon-glow-outline-strong);
+    --moon-shadow-white-soft: var(--moon-glow-white-soft);
+    --moon-shadow-white-mid: var(--moon-glow-white-mid);
+    --moon-shadow-white-strong: var(--moon-glow-white-strong);
+    --moon-shadow-black-soft: 0 0 0 1px var(--moon-black-a20), var(--moon-glow-white-soft);
+    --moon-shadow-black-mid: 0 0 0 1px var(--moon-black-a30), var(--moon-glow-white-mid);
+    --moon-shadow-black-strong: 0 0 0 1px var(--moon-black-a36), var(--moon-glow-white-strong);
+    --moon-shadow-line-soft: 0 0 0 1px var(--moon-glow-line-soft), var(--moon-glow-white-soft);
+    --moon-shadow-line-mid: 0 0 0 1px var(--moon-glow-line-mid), var(--moon-glow-white-mid);
+    --moon-shadow-line-strong: 0 0 0 1px var(--moon-glow-line-strong), var(--moon-glow-white-strong);
+    --moon-shadow-accent-line-soft: 0 0 0 1px var(--moon-glow-line-soft), var(--moon-accent-glow-soft);
+    --moon-shadow-accent-line-mid: 0 0 0 1px var(--moon-glow-line-mid), var(--moon-accent-glow-mid);
+    --moon-shadow-accent-line-strong: 0 0 0 1px var(--moon-glow-line-strong), var(--moon-accent-glow-strong);
+    --moon-shadow-ring-accent-soft:
+      0 0 0 3px var(--moon-accent),
+      0 0 0 1px var(--moon-glow-line-strong),
+      var(--moon-accent-glow-soft);
+    --moon-shadow-ring-accent-mid:
+      0 0 0 3px var(--moon-accent),
+      0 0 0 1px var(--moon-glow-line-strong),
+      var(--moon-accent-glow-mid);
+    --moon-shadow-float-soft: 0 10px 24px var(--moon-black-a16);
+    --moon-plus-text-glow:
+      0 0 1px var(--moon-color-black),
+      0 0 2px var(--moon-color-black),
+      0 0 3px var(--moon-color-black),
+      0 0 1px var(--moon-white-a12),
+      0 0 8px var(--moon-white-a16),
+      0 0 0 1px var(--moon-glow-line-soft);
+    --moon-plus-text-glow-strong:
+      0 0 1px var(--moon-color-black),
+      0 0 2px var(--moon-color-black),
+      0 0 4px var(--moon-color-black),
+      0 0 2px var(--moon-white-a16),
+      0 0 12px var(--moon-white-a20),
+      0 0 0 1px var(--moon-glow-line-mid);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .moon-page {
+    --moon-ring-pulse-duration: 0s;
+    --moon-nucleus-pulse-duration: 0s;
+    --moon-glow-pulse-duration: 0s;
+    --moon-motion-glow: 0s linear;
+  }
+}
+
+.moon-page[data-moon-glow-profile='strict'] {
+  --moon-theme-glow-profile: strict;
+  --moon-glow-white-soft: var(--moon-strict-white-glow-soft);
+  --moon-glow-white-mid: var(--moon-strict-white-glow-mid);
+  --moon-glow-white-strong: var(--moon-strict-white-glow-strong);
+  --moon-accent-glow-soft: var(--moon-strict-accent-glow-soft);
+  --moon-accent-glow-mid: var(--moon-strict-accent-glow-mid);
+  --moon-accent-glow-strong: var(--moon-strict-accent-glow-strong);
+  --moon-success-glow-soft: var(--moon-strict-success-glow-soft);
+  --moon-success-glow-mid: var(--moon-strict-success-glow-mid);
+  --moon-success-glow-strong: var(--moon-strict-success-glow-strong);
+  --moon-danger-glow-soft: var(--moon-strict-danger-glow-soft);
+  --moon-danger-glow-mid: var(--moon-strict-danger-glow-mid);
+  --moon-danger-glow-strong: var(--moon-strict-danger-glow-strong);
+  --moon-neutral-glow-soft: var(--moon-strict-neutral-glow-soft);
+  --moon-neutral-glow-mid: var(--moon-strict-neutral-glow-mid);
+  --moon-neutral-glow-strong: var(--moon-strict-neutral-glow-strong);
+  --moon-motion-glow-pulse: var(--moon-motion-glow-pulse-strict);
+  --moon-glow-line-soft: var(--moon-black-a16);
+  --moon-glow-line-mid: var(--moon-black-a18);
+  --moon-glow-line-strong: var(--moon-black-a20);
+}

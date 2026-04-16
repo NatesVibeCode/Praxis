@@ -11,6 +11,9 @@ from storage._generated_workflow_migration_authority import (
     WORKFLOW_POLICY_BUCKETS,
     WORKFLOW_SCHEMA_READINESS_SEQUENCE,
 )
+from storage.postgres.receipt_repository import (
+    _COMPILE_AUTHORITY_READINESS_OBJECTS,
+)
 
 
 def test_generated_workflow_authority_matches_json_spec() -> None:
@@ -41,6 +44,34 @@ def test_generated_readiness_sequence_matches_manifest_and_expected_objects() ->
         WORKFLOW_MIGRATION_SEQUENCE
     )
     assert dict(WORKFLOW_SCHEMA_READINESS_SEQUENCE) == WORKFLOW_MIGRATION_EXPECTED_OBJECTS
+
+
+def test_proof_metrics_compile_authority_reads_readiness_tables_from_schema_authority() -> None:
+    readiness_tables = {
+        object_name
+        for _, objects in WORKFLOW_SCHEMA_READINESS_SEQUENCE
+        for object_type, object_name in objects
+        if object_type == "table"
+    }
+    expected_compile_authority_objects = (
+        "compile_artifacts",
+        "capability_catalog",
+        "verify_refs",
+        "verification_registry",
+        "compile_index_snapshots",
+        "execution_packets",
+        "repo_snapshots",
+        "verifier_registry",
+        "healer_registry",
+        "verifier_healer_bindings",
+        "verification_runs",
+        "healing_runs",
+    )
+    assert _COMPILE_AUTHORITY_READINESS_OBJECTS == tuple(
+        object_name
+        for object_name in expected_compile_authority_objects
+        if object_name in readiness_tables
+    )
 
 
 def test_every_numbered_sql_file_is_classified_by_policy() -> None:

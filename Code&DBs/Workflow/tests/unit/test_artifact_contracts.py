@@ -77,6 +77,19 @@ def test_build_execution_bundle_renders_authoring_and_acceptance_contracts() -> 
                 "required_decision": "approve",
             }
         },
+        decision_pack={
+            "pack_version": 1,
+            "authority_domains": ["sandbox_execution"],
+            "decision_keys": ["architecture-policy::sandbox-execution::docker-only-authority"],
+            "decisions": [
+                {
+                    "decision_key": "architecture-policy::sandbox-execution::docker-only-authority",
+                    "title": "Workflow sandbox execution is Docker-only",
+                    "rationale": "Do not add host-local execution lanes.",
+                    "decision_scope_ref": "sandbox_execution",
+                }
+            ],
+        },
     )
 
     rendered = render_execution_bundle(bundle)
@@ -86,11 +99,14 @@ def test_build_execution_bundle_renders_authoring_and_acceptance_contracts() -> 
     assert bundle["acceptance_contract"]["review"]["required_decision"] == "approve"
     assert bundle["approval_required"] is True
     assert bundle["approval_question"] == "Approve the brief before drafting?"
+    assert bundle["decision_pack"]["authority_domains"] == ["sandbox_execution"]
     assert "** AUTHORING CONTRACT **" in rendered
     assert "section_scaffold" in rendered
     assert "** ACCEPTANCE CONTRACT **" in rendered
     assert "review.required_decision: approve" in rendered
     assert "** APPROVAL REQUIRED **" in rendered
+    assert "** APPLICABLE DECISIONS **" in rendered
+    assert "docker-only-authority" in rendered
 
 
 def test_build_execution_bundle_can_derive_tool_authority_from_execution_manifest() -> None:

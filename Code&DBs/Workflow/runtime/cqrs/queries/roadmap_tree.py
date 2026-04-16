@@ -10,6 +10,7 @@ from ..registry import registry
 class QueryRoadmapTree(BaseModel):
     root_roadmap_item_id: str
     semantic_neighbor_limit: int = Field(default=5, ge=0)
+    include_completed_nodes: bool = True
 
 
 def handle_query_roadmap_tree(query: QueryRoadmapTree, subsystems: Any) -> dict[str, Any]:
@@ -20,6 +21,7 @@ def handle_query_roadmap_tree(query: QueryRoadmapTree, subsystems: Any) -> dict[
     return operator_read.query_roadmap_tree(
         root_roadmap_item_id=query.root_roadmap_item_id,
         semantic_neighbor_limit=query.semantic_neighbor_limit,
+        include_completed_nodes=query.include_completed_nodes,
         env=resolved_env,
     )
 

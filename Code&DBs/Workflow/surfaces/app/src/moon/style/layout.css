@@ -1,0 +1,283 @@
+@layer moon-layout {
+/* Moon Build — flex layout with edge docks that push center inward */
+
+.moon-page {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at top left, var(--moon-accent-a08), transparent 40%),
+    var(--bg);
+  overflow: hidden;
+  font-family: var(--font-sans);
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+
+}
+
+.moon-error-toast {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(720px, calc(100vw - 32px));
+  padding: 12px 16px;
+  border: 1px solid var(--moon-glow);
+  border-radius: 14px;
+  background: var(--moon-shell-surface);
+  color: var(--moon-fg);
+  box-shadow: var(--moon-shadow-line-soft);
+}
+
+.moon-error-toast button {
+  flex-shrink: 0;
+  border: 0;
+  background: transparent;
+  color: var(--moon-fg);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* Frame lines */
+.moon-frame-top, .moon-frame-bottom {
+  display: none;
+}
+
+/* Stage label */
+.moon-stage {
+  position: absolute;
+  top: 24px;
+  left: 44px;
+  z-index: var(--moon-z-overlay);
+}
+.moon-stage__label {
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--moon-fg-dim);
+}
+.moon-stage__desc {
+  font-size: 12px;
+  color: var(--moon-fg-muted);
+  margin-top: 4px;
+}
+
+/* ---- Main body: top-dock | [left-dock | center | right-dock] | bottom-dock ---- */
+.moon-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  padding: 0;
+  gap: 0;
+}
+
+/* Middle row: left | center | right */
+.moon-middle {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  position: relative;
+  min-height: 0;
+}
+
+/* Side docks (Absolute Overlays) */
+.moon-dock-overlay {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: var(--moon-z-dock);
+  width: var(--moon-dock-open);
+  min-width: var(--moon-dock-side-min);
+  max-width: var(--moon-dock-side-max);
+  padding: var(--moon-nav-clearance) var(--moon-dock-pad-h) var(--moon-dock-pad-v);
+  background: linear-gradient(180deg, var(--moon-shell-overlay-start), var(--moon-shell-overlay-end));
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  transition: transform var(--moon-motion-dock), opacity var(--moon-motion-dock);
+  opacity: 0;
+  pointer-events: none;
+  overflow-y: auto;
+  overflow-x: hidden;
+  box-shadow: var(--moon-shadow-line-soft);
+}
+
+.moon-dock-overlay--left {
+  left: 0;
+  transform: translateX(-100%);
+  border-right: 1px solid var(--moon-white-a08);
+  border-top-right-radius: 24px;
+  border-bottom-right-radius: 24px;
+}
+
+.moon-dock-overlay--right {
+  right: 0;
+  transform: translateX(100%);
+  border-left: 1px solid var(--moon-white-a08);
+  border-top-left-radius: 24px;
+  border-bottom-left-radius: 24px;
+}
+
+.moon-dock-overlay--open {
+  transform: translateX(0);
+  opacity: 1;
+  pointer-events: all;
+}
+
+/* Legacy flex classes (Hidden) */
+.moon-dock-side {
+  display: none;
+}
+.moon-dock-side--closed {
+  width: 0;
+}
+.moon-dock-side--open {
+  width: var(--moon-dock-open);
+  min-width: var(--moon-dock-side-min);
+  max-width: var(--moon-dock-side-max);
+  padding: var(--moon-nav-clearance) var(--moon-dock-pad-h) var(--moon-dock-pad-v);
+  background: linear-gradient(180deg, var(--moon-shell-sand), var(--moon-shell-dark));
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+.moon-dock-left--open {
+  border-right: var(--moon-arc-weight) solid var(--moon-fg);
+  border-top-right-radius: 20px;
+  border-bottom-right-radius: 20px;
+}
+.moon-dock-right--open {
+  border-left: var(--moon-arc-weight) solid var(--moon-fg);
+  border-top-left-radius: 20px;
+  border-bottom-left-radius: 20px;
+}
+
+/* Center orbit area — grows/shrinks as docks open */
+.moon-center {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: auto;
+  transition: flex var(--moon-motion-dock);
+  padding: 12px 18px 40px;
+}
+
+.moon-center--empty {
+  padding-bottom: 72px;
+}
+
+/* Bottom dock (Release) */
+.moon-dock-bottom {
+  flex-shrink: 0;
+  overflow: hidden;
+  transition: height var(--moon-motion-dock);
+  border-top: var(--moon-arc-weight) solid transparent;
+}
+.moon-dock-bottom--closed {
+  height: 0;
+}
+.moon-dock-bottom--open {
+  height: var(--moon-dock-open);
+  min-height: var(--moon-dock-tb-min);
+  border-top-color: var(--moon-fg);
+  border-top-left-radius: 40px;
+  border-top-right-radius: 40px;
+  padding: 24px var(--moon-dock-pad-v);
+  background: linear-gradient(180deg, var(--moon-shell-faint), var(--moon-shell-slab));
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+/* ---- Half-moon dock invitations ---- */
+.moon-halfmoon {
+  position: absolute;
+  z-index: var(--moon-z-arc);
+  background: var(--moon-shell-ghost);
+  border: 1px solid var(--moon-white-a10);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--moon-shadow-line-soft);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: border-color 220ms ease, background 220ms ease, transform 220ms ease, box-shadow 220ms ease;
+}
+.moon-halfmoon:hover {
+  border-color: var(--moon-white-a20);
+  background: var(--moon-shell-mid);
+  box-shadow: var(--moon-shadow-line-mid);
+}
+.moon-halfmoon:hover .moon-halfmoon__text {
+  color: var(--moon-fg);
+}
+.moon-halfmoon__text {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--moon-fg-muted);
+  transition: color 220ms ease;
+}
+
+/* Top half-moon */
+.moon-halfmoon--top {
+  top: var(--moon-nav-clearance);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 36px;
+  border-bottom-left-radius: 28px;
+  border-bottom-right-radius: 28px;
+  border-top: none;
+  z-index: var(--moon-z-overlay);
+}
+
+/* Bottom half-moon */
+.moon-halfmoon--bottom {
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 36px;
+  border-top-left-radius: 28px;
+  border-top-right-radius: 28px;
+  border-bottom: none;
+}
+
+/* Left half-moon */
+.moon-halfmoon--left {
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 36px 8px;
+  border-top-right-radius: 28px;
+  border-bottom-right-radius: 28px;
+  border-left: none;
+}
+.moon-halfmoon--left .moon-halfmoon__text {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+}
+
+/* Right half-moon */
+.moon-halfmoon--right {
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 36px 8px;
+  border-top-left-radius: 28px;
+  border-bottom-left-radius: 28px;
+  border-right: none;
+}
+.moon-halfmoon--right .moon-halfmoon__text {
+  writing-mode: vertical-rl;
+}
+
+}

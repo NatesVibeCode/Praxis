@@ -1,0 +1,10 @@
+{
+  "workflow": "live_workflow_probe_gpt54mini",
+  "generated_by": "openai/gpt-5.4-mini",
+  "signals": [
+    "operator queue is responsive",
+    "runtime receipts are visible",
+    "verification surface is stable"
+  ],
+  "verdict": "healthy"
+}

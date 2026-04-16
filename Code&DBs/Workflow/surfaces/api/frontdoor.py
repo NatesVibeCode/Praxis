@@ -38,6 +38,7 @@ from storage.postgres import (
 )
 
 from ._operator_helpers import _json_compatible, _now, _run_async as _shared_run_async
+from ._payload_contract import require_text
 
 
 class NativeFrontdoorError(RuntimeError):
@@ -303,13 +304,14 @@ async def _load_run_jobs_with_submission_summary(
 
 
 def _require_text(value: object, *, field_name: str) -> str:
-    if not isinstance(value, str) or not value.strip():
+    try:
+        return require_text(value, field_name=field_name)
+    except ValueError as exc:
         raise NativeFrontdoorError(
             "frontdoor.invalid_request",
-            f"{field_name} must be a non-empty string",
+            str(exc),
             details={"field": field_name, "value_type": type(value).__name__},
-        )
-    return value.strip()
+        ) from exc
 
 
 def _require_int(value: object, *, field_name: str) -> int:

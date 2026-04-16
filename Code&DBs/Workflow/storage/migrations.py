@@ -17,6 +17,7 @@ from ._generated_workflow_migration_authority import (
     WORKFLOW_MIGRATION_EXPECTED_OBJECTS as _GENERATED_WORKFLOW_MIGRATION_EXPECTED_OBJECTS,
     WORKFLOW_MIGRATION_POLICIES as _GENERATED_WORKFLOW_MIGRATION_POLICIES,
     WORKFLOW_MIGRATION_SEQUENCE as _GENERATED_WORKFLOW_MIGRATION_SEQUENCE,
+    WORKFLOW_SCHEMA_READINESS_SEQUENCE as _GENERATED_WORKFLOW_SCHEMA_READINESS_SEQUENCE,
     WORKFLOW_POLICY_BUCKETS as _GENERATED_WORKFLOW_POLICY_BUCKETS,
 )
 
@@ -54,6 +55,61 @@ class WorkflowMigrationError(RuntimeError):
 WorkflowMigrationPathError = WorkflowMigrationError
 
 _WORKFLOW_MIGRATION_SEQUENCE = _GENERATED_WORKFLOW_MIGRATION_SEQUENCE
+_WORKFLOW_SCHEMA_READINESS_SEQUENCE = _GENERATED_WORKFLOW_SCHEMA_READINESS_SEQUENCE
+WORKFLOW_SCHEMA_READINESS_SEQUENCE = _WORKFLOW_SCHEMA_READINESS_SEQUENCE
+
+
+_COMPILE_AUTHORITY_REQUIREMENT_TABLES = (
+    ("compile_artifact_authority_ready", ("compile_artifacts", "capability_catalog", "verify_refs", "verification_registry")),
+    ("compile_index_authority_ready", ("compile_index_snapshots",)),
+    ("execution_packet_authority_ready", ("execution_packets",)),
+    ("repo_snapshot_authority_ready", ("repo_snapshots",)),
+    ("verification_registry_ready", ("verification_registry",)),
+    ("verifier_authority_ready", ("verifier_registry", "verification_runs")),
+    ("healer_authority_ready", ("healer_registry", "verifier_healer_bindings", "healing_runs")),
+)
+
+_WORKFLOW_READY_TABLES = {
+    object_name
+    for _, objects in WORKFLOW_SCHEMA_READINESS_SEQUENCE
+    for object_type, object_name in objects
+    if object_type == "table"
+}
+
+
+@lru_cache(maxsize=1)
+def workflow_compile_authority_readiness_requirements() -> tuple[
+    tuple[str, tuple[str, ...]],
+    ...,
+]:
+    """Return authority readiness checks aligned to generated schema readiness tables."""
+
+    return tuple(
+        (
+            check_name,
+            tuple(
+                table_name
+                for table_name in table_names
+                if table_name in _WORKFLOW_READY_TABLES
+            ),
+        )
+        for check_name, table_names in _COMPILE_AUTHORITY_REQUIREMENT_TABLES
+    )
+
+
+@lru_cache(maxsize=1)
+def workflow_compile_authority_readiness_tables() -> tuple[str, ...]:
+    """Return the flattened list of readiness tables for compile-authority checks."""
+
+    tables: list[str] = []
+    seen: set[str] = set()
+    for _check_name, table_names in workflow_compile_authority_readiness_requirements():
+        for table_name in table_names:
+            if table_name in seen:
+                continue
+            tables.append(table_name)
+            seen.add(table_name)
+    return tuple(tables)
 
 
 @dataclass(frozen=True, slots=True)
@@ -559,6 +615,8 @@ def clear_workflow_migration_caches() -> None:
     workflow_migration_sql_text.cache_clear()
     workflow_migration_statements.cache_clear()
     workflow_migration_expected_objects.cache_clear()
+    workflow_compile_authority_readiness_requirements.cache_clear()
+    workflow_compile_authority_readiness_tables.cache_clear()
 
 
 __all__ = [
@@ -567,6 +625,8 @@ __all__ = [
     "WorkflowMigrationExpectedObject",
     "WorkflowMigrationManifestEntry",
     "WorkflowMigrationPathError",
+    "workflow_compile_authority_readiness_requirements",
+    "workflow_compile_authority_readiness_tables",
     "workflow_migration_expected_objects",
     "workflow_migration_manifest",
     "workflow_migration_path",

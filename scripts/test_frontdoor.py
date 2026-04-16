@@ -436,12 +436,43 @@ def _selftest_payload() -> dict[str, Any]:
     }
 
 
+def _moon_style_lint_payload(args: list[str]) -> dict[str, Any]:
+    if args:
+        return {
+            "ok": False,
+            "results": {},
+            "errors": ["moon-style-lint does not accept positional arguments"],
+            "warnings": [],
+        }
+    command = [sys.executable, str(REPO_ROOT / "scripts" / "moon_style_lint.py")]
+    run = _run_command(command)
+    try:
+        details = json.loads(run["stdout"] or "{}")
+    except json.JSONDecodeError:
+        return {
+            "ok": False,
+            "results": {"raw": run["stdout"]},
+            "errors": ["moon-style-lint output was not valid JSON"],
+            "warnings": [run["stderr"].strip()] if run["stderr"] else [],
+        }
+
+    ok = run["returncode"] == 0 and bool(details.get("ok", False))
+    return {
+        "ok": ok,
+        "results": details.get("results", {}),
+        "errors": list(details.get("errors", [])),
+        "warnings": list(details.get("warnings", [])),
+    }
+
+
 def _dispatch(argv: list[str]) -> dict[str, Any]:
     if not argv:
         return {
             "ok": False,
             "results": {},
-            "errors": ["usage: ./scripts/test.sh suite list|suite focus|plan|check-affected|validate|selftest"],
+            "errors": [
+                "usage: ./scripts/test.sh suite list|suite focus|plan|check-affected|validate|selftest|moon-style-lint"
+            ],
             "warnings": [],
         }
 
@@ -484,6 +515,8 @@ def _dispatch(argv: list[str]) -> dict[str, Any]:
                 "warnings": [],
             }
         return _selftest_payload()
+    if command == "moon-style-lint":
+        return _moon_style_lint_payload(tail)
 
     return {
         "ok": False,

@@ -10,15 +10,12 @@ from typing import Any
 from storage.postgres.connection import resolve_workflow_database_url
 from storage.postgres.validators import PostgresConfigurationError
 
+from .._payload_contract import coerce_optional_text
 from ._shared import _ClientError, _bug_to_dict, _matches, _serialize
 from .workflow_admin import _handle_health
 
 
-def _optional_text(value: object) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
+_optional_text = coerce_optional_text
 
 
 def _build_workflow_bridge(subs: Any):
@@ -127,6 +124,16 @@ def handle_query(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         panel = subs.get_operator_panel()
         snap = panel.snapshot()
         return {"routed_to": "operator_panel", "snapshot": _serialize(snap)}
+
+    if _matches(question, ["issue backlog", "upstream issue", "upstream issues", "intake issue", "intake issues"]):
+        from surfaces.api import operator_read
+
+        backlog = operator_read.query_issue_backlog(
+            limit=25,
+            open_only=True,
+        )
+        backlog["routed_to"] = "issue_backlog"
+        return backlog
 
     if _matches(question, ["bug", "defect", "issue"]):
         bt = subs.get_bug_tracker()
@@ -876,6 +883,25 @@ def handle_research(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
 
 def handle_operator_view(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
     view = body.get("view", "status")
+    if view == "issue_backlog":
+        from surfaces.api import operator_read
+
+        limit = max(1, int(body.get("limit", 50) or 50))
+        open_only = bool(body.get("open_only", True))
+        status = _optional_text(body.get("status"))
+        backlog = operator_read.query_issue_backlog(
+            limit=limit,
+            open_only=open_only,
+            status=status,
+        )
+        return {
+            "view": view,
+            "requires": {
+                "runtime": "sync_postgres",
+                "driver": "postgres",
+            },
+            **backlog,
+        }
     if view == "replay_ready_bugs":
         bt = subs.get_bug_tracker()
         limit = max(1, int(body.get("limit", 50) or 50))
@@ -942,8 +968,8 @@ def handle_operator_view(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
             "refresh_backfill": refresh_backfill,
         }
     run_id = _optional_text(body.get("run_id"))
-    view_options = ("status", "scoreboard", "graph", "lineage", "replay_ready_bugs")
-    if view not in {"status", "scoreboard", "graph", "lineage"}:
+    view_options = ("status", "scoreboard", "graph", "lineage", "replay_ready_bugs", "issue_backlog")
+    if view not in {"status", "scoreboard", "graph", "lineage", "replay_ready_bugs", "issue_backlog"}:
         raise _ClientError(f"Unknown view: {view}. Options: {', '.join(view_options)}")
     if run_id is None:
         raise _ClientError(f"run_id is required for operator view '{view}'")

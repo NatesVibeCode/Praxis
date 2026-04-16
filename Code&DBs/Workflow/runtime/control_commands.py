@@ -314,6 +314,37 @@ def submit_workflow_command(
         return payload
     return _merge_workflow_submit_metrics(payload, snapshot)
 
+
+def submit_workflow_chain_command(
+    conn: "SyncPostgresConnection",
+    *,
+    requested_by_kind: str,
+    requested_by_ref: str,
+    coordination_path: str,
+    repo_root: str,
+    adopt_active: bool = True,
+    idempotency_key: str | None = None,
+    command_id: str | None = None,
+    requested_at: Any = None,
+) -> dict[str, Any]:
+    """Request and render one workflow.chain.submit command in a single step."""
+    command = request_workflow_chain_submit_command(
+        conn,
+        requested_by_kind=requested_by_kind,
+        requested_by_ref=requested_by_ref,
+        coordination_path=coordination_path,
+        repo_root=repo_root,
+        adopt_active=adopt_active,
+        idempotency_key=idempotency_key,
+        command_id=command_id,
+        requested_at=requested_at,
+    )
+    return render_workflow_chain_submit_response(
+        conn,
+        command,
+        coordination_path=coordination_path,
+    )
+
 # 040 creates the table; 042 performs the explicit workflow.* type cutover.
 _SCHEMA_FILENAMES = (
     "040_control_commands.sql",
@@ -1309,6 +1340,7 @@ __all__ = [
     "render_control_command_response",
     "render_control_command_failure",
     "request_control_command",
+    "submit_workflow_chain_command",
     "render_workflow_chain_submit_response",
     "request_workflow_chain_submit_command",
     "render_workflow_spawn_response",

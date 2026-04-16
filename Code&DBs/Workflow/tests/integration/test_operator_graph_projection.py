@@ -467,6 +467,7 @@ async def _exercise_operator_graph_projection_is_graph_ready_and_explicit() -> N
             "008_workflow_class_and_schedule_schema.sql",
             "009_bug_and_roadmap_authority.sql",
             "010_operator_control_authority.sql",
+            "132_issue_backlog_authority.sql",
         ):
             await _bootstrap_migration(conn, filename)
 

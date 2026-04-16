@@ -153,5 +153,53 @@ class PostgresWorkItemCloseoutRepository:
             ) from exc
         return tuple(dict(row) for row in rows)
 
+    async def mark_issues_resolved_by_bug_ids(
+        self,
+        *,
+        bug_ids: Sequence[str],
+        resolved_at: datetime,
+    ) -> tuple[dict[str, Any], ...]:
+        normalized_bug_ids = _normalize_text_sequence(bug_ids, field_name="bug_ids")
+        if not normalized_bug_ids:
+            return ()
+        normalized_resolved_at = _require_utc(
+            resolved_at,
+            field_name="resolved_at",
+        )
+        try:
+            rows = await self._conn.fetch(
+                """
+                UPDATE issues AS issue
+                SET
+                    status = 'resolved',
+                    resolved_at = COALESCE(issue.resolved_at, $1),
+                    updated_at = $1,
+                    resolution_summary = COALESCE(
+                        NULLIF(issue.resolution_summary, ''),
+                        candidate.resolution_summary
+                    )
+                FROM (
+                    SELECT
+                        bug.source_issue_id AS issue_id,
+                        CONCAT('Resolved through ', bug.bug_id) AS resolution_summary
+                    FROM bugs AS bug
+                    WHERE bug.bug_id = ANY($2::text[])
+                      AND bug.source_issue_id IS NOT NULL
+                ) AS candidate
+                WHERE issue.issue_id = candidate.issue_id
+                  AND issue.resolved_at IS NULL
+                RETURNING issue.issue_id, issue.status, issue.resolved_at, issue.resolution_summary
+                """,
+                normalized_resolved_at,
+                list(normalized_bug_ids),
+            )
+        except asyncpg.PostgresError as exc:
+            raise PostgresWriteError(
+                "work_item_closeout.write_failed",
+                "failed to mark issues resolved",
+                details={"sqlstate": getattr(exc, "sqlstate", None)},
+            ) from exc
+        return tuple(dict(row) for row in rows)
+
 
 __all__ = ["PostgresWorkItemCloseoutRepository"]

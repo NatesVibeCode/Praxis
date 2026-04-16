@@ -25,6 +25,51 @@
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04), 0 18px 36px rgba(0, 0, 0, 0.18);
 }
 
+.app-shell__chrome--collapsed {
+  grid-template-columns: minmax(200px, 260px) minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 10px 18px 9px;
+}
+
+.app-shell__chrome--collapsed .app-shell__identity {
+  gap: 10px;
+}
+
+.app-shell__chrome--collapsed .app-shell__identity-mark {
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+}
+
+.app-shell__chrome--collapsed .app-shell__identity-mark::before {
+  inset: 7px;
+  border-radius: 7px;
+}
+
+.app-shell__chrome--collapsed .app-shell__identity-mark::after {
+  inset: 10px;
+}
+
+.app-shell__chrome--collapsed .app-shell__identity-copy em,
+.app-shell__chrome--collapsed .app-shell__identity-copy p,
+.app-shell__chrome--collapsed .app-shell__action-kicker {
+  display: none;
+}
+
+.app-shell__chrome--collapsed .app-shell__identity-copy strong {
+  font-size: 13px;
+}
+
+.app-shell__chrome--collapsed .app-shell__tab-button {
+  min-height: 32px;
+}
+
+.app-shell__chrome--collapsed .app-shell__action-button {
+  min-height: 34px;
+  min-width: 88px;
+  padding: 6px 10px;
+}
+
 .app-shell__identity {
   display: flex;
   align-items: center;
@@ -713,6 +758,30 @@
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
+}
+
+.app-toast__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.app-toast__dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1;
+  font-weight: 700;
+  cursor: pointer;
+  opacity: 0.84;
 }
 
 @keyframes app-toast-in {

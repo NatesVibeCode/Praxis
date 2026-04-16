@@ -38,12 +38,20 @@ from runtime.work_item_workflow_bindings import (
 )
 from storage.postgres import (
     PostgresOperatorControlRepository,
+    PostgresWorkItemCloseoutRepository,
     PostgresRoadmapAuthoringRepository,
     PostgresTaskRouteEligibilityRepository,
     connect_workflow_database,
     resolve_workflow_authority_cache_key,
 )
 from ._operator_helpers import _json_compatible, _normalize_as_of, _now, _run_async
+from ._payload_contract import (
+    coerce_choice,
+    coerce_slug,
+    coerce_text_sequence,
+    optional_text,
+    require_text,
+)
 
 
 class _Connection(Protocol):
@@ -64,6 +72,7 @@ class _Connection(Protocol):
 
 
 _TASK_ROUTE_ELIGIBILITY_STATUSES = frozenset({"eligible", "rejected"})
+_ISSUE_STATUSES = frozenset({"open", "resolved"})
 _ROADMAP_WRITE_ACTIONS = frozenset({"preview", "validate", "commit"})
 _WORK_ITEM_CLOSEOUT_ACTIONS = frozenset({"preview", "commit"})
 _ROADMAP_ITEM_KINDS = frozenset({"capability", "initiative"})
@@ -74,25 +83,27 @@ _BUG_CLOSEOUT_EVIDENCE_ROLE = "validates_fix"
 _ROADMAP_COMPLETED_STATUS = "completed"
 
 
-def _require_text(value: object, *, field_name: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{field_name} must be a non-empty string")
-    return value.strip()
-
-
-def _optional_text(value: object, *, field_name: str) -> str | None:
-    if value is None:
-        return None
-    return _require_text(value, field_name=field_name)
+_require_text = require_text
+_optional_text = optional_text
+_coerce_text_sequence = coerce_text_sequence
 
 
 def _normalize_task_route_eligibility_status(value: object) -> str:
-    normalized = _require_text(value, field_name="eligibility_status").lower()
-    if normalized not in _TASK_ROUTE_ELIGIBILITY_STATUSES:
-        raise ValueError(
-            "eligibility_status must be one of eligible, rejected"
-        )
-    return normalized
+    return coerce_choice(
+        value,
+        field_name="eligibility_status",
+        choices=_TASK_ROUTE_ELIGIBILITY_STATUSES,
+    )
+
+
+def _normalize_issue_status(value: object | None) -> str:
+    if value is None:
+        return "open"
+    return coerce_choice(
+        value,
+        field_name="status",
+        choices=_ISSUE_STATUSES,
+    )
 
 
 def _scope_fragment(value: str | None, *, fallback: str) -> str:
@@ -153,73 +164,54 @@ def _operator_decision_to_json(
     }
 
 
-def _coerce_text_sequence(
-    value: object,
-    *,
-    field_name: str,
-) -> tuple[str, ...]:
-    if value is None:
-        return ()
-    if isinstance(value, str):
-        return (_require_text(value, field_name=field_name),)
-    if not isinstance(value, (list, tuple)):
-        raise ValueError(f"{field_name} must be a list of non-empty strings")
-    normalized: list[str] = []
-    for index, item in enumerate(value):
-        normalized.append(
-            _require_text(item, field_name=f"{field_name}[{index}]")
-        )
-    return tuple(dict.fromkeys(normalized))
-
-
 def _normalize_registry_paths(value: object) -> tuple[str, ...]:
-    return _coerce_text_sequence(value, field_name="registry_paths")
+    return coerce_text_sequence(value, field_name="registry_paths")
 
 
 def _normalize_roadmap_action(value: object) -> str:
-    normalized = _require_text(value, field_name="action").lower()
-    if normalized not in _ROADMAP_WRITE_ACTIONS:
-        allowed = ", ".join(sorted(_ROADMAP_WRITE_ACTIONS))
-        raise ValueError(f"action must be one of {allowed}")
-    return normalized
+    return coerce_choice(
+        value,
+        field_name="action",
+        choices=_ROADMAP_WRITE_ACTIONS,
+    )
 
 
 def _normalize_work_item_closeout_action(value: object) -> str:
-    normalized = _require_text(value, field_name="action").lower()
-    if normalized not in _WORK_ITEM_CLOSEOUT_ACTIONS:
-        allowed = ", ".join(sorted(_WORK_ITEM_CLOSEOUT_ACTIONS))
-        raise ValueError(f"action must be one of {allowed}")
-    return normalized
+    return coerce_choice(
+        value,
+        field_name="action",
+        choices=_WORK_ITEM_CLOSEOUT_ACTIONS,
+    )
 
 
 def _normalize_roadmap_item_kind(value: object | None, *, template: str) -> str:
     if value is None:
         return "capability" if template == "hard_cutover_program" else "capability"
-    normalized = _require_text(value, field_name="item_kind").lower()
-    if normalized not in _ROADMAP_ITEM_KINDS:
-        allowed = ", ".join(sorted(_ROADMAP_ITEM_KINDS))
-        raise ValueError(f"item_kind must be one of {allowed}")
-    return normalized
+    return coerce_choice(
+        value,
+        field_name="item_kind",
+        choices=_ROADMAP_ITEM_KINDS,
+    )
 
 
 def _normalize_roadmap_status(value: object | None) -> str:
     if value is None:
         return "active"
-    normalized = _require_text(value, field_name="status").lower()
-    if normalized not in _ROADMAP_STATUSES:
-        allowed = ", ".join(sorted(_ROADMAP_STATUSES))
-        raise ValueError(f"status must be one of {allowed}")
-    return normalized
+    return coerce_choice(
+        value,
+        field_name="status",
+        choices=_ROADMAP_STATUSES,
+    )
 
 
 def _normalize_roadmap_priority(value: object | None) -> str:
     if value is None:
         return "p2"
-    normalized = _require_text(value, field_name="priority").lower()
-    if normalized not in _ROADMAP_PRIORITIES:
-        allowed = ", ".join(sorted(_ROADMAP_PRIORITIES))
-        raise ValueError(f"priority must be one of {allowed}")
-    return normalized
+    return coerce_choice(
+        value,
+        field_name="priority",
+        choices=_ROADMAP_PRIORITIES,
+    )
 
 
 def _slugify_roadmap_text(value: str) -> str:
@@ -369,6 +361,94 @@ _ROADMAP_TEMPLATE_CHILDREN: dict[str, tuple[_RoadmapTemplateChild, ...]] = {
             ),
         ),
     ),
+    "data_dictionary_impact_program": (
+        _RoadmapTemplateChild(
+            suffix="contract",
+            title="Shared data-dictionary contract and CQRS query seam",
+            priority="p1",
+            summary=(
+                "Persist a canonical dictionary payload contract in the DB authority so "
+                "all downstream tools consume one normalized schema and dependency graph "
+                "shape, including lifecycle metadata and freshness."
+            ),
+            must_have=(
+                "Define a shared dictionary payload contract (schema, summary, columns, dependencies).",
+                "Guarantee schema and relationship payloads are returned through a single CQRS query path.",
+                "Publish a backward-compatible contract version so existing and new tools can parse safely.",
+            ),
+        ),
+        _RoadmapTemplateChild(
+            suffix="scenario_composer",
+            title="1+1=3 scenario composer across tools",
+            priority="p1",
+            summary=(
+                "Build a deterministic scenario composer that fuses dictionary lineage with "
+                "bug history, workflow-class pressure, and roadmap intent to produce emergent "
+                "execution ideas."
+            ),
+            must_have=(
+                "Generate at least three novel scenario candidates per trigger set from dictionary signals.",
+                "Each scenario includes a root cause hypothesis, impacted query path, and proposed action.",
+                "Persist scenario outputs as durable records linked to dictionary refresh receipts.",
+            ),
+        ),
+        _RoadmapTemplateChild(
+            suffix="impact_scoring",
+            title="Impact scoring and prioritization for dictionary-driven scenarios",
+            priority="p1",
+            summary=(
+                "Create a deterministic scoring model so generated scenarios are prioritized by "
+                "blast radius and confidence instead of manual guesswork."
+            ),
+            must_have=(
+                "Score scenarios across dependency breadth, incident history, and query complexity.",
+                "Persist scoring components in audit fields for explainability and rerun determinism.",
+                "Require top-scoring scenarios to be surfaced to operator-write and review workflows.",
+            ),
+        ),
+        _RoadmapTemplateChild(
+            suffix="tool_fanout",
+            title="Wire dictionary outputs into existing tools (queries, runbooks, roadmap)",
+            priority="p1",
+            summary=(
+                "Add tool-level fanout so dictionary output is consumed by MCP and CLI surfaces "
+                "to propose roadmap items, runbooks, and scenario previews automatically."
+            ),
+            must_have=(
+                "Update existing query surfaces to attach related scenario suggestions when dictionary depth threshold is met.",
+                "Add a low-friction path from scenario output to roadmap creation payloads.",
+                "Preserve a preview-first UX so all auto-generated changes are inspectable before commit.",
+            ),
+        ),
+        _RoadmapTemplateChild(
+            suffix="validation_gate",
+            title="Validation, evidence, and auto-generation guardrails",
+            priority="p2",
+            summary=(
+                "Add validation guards that only generate auto-scenarios when dictionary freshness, "
+                "ownership, and acceptance criteria thresholds are met."
+            ),
+            must_have=(
+                "Block auto-generation if dictionary freshness is stale or required metadata is missing.",
+                "Attach generated scenarios to test-generation and schema-refresh tasks as acceptance criteria.",
+                "Emit clear warnings for ambiguous relationships and unresolved table matches.",
+            ),
+        ),
+        _RoadmapTemplateChild(
+            suffix="observability",
+            title="Observability and auditability for dictionary-to-scenario lineage",
+            priority="p2",
+            summary=(
+                "Instrument receipts and audit rows that prove each scenario was generated from a "
+                "specific dictionary snapshot and was then transformed into one or more roadmap rows."
+            ),
+            must_have=(
+                "Record generation receipts for each scenario with source table set and snapshot timestamp.",
+                "Create a roadmap query view that shows scenario lineage by dictionary version and run.",
+                "Add a troubleshooting endpoint that proves why a scenario was skipped, gated, or committed.",
+            ),
+        ),
+    ),
 }
 
 
@@ -508,11 +588,11 @@ def _default_task_route_rationale(
 
 
 def _normalize_circuit_breaker_override_state(value: object) -> str:
-    normalized = _require_text(value, field_name="override_state").lower()
-    if normalized not in _CIRCUIT_BREAKER_OVERRIDE_STATES:
-        allowed = ", ".join(sorted(_CIRCUIT_BREAKER_OVERRIDE_STATES))
-        raise ValueError(f"override_state must be one of {allowed}")
-    return normalized
+    return coerce_choice(
+        value,
+        field_name="override_state",
+        choices=_CIRCUIT_BREAKER_OVERRIDE_STATES,
+    )
 
 
 def _circuit_breaker_scope_label(provider_slug: str) -> str:
@@ -585,19 +665,19 @@ def _default_circuit_breaker_rationale(
 
 
 def _normalize_authority_domain_scope_ref(value: object) -> str:
-    normalized = _require_text(value, field_name="authority_domain").lower()
-    tokens = re.findall(r"[a-z0-9]+", normalized)
-    if not tokens:
-        raise ValueError("authority_domain must contain at least one alphanumeric character")
-    return "_".join(tokens)
+    return coerce_slug(
+        value,
+        field_name="authority_domain",
+        separator="_",
+    )
 
 
 def _normalize_architecture_policy_slug(value: object) -> str:
-    normalized = _require_text(value, field_name="policy_slug").lower()
-    tokens = re.findall(r"[a-z0-9]+", normalized)
-    if not tokens:
-        raise ValueError("policy_slug must contain at least one alphanumeric character")
-    return "-".join(tokens)
+    return coerce_slug(
+        value,
+        field_name="policy_slug",
+        separator="-",
+    )
 
 
 def _architecture_policy_operator_decision_id(
@@ -815,6 +895,39 @@ def _closeout_resolution_summary(*, bug_id: str, evidence_count: int) -> str:
     )
 
 
+def _binding_status_supports_pipeline(value: str) -> bool:
+    normalized = value.strip().lower()
+    return normalized not in {"inactive", "closed", "completed", "superseded", "cancelled"}
+
+
+def _auto_promoted_bug_roadmap_item_id(bug_id: str) -> str:
+    suffix = _scope_fragment(bug_id, fallback="bug").replace("-", ".")
+    return f"roadmap_item.auto_bug.{suffix}"
+
+
+def _auto_promoted_bug_priority(severity: str | None) -> str:
+    normalized = (severity or "").strip().upper()
+    if normalized in {"P0", "P1", "HIGH", "CRITICAL"}:
+        return "p1"
+    return "p2"
+
+
+def _issue_id_from_slug(slug: str) -> str:
+    return f"issue.{slug}"
+
+
+def _issue_key_from_issue_id(issue_id: str) -> str:
+    prefix = "issue."
+    if issue_id.startswith(prefix):
+        return f"issue.{issue_id[len(prefix):]}"
+    return issue_id.replace("_", ".")
+
+
+def _auto_promoted_issue_bug_id(issue_id: str) -> str:
+    suffix = _scope_fragment(issue_id, fallback="issue").replace("-", ".")
+    return f"bug.auto_issue.{suffix}"
+
+
 def _task_route_eligibility_record_from_row(row: Mapping[str, Any]) -> TaskRouteEligibilityRecord:
     return TaskRouteEligibilityRecord(
         task_route_eligibility_id=str(row["task_route_eligibility_id"]),
@@ -853,6 +966,9 @@ class OperatorControlFrontdoor:
     native_primary_cutover_repository_factory: Callable[[
         _Connection,
     ], NativePrimaryCutoverRepository] | None = None
+    work_item_closeout_repository_factory: Callable[[
+        _Connection,
+    ], PostgresWorkItemCloseoutRepository] | None = None
 
     def __post_init__(self) -> None:
         if self.operator_control_repository_factory is None:
@@ -870,6 +986,10 @@ class OperatorControlFrontdoor:
         if self.native_primary_cutover_repository_factory is None:
             self.native_primary_cutover_repository_factory = (
                 self._default_native_primary_cutover_repository_factory
+            )
+        if self.work_item_closeout_repository_factory is None:
+            self.work_item_closeout_repository_factory = (
+                self._default_work_item_closeout_repository_factory
             )
 
     @staticmethod
@@ -902,11 +1022,18 @@ class OperatorControlFrontdoor:
     ) -> NativePrimaryCutoverRepository:
         return PostgresNativePrimaryCutoverRepository(conn)  # type: ignore[arg-type]
 
+    @staticmethod
+    def _default_work_item_closeout_repository_factory(
+        conn: _Connection,
+    ) -> PostgresWorkItemCloseoutRepository:
+        return PostgresWorkItemCloseoutRepository(conn)  # type: ignore[arg-type]
+
     async def _record_work_item_workflow_binding(
         self,
         *,
         env: Mapping[str, str] | None,
         binding_kind: str,
+        issue_id: str | None,
         bug_id: str | None,
         roadmap_item_id: str | None,
         workflow_class_id: str | None,
@@ -916,15 +1043,20 @@ class OperatorControlFrontdoor:
         bound_by_decision_id: str | None,
         created_at: datetime | None,
         updated_at: datetime | None,
-    ) -> WorkItemWorkflowBindingRecord:
+    ) -> tuple[
+        WorkItemWorkflowBindingRecord,
+        dict[str, Any] | None,
+        dict[str, Any] | None,
+    ]:
         conn = await self.connect_database(env)
         try:
             assert self.binding_repository_factory is not None
             runtime = WorkItemWorkflowBindingRuntime(
                 repository=self.binding_repository_factory(conn),
             )
-            return await runtime.record_binding(
+            record = await runtime.record_binding(
                 binding_kind=binding_kind,
+                issue_id=issue_id,
                 bug_id=bug_id,
                 roadmap_item_id=roadmap_item_id,
                 workflow_class_id=workflow_class_id,
@@ -935,6 +1067,37 @@ class OperatorControlFrontdoor:
                 created_at=created_at,
                 updated_at=updated_at,
             )
+            auto_promoted_bug: dict[str, Any] | None = None
+            auto_promoted_roadmap: dict[str, Any] | None = None
+            if issue_id is not None:
+                auto_promoted_bug, auto_promoted_roadmap = await self._ensure_issue_promoted_to_bug(
+                    conn=conn,
+                    runtime=runtime,
+                    binding_kind=binding_kind,
+                    issue_id=issue_id,
+                    workflow_class_id=workflow_class_id,
+                    schedule_definition_id=schedule_definition_id,
+                    workflow_run_id=workflow_run_id,
+                    binding_status=binding_status,
+                    bound_by_decision_id=bound_by_decision_id,
+                    created_at=created_at,
+                    updated_at=updated_at,
+                )
+            else:
+                auto_promoted_roadmap = await self._ensure_bug_promoted_to_roadmap(
+                    conn=conn,
+                    runtime=runtime,
+                    binding_kind=binding_kind,
+                    bug_id=bug_id,
+                    workflow_class_id=workflow_class_id,
+                    schedule_definition_id=schedule_definition_id,
+                    workflow_run_id=workflow_run_id,
+                    binding_status=binding_status,
+                    bound_by_decision_id=bound_by_decision_id,
+                    created_at=created_at,
+                    updated_at=updated_at,
+                )
+            return record, auto_promoted_bug, auto_promoted_roadmap
         finally:
             await conn.close()
 
@@ -1145,6 +1308,593 @@ class OperatorControlFrontdoor:
             bug_id,
         )
         return row is not None
+
+    async def _issue_exists(
+        self,
+        conn: _Connection,
+        *,
+        issue_id: str,
+    ) -> bool:
+        row = await conn.fetchrow(
+            "SELECT issue_id FROM issues WHERE issue_id = $1",
+            issue_id,
+        )
+        return row is not None
+
+    async def _fetch_issue_row(
+        self,
+        conn: _Connection,
+        *,
+        issue_id: str,
+    ) -> Mapping[str, Any] | None:
+        return await conn.fetchrow(
+            """
+            SELECT
+                issue_id,
+                issue_key,
+                title,
+                status,
+                severity,
+                priority,
+                summary,
+                source_kind,
+                discovered_in_run_id,
+                discovered_in_receipt_id,
+                owner_ref,
+                decision_ref,
+                resolution_summary,
+                opened_at,
+                resolved_at,
+                created_at,
+                updated_at
+            FROM issues
+            WHERE issue_id = $1
+            """,
+            issue_id,
+        )
+
+    async def _fetch_bug_row(
+        self,
+        conn: _Connection,
+        *,
+        bug_id: str,
+    ) -> Mapping[str, Any] | None:
+        return await conn.fetchrow(
+            """
+            SELECT
+                bug_id,
+                title,
+                severity,
+                summary,
+                source_issue_id,
+                decision_ref,
+                updated_at
+            FROM bugs
+            WHERE bug_id = $1
+            """,
+            bug_id,
+        )
+
+    async def _fetch_bug_row_by_source_issue_id(
+        self,
+        conn: _Connection,
+        *,
+        source_issue_id: str,
+    ) -> Mapping[str, Any] | None:
+        return await conn.fetchrow(
+            """
+            SELECT
+                bug_id,
+                bug_key,
+                title,
+                status,
+                severity,
+                priority,
+                summary,
+                source_kind,
+                discovered_in_run_id,
+                discovered_in_receipt_id,
+                owner_ref,
+                source_issue_id,
+                decision_ref,
+                opened_at,
+                resolved_at,
+                created_at,
+                updated_at
+            FROM bugs
+            WHERE source_issue_id = $1
+            ORDER BY created_at ASC, bug_id ASC
+            LIMIT 1
+            """,
+            source_issue_id,
+        )
+
+    async def _fetch_roadmap_item_by_source_bug_id(
+        self,
+        conn: _Connection,
+        *,
+        source_bug_id: str,
+    ) -> Mapping[str, Any] | None:
+        return await conn.fetchrow(
+            """
+            SELECT
+                roadmap_item_id,
+                roadmap_key,
+                title,
+                status,
+                priority,
+                source_bug_id,
+                created_at,
+                updated_at
+            FROM roadmap_items
+            WHERE source_bug_id = $1
+            ORDER BY created_at ASC, roadmap_item_id ASC
+            LIMIT 1
+            """,
+            source_bug_id,
+        )
+
+    async def _record_issue(
+        self,
+        *,
+        env: Mapping[str, str] | None,
+        title: str,
+        summary: str,
+        severity: str,
+        priority: str,
+        source_kind: str = "manual",
+        issue_id: str | None = None,
+        issue_key: str | None = None,
+        status: str | None = None,
+        owner_ref: str | None = None,
+        decision_ref: str | None = None,
+        discovered_in_run_id: str | None = None,
+        discovered_in_receipt_id: str | None = None,
+        opened_at: datetime | None = None,
+        resolved_at: datetime | None = None,
+        created_at: datetime | None = None,
+        updated_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        normalized_title = _require_text(title, field_name="title")
+        normalized_summary = _require_text(summary, field_name="summary")
+        normalized_severity = _require_text(severity, field_name="severity")
+        normalized_priority = _require_text(priority, field_name="priority")
+        normalized_source_kind = _require_text(source_kind, field_name="source_kind")
+        normalized_status = (
+            "resolved"
+            if status is None and resolved_at is not None
+            else _normalize_issue_status(status)
+        )
+        normalized_owner_ref = _optional_text(owner_ref, field_name="owner_ref")
+        now = _now()
+        normalized_opened_at = (
+            now
+            if opened_at is None
+            else _normalize_as_of(
+                opened_at,
+                error_type=ValueError,
+                reason_code="operator_control.invalid_opened_at",
+            )
+        )
+        normalized_created_at = (
+            normalized_opened_at
+            if created_at is None
+            else _normalize_as_of(
+                created_at,
+                error_type=ValueError,
+                reason_code="operator_control.invalid_created_at",
+            )
+        )
+        normalized_updated_at = (
+            normalized_created_at
+            if updated_at is None
+            else _normalize_as_of(
+                updated_at,
+                error_type=ValueError,
+                reason_code="operator_control.invalid_updated_at",
+            )
+        )
+        normalized_resolved_at = (
+            None
+            if resolved_at is None
+            else _normalize_as_of(
+                resolved_at,
+                error_type=ValueError,
+                reason_code="operator_control.invalid_resolved_at",
+            )
+        )
+        slug = (
+            _optional_text(issue_id, field_name="issue_id")
+            or _optional_text(issue_key, field_name="issue_key")
+            or coerce_slug(normalized_title, field_name="title")
+        )
+        normalized_issue_id = (
+            slug
+            if slug.startswith("issue.")
+            else _issue_id_from_slug(coerce_slug(slug, field_name="issue_slug"))
+        )
+        normalized_issue_key = (
+            _optional_text(issue_key, field_name="issue_key")
+            or _issue_key_from_issue_id(normalized_issue_id)
+        )
+        normalized_decision_ref = (
+            _optional_text(decision_ref, field_name="decision_ref")
+            or _default_decision_ref(
+                _scope_fragment(normalized_issue_id, fallback="issue"),
+                normalized_created_at,
+            )
+        )
+        conn = await self.connect_database(env)
+        try:
+            await conn.execute(
+                """
+                INSERT INTO issues (
+                    issue_id,
+                    issue_key,
+                    title,
+                    status,
+                    severity,
+                    priority,
+                    summary,
+                    source_kind,
+                    discovered_in_run_id,
+                    discovered_in_receipt_id,
+                    owner_ref,
+                    decision_ref,
+                    resolution_summary,
+                    opened_at,
+                    resolved_at,
+                    created_at,
+                    updated_at
+                ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULL, $13, $14, $15, $16
+                )
+                ON CONFLICT (issue_id) DO UPDATE SET
+                    issue_key = EXCLUDED.issue_key,
+                    title = EXCLUDED.title,
+                    status = EXCLUDED.status,
+                    severity = EXCLUDED.severity,
+                    priority = EXCLUDED.priority,
+                    summary = EXCLUDED.summary,
+                    source_kind = EXCLUDED.source_kind,
+                    discovered_in_run_id = EXCLUDED.discovered_in_run_id,
+                    discovered_in_receipt_id = EXCLUDED.discovered_in_receipt_id,
+                    owner_ref = EXCLUDED.owner_ref,
+                    decision_ref = EXCLUDED.decision_ref,
+                    opened_at = EXCLUDED.opened_at,
+                    resolved_at = EXCLUDED.resolved_at,
+                    updated_at = EXCLUDED.updated_at
+                """,
+                normalized_issue_id,
+                normalized_issue_key,
+                normalized_title,
+                normalized_status,
+                normalized_severity,
+                normalized_priority,
+                normalized_summary,
+                normalized_source_kind,
+                _optional_text(
+                    discovered_in_run_id,
+                    field_name="discovered_in_run_id",
+                ),
+                _optional_text(
+                    discovered_in_receipt_id,
+                    field_name="discovered_in_receipt_id",
+                ),
+                normalized_owner_ref,
+                normalized_decision_ref,
+                normalized_opened_at,
+                normalized_resolved_at,
+                normalized_created_at,
+                normalized_updated_at,
+            )
+            row = await self._fetch_issue_row(conn, issue_id=normalized_issue_id)
+            if row is None:
+                raise RuntimeError("failed to read issue row after write")
+            return {
+                key: (
+                    value.isoformat()
+                    if isinstance(value, datetime)
+                    else value
+                )
+                for key, value in dict(row).items()
+            }
+        finally:
+            await conn.close()
+
+    async def _ensure_issue_promoted_to_bug(
+        self,
+        *,
+        conn: _Connection,
+        runtime: WorkItemWorkflowBindingRuntime,
+        binding_kind: str,
+        issue_id: str | None,
+        workflow_class_id: str | None,
+        schedule_definition_id: str | None,
+        workflow_run_id: str | None,
+        binding_status: str,
+        bound_by_decision_id: str | None,
+        created_at: datetime | None,
+        updated_at: datetime | None,
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        if (
+            issue_id is None
+            or not _binding_status_supports_pipeline(binding_status)
+            or (
+                workflow_class_id is None
+                and schedule_definition_id is None
+                and workflow_run_id is None
+            )
+        ):
+            return None, None
+
+        existing_bug = await self._fetch_bug_row_by_source_issue_id(
+            conn,
+            source_issue_id=issue_id,
+        )
+        bug_id: str
+        created = False
+        if existing_bug is None:
+            issue_row = await self._fetch_issue_row(conn, issue_id=issue_id)
+            if issue_row is None:
+                return None, None
+            bug_id = _auto_promoted_issue_bug_id(issue_id)
+            created_at_value = (
+                _normalize_as_of(
+                    created_at,
+                    error_type=ValueError,
+                    reason_code="operator_control.invalid_created_at",
+                )
+                if created_at is not None
+                else _normalize_as_of(
+                    issue_row["created_at"],
+                    error_type=ValueError,
+                    reason_code="operator_control.invalid_created_at",
+                )
+            )
+            updated_at_value = (
+                created_at_value
+                if updated_at is None
+                else _normalize_as_of(
+                    updated_at,
+                    error_type=ValueError,
+                    reason_code="operator_control.invalid_updated_at",
+                )
+            )
+            await conn.execute(
+                """
+                INSERT INTO bugs (
+                    bug_id,
+                    bug_key,
+                    title,
+                    status,
+                    severity,
+                    priority,
+                    summary,
+                    source_kind,
+                    discovered_in_run_id,
+                    discovered_in_receipt_id,
+                    owner_ref,
+                    source_issue_id,
+                    decision_ref,
+                    resolution_summary,
+                    opened_at,
+                    resolved_at,
+                    created_at,
+                    updated_at
+                ) VALUES (
+                    $1, $2, $3, 'open', $4, $5, $6, $7, $8, $9, $10, $11, $12, NULL, $13, NULL, $14, $15
+                )
+                ON CONFLICT (bug_id) DO UPDATE SET
+                    bug_key = EXCLUDED.bug_key,
+                    title = EXCLUDED.title,
+                    severity = EXCLUDED.severity,
+                    priority = EXCLUDED.priority,
+                    summary = EXCLUDED.summary,
+                    source_kind = EXCLUDED.source_kind,
+                    discovered_in_run_id = EXCLUDED.discovered_in_run_id,
+                    discovered_in_receipt_id = EXCLUDED.discovered_in_receipt_id,
+                    owner_ref = EXCLUDED.owner_ref,
+                    source_issue_id = EXCLUDED.source_issue_id,
+                    decision_ref = EXCLUDED.decision_ref,
+                    opened_at = EXCLUDED.opened_at,
+                    updated_at = EXCLUDED.updated_at
+                """,
+                bug_id,
+                bug_id.replace(".", "-"),
+                _require_text(issue_row.get("title"), field_name="issue.title"),
+                _require_text(issue_row.get("severity"), field_name="issue.severity"),
+                _require_text(issue_row.get("priority"), field_name="issue.priority"),
+                f"Auto-promoted from {issue_id}: "
+                f"{_require_text(issue_row.get('summary'), field_name='issue.summary')}",
+                _require_text(issue_row.get("source_kind"), field_name="issue.source_kind"),
+                _optional_text(
+                    issue_row.get("discovered_in_run_id"),
+                    field_name="issue.discovered_in_run_id",
+                ),
+                _optional_text(
+                    issue_row.get("discovered_in_receipt_id"),
+                    field_name="issue.discovered_in_receipt_id",
+                ),
+                _optional_text(issue_row.get("owner_ref"), field_name="issue.owner_ref"),
+                issue_id,
+                _require_text(issue_row.get("decision_ref"), field_name="issue.decision_ref"),
+                _normalize_as_of(
+                    issue_row["opened_at"],
+                    error_type=ValueError,
+                    reason_code="operator_control.invalid_opened_at",
+                ),
+                created_at_value,
+                updated_at_value,
+            )
+            created = True
+        else:
+            bug_id = _require_text(existing_bug.get("bug_id"), field_name="bug_id")
+
+        bug_binding = await runtime.record_binding(
+            binding_kind=binding_kind,
+            bug_id=bug_id,
+            workflow_class_id=workflow_class_id,
+            schedule_definition_id=schedule_definition_id,
+            workflow_run_id=workflow_run_id,
+            binding_status=binding_status,
+            bound_by_decision_id=bound_by_decision_id,
+            created_at=created_at,
+            updated_at=updated_at,
+        )
+        auto_promoted_roadmap = await self._ensure_bug_promoted_to_roadmap(
+            conn=conn,
+            runtime=runtime,
+            binding_kind=binding_kind,
+            bug_id=bug_id,
+            workflow_class_id=workflow_class_id,
+            schedule_definition_id=schedule_definition_id,
+            workflow_run_id=workflow_run_id,
+            binding_status=binding_status,
+            bound_by_decision_id=bound_by_decision_id,
+            created_at=created_at,
+            updated_at=updated_at,
+        )
+        return {
+            "bug_id": bug_id,
+            "created": created,
+            "binding": bug_binding.to_json(),
+        }, auto_promoted_roadmap
+
+    async def _ensure_bug_promoted_to_roadmap(
+        self,
+        *,
+        conn: _Connection,
+        runtime: WorkItemWorkflowBindingRuntime,
+        binding_kind: str,
+        bug_id: str | None,
+        workflow_class_id: str | None,
+        schedule_definition_id: str | None,
+        workflow_run_id: str | None,
+        binding_status: str,
+        bound_by_decision_id: str | None,
+        created_at: datetime | None,
+        updated_at: datetime | None,
+    ) -> dict[str, Any] | None:
+        if (
+            bug_id is None
+            or not _binding_status_supports_pipeline(binding_status)
+            or (
+                workflow_class_id is None
+                and schedule_definition_id is None
+                and workflow_run_id is None
+            )
+        ):
+            return None
+
+        existing_item = await self._fetch_roadmap_item_by_source_bug_id(
+            conn,
+            source_bug_id=bug_id,
+        )
+        roadmap_item_id: str
+        created = False
+        now = _now()
+        if existing_item is None:
+            bug_row = await self._fetch_bug_row(conn, bug_id=bug_id)
+            if bug_row is None:
+                return None
+            roadmap_item_id = _auto_promoted_bug_roadmap_item_id(bug_id)
+            created_at_value = (
+                now
+                if created_at is None
+                else _normalize_as_of(
+                    created_at,
+                    error_type=ValueError,
+                    reason_code="operator_control.invalid_created_at",
+                )
+            )
+            updated_at_value = (
+                created_at_value
+                if updated_at is None
+                else _normalize_as_of(
+                    updated_at,
+                    error_type=ValueError,
+                    reason_code="operator_control.invalid_updated_at",
+                )
+            )
+            phase_order = _next_phase_order(
+                await self._roadmap_sibling_phase_orders(
+                    conn,
+                    parent_roadmap_item_id=None,
+                )
+            )
+            title = _require_text(bug_row.get("title"), field_name="bug.title")
+            summary = _require_text(bug_row.get("summary"), field_name="bug.summary")
+            decision_ref = (
+                _optional_text(bug_row.get("decision_ref"), field_name="bug.decision_ref")
+                or _default_decision_ref(
+                    _scope_fragment(bug_id, fallback="bug"),
+                    created_at_value,
+                )
+            )
+            acceptance = _acceptance_payload(
+                tier="tier_1",
+                phase_ready=False,
+                approval_tag=_default_approval_tag(created_at_value),
+                outcome_gate=f"Resolve {bug_id} through the bound workflow path.",
+                phase_order=phase_order,
+                reference_doc=None,
+                must_have=(
+                    f"Track active work for {bug_id} through workflow bindings.",
+                    f"Close {bug_id} only after explicit validates_fix evidence exists.",
+                ),
+            )
+            assert self.roadmap_repository_factory is not None
+            repository = self.roadmap_repository_factory(conn)
+            await repository.record_roadmap_package(
+                roadmap_items=[
+                    _roadmap_item_payload(
+                        roadmap_item_id=roadmap_item_id,
+                        roadmap_key=_roadmap_key_from_item_id(roadmap_item_id),
+                        title=title,
+                        item_kind="capability",
+                        status="active",
+                        priority=_auto_promoted_bug_priority(
+                            _optional_text(
+                                bug_row.get("severity"),
+                                field_name="bug.severity",
+                            )
+                        ),
+                        parent_roadmap_item_id=None,
+                        source_bug_id=bug_id,
+                        registry_paths=(),
+                        summary=f"Auto-promoted from {bug_id}: {summary}",
+                        acceptance_criteria=acceptance,
+                        decision_ref=decision_ref,
+                        created_at=created_at_value,
+                        updated_at=updated_at_value,
+                    )
+                ],
+                roadmap_item_dependencies=[],
+            )
+            created = True
+        else:
+            roadmap_item_id = _require_text(
+                existing_item.get("roadmap_item_id"),
+                field_name="roadmap_item_id",
+            )
+
+        roadmap_binding = await runtime.record_binding(
+            binding_kind=binding_kind,
+            roadmap_item_id=roadmap_item_id,
+            workflow_class_id=workflow_class_id,
+            schedule_definition_id=schedule_definition_id,
+            workflow_run_id=workflow_run_id,
+            binding_status=binding_status,
+            bound_by_decision_id=bound_by_decision_id,
+            created_at=created_at,
+            updated_at=updated_at,
+        )
+        return {
+            "roadmap_item_id": roadmap_item_id,
+            "created": created,
+            "binding": roadmap_binding.to_json(),
+        }
 
     async def _roadmap_sibling_phase_orders(
         self,
@@ -1779,6 +2529,7 @@ class OperatorControlFrontdoor:
                 "committed": False,
                 "applied": {
                     "bugs": [],
+                    "issues": [],
                     "roadmap_items": [],
                 },
             }
@@ -1786,54 +2537,34 @@ class OperatorControlFrontdoor:
                 return payload
 
             async with conn.transaction():
+                # DECISION: closeout write-side effects are delegated to the repository seam.
+                # SEE: storage.postgres.work_item_closeout_repository for canonical bug/roadmap mutation contract.
+                assert self.work_item_closeout_repository_factory is not None
+                closeout_repository = self.work_item_closeout_repository_factory(conn)
                 applied_bug_rows = []
                 if bug_candidates:
-                    applied_bug_rows = await conn.fetch(
-                        """
-                        UPDATE bugs AS bug
-                        SET
-                            status = 'FIXED',
-                            resolved_at = COALESCE(bug.resolved_at, $1),
-                            updated_at = $1,
-                            resolution_summary = COALESCE(
-                                NULLIF(bug.resolution_summary, ''),
-                                candidate.resolution_summary
-                            )
-                        FROM UNNEST($2::text[], $3::text[]) AS candidate(
-                            bug_id,
-                            resolution_summary
-                        )
-                        WHERE bug.bug_id = candidate.bug_id
-                          AND bug.resolved_at IS NULL
-                        RETURNING
-                            bug.bug_id,
-                            bug.status,
-                            bug.resolved_at,
-                            bug.resolution_summary
-                        """,
-                        now,
-                        [candidate["bug_id"] for candidate in bug_candidates],
-                        [
-                            candidate["resolution_summary"]
+                    applied_bug_rows = await closeout_repository.mark_bugs_fixed(
+                        bug_ids=tuple(candidate["bug_id"] for candidate in bug_candidates),
+                        resolution_summaries_by_bug_id={
+                            candidate["bug_id"]: candidate["resolution_summary"]
                             for candidate in bug_candidates
-                        ],
+                        },
+                        resolved_at=now,
+                    )
+                applied_issue_rows = []
+                if applied_bug_rows:
+                    applied_issue_rows = await closeout_repository.mark_issues_resolved_by_bug_ids(
+                        bug_ids=tuple(str(row["bug_id"]) for row in applied_bug_rows),
+                        resolved_at=now,
                     )
                 applied_roadmap_rows = []
                 if roadmap_candidates:
-                    applied_roadmap_rows = await conn.fetch(
-                        """
-                        UPDATE roadmap_items
-                        SET
-                            status = $1,
-                            completed_at = COALESCE(completed_at, $2),
-                            updated_at = $2
-                        WHERE roadmap_item_id = ANY($3::text[])
-                          AND completed_at IS NULL
-                        RETURNING roadmap_item_id, status, completed_at, source_bug_id
-                        """,
-                        _ROADMAP_COMPLETED_STATUS,
-                        now,
-                        [candidate["roadmap_item_id"] for candidate in roadmap_candidates],
+                    applied_roadmap_rows = await closeout_repository.mark_roadmap_items_completed(
+                        roadmap_item_ids=tuple(
+                            candidate["roadmap_item_id"] for candidate in roadmap_candidates
+                        ),
+                        completed_status=_ROADMAP_COMPLETED_STATUS,
+                        completed_at=now,
                     )
             payload["committed"] = True
             payload["applied"] = {
@@ -1845,6 +2576,15 @@ class OperatorControlFrontdoor:
                         "resolution_summary": str(row["resolution_summary"]) if row["resolution_summary"] is not None else None,
                     }
                     for row in applied_bug_rows
+                ],
+                "issues": [
+                    {
+                        "issue_id": str(row["issue_id"]),
+                        "status": str(row["status"]),
+                        "resolved_at": row["resolved_at"].isoformat() if row["resolved_at"] is not None else None,
+                        "resolution_summary": str(row["resolution_summary"]) if row["resolution_summary"] is not None else None,
+                    }
+                    for row in applied_issue_rows
                 ],
                 "roadmap_items": [
                     {
@@ -2165,6 +2905,49 @@ class OperatorControlFrontdoor:
             decision_ref=decision_ref,
         )
         return result.to_json()
+
+    async def record_issue_async(
+        self,
+        *,
+        title: str,
+        summary: str,
+        severity: str = "medium",
+        priority: str = "p2",
+        source_kind: str = "manual",
+        issue_id: str | None = None,
+        issue_key: str | None = None,
+        status: str | None = None,
+        owner_ref: str | None = None,
+        decision_ref: str | None = None,
+        discovered_in_run_id: str | None = None,
+        discovered_in_receipt_id: str | None = None,
+        opened_at: datetime | None = None,
+        resolved_at: datetime | None = None,
+        created_at: datetime | None = None,
+        updated_at: datetime | None = None,
+        env: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "issue": await self._record_issue(
+                env=env,
+                title=title,
+                summary=summary,
+                severity=severity,
+                priority=priority,
+                source_kind=source_kind,
+                issue_id=issue_id,
+                issue_key=issue_key,
+                status=status,
+                owner_ref=owner_ref,
+                decision_ref=decision_ref,
+                discovered_in_run_id=discovered_in_run_id,
+                discovered_in_receipt_id=discovered_in_receipt_id,
+                opened_at=opened_at,
+                resolved_at=resolved_at,
+                created_at=created_at,
+                updated_at=updated_at,
+            )
+        }
 
     async def roadmap_write_async(
         self,
@@ -2582,6 +3365,53 @@ class OperatorControlFrontdoor:
             ),
         )
 
+    def record_issue(
+        self,
+        *,
+        title: str,
+        summary: str,
+        severity: str = "medium",
+        priority: str = "p2",
+        source_kind: str = "manual",
+        issue_id: str | None = None,
+        issue_key: str | None = None,
+        status: str | None = None,
+        owner_ref: str | None = None,
+        decision_ref: str | None = None,
+        discovered_in_run_id: str | None = None,
+        discovered_in_receipt_id: str | None = None,
+        opened_at: datetime | None = None,
+        resolved_at: datetime | None = None,
+        created_at: datetime | None = None,
+        updated_at: datetime | None = None,
+        env: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
+        return _run_async(
+            self.record_issue_async(
+                title=title,
+                summary=summary,
+                severity=severity,
+                priority=priority,
+                source_kind=source_kind,
+                issue_id=issue_id,
+                issue_key=issue_key,
+                status=status,
+                owner_ref=owner_ref,
+                decision_ref=decision_ref,
+                discovered_in_run_id=discovered_in_run_id,
+                discovered_in_receipt_id=discovered_in_receipt_id,
+                opened_at=opened_at,
+                resolved_at=resolved_at,
+                created_at=created_at,
+                updated_at=updated_at,
+                env=env,
+            ),
+            message=(
+                "operator_control.async_boundary_required: "
+                "operator control sync entrypoints require a non-async call boundary"
+            ),
+        )
+
     def roadmap_write(
         self,
         *,
@@ -2637,6 +3467,7 @@ class OperatorControlFrontdoor:
         self,
         *,
         binding_kind: str,
+        issue_id: str | None = None,
         bug_id: str | None = None,
         roadmap_item_id: str | None = None,
         workflow_class_id: str | None = None,
@@ -2650,9 +3481,10 @@ class OperatorControlFrontdoor:
     ) -> dict[str, Any]:
         """Record one canonical work-item workflow binding in async contexts."""
 
-        record = await self._record_work_item_workflow_binding(
+        record, auto_promoted_bug, auto_promoted_roadmap = await self._record_work_item_workflow_binding(
             env=env,
             binding_kind=binding_kind,
+            issue_id=issue_id,
             bug_id=bug_id,
             roadmap_item_id=roadmap_item_id,
             workflow_class_id=workflow_class_id,
@@ -2663,7 +3495,12 @@ class OperatorControlFrontdoor:
             created_at=created_at,
             updated_at=updated_at,
         )
-        return {"binding": record.to_json()}
+        payload: dict[str, Any] = {"binding": record.to_json()}
+        if auto_promoted_bug is not None:
+            payload["auto_promoted_bug"] = auto_promoted_bug
+        if auto_promoted_roadmap is not None:
+            payload["auto_promoted_roadmap"] = auto_promoted_roadmap
+        return payload
 
     async def admit_native_primary_cutover_gate_async(
         self,
@@ -2709,6 +3546,7 @@ class OperatorControlFrontdoor:
         self,
         *,
         binding_kind: str,
+        issue_id: str | None = None,
         bug_id: str | None = None,
         roadmap_item_id: str | None = None,
         workflow_class_id: str | None = None,
@@ -2722,10 +3560,11 @@ class OperatorControlFrontdoor:
     ) -> dict[str, Any]:
         """Record one canonical work-item workflow binding through Postgres."""
 
-        record = _run_async(
+        record, auto_promoted_bug, auto_promoted_roadmap = _run_async(
             self._record_work_item_workflow_binding(
                 env=env,
                 binding_kind=binding_kind,
+                issue_id=issue_id,
                 bug_id=bug_id,
                 roadmap_item_id=roadmap_item_id,
                 workflow_class_id=workflow_class_id,
@@ -2741,7 +3580,12 @@ class OperatorControlFrontdoor:
                 "operator control sync entrypoints require a non-async call boundary"
             ),
         )
-        return {"binding": record.to_json()}
+        payload: dict[str, Any] = {"binding": record.to_json()}
+        if auto_promoted_bug is not None:
+            payload["auto_promoted_bug"] = auto_promoted_bug
+        if auto_promoted_roadmap is not None:
+            payload["auto_promoted_roadmap"] = auto_promoted_roadmap
+        return payload
 
     def admit_native_primary_cutover_gate(
         self,
@@ -2793,6 +3637,7 @@ class OperatorControlFrontdoor:
 def record_work_item_workflow_binding(
     *,
     binding_kind: str,
+    issue_id: str | None = None,
     bug_id: str | None = None,
     roadmap_item_id: str | None = None,
     workflow_class_id: str | None = None,
@@ -2808,6 +3653,7 @@ def record_work_item_workflow_binding(
 
     return OperatorControlFrontdoor().record_work_item_workflow_binding(
         binding_kind=binding_kind,
+        issue_id=issue_id,
         bug_id=bug_id,
         roadmap_item_id=roadmap_item_id,
         workflow_class_id=workflow_class_id,
@@ -2824,6 +3670,7 @@ def record_work_item_workflow_binding(
 async def arecord_work_item_workflow_binding(
     *,
     binding_kind: str,
+    issue_id: str | None = None,
     bug_id: str | None = None,
     roadmap_item_id: str | None = None,
     workflow_class_id: str | None = None,
@@ -2839,6 +3686,7 @@ async def arecord_work_item_workflow_binding(
 
     return await OperatorControlFrontdoor().record_work_item_workflow_binding_async(
         binding_kind=binding_kind,
+        issue_id=issue_id,
         bug_id=bug_id,
         roadmap_item_id=roadmap_item_id,
         workflow_class_id=workflow_class_id,
@@ -3196,6 +4044,92 @@ async def areconcile_work_item_closeout(
         action=action,
         bug_ids=bug_ids,
         roadmap_item_ids=roadmap_item_ids,
+        env=env,
+    )
+
+
+def record_issue(
+    *,
+    title: str,
+    summary: str,
+    severity: str = "medium",
+    priority: str = "p2",
+    source_kind: str = "manual",
+    issue_id: str | None = None,
+    issue_key: str | None = None,
+    status: str | None = None,
+    owner_ref: str | None = None,
+    decision_ref: str | None = None,
+    discovered_in_run_id: str | None = None,
+    discovered_in_receipt_id: str | None = None,
+    opened_at: datetime | None = None,
+    resolved_at: datetime | None = None,
+    created_at: datetime | None = None,
+    updated_at: datetime | None = None,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Record one canonical upstream issue through the default frontdoor."""
+
+    return OperatorControlFrontdoor().record_issue(
+        title=title,
+        summary=summary,
+        severity=severity,
+        priority=priority,
+        source_kind=source_kind,
+        issue_id=issue_id,
+        issue_key=issue_key,
+        status=status,
+        owner_ref=owner_ref,
+        decision_ref=decision_ref,
+        discovered_in_run_id=discovered_in_run_id,
+        discovered_in_receipt_id=discovered_in_receipt_id,
+        opened_at=opened_at,
+        resolved_at=resolved_at,
+        created_at=created_at,
+        updated_at=updated_at,
+        env=env,
+    )
+
+
+async def arecord_issue(
+    *,
+    title: str,
+    summary: str,
+    severity: str = "medium",
+    priority: str = "p2",
+    source_kind: str = "manual",
+    issue_id: str | None = None,
+    issue_key: str | None = None,
+    status: str | None = None,
+    owner_ref: str | None = None,
+    decision_ref: str | None = None,
+    discovered_in_run_id: str | None = None,
+    discovered_in_receipt_id: str | None = None,
+    opened_at: datetime | None = None,
+    resolved_at: datetime | None = None,
+    created_at: datetime | None = None,
+    updated_at: datetime | None = None,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Record one canonical upstream issue through the default async frontdoor."""
+
+    return await OperatorControlFrontdoor().record_issue_async(
+        title=title,
+        summary=summary,
+        severity=severity,
+        priority=priority,
+        source_kind=source_kind,
+        issue_id=issue_id,
+        issue_key=issue_key,
+        status=status,
+        owner_ref=owner_ref,
+        decision_ref=decision_ref,
+        discovered_in_run_id=discovered_in_run_id,
+        discovered_in_receipt_id=discovered_in_receipt_id,
+        opened_at=opened_at,
+        resolved_at=resolved_at,
+        created_at=created_at,
+        updated_at=updated_at,
         env=env,
     )
 
@@ -3654,6 +4588,7 @@ __all__ = [
     "TaskRouteEligibilityRecord",
     "TaskRouteEligibilityWriteResult",
     "arecord_architecture_policy_decision",
+    "arecord_issue",
     "aset_circuit_breaker_override",
     "aadmit_native_primary_cutover_gate",
     "aroadmap_write",
@@ -3664,6 +4599,7 @@ __all__ = [
     "inspect_workflow_flows",
     "inspect_recurring_review_repair_flow",
     "record_architecture_policy_decision",
+    "record_issue",
     "roadmap_write",
     "reconcile_work_item_closeout",
     "record_work_item_workflow_binding",

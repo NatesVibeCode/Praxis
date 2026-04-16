@@ -51,11 +51,12 @@ function SchemaEditorModule({ config }: QuadrantProps) {
     setSaving(true);
     setSaved(false);
     try {
-      await fetch('/api/object-types', {
-        method: 'POST',
+      await fetch(`/api/object-types/${encodeURIComponent(selected.type_id)}`, {
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name, description, type_id: selected.type_id,
+          name,
+          description,
           property_definitions: props.filter(p => p.name.trim()),
         }),
       });

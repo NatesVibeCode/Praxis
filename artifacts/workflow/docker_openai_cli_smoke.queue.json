@@ -1,0 +1,25 @@
+{
+  "name": "Docker OpenAI CLI Smoke",
+  "workflow_id": "docker_openai_cli_smoke",
+  "phase": "test",
+  "outcome_goal": "Prove Docker can complete a minimal legacy queue workflow through openai/gpt-5.4-mini on the cli_llm transport.",
+  "jobs": [
+    {
+      "label": "step1_echo",
+      "agent": "openai/gpt-5.4-mini",
+      "adapter_type": "cli_llm",
+      "prompt": "Reply with exactly: STEP1_OK",
+      "timeout": 180
+    },
+    {
+      "label": "step2_echo",
+      "agent": "openai/gpt-5.4-mini",
+      "adapter_type": "cli_llm",
+      "depends_on": [
+        "step1_echo"
+      ],
+      "prompt": "Reply with exactly: STEP2_OK",
+      "timeout": 180
+    }
+  ]
+}

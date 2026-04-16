@@ -93,7 +93,7 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         "/session": "Session carry-forward packs (latest/validate)",
         "/decompose": "Sprint decomposition (objective→micro-sprints)",
         "/research": "Research sessions (search local knowledge)",
-        "/operator_view": "Observability views (operator status/scoreboard/graph)",
+        "/operator_view": "Observability views (operator status/scoreboard/graph/issue backlog)",
         "/api/operator/task-route-eligibility": "Write a timed provider/model route eligibility window",
         "/api/operator/transport-support": "Read provider/model transport support before run time",
         "/api/operator/native-primary-cutover-gate": "Admit a native-primary cutover gate through operator control",

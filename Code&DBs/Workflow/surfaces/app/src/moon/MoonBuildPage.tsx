@@ -61,6 +61,19 @@ interface Props {
   initialMode?: 'choice' | 'compose' | 'trigger-picker';
 }
 
+type MoonGlowProfile = 'soft' | 'strict';
+
+function readMoonGlowProfile(): MoonGlowProfile {
+  if (typeof window === 'undefined') return 'soft';
+  const storage = window.localStorage;
+  if (!storage || typeof storage.getItem !== 'function') return 'soft';
+  try {
+    return storage.getItem('moon-glow-profile') === 'strict' ? 'strict' : 'soft';
+  } catch {
+    return 'soft';
+  }
+}
+
 // Half-moon dock invitation
 function HalfMoon({ position, label, onClick }: {
   position: 'top' | 'left' | 'right' | 'bottom'; label: string; onClick: () => void;
@@ -269,6 +282,7 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
   const triggerAnchorRef = useRef<HTMLDivElement>(null);
   const pinnedSelectionRef = useRef<string | null>(null);
   const [catalog, setCatalog] = useState<CatalogItem[]>(getCatalog());
+  const [moonGlowProfile, setMoonGlowProfile] = useState<MoonGlowProfile>(readMoonGlowProfile);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const { show } = useToast();
   const persistedWorkflowId = useMemo(
@@ -294,6 +308,18 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
   useEffect(() => { loadCatalog().then(setCatalog); }, []);
 
   useEffect(() => {
+    const syncProfile = () => setMoonGlowProfile(readMoonGlowProfile());
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === null || event.key === 'moon-glow-profile') {
+        syncProfile();
+      }
+    };
+    syncProfile();
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
+
+  useEffect(() => {
     onDraftStateChange?.(draftGuardState);
   }, [draftGuardState, onDraftStateChange]);
 
@@ -317,6 +343,18 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
   const viewModel = useMemo(
     () => presentBuild(payload, state.selectedNodeId, state.activeNodeId, runJobs),
     [payload, state.selectedNodeId, state.activeNodeId, runJobs],
+  );
+
+  const contractSuggestionExtras = useMemo(
+    () =>
+      payload
+        ? {
+            compiledSpec:
+              payload.compiled_spec_projection?.compiled_spec ?? payload.compiled_spec ?? null,
+            buildIssues: payload.build_issues ?? null,
+          }
+        : null,
+    [payload],
   );
 
   const runMutation = useCallback(async (subpath: string, body: Record<string, unknown>) => {
@@ -835,7 +873,7 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
               : item.source === 'integration' && item.connectionStatus && item.connectionStatus !== 'connected'
                 ? item.connectionStatus
                 : truth.badge,
-            icon: <MoonGlyph type={item.icon} size={16} color={item.status === 'ready' ? '#6CB6FF' : '#8b949e'} />,
+            icon: <MoonGlyph type={item.icon} size={16} color={item.status === 'ready' ? 'var(--moon-glow)' : '#8b949e'} />,
             onSelect: () => handleTriggerSelect(item),
           };
         }),
@@ -1030,7 +1068,7 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
   }, [activeIdx, centerWidth, hasMeasured]);
 
   const hasNodes = viewModel.nodes.length > 0;
-  const showComposePanel = !hasNodes && state.emptyMode !== 'trigger-picker' && !state.selectedTrigger;
+  const showComposePanel = !hasNodes && state.emptyMode === 'compose';
   const actionOpen = state.openDock === 'action';
   const contextOpen = state.openDock === 'context';
   const releaseOpen = state.releaseOpen;
@@ -1110,7 +1148,7 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
   );
 
   return (
-    <div className="moon-page" style={MOON_LAYOUT_CSS_VARS}>
+    <div className="moon-page" style={MOON_LAYOUT_CSS_VARS} data-moon-glow-profile={moonGlowProfile}>
       {mutationError && (
         <div className="moon-error-toast" role="alert" aria-live="polite">
           {mutationError}
@@ -1119,26 +1157,11 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
           </button>
         </div>
       )}
-      <div className="moon-frame-top" />
-
       <div className="moon-body">
-        <div style={{ padding: '0 24px 8px' }}>
-          <UiActionFeed
-            surface="moon"
-            scope={moonUndoScope}
-            title="Control"
-            subtitle=""
-            maxHeight="min(34vh, 260px)"
-            maxVisibleEntries={2}
-            variant="compact"
-            collapsible
-            defaultCollapsed
-          />
-        </div>
         {/* Middle row */}
         <div className="moon-middle">
-          {/* Left dock: Action */}
-          <div className={`moon-dock-side${actionOpen ? ' moon-dock-side--open moon-dock-left--open' : ' moon-dock-side--closed'}`}>
+          {/* Left dock: Action (Overlay) */}
+          <div className={`moon-dock-overlay moon-dock-overlay--left${actionOpen ? ' moon-dock-overlay--open' : ''}`}>
             {actionOpen && (
               <MoonActionDock
                 workflowId={workflowId}
@@ -1157,9 +1180,13 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
 
           {/* Center */}
           <div className={`moon-center${!hasNodes ? ' moon-center--empty' : ''}`} ref={centerRef}>
-            {!actionOpen && <HalfMoon position="left" label="Action" onClick={() => openDock('action')} />}
-            {!contextOpen && <HalfMoon position="right" label="Detail" onClick={() => openDock('context')} />}
-            {!releaseOpen && <HalfMoon position="bottom" label="Release" onClick={() => dispatch({ type: 'TOGGLE_RELEASE' })} />}
+            {hasNodes && (
+              <>
+                {!actionOpen && <HalfMoon position="left" label="Action" onClick={() => openDock('action')} />}
+                {!contextOpen && <HalfMoon position="right" label="Detail" onClick={() => openDock('context')} />}
+                {!releaseOpen && !state.runViewOpen && <HalfMoon position="bottom" label="Release" onClick={() => dispatch({ type: 'TOGGLE_RELEASE' })} />}
+              </>
+            )}
 
             {!hasNodes ? (
               <div className="moon-start">
@@ -1167,38 +1194,37 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
                 <div
                   ref={triggerAnchorRef}
                   className={`moon-nucleus${state.emptyMode === 'choice' ? ' moon-nucleus--interactive' : ''}`}
-                  onClick={state.emptyMode === 'choice' ? () => dispatch({ type: 'EMPTY_PICK_TRIGGER' }) : undefined}
+                  onClick={state.emptyMode === 'choice' ? () => dispatch({ type: 'EMPTY_OPEN_SELECTION' }) : undefined}
                 >
                   <div className={`moon-nucleus__ring${state.selectedTrigger ? ' moon-nucleus__ring--decided' : ''}`}>
-                    {state.emptyMode === 'trigger-picker' && !state.selectedTrigger && (
-                      <MoonGlyph type="trigger" size={22} color="#6CB6FF" />
-                    )}
-                    {state.selectedTrigger && (
-                      <MoonGlyph type={state.selectedTrigger.icon as any} size={22} color="#fff" />
-                    )}
                   </div>
-                  {state.emptyMode === 'choice' && (
-                    <span className="moon-nucleus__label">Choose a trigger</span>
-                  )}
-                  {state.selectedTrigger && (
-                    <span className="moon-nucleus__label">{state.selectedTrigger.label}</span>
-                  )}
                 </div>
 
+                {state.emptyMode === 'selection' && (
+                  <div className="moon-selection-window">
+                    <button
+                      type="button"
+                      className="moon-selection-btn"
+                      onClick={() => dispatch({ type: 'EMPTY_PICK_TRIGGER' })}
+                    >
+                      Build
+                    </button>
+                    <div className="moon-selection-sep" />
+                    <button
+                      type="button"
+                      className="moon-selection-btn"
+                      onClick={() => dispatch({ type: 'EMPTY_PICK_COMPOSE' })}
+                    >
+                      Prompt
+                    </button>
+                  </div>
+                )}
+
                 {showComposePanel && (
-                  <div className="moon-compose">
-                    <div className="moon-compose__title">Free fill workflow</div>
-                    <div className="moon-compose__hint">
-                      Describe the trigger, the steps, and the outcome in plain language. Moon will scaffold the flow from the prompt.
-                    </div>
+                  <div className="moon-compose" style={{ marginTop: 32 }}>
                     <textarea
                       value={state.compileProse}
                       onChange={(e) => dispatch({ type: 'SET_PROSE', prose: e.target.value })}
-                      onFocus={() => {
-                        if (state.emptyMode === 'choice') {
-                          dispatch({ type: 'EMPTY_PICK_COMPOSE' });
-                        }
-                      }}
                       onKeyDown={(event) => {
                         if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
                           event.preventDefault();
@@ -1207,34 +1233,15 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
                           }
                         }
                       }}
-                      placeholder="When a new lead arrives, enrich it from public data, score fit, route qualified leads to the right AE, and notify sales ops with a short summary."
+                      placeholder="Describe the workflow you want to build..."
                       rows={4}
                       disabled={compiling}
+                      autoFocus
                     />
-                    <div className="moon-compose__shortcut">Press Cmd/Ctrl + Enter to build from the prompt.</div>
-                    {state.compileError && <div className="moon-compose__error">{state.compileError}</div>}
                     <div className="moon-compose__actions">
                       <button className="moon-compose__btn" onClick={handleCompile} disabled={compiling || !state.compileProse.trim()}>
                         {compiling ? 'Building...' : 'Build from prompt'}
                       </button>
-                      <button
-                        className="moon-compose__btn moon-compose__btn--secondary"
-                        onClick={() => dispatch({ type: 'SET_PROSE', prose: '' })}
-                        disabled={compiling || !state.compileProse.trim()}
-                      >
-                        Clear
-                      </button>
-                    </div>
-                    <div className="moon-compose__examples">
-                      {EXAMPLE_PROMPTS.map((prompt) => (
-                        <button
-                          key={prompt}
-                          className="moon-compose__chip"
-                          onClick={() => dispatch({ type: 'SET_PROSE', prose: prompt })}
-                        >
-                          {prompt}
-                        </button>
-                      ))}
                     </div>
                   </div>
                 )}
@@ -1276,13 +1283,16 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
                         style={{ left: control.centerX, top: control.centerY }}
                         data-drop-edge={control.edge.id}
                       >
-                        <button
-                          type="button"
-                          className="moon-graph-gate__trigger"
-                          onClick={() => handleSelectEdge(control.edge.id)}
-                          aria-label={`Select gate between ${control.fromLabel} and ${control.toLabel}`}
-                        >
-                          <span className="moon-graph-gate__icon" aria-hidden="true">
+                          <button
+                            type="button"
+                            className="moon-graph-gate__trigger"
+                            onClick={() => handleSelectEdge(control.edge.id)}
+                            aria-label={`Select gate between ${control.fromLabel} and ${control.toLabel}`}
+                          >
+                          <span
+                            className={`moon-graph-gate__icon${isEmpty ? ' moon-graph-gate__icon--plus' : ''}`}
+                            aria-hidden="true"
+                          >
                             {isEmpty ? '+' : <MoonGlyph type="gate" size={12} color="currentColor" />}
                           </span>
                           <span className="moon-graph-gate__trigger-label">{control.label}</span>
@@ -1376,7 +1386,9 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
                     data-drop-append="true"
                     onClick={() => appendNode()}
                   >
-                    <span style={{ color: 'var(--moon-muted, #484f58)', fontSize: 18 }}>+</span>
+                    <span className="moon-graph-append__plus" aria-hidden="true">
+                      +
+                    </span>
                   </div>
                 </div>
                 <MoonDragGhost drag={drag.drag} />
@@ -1385,12 +1397,13 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
 
           </div>
 
-          {/* Right dock: Detail */}
-          <div className={`moon-dock-side${contextOpen ? ' moon-dock-side--open moon-dock-right--open' : ' moon-dock-side--closed'}`}>
+          {/* Right dock: Detail (Overlay) */}
+          <div className={`moon-dock-overlay moon-dock-overlay--right${contextOpen ? ' moon-dock-overlay--open' : ''}`}>
             {contextOpen && (
               <MoonNodeDetail
                 node={viewModel.selectedNode}
                 content={viewModel.dockContent}
+                contractSuggestionExtras={contractSuggestionExtras}
                 workflowId={workflowId}
                 onMutate={async (subpath, body) => {
                   await runMutation(subpath, body);
@@ -1490,7 +1503,6 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
         />
       )}
 
-      <div className="moon-frame-bottom" />
       <Toast />
     </div>
   );

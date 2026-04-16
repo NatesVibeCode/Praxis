@@ -41,8 +41,16 @@ class ProbeResult:
 def _get_cmd_template(provider_slug: str, model_slug: str) -> list[str] | None:
     """Load CLI command template from provider_model_candidates."""
     try:
-        from storage.postgres.connection import SyncPostgresConnection, get_workflow_pool
-        conn = SyncPostgresConnection(get_workflow_pool())
+        from storage.postgres.connection import (
+            SyncPostgresConnection,
+            get_workflow_pool,
+            resolve_workflow_database_url,
+        )
+
+        conn_url = os.environ.get("WORKFLOW_DATABASE_URL")
+        if not conn_url:
+            conn_url = resolve_workflow_database_url()
+        conn = SyncPostgresConnection(get_workflow_pool(env={"WORKFLOW_DATABASE_URL": conn_url}))
         rows = conn.execute(
             """SELECT cli_config FROM provider_model_candidates
                WHERE provider_slug = $1 AND model_slug = $2

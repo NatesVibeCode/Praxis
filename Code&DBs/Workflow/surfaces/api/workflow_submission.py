@@ -18,6 +18,7 @@ from typing import Any, Callable, Protocol
 from surfaces.mcp.catalog import canonical_tool_name
 from surfaces.mcp.helpers import _serialize
 from surfaces.mcp.runtime_context import WorkflowMcpRequestContext, get_current_workflow_mcp_context
+from ._payload_contract import optional_text, require_text
 
 
 _SUBMIT_TOOL_NAMES = {
@@ -93,19 +94,27 @@ def _frontdoor_response(tool_name: str, operation: Callable[[], dict[str, Any]])
 
 
 def _require_text(value: object, *, field_name: str) -> str:
-    if not isinstance(value, str) or not value.strip():
+    try:
+        return require_text(value, field_name=field_name)
+    except ValueError as exc:
         raise SubmissionFrontdoorError(
             "workflow_submission.invalid_input",
-            f"{field_name} must be a non-empty string",
+            str(exc),
             details={"field": field_name, "value_type": type(value).__name__},
-        )
-    return value.strip()
+        ) from exc
 
 
 def _optional_text(value: object, *, field_name: str) -> str | None:
     if value is None:
         return None
-    return _require_text(value, field_name=field_name)
+    try:
+        return optional_text(value, field_name=field_name)
+    except ValueError as exc:
+        raise SubmissionFrontdoorError(
+            "workflow_submission.invalid_input",
+            str(exc),
+            details={"field": field_name, "value_type": type(value).__name__},
+        ) from exc
 
 
 def _require_text_list(value: object, *, field_name: str) -> tuple[str, ...]:

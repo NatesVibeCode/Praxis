@@ -7,6 +7,7 @@ plus the LISTEN/NOTIFY background listener for instant wakeups.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 import uuid

@@ -1,0 +1,41 @@
+{
+  "status": "queued",
+  "command_status": "succeeded",
+  "command_id": "control.command.9ca973376f44",
+  "approval_required": false,
+  "run_id": "workflow_446a289be71e",
+  "stream_url": "/api/workflow-runs/workflow_446a289be71e/stream",
+  "status_url": "/api/workflow-runs/workflow_446a289be71e/status",
+  "spec_name": "Live Workflow Probe GPT54 Mini Small",
+  "total_jobs": 3,
+  "result_ref": "workflow_run:workflow_446a289be71e",
+  "run_status": "queued",
+  "status_source": "live_snapshot",
+  "run_metrics": {
+    "completed_jobs": 0,
+    "total_jobs": 3,
+    "elapsed_seconds": 0.0,
+    "health_state": "healthy",
+    "job_status_counts": {
+      "ready": 1,
+      "pending": 2
+    },
+    "total_cost_usd": 0.0,
+    "total_duration_ms": 0,
+    "total_tokens_in": 0,
+    "total_tokens_out": 0
+  },
+  "recovery": {
+    "mode": "monitor",
+    "reason": "Run is queued and waiting for a claim.",
+    "recommended_tool": {
+      "name": "praxis_workflow",
+      "arguments": {
+        "action": "status",
+        "run_id": "workflow_446a289be71e"
+      }
+    }
+  },
+  "job_id": "cli",
+  "workflow_id": "live_workflow_probe_gpt54mini_small"
+}

@@ -13,6 +13,7 @@ from ._operator_repository import (
     NativeOperatorQuerySnapshot,
     OperatorBugRecord,
     OperatorCutoverGateRecord,
+    OperatorIssueRecord,
     OperatorRoadmapDependencyRecord,
     OperatorRoadmapItemRecord,
     OperatorRoadmapSemanticNeighborRecord,
@@ -21,6 +22,7 @@ from ._operator_repository import (
     OperatorWorkflowRunObservabilitySummary,
     OperatorWorkItemCloseoutRecommendationRecord,
     query_operator_surface,
+    query_issue_backlog,
     query_roadmap_tree,
 )
 from ._smoke_service import (
@@ -61,6 +63,7 @@ __all__ = [
     "NativeOperatorQuerySnapshot",
     "OperatorBugRecord",
     "OperatorCutoverGateRecord",
+    "OperatorIssueRecord",
     "OperatorRoadmapDependencyRecord",
     "OperatorRoadmapItemRecord",
     "OperatorRoadmapSemanticNeighborRecord",
@@ -70,6 +73,7 @@ __all__ = [
     "OperatorWorkItemCloseoutRecommendationRecord",
     "load_native_self_hosted_smoke_contract",
     "query_transport_support",
+    "query_issue_backlog",
     "query_roadmap_tree",
     "query_operator_surface",
     "run_local_operator_flow",

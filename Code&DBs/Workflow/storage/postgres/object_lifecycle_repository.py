@@ -117,6 +117,20 @@ def upsert_object_type_record(
     return _row_dict(row, operation="upserting object type")
 
 
+def delete_object_type_record(
+    conn: Any,
+    *,
+    type_id: str,
+) -> dict[str, Any] | None:
+    row = conn.fetchrow(
+        "DELETE FROM object_types WHERE type_id = $1 RETURNING type_id",
+        _require_text(type_id, field_name="type_id"),
+    )
+    if row is None:
+        return None
+    return dict(row)
+
+
 def ensure_object_type_record(
     conn: Any,
     *,

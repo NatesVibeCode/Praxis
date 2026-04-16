@@ -63,7 +63,7 @@ class _BaseSubsystems:
         self._pg_conn = None
 
         self.receipts_dir = receipts_dir
-        self._maybe_startup_wiring()
+        self._startup_wiring_done = False
 
     def _ensure_init(self) -> None:
         if self._initialized:
@@ -109,10 +109,11 @@ class _BaseSubsystems:
         return True
 
     def _maybe_startup_wiring(self) -> None:
-        if self._lifecycle.started or not self._should_auto_startup_wiring():
+        if self._startup_wiring_done or self._lifecycle.started or not self._should_auto_startup_wiring():
+            self._startup_wiring_done = True
             return
+        self._startup_wiring_done = True
         try:
-            self.get_pg_conn()
             if self._should_start_heartbeat_background():
                 self._lifecycle.start_heartbeat(self.get_heartbeat_runner())
         except Exception as exc:
@@ -138,6 +139,7 @@ class _BaseSubsystems:
                 env=self._postgres_env(),
             )
             sync_registries(self._pg_conn)
+        self._maybe_startup_wiring()
         return self._pg_conn
 
     def get_obs_hub(self):

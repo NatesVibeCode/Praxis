@@ -95,11 +95,13 @@ def _require_datetime(value: object, *, field_name: str) -> datetime:
 
 def _source_fields(
     *,
+    issue_id: str | None,
     bug_id: str | None,
     roadmap_item_id: str | None,
     cutover_gate_id: str | None,
 ) -> tuple[tuple[str, str], ...]:
     fields = (
+        ("issue_id", issue_id),
         ("bug_id", bug_id),
         ("roadmap_item_id", roadmap_item_id),
         ("cutover_gate_id", cutover_gate_id),
@@ -108,7 +110,7 @@ def _source_fields(
     if len(selected) != 1:
         raise _fail(
             "work_item_workflow_binding.invalid_source",
-            "exactly one of bug_id, roadmap_item_id, or cutover_gate_id must be provided",
+            "exactly one of issue_id, bug_id, roadmap_item_id, or cutover_gate_id must be provided",
             details={
                 "provided_fields": ",".join(field_name for field_name, value in fields if value is not None),
             },
@@ -140,6 +142,7 @@ def _target_fields(
 def work_item_workflow_binding_id(
     *,
     binding_kind: str,
+    issue_id: str | None = None,
     bug_id: str | None = None,
     roadmap_item_id: str | None = None,
     cutover_gate_id: str | None = None,
@@ -151,6 +154,7 @@ def work_item_workflow_binding_id(
 
     normalized_binding_kind = _require_text(binding_kind, field_name="binding_kind")
     source_fields = _source_fields(
+        issue_id=issue_id,
         bug_id=bug_id,
         roadmap_item_id=roadmap_item_id,
         cutover_gate_id=cutover_gate_id,
@@ -176,6 +180,7 @@ class WorkItemWorkflowBindingRecord:
     work_item_workflow_binding_id: str
     binding_kind: str
     binding_status: str
+    issue_id: str | None
     roadmap_item_id: str | None
     bug_id: str | None
     cutover_gate_id: str | None
@@ -188,6 +193,8 @@ class WorkItemWorkflowBindingRecord:
 
     @property
     def source_kind(self) -> str:
+        if self.issue_id is not None:
+            return "issue"
         if self.bug_id is not None:
             return "bug"
         if self.roadmap_item_id is not None:
@@ -202,6 +209,8 @@ class WorkItemWorkflowBindingRecord:
 
     @property
     def source_id(self) -> str:
+        if self.issue_id is not None:
+            return self.issue_id
         if self.bug_id is not None:
             return self.bug_id
         if self.roadmap_item_id is not None:
@@ -233,6 +242,7 @@ class WorkItemWorkflowBindingRecord:
             self.work_item_workflow_binding_id,
             self.binding_kind,
             self.binding_status,
+            self.issue_id,
             self.roadmap_item_id,
             self.bug_id,
             self.cutover_gate_id,
@@ -246,6 +256,8 @@ class WorkItemWorkflowBindingRecord:
 
     def to_json(self) -> dict[str, Any]:
         source: dict[str, Any] = {"kind": self.source_kind, "id": self.source_id}
+        if self.issue_id is not None:
+            source["issue_id"] = self.issue_id
         if self.bug_id is not None:
             source["bug_id"] = self.bug_id
         if self.roadmap_item_id is not None:
@@ -271,10 +283,13 @@ def project_work_item_workflow_binding(row: Mapping[str, Any]) -> WorkItemWorkfl
     targets = _require_mapping(row.get("targets"), field_name="targets")
     source_kind = _require_text(source.get("kind"), field_name="source.kind")
     source_id = _require_text(source.get("id"), field_name="source.id")
+    issue_id = None
     bug_id = None
     roadmap_item_id = None
     cutover_gate_id = None
-    if source_kind == "bug":
+    if source_kind == "issue":
+        issue_id = source_id
+    elif source_kind == "bug":
         bug_id = source_id
     elif source_kind == "roadmap_item":
         roadmap_item_id = source_id
@@ -283,7 +298,7 @@ def project_work_item_workflow_binding(row: Mapping[str, Any]) -> WorkItemWorkfl
     else:
         raise WorkItemWorkflowBindingError(
             "work_item_workflow_binding.invalid_projection",
-            "work binding source.kind must be bug, roadmap_item, or cutover_gate",
+            "work binding source.kind must be issue, bug, roadmap_item, or cutover_gate",
             details={"source_kind": source_kind},
         )
 
@@ -304,6 +319,7 @@ def project_work_item_workflow_binding(row: Mapping[str, Any]) -> WorkItemWorkfl
         ),
         binding_kind=_require_text(row.get("binding_kind"), field_name="binding_kind"),
         binding_status=_require_text(row.get("binding_status"), field_name="binding_status"),
+        issue_id=issue_id,
         roadmap_item_id=roadmap_item_id,
         bug_id=bug_id,
         cutover_gate_id=cutover_gate_id,
@@ -371,6 +387,7 @@ def _binding_from_row(row: Mapping[str, Any]) -> WorkItemWorkflowBindingRecord:
         ),
         binding_kind=_require_text(row.get("binding_kind"), field_name="binding_kind"),
         binding_status=_require_text(row.get("binding_status"), field_name="binding_status"),
+        issue_id=_optional_text(row.get("issue_id"), field_name="issue_id"),
         roadmap_item_id=_optional_text(row.get("roadmap_item_id"), field_name="roadmap_item_id"),
         bug_id=_optional_text(row.get("bug_id"), field_name="bug_id"),
         cutover_gate_id=_optional_text(row.get("cutover_gate_id"), field_name="cutover_gate_id"),
@@ -453,6 +470,7 @@ class PostgresWorkItemWorkflowBindingRepository:
                 work_item_workflow_binding_id,
                 binding_kind,
                 binding_status,
+                issue_id,
                 roadmap_item_id,
                 bug_id,
                 cutover_gate_id,
@@ -486,6 +504,7 @@ class PostgresWorkItemWorkflowBindingRepository:
                 work_item_workflow_binding_id,
                 binding_kind,
                 binding_status,
+                issue_id,
                 roadmap_item_id,
                 bug_id,
                 cutover_gate_id,
@@ -524,6 +543,7 @@ class PostgresWorkItemWorkflowBindingRepository:
                 binding.binding_status,
                 field_name="binding.binding_status",
             ),
+            issue_id=_optional_text(binding.issue_id, field_name="binding.issue_id"),
             roadmap_item_id=_optional_text(
                 binding.roadmap_item_id,
                 field_name="binding.roadmap_item_id",
@@ -558,6 +578,7 @@ class PostgresWorkItemWorkflowBindingRepository:
                 work_item_workflow_binding_id,
                 binding_kind,
                 binding_status,
+                issue_id,
                 roadmap_item_id,
                 bug_id,
                 cutover_gate_id,
@@ -568,11 +589,12 @@ class PostgresWorkItemWorkflowBindingRepository:
                 created_at,
                 updated_at
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
             )
             ON CONFLICT (work_item_workflow_binding_id) DO UPDATE SET
                 binding_kind = EXCLUDED.binding_kind,
                 binding_status = EXCLUDED.binding_status,
+                issue_id = EXCLUDED.issue_id,
                 roadmap_item_id = EXCLUDED.roadmap_item_id,
                 bug_id = EXCLUDED.bug_id,
                 cutover_gate_id = EXCLUDED.cutover_gate_id,
@@ -585,6 +607,7 @@ class PostgresWorkItemWorkflowBindingRepository:
                 work_item_workflow_binding_id,
                 binding_kind,
                 binding_status,
+                issue_id,
                 roadmap_item_id,
                 bug_id,
                 cutover_gate_id,
@@ -598,6 +621,7 @@ class PostgresWorkItemWorkflowBindingRepository:
             normalized_binding.work_item_workflow_binding_id,
             normalized_binding.binding_kind,
             normalized_binding.binding_status,
+            normalized_binding.issue_id,
             normalized_binding.roadmap_item_id,
             normalized_binding.bug_id,
             normalized_binding.cutover_gate_id,
@@ -644,6 +668,7 @@ class WorkItemWorkflowBindingRuntime:
         self,
         *,
         binding_kind: str,
+        issue_id: str | None = None,
         bug_id: str | None = None,
         roadmap_item_id: str | None = None,
         cutover_gate_id: str | None = None,
@@ -657,6 +682,7 @@ class WorkItemWorkflowBindingRuntime:
     ) -> WorkItemWorkflowBindingRecord:
         binding_id = work_item_workflow_binding_id(
             binding_kind=binding_kind,
+            issue_id=issue_id,
             bug_id=bug_id,
             roadmap_item_id=roadmap_item_id,
             cutover_gate_id=cutover_gate_id,
@@ -685,6 +711,7 @@ class WorkItemWorkflowBindingRuntime:
             work_item_workflow_binding_id=binding_id,
             binding_kind=_require_text(binding_kind, field_name="binding_kind"),
             binding_status=_require_text(binding_status, field_name="binding_status"),
+            issue_id=_optional_text(issue_id, field_name="issue_id"),
             roadmap_item_id=_optional_text(roadmap_item_id, field_name="roadmap_item_id"),
             bug_id=_optional_text(bug_id, field_name="bug_id"),
             cutover_gate_id=_optional_text(cutover_gate_id, field_name="cutover_gate_id"),
@@ -737,6 +764,7 @@ async def record_work_item_workflow_binding(
     conn: asyncpg.Connection,
     *,
     binding_kind: str,
+    issue_id: str | None = None,
     bug_id: str | None = None,
     roadmap_item_id: str | None = None,
     cutover_gate_id: str | None = None,
@@ -755,6 +783,7 @@ async def record_work_item_workflow_binding(
     )
     return await runtime.record_binding(
         binding_kind=binding_kind,
+        issue_id=issue_id,
         bug_id=bug_id,
         roadmap_item_id=roadmap_item_id,
         cutover_gate_id=cutover_gate_id,

@@ -69,6 +69,20 @@ function ObjectTypeBrowserModule({ config }: QuadrantProps) {
     } catch { /* ignore */ }
   };
 
+  const handleDelete = async (type_id: string) => {
+    if (!window.confirm('Delete this object type?')) return;
+    try {
+      await fetch(`/api/object-types/${encodeURIComponent(type_id)}`, {
+        method: 'DELETE',
+      });
+      if (selected === type_id) {
+        setSelected(null);
+        world.set('shared.selected_object_type', null);
+      }
+      loadTypes();
+    } catch { /* ignore */ }
+  };
+
   const s = { bg: 'var(--bg-card)', border: 'var(--border)', radius: 'var(--radius)', accent: 'var(--accent)', text: 'var(--text)', muted: 'var(--text-muted)' };
 
   return (
@@ -114,6 +128,15 @@ function ObjectTypeBrowserModule({ config }: QuadrantProps) {
           }}>
             <div style={{ fontWeight: 500, fontSize: 13 }}>{t.icon || '📦'} {t.name}</div>
             <div style={{ color: s.muted, fontSize: 11 }}>{t.property_definitions?.length ?? 0} properties · {t.description?.slice(0, 60)}</div>
+            <button
+              onClick={(event) => {
+                event.stopPropagation();
+                void handleDelete(t.type_id);
+              }}
+              style={{ marginTop: 6, border: 'none', background: 'transparent', color: 'var(--danger)', cursor: 'pointer', fontSize: 11 }}
+            >
+              Delete
+            </button>
           </div>
         ))}
       </div>

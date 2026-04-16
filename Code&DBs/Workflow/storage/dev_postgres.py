@@ -35,6 +35,7 @@ from .postgres import (
     inspect_workflow_schema,
     resolve_workflow_database_url,
 )
+from storage.migrations import workflow_compile_authority_readiness_requirements
 
 PRAXIS_LOCAL_POSTGRES_DATA_DIR_ENV = "PRAXIS_LOCAL_POSTGRES_DATA_DIR"
 _DEFAULT_DATA_DIR = (
@@ -110,6 +111,15 @@ class DevPostgresStatus:
             "verifier_authority_ready": self.verifier_authority_ready,
             "healer_authority_ready": self.healer_authority_ready,
         }
+
+
+def _authority_ready(
+    missing_set: set[str], required_tables: tuple[str, ...]
+) -> bool:
+    return all(
+        table not in missing_set
+        for table in required_tables
+    )
 
 
 def _fail_config(
@@ -427,6 +437,7 @@ def _collect_local_postgres_health(config: DevPostgresConfig) -> DevPostgresStat
         else (False, False, ())
     )
     missing_set = set(missing_schema_objects)
+    readiness = dict(workflow_compile_authority_readiness_requirements())
     return DevPostgresStatus(
         data_dir=str(config.data_dir),
         log_file=str(config.log_file),
@@ -437,21 +448,26 @@ def _collect_local_postgres_health(config: DevPostgresConfig) -> DevPostgresStat
         database_reachable=database_reachable,
         schema_bootstrapped=schema_bootstrapped,
         missing_schema_objects=tuple(missing_schema_objects),
-        compile_artifact_authority_ready=all(
-            name not in missing_set
-            for name in ("compile_artifacts", "capability_catalog", "verify_refs")
+        compile_artifact_authority_ready=_authority_ready(
+            missing_set, readiness["compile_artifact_authority_ready"]
         ),
-        compile_index_authority_ready="compile_index_snapshots" not in missing_set,
-        execution_packet_authority_ready="execution_packets" not in missing_set,
-        repo_snapshot_authority_ready="repo_snapshots" not in missing_set,
-        verification_registry_ready="verification_registry" not in missing_set,
-        verifier_authority_ready=all(
-            name not in missing_set
-            for name in ("verifier_registry", "verification_runs")
+        compile_index_authority_ready=_authority_ready(
+            missing_set, readiness["compile_index_authority_ready"]
         ),
-        healer_authority_ready=all(
-            name not in missing_set
-            for name in ("healer_registry", "verifier_healer_bindings", "healing_runs")
+        execution_packet_authority_ready=_authority_ready(
+            missing_set, readiness["execution_packet_authority_ready"]
+        ),
+        repo_snapshot_authority_ready=_authority_ready(
+            missing_set, readiness["repo_snapshot_authority_ready"]
+        ),
+        verification_registry_ready=_authority_ready(
+            missing_set, readiness["verification_registry_ready"]
+        ),
+        verifier_authority_ready=_authority_ready(
+            missing_set, readiness["verifier_authority_ready"]
+        ),
+        healer_authority_ready=_authority_ready(
+            missing_set, readiness["healer_authority_ready"]
         ),
     )
 

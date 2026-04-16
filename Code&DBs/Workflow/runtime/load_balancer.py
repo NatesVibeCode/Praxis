@@ -55,7 +55,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Generator, Protocol
 
-from storage.postgres.provider_concurrency_repository import (
+from storage.postgres import (
     DEFAULT_PROVIDER_COST_WEIGHT,
     PostgresProviderConcurrencyRepository,
 )

@@ -161,7 +161,7 @@ def tool_praxis_maintenance(params: dict) -> dict:
 
 
 def tool_praxis_operator_view(params: dict) -> dict:
-    """Observability views: operator status, scoreboard, graph, lineage, and replay-ready bugs."""
+    """Observability views: operator status, scoreboard, graph, lineage, issue backlog, and replay-ready bugs."""
 
     try:
         return workflow_query_core.handle_operator_view(_subs, params)
@@ -535,12 +535,15 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "  'graph'      — full operator graph projection: bugs, roadmap items, decisions, "
                 "gates, and their connections\n"
                 "  'lineage'    — graph lineage for one run, including operator frames\n"
+                "  'issue_backlog' — canonical upstream issue intake rows before bug promotion\n"
                 "  'replay_ready_bugs' — replayable bug backlog with optional safe provenance refresh\n\n"
                 "USE WHEN: you need detailed operational insight beyond pass/fail rates. "
-                "'Show me the operator graph.' 'What's the cutover status?' 'Which bugs can I replay right now?'\n\n"
+                "'Show me the operator graph.' 'What's the cutover status?' 'Show the issue backlog.' "
+                "'Which bugs can I replay right now?'\n\n"
                 "EXAMPLES:\n"
                 "  praxis_operator_view(view='graph', run_id='run_123')\n"
                 "  praxis_operator_view(view='lineage', run_id='run_123')\n"
+                "  praxis_operator_view(view='issue_backlog')\n"
                 "  praxis_operator_view(view='replay_ready_bugs')"
             ),
             "inputSchema": {
@@ -548,16 +551,25 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "properties": {
                     "view": {
                         "type": "string",
-                        "description": "View to render: 'status', 'scoreboard', 'graph', 'lineage', or 'replay_ready_bugs'.",
-                        "enum": ["status", "scoreboard", "graph", "lineage", "replay_ready_bugs"],
+                        "description": "View to render: 'status', 'scoreboard', 'graph', 'lineage', 'issue_backlog', or 'replay_ready_bugs'.",
+                        "enum": ["status", "scoreboard", "graph", "lineage", "issue_backlog", "replay_ready_bugs"],
                     },
                     "run_id": {
                         "type": "string",
                         "description": "Required for run-scoped views: 'status', 'scoreboard', 'graph', and 'lineage'.",
                     },
+                    "status": {
+                        "type": "string",
+                        "description": "Optional issue status filter for issue_backlog, e.g. open or resolved.",
+                    },
+                    "open_only": {
+                        "type": "boolean",
+                        "description": "When true, exclude resolved issues from issue_backlog.",
+                        "default": True,
+                    },
                     "limit": {
                         "type": "integer",
-                        "description": "Maximum replay-ready bugs to return for replay_ready_bugs.",
+                        "description": "Maximum rows to return for issue_backlog or replay_ready_bugs.",
                         "minimum": 1,
                         "default": 50,
                     },

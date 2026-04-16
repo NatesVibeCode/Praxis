@@ -86,6 +86,11 @@ from .operator_control_repository import (
 )
 from .operator_frame_repository import PostgresOperatorFrameRepository
 from .memory_graph_repository import PostgresMemoryGraphRepository
+from .provider_concurrency_repository import (
+    DEFAULT_PROVIDER_CONCURRENCY_LIMITS,
+    DEFAULT_PROVIDER_COST_WEIGHT,
+    PostgresProviderConcurrencyRepository,
+)
 from .receipt_repository import PostgresReceiptRepository
 from .evidence_repository import PostgresEvidenceRepository
 from .compile_artifact_repository import PostgresCompileArtifactRepository
@@ -100,6 +105,7 @@ from .bug_evidence_repository import PostgresBugEvidenceRepository
 from .workflow_metrics_repository import PostgresWorkflowMetricsRepository
 from .workflow_surface_usage_repository import PostgresWorkflowSurfaceUsageRepository
 from .subscription_repository import PostgresSubscriptionRepository
+from .task_type_routing_repository import PostgresTaskTypeRoutingRepository
 from .task_route_eligibility_repository import (
     PostgresTaskRouteEligibilityRepository,
 )
@@ -118,6 +124,7 @@ from .workflow_runtime_repository import (
     upsert_app_manifest,
 )
 from .workflow_schedule_repository import PostgresWorkflowScheduleRepository
+from .webhook_repository import PostgresWebhookRepository
 
 __all__ = [
     "ControlPlaneSchemaReadiness",
@@ -134,6 +141,7 @@ __all__ = [
     "PostgresWorkflowSurfaceUsageRepository",
     "PostgresOperatorControlRepository",
     "PostgresOperatorFrameRepository",
+    "PostgresProviderConcurrencyRepository",
     "PostgresReceiptRepository",
     "PostgresRoadmapAuthoringRepository",
     "PostgresSchemaError",
@@ -141,9 +149,11 @@ __all__ = [
     "PostgresSubscriptionRepository",
     "PostgresTaskRouteEligibilityRepository",
     "PostgresTransportEligibilityRepository",
+    "PostgresTaskTypeRoutingRepository",
     "PostgresVerificationRepository",
     "PostgresWorkItemCloseoutRepository",
     "PostgresWorkflowScheduleRepository",
+    "PostgresWebhookRepository",
     "PreparedVectorQuery",
     "PostgresWriteError",
     "PostgresVectorStore",
@@ -179,6 +189,8 @@ __all__ = [
     "resolve_workflow_database_url",
     "record_app_manifest_history",
     "reset_observability_metrics",
+    "DEFAULT_PROVIDER_CONCURRENCY_LIMITS",
+    "DEFAULT_PROVIDER_COST_WEIGHT",
     "shutdown_workflow_pool",
     "VectorFilter",
     "ExecutionPacketRecord",

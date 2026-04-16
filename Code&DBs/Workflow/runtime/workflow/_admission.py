@@ -428,39 +428,44 @@ def _persist_graph_authority(
         decision.validation_result_ref,
         decision.authority_context_ref,
     )
-    conn.execute(
-        """INSERT INTO workflow_runs (
-               run_id, workflow_id, request_id, request_digest, authority_context_digest,
-               workflow_definition_id, admitted_definition_hash, run_idempotency_key,
-               schema_version, request_envelope, context_bundle_id, admission_decision_id,
-               current_state, terminal_reason_code, requested_at, admitted_at, started_at, finished_at, last_event_id
-           ) VALUES (
-               $1, $2, $3, $4, $5, $6, $7, $8,
-               $9, $10::jsonb, $11, $12, $13, NULL, $14, $15, NULL, NULL, NULL
-           )
-           ON CONFLICT (run_id) DO UPDATE
-           SET workflow_id = EXCLUDED.workflow_id,
-               request_envelope = EXCLUDED.request_envelope,
-               workflow_definition_id = EXCLUDED.workflow_definition_id,
-               admitted_definition_hash = EXCLUDED.admitted_definition_hash,
-               current_state = EXCLUDED.current_state,
-               admission_decision_id = EXCLUDED.admission_decision_id""",
-        intake_outcome.run_id,
-        request.workflow_id,
-        request.request_id,
-        intake_outcome.request_digest,
-        intake_outcome.route_identity.authority_context_digest,
-        definition_id,
-        definition_hash,
-        intake_outcome.run_idempotency_key,
-        request.schema_version,
-        request_envelope_json,
-        decision.authority_context_ref,
-        decision.admission_decision_id,
-        intake_outcome.current_state.value,
-        requested_at,
-        now,
-    )
+    # Accepted graph-runtime submissions hand off workflow_runs + evidence to the
+    # persistent evidence authority. Writing the run row here would split lifecycle
+    # ownership and leave the executor trying to replay the initial submission over
+    # a run that already claims to be admitted.
+    if intake_outcome.current_state.value != "claim_accepted":
+        conn.execute(
+            """INSERT INTO workflow_runs (
+                   run_id, workflow_id, request_id, request_digest, authority_context_digest,
+                   workflow_definition_id, admitted_definition_hash, run_idempotency_key,
+                   schema_version, request_envelope, context_bundle_id, admission_decision_id,
+                   current_state, terminal_reason_code, requested_at, admitted_at, started_at, finished_at, last_event_id
+               ) VALUES (
+                   $1, $2, $3, $4, $5, $6, $7, $8,
+                   $9, $10::jsonb, $11, $12, $13, NULL, $14, $15, NULL, NULL, NULL
+               )
+               ON CONFLICT (run_id) DO UPDATE
+               SET workflow_id = EXCLUDED.workflow_id,
+                   request_envelope = EXCLUDED.request_envelope,
+                   workflow_definition_id = EXCLUDED.workflow_definition_id,
+                   admitted_definition_hash = EXCLUDED.admitted_definition_hash,
+                   current_state = EXCLUDED.current_state,
+                   admission_decision_id = EXCLUDED.admission_decision_id""",
+            intake_outcome.run_id,
+            request.workflow_id,
+            request.request_id,
+            intake_outcome.request_digest,
+            intake_outcome.route_identity.authority_context_digest,
+            definition_id,
+            definition_hash,
+            intake_outcome.run_idempotency_key,
+            request.schema_version,
+            request_envelope_json,
+            decision.authority_context_ref,
+            decision.admission_decision_id,
+            intake_outcome.current_state.value,
+            requested_at,
+            now,
+        )
 
 
 def _submit_graph_workflow_inline(
@@ -593,6 +598,25 @@ def _do_submit_workflow(
             {k: v for k, v in j.items() if k != "_route_plan"}
             for j in raw_snapshot["jobs"]
         ]
+    route_plan_manifest: dict[str, dict[str, object]] = {}
+    for job in spec.jobs:
+        label = str(job.get("label", "") or "").strip()
+        route_plan = job.get("_route_plan")
+        route_task_type = (
+            str(getattr(route_plan, "task_type", "") or job.get("task_type") or "").strip()
+        )
+        failover_chain = list(job.get("route_candidates") or [])
+        if not failover_chain and route_plan:
+            failover_chain = [str(item).strip() for item in route_plan.chain]
+        if not failover_chain:
+            failover_chain = [str(job.get("agent") or "auto/build").strip()]
+        route_origin_slug = str(getattr(route_plan, "original_slug", "") or "").strip()
+        if label:
+            route_plan_manifest[label] = {
+                "route_task_type": route_task_type,
+                "failover_chain": [str(item).strip() for item in failover_chain if str(item).strip()],
+                "route_origin_slug": route_origin_slug,
+            }
     authority = _ensure_workflow_authority(
         conn,
         run_id=run_id,
@@ -604,6 +628,7 @@ def _do_submit_workflow(
         dispatch_reason=dispatch_reason,
         trigger_depth=trigger_depth,
         lineage_depth=lineage_depth,
+        route_plan_manifest={"jobs": route_plan_manifest} if route_plan_manifest else None,
     )
 
     # 2. Build label → job_id mapping for dependency wiring

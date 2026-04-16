@@ -43,7 +43,6 @@ from adapters import (
     DeterministicExecutionControl,
     DeterministicTaskRequest,
     DeterministicTaskResult,
-    build_claim_received_proof,
     build_transition_proof,
 )
 from contracts.domain import WorkflowEdgeContract, WorkflowNodeContract, WorkflowRequest
@@ -1251,28 +1250,15 @@ class RuntimeOrchestrator(RuntimeOrchestratorContract):
         node_results: list[NodeExecutionRecord] = []
         operator_frame_repository.clear_for_run(run_id=intake_outcome.run_id)
 
-        submission_result = writer.append_transition_proof(
-            build_claim_received_proof(
-                route_identity=cursor.identity_for_current_transition(),
-                event_id=_event_id(
-                    run_id=intake_outcome.run_id,
-                    evidence_seq=cursor.next_evidence_seq,
-                ),
-                receipt_id=_receipt_id(
-                    run_id=intake_outcome.run_id,
-                    evidence_seq=cursor.next_evidence_seq + 1,
-                ),
-                evidence_seq=cursor.next_evidence_seq,
-                transition_seq=cursor.transition_seq,
-                request_payload=_workflow_request_payload(request),
-                admitted_definition_ref=(
-                    intake_outcome.admitted_definition_ref or request.workflow_definition_id
-                ),
-                admitted_definition_hash=(
-                    intake_outcome.admitted_definition_hash or request.definition_hash
-                ),
-                occurred_at=_now(),
-            )
+        submission_result = evidence_writer.commit_submission(
+            route_identity=cursor.identity_for_current_transition(),
+            request_payload=_workflow_request_payload(request),
+            admitted_definition_ref=(
+                intake_outcome.admitted_definition_ref or request.workflow_definition_id
+            ),
+            admitted_definition_hash=(
+                intake_outcome.admitted_definition_hash or request.definition_hash
+            ),
         )
         cursor.advance(result=submission_result, new_state=RunState.CLAIM_RECEIVED)
 

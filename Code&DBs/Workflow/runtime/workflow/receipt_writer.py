@@ -12,6 +12,9 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from runtime.native_authority import default_native_authority_refs
 from runtime.receipt_store import _receipt_failure_category, _run_post_receipt_hooks
+from runtime.workflow.evidence_sequence_allocator import (
+    insert_receipt_if_absent_with_deterministic_seq,
+)
 from runtime.receipt_provenance import (
     build_git_provenance,
     build_mutation_provenance,
@@ -245,8 +248,6 @@ def write_job_receipt(
     error_code = final_error_code if final_error_code is not None else result.get("error_code", "")
     workflow_row = repository.load_workflow_job_receipt_context(job_id=job_id, run_id=run_id) or {}
     attempt_no = max(1, int(workflow_row.get("attempt") or 1))
-    evidence_seq = (int(job_id) * 100) + attempt_no
-    transition_seq = evidence_seq
     receipt_id = f"receipt:{run_id}:{job_id}:{attempt_no}"
     workflow_id = str(workflow_row.get("workflow_id") or "")
     request_id = str(workflow_row.get("request_id") or f"req_{run_id}")
@@ -399,7 +400,6 @@ def write_job_receipt(
         "job_label": label,
         "agent_slug": agent_slug,
         "attempt": attempt_no,
-        "transition_seq": transition_seq,
         "workspace_ref": workspace_ref,
         "runtime_profile_ref": runtime_profile_ref,
     }
@@ -429,7 +429,8 @@ def write_job_receipt(
                 verification_artifact_refs
             )
 
-    repository.insert_receipt_if_absent(
+    transition_seq = insert_receipt_if_absent_with_deterministic_seq(
+        conn,
         receipt_id=receipt_id,
         workflow_id=workflow_id,
         run_id=run_id,
@@ -438,13 +439,13 @@ def write_job_receipt(
         attempt_no=attempt_no,
         started_at=started_at,
         finished_at=finished_at,
-        evidence_seq=evidence_seq,
         status=status,
-        inputs=_json_safe(receipt_inputs),
-        outputs=_json_safe(receipt_outputs),
-        artifacts=_json_safe(receipt_artifacts),
+        inputs=receipt_inputs,
+        outputs=receipt_outputs,
+        artifacts=receipt_artifacts,
         failure_code=error_code or None,
     )
+    receipt_inputs["transition_seq"] = transition_seq
     _run_post_receipt_hooks(
         {
             "receipt_id": receipt_id,

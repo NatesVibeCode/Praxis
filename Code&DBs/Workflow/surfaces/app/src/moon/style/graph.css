@@ -1,0 +1,219 @@
+@layer moon-graph {
+/* === Graph Canvas === */
+.moon-graph {
+  position: relative;
+  overflow: visible;
+  /* Massive breathing room */
+  padding: 120px;
+}
+
+.moon-graph-node {
+  position: absolute;
+  width: var(--moon-node-size);
+  height: var(--moon-node-size);
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 300ms cubic-bezier(0.23, 1, 0.32, 1), box-shadow 300ms ease;
+}
+
+.moon-graph-node:hover {
+  transform: translateY(-2px) scale(1.05);
+  z-index: 2;
+}
+
+.moon-graph-node--selected {
+  z-index: 3;
+}
+
+.moon-graph-node--selected .moon-chain__ring {
+  box-shadow: var(--moon-shadow-ring-accent-soft);
+}
+
+.moon-graph-node--drag-over {
+  outline: 2px dashed var(--moon-accent);
+  outline-offset: 4px;
+  box-shadow: var(--moon-shadow-line-mid);
+}
+
+.moon-graph-node__label {
+  position: absolute;
+  top: calc(var(--moon-node-size) + 12px);
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--moon-fg-muted);
+  pointer-events: none;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.8;
+  transition: opacity 200ms ease, color 200ms ease;
+}
+
+.moon-graph-node:hover .moon-graph-node__label {
+  opacity: 1;
+  color: var(--moon-fg);
+}
+
+.moon-graph-gate {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  z-index: 2;
+}
+
+.moon-graph-gate--selected {
+  z-index: 5;
+}
+
+.moon-graph-gate__trigger {
+  min-width: 100px;
+  min-height: 32px;
+  padding: 6px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--moon-glass-border);
+  background: var(--moon-glass-bg);
+  backdrop-filter: blur(8px);
+  color: var(--moon-fg-dim);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: var(--moon-shadow-line-soft);
+  transition: all 200ms ease;
+}
+
+.moon-graph-gate__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  color: currentColor;
+}
+
+.moon-graph-gate__icon--plus {
+  color: var(--moon-color-white);
+  font-weight: 800;
+  paint-order: stroke fill;
+  -webkit-text-stroke: 1px var(--moon-color-black);
+  text-shadow: var(--moon-plus-text-glow);
+}
+
+.moon-graph-gate__trigger:hover,
+.moon-graph-gate--selected .moon-graph-gate__trigger,
+.moon-graph-gate--drag-over .moon-graph-gate__trigger {
+  transform: translateY(-1px);
+  border-color: var(--moon-accent);
+  color: var(--moon-fg);
+  box-shadow: var(--moon-shadow-accent-line-mid);
+}
+
+.moon-graph-gate--empty .moon-graph-gate__trigger {
+  border-style: dashed;
+  color: var(--moon-glow);
+}
+
+.moon-graph-gate--core .moon-graph-gate__trigger {
+  border-color: var(--moon-accent-a30);
+  color: var(--moon-accent);
+}
+
+.moon-graph-append {
+  position: absolute;
+  width: var(--moon-graph-append-size);
+  height: var(--moon-graph-append-size);
+  border-radius: 50%;
+  border: 1px dashed var(--moon-glass-border);
+  background: var(--moon-white-a02);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0.5;
+  box-shadow: var(--moon-shadow-line-soft);
+  transition: all 200ms ease;
+}
+
+.moon-graph-append:hover {
+  opacity: 1;
+  border-color: var(--moon-accent);
+  background: var(--moon-white-a05);
+  box-shadow: var(--moon-shadow-line-mid);
+  transform: scale(1.1);
+}
+
+.moon-graph-append--drag-over {
+  opacity: 1;
+  border-color: var(--moon-accent);
+  background: var(--moon-accent-a10);
+  box-shadow: var(--moon-shadow-accent-line-soft);
+}
+
+.moon-graph-append__plus {
+  font-size: 18px;
+  color: var(--moon-color-white);
+  font-weight: 800;
+  paint-order: stroke fill;
+  line-height: 1;
+  -webkit-text-stroke: 1px var(--moon-color-black);
+  text-shadow: var(--moon-plus-text-glow-strong);
+}
+
+@media (max-width: 760px) {
+  .moon-body {
+    padding: 14px 14px 0;
+    gap: 14px;
+  }
+
+  .moon-start {
+    padding: 14px 12px 20px;
+  }
+
+  .moon-compose,
+  .moon-compose__examples {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .moon-center {
+    padding-inline: 8px;
+  }
+
+  .moon-graph-gate__card {
+    width: 208px;
+  }
+
+  .moon-center--empty {
+    padding-top: 14px;
+  }
+
+  .moon-halfmoon--left,
+  .moon-halfmoon--right {
+    padding-block: 24px;
+  }
+
+  .moon-dock-side--open {
+    min-width: 280px;
+  }
+
+  .moon-http-request__preset-grid {
+    grid-template-columns: 1fr;
+  }
+}
+}

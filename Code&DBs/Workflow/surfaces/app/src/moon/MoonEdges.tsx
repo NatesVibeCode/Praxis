@@ -60,21 +60,28 @@ export function MoonEdges({ edges, layout, selectedEdgeId, onEdgeClick }: MoonEd
         pointerEvents: 'none',
       }}
     >
+      <defs>
+        <filter id="moon-edge-glow" x="-20%" y="-20%" width="140%" height="140%">
+          <feGaussianBlur stdDeviation="2" result="blur" />
+          <feComposite in="SourceGraphic" in2="blur" operator="over" />
+        </filter>
+      </defs>
       {edges.map((edge) => {
         const geometry = getEdgeGeometry(edge, layout);
         if (!geometry) return null;
 
         const isSelected = edge.id === selectedEdgeId;
         const isConditional = edge.gateFamily === 'conditional';
+        const isFlowing = isSelected || edge.isOnDominantPath;
         const color = isConditional
           ? 'var(--moon-branch, #D29922)'
-          : isSelected || edge.isOnDominantPath
-            ? 'var(--moon-accent, #6CB6FF)'
+          : isFlowing
+            ? 'var(--moon-glow, #D29922)'
             : 'var(--moon-muted, #484f58)';
         const width = isSelected ? 2.5 : edge.isOnDominantPath ? 2 : 1.5;
 
         return (
-          <g key={edge.id}>
+          <g key={edge.id} filter={isFlowing ? 'url(#moon-edge-glow)' : undefined}>
             <path
               d={geometry.path}
               stroke="transparent"
@@ -93,8 +100,22 @@ export function MoonEdges({ edges, layout, selectedEdgeId, onEdgeClick }: MoonEd
               strokeWidth={width}
               fill="none"
               strokeDasharray={isConditional ? '7 5' : undefined}
-              style={{ pointerEvents: 'none' }}
+              style={{ pointerEvents: 'none', transition: 'stroke 300ms ease, stroke-width 300ms ease' }}
             />
+            {isFlowing && (
+              <path
+                d={geometry.path}
+                stroke="var(--moon-accent)"
+                strokeWidth={width * 1.6}
+                fill="none"
+                strokeDasharray="4 24"
+                style={{ 
+                  pointerEvents: 'none', 
+                  opacity: 0.5,
+                  animation: 'moon-edge-flow 2.5s infinite linear' 
+                }}
+              />
+            )}
           </g>
         );
       })}

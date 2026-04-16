@@ -18,6 +18,7 @@ _REPO_ROOT = str(pathlib.Path(__file__).resolve().parents[4])
 class _FakeConnection:
     schedule_rows: tuple[dict[str, object], ...]
     dispatch_rows: tuple[dict[str, object], ...]
+    run_window_rows: tuple[dict[str, object], ...]
     seen: dict[str, object]
 
     async def fetch(self, query: str, *args: object):
@@ -26,6 +27,8 @@ class _FakeConnection:
             return self.schedule_rows
         if "FROM workflow_classes" in query:
             return self.dispatch_rows
+        if "FROM recurring_run_windows" in query:
+            return self.run_window_rows
         raise AssertionError(f"unexpected query: {query}")
 
     async def close(self) -> None:
@@ -89,6 +92,20 @@ def _dispatch_row() -> dict[str, object]:
     }
 
 
+def _run_window_row(as_of: datetime) -> dict[str, object]:
+    return {
+        "recurring_run_window_id": "recurring_run_window.hourly.alpha",
+        "schedule_definition_id": "schedule_definition.hourly.alpha",
+        "window_started_at": as_of - timedelta(hours=1),
+        "window_ended_at": as_of + timedelta(hours=1),
+        "window_status": "active",
+        "capacity_limit": 1,
+        "capacity_used": 0,
+        "last_workflow_at": None,
+        "created_at": as_of,
+    }
+
+
 def test_native_scheduler_runtime_is_deterministic_and_fail_closed(monkeypatch: pytest.MonkeyPatch) -> None:
     as_of = datetime(2026, 4, 2, 20, 0, tzinfo=timezone.utc)
     env = {
@@ -108,6 +125,7 @@ def test_native_scheduler_runtime_is_deterministic_and_fail_closed(monkeypatch: 
         return _FakeConnection(
             schedule_rows=(_schedule_row(),),
             dispatch_rows=(_dispatch_row(),),
+            run_window_rows=(_run_window_row(as_of),),
             seen=seen,
         )
 
@@ -137,11 +155,15 @@ def test_native_scheduler_runtime_is_deterministic_and_fail_closed(monkeypatch: 
     assert seen["resolved_envs"] == [env, env]
     assert seen["closed_connections"] == 2
     assert [
-        "FROM schedule_definitions" in query for query, _ in seen["queries"][:2]
-    ] == [True, False]
+        "FROM workflow_classes" in query for query, _ in seen["queries"][:3]
+    ] == [True, False, False]
     assert [
-        "FROM workflow_classes" in query for query, _ in seen["queries"][:2]
-    ] == [False, True]
+        "FROM schedule_definitions" in query for query, _ in seen["queries"][:3]
+    ] == [False, True, False]
+    assert [
+        "FROM recurring_run_windows" in query for query, _ in seen["queries"][:3]
+    ] == [False, False, True]
+    assert len(seen["queries"]) >= 6
 
     async def _connect_ambiguous_database(env=None):
         return _FakeConnection(
@@ -154,6 +176,7 @@ def test_native_scheduler_runtime_is_deterministic_and_fail_closed(monkeypatch: 
                 },
             ),
             dispatch_rows=(_dispatch_row(),),
+            run_window_rows=(_run_window_row(as_of),),
             seen=seen,
         )
 

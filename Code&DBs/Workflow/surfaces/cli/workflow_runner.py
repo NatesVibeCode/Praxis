@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import itertools
 import json
 import time
 import uuid
@@ -23,6 +22,9 @@ from runtime._workflow_database import resolve_runtime_database_url
 from runtime.notifications import dispatch_notification_payload
 from runtime.workflow.receipt_writer import prepare_output_artifact
 from runtime.workflow.execution_backends import execute_api as execute_api_in_sandbox
+from runtime.workflow.evidence_sequence_allocator import (
+    insert_receipt_if_absent_with_deterministic_seq,
+)
 from runtime.workflow_spec import WorkflowSpec, WorkflowSpecError
 
 # ---------------------------------------------------------------------------
@@ -197,7 +199,6 @@ class WorkflowRunner:
         self._run_id = run_id or f"workflow_{uuid.uuid4().hex[:12]}"
         self._workflow_id = spec.workflow_id if spec.workflow_id.startswith("workflow.") else f"workflow.{spec.workflow_id}"
         self._request_id = f"req_{uuid.uuid4().hex[:12]}"
-        self._evidence_counter = itertools.count(1)
 
         job_results: list[JobExecution] = []
         receipts_written: list[str] = []
@@ -844,6 +845,7 @@ class WorkflowRunner:
             "request_id": getattr(self, "_request_id", ""),
             "status": result.status,
             "failure_code": failure_code or (f"exit_{result.exit_code}" if result.status == "failed" else ""),
+            "failure_category": failure_code or "",
             "exit_code": result.exit_code,
             "duration_seconds": result.duration_seconds,
             "latency_ms": int(result.duration_seconds * 1000),
@@ -884,39 +886,32 @@ class WorkflowRunner:
         receipt_ref = f"workflow_receipt:{result.job_label}:{uuid.uuid4().hex[:8]}"
         if self._pg_conn is not None and hasattr(self, '_run_id'):
             try:
-                evidence_seq = next(self._evidence_counter)
                 receipt_id = f"rcpt_{uuid.uuid4().hex[:12]}"
-                receipt_ref = receipt_id
                 started_at = now - timedelta(seconds=result.duration_seconds)
-                self._pg_conn.execute(
-                    """INSERT INTO receipts (
-                        receipt_id, receipt_type, schema_version,
-                        workflow_id, run_id, request_id,
-                        started_at, finished_at, evidence_seq,
-                        executor_type, status,
-                        inputs, outputs, artifacts, decision_refs,
-                        failure_code
-                    ) VALUES (
-                        $1, $2, $3, $4, $5, $6, $7, $8, $9,
-                        $10, $11, $12::jsonb, $13::jsonb, $14::jsonb, $15::jsonb, $16
-                    )""",
-                    receipt_id, "workflow_job", 1,
-                    self._workflow_id, self._run_id, self._request_id,
-                    started_at, now, evidence_seq,
-                    "workflow_runner", result.status,
-                    json.dumps({
+                transition_seq = insert_receipt_if_absent_with_deterministic_seq(
+                    self._pg_conn,
+                    receipt_id=receipt_id,
+                    executor_type="workflow_runner",
+                    workflow_id=self._workflow_id,
+                    run_id=self._run_id,
+                    request_id=self._request_id,
+                    node_id=result.job_label,
+                    attempt_no=max(1, int(result.retry_count) + 1),
+                    started_at=started_at,
+                    finished_at=now,
+                    status=result.status,
+                    inputs={
                         "job_label": result.job_label,
                         "agent_slug": result.agent_slug,
                         "spec_name": spec.name,
                         "workflow_id": spec.workflow_id,
                         "phase": spec.phase,
-                        "transition_seq": evidence_seq,
                         "workspace_root": workspace_root,
                         "workspace_ref": workspace_ref,
                         "runtime_profile_ref": runtime_profile_ref,
                         "write_scope": write_scope,
-                    }),
-                    json.dumps({
+                    },
+                    outputs={
                         "exit_code": result.exit_code,
                         "duration_seconds": result.duration_seconds,
                         "verify_passed": result.verify_passed,
@@ -934,12 +929,14 @@ class WorkflowRunner:
                         "git_provenance": git_provenance,
                         "write_manifest": write_manifest,
                         "mutation_provenance": mutation_provenance,
-                    }),
-                    json.dumps({}),  # artifacts
-                    json.dumps([]),  # decision_refs
-                    receipt["failure_code"] or None,
+                    },
+                    artifacts={},
+                    failure_code=receipt["failure_code"] or None,
                 )
-            except Exception as exc:
+                receipt_ref = receipt_id
+                if transition_seq:
+                    receipt["transition_seq"] = transition_seq
+            except Exception:
                 # Authority receipt write is non-fatal — search tables still have the data
                 pass
 
@@ -968,6 +965,14 @@ class WorkflowRunner:
                     json.dumps(receipt), output_path or "", now, now,
                 )
             except Exception:
+                pass
+
+        obs_hub = getattr(self, "_obs_hub", None)
+        if obs_hub is not None:
+            try:
+                obs_hub.ingest_receipt(receipt)
+            except Exception:
+                # Observability is advisory; receipt durability already happened.
                 pass
 
         return receipt_ref

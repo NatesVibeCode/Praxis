@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 import time
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from memory.types import Edge, Entity, EntityType, RelationType
@@ -75,7 +75,7 @@ class RelationshipMiner(HeartbeatModule):
         )
         findings = 0
         actions = 0
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         for row in rows:
             agent = row['agent']
@@ -153,7 +153,7 @@ class RelationshipMiner(HeartbeatModule):
         )
         findings = 0
         actions = 0
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         for row in rows:
             model = row['model']
@@ -254,7 +254,7 @@ class RelationshipMiner(HeartbeatModule):
         )
         findings = 0
         actions = 0
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         for c_row in constraints:
             c_id = c_row['id']
@@ -325,7 +325,7 @@ class RelationshipMiner(HeartbeatModule):
         )
         findings = 0
         actions = 0
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         for row in rows:
             earlier_id = row['a_id']
@@ -374,7 +374,7 @@ class RelationshipMiner(HeartbeatModule):
         )
         findings = 0
         actions = 0
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         for f_row in friction_entities:
             f_id = f_row['id']
@@ -473,7 +473,7 @@ class RelationshipMiner(HeartbeatModule):
 
         findings = 0
         actions = 0
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         # Get existing catalog edges to avoid duplicates
         existing_edges: set[tuple[str, str, str]] = set()

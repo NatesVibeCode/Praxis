@@ -428,6 +428,7 @@ export function AppShell() {
     [activeDynamicTab, state],
   );
   const activeContext = activeSurface.context;
+  const isBuildMode = state.activeTabId === 'build';
 
   const createSeedTab = useCallback(async (seedId: string) => {
     const seed = seedBundles.find((candidate) => candidate.id === seedId);
@@ -572,8 +573,8 @@ export function AppShell() {
 
   return (
     <React.Suspense fallback={<SurfacePlaceholder title="Loading workspace..." />}>
-      <div className="app-shell">
-        <header className="app-shell__chrome">
+      <div className={`app-shell${isBuildMode ? ' app-shell--build-mode' : ''}`}>
+        <header className={`app-shell__chrome${isBuildMode ? ' app-shell__chrome--collapsed' : ''}`}>
           <div className="app-shell__identity">
             <div className="app-shell__identity-mark" aria-hidden="true" />
             <div className="app-shell__identity-copy">

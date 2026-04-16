@@ -105,6 +105,33 @@ def _dispatch_rows(as_of: datetime) -> tuple[dict[str, object], ...]:
     )
 
 
+def _run_window_rows(as_of: datetime) -> tuple[dict[str, object], ...]:
+    return (
+        {
+            "recurring_run_window_id": "recurring_run_window.fanout.parallel_proof",
+            "schedule_definition_id": "schedule_definition.fanout.parallel_proof",
+            "window_started_at": as_of - timedelta(minutes=5),
+            "window_ended_at": as_of + timedelta(minutes=5),
+            "window_status": "active",
+            "capacity_limit": 2,
+            "capacity_used": 0,
+            "last_workflow_at": None,
+            "created_at": as_of,
+        },
+        {
+            "recurring_run_window_id": "recurring_run_window.fanout.parallel_proof.alt",
+            "schedule_definition_id": "schedule_definition.fanout.parallel_proof",
+            "window_started_at": as_of - timedelta(minutes=15),
+            "window_ended_at": as_of - timedelta(minutes=10),
+            "window_status": "inactive",
+            "capacity_limit": 2,
+            "capacity_used": 1,
+            "last_workflow_at": as_of - timedelta(minutes=12),
+            "created_at": as_of,
+        },
+    )
+
+
 @dataclass
 class _FakeTransaction:
     async def __aenter__(self):
@@ -118,6 +145,7 @@ class _FakeTransaction:
 class _FakeConnection:
     schedule_rows: tuple[dict[str, object], ...]
     dispatch_rows: tuple[dict[str, object], ...]
+    run_window_rows: tuple[dict[str, object], ...]
     seen: dict[str, object]
 
     def transaction(self) -> _FakeTransaction:
@@ -136,6 +164,8 @@ class _FakeConnection:
                     if row["workflow_class_id"] == workflow_class_id
                 )
             return self.dispatch_rows
+        if "FROM recurring_run_windows" in query:
+            return self.run_window_rows
         raise AssertionError(f"unexpected query: {query}")
 
     async def close(self) -> None:
@@ -209,6 +239,7 @@ def test_native_default_parallel_proof_uses_stored_class_authority_and_native_tr
     conn = _FakeConnection(
         schedule_rows=(_schedule_row(as_of),),
         dispatch_rows=_dispatch_rows(as_of),
+        run_window_rows=_run_window_rows(as_of),
         seen=seen,
     )
 
@@ -242,7 +273,7 @@ def test_native_default_parallel_proof_uses_stored_class_authority_and_native_tr
         "runtime_profiles_config": f"{_root}/config/runtime_profiles.json",
         "workdir": _root,
     }
-    assert payload["schedule"]["schedule_authority"] == "runtime.schedule_definitions"
+    assert payload["schedule"]["schedule_authority"] == "authority.workflow_schedule"
     assert payload["schedule"]["workflow_class_authority"] == "policy.workflow_classes"
     assert payload["schedule"]["schedule_definition"]["schedule_definition_id"] == parallel_wave[
         "schedule_definition_id"
@@ -274,11 +305,18 @@ def test_native_default_parallel_proof_uses_stored_class_authority_and_native_tr
     ]
     assert seen["resolved_envs"] == [env]
     assert seen["closed_connections"] == 1
-    assert [("FROM schedule_definitions" in query) for query, _ in seen["queries"][:2]] == [
+    assert [("FROM workflow_classes" in query) for query, _ in seen["queries"][:3]] == [
+        True,
+        False,
+        False,
+    ]
+    assert [("FROM schedule_definitions" in query) for query, _ in seen["queries"][:3]] == [
+        False,
         True,
         False,
     ]
-    assert [("FROM workflow_classes" in query) for query, _ in seen["queries"][:2]] == [
+    assert [("FROM recurring_run_windows" in query) for query, _ in seen["queries"][:3]] == [
+        False,
         False,
         True,
     ]

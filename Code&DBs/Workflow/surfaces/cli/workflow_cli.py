@@ -25,14 +25,18 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import surfaces.mcp.subsystems
 from runtime.canonical_manifests import generate_manifest, load_app_manifest_record, ManifestRuntimeBoundaryError
 from runtime.control_commands import submit_workflow_command
 from runtime.spec_compiler import PromptLaunchSpec, compile_prompt_launch_spec
 from surfaces.cli.mcp_tools import run_cli_tool
 
 _WORKFLOW_ROOT = str(Path(__file__).resolve().parent.parent.parent)
-subsystems = surfaces.mcp.subsystems._subs
+
+
+def _workflow_subsystems():
+    from surfaces.mcp.subsystems import _subs
+
+    return _subs
 
 _COMMAND_SYNONYMS = {
     "commands": "commands",
@@ -101,7 +105,7 @@ def _repo_root() -> str:
 
 
 def _get_pg_conn():
-    return subsystems.get_pg_conn()
+    return _workflow_subsystems().get_pg_conn()
 
 
 def _write_result_file(path: str, payload: dict) -> None:
@@ -135,7 +139,7 @@ def _help_text() -> str:
             "Tip: run `workflow_cli.py help api` for HTTP route discovery.",
             "Tip: run `workflow_cli.py help mcp` for catalog-backed tool discovery.",
             "Tip: run `workflow_cli.py help diagnose` for single-run diagnosis.",
-            "Tip: `./scripts/workflow.sh` is the durable shell wrapper around this CLI.",
+            "Tip: `./scripts/praxis workflow` is the durable shell wrapper around this CLI.",
         ]
     )
     return "\n".join(lines)
@@ -349,7 +353,6 @@ def _submit_workflow_launch(
         print(f"Result written to: {result_file}")
     print("Observe via:")
     print(f"  ./scripts/praxis workflow stream {result['run_id']}")
-    print(f"  ./scripts/praxis-workflow stream {result['run_id']}")
     print(f"  GET {result['stream_url']}")
     print(f"  GET {result['status_url']}")
     return 0
@@ -395,6 +398,7 @@ def cmd_generate(args: argparse.Namespace) -> int:
         return 1
 
     pg_conn = _get_pg_conn()
+    subsystems = _workflow_subsystems()
     try:
         result = generate_manifest(
             pg_conn,
@@ -498,7 +502,6 @@ def cmd_spawn(args: argparse.Namespace) -> int:
         print(f"Result written to: {args.result_file}")
     print("Observe via:")
     print(f"  ./scripts/praxis workflow stream {result['run_id']}")
-    print(f"  ./scripts/praxis-workflow stream {result['run_id']}")
     print(f"  GET {result['stream_url']}")
     print(f"  GET {result['status_url']}")
     return 0

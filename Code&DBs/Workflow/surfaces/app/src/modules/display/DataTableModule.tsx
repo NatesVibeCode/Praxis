@@ -10,7 +10,8 @@ import { world } from '../../world';
 
 interface PropertyDef {
   name: string;
-  property_type: string;
+  property_type?: string;
+  type?: string;
   [key: string]: unknown;
 }
 
@@ -66,7 +67,11 @@ function DataTableModule({ config }: QuadrantProps) {
     if (!cfg.objectType) return;
     fetch(`/api/object-types/${cfg.objectType}`)
       .then(r => r.json())
-      .then(data => setPropDefs(data.property_definitions ?? []))
+      .then(data => {
+        const typePayload = (data as { type?: { property_definitions?: PropertyDef[] } } | null)?.type;
+        const directPayload = (data as { property_definitions?: PropertyDef[] })?.property_definitions;
+        setPropDefs(typePayload?.property_definitions ?? directPayload ?? []);
+      })
       .catch(() => setPropDefs([]));
   }, [cfg.objectType]);
 

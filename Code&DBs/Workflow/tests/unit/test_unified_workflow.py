@@ -2574,6 +2574,23 @@ def test_submit_workflow_persists_execution_bundle_and_control_prompt(monkeypatc
             },
         },
     )
+    monkeypatch.setattr(
+        _ctx_mod,
+        "resolve_job_decision_pack",
+        lambda *args, **kwargs: {
+            "pack_version": 1,
+            "authority_domains": ["sandbox_execution"],
+            "decision_keys": ["architecture-policy::sandbox-execution::docker-only-authority"],
+            "decisions": [
+                {
+                    "decision_key": "architecture-policy::sandbox-execution::docker-only-authority",
+                    "title": "Workflow sandbox execution is Docker-only",
+                    "rationale": "Do not add host-local execution lanes.",
+                    "decision_scope_ref": "sandbox_execution",
+                }
+            ],
+        },
+    )
     monkeypatch.setattr(_admission_mod, "_runtime_profile_ref_from_spec", lambda _spec: None)
     monkeypatch.setattr("runtime.workflow._routing._runtime_profile_ref_from_spec", lambda _spec: None)
     monkeypatch.setattr("runtime.workflow._routing._workspace_ref_from_spec", lambda _spec: None)
@@ -2596,7 +2613,9 @@ def test_submit_workflow_persists_execution_bundle_and_control_prompt(monkeypatc
 
     assert "--- EXECUTION CONTEXT SHARD ---" in user_prompt
     assert "--- EXECUTION CONTROL BUNDLE ---" in user_prompt
+    assert "** APPLICABLE DECISIONS **" in user_prompt
     assert bundle["tool_bucket"] == "build"
+    assert bundle["decision_pack"]["authority_domains"] == ["sandbox_execution"]
     assert "praxis_context_shard" in bundle["mcp_tool_names"]
     assert "praxis_query" in bundle["mcp_tool_names"]
     assert "praxis_workflow_validate" in bundle["mcp_tool_names"]

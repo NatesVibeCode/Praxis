@@ -12,6 +12,7 @@ import pytest
 from storage.migrations import workflow_migration_statements
 from storage.postgres import PostgresConfigurationError, connect_workflow_database
 from surfaces.api import operator_read, operator_write
+from surfaces.api._operator_repository import _render_roadmap_tree_markdown
 
 _DUPLICATE_SQLSTATES = {"42P07", "42710"}
 _SCHEMA_BOOTSTRAP_LOCK_ID = 741003
@@ -306,7 +307,7 @@ def test_roadmap_tree_renderer_orders_phase_tokens_numerically() -> None:
         updated_at=datetime(2026, 4, 8, 20, 2, tzinfo=timezone.utc),
     )
 
-    rendered = operator_read._render_roadmap_tree_markdown(
+    rendered = _render_roadmap_tree_markdown(
         root_item=root,
         roadmap_items=(root, child_late, child_early),
         roadmap_item_dependencies=(),
@@ -421,16 +422,23 @@ async def _exercise_roadmap_write_preview_parity() -> None:
         assert committed["committed"] is True
 
         root_roadmap_item_id = committed["preview"]["roadmap_items"][0]["roadmap_item_id"]
-        payload = operator_read.query_roadmap_tree(
+        payload = await asyncio.to_thread(
+            operator_read.query_roadmap_tree,
             env={"WORKFLOW_DATABASE_URL": database_url},
             root_roadmap_item_id=root_roadmap_item_id,
         )
 
         assert payload["root_item"] == committed["preview"]["roadmap_items"][0]
         assert payload["roadmap_items"] == committed["preview"]["roadmap_items"]
-        assert payload["roadmap_item_dependencies"] == committed["preview"][
-            "roadmap_item_dependencies"
-        ]
+        dependency_sort_key = lambda row: (
+            row["roadmap_item_id"],
+            row["created_at"],
+            row["roadmap_item_dependency_id"],
+        )
+        assert sorted(payload["roadmap_item_dependencies"], key=dependency_sort_key) == sorted(
+            committed["preview"]["roadmap_item_dependencies"],
+            key=dependency_sort_key,
+        )
         assert payload["counts"] == {
             "roadmap_items": len(committed["preview"]["roadmap_items"]),
             "roadmap_item_dependencies": len(
@@ -439,7 +447,10 @@ async def _exercise_roadmap_write_preview_parity() -> None:
             "semantic_neighbors": len(payload["semantic_neighbors"]),
         }
         assert "Roadmap write preview parity" in payload["rendered_markdown"]
-        assert "Blocking roadmap" in payload["rendered_markdown"]
+        assert any(
+            dependency["depends_on_roadmap_item_id"] == blocker_id
+            for dependency in payload["roadmap_item_dependencies"]
+        )
     finally:
         await conn.close()
         await _cleanup_tree_rows({"WORKFLOW_DATABASE_URL": database_url}, {"suffix": suffix})

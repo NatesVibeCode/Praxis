@@ -133,6 +133,12 @@ class PostgresEvidenceRepository:
         normalized_request_envelope = _json_compatible_value(
             dict(_require_mapping(request_envelope, field_name="request_envelope"))
         )
+        normalized_requested_at = _require_utc(requested_at, field_name="requested_at")
+        normalized_admitted_at = (
+            _require_utc(admitted_at, field_name="admitted_at")
+            if admitted_at
+            else normalized_requested_at
+        )
         await self._conn.execute(
             """
             INSERT INTO workflow_runs (
@@ -179,8 +185,8 @@ class PostgresEvidenceRepository:
             _require_text(context_bundle_id, field_name="context_bundle_id"),
             _require_text(admission_decision_id, field_name="admission_decision_id"),
             _require_text(current_state, field_name="current_state"),
-            _require_utc(requested_at, field_name="requested_at"),
-            _require_utc(admitted_at, field_name="admitted_at") if admitted_at else None,
+            normalized_requested_at,
+            normalized_admitted_at,
         )
 
     async def insert_workflow_event_if_absent(
@@ -342,9 +348,10 @@ class PostgresEvidenceRepository:
         finished_at: datetime | None,
         last_event_id: str,
         occurred_at: datetime,
+        expected_current_state: str | None = None,
     ) -> bool:
-        result = await self._conn.execute(
-            """
+        terminal_states = ("succeeded", "failed", "cancelled", "dead_letter")
+        base_query = """
             UPDATE workflow_runs
             SET current_state = $2,
                 admitted_at = CASE
@@ -357,19 +364,37 @@ class PostgresEvidenceRepository:
                     THEN COALESCE(started_at, admitted_at, requested_at, $6)
                     ELSE started_at
                 END,
-                terminal_reason_code = COALESCE($3, terminal_reason_code),
-                finished_at = COALESCE($4, finished_at),
+                terminal_reason_code = CASE
+                    WHEN $2 IN %(terminal_states)s THEN
+                        CASE
+                            WHEN current_state IN %(terminal_states)s THEN terminal_reason_code
+                            ELSE COALESCE($3, terminal_reason_code)
+                        END
+                    ELSE NULL
+                END,
+                finished_at = CASE
+                    WHEN $2 IN %(terminal_states)s THEN COALESCE($4, finished_at)
+                    ELSE finished_at
+                END,
                 last_event_id = $5
             WHERE run_id = $1
-            """,
+              AND (current_state NOT IN %(terminal_states)s OR current_state = $2)
+        """ % {"terminal_states": tuple(terminal_states)}
+        args: list[object] = [
             _require_text(run_id, field_name="run_id"),
             _require_text(new_state, field_name="new_state"),
             _optional_text(terminal_reason_code, field_name="terminal_reason_code"),
             _require_utc(finished_at, field_name="finished_at") if finished_at else None,
             _require_text(last_event_id, field_name="last_event_id"),
             _require_utc(occurred_at, field_name="occurred_at"),
-        )
+        ]
+        if expected_current_state is not None:
+            base_query += " AND current_state = $7"
+            args.append(_require_text(expected_current_state, field_name="expected_current_state"))
+        result = await self._conn.execute(base_query, *args)
+
         return result == "UPDATE 1"
+
 
     async def notify_run_cancelled(self, *, channel: str, run_id: str) -> None:
         await self._conn.execute(

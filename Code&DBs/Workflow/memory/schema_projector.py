@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import time
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from memory.types import Edge, Entity, EntityType, RelationType
@@ -138,7 +138,7 @@ class SchemaProjector(HeartbeatModule):
 
     def _project_tables(self) -> tuple[int, list[str]]:
         """Create an entity per public table with columns, indexes, triggers."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         actions = 0
         findings: list[str] = []
 
@@ -321,7 +321,7 @@ class SchemaProjector(HeartbeatModule):
 
     def _project_fk_edges(self) -> tuple[int, list[str]]:
         """Create depends_on edges between tables connected by foreign keys."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         actions = 0
         findings: list[str] = []
 
@@ -374,7 +374,7 @@ class SchemaProjector(HeartbeatModule):
         Reads trigger function source to find which other tables they
         UPDATE/INSERT into, creating caused_by edges.
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         actions = 0
         findings: list[str] = []
 
@@ -456,7 +456,7 @@ class SchemaProjector(HeartbeatModule):
         subsystem(s) use each table, then creates edges to the matching
         catalog document entity.
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         actions = 0
         findings: list[str] = []
 

@@ -481,6 +481,7 @@ async def _seed_cockpit_bindings(
         await _bootstrap_workflow_migration(conn, "008_workflow_class_and_schedule_schema.sql")
         await _bootstrap_workflow_migration(conn, "009_bug_and_roadmap_authority.sql")
         await _bootstrap_workflow_migration(conn, "010_operator_control_authority.sql")
+        await _bootstrap_workflow_migration(conn, "132_issue_backlog_authority.sql")
 
         governing_decision_id = await _seed_operator_decision(conn, as_of=as_of, suffix=f"{suffix}.governing")
         other_decision_id = await _seed_operator_decision(conn, as_of=as_of, suffix=f"{suffix}.other")
@@ -546,6 +547,7 @@ async def _seed_activity_truth_loop_baseline(
         await _bootstrap_workflow_migration(conn, "008_workflow_class_and_schedule_schema.sql")
         await _bootstrap_workflow_migration(conn, "009_bug_and_roadmap_authority.sql")
         await _bootstrap_workflow_migration(conn, "010_operator_control_authority.sql")
+        await _bootstrap_workflow_migration(conn, "132_issue_backlog_authority.sql")
         await _bootstrap_workflow_migration(conn, "040_debate_metrics.sql")
 
         run_seed = await _seed_workflow_run(conn, run_id=run_id, suffix=suffix, as_of=as_of)

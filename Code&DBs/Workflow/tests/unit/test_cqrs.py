@@ -81,3 +81,15 @@ def test_cqrs_query_roadmap_tree_dispatch(monkeypatch: Any) -> None:
     assert result["kind"] == "roadmap_tree"
     assert captured["root_roadmap_item_id"] == "roadmap_item.test.root"
     assert captured["semantic_neighbor_limit"] == 5
+    assert captured["include_completed_nodes"] is True
+
+    captured.clear()
+    result = bus.dispatch(
+        QueryRoadmapTree(
+            root_roadmap_item_id="roadmap_item.test.root",
+            include_completed_nodes=False,
+        )
+    )
+
+    assert result["kind"] == "roadmap_tree"
+    assert captured["include_completed_nodes"] is False

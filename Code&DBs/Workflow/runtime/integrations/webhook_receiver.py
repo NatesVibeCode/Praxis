@@ -10,7 +10,9 @@ import hashlib
 import hmac
 import os
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Optional, Mapping
+
+from storage.postgres.webhook_repository import PostgresWebhookRepository
 
 if TYPE_CHECKING:
     from storage.postgres.connection import SyncPostgresConnection
@@ -82,26 +84,19 @@ def verify_signature(
 def ingest_webhook(
     conn: "SyncPostgresConnection",
     endpoint_slug: str,
-    payload: dict,
-    headers: dict,
+    payload: Mapping[str, Any],
+    headers: Mapping[str, Any],
     raw_body: bytes,
 ) -> WebhookIngestionResult:
     """Ingest an incoming webhook: validate signature, store event, route to trigger."""
-
-    rows = conn.execute(
-        """SELECT endpoint_id, provider, secret_env_var, signature_header,
-                  signature_algorithm, target_workflow_id, target_trigger_id,
-                  filter_expression, transform_spec, enabled
-           FROM webhook_endpoints WHERE slug = $1 LIMIT 1""",
-        endpoint_slug,
-    )
-    if not rows:
+    repository = PostgresWebhookRepository(conn)
+    endpoint = repository.load_webhook_endpoint(slug=endpoint_slug)
+    if endpoint is None:
         return WebhookIngestionResult(
             event_id=None, signature_valid=None, trigger_action=None,
             error=f"unknown endpoint: {endpoint_slug}",
         )
 
-    endpoint = rows[0]
     if not endpoint["enabled"]:
         return WebhookIngestionResult(
             event_id=None, signature_valid=None, trigger_action=None,
@@ -128,18 +123,13 @@ def ingest_webhook(
                 error="signature verification failed",
             )
 
-    # Store event
-    import json
-    event_rows = conn.execute(
-        """INSERT INTO webhook_events (endpoint_id, payload, headers, signature_valid, processing_status)
-           VALUES ($1, $2::jsonb, $3::jsonb, $4, 'received')
-           RETURNING event_id""",
-        endpoint["endpoint_id"],
-        json.dumps(payload),
-        json.dumps({k: v for k, v in headers.items()}),
-        signature_valid,
+    event_row = repository.insert_webhook_event(
+        endpoint_id=endpoint["endpoint_id"],
+        payload=payload,
+        headers=headers,
+        signature_valid=signature_valid,
     )
-    event_id = event_rows[0]["event_id"] if event_rows else None
+    event_id = event_row["event_id"] if event_row else None
 
     # Emit to event log
     try:

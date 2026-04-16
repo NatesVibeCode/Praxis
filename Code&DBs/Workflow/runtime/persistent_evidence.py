@@ -37,10 +37,12 @@ from receipts.evidence import (
 )
 from runtime.domain import (
     EvidenceCommitResult,
+    RunState,
     LifecycleTransition,
     RouteIdentity,
     RuntimeBoundaryError,
 )
+from runtime.execution.state_machine import validate_transition
 from storage.postgres.connection import connect_workflow_database
 from storage.postgres.evidence import fetch_workflow_evidence_timeline
 from storage.postgres.evidence_repository import PostgresEvidenceRepository
@@ -505,6 +507,7 @@ class PostgresEvidenceWriter:
                 reason_code=proof.event.reason_code,
                 occurred_at=proof.event.occurred_at,
                 last_event_id=proof.event.event_id,
+                expected_current_state=proof.receipt.status,
             )
 
         return EvidenceCommitResult(
@@ -541,6 +544,7 @@ class PostgresEvidenceWriter:
         conn = await self._ensure_conn()
         normalized_route_identity = _normalize_route_identity(transition.route_identity)
         run_id = normalized_route_identity.run_id
+        validate_transition(transition)
 
         async with conn.transaction():
             await self._lock_run(conn, run_id)
@@ -548,6 +552,17 @@ class PostgresEvidenceWriter:
             if state.last_route_identity is None:
                 raise RuntimeBoundaryError(
                     f"persistent evidence transition missing durable submission for run {run_id}"
+                )
+            persisted_state = await self._repository(conn).load_current_state(run_id=run_id)
+            if persisted_state != transition.from_state.value:
+                raise EvidenceAppendError(
+                    "evidence.state_conflict",
+                    "workflow_runs.current_state must match transition.from_state",
+                    details={
+                        "run_id": run_id,
+                        "expected_current_state": transition.from_state.value,
+                        "persisted_current_state": persisted_state,
+                    },
                 )
             _validate_route_identity_lineage(
                 previous=state.last_route_identity,
@@ -632,6 +647,7 @@ class PostgresEvidenceWriter:
                 reason_code=transition.reason_code,
                 occurred_at=transition.occurred_at,
                 last_event_id=proof.event.event_id,
+                expected_current_state=transition.from_state.value,
             )
 
         return EvidenceCommitResult(
@@ -717,8 +733,9 @@ class PostgresEvidenceWriter:
         reason_code: str | None,
         occurred_at: datetime,
         last_event_id: str,
+        expected_current_state: str | None = None,
     ) -> None:
-        terminal_states = {"succeeded", "failed", "cancelled"}
+        terminal_states = {"succeeded", "failed", "dead_letter", "cancelled"}
         terminal_reason = None
         finished_at = None
         if new_state in terminal_states:
@@ -733,10 +750,17 @@ class PostgresEvidenceWriter:
             finished_at=finished_at,
             last_event_id=last_event_id,
             occurred_at=occurred_at,
+            expected_current_state=expected_current_state,
         )
         if not updated:
+            persisted_state = await repository.load_current_state(run_id=run_id)
+            if persisted_state is None:
+                raise RuntimeBoundaryError(
+                    f"persistent evidence missing workflow_runs row for {run_id}"
+                )
             raise RuntimeBoundaryError(
-                f"persistent evidence missing workflow_runs row for {run_id}"
+                "persistent evidence state transition was rejected due to stale or terminal run state: "
+                f"run={run_id} current={persisted_state!r} expected={expected_current_state!r}"
             )
         if new_state == "cancelled":
             await repository.notify_run_cancelled(
@@ -779,6 +803,43 @@ class PostgresEvidenceWriter:
                 previous=state.last_route_identity,
                 current=route_identity,
             )
+
+            proof_from_state = str(normalized_proof.event.payload.get("from_state") or "").strip()
+            proof_to_state = str(normalized_proof.event.payload.get("to_state") or "").strip()
+            try:
+                parsed_from_state = RunState(proof_from_state)
+                parsed_to_state = RunState(proof_to_state)
+            except ValueError as exc:
+                raise EvidenceAppendError(
+                    "evidence.invalid_transition",
+                    "transition proof payload contains unknown run state",
+                    details={"from_state": proof_from_state, "to_state": proof_to_state},
+                ) from exc
+
+            validate_transition(
+                LifecycleTransition(
+                    route_identity=route_identity,
+                    from_state=parsed_from_state,
+                    to_state=parsed_to_state,
+                    reason_code=normalized_proof.event.reason_code,
+                    evidence_seq=normalized_proof.event.evidence_seq,
+                    event_type=normalized_proof.event.event_type,
+                    receipt_type=normalized_proof.receipt.receipt_type,
+                    occurred_at=normalized_proof.event.occurred_at,
+                )
+            )
+
+            persisted_state = await repository.load_current_state(run_id=run_id)
+            if persisted_state is not None and persisted_state != proof_from_state:
+                raise EvidenceAppendError(
+                    "evidence.state_conflict",
+                    "workflow_runs.current_state must match proof transition from_state",
+                    details={
+                        "run_id": run_id,
+                        "expected_current_state": proof_from_state,
+                        "persisted_current_state": persisted_state,
+                    },
+                )
             expected_transition_seq = state.last_transition_seq + 1
             if normalized_proof.transition_seq != expected_transition_seq:
                 raise EvidenceAppendError(
@@ -944,6 +1005,7 @@ class PostgresEvidenceWriter:
                 reason_code=normalized_proof.receipt.failure_code or normalized_proof.event.reason_code,
                 occurred_at=normalized_proof.receipt.finished_at,
                 last_event_id=normalized_proof.event.event_id,
+                expected_current_state=proof_from_state,
             )
 
         return EvidenceCommitResult(

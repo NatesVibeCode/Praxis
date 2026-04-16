@@ -23,7 +23,7 @@ services:
     env_file:
       - .env
     environment:
-      PYTHONPATH: Code&DBs/Workflow
+      PYTHONPATH: "/workspace/Code&DBs/Workflow"
       PRAXIS_SEMANTIC_HOST: 0.0.0.0
       PRAXIS_SEMANTIC_PORT: 8421
       WORKFLOW_EMBEDDING_BACKEND: local
@@ -62,7 +62,7 @@ services:
       WORKFLOW_DATABASE_URL: postgresql://postgres@postgres:5432/praxis
       WORKFLOW_EMBEDDING_BACKEND: service
       WORKFLOW_EMBEDDING_SERVICE_URL: http://semantic-backend:8421
-      PYTHONPATH: Code&DBs/Workflow
+      PYTHONPATH: "/workspace/Code&DBs/Workflow"
       PRAXIS_API_HOST: 0.0.0.0
       PRAXIS_API_PORT: 8420
       PRAXIS_API_RELOAD: "0"
@@ -100,7 +100,7 @@ services:
       - .env
     environment:
       WORKFLOW_DATABASE_URL: postgresql://postgres@postgres:5432/praxis
-      PYTHONPATH: Code&DBs/Workflow
+      PYTHONPATH: "/workspace/Code&DBs/Workflow"
     working_dir: /workspace
     volumes:
       - .:/workspace
@@ -136,7 +136,7 @@ services:
       WORKFLOW_EMBEDDING_BACKEND: service
       WORKFLOW_EMBEDDING_SERVICE_URL: http://semantic-backend:8421
       CURSOR_API_KEY: ${CURSOR_API_KEY:-}
-      PYTHONPATH: Code&DBs/Workflow
+      PYTHONPATH: "/workspace/Code&DBs/Workflow"
       PRAXIS_CLI_AUTH_HOME: /Users/nate
     working_dir: /workspace
     volumes:

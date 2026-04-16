@@ -13,6 +13,7 @@ from typing import Any
 
 from adapters.task_profiles import infer_task_type, merge_allowed_tools, try_resolve_profile
 from surfaces.mcp.catalog import canonical_tool_name, get_tool_catalog
+from .decision_context import render_decision_pack
 from .artifact_contracts import (
     normalize_acceptance_contract,
     normalize_authoring_contract,
@@ -331,6 +332,7 @@ def build_execution_bundle(
     output_schema: Mapping[str, Any] | None = None,
     authoring_contract: Mapping[str, Any] | None = None,
     acceptance_contract: Mapping[str, Any] | None = None,
+    decision_pack: Mapping[str, Any] | None = None,
     execution_manifest: Mapping[str, Any] | None = None,
     require_manifest_authority: bool = False,
 ) -> dict[str, Any]:
@@ -395,6 +397,11 @@ def build_execution_bundle(
         acceptance_contract=acceptance_contract,
         verify_refs=normalized_verify_refs,
     )
+    normalized_decision_pack = (
+        json.loads(json.dumps(dict(decision_pack), sort_keys=True, default=str))
+        if isinstance(decision_pack, Mapping) and decision_pack
+        else None
+    )
     normalized_mcp_tools = (
         manifest_mcp_tools
         if manifest_mcp_tools
@@ -457,6 +464,7 @@ def build_execution_bundle(
         "skill_refs": normalized_skill_refs,
         "approval_required": bool(approval_required),
         "approval_question": normalized_approval_question or None,
+        "decision_pack": normalized_decision_pack,
         "completion_contract": completion_contract,
         "authoring_contract": normalized_authoring_contract,
         "acceptance_contract": normalized_acceptance_contract,
@@ -531,6 +539,10 @@ def render_execution_bundle(bundle: Mapping[str, Any] | None) -> str:
             "This job pauses for human approval before execution.\n"
             + (f"Question: {approval_question}\n" if approval_question else "")
         )
+
+    rendered_decision_pack = render_decision_pack(bundle.get("decision_pack"))
+    if rendered_decision_pack:
+        parts.append("\n" + rendered_decision_pack)
 
     completion_contract = bundle.get("completion_contract")
     if isinstance(completion_contract, Mapping) and completion_contract:

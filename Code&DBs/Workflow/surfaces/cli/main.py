@@ -6,6 +6,7 @@ The CLI is a parser and renderer. It does not own runtime truth.
 from __future__ import annotations
 
 import contextlib
+import os
 from difflib import SequenceMatcher
 import sys
 from collections.abc import Mapping, Sequence
@@ -30,31 +31,6 @@ from .commands.authority import (
     _schema_command,
 )
 from .commands.data import _data_command
-from .commands.workflow import (
-    _active_command,
-    _cancel_command,
-    _chain_command,
-    _debate_command,
-    _diagnose_command,
-    _fan_out_command,
-    _heal_command,
-    _inspect_job_command,
-    _manifest_command,
-    _pipeline_command,
-    _proof_command,
-    _queue_command,
-    _repair_command,
-    _retry_command,
-    _run_status_command,
-    _run_command,
-    _runs_command,
-    _scheduler_command,
-    _status_command,
-    _triggers_command,
-    _verify_command,
-    _verify_platform_command,
-    _work_command,
-)
 from .commands.operate import (
     _api_command,
     _cache_command,
@@ -90,6 +66,31 @@ from .commands.query import (
 )
 from .commands.roadmap import _roadmap_command
 from .commands.tools import _tools_command, _tools_quickstart_text
+from .commands.workflow import (
+    _active_command,
+    _cancel_command,
+    _chain_command,
+    _debate_command,
+    _diagnose_command,
+    _fan_out_command,
+    _heal_command,
+    _inspect_job_command,
+    _manifest_command,
+    _pipeline_command,
+    _proof_command,
+    _queue_command,
+    _repair_command,
+    _retry_command,
+    _run_command,
+    _run_status_command,
+    _runs_command,
+    _scheduler_command,
+    _status_command,
+    _triggers_command,
+    _verify_command,
+    _verify_platform_command,
+    _work_command,
+)
 from .render import (
     render_graph_lineage,
     render_graph_topology,
@@ -230,6 +231,9 @@ def _build_default_observability_service(
     return _PostgresObservabilityService(env=env)
 
 
+os.environ.setdefault("PRAXIS_DISABLE_STARTUP_WIRING", "1")
+
+
 def _delegate_legacy_workflow_cli(
     command_name: str,
     args: list[str],
@@ -247,73 +251,87 @@ def _delegate_legacy_workflow_cli(
         sys.argv = original_argv
 
 
-_ARG_COMMANDS: dict[str, ArgsCommandHandler] = {
-    "run": _run_command,
-    "chain": _chain_command,
-    "query": _query_command,
-    "data": _data_command,
-    "schema": _schema_command,
-    "registry": _registry_command,
-    "object-type": _object_type_command,
-    "object": _object_command,
-    "catalog": _catalog_command,
-    "reload": _reload_command,
-    "reconcile": _reconcile_command,
-    "architecture": _architecture_command,
-    "bugs": _bugs_command,
-    "recall": _recall_command,
-    "discover": _discover_command,
-    "artifacts": _artifacts_command,
-    "health": _health_command,
-    "receipts": _receipts_command,
-    "diagnose": _diagnose_command,
-    "inspect-job": _inspect_job_command,
-    "leaderboard": _leaderboard_command,
-    "manifest": _manifest_command,
-    "trust": _trust_command,
-    "fitness": _fitness_command,
-    "trends": _trends_command,
-    "verify": _verify_command,
-    "verify-platform": _verify_platform_command,
-    "pipeline": _pipeline_command,
-    "proof": _proof_command,
-    "heal": _heal_command,
-    "run-status": _run_status_command,
-    "scheduler": _scheduler_command,
-    "fan-out": _fan_out_command,
-    "debate": _debate_command,
-    "runs": _runs_command,
-    "retry": _retry_command,
-    "cancel": _cancel_command,
-    "circuits": _circuits_command,
-    "params": _params_command,
-    "notifications": _notifications_command,
-    "config": _config_command,
-    "dashboard": _dashboard_command,
-    "queue": _queue_command,
-    "capabilities": _capabilities_command,
-    "scope": _scope_command,
-    "risk": _risk_command,
-    "events": _events_command,
-    "cache": _cache_command,
-    "health-map": _health_map_command,
-    "reviews": _reviews_command,
-    "compile": _compile_command,
-    "metrics": _metrics_command,
-    "github": _github_command,
-    "api": _api_command,
-    "routes": lambda args, *, stdout: _api_command(["routes", *args], stdout=stdout),
-    "supervisor": _supervisor_command,
-    "tools": _tools_command,
-    "generate": lambda args, *, stdout: _delegate_legacy_workflow_cli("generate", args, stdout=stdout),
-    "validate": lambda args, *, stdout: _delegate_legacy_workflow_cli("validate", args, stdout=stdout),
-    "stream": lambda args, *, stdout: _delegate_legacy_workflow_cli("stream", args, stdout=stdout),
-    "chain-status": lambda args, *, stdout: _delegate_legacy_workflow_cli("chain-status", args, stdout=stdout),
-    "triggers": _triggers_command,
-    "repair": _repair_command,
-    "work": _work_command,
-    "roadmap": _roadmap_command,
-}
+_ARG_COMMANDS: dict[str, ArgsCommandHandler] | None = None
+
+
+def _workflow_arg_commands() -> dict[str, ArgsCommandHandler]:
+    global _ARG_COMMANDS
+    if _ARG_COMMANDS is not None:
+        return _ARG_COMMANDS
+
+    _ARG_COMMANDS = {
+        "run": _run_command,
+        "spawn": lambda args, *, stdout: _delegate_legacy_workflow_cli("spawn", args, stdout=stdout),
+        "chain": _chain_command,
+        "query": _query_command,
+        "data": _data_command,
+        "schema": _schema_command,
+        "registry": _registry_command,
+        "object-type": _object_type_command,
+        "object": _object_command,
+        "catalog": _catalog_command,
+        "reload": _reload_command,
+        "reconcile": _reconcile_command,
+        "architecture": _architecture_command,
+        "bugs": _bugs_command,
+        "recall": _recall_command,
+        "discover": _discover_command,
+        "artifacts": _artifacts_command,
+        "health": _health_command,
+        "receipts": _receipts_command,
+        "diagnose": _diagnose_command,
+        "inspect-job": _inspect_job_command,
+        "leaderboard": _leaderboard_command,
+        "manifest": _manifest_command,
+        "trust": _trust_command,
+        "fitness": _fitness_command,
+        "trends": _trends_command,
+        "verify": _verify_command,
+        "verify-platform": _verify_platform_command,
+        "pipeline": _pipeline_command,
+        "proof": _proof_command,
+        "heal": _heal_command,
+        "run-status": _run_status_command,
+        "scheduler": _scheduler_command,
+        "fan-out": _fan_out_command,
+        "debate": _debate_command,
+        "runs": _runs_command,
+        "retry": _retry_command,
+        "cancel": _cancel_command,
+        "circuits": _circuits_command,
+        "params": _params_command,
+        "notifications": _notifications_command,
+        "config": _config_command,
+        "dashboard": _dashboard_command,
+        "queue": _queue_command,
+        "capabilities": _capabilities_command,
+        "scope": _scope_command,
+        "risk": _risk_command,
+        "events": _events_command,
+        "cache": _cache_command,
+        "health-map": _health_map_command,
+        "reviews": _reviews_command,
+        "compile": _compile_command,
+        "metrics": _metrics_command,
+        "github": _github_command,
+        "api": _api_command,
+        "routes": lambda args, *, stdout: _api_command(["routes", *args], stdout=stdout),
+        "supervisor": _supervisor_command,
+        "tools": _tools_command,
+        "generate": lambda args, *, stdout: _delegate_legacy_workflow_cli("generate", args, stdout=stdout),
+        "validate": lambda args, *, stdout: _delegate_legacy_workflow_cli("validate", args, stdout=stdout),
+        "stream": lambda args, *, stdout: _delegate_legacy_workflow_cli("stream", args, stdout=stdout),
+        "chain-status": lambda args, *, stdout: _delegate_legacy_workflow_cli(
+            "chain-status",
+            args,
+            stdout=stdout,
+        ),
+        "triggers": _triggers_command,
+        "repair": _repair_command,
+        "work": _work_command,
+        "roadmap": _roadmap_command,
+    }
+    return _ARG_COMMANDS
 
 _STDOUT_COMMANDS: dict[str, StdoutCommandHandler] = {
     "commands": lambda *, stdout: _commands_index_command(stdout=stdout),
@@ -395,6 +413,7 @@ def _commands_index_text() -> str:
             "  workflow help routes                            Same route discovery help from the root help system",
             "  workflow mcp [list|search|describe|call]        Alias for workflow tools discovery",
             "  workflow run <spec.json>                        Submit a workflow spec",
+            "  workflow spawn <parent_run_id> <spec.json>      Spawn a child workflow with explicit parent lineage",
             "  workflow validate <spec.json>                   Validate a spec without running",
             "  workflow status [--since-hours N]               Show recent workflow status",
             "  workflow active                                 Show active workflow runs",
@@ -498,7 +517,7 @@ def _help_topic_text(topic: str, *, stdout: TextIO) -> int:
         stdout.write(_api_help_text() + "\n")
         return 0
     if topic == "tools":
-        _ARG_COMMANDS["tools"](["--help"], stdout=stdout)
+        _workflow_arg_commands()["tools"](["--help"], stdout=stdout)
         return 0
 
     if topic in {"inspect", "replay", "graph-topology", "topology", "graph-lineage", "lineage"}:
@@ -524,8 +543,8 @@ def _help_topic_text(topic: str, *, stdout: TextIO) -> int:
             stdout.write(usage + "\n")
             return 0
 
-    if topic in _ARG_COMMANDS:
-        _ARG_COMMANDS[topic](["--help"], stdout=stdout)
+    if topic in _workflow_arg_commands():
+        _workflow_arg_commands()[topic](["--help"], stdout=stdout)
         return 0
 
     stdout.write(f"unknown help topic: {topic}\n")
@@ -551,16 +570,14 @@ def _known_root_commands() -> set[str]:
         "topology",
         "graph-lineage",
         "lineage",
-        *(_ARG_COMMANDS.keys()),
+        *(_workflow_arg_commands().keys()),
         *(_STDOUT_COMMANDS.keys()),
     }
 
 
 def _normalize_namespace_tokens(argv: Sequence[str]) -> list[str]:
     args = list(argv)
-    if len(args) >= 2 and args[0] == "praxis" and args[1] == "workflow":
-        return args[1:]
-    if args and args[0] in {"workflow", "praxis-workflow"}:
+    if args and args[0] == "workflow":
         return args[1:]
     return args
 
@@ -644,7 +661,7 @@ def main(
 
         return native_operator.main(args[1:], env=env, stdout=stdout)
     if args and args[0] == "mcp":
-        return _ARG_COMMANDS["tools"](args[1:], stdout=stdout)
+        return _workflow_arg_commands()["tools"](args[1:], stdout=stdout)
 
     if args[0] not in _known_root_commands():
         stdout.write(f"unknown command: {args[0]}\n")
@@ -662,8 +679,9 @@ def main(
 
     if args:
         command_name = args[0]
-        if command_name in _ARG_COMMANDS:
-            return _ARG_COMMANDS[command_name](args[1:], stdout=stdout)
+        arg_commands = _workflow_arg_commands()
+        if command_name in arg_commands:
+            return arg_commands[command_name](args[1:], stdout=stdout)
         if command_name in _STDOUT_COMMANDS:
             return _STDOUT_COMMANDS[command_name](stdout=stdout)
 

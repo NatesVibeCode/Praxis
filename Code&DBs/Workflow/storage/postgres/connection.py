@@ -13,6 +13,7 @@ from urllib.parse import urlsplit, urlunsplit
 import asyncpg
 
 from .validators import PostgresConfigurationError, PostgresStorageError
+from storage.migrations import workflow_compile_authority_readiness_tables
 
 WORKFLOW_DATABASE_URL_ENV = "WORKFLOW_DATABASE_URL"
 _POSTGRES_SCHEMES = ("postgresql://", "postgres://")
@@ -415,30 +416,17 @@ def ensure_postgres_available(
         async with pool.acquire() as conn:
             await bootstrap_workflow_schema(conn)
             readiness = await inspect_workflow_schema(conn)
-            critical_objects = {
-                "compile_artifacts",
-                "capability_catalog",
-                "verify_refs",
-                "verification_registry",
-                "compile_index_snapshots",
-                "execution_packets",
-                "repo_snapshots",
-                "verifier_registry",
-                "healer_registry",
-                "verifier_healer_bindings",
-                "verification_runs",
-                "healing_runs",
-            }
-            missing_critical = tuple(
-                name for name in readiness.missing_relations if name in critical_objects
+        critical_objects = tuple(workflow_compile_authority_readiness_tables())
+        missing_critical = tuple(
+            name for name in readiness.missing_relations if name in critical_objects
+        )
+        if missing_critical:
+            missing = ", ".join(missing_critical[:10])
+            raise RuntimeError(
+                "workflow schema bootstrap incomplete: "
+                f"{len(missing_critical)} critical objects still missing"
+                + (f" ({missing})" if missing else "")
             )
-            if missing_critical:
-                missing = ", ".join(missing_critical[:10])
-                raise RuntimeError(
-                    "workflow schema bootstrap incomplete: "
-                    f"{len(missing_critical)} critical objects still missing"
-                    + (f" ({missing})" if missing else "")
-                )
     _run_sync(_bootstrap())
 
     return SyncPostgresConnection(pool)

@@ -21,6 +21,7 @@ from runtime.workflow.mcp_bridge import (
     augment_cli_command_for_workflow_mcp,
     workflow_mcp_workspace_overlays,
 )
+from runtime.workflow.decision_context import decision_workspace_overlays
 
 
 _WORKFLOW_MODEL_NETWORK_ENV = "PRAXIS_WORKFLOW_MODEL_NETWORK"
@@ -489,11 +490,15 @@ def execute_cli(
                 if "--dangerously-bypass-approvals-and-sandbox" not in cmd:
                     cmd.insert(exec_idx + 1, "--dangerously-bypass-approvals-and-sandbox")
 
-        workspace_overlays = workflow_mcp_workspace_overlays(
-            provider_slug=provider_slug,
-            execution_bundle=execution_bundle,
-            prefer_docker=_sandbox_provider_for_execution(agent_config, execution_bundle) == "docker_local",
-        )
+        decision_overlays = decision_workspace_overlays(execution_bundle)
+        workspace_overlays = [
+            *decision_overlays,
+            *workflow_mcp_workspace_overlays(
+                provider_slug=provider_slug,
+                execution_bundle=execution_bundle,
+                prefer_docker=_sandbox_provider_for_execution(agent_config, execution_bundle) == "docker_local",
+            ),
+        ]
         cmd = augment_cli_command_for_workflow_mcp(
             provider_slug=provider_slug,
             command_parts=cmd,
@@ -651,6 +656,7 @@ def execute_api(
             if isinstance(sandbox_profile, dict)
             else ""
         )
+        decision_overlays = decision_workspace_overlays(execution_bundle)
         python_executable = shlex.quote(sys.executable or "python3")
         command = (
             f"{python_executable} -m runtime.api_transport_worker "
@@ -699,6 +705,7 @@ def execute_api(
                     "provider_slug": provider_slug,
                     "model_slug": model_slug,
                     "execution_bundle": execution_bundle or {},
+                    **({"workspace_overlays": decision_overlays} if decision_overlays else {}),
                     **(dict(sandbox_profile or {}) if isinstance(sandbox_profile, dict) else {}),
                 },
                 artifact_store=artifact_store,

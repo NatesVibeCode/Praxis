@@ -1,0 +1,45 @@
+{
+  "name": "Live Workflow Probe GPT54 Mini Small",
+  "workflow_id": "live_workflow_probe_gpt54mini_small",
+  "phase": "execute",
+  "workdir": "/Users/nate/Praxis/artifacts/workflow_probe_workspace",
+  "outcome_goal": "Prove the queued workflow lane can chain multiple GPT-5.4 Mini steps end-to-end in a minimal workspace.",
+  "jobs": [
+    {
+      "label": "step1_create_json",
+      "agent": "openai/gpt-5.4-mini",
+      "prompt": "Create the directory `outputs` if it does not exist. Then write `outputs/step1_summary.json` containing valid JSON with keys `workflow`, `generated_by`, `signals`, and `verdict`. Use three short signal strings about workflow operator health. Set `workflow` to `live_workflow_probe_gpt54mini_small` and `generated_by` to `openai/gpt-5.4-mini`. After writing the file, reply with exactly one JSON object on stdout: {\"step\":\"step1_create_json\",\"status\":\"ok\",\"file\":\"outputs/step1_summary.json\"}.",
+      "timeout": 300,
+      "workdir": "/Users/nate/Praxis/artifacts/workflow_probe_workspace",
+      "write_scope": [
+        "outputs/step1_summary.json"
+      ]
+    },
+    {
+      "label": "step2_create_markdown",
+      "agent": "openai/gpt-5.4-mini",
+      "depends_on": [
+        "step1_create_json"
+      ],
+      "prompt": "Read `outputs/step1_summary.json`. Create `outputs/step2_report.md` with a short title, a markdown table listing the three signals, and a final line that states the verdict from the JSON file. After writing the file, reply with exactly one JSON object on stdout: {\"step\":\"step2_create_markdown\",\"status\":\"ok\",\"file\":\"outputs/step2_report.md\"}.",
+      "timeout": 300,
+      "workdir": "/Users/nate/Praxis/artifacts/workflow_probe_workspace",
+      "write_scope": [
+        "outputs/step2_report.md"
+      ]
+    },
+    {
+      "label": "step3_create_brief",
+      "agent": "openai/gpt-5.4-mini",
+      "depends_on": [
+        "step2_create_markdown"
+      ],
+      "prompt": "Read `outputs/step1_summary.json` and `outputs/step2_report.md`. Create `outputs/step3_brief.txt` with exactly three lines: `Workflow: ...`, `Primary artifact: ...`, and `Verdict: ...`. After writing the file, reply with exactly one JSON object on stdout: {\"step\":\"step3_create_brief\",\"status\":\"ok\",\"file\":\"outputs/step3_brief.txt\"}.",
+      "timeout": 300,
+      "workdir": "/Users/nate/Praxis/artifacts/workflow_probe_workspace",
+      "write_scope": [
+        "outputs/step3_brief.txt"
+      ]
+    }
+  ]
+}

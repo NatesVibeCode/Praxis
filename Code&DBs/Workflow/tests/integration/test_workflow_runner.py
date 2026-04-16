@@ -514,6 +514,10 @@ class TestEvidenceSequencing:
     def test_write_receipt_populates_canonical_receipts(self):
         pg_conn = _RecordingPgConn()
         runner = _RaceyEvidenceSeqRunner(1, pg_conn)
+        obs_receipts: list[dict[str, object]] = []
+        runner._obs_hub = SimpleNamespace(
+            ingest_receipt=lambda receipt: obs_receipts.append(dict(receipt))
+        )
         spec = WorkflowSpec(
             name="Test Spec",
             workflow_id="test_spec_001",
@@ -560,6 +564,12 @@ class TestEvidenceSequencing:
         assert pg_conn.receipt_rows[0]["inputs"]["transition_seq"] == 1
         assert pg_conn.receipt_rows[0]["outputs"]["cost_usd"] == pytest.approx(0.42)
         assert pg_conn.receipt_rows[0]["outputs"]["tool_use"] == {"web_search_requests": 1}
+        assert len(obs_receipts) == 1
+        assert obs_receipts[0]["job_label"] == "job_1"
+        assert obs_receipts[0]["status"] == "failed"
+        assert obs_receipts[0]["failure_code"] == "timeout"
+        assert obs_receipts[0]["failure_category"] == "timeout"
+        assert obs_receipts[0]["run_id"] == "dispatch_test_run"
 
     def test_write_receipt_uses_atomic_counter_for_parallel_receipts(self):
         pg_conn = _RecordingPgConn()

@@ -49,28 +49,40 @@ export const IntentBoxModule: React.FC<QuadrantProps> = ({ config }) => {
     setMessage(null);
     resetGenerateState();
     try {
-      const url = query
-        ? `/api/templates?q=${encodeURIComponent(query)}`
-        : '/api/templates';
-      const res = await fetch(url);
-      const data = await res.json();
+      const data = query
+        ? await fetch(`/api/intent/analyze?q=${encodeURIComponent(query)}`).then(async (response) => {
+            if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+            return response.json();
+          })
+        : await fetch('/api/templates').then(async (response) => {
+            if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+            return response.json();
+          });
+
       const found = data.templates ?? [];
 
       if (query) {
-        // Also search registries for components
-        const regRes = await fetch(`/api/registries/search?q=${encodeURIComponent(query)}`);
-        const regData = await regRes.json();
-        const components = regData.results ?? [];
+        const analysis = data.analysis ?? {};
+        const matches = analysis.matches ?? {};
+        const uiCount = Array.isArray(matches.ui_components) ? matches.ui_components.length : 0;
+        const calcCount = Array.isArray(matches.calculations) ? matches.calculations.length : 0;
+        const wfCount = Array.isArray(matches.workflows) ? matches.workflows.length : 0;
+        const totalMatches = typeof matches.total_count === 'number'
+          ? matches.total_count
+          : uiCount + calcCount + wfCount;
 
         if (found.length > 0) {
           setTemplates(found);
           setMessage(`Found ${found.length} template${found.length > 1 ? 's' : ''}`);
-        } else if (components.length > 0) {
-          setMessage(`No templates match "${query}" but found ${components.length} components. A custom workspace can be assembled.`);
+        } else if (totalMatches > 0) {
+          setMessage(
+            `No templates match "${query}" but the intent matcher found ${totalMatches} related piece${totalMatches > 1 ? 's' : ''} `
+            + `(${uiCount} components, ${calcCount} calculations, ${wfCount} workflows). A custom workspace can be assembled.`
+          );
         } else {
           setMessage(`No matches for "${query}".`);
-          setShowGenerate(true);
         }
+        setShowGenerate(Boolean(data.can_generate ?? false) && found.length === 0);
       } else {
         setTemplates(found);
         setMessage(`All templates (${found.length})`);

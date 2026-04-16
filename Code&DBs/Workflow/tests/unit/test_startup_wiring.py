@@ -20,8 +20,8 @@ sys.modules.setdefault("runtime", _runtime_pkg)
 from surfaces._subsystems_base import _BaseSubsystems
 import registry.integration_registry_sync as integration_registry_sync_mod
 import registry.native_runtime_profile_sync as native_runtime_profile_sync_mod
-import registry.reference_catalog_sync as reference_catalog_mod
 import runtime.capability_catalog as capability_catalog_mod
+import runtime.reference_catalog_seeder as reference_catalog_seeder_mod
 from registry.integration_registry_sync import sync_integration_registry
 from storage.postgres import PostgresConfigurationError
 from surfaces.api.handlers import _subsystems as api_subsystems
@@ -165,6 +165,7 @@ def test_sync_integration_registry_projects_static_and_mcp_rows() -> None:
         "scoreboard",
         "graph",
         "lineage",
+        "issue_backlog",
         "replay_ready_bugs",
     ]
 
@@ -195,8 +196,8 @@ def test_startup_wiring_syncs_registry_before_reference_catalog_and_starts_heart
         lambda conn: events.append("native_runtime_profile") or ("praxis",),
     )
     monkeypatch.setattr(
-        reference_catalog_mod,
-        "sync_reference_catalog",
+        reference_catalog_seeder_mod,
+        "seed_reference_catalog",
         lambda conn: events.append("reference_catalog") or 1,
     )
     monkeypatch.setattr("surfaces._lifecycle.threading.Thread", _FakeThread)
@@ -205,8 +206,8 @@ def test_startup_wiring_syncs_registry_before_reference_catalog_and_starts_heart
     subs._build_heartbeat_runner = lambda: fake_runner
     subs._should_auto_startup_wiring = lambda: True
 
-    subs._maybe_startup_wiring()
-    subs._maybe_startup_wiring()
+    subs.get_pg_conn()
+    subs.get_pg_conn()
 
     assert events == [
         "integration",
@@ -245,8 +246,8 @@ def test_startup_wiring_can_skip_heartbeat_background(monkeypatch) -> None:
         lambda conn: events.append("native_runtime_profile") or ("praxis",),
     )
     monkeypatch.setattr(
-        reference_catalog_mod,
-        "sync_reference_catalog",
+        reference_catalog_seeder_mod,
+        "seed_reference_catalog",
         lambda conn: events.append("reference_catalog") or 1,
     )
     monkeypatch.setattr("surfaces._lifecycle.threading.Thread", _FakeThread)
@@ -255,7 +256,7 @@ def test_startup_wiring_can_skip_heartbeat_background(monkeypatch) -> None:
     subs = _NoHeartbeatSubsystems()
     subs._should_auto_startup_wiring = lambda: True
 
-    subs._maybe_startup_wiring()
+    subs.get_pg_conn()
 
     assert events == [
         "integration",

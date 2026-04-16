@@ -39,6 +39,7 @@ async def _exercise_work_item_workflow_bindings_record_bug_to_workflow_class_bin
         await _bootstrap_workflow_migration(conn, "008_workflow_class_and_schedule_schema.sql")
         await _bootstrap_workflow_migration(conn, "009_bug_and_roadmap_authority.sql")
         await _bootstrap_workflow_migration(conn, "010_operator_control_authority.sql")
+        await _bootstrap_workflow_migration(conn, "132_issue_backlog_authority.sql")
 
         await _seed_workflow_lane(conn, as_of=as_of)
         await _seed_workflow_class(conn, as_of=as_of)
@@ -68,8 +69,8 @@ async def _exercise_work_item_workflow_bindings_record_bug_to_workflow_class_bin
             workflow_class_id=binding_kwargs["workflow_class_id"],
         )
 
-        assert first_payload == second_payload
         assert first_payload["binding"]["work_item_workflow_binding_id"] == binding_id
+        assert second_payload["binding"] == first_payload["binding"]
         assert first_payload["binding"]["source"] == {
             "kind": "bug",
             "id": "bug.dispatch-binding.1",
@@ -79,6 +80,69 @@ async def _exercise_work_item_workflow_bindings_record_bug_to_workflow_class_bin
             "workflow_class_id": "workflow_class.review.binding",
         }
         assert first_payload["binding"]["bound_by_decision_id"] == "operator_decision.dispatch-binding.1"
+        assert first_payload["auto_promoted_roadmap"]["created"] is True
+        assert second_payload["auto_promoted_roadmap"]["created"] is False
+
+        promoted_roadmap_item_id = first_payload["auto_promoted_roadmap"]["roadmap_item_id"]
+        assert promoted_roadmap_item_id == "roadmap_item.auto_bug.bug.dispatch.binding.1"
+        assert second_payload["auto_promoted_roadmap"]["roadmap_item_id"] == promoted_roadmap_item_id
+        assert second_payload["auto_promoted_roadmap"]["binding"] == first_payload["auto_promoted_roadmap"]["binding"]
+
+        roadmap_row = await conn.fetchrow(
+            """
+            SELECT
+                roadmap_item_id,
+                roadmap_key,
+                title,
+                item_kind,
+                status,
+                priority,
+                source_bug_id,
+                summary
+            FROM roadmap_items
+            WHERE roadmap_item_id = $1
+            """,
+            promoted_roadmap_item_id,
+        )
+        assert roadmap_row is not None
+        assert roadmap_row["roadmap_key"] == "roadmap.auto.bug.bug.dispatch.binding.1"
+        assert roadmap_row["title"] == "Binding test bug"
+        assert roadmap_row["item_kind"] == "capability"
+        assert roadmap_row["status"] == "active"
+        assert roadmap_row["priority"] == "p2"
+        assert roadmap_row["source_bug_id"] == "bug.dispatch-binding.1"
+        assert roadmap_row["summary"] == (
+            "Auto-promoted from bug.dispatch-binding.1: "
+            "Work item binding test bug"
+        )
+
+        roadmap_binding_id = work_item_workflow_binding_id(
+            binding_kind=binding_kwargs["binding_kind"],
+            roadmap_item_id=promoted_roadmap_item_id,
+            workflow_class_id=binding_kwargs["workflow_class_id"],
+        )
+        roadmap_binding_row = await conn.fetchrow(
+            """
+            SELECT
+                work_item_workflow_binding_id,
+                binding_kind,
+                binding_status,
+                bug_id,
+                roadmap_item_id,
+                workflow_class_id,
+                bound_by_decision_id
+            FROM work_item_workflow_bindings
+            WHERE work_item_workflow_binding_id = $1
+            """,
+            roadmap_binding_id,
+        )
+        assert roadmap_binding_row is not None
+        assert roadmap_binding_row["binding_kind"] == "governed_by"
+        assert roadmap_binding_row["binding_status"] == "active"
+        assert roadmap_binding_row["bug_id"] is None
+        assert roadmap_binding_row["roadmap_item_id"] == promoted_roadmap_item_id
+        assert roadmap_binding_row["workflow_class_id"] == "workflow_class.review.binding"
+        assert roadmap_binding_row["bound_by_decision_id"] == "operator_decision.dispatch-binding.1"
 
         row = await conn.fetchrow(
             """
@@ -133,6 +197,128 @@ async def _exercise_work_item_workflow_bindings_record_bug_to_workflow_class_bin
             binding_id,
         )
         assert duplicate_count == 1
+    finally:
+        await conn.close()
+
+
+def test_work_item_workflow_bindings_issue_binding_auto_promotes_issue_to_bug_and_roadmap() -> None:
+    asyncio.run(_exercise_work_item_workflow_bindings_issue_binding_auto_promotes_issue_to_bug_and_roadmap())
+
+
+async def _exercise_work_item_workflow_bindings_issue_binding_auto_promotes_issue_to_bug_and_roadmap() -> None:
+    env = _workflow_env()
+    as_of = datetime(2026, 4, 16, 17, 0, tzinfo=timezone.utc)
+
+    conn = await connect_workflow_database(env=env)
+    try:
+        await bootstrap_control_plane_schema(conn)
+        await bootstrap_workflow_lane_catalog_schema(conn)
+        await _bootstrap_workflow_migration(conn, "008_workflow_class_and_schedule_schema.sql")
+        await _bootstrap_workflow_migration(conn, "009_bug_and_roadmap_authority.sql")
+        await _bootstrap_workflow_migration(conn, "010_operator_control_authority.sql")
+        await _bootstrap_workflow_migration(conn, "132_issue_backlog_authority.sql")
+
+        await _seed_workflow_lane(conn, as_of=as_of)
+        await _seed_workflow_class(conn, as_of=as_of)
+        await _seed_operator_decision(conn, as_of=as_of)
+        await _seed_issue(conn, as_of=as_of)
+
+        payload = await operator_write.arecord_work_item_workflow_binding(
+            binding_kind="governed_by",
+            issue_id="issue.dispatch-gap.1",
+            workflow_class_id="workflow_class.review.binding",
+            binding_status="active",
+            bound_by_decision_id="operator_decision.dispatch-binding.1",
+            created_at=as_of,
+            updated_at=as_of,
+            env=env,
+        )
+
+        issue_binding_id = work_item_workflow_binding_id(
+            binding_kind="governed_by",
+            issue_id="issue.dispatch-gap.1",
+            workflow_class_id="workflow_class.review.binding",
+        )
+        promoted_bug = payload["auto_promoted_bug"]
+        promoted_roadmap = payload["auto_promoted_roadmap"]
+
+        assert payload["binding"]["work_item_workflow_binding_id"] == issue_binding_id
+        assert payload["binding"]["source"] == {
+            "kind": "issue",
+            "id": "issue.dispatch-gap.1",
+            "issue_id": "issue.dispatch-gap.1",
+        }
+        assert promoted_bug["created"] is True
+        assert promoted_bug["bug_id"] == "bug.auto_issue.issue.dispatch.gap.1"
+        assert promoted_bug["binding"]["source"] == {
+            "kind": "bug",
+            "id": "bug.auto_issue.issue.dispatch.gap.1",
+            "bug_id": "bug.auto_issue.issue.dispatch.gap.1",
+        }
+        assert promoted_roadmap["created"] is True
+        assert promoted_roadmap["roadmap_item_id"] == (
+            "roadmap_item.auto_bug.bug.auto.issue.issue.dispatch.gap.1"
+        )
+
+        bug_row = await conn.fetchrow(
+            """
+            SELECT
+                bug_id,
+                bug_key,
+                title,
+                status,
+                priority,
+                source_issue_id,
+                summary
+            FROM bugs
+            WHERE bug_id = $1
+            """,
+            promoted_bug["bug_id"],
+        )
+        assert bug_row is not None
+        assert bug_row["bug_key"] == "bug-auto_issue-issue-dispatch-gap-1"
+        assert bug_row["title"] == "Dispatch gap issue"
+        assert bug_row["status"] == "open"
+        assert bug_row["priority"] == "p1"
+        assert bug_row["source_issue_id"] == "issue.dispatch-gap.1"
+        assert bug_row["summary"] == "Auto-promoted from issue.dispatch-gap.1: Work started on upstream issue."
+
+        bug_binding_id = work_item_workflow_binding_id(
+            binding_kind="governed_by",
+            bug_id=promoted_bug["bug_id"],
+            workflow_class_id="workflow_class.review.binding",
+        )
+        bug_binding_row = await conn.fetchrow(
+            """
+            SELECT
+                work_item_workflow_binding_id,
+                issue_id,
+                bug_id,
+                workflow_class_id
+            FROM work_item_workflow_bindings
+            WHERE work_item_workflow_binding_id = $1
+            """,
+            bug_binding_id,
+        )
+        assert bug_binding_row is not None
+        assert bug_binding_row["issue_id"] is None
+        assert bug_binding_row["bug_id"] == promoted_bug["bug_id"]
+        assert bug_binding_row["workflow_class_id"] == "workflow_class.review.binding"
+
+        roadmap_row = await conn.fetchrow(
+            """
+            SELECT
+                roadmap_item_id,
+                source_bug_id,
+                status
+            FROM roadmap_items
+            WHERE roadmap_item_id = $1
+            """,
+            promoted_roadmap["roadmap_item_id"],
+        )
+        assert roadmap_row is not None
+        assert roadmap_row["source_bug_id"] == promoted_bug["bug_id"]
+        assert roadmap_row["status"] == "active"
     finally:
         await conn.close()
 
@@ -287,6 +473,54 @@ async def _seed_bug(conn, *, as_of: datetime) -> None:
         "Work item binding test bug",
         "manual",
         "decision:bug:dispatch-binding.1",
+        as_of,
+        as_of,
+        as_of,
+    )
+
+
+async def _seed_issue(conn, *, as_of: datetime) -> None:
+    await conn.execute(
+        """
+        INSERT INTO issues (
+            issue_id,
+            issue_key,
+            title,
+            status,
+            severity,
+            priority,
+            summary,
+            source_kind,
+            decision_ref,
+            opened_at,
+            resolved_at,
+            created_at,
+            updated_at
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, $11, $12
+        )
+        ON CONFLICT (issue_id) DO UPDATE SET
+            issue_key = EXCLUDED.issue_key,
+            title = EXCLUDED.title,
+            status = EXCLUDED.status,
+            severity = EXCLUDED.severity,
+            priority = EXCLUDED.priority,
+            summary = EXCLUDED.summary,
+            source_kind = EXCLUDED.source_kind,
+            decision_ref = EXCLUDED.decision_ref,
+            opened_at = EXCLUDED.opened_at,
+            created_at = EXCLUDED.created_at,
+            updated_at = EXCLUDED.updated_at
+        """,
+        "issue.dispatch-gap.1",
+        "issue.dispatch-gap.1",
+        "Dispatch gap issue",
+        "open",
+        "high",
+        "p1",
+        "Work started on upstream issue.",
+        "manual",
+        "decision:issue:dispatch-gap.1",
         as_of,
         as_of,
         as_of,

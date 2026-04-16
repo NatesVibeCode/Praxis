@@ -68,6 +68,7 @@ from ._operator_helpers import (
     _now,
     _run_async as _shared_run_async,
 )
+from ._payload_contract import optional_text, require_text
 from .frontdoor import status as frontdoor_status
 from .operator_read import NativeOperatorQueryFrontdoor, query_operator_surface
 
@@ -122,13 +123,14 @@ def _normalize_as_of(value: datetime) -> datetime:
 
 
 def _require_text(value: object, *, field_name: str) -> str:
-    if not isinstance(value, str) or not value.strip():
+    try:
+        return require_text(value, field_name=field_name)
+    except ValueError as exc:
         raise NativeOperatorSurfaceError(
             "native_operator_surface.invalid_row",
-            f"{field_name} must be a non-empty string",
+            str(exc),
             details={"field": field_name, "value_type": type(value).__name__},
-        )
-    return value.strip()
+        ) from exc
 
 
 def _text(value: object) -> str | None:
@@ -814,7 +816,14 @@ class _BoundedForkOwnershipSelection:
 def _optional_text(value: object, *, field_name: str) -> str | None:
     if value is None:
         return None
-    return _require_text(value, field_name=field_name)
+    try:
+        return optional_text(value, field_name=field_name)
+    except ValueError as exc:
+        raise NativeOperatorSurfaceError(
+            "native_operator_surface.invalid_row",
+            str(exc),
+            details={"field": field_name, "value_type": type(value).__name__},
+        ) from exc
 
 
 def _normalize_json_field(value: object) -> object:

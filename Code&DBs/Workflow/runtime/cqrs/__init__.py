@@ -5,5 +5,6 @@ from .bus import CommandBus
 from .commands import suggest_next
 from .commands import workflow_build
 from .queries import roadmap_tree
+from .queries import data_dictionary
 
 __all__ = ["registry", "CommandBus", "CapabilityRoute"]

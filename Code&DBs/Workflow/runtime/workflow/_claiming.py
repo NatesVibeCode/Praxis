@@ -369,8 +369,12 @@ def reap_stale_runs(conn: SyncPostgresConnection) -> int:
         )
         conn.execute(
             """UPDATE workflow_runs
-               SET current_state = 'cancelled',
-                   terminal_reason_code = 'stale_run_reaped',
+               SET current_state = CASE
+                       WHEN current_state NOT IN ('succeeded', 'failed', 'dead_letter', 'cancelled')
+                       THEN 'cancelled'
+                       ELSE current_state
+                   END,
+                   terminal_reason_code = COALESCE(terminal_reason_code, 'stale_run_reaped'),
                    started_at = COALESCE(started_at, admitted_at, requested_at),
                    finished_at = GREATEST(COALESCE(started_at, admitted_at, requested_at), now())
                WHERE run_id = $1

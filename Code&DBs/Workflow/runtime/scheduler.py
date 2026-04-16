@@ -15,12 +15,19 @@ import json
 import os
 import sys
 import time
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from runtime.control_commands import submit_workflow_command
+from runtime.control_commands import (
+    submit_workflow_chain_command,
+    submit_workflow_command,
+)
+
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -351,10 +358,22 @@ def run_scheduler_tick(
         try:
             raw = load_raw(spec_path)
             if is_batch_spec(raw):
+                payload = submit_workflow_chain_command(
+                    _workflow_pg_conn(),
+                    requested_by_kind="scheduler",
+                    requested_by_ref="scheduler.tick",
+                    coordination_path=spec_path,
+                    repo_root=str(_PROJECT_ROOT),
+                )
+                if payload.get("error") or not payload.get("chain_id"):
+                    raise RuntimeError(str(payload.get("error") or payload))
                 results.append({
                     "job_name": job.name,
-                    "status": "failed",
-                    "error": "scheduler no longer launches batch specs directly; use workflow chain or API/MCP frontdoor",
+                    "status": payload.get("status", "queued"),
+                    "chain_id": payload.get("chain_id"),
+                    "command_id": payload.get("command_id"),
+                    "command_status": payload.get("command_status"),
+                    "result_ref": payload.get("result_ref"),
                     "skipped": False,
                 })
             else:
@@ -403,7 +422,6 @@ def force_run_job(
     state: SchedulerState | None = None,
 ) -> dict[str, Any]:
     """Force-dispatch a specific scheduled job regardless of cron timing."""
-    from runtime.control_commands import submit_workflow_command
     from .workflow_spec import load_raw, is_batch_spec
 
     if state is None:
@@ -435,10 +453,22 @@ def force_run_job(
     try:
         raw = load_raw(spec_path)
         if is_batch_spec(raw):
+            payload = submit_workflow_chain_command(
+                _workflow_pg_conn(),
+                requested_by_kind="scheduler",
+                requested_by_ref="scheduler.force_run",
+                coordination_path=spec_path,
+                repo_root=str(_PROJECT_ROOT),
+            )
+            if payload.get("error") or not payload.get("chain_id"):
+                raise RuntimeError(str(payload.get("error") or payload))
             result_dict = {
                 "job_name": job.name,
-                "status": "failed",
-                "error": "scheduler no longer launches batch specs directly; use workflow chain or API/MCP frontdoor",
+                "status": payload.get("status", "queued"),
+                "chain_id": payload.get("chain_id"),
+                "command_id": payload.get("command_id"),
+                "command_status": payload.get("command_status"),
+                "result_ref": payload.get("result_ref"),
             }
         else:
             payload = submit_workflow_command(

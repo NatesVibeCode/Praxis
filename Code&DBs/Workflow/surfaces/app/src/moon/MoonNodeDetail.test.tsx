@@ -3,7 +3,7 @@ import React from 'react';
 import { vi } from 'vitest';
 
 import { MoonNodeDetail } from './MoonNodeDetail';
-import type { OrbitEdge } from './moonBuildPresenter';
+import type { OrbitEdge, OrbitNode } from './moonBuildPresenter';
 import type { BuildPayload } from '../shared/types';
 
 vi.mock('../shared/hooks/useObjectTypes', () => ({
@@ -132,5 +132,114 @@ describe('MoonNodeDetail', () => {
     fireEvent.change(screen.getByLabelText('Gate type'), { target: { value: 'after_failure' } });
 
     expect(onApplyGate).toHaveBeenCalledWith('edge-trigger-next', 'after_failure');
+  });
+
+  test('renders block contract string lists as data fields with values from the build graph', () => {
+    const node: OrbitNode = {
+      id: 'n-step',
+      kind: 'step',
+      title: 'Research',
+      summary: 'Run research',
+      glyphType: 'research',
+      ringState: 'decided-grounded',
+      isOnDominantPath: true,
+      issueCount: 0,
+      needsBadge: false,
+      dominantPathIndex: 0,
+      x: 0,
+      y: 0,
+      rank: 0,
+    };
+
+    const buildGraph: NonNullable<BuildPayload['build_graph']> = {
+      nodes: [
+        {
+          node_id: 'n-step',
+          kind: 'step',
+          title: 'Research',
+          route: 'auto/research',
+          required_inputs: ['customer_id'],
+          outputs: ['research_findings'],
+          persistence_targets: ['store.research_notes'],
+        },
+      ],
+      edges: [],
+    };
+
+    render(
+      <MoonNodeDetail
+        node={node}
+        content={null}
+        workflowId="wf_1"
+        onMutate={vi.fn()}
+        onClose={vi.fn()}
+        buildGraph={buildGraph}
+        onUpdateBuildGraph={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText('Required inputs')).toBeInTheDocument();
+    expect(screen.getByLabelText('Outputs')).toBeInTheDocument();
+    expect(screen.getByLabelText('Persistence targets')).toBeInTheDocument();
+    expect(screen.getByLabelText('Required inputs field: customer_id')).toBeInTheDocument();
+    expect(screen.getByLabelText('Outputs field: research_findings')).toBeInTheDocument();
+    expect(screen.getByLabelText('Persistence targets field: store.research_notes')).toBeInTheDocument();
+  });
+
+  test('webhook trigger steps still show contract data fields under block properties', () => {
+    const node: OrbitNode = {
+      id: 'n-hook',
+      kind: 'step',
+      title: 'Webhook',
+      summary: 'Inbound webhook',
+      glyphType: 'tool',
+      ringState: 'decided-grounded',
+      isOnDominantPath: true,
+      issueCount: 0,
+      needsBadge: false,
+      dominantPathIndex: 0,
+      x: 0,
+      y: 0,
+      rank: 0,
+      route: 'trigger/webhook',
+    };
+
+    const buildGraph: NonNullable<BuildPayload['build_graph']> = {
+      nodes: [
+        {
+          node_id: 'n-hook',
+          kind: 'step',
+          title: 'Webhook',
+          route: 'trigger/webhook',
+          trigger: {
+            event_type: 'db.webhook_events.insert',
+            filter: {},
+          },
+          required_inputs: ['payload'],
+          outputs: ['verified_event'],
+          persistence_targets: [],
+        },
+      ],
+      edges: [],
+    };
+
+    render(
+      <MoonNodeDetail
+        node={node}
+        content={null}
+        workflowId="wf_1"
+        onMutate={vi.fn()}
+        onClose={vi.fn()}
+        buildGraph={buildGraph}
+        onUpdateBuildGraph={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Trigger config')).toBeInTheDocument();
+    expect(screen.getByLabelText('Required inputs')).toBeInTheDocument();
+    expect(screen.getByLabelText('Outputs')).toBeInTheDocument();
+    expect(screen.getByLabelText('Persistence targets')).toBeInTheDocument();
+    expect(screen.getByLabelText('Required inputs field: payload')).toBeInTheDocument();
+    expect(screen.getByLabelText('Outputs field: verified_event')).toBeInTheDocument();
   });
 });

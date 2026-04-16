@@ -805,6 +805,7 @@ def _query_command(args: list[str], *, stdout: TextIO) -> int:
             "    workflow query 'what is failing right now?'\n"
             "    workflow query 'what is the pass rate?'\n"
             "    workflow query 'are there any open bugs?'\n"
+            "    workflow query 'issue backlog'\n"
             "    workflow query 'schema for workflow_runs'\n"
             "    workflow query 'import path for BugTracker'\n"
             "    workflow query 'test command for runtime/compiler.py'\n"

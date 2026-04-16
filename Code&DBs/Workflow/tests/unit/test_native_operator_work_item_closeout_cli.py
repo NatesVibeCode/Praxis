@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from io import StringIO
+from datetime import datetime, timezone
 
 from surfaces.cli import native_operator
 from surfaces.cli.main import main as workflow_cli_main
+from surfaces.api import operator_write
 
 
 class _FakeInstance:
@@ -14,6 +17,7 @@ class _FakeInstance:
 
 def test_native_operator_work_item_closeout_uses_shared_gate(monkeypatch) -> None:
     captured: dict[str, object] = {}
+    legacy_bridge_called: dict[str, bool] = {"value": False}
 
     def _reconcile_work_item_closeout(**kwargs):
         captured.update(kwargs)
@@ -33,11 +37,21 @@ def test_native_operator_work_item_closeout_uses_shared_gate(monkeypatch) -> Non
             "applied": {"bugs": [], "roadmap_items": []},
         }
 
+    def _legacy_bridge(**kwargs):
+        del kwargs
+        legacy_bridge_called["value"] = True
+        raise AssertionError("legacy reconcile path must not run for native CLI closeout")
+
     monkeypatch.setattr(native_operator, "resolve_native_instance", lambda env=None: _FakeInstance())
     monkeypatch.setattr(
         native_operator.operator_write,
         "reconcile_work_item_closeout",
         _reconcile_work_item_closeout,
+    )
+    monkeypatch.setattr(
+        native_operator.operator_write,
+        "areconcile_work_item_closeout",
+        _legacy_bridge,
     )
 
     stdout = StringIO()
@@ -64,3 +78,260 @@ def test_native_operator_work_item_closeout_uses_shared_gate(monkeypatch) -> Non
     assert captured["roadmap_item_ids"] == ("roadmap_item.closeout.1",)
     assert payload["committed"] is True
     assert payload["proof_threshold"]["bug_requires_evidence_role"] == "validates_fix"
+    assert legacy_bridge_called["value"] is False
+
+
+def test_native_operator_work_item_closeout_preview_commits_also_use_shared_gate(monkeypatch) -> None:
+    captured: list[str] = []
+    legacy_bridge_called: dict[str, bool] = {"value": False}
+
+    def _reconcile_work_item_closeout(**kwargs):
+        captured.append(kwargs["action"])
+        return {
+            "action": kwargs["action"],
+            "proof_threshold": {
+                "bug_requires_evidence_role": "validates_fix",
+                "roadmap_requires_source_bug_fix_proof": True,
+            },
+            "evaluated": {
+                "bug_ids": list(kwargs["bug_ids"]),
+                "roadmap_item_ids": list(kwargs["roadmap_item_ids"]),
+            },
+            "candidates": {"bugs": [], "roadmap_items": []},
+            "skipped": {"bugs": [], "roadmap_items": []},
+            "committed": kwargs["action"] == "commit",
+            "applied": {"bugs": [], "roadmap_items": []},
+        }
+
+    def _legacy_bridge(**kwargs):
+        del kwargs
+        legacy_bridge_called["value"] = True
+        raise AssertionError("legacy reconcile path must not run for native CLI closeout")
+
+    monkeypatch.setattr(native_operator, "resolve_native_instance", lambda env=None: _FakeInstance())
+    monkeypatch.setattr(
+        native_operator.operator_write,
+        "reconcile_work_item_closeout",
+        _reconcile_work_item_closeout,
+    )
+    monkeypatch.setattr(
+        native_operator.operator_write,
+        "areconcile_work_item_closeout",
+        _legacy_bridge,
+    )
+
+    stdout = StringIO()
+    assert (
+        workflow_cli_main(
+            [
+                "native-operator",
+                "work-item-closeout",
+                "--bug-id",
+                "bug.closeout.2",
+                "--roadmap-item-id",
+                "roadmap_item.closeout.2",
+            ],
+            env={},
+            stdout=stdout,
+        )
+        == 0
+    )
+    assert "\"committed\": false" in stdout.getvalue()
+
+    stdout = StringIO()
+    assert (
+        workflow_cli_main(
+            [
+                "native-operator",
+                "work-item-closeout",
+                "--bug-id",
+                "bug.closeout.2",
+                "--roadmap-item-id",
+                "roadmap_item.closeout.2",
+                "--commit",
+            ],
+            env={},
+            stdout=stdout,
+        )
+        == 0
+    )
+    assert "\"committed\": true" in stdout.getvalue()
+    assert captured == ["preview", "commit"]
+    assert legacy_bridge_called["value"] is False
+
+
+class _NoSqlConnectionProxy:
+    def transaction(self):
+        return _NoSqlTransaction()
+
+    async def close(self) -> None:
+        return None
+
+    async def execute(self, *_: object, **__: object) -> str:
+        raise AssertionError("direct SQL execution is not expected in closeout delegation test")
+
+    async def fetch(self, *_: object, **__: object) -> list[dict[str, object]]:
+        raise AssertionError("direct SQL fetch is not expected in closeout delegation test")
+
+    async def fetchrow(self, *_: object, **__: object):
+        raise AssertionError("direct SQL fetchrow is not expected in closeout delegation test")
+
+
+class _NoSqlTransaction:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        return None
+
+
+class _CloseoutRepositorySpy:
+    def __init__(self, *, resolved_at: datetime) -> None:
+        self.resolved_at = resolved_at
+        self.bug_calls: list[tuple[tuple[str, ...], dict[str, str], datetime]] = []
+        self.roadmap_calls: list[tuple[tuple[str, ...], str, datetime]] = []
+
+    async def mark_bugs_fixed(
+        self,
+        *,
+        bug_ids: tuple[str, ...],
+        resolution_summaries_by_bug_id: dict[str, str],
+        resolved_at: datetime,
+    ) -> tuple[dict[str, object], ...]:
+        self.bug_calls.append((bug_ids, resolution_summaries_by_bug_id, resolved_at))
+        return tuple(
+            {
+                "bug_id": bug_id,
+                "status": "FIXED",
+                "resolved_at": resolved_at,
+                "resolution_summary": resolution_summaries_by_bug_id[bug_id],
+            }
+            for bug_id in bug_ids
+        )
+
+    async def mark_roadmap_items_completed(
+        self,
+        *,
+        roadmap_item_ids: tuple[str, ...],
+        completed_status: str,
+        completed_at: datetime,
+    ) -> tuple[dict[str, object], ...]:
+        self.roadmap_calls.append((roadmap_item_ids, completed_status, completed_at))
+        return tuple(
+            {
+                "roadmap_item_id": roadmap_item_id,
+                "status": completed_status,
+                "completed_at": completed_at,
+                "source_bug_id": "bug.closeout.1",
+            }
+            for roadmap_item_id in roadmap_item_ids
+        )
+
+
+def test_work_item_closeout_commit_delegates_to_closeout_repository(monkeypatch) -> None:
+    resolved_at = datetime(2026, 4, 9, 17, 0, tzinfo=timezone.utc)
+    spy = _CloseoutRepositorySpy(resolved_at=resolved_at)
+
+    async def _fetch_bug_rows_for_closeout(self, conn, bug_ids):
+        del conn
+        return (
+            {
+                "bug_id": "bug.closeout.1",
+                "resolved_at": None,
+                "status": "OPEN",
+            },
+        )
+
+    async def _fetch_roadmap_rows_for_closeout(
+        self,
+        conn,
+        roadmap_item_ids: tuple[str, ...],
+        source_bug_ids: tuple[str, ...],
+    ) -> tuple[dict[str, object], ...]:
+        del conn, source_bug_ids
+        if not roadmap_item_ids:
+            return ()
+        return (
+            {
+                "roadmap_item_id": roadmap_item_ids[0],
+                "title": "Closeout roadmap",
+                "status": "active",
+                "source_bug_id": "bug.closeout.1",
+                "completed_at": None,
+                "updated_at": resolved_at,
+            },
+        )
+
+    async def _fetch_bug_evidence_for_closeout(
+        self,
+        conn,
+        bug_ids: tuple[str, ...],
+    ) -> dict[str, tuple[dict[str, str], ...]]:
+        del conn
+        assert bug_ids == ("bug.closeout.1",)
+        return {
+            "bug.closeout.1": (
+                {
+                    "evidence_kind": "receipt",
+                    "evidence_ref": "receipt.closeout.1",
+                    "evidence_role": "validates_fix",
+                },
+            )
+        }
+
+    monkeypatch.setattr(
+        operator_write.OperatorControlFrontdoor,
+        "_fetch_bug_rows_for_closeout",
+        _fetch_bug_rows_for_closeout,
+    )
+    monkeypatch.setattr(
+        operator_write.OperatorControlFrontdoor,
+        "_fetch_roadmap_rows_for_closeout",
+        _fetch_roadmap_rows_for_closeout,
+    )
+    monkeypatch.setattr(
+        operator_write.OperatorControlFrontdoor,
+        "_fetch_bug_evidence_for_closeout",
+        _fetch_bug_evidence_for_closeout,
+    )
+    monkeypatch.setattr(operator_write, "_now", lambda: resolved_at)
+
+    frontdoor = operator_write.OperatorControlFrontdoor(
+        connect_database=lambda env=None: asyncio.sleep(0, result=_NoSqlConnectionProxy()),
+        work_item_closeout_repository_factory=lambda conn: spy,
+    )
+
+    payload = asyncio.run(
+        frontdoor.reconcile_work_item_closeout_async(
+            action="commit",
+            bug_ids=("bug.closeout.1",),
+            roadmap_item_ids=("roadmap_item.closeout.1",),
+        )
+    )
+
+    assert payload["committed"] is True
+    assert len(spy.bug_calls) == 1
+    assert spy.bug_calls[0][0] == ("bug.closeout.1",)
+    assert spy.bug_calls[0][2] == resolved_at
+    assert len(spy.roadmap_calls) == 1
+    assert spy.roadmap_calls[0][0] == ("roadmap_item.closeout.1",)
+    assert spy.roadmap_calls[0][1] == "completed"
+    assert spy.roadmap_calls[0][2] == resolved_at
+    assert payload["applied"]["bugs"] == [
+        {
+            "bug_id": "bug.closeout.1",
+            "status": "FIXED",
+            "resolved_at": resolved_at.isoformat(),
+            "resolution_summary": operator_write._closeout_resolution_summary(
+                bug_id="bug.closeout.1", evidence_count=1
+            ),
+        }
+    ]
+    assert payload["applied"]["roadmap_items"] == [
+        {
+            "roadmap_item_id": "roadmap_item.closeout.1",
+            "status": "completed",
+            "completed_at": resolved_at.isoformat(),
+            "source_bug_id": "bug.closeout.1",
+        }
+    ]

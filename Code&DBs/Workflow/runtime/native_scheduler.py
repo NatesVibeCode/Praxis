@@ -1,23 +1,22 @@
-"""Native scheduler authority over stored workflow classes and schedules.
-
-This module keeps recurring workflow scheduling deterministic and fail-closed:
-
-- schedule meaning comes from stored `schedule_definitions` rows
-- workflow breadth comes from stored `workflow_classes` rows
-- overlapping active rows are treated as ambiguity, not as a hint to guess
-- no wrapper memory or hosted scheduler service is consulted
-"""
+"""Native scheduler authority over stored recurring schedules."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Protocol
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
 from functools import partial
-from typing import Any, Protocol, cast
+from typing import Any
+from datetime import datetime
 
 import asyncpg
 
+from authority.workflow_schedule import (
+    NativeWorkflowScheduleCatalog,
+    NativeWorkflowScheduleResolution,
+    ScheduleRepositoryError,
+    _normalize_as_of,
+    load_workflow_schedule_catalog,
+)
 from runtime._helpers import _fail as _shared_fail, _json_compatible
 
 
@@ -39,55 +38,18 @@ class NativeSchedulerError(RuntimeError):
 _fail = partial(_shared_fail, error_type=NativeSchedulerError)
 
 
-def _require_text(value: object, *, field_name: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise _fail(
-            "native_scheduler.invalid_row",
-            f"{field_name} must be a non-empty string",
-            details={"field": field_name, "value_type": type(value).__name__},
-        )
-    return value.strip()
+def _map_schedule_reason(reason_code: str) -> str:
+    if reason_code.startswith("schedule."):
+        return f"native_scheduler.{reason_code[len('schedule.'):]}"
+    return f"native_scheduler.{reason_code}"
 
 
-def _require_bool(value: object, *, field_name: str) -> bool:
-    if not isinstance(value, bool):
-        raise _fail(
-            "native_scheduler.invalid_row",
-            f"{field_name} must be a boolean",
-            details={"field": field_name, "value_type": type(value).__name__},
-        )
-    return value
-
-
-def _require_utc(value: object, *, field_name: str) -> datetime:
-    if not isinstance(value, datetime):
-        raise _fail(
-            "native_scheduler.invalid_row",
-            f"{field_name} must be a datetime",
-            details={"field": field_name, "value_type": type(value).__name__},
-        )
-    if value.tzinfo is None or value.utcoffset() != timedelta(0):
-        raise _fail(
-            "native_scheduler.invalid_row",
-            f"{field_name} must be UTC-backed",
-            details={"field": field_name},
-        )
-    return value
-
-
-def _require_mapping(value: object, *, field_name: str) -> Mapping[str, Any]:
-    if not isinstance(value, Mapping):
-        raise _fail(
-            "native_scheduler.invalid_row",
-            f"{field_name} must be an object",
-            details={"field": field_name, "value_type": type(value).__name__},
-        )
-    return value
-
-
-def _normalize_as_of(value: datetime) -> datetime:
-    normalized = _require_utc(value, field_name="as_of")
-    return normalized.astimezone(timezone.utc)
+def _raise_native_schedule_error(exc: ScheduleRepositoryError) -> None:
+    raise _fail(
+        _map_schedule_reason(exc.reason_code),
+        str(exc),
+        details=exc.details,
+    ) from exc
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,7 +127,11 @@ class NativeScheduledWorkflow:
     as_of: datetime
     schedule_definition: NativeScheduleDefinitionRecord
     workflow_class: NativeWorkflowClassRecord
-    schedule_authority: str = "runtime.schedule_definitions"
+    recurring_run_window_id: str
+    recurring_run_window_status: str
+    capacity_limit: int | None
+    capacity_used: int
+    schedule_authority: str = "authority.workflow_schedule"
     workflow_class_authority: str = "policy.workflow_classes"
 
     def to_json(self) -> dict[str, Any]:
@@ -175,217 +141,79 @@ class NativeScheduledWorkflow:
             "workflow_class_authority": self.workflow_class_authority,
             "schedule_definition": self.schedule_definition.to_json(),
             "workflow_class": self.workflow_class.to_json(),
+            "recurring_run_window_id": self.recurring_run_window_id,
+            "recurring_run_window_status": self.recurring_run_window_status,
+            "capacity_limit": self.capacity_limit,
+            "capacity_used": self.capacity_used,
         }
 
 
 class NativeSchedulerRepository(Protocol):
     """Minimal repository contract for native scheduler authority."""
 
-    async def load_schedule_definition(
+    async def load_catalog(
         self,
         *,
-        target_ref: str,
-        schedule_kind: str,
         as_of: datetime,
-    ) -> NativeScheduleDefinitionRecord:
-        ...
-
-    async def load_workflow_class(
-        self,
-        *,
-        workflow_class_id: str,
-        as_of: datetime,
-    ) -> NativeWorkflowClassRecord:
+    ) -> NativeWorkflowScheduleCatalog:
         ...
 
 
-_SCHEDULE_QUERY = """
-SELECT
-    schedule_definition_id,
-    workflow_class_id,
-    schedule_name,
-    schedule_kind,
-    status,
-    cadence_policy,
-    throttle_policy,
-    target_ref,
-    effective_from,
-    effective_to,
-    decision_ref,
-    created_at
-FROM schedule_definitions
-WHERE status = 'active'
-  AND target_ref = $1
-  AND schedule_kind = $2
-  AND effective_from <= $3
-  AND (effective_to IS NULL OR effective_to > $3)
-ORDER BY effective_from DESC, created_at DESC, schedule_definition_id
-"""
-
-_WORKFLOW_CLASS_QUERY = """
-SELECT
-    workflow_class_id,
-    class_name,
-    class_kind,
-    workflow_lane_id,
-    status,
-    queue_shape,
-    throttle_policy,
-    review_required,
-    effective_from,
-    effective_to,
-    decision_ref,
-    created_at
-FROM workflow_classes
-WHERE status = 'active'
-  AND workflow_class_id = $1
-  AND effective_from <= $2
-  AND (effective_to IS NULL OR effective_to > $2)
-ORDER BY effective_from DESC, created_at DESC, workflow_class_id
-"""
-
-
-def _schedule_record_from_row(row: Mapping[str, Any]) -> NativeScheduleDefinitionRecord:
-    return NativeScheduleDefinitionRecord(
-        schedule_definition_id=_require_text(
-            row.get("schedule_definition_id"),
-            field_name="schedule_definition_id",
-        ),
-        workflow_class_id=_require_text(row.get("workflow_class_id"), field_name="workflow_class_id"),
-        schedule_name=_require_text(row.get("schedule_name"), field_name="schedule_name"),
-        schedule_kind=_require_text(row.get("schedule_kind"), field_name="schedule_kind"),
-        status=_require_text(row.get("status"), field_name="status"),
-        cadence_policy=_require_mapping(row.get("cadence_policy"), field_name="cadence_policy"),
-        throttle_policy=_require_mapping(row.get("throttle_policy"), field_name="throttle_policy"),
-        target_ref=_require_text(row.get("target_ref"), field_name="target_ref"),
-        effective_from=_require_utc(row.get("effective_from"), field_name="effective_from"),
-        effective_to=(
-            None
-            if row.get("effective_to") is None
-            else _require_utc(row.get("effective_to"), field_name="effective_to")
-        ),
-        decision_ref=cast(str | None, row.get("decision_ref")),
-        created_at=_require_utc(row.get("created_at"), field_name="created_at"),
+def _native_workflow_class_record_from_resolution(
+    resolution: NativeWorkflowScheduleResolution,
+) -> NativeWorkflowClassRecord:
+    return NativeWorkflowClassRecord(
+        workflow_class_id=resolution.workflow_class_id,
+        class_name=resolution.class_name,
+        class_kind=resolution.class_kind,
+        workflow_lane_id=resolution.workflow_lane_id,
+        status=resolution.workflow_class_resolution.workflow_class.status,
+        queue_shape=resolution.queue_shape,
+        throttle_policy=resolution.workflow_class_throttle_policy,
+        review_required=resolution.workflow_class_resolution.workflow_class.review_required,
+        effective_from=resolution.workflow_class_resolution.workflow_class.effective_from,
+        effective_to=resolution.workflow_class_resolution.workflow_class.effective_to,
+        decision_ref=resolution.workflow_class_resolution.workflow_class.decision_ref,
+        created_at=resolution.workflow_class_resolution.workflow_class.created_at,
     )
 
 
-def _workflow_class_record_from_row(row: Mapping[str, Any]) -> NativeWorkflowClassRecord:
-    return NativeWorkflowClassRecord(
-        workflow_class_id=_require_text(row.get("workflow_class_id"), field_name="workflow_class_id"),
-        class_name=_require_text(row.get("class_name"), field_name="class_name"),
-        class_kind=_require_text(row.get("class_kind"), field_name="class_kind"),
-        workflow_lane_id=_require_text(row.get("workflow_lane_id"), field_name="workflow_lane_id"),
-        status=_require_text(row.get("status"), field_name="status"),
-        queue_shape=_require_mapping(row.get("queue_shape"), field_name="queue_shape"),
-        throttle_policy=_require_mapping(row.get("throttle_policy"), field_name="throttle_policy"),
-        review_required=_require_bool(row.get("review_required"), field_name="review_required"),
-        effective_from=_require_utc(row.get("effective_from"), field_name="effective_from"),
-        effective_to=(
-            None
-            if row.get("effective_to") is None
-            else _require_utc(row.get("effective_to"), field_name="effective_to")
-        ),
-        decision_ref=cast(str | None, row.get("decision_ref")),
-        created_at=_require_utc(row.get("created_at"), field_name="created_at"),
+def _native_schedule_definition_record_from_resolution(
+    resolution: NativeWorkflowScheduleResolution,
+) -> NativeScheduleDefinitionRecord:
+    return NativeScheduleDefinitionRecord(
+        schedule_definition_id=resolution.schedule_definition.schedule_definition_id,
+        workflow_class_id=resolution.workflow_class_id,
+        schedule_name=resolution.schedule_name,
+        schedule_kind=resolution.schedule_kind,
+        status=resolution.schedule_definition.status,
+        cadence_policy=resolution.schedule_cadence_policy,
+        throttle_policy=resolution.schedule_throttle_policy,
+        target_ref=resolution.target_ref,
+        effective_from=resolution.schedule_definition.effective_from,
+        effective_to=resolution.schedule_definition.effective_to,
+        decision_ref=resolution.schedule_definition.decision_ref,
+        created_at=resolution.schedule_definition.created_at,
     )
 
 
 class PostgresNativeSchedulerRepository:
-    """Explicit Postgres repository for native recurring scheduler authority."""
+    """Postgres-native repository for native scheduler authority."""
 
     def __init__(self, conn: asyncpg.Connection) -> None:
         self._conn = conn
 
-    async def load_schedule_definition(
+    async def load_catalog(
         self,
         *,
-        target_ref: str,
-        schedule_kind: str,
         as_of: datetime,
-    ) -> NativeScheduleDefinitionRecord:
-        normalized_as_of = _normalize_as_of(as_of)
-        try:
-            rows = await self._conn.fetch(
-                _SCHEDULE_QUERY,
-                target_ref,
-                schedule_kind,
-                normalized_as_of,
-            )
-        except asyncpg.PostgresError as exc:
-            raise _fail(
-                "native_scheduler.schedule_read_failed",
-                "failed to read active schedule-definition rows",
-                details={"sqlstate": getattr(exc, "sqlstate", None)},
-            ) from exc
-
-        if not rows:
-            raise _fail(
-                "native_scheduler.schedule_missing",
-                "no active schedule-definition row matched the requested target and kind",
-                details={
-                    "target_ref": target_ref,
-                    "schedule_kind": schedule_kind,
-                    "as_of": normalized_as_of.isoformat(),
-                },
-            )
-        if len(rows) > 1:
-            raise _fail(
-                "native_scheduler.schedule_ambiguous",
-                "more than one active schedule-definition row matched the requested target and kind",
-                details={
-                    "target_ref": target_ref,
-                    "schedule_kind": schedule_kind,
-                    "as_of": normalized_as_of.isoformat(),
-                    "row_count": len(rows),
-                },
-            )
-        return _schedule_record_from_row(cast(Mapping[str, Any], rows[0]))
-
-    async def load_workflow_class(
-        self,
-        *,
-        workflow_class_id: str,
-        as_of: datetime,
-    ) -> NativeWorkflowClassRecord:
-        normalized_as_of = _normalize_as_of(as_of)
-        try:
-            rows = await self._conn.fetch(
-                _WORKFLOW_CLASS_QUERY,
-                workflow_class_id,
-                normalized_as_of,
-            )
-        except asyncpg.PostgresError as exc:
-            raise _fail(
-                "native_scheduler.workflow_class_read_failed",
-                "failed to read active workflow-class rows",
-                details={"sqlstate": getattr(exc, "sqlstate", None)},
-            ) from exc
-
-        if not rows:
-            raise _fail(
-                "native_scheduler.workflow_class_missing",
-                "no active workflow-class row matched the schedule definition",
-                details={
-                    "workflow_class_id": workflow_class_id,
-                    "as_of": normalized_as_of.isoformat(),
-                },
-            )
-        if len(rows) > 1:
-            raise _fail(
-                "native_scheduler.workflow_class_ambiguous",
-                "more than one active workflow-class row matched the schedule definition",
-                details={
-                    "workflow_class_id": workflow_class_id,
-                    "as_of": normalized_as_of.isoformat(),
-                    "row_count": len(rows),
-                },
-            )
-        return _workflow_class_record_from_row(cast(Mapping[str, Any], rows[0]))
+    ) -> NativeWorkflowScheduleCatalog:
+        return await load_workflow_schedule_catalog(self._conn, as_of=as_of)
 
 
 @dataclass(frozen=True, slots=True)
 class NativeSchedulerRuntime:
-    """Deterministic native scheduler seam over stored authority rows."""
+    """Deterministic native scheduler seam over canonical authority."""
 
     repository: NativeSchedulerRepository
 
@@ -396,19 +224,25 @@ class NativeSchedulerRuntime:
         schedule_kind: str,
         as_of: datetime,
     ) -> NativeScheduledWorkflow:
-        schedule_definition = await self.repository.load_schedule_definition(
+        normalized_as_of = _normalize_as_of(as_of)
+        try:
+            catalog = await self.repository.load_catalog(as_of=normalized_as_of)
+        except ScheduleRepositoryError as exc:
+            _raise_native_schedule_error(exc)
+        resolution = catalog.resolve(
             target_ref=target_ref,
             schedule_kind=schedule_kind,
-            as_of=as_of,
-        )
-        workflow_class = await self.repository.load_workflow_class(
-            workflow_class_id=schedule_definition.workflow_class_id,
-            as_of=as_of,
         )
         return NativeScheduledWorkflow(
-            as_of=_normalize_as_of(as_of),
-            schedule_definition=schedule_definition,
-            workflow_class=workflow_class,
+            as_of=normalized_as_of,
+            schedule_definition=_native_schedule_definition_record_from_resolution(
+                resolution,
+            ),
+            workflow_class=_native_workflow_class_record_from_resolution(resolution),
+            recurring_run_window_id=resolution.recurring_run_window.recurring_run_window_id,
+            recurring_run_window_status=resolution.window_status,
+            capacity_limit=resolution.capacity_limit,
+            capacity_used=resolution.capacity_used,
         )
 
 

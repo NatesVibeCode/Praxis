@@ -66,7 +66,8 @@ def test_workflow_migration_manifest_includes_provider_route_health_budget_migra
     assert "126_operator_decision_scope_policy.sql" in filenames
     assert "127_operator_decision_architecture_policies.sql" in filenames
     assert "128_operator_decision_embedding_architecture.sql" in filenames
-    assert filenames[-1] == "131_roadmap_items_semantic_clustering.sql"
+    assert "132_issue_backlog_authority.sql" in filenames
+    assert filenames[-1] == "132_issue_backlog_authority.sql"
 
 
 def test_every_manifest_migration_has_expected_object_contract() -> None:
@@ -250,6 +251,23 @@ def test_operator_control_authority_expected_objects_are_registered() -> None:
     assert "operator_decisions_kind_status_decided_idx" in names
     assert "cutover_gates_status_kind_opened_idx" in names
     assert "work_item_workflow_bindings_status_kind_idx" in names
+
+
+def test_issue_backlog_authority_expected_objects_are_registered() -> None:
+    objects = workflow_migration_expected_objects("132_issue_backlog_authority.sql")
+    names = {item.object_name for item in objects}
+    assert names.issuperset(
+        {
+            "issues",
+            "issues_status_priority_opened_at_idx",
+            "bugs.source_issue_id",
+            "bugs.bugs_source_issue_fkey",
+            "bugs_source_issue_uidx",
+            "work_item_workflow_bindings.issue_id",
+            "work_item_workflow_bindings.work_item_workflow_bindings_issue_fkey",
+            "work_item_workflow_bindings_unique_edge",
+        }
+    )
 
 
 def test_runtime_breadth_authority_expected_objects_are_registered() -> None:

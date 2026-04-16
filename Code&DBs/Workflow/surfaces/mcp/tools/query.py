@@ -71,9 +71,18 @@ def tool_praxis_query(params: dict) -> dict:
             pass
         result["quick_lookups"] = {
             "data_dictionary": "praxis_query('data dictionary')",
+            "issue_backlog": "praxis_query('issue backlog')",
             "import_resolver": "praxis_query('import path for <ClassName>')",
             "test_commands": "praxis_query('test command for <file.py>')",
         }
+        return result
+
+    if _matches(question, ["issue backlog", "upstream issue", "upstream issues", "intake issue", "intake issues"]):
+        from .operator import tool_praxis_operator_view
+
+        result = tool_praxis_operator_view({"view": "issue_backlog", "limit": 25, "open_only": True})
+        if isinstance(result, dict):
+            result.setdefault("routed_to", "issue_backlog")
         return result
 
     if _matches(question, ["bug", "defect", "issue"]):
@@ -519,87 +528,33 @@ def _run_staleness_query(params: dict) -> dict:
 
 
 def _data_dictionary(question: str) -> dict:
-    """Return browsable data dictionary from schema-projected table entities."""
-    import json as _json
-    import re
+    """Return browsable data dictionary from CQRS-backed table projections."""
+    from runtime.cqrs import CommandBus
+    from runtime.cqrs.queries.data_dictionary import QueryDataDictionary
 
-    conn = _subs.get_pg_conn()
-
-    # Live CHECK constraint lookup — always fresh, no heartbeat dependency
-    check_values: dict[str, dict[str, list[str]]] = {}
-    try:
-        ck_rows = conn.execute(
-            "SELECT conrelid::regclass::text AS table_name, "
-            "pg_get_constraintdef(oid) AS check_def "
-            "FROM pg_constraint "
-            "WHERE contype = 'c' AND connamespace = 'public'::regnamespace"
+    table_name = _extract_data_dictionary_table(question)
+    return CommandBus(_subs).dispatch(
+        QueryDataDictionary(
+            table_name=table_name,
+            include_relationships=True,
         )
-        for cr in ck_rows or []:
-            defn = cr["check_def"] or ""
-            array_match = re.search(r"ARRAY\[(.+?)\]", defn)
-            if not array_match:
-                continue
-            col_match = re.search(r"\(+\s*\(?(\w+)\)?", defn)
-            if not col_match:
-                continue
-            values = re.findall(r"'([^']+)'", array_match.group(1))
-            if values:
-                check_values.setdefault(cr["table_name"], {})[col_match.group(1)] = values
-    except Exception:
-        pass  # fall back to whatever metadata has
-
-    rows = conn.execute(
-        "SELECT name, content, metadata FROM memory_entities "
-        "WHERE entity_type = 'table' AND NOT archived ORDER BY name"
     )
-    if not rows:
-        return {"routed_to": "data_dictionary", "tables": [], "count": 0}
 
-    all_names = [r["name"] for r in rows]
 
-    # Check if question targets a specific table
-    target = None
-    for name in all_names:
-        if name in question:
-            target = name
-            break
-
-    tables = []
-    for r in rows:
-        if target and r["name"] != target:
-            continue
-        meta = r["metadata"] if isinstance(r["metadata"], dict) else _json.loads(r["metadata"] or "{}")
-        # Merge live CHECK values over metadata (live wins)
-        vv = {**meta.get("valid_values", {}), **check_values.get(r["name"], {})}
-        if target:
-            # Detail mode — full schema for one table
-            tables.append({
-                "name": r["name"],
-                "summary": r["content"],
-                "columns": meta.get("columns", []),
-                "valid_values": vv,
-                "indexes": meta.get("indexes", []),
-                "triggers": meta.get("triggers", []),
-                "used_by": meta.get("used_by", {}),
-                "approx_rows": meta.get("approx_rows", 0),
-                "pg_notify_channels": meta.get("pg_notify_channels", []),
-            })
-        else:
-            # Overview mode — only tables with constrained values
-            if not vv:
-                continue
-            tables.append({
-                "name": r["name"],
-                "columns": len(meta.get("columns", [])),
-                "rows": meta.get("approx_rows", 0),
-                "valid_values": vv,
-            })
-
-    result: dict = {"routed_to": "data_dictionary", "tables": tables, "count": len(tables)}
-    if not target:
-        result["total_tables"] = len(all_names)
-        result["hint"] = "Showing tables with constrained values. Use 'schema for <table_name>' for full detail on any table."
-    return result
+def _extract_data_dictionary_table(question: str) -> str | None:
+    lowered = question.lower()
+    patterns = [
+        r"schema for ([a-z_][a-z0-9_]*)",
+        r"schema of ([a-z_][a-z0-9_]*)",
+        r"table ([a-z_][a-z0-9_]*)",
+        r"columns? for ([a-z_][a-z0-9_]*)",
+        r"fields? for ([a-z_][a-z0-9_]*)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, lowered)
+        if match:
+            return match.group(1)
+    return None
 
 
 def _import_resolver(question: str) -> dict:

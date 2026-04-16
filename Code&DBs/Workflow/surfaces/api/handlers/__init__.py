@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
-from ._shared import _ClientError, _read_json_body
 from ._surface_usage import record_api_route_usage as _record_api_route_usage
 from .workflow_admin import ADMIN_GET_ROUTES, ADMIN_POST_ROUTES, ADMIN_ROUTES
 from .workflow_mcp import MCP_POST_ROUTES
 from .workflow_notify import NOTIFY_GET_ROUTES, NOTIFY_POST_ROUTES, NOTIFY_ROUTES
-from .workflow_query import (
+from .workflow_query_routes import (
     QUERY_DELETE_ROUTES,
     QUERY_GET_ROUTES,
     QUERY_POST_ROUTES,
@@ -18,6 +16,7 @@ from .workflow_query import (
     QUERY_ROUTES,
 )
 from .workflow_run import RUN_GET_ROUTES, RUN_POST_ROUTES, RUN_ROUTES
+from ._dispatch import _dispatch_dynamic, _dispatch_standard_post
 
 
 ROUTES: dict[str, object] = {}
@@ -50,95 +49,12 @@ DELETE_ROUTE_HANDLERS = [
 ]
 
 
-def _dispatch_dynamic(routes: list[tuple[object, object]], request: Any, path: str) -> bool:
-    for matches, handler in routes:
-        if matches(path):
-            handler(request, path)
-            return True
-    return False
-
-
-def _dispatch_standard_post(request: Any, path: str) -> bool:
-    handler = ROUTES.get(path)
-    if handler is None:
-        return False
-
-    try:
-        body = _read_json_body(request)
-        if not isinstance(body, dict):
-            payload = {"error": "Request body must be a JSON object"}
-            request._send_json(400, payload)
-            _record_api_route_usage(
-                request.subsystems,
-                path=path,
-                method="POST",
-                status_code=400,
-                response_payload=payload,
-                headers=request.headers,
-            )
-            return True
-    except (json.JSONDecodeError, ValueError) as exc:
-        payload = {"error": f"Invalid JSON: {exc}"}
-        request._send_json(400, payload)
-        _record_api_route_usage(
-            request.subsystems,
-            path=path,
-            method="POST",
-            status_code=400,
-            response_payload=payload,
-            headers=request.headers,
-        )
-        return True
-
-    try:
-        result = handler(request.subsystems, body)
-        request._send_json(200, result)
-        _record_api_route_usage(
-            request.subsystems,
-            path=path,
-            method="POST",
-            status_code=200,
-            request_body=body,
-            response_payload=result,
-            headers=request.headers,
-        )
-    except _ClientError as exc:
-        payload = {"error": str(exc)}
-        request._send_json(400, payload)
-        _record_api_route_usage(
-            request.subsystems,
-            path=path,
-            method="POST",
-            status_code=400,
-            request_body=body,
-            response_payload=payload,
-            headers=request.headers,
-        )
-    except Exception as exc:
-        payload = {
-            "error": f"{type(exc).__name__}: {exc}",
-            "error_code": "internal_error",
-        }
-        request._send_json(
-            500,
-            payload,
-        )
-        _record_api_route_usage(
-            request.subsystems,
-            path=path,
-            method="POST",
-            status_code=500,
-            request_body=body,
-            response_payload=payload,
-            headers=request.headers,
-        )
-    return True
-
-
 def handle_post_request(request: Any, path: str) -> bool:
     return _dispatch_dynamic(POST_ROUTE_HANDLERS, request, path) or _dispatch_standard_post(
         request,
         path,
+        ROUTES,
+        record_api_route_usage=_record_api_route_usage,
     )
 
 

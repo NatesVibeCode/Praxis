@@ -10,6 +10,7 @@ from storage.postgres.object_lifecycle_repository import (
     attach_document_record,
     create_object_record,
     create_object_type_record,
+    delete_object_type_record,
     load_object_record,
     load_object_type_record,
     mark_object_deleted,
@@ -48,13 +49,43 @@ def _properties(value: Any, *, field_name: str) -> dict[str, Any]:
     return dict(value)
 
 
-def _property_definitions(value: Any) -> dict[str, Any] | list[Any]:
+def _coerce_property_definition(*, value: Any, index: int) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ObjectLifecycleBoundaryError(
+            f"property_definitions[{index}] must be an object"
+        )
+    normalized: dict[str, Any] = {
+        "name": _text(value.get("name")),
+        "type": _text(value.get("type")) or "text",
+    }
+    if not normalized["name"]:
+        raise ObjectLifecycleBoundaryError(
+            f"property_definitions[{index}].name is required"
+        )
+    if "required" in value:
+        normalized["required"] = bool(value.get("required"))
+    if "options" in value and value.get("options") is not None:
+        options = value.get("options")
+        if not isinstance(options, list) or not all(isinstance(item, str) for item in options):
+            raise ObjectLifecycleBoundaryError(
+                f"property_definitions[{index}].options must be a list of strings"
+            )
+        normalized["options"] = list(options)
+    if "default" in value and value.get("default") is not None:
+        normalized["default"] = value.get("default")
+    return normalized
+
+
+def _property_definitions(value: Any) -> list[dict[str, Any]]:
     if value is None:
-        return {}
-    if isinstance(value, dict):
-        return dict(value)
+        return []
     if isinstance(value, list):
-        return list(value)
+        return [_coerce_property_definition(value=item, index=index) for index, item in enumerate(value)]
+    if isinstance(value, dict):
+        normalized: list[dict[str, Any]] = []
+        for index, item in enumerate(value.values()):
+            normalized.append(_coerce_property_definition(value=item, index=index))
+        return normalized
     raise ObjectLifecycleBoundaryError("property_definitions must be an object or list")
 
 
@@ -202,6 +233,23 @@ def get_object_type(conn: Any, *, type_id: Any) -> dict[str, Any]:
     if row is None:
         raise ObjectLifecycleBoundaryError(f"Object type not found: {normalized_type_id}", status_code=404)
     return row
+
+
+def delete_object_type(conn: Any, *, type_id: Any) -> dict[str, Any]:
+    normalized_type_id = _text(type_id)
+    if not normalized_type_id:
+        raise ObjectLifecycleBoundaryError("type_id is required")
+
+    try:
+        row = delete_object_type_record(conn, type_id=normalized_type_id)
+    except PostgresWriteError as exc:
+        _raise_storage_boundary(exc)
+    if row is None:
+        raise ObjectLifecycleBoundaryError(
+            f"Object type not found: {normalized_type_id}",
+            status_code=404,
+        )
+    return {"type_id": row["type_id"], "deleted": True}
 
 
 def list_object_types(

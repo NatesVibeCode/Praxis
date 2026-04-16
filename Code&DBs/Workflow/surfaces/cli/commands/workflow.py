@@ -11,8 +11,13 @@ from typing import TextIO
 
 from runtime._workflow_database import resolve_runtime_database_url
 from surfaces.cli.mcp_tools import load_json_file, print_json, run_cli_tool
-from surfaces.cli import workflow_cli
 from runtime.spec_compiler import compile_prompt_launch_spec
+
+
+def _workflow_cli():
+    from surfaces.cli import workflow_cli
+
+    return workflow_cli
 
 
 def _workflow_tool(params: dict[str, object]) -> dict[str, object]:
@@ -313,7 +318,7 @@ def _run_command(args: list[str], *, stdout: TextIO) -> int:
             stdout.write(f"error: {exc}\n")
             return 2
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stdout):
-            return workflow_cli._submit_workflow_launch(
+            return _workflow_cli()._submit_workflow_launch(
                 prompt_launch_spec=prompt_launch_spec,
                 dry_run=bool(common_options["dry_run"]),
                 fresh=bool(common_options["fresh"]),
@@ -344,7 +349,7 @@ def _run_command(args: list[str], *, stdout: TextIO) -> int:
         rendered_path = _render_templated_spec_to_temp_file(spec_path, variables)
     try:
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stdout):
-            return workflow_cli.cmd_run(
+            return _workflow_cli().cmd_run(
                 SimpleNamespace(
                     spec=rendered_path,
                     dry_run=bool(common_options["dry_run"]),
@@ -1354,8 +1359,6 @@ def _retry_command(args: list[str], *, stdout: TextIO) -> int:
     from io import StringIO
     from types import SimpleNamespace
 
-    from surfaces.cli import workflow_cli
-
     if len(args) < 2 or args[0] in {"-h", "--help"}:
         stdout.write("usage: workflow retry <run_id> <label>\n")
         return 2
@@ -1363,7 +1366,7 @@ def _retry_command(args: list[str], *, stdout: TextIO) -> int:
     run_id, label = args[0], args[1]
     buffer = StringIO()
     with redirect_stdout(buffer):
-        exit_code = workflow_cli.cmd_retry(SimpleNamespace(run_id=run_id, label=label))
+        exit_code = _workflow_cli().cmd_retry(SimpleNamespace(run_id=run_id, label=label))
     stdout.write(buffer.getvalue())
     return exit_code
 
@@ -1374,8 +1377,6 @@ def _cancel_command(args: list[str], *, stdout: TextIO) -> int:
     from io import StringIO
     from types import SimpleNamespace
 
-    from surfaces.cli import workflow_cli
-
     if not args or args[0] in {"-h", "--help"}:
         stdout.write("usage: workflow cancel <run_id>\n")
         return 2
@@ -1383,7 +1384,7 @@ def _cancel_command(args: list[str], *, stdout: TextIO) -> int:
     run_id = args[0]
     buffer = StringIO()
     with redirect_stdout(buffer):
-        exit_code = workflow_cli.cmd_cancel(SimpleNamespace(run_id=run_id))
+        exit_code = _workflow_cli().cmd_cancel(SimpleNamespace(run_id=run_id))
     stdout.write(buffer.getvalue())
     return exit_code
 
@@ -1394,8 +1395,6 @@ def _repair_command(args: list[str], *, stdout: TextIO) -> int:
     from io import StringIO
     from types import SimpleNamespace
 
-    from surfaces.cli import workflow_cli
-
     if not args or args[0] in {"-h", "--help"}:
         stdout.write("usage: workflow repair <run_id>\n")
         return 2
@@ -1403,7 +1402,7 @@ def _repair_command(args: list[str], *, stdout: TextIO) -> int:
     run_id = args[0]
     buffer = StringIO()
     with redirect_stdout(buffer):
-        exit_code = workflow_cli.cmd_repair(SimpleNamespace(run_id=run_id))
+        exit_code = _workflow_cli().cmd_repair(SimpleNamespace(run_id=run_id))
     stdout.write(buffer.getvalue())
     return exit_code
 

@@ -59,6 +59,7 @@ def _ensure_workflow_authority(
     dispatch_reason: str | None = None,
     trigger_depth: int,
     lineage_depth: int | None = None,
+    route_plan_manifest: dict[str, object] | None = None,
 ) -> dict[str, str]:
     workflow_id = _workflow_id_for_spec(spec)
     request_envelope = _build_request_envelope(
@@ -72,6 +73,7 @@ def _ensure_workflow_authority(
         dispatch_reason=dispatch_reason,
         trigger_depth=trigger_depth,
         lineage_depth=lineage_depth,
+        route_plan_manifest=route_plan_manifest,
     )
     definition_hash = hashlib.sha256(
         json.dumps(raw_snapshot, sort_keys=True, default=str).encode("utf-8")
@@ -283,6 +285,9 @@ def _recompute_workflow_run_state(conn: SyncPostgresConnection, run_id: str) -> 
         new_state = "queued"
         terminal_reason = None
 
+    if prior_state in _WORKFLOW_TERMINAL_STATES and new_state not in _WORKFLOW_TERMINAL_STATES:
+        return prior_state
+
     conn.execute(
         """UPDATE workflow_runs
            SET current_state = $2,
@@ -298,7 +303,8 @@ def _recompute_workflow_run_state(conn: SyncPostgresConnection, run_id: str) -> 
                    ELSE NULL
                END,
                terminal_reason_code = CASE
-                   WHEN $2 IN ('succeeded', 'failed', 'dead_letter', 'cancelled') THEN $3
+                   WHEN $2 IN ('succeeded', 'failed', 'dead_letter', 'cancelled')
+                   THEN COALESCE(terminal_reason_code, $3)
                    ELSE NULL
                END
            WHERE run_id = $1""",

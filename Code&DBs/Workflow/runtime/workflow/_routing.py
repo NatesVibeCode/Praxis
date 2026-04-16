@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-import random
+import hashlib
 from typing import TYPE_CHECKING
 
 from ._shared import (
@@ -138,6 +138,7 @@ def _build_request_envelope(
     dispatch_reason: str | None = None,
     trigger_depth: int,
     lineage_depth: int | None = None,
+    route_plan_manifest: dict[str, object] | None = None,
 ) -> dict:
     workspace_ref = _workspace_ref_from_spec(spec)
     runtime_profile_ref = _runtime_profile_ref_from_spec(spec)
@@ -180,7 +181,66 @@ def _build_request_envelope(
         adoption_key = str(raw_snapshot.get("queue_id") or "").strip()
         if adoption_key:
             envelope["adoption_key"] = adoption_key
+
+    if isinstance(route_plan_manifest, dict) and route_plan_manifest:
+        envelope["route_plan_manifest"] = dict(route_plan_manifest)
     return envelope
+
+
+def _route_plan_from_run_envelope(
+    conn: SyncPostgresConnection,
+    *,
+    run_id: str,
+    job_label: str,
+) -> dict[str, object]:
+    if not run_id or not job_label:
+        return {}
+    try:
+        rows = conn.execute(
+            """SELECT request_envelope->'route_plan_manifest' AS route_plan_manifest
+               FROM workflow_runs
+               WHERE run_id = $1""",
+            run_id,
+        )
+    except Exception as exc:
+        logger.debug("Could not load route_plan_manifest for run_id=%s: %s", run_id, exc)
+        return {}
+    if not rows:
+        return {}
+    manifest = _json_loads_maybe(rows[0].get("route_plan_manifest"), {}) or {}
+    if not isinstance(manifest, dict):
+        return {}
+    jobs = manifest.get("jobs")
+    if not isinstance(jobs, dict):
+        return {}
+    route_plan = jobs.get(job_label)
+    if isinstance(route_plan, dict):
+        return route_plan
+    return {}
+
+
+def _deterministic_route_jitter(
+    *,
+    run_id: str,
+    job_label: str,
+    candidate: str,
+    candidate_index: int,
+    route_task_type: str,
+    route_candidates: list[str],
+) -> float:
+    if not run_id or not candidate:
+        return 0.0
+    normalized_candidates = [str(item).strip() for item in route_candidates if str(item).strip()]
+    if not normalized_candidates:
+        normalized_candidates = [candidate]
+    normalized_route_task_type = str(route_task_type or "default").strip() or "default"
+    normalized_candidate_seed = "|".join(normalized_candidates)
+    seed = (
+        f"{run_id}\x1f{job_label}\x1f{candidate}\x1f{candidate_index}\x1f"
+        f"{normalized_route_task_type}\x1f{normalized_candidate_seed}"
+    )
+    digest = hashlib.sha1(seed.encode("utf-8")).hexdigest()
+    return (int(digest[:16], 16) / (1 << 64)) * 0.04
 
 
 def _job_touch_entries(job: dict) -> list[dict[str, str]]:
@@ -472,9 +532,18 @@ def _select_claim_route(conn: SyncPostgresConnection, job: dict) -> str:
     from runtime.task_type_router import TaskTypeRouter
 
     route_policy = getattr(TaskTypeRouter(conn), "route_policy", None)
-
-    # Small jitter so similarly-ranked models rotate across claims
-    _EXPLORATION_JITTER = 0.04
+    run_id = str(job.get("run_id") or "").strip()
+    job_label = str(job.get("label") or "").strip()
+    persisted_route_plan = _route_plan_from_run_envelope(
+        conn,
+        run_id=run_id,
+        job_label=job_label,
+    )
+    persisted_candidates = persisted_route_plan.get("failover_chain")
+    if isinstance(persisted_candidates, list):
+        persisted_candidates = [str(item).strip() for item in persisted_candidates if str(item).strip()]
+    else:
+        persisted_candidates = []
 
     def _route_score(candidate: str) -> tuple[float, int]:
         meta = route_meta.get(candidate, {})
@@ -511,7 +580,15 @@ def _select_claim_route(conn: SyncPostgresConnection, job: dict) -> str:
             if route_policy is not None
             else 0.15
         )
-        jitter = random.uniform(0, _EXPLORATION_JITTER)
+        candidate_signature_candidates = persisted_candidates or candidates
+        jitter = _deterministic_route_jitter(
+            run_id=run_id,
+            job_label=job_label,
+            candidate=candidate,
+            candidate_index=candidates.index(candidate),
+            route_task_type=route_task_type,
+            route_candidates=candidate_signature_candidates,
+        )
         score = (
             (health * route_health_weight)
             + ((1.0 / max(db_rank, 1)) * route_rank_weight)

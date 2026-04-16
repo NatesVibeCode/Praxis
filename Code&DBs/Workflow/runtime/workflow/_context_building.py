@@ -33,6 +33,10 @@ from runtime.workflow.execution_bundle import (
     build_execution_bundle,
     render_execution_bundle,
 )
+from runtime.workflow.decision_context import (
+    explicit_authority_domains_for_job,
+    resolve_job_decision_pack,
+)
 from runtime.workflow.submission_capture import (
     capture_submission_baseline_for_job as _submission_capture_baseline_for_job,
     get_submission_for_job_attempt as _submission_get_submission_for_job_attempt,
@@ -536,6 +540,18 @@ def _build_job_execution_bundles(
     for index, job in enumerate(spec.jobs):
         label = str(job.get("label") or f"job_{index}")
         context_shard = execution_context_shards.get(label) or {}
+        explicit_authority_domains = explicit_authority_domains_for_job(
+            job=job,
+            spec_snapshot=raw_snapshot,
+        )
+        decision_pack = resolve_job_decision_pack(
+            conn,
+            write_scope=_normalize_paths(context_shard.get("write_scope")),
+            declared_read_scope=_normalize_paths(context_shard.get("declared_read_scope")),
+            resolved_read_scope=_normalize_paths(context_shard.get("resolved_read_scope")),
+            blast_radius=_normalize_paths(context_shard.get("blast_radius")),
+            explicit_authority_domains=explicit_authority_domains,
+        )
         sandbox_profile = _runtime_profile_sandbox_payload(
             conn,
             runtime_profile_ref=runtime_profile_ref or getattr(spec, "runtime_profile_ref", None),
@@ -582,6 +598,7 @@ def _build_job_execution_bundles(
             acceptance_contract=job.get("acceptance_contract")
             if isinstance(job.get("acceptance_contract"), dict)
             else None,
+            decision_pack=decision_pack,
             execution_manifest=execution_manifest,
             require_manifest_authority=require_manifest_authority,
         )
@@ -805,6 +822,18 @@ def _runtime_execution_bundle(
             ]
         )
     )
+    explicit_authority_domains = explicit_authority_domains_for_job(
+        job=source_job,
+        spec_snapshot=snapshot,
+    )
+    decision_pack = resolve_job_decision_pack(
+        conn,
+        write_scope=write_scope,
+        declared_read_scope=declared_read_scope,
+        resolved_read_scope=resolved_read_scope,
+        blast_radius=blast_radius,
+        explicit_authority_domains=explicit_authority_domains,
+    )
     return build_execution_bundle(
         run_id=str(run_row.get("run_id") or "").strip() or None,
         workflow_id=str(_workflow_run_envelope(run_row).get("workflow_id") or "").strip() or None,
@@ -845,6 +874,7 @@ def _runtime_execution_bundle(
         acceptance_contract=source_job.get("acceptance_contract")
         if isinstance(source_job.get("acceptance_contract"), dict)
         else None,
+        decision_pack=decision_pack,
         execution_manifest=execution_manifest,
         require_manifest_authority=require_manifest_authority,
     )

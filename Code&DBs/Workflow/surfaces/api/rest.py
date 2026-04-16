@@ -1115,7 +1115,13 @@ def _launcher_index_response() -> FileResponse | JSONResponse:
                 "launch_url": "http://127.0.0.1:8420/app",
             },
         )
-    return FileResponse(index_path)
+    return FileResponse(
+        index_path,
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2038,6 +2044,14 @@ async def object_types_post(request: Request) -> Response:
 async def object_types_path_get(request: Request, rest_of_path: str) -> Response:
     return await _route_to_handler(request)
 
+@app.put("/api/object-types/{rest_of_path:path}")
+async def object_types_path_put(request: Request, rest_of_path: str) -> Response:
+    return await _route_to_handler(request)
+
+@app.delete("/api/object-types/{rest_of_path:path}")
+async def object_types_path_delete(request: Request, rest_of_path: str) -> Response:
+    return await _route_to_handler(request)
+
 @app.get("/api/objects")
 async def objects_get(request: Request) -> Response:
     return await _route_to_handler(request)
@@ -2048,6 +2062,14 @@ async def objects_post(request: Request) -> Response:
 
 @app.get("/api/objects/{rest_of_path:path}")
 async def objects_path_get(request: Request, rest_of_path: str) -> Response:
+    return await _route_to_handler(request)
+
+@app.put("/api/objects/{rest_of_path:path}")
+async def objects_path_put(request: Request, rest_of_path: str) -> Response:
+    return await _route_to_handler(request)
+
+@app.delete("/api/objects/{rest_of_path:path}")
+async def objects_path_delete(request: Request, rest_of_path: str) -> Response:
     return await _route_to_handler(request)
 
 @app.put("/api/objects/update")

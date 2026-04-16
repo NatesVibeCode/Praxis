@@ -54,6 +54,7 @@ from .routing_scorer import (
     profile_task_rank_score as _profile_task_rank_score,
     rerank_rows as _rerank_rows,
 )
+from storage.postgres.task_type_routing_repository import PostgresTaskTypeRoutingRepository
 
 if TYPE_CHECKING:
     from storage.postgres.connection import SyncPostgresConnection
@@ -150,29 +151,6 @@ _ELIGIBILITY_SQL = """
       AND effective_from <= $4
       AND (effective_to IS NULL OR effective_to > $4)
     ORDER BY effective_from DESC, task_route_eligibility_id DESC
-"""
-
-_MATERIALIZE_SQL = """
-    INSERT INTO task_type_routing (
-        task_type, model_slug, provider_slug, permitted, rank,
-        benchmark_score, benchmark_name, cost_per_m_tokens, rationale,
-        route_tier, route_tier_rank, latency_class, latency_rank, route_source,
-        route_health_score, observed_completed_count, observed_execution_failure_count,
-        observed_external_failure_count, observed_config_failure_count,
-        observed_downstream_failure_count, observed_downstream_bug_count,
-        consecutive_internal_failures, last_failure_category, last_failure_zone, updated_at
-    ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-        'derived', $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, now()
-    )
-    ON CONFLICT (task_type, provider_slug, model_slug) DO UPDATE SET
-        permitted = EXCLUDED.permitted, rank = EXCLUDED.rank,
-        benchmark_score = EXCLUDED.benchmark_score, benchmark_name = EXCLUDED.benchmark_name,
-        cost_per_m_tokens = EXCLUDED.cost_per_m_tokens, rationale = EXCLUDED.rationale,
-        route_tier = EXCLUDED.route_tier, route_tier_rank = EXCLUDED.route_tier_rank,
-        latency_class = EXCLUDED.latency_class, latency_rank = EXCLUDED.latency_rank,
-        updated_at = now()
-    WHERE task_type_routing.route_source = 'derived'
 """
 
 
@@ -384,6 +362,7 @@ class TaskTypeRouter:
     ) -> None:
         self._conn = conn
         self._now_factory = now_factory or (lambda: datetime.now(timezone.utc))
+        self._routing_repository = PostgresTaskTypeRoutingRepository(self._conn)
         authority = get_route_authority_snapshot(
             self._conn,
             load_snapshot=self._load_static_authority_snapshot,
@@ -750,9 +729,10 @@ class TaskTypeRouter:
         return [dict(candidate) for candidate in cached]
 
     def _load_task_route_rows(self, task_type: str) -> list[dict[str, Any]]:
-        sql = "SELECT * FROM task_type_routing WHERE task_type = $1"
-        rows = self._conn.execute(sql, task_type) or self._conn.execute(sql, f"auto/{task_type}")
-        return [dict(row) for row in rows or []]
+        rows = self._routing_repository.load_routes_for_task(task_type=task_type)
+        if not rows:
+            rows = self._routing_repository.load_routes_for_task(task_type=f"auto/{task_type}")
+        return [dict(row) for row in rows]
 
 
     def _load_provider_budget_windows(self, provider_policy_ids: set[str]) -> dict[str, dict[str, Any]]:
@@ -847,31 +827,30 @@ class TaskTypeRouter:
         for row in rows:
             if str(row.get("route_source") or "derived") != "derived":
                 continue
-            self._conn.execute(
-                _MATERIALIZE_SQL,
-                task_type,
-                row["model_slug"],
-                row["provider_slug"],
-                bool(row.get("permitted", True)),
-                int(row.get("effective_rank") or row.get("rank") or 99),
-                float(row.get("benchmark_score") or 0.0),
-                str(row.get("benchmark_name") or ""),
-                float(row.get("cost_per_m_tokens") or 0.0),
-                str(row.get("rationale") or ""),
-                str(row.get("route_tier") or "") or None,
-                int(row.get("route_tier_rank") or 99),
-                str(row.get("latency_class") or "") or None,
-                int(row.get("latency_rank") or 99),
-                float(row["route_health_score"]) if row.get("route_health_score") is not None else self._policy.neutral_route_health,
-                int(row.get("observed_completed_count") or 0),
-                int(row.get("observed_execution_failure_count") or 0),
-                int(row.get("observed_external_failure_count") or 0),
-                int(row.get("observed_config_failure_count") or 0),
-                int(row.get("observed_downstream_failure_count") or 0),
-                int(row.get("observed_downstream_bug_count") or 0),
-                int(row.get("consecutive_internal_failures") or 0),
-                str(row.get("last_failure_category") or ""),
-                str(row.get("last_failure_zone") or ""),
+            self._routing_repository.upsert_derived_route(
+                task_type=task_type,
+                model_slug=str(row["model_slug"]),
+                provider_slug=str(row["provider_slug"]),
+                permitted=bool(row.get("permitted", True)),
+                rank=int(row.get("effective_rank") or row.get("rank") or 99),
+                benchmark_score=float(row.get("benchmark_score") or 0.0),
+                benchmark_name=str(row.get("benchmark_name") or ""),
+                cost_per_m_tokens=float(row.get("cost_per_m_tokens") or 0.0),
+                rationale=str(row.get("rationale") or ""),
+                route_tier=str(row.get("route_tier") or "") or None,
+                route_tier_rank=int(row.get("route_tier_rank") or 99),
+                latency_class=str(row.get("latency_class") or "") or None,
+                latency_rank=int(row.get("latency_rank") or 99),
+                route_health_score=float(row["route_health_score"]) if row.get("route_health_score") is not None else self._policy.neutral_route_health,
+                observed_completed_count=int(row.get("observed_completed_count") or 0),
+                observed_execution_failure_count=int(row.get("observed_execution_failure_count") or 0),
+                observed_external_failure_count=int(row.get("observed_external_failure_count") or 0),
+                observed_config_failure_count=int(row.get("observed_config_failure_count") or 0),
+                observed_downstream_failure_count=int(row.get("observed_downstream_failure_count") or 0),
+                observed_downstream_bug_count=int(row.get("observed_downstream_bug_count") or 0),
+                consecutive_internal_failures=int(row.get("consecutive_internal_failures") or 0),
+                last_failure_category=str(row.get("last_failure_category") or ""),
+                last_failure_zone=str(row.get("last_failure_zone") or ""),
             )
 
     def _persist_explicit_benchmark_scores(
@@ -891,22 +870,12 @@ class TaskTypeRouter:
             name = str(row.get("benchmark_name") or "")
             if not name:
                 continue
-            self._conn.execute(
-                """
-                UPDATE task_type_routing
-                SET benchmark_score = $1,
-                    benchmark_name  = $2,
-                    updated_at      = now()
-                WHERE task_type    = $3
-                  AND provider_slug = $4
-                  AND model_slug    = $5
-                  AND route_source  = 'explicit'
-                """,
-                score,
-                name,
+            self._routing_repository.update_explicit_benchmark_score(
                 task_type,
-                str(row["provider_slug"]),
-                str(row["model_slug"]),
+                provider_slug=str(row["provider_slug"]),
+                model_slug=str(row["model_slug"]),
+                benchmark_score=score,
+                benchmark_name=name,
             )
 
     def _resolve_chain(
@@ -1165,14 +1134,11 @@ class TaskTypeRouter:
         parts = agent_slug.split("/", 1)
         if len(parts) == 2:
             provider, model = parts
-            permitted_rows = self._conn.execute(
-                """SELECT task_type FROM task_type_routing
-                   WHERE provider_slug = $1 AND model_slug = $2 AND permitted = true
-                   LIMIT 1""",
-                provider, model,
+            task_type = self._routing_repository.load_permitted_task_type_for_model(
+                provider_slug=provider,
+                model_slug=model,
             )
-            if permitted_rows:
-                task_type = str(permitted_rows[0]["task_type"])
+            if task_type is not None:
                 try:
                     auto_chain = self._resolve_auto_chain(
                         task_type,
@@ -1189,14 +1155,22 @@ class TaskTypeRouter:
         return chain
 
     def _ensure_route_state_row(self, task_type: str, provider_slug: str, model_slug: str) -> None:
-        if not self._conn.execute("SELECT 1 FROM task_type_routing WHERE task_type = $1 AND provider_slug = $2 AND model_slug = $3 LIMIT 1", task_type, provider_slug, model_slug):
+        if not self._routing_repository.route_exists(
+            task_type=task_type,
+            provider_slug=provider_slug,
+            model_slug=model_slug,
+        ):
             if task_type in self._task_profiles:
                 self._resolve_chain(task_type)
 
     def _check_permission(self, task_type: str, model: str, provider: str) -> None:
-        rows = self._conn.execute("SELECT permitted, rationale FROM task_type_routing WHERE task_type = $1 AND provider_slug = $2 AND model_slug = $3 LIMIT 1", task_type, provider, model)
-        if rows and not rows[0]["permitted"]:
-            rationale = rows[0]["rationale"] or "not permitted"
+        row = self._routing_repository.load_route_permission(
+            task_type=task_type,
+            provider_slug=provider,
+            model_slug=model,
+        )
+        if row and not row.get("permitted"):
+            rationale = row.get("rationale") or "not permitted"
             raise PermissionError(
                 f"{provider}/{model} is not permitted for task type '{task_type}': {rationale}"
             )
@@ -1291,10 +1265,9 @@ class TaskTypeRouter:
 
     def list_routes(self, task_type: Optional[str] = None) -> list[dict]:
         if task_type:
-            rows = self._conn.execute(
-                "SELECT * FROM task_type_routing WHERE task_type = $1 ORDER BY rank", task_type)
+            rows = self._routing_repository.load_routes(task_type=task_type)
         else:
-            rows = self._conn.execute("SELECT * FROM task_type_routing ORDER BY task_type, rank")
+            rows = self._routing_repository.load_routes()
         return [dict(r) for r in rows]
 
     def validate_routes(self) -> list[str]:
@@ -1310,24 +1283,26 @@ class TaskTypeRouter:
         )
         active_set = {(r["provider_slug"], r["model_slug"]) for r in active}
 
-        routes = self._conn.execute(
-            "SELECT task_type, provider_slug, model_slug, permitted FROM task_type_routing"
-        )
+        routes = self._routing_repository.load_routes()
         for r in routes:
             key = (r["provider_slug"], r["model_slug"])
             if key not in active_set and r["permitted"]:
+                task_type = str(r["task_type"])
+                provider_slug = str(r["provider_slug"])
+                model_slug = str(r["model_slug"])
                 problems.append(
-                    f"{r['task_type']}: {r['provider_slug']}/{r['model_slug']} "
-                    f"not in active registry — auto-disabling"
+                    f"{task_type}: {provider_slug}/{model_slug} not in active registry — auto-disabling"
                 )
-                self._conn.execute(
-                    """UPDATE task_type_routing SET permitted = false,
-                              rationale = 'auto-disabled: model not in active registry'
-                       WHERE task_type = $1 AND provider_slug = $2 AND model_slug = $3""",
-                    r["task_type"], r["provider_slug"], r["model_slug"],
+                self._routing_repository.disable_route(
+                    task_type=task_type,
+                    provider_slug=provider_slug,
+                    model_slug=model_slug,
+                    rationale="auto-disabled: model not in active registry",
                 )
-                logger.warning("Auto-disabled route %s/%s for task_type=%s: not in active registry",
-                               r["provider_slug"], r["model_slug"], r["task_type"])
+                logger.warning(
+                    "Auto-disabled route %s/%s for task_type=%s: not in active registry",
+                    provider_slug, model_slug, task_type,
+                )
 
         if not problems:
             logger.info("Route validation passed: all routing table models exist in registry")
@@ -1365,41 +1340,25 @@ class TaskTypeRouter:
             failure_zone=failure_zone,
         )
         if succeeded:
-            self._conn.execute(
-                """UPDATE task_type_routing
-                   SET recent_successes = recent_successes + 1,
-                       recent_failures = 0,
-                       consecutive_internal_failures = 0,
-                       observed_completed_count = observed_completed_count + 1,
-                       route_health_score = LEAST($4, route_health_score + $5),
-                       last_success_at = now(),
-                       last_outcome_at = now(),
-                       updated_at = now()
-                   WHERE task_type = $1 AND provider_slug = $2 AND model_slug = $3""",
-                task_type,
-                provider_slug,
-                model_slug,
-                self._policy.max_route_health,
-                self._policy.success_health_bump,
+            self._routing_repository.record_success(
+                task_type=task_type,
+                provider_slug=provider_slug,
+                model_slug=model_slug,
+                max_route_health=self._policy.max_route_health,
+                success_health_bump=self._policy.success_health_bump,
             )
             return
 
         counter_column = self._route_health_observation_column(normalized_category)
         if not self._failure_counts_against_route_health(normalized_category):
-            self._conn.execute(
-                f"""UPDATE task_type_routing
-                    SET {counter_column} = {counter_column} + 1,
-                        last_failure_category = $4,
-                        last_failure_zone = $5,
-                        last_outcome_at = now(),
-                        updated_at = now()
-                    WHERE task_type = $1 AND provider_slug = $2 AND model_slug = $3""",
-                task_type,
-                provider_slug,
-                model_slug,
-                normalized_category,
-                    normalized_zone,
-                )
+            self._routing_repository.record_failure_count_only(
+                task_type=task_type,
+                provider_slug=provider_slug,
+                model_slug=model_slug,
+                counter_column=counter_column,
+                failure_category=normalized_category,
+                failure_zone=normalized_zone,
+            )
             logger.debug(
                 "Skipping routing penalty for %s/%s: failure_category=%s (not route-relevant)",
                 provider_slug, model_slug, normalized_category,
@@ -1408,51 +1367,37 @@ class TaskTypeRouter:
 
         # Internal failure path
         penalty = _failure_penalty(normalized_category, policy=self._policy)
-        self._conn.execute(
-            """UPDATE task_type_routing
-               SET recent_failures = recent_failures + 1,
-                   recent_successes = 0,
-                   consecutive_internal_failures = consecutive_internal_failures + 1,
-                   observed_execution_failure_count = observed_execution_failure_count + 1,
-                   route_health_score = GREATEST($7, route_health_score - $4),
-                   last_failure_at = now(),
-                   last_failure_category = $5,
-                   last_failure_zone = $6,
-                   last_outcome_at = now(),
-                   updated_at = now()
-               WHERE task_type = $1 AND provider_slug = $2 AND model_slug = $3""",
-            task_type,
-            provider_slug,
-            model_slug,
-            penalty,
-            normalized_category,
-            normalized_zone or "internal",
-            self._policy.min_route_health,
+        self._routing_repository.record_internal_failure(
+            task_type=task_type,
+            provider_slug=provider_slug,
+            model_slug=model_slug,
+            penalty=penalty,
+            failure_category=normalized_category,
+            failure_zone=normalized_zone or "internal",
+            min_route_health=self._policy.min_route_health,
         )
 
         # Check if we need to demote
-        rows = self._conn.execute(
-            """SELECT rank, recent_failures FROM task_type_routing
-               WHERE task_type = $1 AND provider_slug = $2 AND model_slug = $3""",
-            task_type, provider_slug, model_slug,
+        row = self._routing_repository.load_outcome_state(
+            task_type=task_type,
+            provider_slug=provider_slug,
+            model_slug=model_slug,
         )
-        if not rows:
+        if row is None:
             return
 
-        current_rank = rows[0]["rank"]
-        failures = rows[0]["recent_failures"]
+        current_rank = int(row["rank"])
+        failures = int(row["recent_failures"])
 
         if failures < self.FAILURE_THRESHOLD:
             return
 
         # Find the next-ranked permitted route to swap with
-        next_rows = self._conn.execute(
-            """SELECT provider_slug, model_slug, rank FROM task_type_routing
-               WHERE task_type = $1 AND permitted = true AND rank > $2
-               ORDER BY rank ASC LIMIT 1""",
-            task_type, current_rank,
+        next_row = self._routing_repository.load_next_permitted_route(
+            task_type=task_type,
+            current_rank=current_rank,
         )
-        if not next_rows:
+        if next_row is None:
             logger.warning(
                 "Route %s/%s has %d consecutive failures but no lower-ranked "
                 "alternative to swap with for task_type=%s",
@@ -1460,20 +1405,22 @@ class TaskTypeRouter:
             )
             return
 
-        next_rank = next_rows[0]["rank"]
-        next_provider = next_rows[0]["provider_slug"]
-        next_model = next_rows[0]["model_slug"]
+        next_rank = int(next_row["rank"])
+        next_provider = str(next_row["provider_slug"])
+        next_model = str(next_row["model_slug"])
 
         # Swap ranks: demote the failing route, promote the next one
-        self._conn.execute(
-            """UPDATE task_type_routing SET rank = $1, updated_at = now()
-               WHERE task_type = $2 AND provider_slug = $3 AND model_slug = $4""",
-            next_rank, task_type, provider_slug, model_slug,
+        self._routing_repository.set_route_rank(
+            task_type=task_type,
+            provider_slug=provider_slug,
+            model_slug=model_slug,
+            rank=next_rank,
         )
-        self._conn.execute(
-            """UPDATE task_type_routing SET rank = $1, updated_at = now()
-               WHERE task_type = $2 AND provider_slug = $3 AND model_slug = $4""",
-            current_rank, task_type, next_provider, next_model,
+        self._routing_repository.set_route_rank(
+            task_type=task_type,
+            provider_slug=next_provider,
+            model_slug=next_model,
+            rank=current_rank,
         )
 
         logger.warning(
@@ -1504,32 +1451,20 @@ class TaskTypeRouter:
             + (max(0, int(bug_count)) * 0.01),
         )
         if bug_count <= 0:
-            self._conn.execute(
-                """UPDATE task_type_routing
-                   SET route_health_score = LEAST($4, route_health_score + $5),
-                       last_reviewed_at = now(),
-                       updated_at = now()
-                   WHERE task_type = $1 AND provider_slug = $2 AND model_slug = $3""",
-                task_type,
-                provider_slug,
-                model_slug,
-                self._policy.max_route_health,
-                self._policy.review_success_bump,
+            self._routing_repository.record_review_success(
+                task_type=task_type,
+                provider_slug=provider_slug,
+                model_slug=model_slug,
+                max_route_health=self._policy.max_route_health,
+                review_success_bump=self._policy.review_success_bump,
             )
             return
 
-        self._conn.execute(
-            """UPDATE task_type_routing
-               SET observed_downstream_failure_count = observed_downstream_failure_count + 1,
-                   observed_downstream_bug_count = observed_downstream_bug_count + $4,
-                   route_health_score = GREATEST($6, route_health_score - $5),
-                   last_reviewed_at = now(),
-                   updated_at = now()
-               WHERE task_type = $1 AND provider_slug = $2 AND model_slug = $3""",
-            task_type,
-            provider_slug,
-            model_slug,
-            bug_count,
-            penalty,
-            self._policy.min_route_health,
+        self._routing_repository.record_review_failure(
+            task_type=task_type,
+            provider_slug=provider_slug,
+            model_slug=model_slug,
+            bug_count=int(bug_count),
+            review_penalty=penalty,
+            min_route_health=self._policy.min_route_health,
         )

@@ -28,3 +28,16 @@ def test_praxis_query_routes_diagnose_requests(monkeypatch) -> None:
     assert result["diagnosis"]["diagnosis"]["run_id"] == "run_abc123"
     assert result["diagnosis"]["diagnosis"]["receipt_found"] is True
 
+
+def test_praxis_query_routes_issue_backlog_requests(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "surfaces.mcp.tools.operator.tool_praxis_operator_view",
+        lambda params: {"view": params["view"], "count": 2, "issues": [{"issue_id": "issue.alpha"}]},
+    )
+
+    result = query_mod.tool_praxis_query({"question": "show me the issue backlog"})
+
+    assert result["routed_to"] == "issue_backlog"
+    assert result["view"] == "issue_backlog"
+    assert result["count"] == 2
+    assert result["issues"][0]["issue_id"] == "issue.alpha"

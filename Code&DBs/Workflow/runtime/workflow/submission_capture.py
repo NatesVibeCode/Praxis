@@ -31,6 +31,9 @@ from runtime.workflow.submission_policy import (
     _PUBLISH_REVIEW_ROLE_TASK_TYPES,
     evaluate_publish_policy,
 )
+from runtime.workflow.evidence_sequence_allocator import (
+    insert_workflow_event_if_absent_with_deterministic_seq,
+)
 from storage.postgres.workflow_submission_repository import (
     PostgresWorkflowSubmissionRepository,
     WorkflowSubmissionRepositoryError,
@@ -267,19 +270,6 @@ def _target_workspace_root(
     return workspace_root or None
 
 
-def _next_evidence_seq(conn, *, run_id: str) -> int:
-    value = conn.fetchval(
-        """
-        SELECT GREATEST(
-            COALESCE((SELECT MAX(evidence_seq) FROM workflow_events WHERE run_id = $1), 0),
-            COALESCE((SELECT MAX(evidence_seq) FROM receipts WHERE run_id = $1), 0)
-        )
-        """,
-        _normalize_text(run_id, field_name="run_id"),
-    )
-    return int(value or 0) + 1
-
-
 def _emit_workflow_event(
     conn,
     *,
@@ -291,39 +281,18 @@ def _emit_workflow_event(
     payload: Mapping[str, Any],
 ) -> str:
     event_id = f"workflow_event:{uuid.uuid4().hex}"
-    evidence_seq = _next_evidence_seq(conn, run_id=run_id)
-    conn.execute(
-        """
-        INSERT INTO workflow_events (
-            event_id,
-            event_type,
-            schema_version,
-            workflow_id,
-            run_id,
-            request_id,
-            causation_id,
-            node_id,
-            occurred_at,
-            evidence_seq,
-            actor_type,
-            reason_code,
-            payload
-        ) VALUES (
-            $1, $2, 1, $3, $4, $5, NULL, $6, $7, $8, $9, $10, $11::jsonb
-        )
-        ON CONFLICT DO NOTHING
-        """,
-        event_id,
-        event_type,
-        workflow_id,
-        run_id,
-        _workflow_request_id(conn, run_id=run_id),
-        job_label,
-        _utc_now(),
-        evidence_seq,
-        "workflow_submission",
-        reason_code,
-        json.dumps(dict(payload), sort_keys=True, default=str),
+    insert_workflow_event_if_absent_with_deterministic_seq(
+        conn,
+        event_id=event_id,
+        event_type=event_type,
+        workflow_id=workflow_id,
+        run_id=run_id,
+        request_id=_workflow_request_id(conn, run_id=run_id),
+        node_id=job_label,
+        occurred_at=_utc_now(),
+        actor_type="workflow_submission",
+        reason_code=reason_code,
+        payload=dict(payload),
     )
     return event_id
 

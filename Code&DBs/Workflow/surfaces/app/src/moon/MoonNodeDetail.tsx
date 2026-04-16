@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import type { OrbitNode, OrbitEdge, DockContent } from './moonBuildPresenter';
 import type {
   BindingLedgerEntry,
@@ -15,6 +15,16 @@ import {
 import type { CatalogItem } from './catalog';
 import { getCatalogSurfacePolicy, getCatalogTruth } from './actionTruth';
 import { MoonGlyph } from './MoonGlyph';
+import {
+  contractRowsFromStringArray,
+  MoonContractStringListField,
+  stringArrayFromContractRows,
+  type ContractStringRow,
+} from './MoonContractStringList';
+import {
+  buildPrimitiveContractSuggestions,
+  type PrimitiveContractExtras,
+} from './moonContractSuggestions';
 import {
   buildHttpRequestIntegrationArgs,
   buildNotificationIntegrationArgs,
@@ -67,6 +77,8 @@ interface Props {
       changeSummary?: string[];
     },
   ) => Promise<void>;
+  /** Compiled plan + issues for richer primitive field suggestions */
+  contractSuggestionExtras?: PrimitiveContractExtras | null;
 }
 
 const TRIGGER_MANUAL_ROUTE = 'trigger';
@@ -75,7 +87,6 @@ const TRIGGER_WEBHOOK_ROUTE = 'trigger/webhook';
 const WEBHOOK_TRIGGER_EVENT = 'db.webhook_events.insert';
 type BranchConditionMode = 'simple' | 'json';
 type BranchComposerOp = typeof BRANCH_OP_OPTIONS[number]['value'];
-type TriggerFilterMode = 'pills' | 'json';
 type TriggerFilterValueType = 'string' | 'number' | 'boolean' | 'null' | 'json';
 
 const BRANCH_OP_OPTIONS = [
@@ -109,10 +120,10 @@ const TRIGGER_FILTER_SUGGESTIONS: Array<{
   valueType: TriggerFilterValueType;
   valueText: string;
 }> = [
-  { label: 'env: prod', key: 'env', valueType: 'string', valueText: 'prod' },
-  { label: 'dry_run: false', key: 'dry_run', valueType: 'boolean', valueText: 'false' },
-  { label: 'priority: high', key: 'priority', valueType: 'string', valueText: 'high' },
-  { label: 'source: api', key: 'source', valueType: 'string', valueText: 'api' },
+  { label: 'Env: Prod', key: 'env', valueType: 'string', valueText: 'prod' },
+  { label: 'Dry Run: False', key: 'dry_run', valueType: 'boolean', valueText: 'false' },
+  { label: 'Priority: High', key: 'priority', valueType: 'string', valueText: 'high' },
+  { label: 'Source: Api', key: 'source', valueType: 'string', valueText: 'api' },
 ];
 
 function nodeTarget(node: OrbitNode | null | undefined): UiActionTarget | null {
@@ -197,6 +208,13 @@ function triggerFilterHasComplexValue(filter: Record<string, unknown>): boolean 
   ));
 }
 
+function isVacuousBranchCondition(condition: Record<string, unknown>): boolean {
+  const keys = Object.keys(condition || {});
+  if (keys.length === 0) return true;
+  if (keys.length === 1 && keys[0] === 'kind' && condition.kind === 'always') return true;
+  return false;
+}
+
 function parseTriggerFilterRows(rows: TriggerFilterFieldRow[]): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const row of rows) {
@@ -239,11 +257,18 @@ function parseTriggerFilterRows(rows: TriggerFilterFieldRow[]): Record<string, u
 }
 
 function triggerFilterChipText(row: TriggerFilterFieldRow): string {
-  const key = row.key.trim() || 'new_filter';
-  if (row.valueType === 'null') return `${key}: null`;
-  if (!row.valueText.trim()) return `${key}: value`;
-  if (row.valueType === 'string') return `${key}: "${row.valueText.trim()}"`;
-  return `${key}: ${row.valueText.trim()}`;
+  const rawKey = row.key.trim() || 'New filter';
+  const key = rawKey
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+
+  if (row.valueType === 'null') return `${key}: Null`;
+  if (!row.valueText.trim()) return `${key}: Value`;
+  const value = row.valueType === 'boolean'
+    ? row.valueText.trim().charAt(0).toUpperCase() + row.valueText.trim().slice(1)
+    : row.valueText.trim();
+  if (row.valueType === 'string') return `${key}: "${value}"`;
+  return `${key}: ${value}`;
 }
 
 function formatJsonObject(value: unknown): string {
@@ -266,21 +291,6 @@ function parseJsonObject(text: string, emptyMessage: string): Record<string, unk
     throw new Error('Condition must be a JSON object.');
   }
   return parsed as Record<string, unknown>;
-}
-
-function formatStringList(value: unknown): string {
-  if (!Array.isArray(value)) return '';
-  return value
-    .map(item => typeof item === 'string' ? item.trim() : '')
-    .filter(Boolean)
-    .join('\n');
-}
-
-function parseStringList(text: string): string[] {
-  return text
-    .split('\n')
-    .map(item => item.trim())
-    .filter(Boolean);
 }
 
 function parseOptionalJsonObject(text: string, label: string): Record<string, unknown> {
@@ -383,7 +393,7 @@ function buildSimpleBranchCondition(
   return condition;
 }
 
-export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAuthorityAction, onClose, selectedEdge, edgeFromLabel, edgeToLabel, onApplyGate, gateItems = [], buildGraph, onUpdateBuildGraph, onCommitGraphAction }: Props) {
+export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAuthorityAction, onClose, selectedEdge, edgeFromLabel, edgeToLabel, onApplyGate, gateItems = [], buildGraph, onUpdateBuildGraph, onCommitGraphAction, contractSuggestionExtras = null }: Props) {
   const { objectTypes, loading: objectTypesLoading } = useObjectTypes();
   const [objectSearch, setObjectSearch] = useState('');
   const [attachKind, setAttachKind] = useState('reference');
@@ -401,7 +411,6 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
   const [triggerCronExpression, setTriggerCronExpression] = useState('@daily');
   const [triggerSourceRef, setTriggerSourceRef] = useState('');
   const [triggerFilterText, setTriggerFilterText] = useState('{}');
-  const [triggerFilterMode, setTriggerFilterMode] = useState<TriggerFilterMode>('pills');
   const [triggerFilterRows, setTriggerFilterRows] = useState<TriggerFilterFieldRow[]>([
     { id: 'trigger-filter-1', key: '', valueType: 'string', valueText: '' },
   ]);
@@ -420,9 +429,15 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
   const [nodeTitle, setNodeTitle] = useState('');
   const [nodeSummary, setNodeSummary] = useState('');
   const [nodePrompt, setNodePrompt] = useState('');
-  const [nodeRequiredInputsText, setNodeRequiredInputsText] = useState('');
-  const [nodeOutputsText, setNodeOutputsText] = useState('');
-  const [nodePersistenceTargetsText, setNodePersistenceTargetsText] = useState('');
+  const [requiredInputRows, setRequiredInputRows] = useState<ContractStringRow[]>(() => (
+    contractRowsFromStringArray(undefined, 'required-inputs')
+  ));
+  const [outputRows, setOutputRows] = useState<ContractStringRow[]>(() => (
+    contractRowsFromStringArray(undefined, 'outputs')
+  ));
+  const [persistenceTargetRows, setPersistenceTargetRows] = useState<ContractStringRow[]>(() => (
+    contractRowsFromStringArray(undefined, 'persistence-targets')
+  ));
   const [nodeHandoffTarget, setNodeHandoffTarget] = useState('');
   const [notificationTitle, setNotificationTitle] = useState('');
   const [notificationMessage, setNotificationMessage] = useState('');
@@ -534,6 +549,47 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
   const failureSourceLabel = edgeFromLabel || selectedEdge?.from || 'upstream step';
   const failureTargetLabel = edgeToLabel || selectedEdge?.to || 'failure step';
 
+  const primitiveContractSuggestions = useMemo(
+    () =>
+      buildPrimitiveContractSuggestions(
+        buildGraph,
+        node?.id ?? null,
+        objectTypes,
+        content,
+        contractSuggestionExtras,
+      ),
+    [buildGraph, node?.id, objectTypes, content, contractSuggestionExtras],
+  );
+
+  const triggerFilterFingerprint = useMemo(() => {
+    try {
+      return JSON.stringify(triggerConfig?.filter ?? null);
+    } catch {
+      return 'null';
+    }
+  }, [triggerConfig?.filter]);
+
+  const triggerFilterRowParse = useMemo(() => {
+    try {
+      return { ok: true as const, value: parseTriggerFilterRows(triggerFilterRows) };
+    } catch {
+      return { ok: false as const, value: {} as Record<string, unknown> };
+    }
+  }, [triggerFilterRows]);
+
+  const triggerNeedsJsonEditor = Boolean(
+    triggerFilterRowParse.ok && triggerFilterHasComplexValue(triggerFilterRowParse.value),
+  );
+
+  const prevTriggerNeedsJsonRef = useRef(false);
+  useEffect(() => {
+    if (!isTriggerNode) return;
+    if (triggerNeedsJsonEditor && !prevTriggerNeedsJsonRef.current && triggerFilterRowParse.ok) {
+      setTriggerFilterText(JSON.stringify(triggerFilterRowParse.value, null, 2));
+    }
+    prevTriggerNeedsJsonRef.current = triggerNeedsJsonEditor;
+  }, [isTriggerNode, triggerNeedsJsonEditor, triggerFilterRowParse]);
+
   useEffect(() => {
     if (!isTriggerNode) return;
     const normalizedFilter = normalizeTriggerFilter(triggerConfig?.filter);
@@ -544,7 +600,6 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
     setTriggerFilterText(JSON.stringify(normalizedFilter, null, 2));
     const rows = triggerFilterRowsFromObject(normalizedFilter);
     setTriggerFilterRows(rows);
-    setTriggerFilterMode(triggerFilterHasComplexValue(normalizedFilter) ? 'json' : 'pills');
     setActiveTriggerFilterId(rows[0]?.id || null);
     setTriggerError(null);
   }, [
@@ -552,6 +607,7 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
     node?.id,
     triggerConfig?.cron_expression,
     triggerConfig?.source_ref,
+    triggerFilterFingerprint,
   ]);
 
   useEffect(() => {
@@ -560,19 +616,29 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
       family: 'conditional',
       edge_type: 'conditional',
       release_condition: {},
-    } as any);
+    } as any) || {};
     const simpleCondition = parseSimpleBranchCondition(condition);
-    setEdgeConditionText(formatJsonObject(condition));
+    const vacuous = !simpleCondition && isVacuousBranchCondition(condition);
     if (simpleCondition) {
       setEdgeConditionMode('simple');
       setEdgeConditionField(simpleCondition.field);
       setEdgeConditionOp(simpleCondition.op);
       setEdgeConditionValueText(simpleCondition.valueText);
+      setEdgeConditionText(formatJsonObject(condition));
+    } else if (vacuous) {
+      setEdgeConditionMode('simple');
+      setEdgeConditionField('should_continue');
+      setEdgeConditionOp('equals');
+      setEdgeConditionValueText('true');
+      setEdgeConditionText(formatJsonObject(
+        buildSimpleBranchCondition('should_continue', 'equals', 'true'),
+      ));
     } else {
       setEdgeConditionMode('json');
       setEdgeConditionField('should_continue');
       setEdgeConditionOp('equals');
       setEdgeConditionValueText('true');
+      setEdgeConditionText(formatJsonObject(condition));
     }
     setEdgeConditionError(null);
   }, [
@@ -592,9 +658,9 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
     setNodeTitle(buildNode.title || node?.title || '');
     setNodeSummary(buildNode.summary || node?.summary || '');
     setNodePrompt(buildNode.prompt || '');
-    setNodeRequiredInputsText(formatStringList(buildNode.required_inputs));
-    setNodeOutputsText(formatStringList(buildNode.outputs));
-    setNodePersistenceTargetsText(formatStringList(buildNode.persistence_targets));
+    setRequiredInputRows(contractRowsFromStringArray(buildNode.required_inputs, 'required-inputs'));
+    setOutputRows(contractRowsFromStringArray(buildNode.outputs, 'outputs'));
+    setPersistenceTargetRows(contractRowsFromStringArray(buildNode.persistence_targets, 'persistence-targets'));
     setNodeHandoffTarget(buildNode.handoff_target || '');
     setNodeSaveError(null);
 
@@ -843,7 +909,7 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
     setTriggerLoading(true);
     setTriggerError(null);
     try {
-      const filter = triggerFilterMode === 'json'
+      const filter = triggerNeedsJsonEditor
         ? parseTriggerFilter(triggerFilterText)
         : parseTriggerFilterRows(triggerFilterRows);
       const nodes = [...(buildGraph.nodes || [])];
@@ -899,35 +965,24 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
     triggerRoute,
     triggerCronExpression,
     triggerSourceRef,
-    triggerFilterMode,
+    triggerNeedsJsonEditor,
     triggerFilterRows,
     triggerFilterText,
   ]);
 
-  const handleTriggerFilterModeChange = useCallback((nextMode: TriggerFilterMode) => {
-    if (nextMode === triggerFilterMode) return;
-    if (nextMode === 'json') {
-      try {
-        const fromRows = parseTriggerFilterRows(triggerFilterRows);
-        setTriggerFilterText(JSON.stringify(fromRows, null, 2));
-      } catch {
-        // Keep existing JSON draft if field rows are incomplete.
-      }
-      setTriggerFilterMode('json');
-      setTriggerError(null);
-      return;
-    }
+  const handleTriggerJsonBlur = useCallback(() => {
     try {
       const parsed = parseTriggerFilter(triggerFilterText);
-      const rows = triggerFilterRowsFromObject(parsed);
-      setTriggerFilterRows(rows);
-      setTriggerFilterMode('pills');
-      setActiveTriggerFilterId(rows[0]?.id || null);
-      setTriggerError(null);
-    } catch (error: any) {
-      setTriggerError(error.message || 'Unable to switch trigger filter mode.');
+      if (!triggerFilterHasComplexValue(parsed)) {
+        const rows = triggerFilterRowsFromObject(parsed);
+        setTriggerFilterRows(rows);
+        setActiveTriggerFilterId(rows[0]?.id || null);
+        setTriggerError(null);
+      }
+    } catch {
+      /* keep JSON draft while invalid */
     }
-  }, [triggerFilterMode, triggerFilterRows, triggerFilterText]);
+  }, [triggerFilterText]);
 
   const activeTriggerFilterRow = useMemo(
     () => triggerFilterRows.find((row) => row.id === activeTriggerFilterId) || null,
@@ -990,10 +1045,11 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
     setWebhookHeadersText(formatJsonObject(presetDefinition.headers));
     setWebhookBodyText(formatJsonValue(presetDefinition.body));
     setNodeSaveError(null);
-    if (!nodeOutputsText.trim()) {
-      setNodeOutputsText('http_response');
-    }
-  }, [nodeOutputsText]);
+    setOutputRows((prev) => {
+      if (stringArrayFromContractRows(prev).length > 0) return prev;
+      return contractRowsFromStringArray(['http_response'], 'outputs');
+    });
+  }, []);
 
   const handleSaveNodePrimitive = useCallback(async () => {
     if (!node || !buildGraph || !canCommitGraph) return;
@@ -1054,9 +1110,9 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
         title: nodeTitle.trim() || nodes[idx].title || 'Untitled step',
         summary: nodeSummary.trim(),
         prompt: nodePrompt.trim(),
-        required_inputs: parseStringList(nodeRequiredInputsText),
-        outputs: parseStringList(nodeOutputsText),
-        persistence_targets: parseStringList(nodePersistenceTargetsText),
+        required_inputs: stringArrayFromContractRows(requiredInputRows),
+        outputs: stringArrayFromContractRows(outputRows),
+        persistence_targets: stringArrayFromContractRows(persistenceTargetRows),
         handoff_target: nodeHandoffTarget.trim() || null,
         integration_args: nextIntegrationArgs,
       };
@@ -1089,10 +1145,10 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
     isWorkflowInvokeRoute,
     node,
     nodeHandoffTarget,
-    nodeOutputsText,
-    nodePersistenceTargetsText,
+    outputRows,
+    persistenceTargetRows,
     nodePrompt,
-    nodeRequiredInputsText,
+    requiredInputRows,
     nodeSummary,
     nodeTitle,
     notificationMessage,
@@ -1346,8 +1402,8 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
                       value={edgeConditionMode}
                       onChange={e => handleEdgeConditionModeChange(e.target.value as BranchConditionMode)}
                     >
-                      <option value="simple">Composer</option>
-                      <option value="json">JSON</option>
+                      <option value="simple">Form (recommended)</option>
+                      <option value="json">JSON (advanced)</option>
                     </select>
                   </div>
                 </div>
@@ -1377,20 +1433,11 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
                         className="moon-dock-form__input"
                         value={edgeConditionValueText}
                         onChange={e => setEdgeConditionValueText(e.target.value)}
-                        placeholder={edgeConditionOp === 'in' || edgeConditionOp === 'not_in'
-                          ? 'Comparison value. Plain text or JSON, for example [\"gold\", \"platinum\"]'
-                          : 'Comparison value. Plain text or JSON, for example true, 10, or \"approved\"'}
+                        placeholder="Value (text or ['array'])"
                         rows={3}
                         style={{ minHeight: 86, resize: 'vertical' }}
                       />
-                    ) : (
-                      <div className="moon-branch-editor__hint">
-                        This operator does not need a comparison value. Moon only checks whether the field exists.
-                      </div>
-                    )}
-                    <div className="moon-branch-editor__hint">
-                      Then runs when <code>{edgeConditionField.trim() || 'field'}</code> {BRANCH_OP_LABELS.get(edgeConditionOp)?.toLowerCase() || 'matches'}{selectedBranchOp.expectsValue && edgeConditionValueText.trim() ? ` ${edgeConditionValueText.trim()}` : ''}. Else automatically uses the inverse.
-                    </div>
+                    ) : null}
                   </>
                 ) : (
                   <>
@@ -1402,9 +1449,6 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
                       rows={8}
                       style={{ minHeight: 132, resize: 'vertical' }}
                     />
-                    <div className="moon-branch-editor__hint">
-                      Use JSON mode for nested `and` / `or` / `not` trees or any condition shape that does not fit the single-predicate composer.
-                    </div>
                   </>
                 )}
               </div>
@@ -1433,7 +1477,7 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
             <>
               <div className="moon-dock__sep" />
               <div className="moon-dock__section-label">Trigger config</div>
-              <div className="moon-dock__item-desc" style={{ marginBottom: 8 }}>
+              <div className="moon-dock__item-desc" style={{ marginBottom: 10, fontWeight: 600 }}>
                 {triggerRoute === TRIGGER_SCHEDULE_ROUTE
                   ? 'Schedule trigger'
                   : triggerRoute === TRIGGER_WEBHOOK_ROUTE
@@ -1441,37 +1485,48 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
                     : 'Manual trigger'}
               </div>
               {triggerRoute === TRIGGER_SCHEDULE_ROUTE ? (
-                <input
-                  className="moon-dock-form__input"
-                  type="text"
-                  value={triggerCronExpression}
-                  onChange={e => setTriggerCronExpression(e.target.value)}
-                  placeholder="Cron expression"
-                />
+                <>
+                  <label className="moon-dock-form__label" htmlFor="moon-trigger-cron">Schedule</label>
+                  <input
+                    id="moon-trigger-cron"
+                    className="moon-dock-form__input"
+                    type="text"
+                    value={triggerCronExpression}
+                    onChange={e => setTriggerCronExpression(e.target.value)}
+                    placeholder="@daily or 0 9 * * *"
+                  />
+                </>
               ) : (
-                <input
-                  className="moon-dock-form__input"
-                  type="text"
-                  value={triggerSourceRef}
-                  onChange={e => setTriggerSourceRef(e.target.value)}
-                  placeholder="Source ref (optional)"
-                />
+                <>
+                  <label className="moon-dock-form__label" htmlFor="moon-trigger-source-ref">
+                    Source reference
+                  </label>
+                  <input
+                    id="moon-trigger-source-ref"
+                    className="moon-dock-form__input"
+                    type="text"
+                    value={triggerSourceRef}
+                    onChange={e => setTriggerSourceRef(e.target.value)}
+                    placeholder="e.g. connector or table id"
+                  />
+                </>
               )}
-              <div className="moon-branch-editor__control">
-                <label className="moon-dock-form__label" htmlFor="moon-trigger-filter-mode">Filter mode</label>
-                <div className="moon-dock-form__row">
-                  <select
-                    id="moon-trigger-filter-mode"
-                    className="moon-dock-form__select"
-                    value={triggerFilterMode}
-                    onChange={e => handleTriggerFilterModeChange(e.target.value as TriggerFilterMode)}
-                  >
-                    <option value="pills">Pills</option>
-                    <option value="json">JSON</option>
-                  </select>
-                </div>
-              </div>
-              {triggerFilterMode === 'pills' ? (
+              <div className="moon-dock__section-label" style={{ marginTop: 14 }}>Event filter</div>
+              {triggerNeedsJsonEditor ? (
+                <>
+                  <textarea
+                    id="moon-trigger-event-filter"
+                    className="moon-dock-form__input"
+                    value={triggerFilterText}
+                    onChange={e => setTriggerFilterText(e.target.value)}
+                    onBlur={handleTriggerJsonBlur}
+                    placeholder='{"env": "prod"}'
+                    rows={6}
+                    style={{ minHeight: 110, resize: 'vertical' }}
+                    aria-label="Trigger filter JSON"
+                  />
+                </>
+              ) : (
                 <>
                   <div className="moon-trigger-pill-row">
                     {triggerFilterRows.map((row) => (
@@ -1489,7 +1544,7 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
                       className="moon-trigger-pill moon-trigger-pill--add"
                       onClick={addTriggerFilterRow}
                     >
-                      + Add filter
+                      + Filter
                     </button>
                   </div>
                   <div className="moon-trigger-pill-suggestions">
@@ -1505,90 +1560,59 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
                     ))}
                   </div>
                   {activeTriggerFilterRow && (
-                    <div className="moon-trigger-pill-editor">
-                      <div className="moon-dock-form__row" style={{ marginBottom: 4 }}>
-                        <input
-                          className="moon-dock-form__input"
-                          type="text"
-                          value={activeTriggerFilterRow.key}
-                          onChange={(event) => updateTriggerFilterRow(activeTriggerFilterRow.id, { key: event.target.value })}
-                          placeholder="Filter key"
-                          style={{ marginBottom: 0 }}
-                        />
-                        <select
-                          className="moon-dock-form__select"
-                          value={activeTriggerFilterRow.valueType}
-                          onChange={(event) => updateTriggerFilterRow(activeTriggerFilterRow.id, { valueType: event.target.value as TriggerFilterValueType })}
-                          style={{ minWidth: 110 }}
-                        >
-                          <option value="string">Text</option>
-                          <option value="number">Number</option>
-                          <option value="boolean">True/false</option>
-                          <option value="null">Null</option>
-                          <option value="json">JSON</option>
-                        </select>
-                      </div>
-                      {activeTriggerFilterRow.valueType !== 'null' && (
-                        <input
-                          className="moon-dock-form__input"
-                          type="text"
-                          value={activeTriggerFilterRow.valueText}
-                          onChange={(event) => updateTriggerFilterRow(activeTriggerFilterRow.id, { valueText: event.target.value })}
-                          placeholder={activeTriggerFilterRow.valueType === 'json' ? '{"nested": true}' : 'Value'}
-                          style={{ marginBottom: 4 }}
-                        />
-                      )}
-                      {activeTriggerFilterRow.valueType === 'boolean' && (
-                        <div className="moon-dock-form__row">
-                          <button
-                            type="button"
-                            className="moon-dock-form__btn--small"
-                            onClick={() => updateTriggerFilterRow(activeTriggerFilterRow.id, { valueText: 'true' })}
-                          >
-                            true
-                          </button>
-                          <button
-                            type="button"
-                            className="moon-dock-form__btn--small"
-                            onClick={() => updateTriggerFilterRow(activeTriggerFilterRow.id, { valueText: 'false' })}
-                          >
-                            false
-                          </button>
-                        </div>
-                      )}
-                      <button
-                        type="button"
-                        className="moon-dock-form__btn--small"
-                        onClick={() => removeTriggerFilterRow(activeTriggerFilterRow.id)}
+                  <div className="moon-trigger-pill-editor">
+                    <div className="moon-dock-form__row" style={{ marginBottom: 4 }}>
+                      <input
+                        className="moon-dock-form__input"
+                        type="text"
+                        value={activeTriggerFilterRow.key}
+                        onChange={(event) => updateTriggerFilterRow(activeTriggerFilterRow.id, { key: event.target.value })}
+                        placeholder="Payload field, e.g. env"
+                        style={{ marginBottom: 0 }}
+                      />
+                      <select
+                        className="moon-dock-form__select"
+                        value={activeTriggerFilterRow.valueType}
+                        onChange={(event) => updateTriggerFilterRow(activeTriggerFilterRow.id, { valueType: event.target.value as TriggerFilterValueType })}
+                        style={{ minWidth: 110 }}
                       >
-                        Remove selected
-                      </button>
+                        <option value="string">Text</option>
+                        <option value="number">Number</option>
+                        <option value="boolean">True/false</option>
+                        <option value="null">Null</option>
+                        <option value="json">JSON</option>
+                      </select>
                     </div>
-                  )}
-                  <div className="moon-dock-form__row">
+                    {activeTriggerFilterRow.valueType !== 'null' && (
+                      <input
+                        className="moon-dock-form__input"
+                        type="text"
+                        value={activeTriggerFilterRow.valueText}
+                        onChange={(event) => updateTriggerFilterRow(activeTriggerFilterRow.id, { valueText: event.target.value })}
+                        placeholder="Expected value, e.g. prod"
+                        style={{ marginBottom: 4 }}
+                      />
+                    )}
                     <button
                       type="button"
                       className="moon-dock-form__btn--small"
-                      onClick={addTriggerFilterRow}
+                      onClick={() => removeTriggerFilterRow(activeTriggerFilterRow.id)}
                     >
-                      Add another pill
+                      Remove selected
                     </button>
                   </div>
-                  <div className="moon-branch-editor__hint">
-                    Pills are the main lane. Click a pill to edit it. JSON mode is only for advanced nested filters.
+                  )}
+                  <div className="moon-dock-form__row">
+                  <button
+                    type="button"
+                    className="moon-dock-form__btn--small"
+                    onClick={addTriggerFilterRow}
+                  >
+                    Add another
+                  </button>
                   </div>
-                </>
-              ) : (
-                <textarea
-                  className="moon-dock-form__input"
-                  value={triggerFilterText}
-                  onChange={e => setTriggerFilterText(e.target.value)}
-                  placeholder="Trigger filter JSON"
-                  rows={6}
-                  style={{ minHeight: 110, resize: 'vertical' }}
-                />
-              )}
-              <button
+                  </>
+                  )}              <button
                 className="moon-dock-form__btn"
                 onClick={handleSaveTrigger}
                 disabled={triggerLoading || !buildGraph || !canCommitGraph}
@@ -1604,9 +1628,6 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
               <div className="moon-dock__sep" />
               <div className="moon-dock__section-label">Block properties</div>
               <div className="moon-dock__item-desc" style={{ marginBottom: 8 }}>
-                Edit the primitive this node owns. Labels, execution contract, and route config all save through the same graph authority.
-              </div>
-              <div className="moon-dock__item-desc" style={{ marginBottom: 8 }}>
                 Route: {triggerRoute || 'Unassigned'}
               </div>
               <input
@@ -1614,13 +1635,13 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
                 type="text"
                 value={nodeTitle}
                 onChange={e => setNodeTitle(e.target.value)}
-                placeholder="Step title"
+                placeholder="Step title, e.g. Research Customer"
               />
               <textarea
                 className="moon-dock-form__input"
                 value={nodeSummary}
                 onChange={e => setNodeSummary(e.target.value)}
-                placeholder="Summary"
+                placeholder="Brief summary of what this step does"
                 rows={3}
                 style={{ minHeight: 88, resize: 'vertical' }}
               />
@@ -1631,33 +1652,9 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
                     className="moon-dock-form__input"
                     value={nodePrompt}
                     onChange={e => setNodePrompt(e.target.value)}
-                    placeholder="Prompt / system instructions"
+                    placeholder="System instructions or prompt for the model"
                     rows={6}
                     style={{ minHeight: 132, resize: 'vertical' }}
-                  />
-                  <textarea
-                    className="moon-dock-form__input"
-                    value={nodeRequiredInputsText}
-                    onChange={e => setNodeRequiredInputsText(e.target.value)}
-                    placeholder={'Required inputs, one per line\ncustomer_id\nthread_context'}
-                    rows={4}
-                    style={{ minHeight: 96, resize: 'vertical' }}
-                  />
-                  <textarea
-                    className="moon-dock-form__input"
-                    value={nodeOutputsText}
-                    onChange={e => setNodeOutputsText(e.target.value)}
-                    placeholder={'Outputs, one per line\nsummary\nnext_action'}
-                    rows={4}
-                    style={{ minHeight: 96, resize: 'vertical' }}
-                  />
-                  <textarea
-                    className="moon-dock-form__input"
-                    value={nodePersistenceTargetsText}
-                    onChange={e => setNodePersistenceTargetsText(e.target.value)}
-                    placeholder={'Persistence targets, one per line\ncrm.reply_drafts'}
-                    rows={3}
-                    style={{ minHeight: 88, resize: 'vertical' }}
                   />
                   <input
                     className="moon-dock-form__input"
@@ -1668,6 +1665,34 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
                   />
                 </>
               )}
+
+              <div className="moon-dock__section-label" style={{ marginTop: 12 }}>Required inputs</div>
+              <MoonContractStringListField
+                fieldId="moon-node-required-inputs"
+                ariaLabel="Required inputs"
+                inputPlaceholder="e.g. customer_id"
+                suggestions={primitiveContractSuggestions}
+                rows={requiredInputRows}
+                onChange={setRequiredInputRows}
+              />
+              <div className="moon-dock__section-label" style={{ marginTop: 12 }}>Outputs</div>
+              <MoonContractStringListField
+                fieldId="moon-node-outputs"
+                ariaLabel="Outputs"
+                inputPlaceholder="e.g. summary"
+                suggestions={primitiveContractSuggestions}
+                rows={outputRows}
+                onChange={setOutputRows}
+              />
+              <div className="moon-dock__section-label" style={{ marginTop: 12 }}>Persistence targets</div>
+              <MoonContractStringListField
+                fieldId="moon-node-persistence-targets"
+                ariaLabel="Persistence targets"
+                inputPlaceholder="e.g. crm.notes"
+                suggestions={primitiveContractSuggestions}
+                rows={persistenceTargetRows}
+                onChange={setPersistenceTargetRows}
+              />
 
               {isNotificationRoute && (
                 <>
@@ -1847,10 +1872,7 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
               <div className="moon-dock__sep" style={{ marginTop: 20 }} />
               <div className="moon-dock__section-label">Authority-backed tools</div>
               <div className="moon-dock__item" style={{ cursor: 'default' }}>
-                <div className="moon-dock__item-title">Save draft to unlock imports, attachments, and bindings</div>
-                <div className="moon-dock__item-desc">
-                  Primitive edits above already persist in local graph state. Authority-backed tools need a saved workflow id so the backend can own the result.
-                </div>
+                <div className="moon-dock__item-title">Save draft to unlock imports and attachments</div>
               </div>
             </>
           ) : (

@@ -10,6 +10,8 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime
+from threading import Lock
+from typing import Final
 from typing import Protocol
 
 from runtime.claims import ClaimLeaseProposalSnapshot
@@ -21,6 +23,10 @@ from runtime.subscriptions import (
     WorkflowWorkerSubscription,
 )
 from policy.workflow_lanes import WorkflowLaneCatalog, WorkflowLaneResolution
+
+
+_BOOTSTRAPPED_BRIDGE_DB: str | None = None
+_BOOTSTRAP_LOCK: Final[Lock] = Lock()
 
 _BUS_AUTHORITY = "runtime.outbox"
 _LIFECYCLE_AUTHORITY = "runtime.claims"
@@ -146,6 +152,20 @@ class WorkflowBridge:
 
 def build_live_workflow_bridge(database_url: str) -> WorkflowBridge:
     """Build a live Postgres-backed bridge over runtime and worker authorities."""
+
+    def _ensure_bridge_schema() -> None:
+        global _BOOTSTRAPPED_BRIDGE_DB
+        if _BOOTSTRAPPED_BRIDGE_DB == database_url:
+            return
+        from storage.postgres.connection import ensure_postgres_available
+
+        with _BOOTSTRAP_LOCK:
+            if _BOOTSTRAPPED_BRIDGE_DB == database_url:
+                return
+            ensure_postgres_available(env={"WORKFLOW_DATABASE_URL": database_url})
+            _BOOTSTRAPPED_BRIDGE_DB = database_url
+
+    _ensure_bridge_schema()
 
     import asyncpg
 

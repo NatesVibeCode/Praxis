@@ -67,8 +67,8 @@ Workflow specs are JSON files (`.queue.json`) that define a DAG of jobs:
 ```
 
 Run it:
-```
-praxis_workflow(action="run", spec_path="specs/my_feature.queue.json")
+```bash
+praxis workflow run specs/my_feature.queue.json
 ```
 
 See [docs/WORKFLOW_SPEC.md](docs/WORKFLOW_SPEC.md) for the full spec reference and [examples/](examples/) for more patterns.

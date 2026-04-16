@@ -74,6 +74,22 @@ export function MenuPanel({
   }, [flatItems, open]);
 
   useEffect(() => {
+    if (!open || !activeId) return;
+    const activeButton = panelRef.current?.querySelector(
+      `[data-menu-item-id="${CSS.escape(activeId)}"]`,
+    ) as HTMLButtonElement | null;
+    if (!activeButton) return;
+
+    if (!searchable) {
+      activeButton.focus({ preventScroll: true });
+    }
+
+    if (typeof activeButton.scrollIntoView === 'function') {
+      activeButton.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+  }, [activeId, open, searchable]);
+
+  useEffect(() => {
     if (!open) return;
     if (searchable) {
       const timer = window.setTimeout(() => searchRef.current?.focus(), 0);
@@ -204,12 +220,15 @@ export function MenuPanel({
                       <button
                         key={item.id}
                         type="button"
+                        data-menu-item-id={item.id}
+                        aria-selected={isActive}
                         className={[
                           'menu-panel__item',
                           isActive ? 'menu-panel__item--active' : '',
                           item.tone === 'danger' ? 'menu-panel__item--danger' : '',
                         ].filter(Boolean).join(' ')}
                         disabled={item.disabled}
+                        onFocus={() => setActiveId(item.id)}
                         onMouseEnter={() => setActiveId(item.id)}
                         onPointerDown={item.onPointerDown}
                         onClick={() => {

@@ -30,6 +30,20 @@ export function ChatPanel({ open, onClose }: ChatPanelProps) {
 
   useEffect(() => {
     if (!open) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [open, onClose]);
+
+  useEffect(() => {
+    if (!open) return;
     const frame = window.requestAnimationFrame(() => {
       inputRef.current?.focus();
     });
@@ -59,6 +73,7 @@ export function ChatPanel({ open, onClose }: ChatPanelProps) {
       <aside
         className={`chat-panel${open ? ' chat-panel--open' : ''}`}
         role="dialog"
+        aria-modal={open ? 'true' : undefined}
         aria-hidden={!open}
         aria-label="Chat panel"
       >
@@ -69,7 +84,7 @@ export function ChatPanel({ open, onClose }: ChatPanelProps) {
           </button>
         </div>
 
-        <div className="chat-panel__messages">
+        <div className="chat-panel__messages" role="log" aria-live="polite" aria-relevant="additions">
           {messages.length === 0 && !streamingText && (
             <div className="chat-panel__empty">
               Ask about workflows, recent runs, or anything in the control plane.
@@ -117,7 +132,11 @@ export function ChatPanel({ open, onClose }: ChatPanelProps) {
           <div ref={messagesEndRef} />
         </div>
 
-        {error && <div className="chat-panel__error">{error}</div>}
+        {error && (
+          <div className="chat-panel__error" role="alert" aria-live="assertive">
+            {error}
+          </div>
+        )}
 
         <div className="chat-panel__input-bar">
           <textarea

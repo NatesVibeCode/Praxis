@@ -198,13 +198,30 @@ def test_execute_cli_google_emits_manifest_backed_mcp_settings(monkeypatch, tmp_
             "workflow_id": "workflow.alpha",
             "job_label": "job.alpha",
             "mcp_tool_names": ["praxis_query", "praxis_discover"],
+            "decision_pack": {
+                "pack_version": 1,
+                "authority_domains": ["sandbox_execution"],
+                "decision_keys": ["architecture-policy::sandbox-execution::docker-only-authority"],
+                "decisions": [
+                    {
+                        "decision_key": "architecture-policy::sandbox-execution::docker-only-authority",
+                        "title": "Workflow sandbox execution is Docker-only",
+                        "rationale": "Do not add host-local execution lanes.",
+                        "decision_scope_ref": "sandbox_execution",
+                    }
+                ],
+            },
         },
     )
 
     assert str(captured["command"]).endswith(" --allowed-mcp-server-names dag-workflow")
     overlays = captured["metadata"]["workspace_overlays"]
-    assert overlays[0]["relative_path"] == ".gemini/settings.json"
-    assert '"dag-workflow"' in overlays[0]["content"]
+    overlay_paths = {overlay["relative_path"] for overlay in overlays}
+    assert ".gemini/settings.json" in overlay_paths
+    assert "_context/decision_pack.json" in overlay_paths
+    assert "_context/decision_summary.md" in overlay_paths
+    settings_overlay = next(overlay for overlay in overlays if overlay["relative_path"] == ".gemini/settings.json")
+    assert '"dag-workflow"' in settings_overlay["content"]
     assert captured["env"]["GEMINI_API_KEY"] == "test-key"
     assert captured["metadata"]["provider_slug"] == "google"
     assert result["status"] == "succeeded"

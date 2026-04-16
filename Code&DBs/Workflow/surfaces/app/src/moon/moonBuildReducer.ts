@@ -15,7 +15,7 @@ export interface MoonBuildState {
   dragDropKind: DragDropKind | null;
   previewTarget: string | null;
   pendingCatalogId: string | null;  // click-fallback: catalog item awaiting target click
-  emptyMode: 'choice' | 'trigger-picker' | 'compose' | null;
+  emptyMode: 'choice' | 'selection' | 'trigger-picker' | 'compose' | null;
   selectedTrigger: { id: string; label: string; icon: string; actionValue: string } | null;
   activeRunId: string | null;
   runViewOpen: boolean;
@@ -40,6 +40,7 @@ export type MoonBuildAction =
   | { type: 'DRAG_END' }
   | { type: 'STAGE_CATALOG'; catalogId: string }
   | { type: 'CLEAR_CATALOG' }
+  | { type: 'EMPTY_OPEN_SELECTION' }
   | { type: 'EMPTY_PICK_TRIGGER' }
   | { type: 'EMPTY_PICK_COMPOSE' }
   | { type: 'EMPTY_RESET' }
@@ -120,6 +121,8 @@ export function moonBuildReducer(state: MoonBuildState, action: MoonBuildAction)
       return { ...state, pendingCatalogId: action.catalogId };
     case 'CLEAR_CATALOG':
       return { ...state, pendingCatalogId: null };
+    case 'EMPTY_OPEN_SELECTION':
+      return { ...state, emptyMode: 'selection' as const };
     case 'EMPTY_PICK_TRIGGER':
       return { ...state, emptyMode: 'trigger-picker' as const, selectedTrigger: null };
     case 'EMPTY_PICK_COMPOSE':

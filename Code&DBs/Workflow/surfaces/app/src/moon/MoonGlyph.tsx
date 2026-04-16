@@ -26,8 +26,20 @@ const paths: Record<GlyphType, string> = {
 
 export function MoonGlyph({ type, size = 24, color = 'currentColor' }: MoonGlyphProps) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d={paths[type] || paths.step} fill={color} fillOpacity={0.15} />
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
+      <path 
+        d={paths[type] || paths.step} 
+        fill={color} 
+        fillOpacity={0.08} 
+        stroke="none"
+      />
+      <path 
+        d={paths[type] || paths.step} 
+        stroke={color}
+        strokeWidth="1.6"
+        opacity={0.9}
+      />
+      <circle cx="12" cy="12" r="11" stroke={color} strokeWidth="0.5" opacity="0.12" />
     </svg>
   );
 }

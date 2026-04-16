@@ -578,8 +578,15 @@ def _finalize_run_if_terminal(conn, run_id: str) -> None:
         )
         terminal_state = 'failed' if (failed and failed[0]['cnt'] > 0) else 'succeeded'
         conn.execute(
-            """UPDATE workflow_runs SET current_state=$2, finished_at=NOW()
-               WHERE run_id=$1 AND current_state='running'""",
+            """
+            UPDATE workflow_runs
+            SET current_state=$2,
+                finished_at=NOW(),
+                terminal_reason_code = COALESCE(terminal_reason_code, 'model_executor.completed'),
+                started_at = COALESCE(started_at, admitted_at, requested_at, NOW())
+            WHERE run_id=$1
+              AND current_state NOT IN ('succeeded', 'failed', 'dead_letter', 'cancelled')
+            """,
             run_id, terminal_state,
         )
         logger.info("Model run %s completed: %s", run_id, terminal_state)

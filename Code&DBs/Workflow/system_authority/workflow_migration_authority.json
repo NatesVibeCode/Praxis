@@ -59,7 +59,8 @@
     "128_operator_decision_embedding_architecture.sql",
     "129_google_gemini_mcp_settings_authority.sql",
     "130_bugs_resume_context.sql",
-    "131_roadmap_items_semantic_clustering.sql"
+    "131_roadmap_items_semantic_clustering.sql",
+    "132_issue_backlog_authority.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -1853,6 +1854,52 @@
         "object_type": "index",
         "object_name": "roadmap_items_hnsw_idx"
       }
+    ],
+    "132_issue_backlog_authority.sql": [
+      {
+        "object_type": "table",
+        "object_name": "issues"
+      },
+      {
+        "object_type": "index",
+        "object_name": "issues_status_priority_opened_at_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "issues_discovered_in_run_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "issues_discovered_in_receipt_idx"
+      },
+      {
+        "object_type": "column",
+        "object_name": "bugs.source_issue_id"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "bugs.bugs_source_issue_fkey"
+      },
+      {
+        "object_type": "index",
+        "object_name": "bugs_source_issue_uidx"
+      },
+      {
+        "object_type": "column",
+        "object_name": "work_item_workflow_bindings.issue_id"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "work_item_workflow_bindings.work_item_workflow_bindings_issue_fkey"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "work_item_workflow_bindings.work_item_workflow_bindings_unique_edge"
+      },
+      {
+        "object_type": "index",
+        "object_name": "work_item_workflow_bindings_issue_idx"
+      }
     ]
   },
   "policy_buckets": {
@@ -1916,7 +1963,8 @@
       "128_operator_decision_embedding_architecture.sql",
       "129_google_gemini_mcp_settings_authority.sql",
       "130_bugs_resume_context.sql",
-      "131_roadmap_items_semantic_clustering.sql"
+      "131_roadmap_items_semantic_clustering.sql",
+      "132_issue_backlog_authority.sql"
     ],
     "bootstrap_only": [
       "012_execution_leases.sql",

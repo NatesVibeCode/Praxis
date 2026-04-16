@@ -4174,6 +4174,19 @@ def test_handle_query_quality_rollup_missing_is_structured() -> None:
     assert result["rollup"] is None
 
 
+def test_handle_query_routes_issue_backlog(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "surfaces.api.operator_read.query_issue_backlog",
+        lambda **kwargs: {"kind": "issue_backlog", "count": 1, "issues": [{"issue_id": "issue.alpha"}], **kwargs},
+    )
+
+    result = workflow_query_core.handle_query(SimpleNamespace(), {"question": "issue backlog"})
+
+    assert result["routed_to"] == "issue_backlog"
+    assert result["kind"] == "issue_backlog"
+    assert result["issues"][0]["issue_id"] == "issue.alpha"
+
+
 def test_handle_query_knowledge_graph_error_is_structured() -> None:
     class _BoomGraph:
         def search(self, *_args, **_kwargs):
@@ -4403,6 +4416,36 @@ def test_handle_operator_view_replay_ready_bugs_returns_direct_payload() -> None
     assert result["maintenance"]["backfilled_count"] == 1
     assert result["bugs"][0]["replay_ready"] is True
     assert result["returned_count"] == 1
+
+
+def test_handle_operator_view_issue_backlog_returns_direct_payload(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def _query_issue_backlog(**kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs)
+        return {
+            "kind": "issue_backlog",
+            "count": 1,
+            "total_issues": 2,
+            "issues": [{"issue_id": "issue.alpha", "status": "open"}],
+            "counts": {"by_status": {"open": 1}, "by_severity": {"P2": 1}},
+        }
+
+    monkeypatch.setattr("surfaces.api.operator_read.query_issue_backlog", _query_issue_backlog)
+
+    result = workflow_query_core.handle_operator_view(
+        SimpleNamespace(),
+        {"view": "issue_backlog", "limit": 7, "open_only": False, "status": "open"},
+    )
+
+    assert result["view"] == "issue_backlog"
+    assert result["requires"] == {
+        "runtime": "sync_postgres",
+        "driver": "postgres",
+    }
+    assert result["count"] == 1
+    assert result["issues"][0]["issue_id"] == "issue.alpha"
+    assert captured == {"limit": 7, "open_only": False, "status": "open"}
 
 
 def test_handle_friction_empty_stats_is_machine_first() -> None:

@@ -22,6 +22,9 @@ from runtime.failure_classifier import classify_failure
 from runtime.friction_ledger import FrictionLedger, FrictionType
 from runtime.bug_tracker import BugTracker, BugCategory, BugSeverity, build_failure_signature
 from storage.postgres.receipt_repository import PostgresReceiptRepository
+from runtime.workflow.evidence_sequence_allocator import (
+    insert_receipt_if_absent_with_deterministic_seq,
+)
 
 _log = logging.getLogger("receipt_store")
 _COMPACT_GIT_PROVENANCE_KEYS = frozenset(
@@ -999,7 +1002,8 @@ def write_receipt(receipt_dict: dict[str, Any], *, conn=None) -> None:
     artifacts = normalized.get("artifacts") if isinstance(normalized.get("artifacts"), dict) else {}
     decision_refs = normalized.get("decision_refs") if isinstance(normalized.get("decision_refs"), list) else []
 
-    repository.upsert_receipt(
+    transition_seq = insert_receipt_if_absent_with_deterministic_seq(
+        conn=conn,
         receipt_id=receipt_id,
         receipt_type="workflow_result",
         schema_version=1,
@@ -1010,15 +1014,13 @@ def write_receipt(receipt_dict: dict[str, Any], *, conn=None) -> None:
         attempt_no=attempt_no,
         started_at=started_at,
         finished_at=finished_at,
-        evidence_seq=int(normalized.get("evidence_count") or attempt_no),
-        executor_type=str(normalized.get("adapter_type") or normalized.get("executor_type") or "workflow"),
         status=str(normalized.get("status") or ""),
         inputs=inputs,
         outputs=outputs,
         artifacts=artifacts,
         failure_code=str(normalized.get("failure_code") or normalized.get("error_code") or ""),
-        decision_refs=[dict(item) for item in decision_refs if isinstance(item, dict)],
     )
+    normalized["evidence_count"] = transition_seq
     _run_post_receipt_hooks(
         {
             **normalized,

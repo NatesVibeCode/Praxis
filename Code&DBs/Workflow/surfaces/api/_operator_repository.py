@@ -20,6 +20,7 @@ from runtime.instance import (
 from runtime.work_item_assessment import WorkItemAssessmentRecord, assess_work_items
 from runtime.work_item_workflow_bindings import WorkItemWorkflowBindingRecord
 from storage.postgres import connect_workflow_database
+from ._payload_contract import optional_text, require_text
 from ._operator_helpers import _json_compatible, _normalize_as_of, _now, _run_async
 
 
@@ -47,19 +48,27 @@ class _Connection(Protocol):
 
 
 def _require_text(value: object, *, field_name: str) -> str:
-    if not isinstance(value, str) or not value.strip():
+    try:
+        return require_text(value, field_name=field_name)
+    except ValueError as exc:
         raise NativeOperatorQueryError(
             "operator_query.invalid_row",
-            f"{field_name} must be a non-empty string",
+            str(exc),
             details={"field": field_name, "value_type": type(value).__name__},
-        )
-    return value.strip()
+        ) from exc
 
 
 def _optional_text(value: object, *, field_name: str) -> str | None:
     if value is None:
         return None
-    return _require_text(value, field_name=field_name)
+    try:
+        return optional_text(value, field_name=field_name)
+    except ValueError as exc:
+        raise NativeOperatorQueryError(
+            "operator_query.invalid_row",
+            str(exc),
+            details={"field": field_name, "value_type": type(value).__name__},
+        ) from exc
 
 
 def _require_datetime(value: object, *, field_name: str) -> datetime:
@@ -507,6 +516,50 @@ def _workflow_run_is_synthetic(row: Mapping[str, Any]) -> bool:
 
 
 @dataclass(frozen=True, slots=True)
+class OperatorIssueRecord:
+    """Canonical issue row exposed by the native operator query surface."""
+
+    issue_id: str
+    issue_key: str
+    title: str
+    status: str
+    severity: str
+    priority: str
+    summary: str
+    source_kind: str
+    discovered_in_run_id: str | None
+    discovered_in_receipt_id: str | None
+    owner_ref: str | None
+    decision_ref: str | None
+    resolution_summary: str | None
+    opened_at: datetime
+    resolved_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "issue_id": self.issue_id,
+            "issue_key": self.issue_key,
+            "title": self.title,
+            "status": self.status,
+            "severity": self.severity,
+            "priority": self.priority,
+            "summary": self.summary,
+            "source_kind": self.source_kind,
+            "discovered_in_run_id": self.discovered_in_run_id,
+            "discovered_in_receipt_id": self.discovered_in_receipt_id,
+            "owner_ref": self.owner_ref,
+            "decision_ref": self.decision_ref,
+            "resolution_summary": self.resolution_summary,
+            "opened_at": self.opened_at.isoformat(),
+            "resolved_at": None if self.resolved_at is None else self.resolved_at.isoformat(),
+            "created_at": self.created_at.isoformat(),
+            "updated_at": self.updated_at.isoformat(),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class OperatorBugRecord:
     """Canonical bug row exposed by the native operator query surface."""
 
@@ -521,6 +574,7 @@ class OperatorBugRecord:
     discovered_in_run_id: str | None
     discovered_in_receipt_id: str | None
     owner_ref: str | None
+    source_issue_id: str | None
     decision_ref: str | None
     resolution_summary: str | None
     opened_at: datetime
@@ -541,6 +595,7 @@ class OperatorBugRecord:
             "discovered_in_run_id": self.discovered_in_run_id,
             "discovered_in_receipt_id": self.discovered_in_receipt_id,
             "owner_ref": self.owner_ref,
+            "source_issue_id": self.source_issue_id,
             "decision_ref": self.decision_ref,
             "resolution_summary": self.resolution_summary,
             "opened_at": self.opened_at.isoformat(),
@@ -821,6 +876,7 @@ class OperatorWorkItemCloseoutRecommendationRecord:
 class NativeOperatorQuerySnapshot:
     """Inspectable snapshot of canonical operator rows."""
 
+    issues: tuple[OperatorIssueRecord, ...]
     bugs: tuple[OperatorBugRecord, ...]
     roadmap_items: tuple[OperatorRoadmapItemRecord, ...]
     cutover_gates: tuple[OperatorCutoverGateRecord, ...]
@@ -830,6 +886,7 @@ class NativeOperatorQuerySnapshot:
         OperatorWorkItemCloseoutRecommendationRecord, ...
     ]
     as_of: datetime
+    issue_ids: tuple[str, ...] | None = None
     bug_ids: tuple[str, ...] | None = None
     roadmap_item_ids: tuple[str, ...] | None = None
     cutover_gate_ids: tuple[str, ...] | None = None
@@ -848,14 +905,12 @@ class NativeOperatorQuerySnapshot:
             "instruction_authority": _operator_query_instruction_authority(self),
             "as_of": self.as_of.isoformat(),
             "query": {
-                "bug_ids": _json_list(self.bug_ids),
                 "roadmap_item_ids": _json_list(self.roadmap_item_ids),
                 "cutover_gate_ids": _json_list(self.cutover_gate_ids),
                 "work_item_workflow_binding_ids": _json_list(self.work_item_workflow_binding_ids),
                 "workflow_run_ids": _json_list(self.workflow_run_ids),
             },
             "counts": {
-                "bugs": len(self.bugs),
                 "roadmap_items": len(self.roadmap_items),
                 "cutover_gates": len(self.cutover_gates),
                 "work_item_workflow_bindings": len(self.work_item_workflow_bindings),
@@ -864,7 +919,6 @@ class NativeOperatorQuerySnapshot:
                     self.work_item_closeout_recommendations
                 ),
             },
-            "bugs": [],
             "roadmap_items": [],
             "cutover_gates": [record.to_json() for record in self.cutover_gates],
             "work_item_workflow_bindings": [record.to_json() for record in self.work_item_workflow_bindings],
@@ -874,6 +928,20 @@ class NativeOperatorQuerySnapshot:
                 for record in self.work_item_closeout_recommendations
             ],
         }
+        if self.issue_ids is not None or self.issues:
+            payload["query"]["issue_ids"] = _json_list(self.issue_ids)
+            payload["counts"]["issues"] = len(self.issues)
+            payload["issues"] = []
+        if self.bug_ids is not None or self.bugs:
+            payload["query"]["bug_ids"] = _json_list(self.bug_ids)
+            payload["counts"]["bugs"] = len(self.bugs)
+            payload["bugs"] = []
+        for record in self.issues:
+            row = record.to_json()
+            assessment = assessments_by_key.get(("issue", record.issue_id))
+            if assessment is not None:
+                row["assessment"] = assessment
+            payload["issues"].append(row)
         for record in self.bugs:
             row = record.to_json()
             assessment = assessments_by_key.get(("bug", record.bug_id))
@@ -905,10 +973,15 @@ class OperatorRoadmapTreeSnapshot:
     roadmap_items: tuple[OperatorRoadmapItemRecord, ...]
     roadmap_item_dependencies: tuple[OperatorRoadmapDependencyRecord, ...]
     as_of: datetime
+    work_item_assessments: tuple[WorkItemAssessmentRecord, ...] = ()
     semantic_neighbors: tuple[OperatorRoadmapSemanticNeighborRecord, ...] = ()
     semantic_neighbors_reason_code: str = "roadmap.semantic_neighbors.none"
 
     def to_json(self) -> dict[str, Any]:
+        assessments_by_key = {
+            (record.item_kind, record.item_id): record.to_json()
+            for record in self.work_item_assessments
+        }
         return {
             "kind": "roadmap_tree",
             "instruction_authority": _roadmap_tree_instruction_authority(self),
@@ -917,13 +990,32 @@ class OperatorRoadmapTreeSnapshot:
             "counts": {
                 "roadmap_items": len(self.roadmap_items),
                 "roadmap_item_dependencies": len(self.roadmap_item_dependencies),
+                "work_item_assessments": len(self.work_item_assessments),
                 "semantic_neighbors": len(self.semantic_neighbors),
             },
-            "root_item": self.root_item.to_json(),
-            "roadmap_items": [record.to_json() for record in self.roadmap_items],
+            "root_item": {
+                **self.root_item.to_json(),
+                **(
+                    {"assessment": assessments_by_key[("roadmap_item", self.root_item.roadmap_item_id)]}
+                    if ("roadmap_item", self.root_item.roadmap_item_id) in assessments_by_key
+                    else {}
+                ),
+            },
+            "roadmap_items": [
+                {
+                    **record.to_json(),
+                    **(
+                        {"assessment": assessments_by_key[("roadmap_item", record.roadmap_item_id)]}
+                        if ("roadmap_item", record.roadmap_item_id) in assessments_by_key
+                        else {}
+                    ),
+                }
+                for record in self.roadmap_items
+            ],
             "roadmap_item_dependencies": [
                 record.to_json() for record in self.roadmap_item_dependencies
             ],
+            "work_item_assessments": [record.to_json() for record in self.work_item_assessments],
             "semantic_neighbors": [record.to_json() for record in self.semantic_neighbors],
             "semantic_neighbors_reason_code": self.semantic_neighbors_reason_code,
             "rendered_markdown": _render_roadmap_tree_markdown(
@@ -938,6 +1030,41 @@ def _bug_record_from_row(row: Mapping[str, Any]) -> OperatorBugRecord:
     return OperatorBugRecord(
         bug_id=_require_text(row.get("bug_id"), field_name="bug_id"),
         bug_key=_require_text(row.get("bug_key"), field_name="bug_key"),
+        title=_require_text(row.get("title"), field_name="title"),
+        status=_require_text(row.get("status"), field_name="status"),
+        severity=_require_text(row.get("severity"), field_name="severity"),
+        priority=_require_text(row.get("priority"), field_name="priority"),
+        summary=_require_text(row.get("summary"), field_name="summary"),
+        source_kind=_require_text(row.get("source_kind"), field_name="source_kind"),
+        discovered_in_run_id=_optional_text(
+            row.get("discovered_in_run_id"),
+            field_name="discovered_in_run_id",
+        ),
+        discovered_in_receipt_id=_optional_text(
+            row.get("discovered_in_receipt_id"),
+            field_name="discovered_in_receipt_id",
+        ),
+        owner_ref=_optional_text(row.get("owner_ref"), field_name="owner_ref"),
+        source_issue_id=_optional_text(
+            row.get("source_issue_id"),
+            field_name="source_issue_id",
+        ),
+        decision_ref=_optional_text(row.get("decision_ref"), field_name="decision_ref"),
+        resolution_summary=_optional_text(
+            row.get("resolution_summary"),
+            field_name="resolution_summary",
+        ),
+        opened_at=_require_datetime(row.get("opened_at"), field_name="opened_at"),
+        resolved_at=_optional_datetime(row.get("resolved_at"), field_name="resolved_at"),
+        created_at=_require_datetime(row.get("created_at"), field_name="created_at"),
+        updated_at=_require_datetime(row.get("updated_at"), field_name="updated_at"),
+    )
+
+
+def _issue_record_from_row(row: Mapping[str, Any]) -> OperatorIssueRecord:
+    return OperatorIssueRecord(
+        issue_id=_require_text(row.get("issue_id"), field_name="issue_id"),
+        issue_key=_require_text(row.get("issue_key"), field_name="issue_key"),
         title=_require_text(row.get("title"), field_name="title"),
         status=_require_text(row.get("status"), field_name="status"),
         severity=_require_text(row.get("severity"), field_name="severity"),
@@ -1136,31 +1263,24 @@ def _operator_query_instruction_authority(
         record.work_item_workflow_binding_id for record in snapshot.work_item_workflow_bindings
     )
     has_run_observability = bool(snapshot.workflow_run_packet_inspections)
+    packet_read_order = ["roadmap_truth", "queue_refs"]
+    if snapshot.issues:
+        packet_read_order.append("issues")
+    if has_run_observability:
+        packet_read_order.append("workflow_run_packet_inspections")
+    packet_read_order.extend(
+        [
+            "work_item_assessments",
+            "work_item_closeout_recommendations",
+            "bugs",
+            "cutover_gates",
+            "work_item_workflow_bindings",
+        ]
+    )
     return {
         "kind": "operator_query_instruction_authority",
         "authority": "surfaces.api.operator_read.query_operator_surface",
-        "packet_read_order": (
-            [
-                "roadmap_truth",
-                "queue_refs",
-                "workflow_run_packet_inspections",
-                "work_item_assessments",
-                "work_item_closeout_recommendations",
-                "bugs",
-                "cutover_gates",
-                "work_item_workflow_bindings",
-            ]
-            if has_run_observability
-            else [
-                "roadmap_truth",
-                "queue_refs",
-                "work_item_assessments",
-                "work_item_closeout_recommendations",
-                "bugs",
-                "cutover_gates",
-                "work_item_workflow_bindings",
-            ]
-        ),
+        "packet_read_order": packet_read_order,
         "roadmap_truth": {
             "authority": "roadmap_items",
             "roadmap_item_ids": list(roadmap_item_ids),
@@ -1336,6 +1456,7 @@ def _binding_record_from_row(row: Mapping[str, Any]) -> WorkItemWorkflowBindingR
         ),
         binding_kind=_require_text(row.get("binding_kind"), field_name="binding_kind"),
         binding_status=_require_text(row.get("binding_status"), field_name="binding_status"),
+        issue_id=_optional_text(row.get("issue_id"), field_name="issue_id"),
         roadmap_item_id=_optional_text(row.get("roadmap_item_id"), field_name="roadmap_item_id"),
         bug_id=_optional_text(row.get("bug_id"), field_name="bug_id"),
         cutover_gate_id=_optional_text(row.get("cutover_gate_id"), field_name="cutover_gate_id"),
@@ -1571,20 +1692,72 @@ class NativeOperatorQueryFrontdoor:
         source = env if env is not None else os.environ
         return source, resolve_native_instance(env=source)
 
+    async def _fetch_issue_records(
+        self,
+        *,
+        conn: _Connection,
+        issue_ids: tuple[str, ...] | None,
+    ) -> tuple[OperatorIssueRecord, ...]:
+        clauses: list[str] = []
+        args: list[object] = []
+        _row_clause(
+            column_name="issue_id",
+            values=issue_ids,
+            args=args,
+            clauses=clauses,
+        )
+        query = """
+            SELECT
+                issue_id,
+                issue_key,
+                title,
+                status,
+                severity,
+                priority,
+                summary,
+                source_kind,
+                discovered_in_run_id,
+                discovered_in_receipt_id,
+                owner_ref,
+                decision_ref,
+                resolution_summary,
+                opened_at,
+                resolved_at,
+                created_at,
+                updated_at
+            FROM issues
+        """
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        query += " ORDER BY opened_at DESC, created_at DESC, issue_id"
+        try:
+            rows = await conn.fetch(query, *args)
+        except asyncpg.PostgresError as exc:
+            raise NativeOperatorQueryError(
+                "operator_query.read_failed",
+                "failed to read issue rows",
+                details={"sqlstate": getattr(exc, "sqlstate", None)},
+            ) from exc
+        return tuple(_issue_record_from_row(row) for row in rows)
+
     async def _fetch_bug_records(
         self,
         *,
         conn: _Connection,
         bug_ids: tuple[str, ...] | None,
+        source_issue_ids: tuple[str, ...] | None = None,
     ) -> tuple[OperatorBugRecord, ...]:
         clauses: list[str] = []
         args: list[object] = []
-        _row_clause(
-            column_name="bug_id",
-            values=bug_ids,
-            args=args,
-            clauses=clauses,
-        )
+        source_clauses: list[str] = []
+        if bug_ids is not None:
+            args.append(list(bug_ids))
+            source_clauses.append(f"bug_id = ANY(${len(args)}::text[])")
+        if source_issue_ids:
+            args.append(list(source_issue_ids))
+            source_clauses.append(f"source_issue_id = ANY(${len(args)}::text[])")
+        if source_clauses:
+            clauses.append("(" + " OR ".join(source_clauses) + ")")
         query = """
             SELECT
                 bug_id,
@@ -1598,6 +1771,7 @@ class NativeOperatorQueryFrontdoor:
                 discovered_in_run_id,
                 discovered_in_receipt_id,
                 owner_ref,
+                source_issue_id,
                 decision_ref,
                 resolution_summary,
                 opened_at,
@@ -1709,7 +1883,15 @@ class NativeOperatorQueryFrontdoor:
         *,
         conn: _Connection,
         root_roadmap_item_id: str,
+        include_completed_nodes: bool = True,
     ) -> tuple[OperatorRoadmapItemRecord, ...]:
+        # DECISION: completed-node visibility is controlled explicitly by caller contract.
+        # SEE: runtime.cqrs.queries.roadmap_tree for the public surface that binds this
+        #      behavior to a query parameter instead of implicit filtering.
+        completed_filter = ""
+        args = [root_roadmap_item_id, f"{root_roadmap_item_id}.%"]
+        if not include_completed_nodes:
+            completed_filter = " AND (roadmap_item_id = $1 OR status != 'completed')"
         try:
             rows = await conn.fetch(
                 """
@@ -1732,11 +1914,10 @@ class NativeOperatorQueryFrontdoor:
                     created_at,
                     updated_at
                 FROM roadmap_items
-                WHERE roadmap_item_id = $1
-                   OR roadmap_item_id LIKE $2
-                """,
-                root_roadmap_item_id,
-                f"{root_roadmap_item_id}.%",
+                WHERE (roadmap_item_id = $1 OR roadmap_item_id LIKE $2)
+                  {completed_filter}
+                """.format(completed_filter=completed_filter),
+                *args,
             )
         except asyncpg.PostgresError as exc:
             raise NativeOperatorQueryError(
@@ -1910,6 +2091,9 @@ class NativeOperatorQueryFrontdoor:
         conn: _Connection,
         work_item_workflow_binding_ids: tuple[str, ...] | None,
         workflow_run_ids: tuple[str, ...] | None,
+        issue_ids: tuple[str, ...] | None = None,
+        bug_ids: tuple[str, ...] | None = None,
+        roadmap_item_ids: tuple[str, ...] | None = None,
     ) -> tuple[WorkItemWorkflowBindingRecord, ...]:
         clauses: list[str] = []
         args: list[object] = []
@@ -1925,11 +2109,24 @@ class NativeOperatorQueryFrontdoor:
             args=args,
             clauses=clauses,
         )
+        source_clauses: list[str] = []
+        if issue_ids:
+            args.append(list(issue_ids))
+            source_clauses.append(f"issue_id = ANY(${len(args)}::text[])")
+        if bug_ids:
+            args.append(list(bug_ids))
+            source_clauses.append(f"bug_id = ANY(${len(args)}::text[])")
+        if roadmap_item_ids:
+            args.append(list(roadmap_item_ids))
+            source_clauses.append(f"roadmap_item_id = ANY(${len(args)}::text[])")
+        if source_clauses:
+            clauses.append("(" + " OR ".join(source_clauses) + ")")
         query = """
             SELECT
                 work_item_workflow_binding_id,
                 binding_kind,
                 binding_status,
+                issue_id,
                 roadmap_item_id,
                 bug_id,
                 cutover_gate_id,
@@ -1953,6 +2150,64 @@ class NativeOperatorQueryFrontdoor:
                 details={"sqlstate": getattr(exc, "sqlstate", None)},
             ) from exc
         return tuple(_binding_record_from_row(row) for row in rows)
+
+    async def _fetch_workflow_run_activity(
+        self,
+        *,
+        conn: _Connection,
+        workflow_run_ids: tuple[str, ...] | None,
+    ) -> dict[str, dict[str, Any]]:
+        if not workflow_run_ids:
+            return {}
+        try:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    wr.run_id AS workflow_run_id,
+                    wr.current_state,
+                    wr.started_at,
+                    wr.finished_at,
+                    GREATEST(
+                        wr.requested_at,
+                        COALESCE(wr.admitted_at, wr.requested_at),
+                        COALESCE(wr.started_at, wr.requested_at),
+                        COALESCE(wr.finished_at, wr.requested_at),
+                        COALESCE(MAX(wj.created_at), wr.requested_at),
+                        COALESCE(MAX(wj.claimed_at), wr.requested_at),
+                        COALESCE(MAX(wj.started_at), wr.requested_at),
+                        COALESCE(MAX(wj.finished_at), wr.requested_at),
+                        COALESCE(MAX(wj.heartbeat_at), wr.requested_at)
+                    ) AS last_touched_at
+                FROM workflow_runs AS wr
+                LEFT JOIN workflow_jobs AS wj
+                    ON wj.run_id = wr.run_id
+                WHERE wr.run_id = ANY($1::text[])
+                GROUP BY
+                    wr.run_id,
+                    wr.current_state,
+                    wr.requested_at,
+                    wr.admitted_at,
+                    wr.started_at,
+                    wr.finished_at
+                """,
+                list(workflow_run_ids),
+            )
+        except asyncpg.PostgresError as exc:
+            raise NativeOperatorQueryError(
+                "operator_query.read_failed",
+                "failed to read workflow run activity",
+                details={"sqlstate": getattr(exc, "sqlstate", None)},
+            ) from exc
+        return {
+            str(row["workflow_run_id"]): {
+                "workflow_run_id": str(row["workflow_run_id"]),
+                "current_state": str(row["current_state"]),
+                "started_at": row["started_at"],
+                "finished_at": row["finished_at"],
+                "last_touched_at": row["last_touched_at"],
+            }
+            for row in rows
+        }
 
     @staticmethod
     def _prefetched_binding_records(
@@ -2098,6 +2353,7 @@ class NativeOperatorQueryFrontdoor:
         *,
         env: Mapping[str, str] | None,
         as_of: datetime,
+        issue_ids: tuple[str, ...] | None,
         bug_ids: tuple[str, ...] | None,
         roadmap_item_ids: tuple[str, ...] | None,
         cutover_gate_ids: tuple[str, ...] | None,
@@ -2110,12 +2366,37 @@ class NativeOperatorQueryFrontdoor:
         if conn is None:
             conn = await self.connect_database(env)
         try:
+            issues: tuple[OperatorIssueRecord, ...] = ()
+            assessment_issues: tuple[OperatorIssueRecord, ...] = ()
+            if issue_ids is None:
+                assessment_issue_ids = ()
+            else:
+                assessment_issue_ids = tuple(dict.fromkeys(issue_ids))
+                assessment_issues = await self._fetch_issue_records(
+                    conn=conn,
+                    issue_ids=assessment_issue_ids,
+                )
+                requested_issue_ids = set(issue_ids)
+                issues = tuple(
+                    record for record in assessment_issues if record.issue_id in requested_issue_ids
+                )
             roadmap_items = await self._fetch_roadmap_item_records(
                 conn=conn,
                 roadmap_item_ids=roadmap_item_ids,
             )
             if bug_ids is None:
-                bugs = await self._fetch_bug_records(conn=conn, bug_ids=None)
+                bugs = await self._fetch_bug_records(
+                    conn=conn,
+                    bug_ids=tuple(
+                        record.source_bug_id
+                        for record in roadmap_items
+                        if record.source_bug_id is not None
+                    )
+                    or None,
+                    source_issue_ids=assessment_issue_ids or None,
+                )
+                if not bugs and not roadmap_items and not assessment_issue_ids:
+                    bugs = await self._fetch_bug_records(conn=conn, bug_ids=None)
                 assessment_bug_ids = tuple(
                     dict.fromkeys(
                         (
@@ -2145,10 +2426,32 @@ class NativeOperatorQueryFrontdoor:
                 assessment_bugs = await self._fetch_bug_records(
                     conn=conn,
                     bug_ids=assessment_bug_ids,
+                    source_issue_ids=assessment_issue_ids or None,
                 )
                 requested_bug_ids = set(bug_ids)
                 bugs = tuple(
                     record for record in assessment_bugs if record.bug_id in requested_bug_ids
+                )
+            if issue_ids is not None:
+                assessment_issue_ids = tuple(
+                    dict.fromkeys(
+                        (
+                            *issue_ids,
+                            *(
+                                record.source_issue_id
+                                for record in assessment_bugs
+                                if record.source_issue_id is not None
+                            ),
+                        )
+                    )
+                )
+                assessment_issues = await self._fetch_issue_records(
+                    conn=conn,
+                    issue_ids=assessment_issue_ids,
+                )
+                requested_issue_ids = set(issue_ids)
+                issues = tuple(
+                    record for record in assessment_issues if record.issue_id in requested_issue_ids
                 )
             cutover_gates = await self._fetch_cutover_gate_records(
                 conn=conn,
@@ -2169,7 +2472,23 @@ class NativeOperatorQueryFrontdoor:
                     conn=conn,
                     work_item_workflow_binding_ids=work_item_workflow_binding_ids,
                     workflow_run_ids=workflow_run_ids,
+                    issue_ids=assessment_issue_ids,
+                    bug_ids=assessment_bug_ids,
+                    roadmap_item_ids=tuple(
+                        record.roadmap_item_id for record in roadmap_items
+                    ),
                 )
+            assessment_workflow_run_ids = tuple(
+                dict.fromkeys(
+                    binding.workflow_run_id
+                    for binding in work_item_workflow_bindings
+                    if binding.workflow_run_id is not None
+                )
+            )
+            workflow_run_activity = await self._fetch_workflow_run_activity(
+                conn=conn,
+                workflow_run_ids=assessment_workflow_run_ids,
+            )
             (
                 workflow_run_packet_inspections,
                 workflow_run_observability,
@@ -2182,11 +2501,24 @@ class NativeOperatorQueryFrontdoor:
                 bug_ids=assessment_bug_ids,
             )
             work_item_assessments = assess_work_items(
+                issues=[
+                    {
+                        "issue_id": record.issue_id,
+                        "updated_at": record.updated_at,
+                        "resolved_at": record.resolved_at,
+                    }
+                    for record in (
+                        issues
+                        if issue_ids is None
+                        else assessment_issues
+                    )
+                ],
                 bugs=[
                     {
                         "bug_id": record.bug_id,
                         "updated_at": record.updated_at,
                         "resolved_at": record.resolved_at,
+                        "source_issue_id": record.source_issue_id,
                     }
                     for record in assessment_bugs
                 ],
@@ -2202,9 +2534,25 @@ class NativeOperatorQueryFrontdoor:
                     for record in roadmap_items
                 ],
                 bug_evidence_links=bug_evidence_links,
+                work_item_workflow_bindings=tuple(
+                    {
+                        "work_item_workflow_binding_id": binding.work_item_workflow_binding_id,
+                        "binding_kind": binding.binding_kind,
+                        "binding_status": binding.binding_status,
+                        "issue_id": binding.issue_id,
+                        "roadmap_item_id": binding.roadmap_item_id,
+                        "bug_id": binding.bug_id,
+                        "workflow_run_id": binding.workflow_run_id,
+                        "created_at": binding.created_at,
+                        "updated_at": binding.updated_at,
+                    }
+                    for binding in work_item_workflow_bindings
+                ),
+                workflow_run_activity=workflow_run_activity,
                 as_of=as_of,
                 repo_root=_repo_root(),
             )
+            issue_id_filter = {record.issue_id for record in issues}
             bug_id_filter = {record.bug_id for record in bugs}
             roadmap_item_id_filter = {
                 record.roadmap_item_id for record in roadmap_items
@@ -2213,6 +2561,10 @@ class NativeOperatorQueryFrontdoor:
                 record
                 for record in work_item_assessments
                 if (
+                    record.item_kind == "issue"
+                    and record.item_id in issue_id_filter
+                )
+                or (
                     record.item_kind == "bug"
                     and record.item_id in bug_id_filter
                 )
@@ -2225,6 +2577,7 @@ class NativeOperatorQueryFrontdoor:
                 work_item_assessments
             )
             return NativeOperatorQuerySnapshot(
+                issues=issues,
                 bugs=bugs,
                 roadmap_items=roadmap_items,
                 cutover_gates=cutover_gates,
@@ -2232,6 +2585,7 @@ class NativeOperatorQueryFrontdoor:
                 work_item_assessments=work_item_assessments,
                 work_item_closeout_recommendations=work_item_closeout_recommendations,
                 as_of=as_of,
+                issue_ids=issue_ids,
                 bug_ids=bug_ids,
                 roadmap_item_ids=roadmap_item_ids,
                 cutover_gate_ids=cutover_gate_ids,
@@ -2249,6 +2603,7 @@ class NativeOperatorQueryFrontdoor:
         *,
         env: Mapping[str, str] | None = None,
         as_of: datetime | None = None,
+        issue_ids: Sequence[str] | None = None,
         bug_ids: Sequence[str] | None = None,
         roadmap_item_ids: Sequence[str] | None = None,
         cutover_gate_ids: Sequence[str] | None = None,
@@ -2271,6 +2626,7 @@ class NativeOperatorQueryFrontdoor:
                     reason_code="operator_query.invalid_as_of",
                 )
             ),
+            issue_ids=_normalize_ids(issue_ids, field_name="issue_ids"),
             bug_ids=_normalize_ids(bug_ids, field_name="bug_ids"),
             roadmap_item_ids=_normalize_ids(
                 roadmap_item_ids,
@@ -2307,12 +2663,14 @@ class NativeOperatorQueryFrontdoor:
         as_of: datetime,
         root_roadmap_item_id: str,
         semantic_neighbor_limit: int,
+        include_completed_nodes: bool = True,
     ) -> OperatorRoadmapTreeSnapshot:
         conn = await self.connect_database(env)
         try:
             roadmap_items = await self._fetch_roadmap_tree_records(
                 conn=conn,
                 root_roadmap_item_id=root_roadmap_item_id,
+                include_completed_nodes=include_completed_nodes,
             )
             root_item = next(
                 (
@@ -2333,6 +2691,78 @@ class NativeOperatorQueryFrontdoor:
                     record.roadmap_item_id for record in roadmap_items
                 ),
             )
+            source_bug_ids = tuple(
+                dict.fromkeys(
+                    record.source_bug_id
+                    for record in roadmap_items
+                    if record.source_bug_id is not None
+                )
+            )
+            bugs = await self._fetch_bug_records(
+                conn=conn,
+                bug_ids=source_bug_ids or None,
+            )
+            bug_evidence_links = await self._fetch_bug_evidence_links(
+                conn=conn,
+                bug_ids=source_bug_ids,
+            )
+            work_item_workflow_bindings = await self._fetch_binding_records(
+                conn=conn,
+                work_item_workflow_binding_ids=None,
+                workflow_run_ids=None,
+                bug_ids=source_bug_ids or None,
+                roadmap_item_ids=tuple(
+                    record.roadmap_item_id for record in roadmap_items
+                ),
+            )
+            workflow_run_activity = await self._fetch_workflow_run_activity(
+                conn=conn,
+                workflow_run_ids=tuple(
+                    dict.fromkeys(
+                        binding.workflow_run_id
+                        for binding in work_item_workflow_bindings
+                        if binding.workflow_run_id is not None
+                    )
+                ),
+            )
+            work_item_assessments = assess_work_items(
+                bugs=[
+                    {
+                        "bug_id": record.bug_id,
+                        "updated_at": record.updated_at,
+                        "resolved_at": record.resolved_at,
+                    }
+                    for record in bugs
+                ],
+                roadmap_items=[
+                    {
+                        "roadmap_item_id": record.roadmap_item_id,
+                        "source_bug_id": record.source_bug_id,
+                        "registry_paths": record.registry_paths,
+                        "updated_at": record.updated_at,
+                        "completed_at": record.completed_at,
+                        "target_end_at": record.target_end_at,
+                    }
+                    for record in roadmap_items
+                ],
+                bug_evidence_links=bug_evidence_links,
+                work_item_workflow_bindings=tuple(
+                    {
+                        "work_item_workflow_binding_id": binding.work_item_workflow_binding_id,
+                        "binding_kind": binding.binding_kind,
+                        "binding_status": binding.binding_status,
+                        "roadmap_item_id": binding.roadmap_item_id,
+                        "bug_id": binding.bug_id,
+                        "workflow_run_id": binding.workflow_run_id,
+                        "created_at": binding.created_at,
+                        "updated_at": binding.updated_at,
+                    }
+                    for binding in work_item_workflow_bindings
+                ),
+                workflow_run_activity=workflow_run_activity,
+                as_of=as_of,
+                repo_root=_repo_root(),
+            )
             semantic_neighbors, semantic_neighbors_reason_code = (
                 await self._fetch_roadmap_semantic_neighbors(
                     conn=conn,
@@ -2348,6 +2778,11 @@ class NativeOperatorQueryFrontdoor:
                 root_item=root_item,
                 roadmap_items=roadmap_items,
                 roadmap_item_dependencies=roadmap_item_dependencies,
+                work_item_assessments=tuple(
+                    record
+                    for record in work_item_assessments
+                    if record.item_kind == "roadmap_item"
+                ),
                 semantic_neighbors=semantic_neighbors,
                 semantic_neighbors_reason_code=semantic_neighbors_reason_code,
                 as_of=as_of,
@@ -2360,6 +2795,7 @@ class NativeOperatorQueryFrontdoor:
         *,
         env: Mapping[str, str] | None = None,
         as_of: datetime | None = None,
+        issue_ids: Sequence[str] | None = None,
         bug_ids: Sequence[str] | None = None,
         roadmap_item_ids: Sequence[str] | None = None,
         cutover_gate_ids: Sequence[str] | None = None,
@@ -2373,14 +2809,15 @@ class NativeOperatorQueryFrontdoor:
             self._query_operator_surface(
                 env=source,
                 as_of=(
-                    _now()
-                    if as_of is None
+                _now()
+                if as_of is None
                     else _normalize_as_of(
                         as_of,
                         error_type=NativeOperatorQueryError,
                         reason_code="operator_query.invalid_as_of",
-                    )
-                ),
+                )
+            ),
+                issue_ids=_normalize_ids(issue_ids, field_name="issue_ids"),
                 bug_ids=_normalize_ids(bug_ids, field_name="bug_ids"),
                 roadmap_item_ids=_normalize_ids(
                     roadmap_item_ids,
@@ -2408,11 +2845,125 @@ class NativeOperatorQueryFrontdoor:
             **snapshot.to_json(),
         }
 
+    async def _query_issue_backlog(
+        self,
+        *,
+        env: Mapping[str, str] | None,
+        as_of: datetime,
+        issue_ids: tuple[str, ...] | None,
+        status: str | None,
+        open_only: bool,
+        limit: int,
+    ) -> dict[str, Any]:
+        conn = await self.connect_database(env)
+        try:
+            issues = await self._fetch_issue_records(
+                conn=conn,
+                issue_ids=issue_ids,
+            )
+            filtered: list[OperatorIssueRecord] = []
+            for record in issues:
+                normalized_status = record.status.strip().lower()
+                if open_only and normalized_status == "resolved":
+                    continue
+                if status is not None and normalized_status != status:
+                    continue
+                filtered.append(record)
+
+            filtered.sort(
+                key=lambda record: (
+                    record.opened_at,
+                    record.created_at,
+                    record.issue_id,
+                ),
+                reverse=True,
+            )
+            limited = filtered[:limit]
+            counts = Counter(record.status for record in limited)
+            severity_counts = Counter(record.severity for record in limited)
+            return {
+                "kind": "issue_backlog",
+                "as_of": as_of.isoformat(),
+                "query": {
+                    "issue_ids": _json_list(issue_ids),
+                    "status": status,
+                    "open_only": open_only,
+                    "limit": limit,
+                },
+                "count": len(limited),
+                "total_issues": len(issues),
+                "issues": [record.to_json() for record in limited],
+                "counts": {
+                    "by_status": dict(sorted(counts.items(), key=lambda item: (-item[1], item[0]))),
+                    "by_severity": dict(sorted(severity_counts.items(), key=lambda item: (-item[1], item[0]))),
+                },
+            }
+        finally:
+            await conn.close()
+
+    def query_issue_backlog(
+        self,
+        *,
+        env: Mapping[str, str] | None = None,
+        as_of: datetime | None = None,
+        issue_ids: Sequence[str] | None = None,
+        status: str | None = None,
+        open_only: bool = True,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """Read canonical issue backlog rows through Postgres."""
+
+        source, instance = self._resolve_instance(env=env)
+        try:
+            issue_limit = int(limit)
+        except (TypeError, ValueError) as exc:
+            raise NativeOperatorQueryError(
+                "operator_query.invalid_request",
+                "limit must be an integer",
+                details={"field": "limit"},
+            ) from exc
+        if issue_limit < 1:
+            raise NativeOperatorQueryError(
+                "operator_query.invalid_request",
+                "limit must be >= 1",
+                details={"field": "limit"},
+            )
+
+        normalized_status = _optional_text(status, field_name="status")
+        if normalized_status is not None:
+            normalized_status = normalized_status.strip().lower()
+        snapshot = _run_async(
+            self._query_issue_backlog(
+                env=source,
+                as_of=(
+                    _now()
+                    if as_of is None
+                    else _normalize_as_of(
+                        as_of,
+                        error_type=NativeOperatorQueryError,
+                        reason_code="operator_query.invalid_as_of",
+                    )
+                ),
+                issue_ids=_normalize_ids(issue_ids, field_name="issue_ids"),
+                status=normalized_status,
+                open_only=bool(open_only) and normalized_status is None,
+                limit=issue_limit,
+            ),
+            error_type=NativeOperatorQueryError,
+            reason_code="operator_query.async_boundary_required",
+            message="native operator query sync entrypoints require a non-async call boundary",
+        )
+        return {
+            "native_instance": instance.to_contract(),
+            **snapshot,
+        }
+
     def query_roadmap_tree(
         self,
         *,
         root_roadmap_item_id: str,
         semantic_neighbor_limit: int = 5,
+        include_completed_nodes: bool = True,
         env: Mapping[str, str] | None = None,
         as_of: datetime | None = None,
     ) -> dict[str, Any]:
@@ -2451,6 +3002,7 @@ class NativeOperatorQueryFrontdoor:
                 ),
                 root_roadmap_item_id=root_id,
                 semantic_neighbor_limit=semantic_limit,
+                include_completed_nodes=include_completed_nodes,
             ),
             error_type=NativeOperatorQueryError,
             reason_code="operator_query.async_boundary_required",
@@ -2466,6 +3018,7 @@ _DEFAULT_NATIVE_OPERATOR_QUERY_FRONTDOOR = NativeOperatorQueryFrontdoor()
 
 # Publish the repo-local operator read methods directly so the public surface
 # is the control-plane object, not the legacy wrapper function.
+query_issue_backlog = _DEFAULT_NATIVE_OPERATOR_QUERY_FRONTDOOR.query_issue_backlog
 query_operator_surface = _DEFAULT_NATIVE_OPERATOR_QUERY_FRONTDOOR.query_operator_surface
 query_roadmap_tree = _DEFAULT_NATIVE_OPERATOR_QUERY_FRONTDOOR.query_roadmap_tree
 
@@ -2476,6 +3029,7 @@ __all__ = [
     "NativeOperatorQuerySnapshot",
     "OperatorBugRecord",
     "OperatorCutoverGateRecord",
+    "OperatorIssueRecord",
     "OperatorRoadmapDependencyRecord",
     "OperatorRoadmapSemanticNeighborRecord",
     "OperatorRoadmapItemRecord",
@@ -2484,6 +3038,7 @@ __all__ = [
     "OperatorWorkflowRunObservabilitySummary",
     "OperatorWorkItemCloseoutRecommendationRecord",
     "_repo_root",
+    "query_issue_backlog",
     "query_operator_surface",
     "query_roadmap_tree",
 ]

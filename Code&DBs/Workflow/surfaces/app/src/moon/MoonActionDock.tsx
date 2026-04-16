@@ -273,45 +273,13 @@ export function MoonActionDock({
       {success && <div className="moon-action__success">{success}</div>}
 
       {/* Draggable catalog — drag items onto chain nodes or edges */}
-      <div style={{ marginTop: 20 }}>
-        <div className="moon-action__surface-card">
-          <div className="moon-dock__section-label">Moon surface</div>
-          <div className="moon-action__surface-note">
-            Counts reflect first-class Moon primitives only, not every live registry lane.
-          </div>
-          <div className="moon-action__surface-grid">
-            <div className="moon-action__surface-stat">
-              <span className="moon-action__surface-value">{surfaceStats.stepTotal}</span>
-              <span className="moon-action__surface-label">step actions</span>
-            </div>
-            <div className="moon-action__surface-stat">
-              <span className="moon-action__surface-value">{surfaceStats.stepCore}</span>
-              <span className="moon-action__surface-label">core now</span>
-            </div>
-            <div className="moon-action__surface-stat">
-              <span className="moon-action__surface-value">{surfaceStats.stepOther}</span>
-              <span className="moon-action__surface-label">off main surface</span>
-            </div>
-            <div className="moon-action__surface-stat">
-              <span className="moon-action__surface-value">{surfaceStats.gateTotal}</span>
-              <span className="moon-action__surface-label">gate types</span>
-            </div>
-            <div className="moon-action__surface-stat">
-              <span className="moon-action__surface-value">{surfaceStats.gateCore}</span>
-              <span className="moon-action__surface-label">execute now</span>
-            </div>
-            <div className="moon-action__surface-stat">
-              <span className="moon-action__surface-value">{surfaceStats.gateOther}</span>
-              <span className="moon-action__surface-label">preview or removed</span>
-            </div>
-          </div>
-        </div>
+      <div style={{ marginTop: 24 }}>
         <MoonSurfaceReviewPanel
           catalogItems={catalogEnvelope.items}
           sourcePolicies={catalogEnvelope.sourcePolicies}
           onCatalogReload={handleCatalogReload}
         />
-        <div className="moon-dock__section-label">Catalog — drag onto a step or edge</div>
+        <div className="moon-dock__section-label">Catalog</div>
         <div className="moon-catalog__filters">
           {filterableFamilies.map(f => (
             <button
@@ -328,9 +296,8 @@ export function MoonActionDock({
           </div>
         )}
         {suggestedCatalogIds.length > 0 && !familyFilter && (
-          <div style={{ marginBottom: 20, padding: 12, background: 'rgba(108, 182, 255, 0.05)', borderRadius: 8, border: '1px solid rgba(108, 182, 255, 0.1)' }}>
-            <div className="moon-dock__section-label" style={{ color: '#6CB6FF' }}>★ Suggested next steps</div>
-            <div className="moon-dock__item-desc" style={{ marginBottom: 12 }}>Based on your selected step. Drag onto the canvas.</div>
+          <div style={{ marginBottom: 32 }}>
+            <div className="moon-dock__section-label">Suggested next</div>
             <div className="moon-dock__catalog-grid">
               {suggestedCatalogIds.map(id => {
                 const model = primaryCatalog.find(m => m.item.id === id || m.item.actionValue === id || m.item.id.includes(id));
@@ -343,38 +310,12 @@ export function MoonActionDock({
 
         {primaryCatalog.length > 0 && (
           <>
-            <div className="moon-dock__section-label">Core now</div>
-            <div className="moon-dock__item-desc">These are the curated primitives we trust in the main Moon surface.</div>
-            <div className="moon-dock__catalog-grid">
+            <div className="moon-dock__catalog-grid" style={{ marginTop: 12 }}>
               {primaryCatalog.map(({ item, truth, policy }) => renderCatalogButton(item, policy.detail, truth.badge, truth.category))}
             </div>
           </>
         )}
       </div>
-
-      {payload?.matched_building_blocks && payload.matched_building_blocks.length > 0 && (
-        <div style={{ marginTop: 12 }}>
-          <div className="moon-dock__section-label">
-            Composed from {payload.matched_building_blocks.length} building block{payload.matched_building_blocks.length !== 1 ? 's' : ''}
-            {payload.composition_plan?.confidence != null && (
-              <span style={{ marginLeft: 6, fontSize: 10, color: 'var(--moon-fg-muted)' }}>
-                ({Math.round(payload.composition_plan.confidence * 100)}% match)
-              </span>
-            )}
-          </div>
-          {payload.matched_building_blocks.slice(0, 5).map((block, i) => (
-            <div key={block.id || i} className="moon-dock__item" style={{ padding: '4px 10px' }}>
-              <div className="moon-dock__item-title" style={{ fontSize: 12 }}>{block.name}</div>
-              <div className="moon-dock__item-desc" style={{ fontSize: 10 }}>{block.category}</div>
-            </div>
-          ))}
-          {payload.matched_building_blocks.length > 5 && (
-            <div className="moon-dock__item-desc" style={{ padding: '2px 10px', fontSize: 10 }}>
-              +{payload.matched_building_blocks.length - 5} more
-            </div>
-          )}
-        </div>
-      )}
     </>
   );
 }

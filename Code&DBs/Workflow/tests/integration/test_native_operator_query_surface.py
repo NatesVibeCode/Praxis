@@ -221,6 +221,7 @@ async def _seed_native_operator_query_surface_test_data() -> dict[str, object]:
         await _bootstrap_workflow_migration(conn, "008_workflow_class_and_schedule_schema.sql")
         await _bootstrap_workflow_migration(conn, "009_bug_and_roadmap_authority.sql")
         await _bootstrap_workflow_migration(conn, "010_operator_control_authority.sql")
+        await _bootstrap_workflow_migration(conn, "132_issue_backlog_authority.sql")
 
         bug_id = await _seed_bug(conn, as_of=as_of, suffix=suffix)
         await _seed_bug_evidence_link(conn, as_of=as_of, suffix=suffix, bug_id=bug_id)

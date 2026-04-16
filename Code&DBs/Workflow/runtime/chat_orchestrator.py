@@ -28,6 +28,7 @@ from adapters.llm_client import (
     call_llm,
     call_llm_streaming,
 )
+from runtime.chat_store import ChatStore
 
 _log = logging.getLogger(__name__)
 
@@ -91,46 +92,30 @@ class ResolvedChatRoute:
 
 
 class ChatOrchestrator:
-    def __init__(self, pg_conn: Any, repo_root: str):
+    def __init__(self, pg_conn: Any, repo_root: str, chat_store: ChatStore | None = None):
         self._pg = pg_conn
         self._repo_root = repo_root
+        self._chat_store = chat_store or ChatStore(pg_conn)
 
     # ------------------------------------------------------------------
     # Conversation CRUD
     # ------------------------------------------------------------------
 
     def create_conversation(self, title: str | None = None) -> str:
-        cid = str(uuid.uuid4())
-        self._pg.execute(
-            "INSERT INTO conversations (id, title) VALUES ($1, $2)",
-            cid, title or "New conversation",
-        )
-        return cid
+        return self._chat_store.create_conversation(title)
 
     def get_conversation(self, conversation_id: str) -> dict[str, Any] | None:
-        rows = self._pg.execute(
-            "SELECT id, title, created_at, updated_at FROM conversations WHERE id = $1",
-            conversation_id,
-        )
-        if not rows:
+        conv = self._chat_store.get_conversation_summary(conversation_id)
+        if not conv:
             return None
 
-        conv = dict(rows[0])
-        msg_rows = self._pg.execute(
-            "SELECT id, role, content, tool_calls, tool_results, model_used, latency_ms, cost_usd, created_at "
-            "FROM conversation_messages WHERE conversation_id = $1 ORDER BY created_at",
-            conversation_id,
-        )
+        conv = _serialize_row(conv)
+        msg_rows = self._chat_store.list_conversation_messages(conversation_id)
         conv["messages"] = [_serialize_message(r) for r in msg_rows]
         return conv
 
     def list_conversations(self, limit: int = 20) -> list[dict[str, Any]]:
-        rows = self._pg.execute(
-            "SELECT c.id, c.title, c.created_at, c.updated_at, "
-            "(SELECT COUNT(*) FROM conversation_messages WHERE conversation_id = c.id) as message_count "
-            "FROM conversations c ORDER BY c.updated_at DESC LIMIT $1",
-            limit,
-        )
+        rows = self._chat_store.list_conversations(limit=limit)
         return [_serialize_row(r) for r in rows]
 
     # ------------------------------------------------------------------
@@ -172,10 +157,7 @@ class ChatOrchestrator:
                 cost_usd=0.0,
             )
             self._auto_title(conversation_id, user_content)
-            self._pg.execute(
-                "UPDATE conversations SET updated_at = NOW() WHERE id = $1",
-                conversation_id,
-            )
+            self._chat_store.touch_updated_at(conversation_id)
             return {
                 "message_id": msg_id,
                 "content": assistant_content,
@@ -251,10 +233,7 @@ class ChatOrchestrator:
             self._auto_title(conversation_id, user_content)
 
             # Update conversation timestamp
-            self._pg.execute(
-                "UPDATE conversations SET updated_at = NOW() WHERE id = $1",
-                conversation_id,
-            )
+            self._chat_store.touch_updated_at(conversation_id)
 
             return {
                 "message_id": msg_id,
@@ -310,7 +289,7 @@ class ChatOrchestrator:
                 latency_ms=latency_ms,
                 cost_usd=0.0,
             )
-            self._pg.execute("UPDATE conversations SET updated_at = NOW() WHERE id = $1", conversation_id)
+            self._chat_store.touch_updated_at(conversation_id)
             yield {"event": "text_delta", "data": {"text": assistant_content}}
             yield {"event": "done", "data": {"message_id": msg_id, "model_used": model_used, "tool_results_count": 0}}
             return
@@ -401,7 +380,7 @@ class ChatOrchestrator:
             model_used=f"{provider}/{model}",
         )
 
-        self._pg.execute("UPDATE conversations SET updated_at = NOW() WHERE id = $1", conversation_id)
+        self._chat_store.touch_updated_at(conversation_id)
 
         yield {"event": "done", "data": {
             "message_id": msg_id,
@@ -425,14 +404,16 @@ class ChatOrchestrator:
         latency_ms: int | None = None,
         cost_usd: float | None = None,
     ) -> str:
-        msg_id = str(uuid.uuid4())
-        self._pg.execute(
-            "INSERT INTO conversation_messages (id, conversation_id, role, content, tool_calls, tool_results, model_used, latency_ms, cost_usd) "
-            "VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9)",
-            msg_id, conversation_id, role, content,
-            tool_calls, tool_results, model_used, latency_ms, cost_usd,
+        return self._chat_store.append_message(
+            conversation_id=conversation_id,
+            role=role,
+            content=content,
+            tool_calls=tool_calls,
+            tool_results=tool_results,
+            model_used=model_used,
+            latency_ms=latency_ms,
+            cost_usd=cost_usd,
         )
-        return msg_id
 
     def _estimate_cost(self, usage: dict[str, int], model: str) -> float:
         """Estimate cost in USD from token usage."""
@@ -443,21 +424,15 @@ class ChatOrchestrator:
 
     def _check_cost_ceiling(self, conversation_id: str) -> float:
         """Return cumulative cost. Raises if over ceiling."""
-        rows = self._pg.execute(
-            "SELECT COALESCE(SUM(cost_usd), 0) as total FROM conversation_messages WHERE conversation_id = $1",
-            conversation_id,
-        )
-        total = float(rows[0]["total"]) if rows else 0.0
+        total = self._chat_store.get_conversation_cost(conversation_id)
         if total >= _MAX_CONVERSATION_COST_USD:
             raise RuntimeError(f"Conversation cost ceiling reached (${total:.2f} / ${_MAX_CONVERSATION_COST_USD:.2f}). Start a new conversation.")
         return total
 
     def _auto_title(self, conversation_id: str, user_content: str) -> None:
         """Auto-title conversation from first user message if still 'New conversation'."""
-        rows = self._pg.execute(
-            "SELECT title FROM conversations WHERE id = $1", conversation_id,
-        )
-        if not rows or rows[0]["title"] not in ("New conversation", None, ""):
+        title = self._chat_store.get_title(conversation_id)
+        if title not in ("New conversation", None, ""):
             return
 
         # Generate title: first meaningful words, max 40 chars
@@ -469,10 +444,7 @@ class ChatOrchestrator:
             title = title[:37] + "..."
         title = title[0].upper() + title[1:] if title else "Conversation"
 
-        self._pg.execute(
-            "UPDATE conversations SET title = $1 WHERE id = $2",
-            title, conversation_id,
-        )
+        self._chat_store.update_title(conversation_id, title)
 
     def _load_history(
         self,
@@ -480,11 +452,7 @@ class ChatOrchestrator:
         selection_context: list[dict] | None = None,
     ) -> list[dict[str, Any]]:
         """Load conversation messages, token-budgeted."""
-        rows = self._pg.execute(
-            "SELECT role, content, tool_calls, tool_results FROM conversation_messages "
-            "WHERE conversation_id = $1 ORDER BY created_at",
-            conversation_id,
-        )
+        rows = self._chat_store.list_conversation_messages(conversation_id)
 
         messages: list[dict[str, Any]] = []
         total_chars = 0

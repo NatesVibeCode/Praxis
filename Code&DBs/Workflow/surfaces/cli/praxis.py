@@ -1,13 +1,9 @@
 """Praxis root CLI with explicit namespaces."""
 
 from __future__ import annotations
-
-import os
 import sys
 from difflib import SequenceMatcher
 from typing import TextIO
-
-os.environ.setdefault("PRAXIS_DISABLE_STARTUP_WIRING", "1")
 
 from surfaces.cli.commands.authority import _reconcile_command, _reload_command
 from surfaces.cli.commands.praxis_authoring import (
@@ -20,7 +16,10 @@ from surfaces.cli.commands.praxis_authoring import (
     _page_command,
     _registry_command_passthrough,
 )
-from surfaces.cli.main import main as workflow_main
+def _workflow_main() -> callable:
+    from surfaces.cli.main import main as workflow_main
+
+    return workflow_main
 
 
 def _usage() -> str:
@@ -103,7 +102,7 @@ def main(argv: list[str] | None = None, *, stdout: TextIO | None = None) -> int:
     tail = args[1:]
 
     if namespace == "workflow":
-        return workflow_main(["workflow", *tail], stdout=stdout)
+        return _workflow_main()(["workflow", *tail], stdout=stdout)
     if namespace == "db":
         return _db_command(tail, stdout=stdout)
     if namespace == "registry":

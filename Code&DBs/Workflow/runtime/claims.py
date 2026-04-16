@@ -24,6 +24,7 @@ import json
 import asyncpg
 
 from storage.migrations import WorkflowMigrationError, workflow_migration_statements
+from runtime.execution.state_machine import validate_transition
 
 from .domain import RouteIdentity, RunState, RuntimeBoundaryError, RuntimeLifecycleError
 from registry.persona_authority import (
@@ -435,6 +436,7 @@ class ClaimLeaseProposalRuntime:
         transition: ClaimLeaseProposalTransitionRequest,
     ) -> ClaimLeaseProposalSnapshot:
         _transition_allowed(from_state=transition.from_state, to_state=transition.to_state)
+        validate_transition(transition)
         _require_utc(transition.occurred_at, field_name="occurred_at")
         _require_text(transition.reason_code, field_name="reason_code")
 
@@ -518,19 +520,26 @@ class ClaimLeaseProposalRuntime:
             terminal_reason_code = (
                 transition.reason_code if transition.to_state in _TERMINAL_STATES else None
             )
-            await conn.execute(
+            run_updated = await conn.execute(
                 """
                 UPDATE workflow_runs
                 SET current_state = $2,
                     terminal_reason_code = $3,
                     last_event_id = COALESCE($4, last_event_id)
                 WHERE run_id = $1
+                  AND current_state = $5
+                RETURNING run_id
                 """,
                 transition.run_id,
                 transition.to_state.value,
                 terminal_reason_code,
                 transition.event_id,
+                transition.from_state.value,
             )
+            if not run_updated:
+                raise RuntimeLifecycleError(
+                    "workflow_run state drifted during transition"
+                )
             await conn.execute(
                 """
                 UPDATE workflow_claim_lease_proposal_runtime

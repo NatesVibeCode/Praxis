@@ -30,11 +30,14 @@ from runtime.object_lifecycle import (
     create_object,
     create_object_type,
     delete_object,
+    delete_object_type,
+    get_object_type,
+    list_object_types,
+    upsert_object_type,
     update_object,
 )
 from runtime.file_storage import delete_file, get_file_content, list_files, save_file
 from runtime.payload_coercion import (
-    coerce_int as _safe_int_impl,
     coerce_isoformat as _isoformat,
     coerce_text as _text,
     json_list as _json_list,
@@ -59,16 +62,15 @@ from surfaces.api.catalog_authority import build_catalog_payload
 from storage.postgres.validators import PostgresWriteError
 from . import workflow_query_core as _workflow_query_core
 from ._surface_usage import record_api_route_usage as _record_api_route_usage
+from .._payload_contract import (
+    coerce_optional_text,
+    coerce_query_bool,
+    coerce_query_int,
+)
 from ._shared import (
     REPO_ROOT,
-    RouteEntry,
-    RouteMatcher,
     _ClientError,
     _bug_to_dict,
-    _exact,
-    _matches,
-    _prefix,
-    _prefix_suffix,
     _query_params,
     _read_json_body,
     _serialize,
@@ -134,26 +136,6 @@ _SOURCE_OPTION_SEEDS: tuple[dict[str, Any], ...] = (
     },
 )
 _DASHBOARD_SECTION_ORDER: tuple[str, ...] = ("live", "saved", "draft")
-def _prefix_single_segment(
-    path_prefix: str,
-    *,
-    excluded: set[str] | None = None,
-) -> RouteMatcher:
-    excluded_values = frozenset(excluded or ())
-
-    def _matches(candidate: str, *, prefix=path_prefix, excluded=excluded_values) -> bool:
-        if not candidate.startswith(prefix):
-            return False
-        suffix = candidate[len(prefix) :]
-        return bool(suffix) and "/" not in suffix and suffix not in excluded
-
-    return _matches
-
-
-def _workflow_build_path(candidate: str) -> bool:
-    return candidate.startswith("/api/workflows/") and "/build" in candidate[len("/api/workflows/") :]
-
-
 def _parse_bug_status(bt_mod, raw_status: object):
     if raw_status is None:
         return None
@@ -530,8 +512,7 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
 
 
 def _optional_text(value: Any) -> str | None:
-    text = str(value or "").strip()
-    return text or None
+    return coerce_optional_text(value, field_name="query_payload")
 
 
 def _workflow_dashboard_bucket(workflow: dict[str, Any]) -> str:
@@ -1415,7 +1396,12 @@ def _handle_workflows_runs_get(request: Any, path: str) -> None:
             return
 
         params = _query_params(request.path)
-        limit = int((params.get("limit") or ["20"])[0])
+        limit = coerce_query_int(
+            params.get("limit"),
+            field_name="limit",
+            default=20,
+            strict=True,
+        )
         runs = _fetch_workflow_runs(pg, workflow["name"], limit=limit)
         request._send_json(
             200,
@@ -1631,14 +1617,93 @@ def _handle_object_types_post(request: Any, path: str) -> None:
         return
 
     try:
+        if path == "/api/object-types":
+            type_id = body.get("type_id")
+            if type_id:
+                request._send_json(
+                    200,
+                    upsert_object_type(
+                        request.subsystems.get_pg_conn(),
+                        type_id=type_id,
+                        name=body.get("name"),
+                        description=body.get("description", ""),
+                        property_definitions=body.get("property_definitions", {}),
+                        icon=body.get("icon", ""),
+                    ),
+                )
+                return
+
+            request._send_json(
+                200,
+                create_object_type(
+                    request.subsystems.get_pg_conn(),
+                    name=body.get("name"),
+                    description=body.get("description", ""),
+                    property_definitions=body.get("property_definitions", {}),
+                    icon=body.get("icon", ""),
+                ),
+            )
+            return
+
+        request._send_json(404, {"error": f"Unknown object-type endpoint: {path}"})
+    except ObjectLifecycleBoundaryError as exc:
+        request._send_json(exc.status_code, {"error": str(exc)})
+    except Exception as exc:
+        request._send_json(500, {"error": str(exc)})
+
+
+def _handle_object_types_put(request: Any, path: str) -> None:
+    try:
+        body = _read_json_body(request)
+    except (json.JSONDecodeError, ValueError) as exc:
+        request._send_json(400, {"error": f"Invalid JSON: {exc}"})
+        return
+
+    if not path.startswith("/api/object-types/"):
+        request._send_json(404, {"error": f"Unknown object-type endpoint: {path}"})
+        return
+
+    type_id = path.split("/api/object-types/")[-1]
+    payload_type_id = _text(type_id or "")
+    if not payload_type_id:
+        request._send_json(400, {"error": "type_id is required"})
+        return
+
+    try:
         request._send_json(
             200,
-            create_object_type(
+            upsert_object_type(
                 request.subsystems.get_pg_conn(),
+                type_id=payload_type_id,
                 name=body.get("name"),
                 description=body.get("description", ""),
                 property_definitions=body.get("property_definitions", {}),
                 icon=body.get("icon", ""),
+            ),
+        )
+    except ObjectLifecycleBoundaryError as exc:
+        request._send_json(exc.status_code, {"error": str(exc)})
+    except Exception as exc:
+        request._send_json(500, {"error": str(exc)})
+
+
+def _handle_object_types_delete(request: Any, path: str) -> None:
+    try:
+        body = _read_json_body(request)
+    except (json.JSONDecodeError, ValueError) as exc:
+        request._send_json(400, {"error": f"Invalid JSON: {exc}"})
+        return
+
+    type_id = body.get("type_id")
+    if path.startswith("/api/object-types/"):
+        type_id = path.split("/api/object-types/")[-1] or type_id
+
+    try:
+        request._send_json(
+            200,
+            delete_object_type(
+                request.subsystems.get_pg_conn(),
+                type_id=type_id,
             ),
         )
     except ObjectLifecycleBoundaryError as exc:
@@ -1677,11 +1742,59 @@ def _handle_objects_post(request: Any, path: str) -> None:
             )
             return
 
+        request._send_json(404, {"error": f"Unknown objects endpoint: {path}"})
+    except ObjectLifecycleBoundaryError as exc:
+        request._send_json(exc.status_code, {"error": str(exc)})
+    except Exception as exc:
+        request._send_json(500, {"error": str(exc)})
+
+
+def _handle_objects_put(request: Any, path: str) -> None:
+    try:
+        body = _read_json_body(request)
+    except (json.JSONDecodeError, ValueError) as exc:
+        request._send_json(400, {"error": f"Invalid JSON: {exc}"})
+        return
+
+    object_id = body.get("object_id")
+    if path.startswith("/api/objects/"):
+        object_id = path.split("/api/objects/")[-1] or object_id
+    if not object_id:
+        request._send_json(400, {"error": "object_id is required"})
+        return
+
+    try:
+        request._send_json(
+            200,
+            update_object(
+                request.subsystems.get_pg_conn(),
+                object_id=object_id,
+                properties=body.get("properties", {}),
+            ),
+        )
+    except ObjectLifecycleBoundaryError as exc:
+        request._send_json(exc.status_code, {"error": str(exc)})
+    except Exception as exc:
+        request._send_json(500, {"error": str(exc)})
+
+
+def _handle_objects_delete(request: Any, path: str) -> None:
+    try:
+        body = _read_json_body(request)
+    except (json.JSONDecodeError, ValueError) as exc:
+        request._send_json(400, {"error": f"Invalid JSON: {exc}"})
+        return
+
+    object_id = body.get("object_id")
+    if path.startswith("/api/objects/"):
+        object_id = path.split("/api/objects/")[-1] or object_id
+
+    try:
         request._send_json(
             200,
             delete_object(
                 request.subsystems.get_pg_conn(),
-                object_id=body.get("object_id"),
+                object_id=object_id,
             ),
         )
     except ObjectLifecycleBoundaryError as exc:
@@ -1842,7 +1955,13 @@ def _handle_manifest_heads_get(request: Any, path: str) -> None:
         scope_ref = str((params.get("scope_ref") or [""])[0]).strip()
         manifest_type = str((params.get("manifest_type") or [""])[0]).strip()
         status = str((params.get("status") or [""])[0]).strip()
-        limit = _safe_int_impl((params.get("limit") or ["20"])[0], default=20, minimum=1, maximum=100)
+        limit = coerce_query_int(
+            params.get("limit"),
+            field_name="limit",
+            default=20,
+            minimum=1,
+            maximum=100,
+        )
         rows = _list_control_manifest_heads(
             pg,
             workspace_ref=workspace_ref or None,
@@ -1879,7 +1998,13 @@ def _handle_manifest_history_get(request: Any, path: str) -> None:
         scope_ref = str((params.get("scope_ref") or [""])[0]).strip()
         manifest_type = str((params.get("manifest_type") or [""])[0]).strip()
         status = str((params.get("status") or [""])[0]).strip()
-        limit = _safe_int_impl((params.get("limit") or ["20"])[0], default=20, minimum=1, maximum=100)
+        limit = coerce_query_int(
+            params.get("limit"),
+            field_name="limit",
+            default=20,
+            minimum=1,
+            maximum=100,
+        )
         if not workspace_ref or not scope_ref or not manifest_type:
             request._send_json(
                 400,
@@ -1925,7 +2050,13 @@ def _handle_manifests_get(request: Any, path: str) -> None:
         manifest_family = str((params.get("manifest_family") or [""])[0]).strip()
         manifest_type = str((params.get("manifest_type") or [""])[0]).strip()
         status = str((params.get("status") or [""])[0]).strip()
-        limit = _safe_int_impl((params.get("limit") or ["20"])[0], default=20, minimum=1, maximum=100)
+        limit = coerce_query_int(
+            params.get("limit"),
+            field_name="limit",
+            default=20,
+            minimum=1,
+            maximum=100,
+        )
 
         sql = (
             "SELECT id, name, description, status, manifest, updated_at "
@@ -2049,8 +2180,20 @@ def _handle_market_models_get(request: Any, path: str) -> None:
         family_filter = str((params.get("family") or [""])[0]).strip().lower()
         binding_filter = str((params.get("binding") or ["all"])[0]).strip().lower() or "all"
         sort_key = str((params.get("sort") or ["creator"])[0]).strip().lower() or "creator"
-        limit = _safe_int_impl((params.get("limit") or ["100"])[0], default=100, minimum=1, maximum=500)
-        offset = _safe_int_impl((params.get("offset") or ["0"])[0], default=0, minimum=0, maximum=10000)
+        limit = coerce_query_int(
+            params.get("limit"),
+            field_name="limit",
+            default=100,
+            minimum=1,
+            maximum=500,
+        )
+        offset = coerce_query_int(
+            params.get("offset"),
+            field_name="offset",
+            default=0,
+            minimum=0,
+            maximum=10000,
+        )
         market_rows = pg.execute(
             """
             SELECT market_model_ref, source_slug, modality, source_model_id,
@@ -2460,6 +2603,67 @@ def _handle_intent_analyze_get(request: Any, path: str) -> None:
             or_query,
         )
 
+        analysis = {
+            "source": "fallback",
+            "matches": {
+                "ui_components": [],
+                "calculations": [],
+                "workflows": [],
+                "coverage_score": 0.0,
+                "gaps": [],
+                "total_count": 0,
+            },
+            "composition": {},
+        }
+        try:
+            matcher = request.subsystems.get_intent_matcher()
+            match_result = matcher.match(intent, limit=5)
+            match_plan = matcher.compose(intent, match_result)
+
+            def _serialize_match(item: Any) -> dict[str, Any]:
+                return {
+                    "id": getattr(item, "id", ""),
+                    "name": getattr(item, "name", ""),
+                    "description": getattr(item, "description", ""),
+                    "category": getattr(item, "category", ""),
+                    "rank": float(getattr(item, "rank", 0.0) or 0.0),
+                    "metadata": dict(getattr(item, "metadata", {}) or {}),
+                }
+
+            ui_components = [_serialize_match(item) for item in getattr(match_result, "ui_components", ()) or ()]
+            calculations = [_serialize_match(item) for item in getattr(match_result, "calculations", ()) or ()]
+            workflows = [_serialize_match(item) for item in getattr(match_result, "workflows", ()) or ()]
+            analysis = {
+                "source": "intent_matcher",
+                "matches": {
+                    "ui_components": ui_components,
+                    "calculations": calculations,
+                    "workflows": workflows,
+                    "coverage_score": float(getattr(match_result, "coverage_score", 0.0) or 0.0),
+                    "gaps": [str(gap) for gap in getattr(match_result, "gaps", ()) or () if str(gap).strip()],
+                    "total_count": len(ui_components) + len(calculations) + len(workflows),
+                },
+                "composition": {
+                    "components": list(getattr(match_plan, "components", ()) or ()),
+                    "calculations": list(getattr(match_plan, "calculations", ()) or ()),
+                    "workflows": list(getattr(match_plan, "workflows", ()) or ()),
+                    "bindings": [
+                        {
+                            "source_id": getattr(binding, "source_id", ""),
+                            "source_type": getattr(binding, "source_type", ""),
+                            "target_id": getattr(binding, "target_id", ""),
+                            "target_type": getattr(binding, "target_type", ""),
+                            "rationale": getattr(binding, "rationale", ""),
+                        }
+                        for binding in getattr(match_plan, "bindings", ()) or ()
+                    ],
+                    "layout_suggestion": str(getattr(match_plan, "layout_suggestion", "") or ""),
+                    "confidence": float(getattr(match_plan, "confidence", 0.0) or 0.0),
+                },
+            }
+        except Exception as exc:
+            logger.info("IntentMatcher unavailable for intent analysis: %s", exc)
+
         request._send_json(
             200,
             {
@@ -2483,6 +2687,7 @@ def _handle_intent_analyze_get(request: Any, path: str) -> None:
                     }
                     for row in integrations
                 ],
+                "analysis": analysis,
                 "can_generate": len(templates) == 0,
             },
         )
@@ -2559,14 +2764,28 @@ def _handle_search_get(request: Any, path: str) -> None:
 def _handle_bugs_get(request: Any, path: str) -> None:
     try:
         params = _query_params(request.path)
-        limit_raw = (params.get("limit") or ["50"])[0]
-        replay_ready_only = (params.get("replay_ready_only") or ["0"])[0] in {"1", "true", "yes"}
-        open_only = (params.get("open_only") or ["0"])[0] in {"1", "true", "yes"}
+        limit = coerce_query_int(
+            params.get("limit"),
+            field_name="limit",
+            default=50,
+            minimum=1,
+            strict=True,
+        )
+        replay_ready_only = coerce_query_bool(
+            params.get("replay_ready_only"),
+            field_name="replay_ready_only",
+            default=False,
+        )
+        open_only = coerce_query_bool(
+            params.get("open_only"),
+            field_name="open_only",
+            default=False,
+        )
         result = _handle_bugs(
             request.subsystems,
             {
                 "action": "list",
-                "limit": max(1, int(limit_raw or 50)),
+                "limit": limit,
                 "replay_ready_only": replay_ready_only,
                 "open_only": open_only,
             },
@@ -2579,13 +2798,23 @@ def _handle_bugs_get(request: Any, path: str) -> None:
 def _handle_bugs_replay_ready_get(request: Any, path: str) -> None:
     try:
         params = _query_params(request.path)
-        limit_raw = (params.get("limit") or ["50"])[0]
-        refresh_backfill = (params.get("refresh_backfill") or ["1"])[0] not in {"0", "false", "no"}
+        limit = coerce_query_int(
+            params.get("limit"),
+            field_name="limit",
+            default=50,
+            minimum=1,
+            strict=True,
+        )
+        refresh_backfill = coerce_query_bool(
+            params.get("refresh_backfill"),
+            field_name="refresh_backfill",
+            default=True,
+        )
         result = _workflow_query_core.handle_operator_view(
             request.subsystems,
             {
                 "view": "replay_ready_bugs",
-                "limit": max(1, int(limit_raw or 50)),
+                "limit": limit,
                 "refresh_backfill": refresh_backfill,
             },
         )
@@ -2690,12 +2919,35 @@ def _handle_documents_get(request: Any, path: str) -> None:
 
 def _handle_object_types_get(request: Any, path: str) -> None:
     try:
-        pg = request.subsystems.get_pg_conn()
-        rows = pg.execute(
-            "SELECT type_id, name, description, icon, property_definitions, created_at "
-            "FROM object_types ORDER BY name"
-        )
-        request._send_json(200, {"types": [dict(row) for row in rows], "count": len(rows)})
+        if path == "/api/object-types":
+            params = _query_params(request.path)
+            query = (params.get("q") or [""])[0].strip()
+            limit = coerce_query_int(
+                params.get("limit"),
+                field_name="limit",
+                default=100,
+                minimum=1,
+                strict=True,
+            )
+            request._send_json(
+                200,
+                list_object_types(
+                    request.subsystems.get_pg_conn(),
+                    query=query,
+                    limit=limit,
+                ),
+            )
+            return
+
+        if path.startswith("/api/object-types/"):
+            type_id = path.split("/api/object-types/")[-1]
+            request._send_json(
+                200,
+                {"type": get_object_type(request.subsystems.get_pg_conn(), type_id=type_id)},
+            )
+            return
+
+        request._send_json(404, {"error": f"Unknown object-types endpoint: {path}"})
     except Exception as exc:
         request._send_json(500, {"error": str(exc)})
 
@@ -2710,7 +2962,13 @@ def _handle_objects_get(request: Any, path: str) -> None:
                 return
             status_filter = (params.get("status") or ["active"])[0].strip()
             query = (params.get("q") or [""])[0].strip()
-            limit = int((params.get("limit") or ["100"])[0])
+            limit = coerce_query_int(
+                params.get("limit"),
+                field_name="limit",
+                default=100,
+                minimum=1,
+                strict=True,
+            )
             pg = request.subsystems.get_pg_conn()
             if query:
                 rows = pg.execute(
@@ -2883,7 +3141,13 @@ def _handle_runs_recent_get(request: Any, path: str) -> None:
     """GET /api/runs/recent — recent workflow runs from Postgres."""
     try:
         pg = request.subsystems.get_pg_conn()
-        limit = _safe_int_impl(_query_params(request.path).get("limit"), default=20, min_value=1, max_value=100)
+        limit = coerce_query_int(
+            _query_params(request.path).get("limit"),
+            field_name="limit",
+            default=20,
+            min_value=1,
+            max_value=100,
+        )
         request._send_json(200, _load_recent_runs_snapshot(pg, limit=limit))
     except Exception as exc:
         request._send_json(500, {"error": str(exc)})
@@ -3222,106 +3486,3 @@ def _handle_build_stream(request: Any, path: str) -> None:
             request._send_json(500, {"error": str(exc)})
         except Exception:
             pass
-
-
-QUERY_POST_ROUTES: list[RouteEntry] = [
-    (_exact("/query"), _handle_query_post),
-    (_exact("/api/catalog/review-decisions"), _handle_catalog_review_decisions_post),
-    (
-        lambda candidate: candidate == "/api/documents"
-        or (
-            candidate.startswith("/api/documents/")
-            and candidate.endswith("/attach")
-        ),
-        _handle_documents_post,
-    ),
-    (_exact("/api/files"), _handle_files_post),
-    (_exact("/api/object-types"), _handle_object_types_post),
-    (
-        lambda candidate: candidate in {
-            "/api/objects",
-        },
-        _handle_objects_post,
-    ),
-    (_exact("/api/workflows"), _handle_workflows_post),
-    (_exact("/api/workflow-triggers"), _handle_workflow_triggers_post),
-    (_prefix("/api/trigger/"), _handle_trigger_post),
-]
-
-QUERY_PUT_ROUTES: list[RouteEntry] = [
-    (_exact("/api/objects/update"), _handle_objects_post),
-    (
-        _prefix_single_segment("/api/workflows/", excluded={"run", "delete"}),
-        _handle_workflows_post,
-    ),
-    (_prefix_single_segment("/api/workflow-triggers/"), _handle_workflow_triggers_post),
-]
-
-QUERY_GET_ROUTES: list[RouteEntry] = [
-    (_prefix_suffix("/api/workflows/", "/build/stream"), _handle_build_stream),
-    (_exact("/api/dashboard"), _handle_dashboard_get),
-    (_exact("/api/leaderboard"), _handle_leaderboard_get),
-    (_exact("/api/status"), _handle_status_get),
-    (_exact("/api/runs/recent"), _handle_runs_recent_get),
-    (_exact("/api/references"), _handle_references_get),
-    (_exact("/api/source-options"), _handle_source_options_get),
-    (_exact("/api/manifest-heads"), _handle_manifest_heads_get),
-    (_exact("/api/manifests"), _handle_manifests_get),
-    (_exact("/api/manifests/history"), _handle_manifest_history_get),
-    (_exact("/api/templates"), _handle_templates_get),
-    (_exact("/api/models"), _handle_models_get),
-    (_exact("/api/models/market"), _handle_market_models_get),
-    (_exact("/api/integrations"), _handle_integrations_get),
-    (_exact("/api/catalog"), _handle_catalog_get),
-    (_exact("/api/catalog/review-decisions"), _handle_catalog_review_decisions_get),
-    (_exact("/api/intent/analyze"), _handle_intent_analyze_get),
-    (_exact("/api/search"), _handle_search_get),
-    (_exact("/api/bugs/replay-ready"), _handle_bugs_replay_ready_get),
-    (_exact("/api/bugs"), _handle_bugs_get),
-    (_exact("/api/registries/search"), _handle_registries_search_get),
-    (_prefix_suffix("/api/files/", "/content"), _handle_files_get),
-    (_exact("/api/files"), _handle_files_get),
-    (_exact("/api/documents"), _handle_documents_get),
-    (_exact("/api/object-types"), _handle_object_types_get),
-    (_exact("/api/objects"), _handle_objects_get),
-    (_prefix("/api/objects/"), _handle_objects_get),
-    (_exact("/api/workflows"), _handle_workflows_get),
-    (_workflow_build_path, _handle_workflow_build_get),
-    (_prefix_suffix("/api/workflows/", "/runs"), _handle_workflows_runs_get),
-    (_prefix("/api/workflows/"), _handle_workflows_get),
-    (_exact("/api/workflow-triggers"), _handle_workflow_triggers_get),
-]
-
-QUERY_DELETE_ROUTES: list[RouteEntry] = [
-    (_exact("/api/objects/delete"), _handle_objects_post),
-    (_prefix_single_segment("/api/workflows/delete/"), _handle_workflow_delete),
-    (
-        lambda candidate: candidate.startswith("/api/files/")
-        and not candidate.endswith("/content"),
-        _handle_files_delete,
-    ),
-]
-
-QUERY_ROUTES: dict[str, object] = {
-    "/bugs": _handle_bugs,
-    "/recall": _handle_recall,
-    "/ingest": _handle_ingest,
-    "/graph": _handle_graph,
-    "/receipts": _handle_receipts,
-    "/constraints": _handle_constraints,
-    "/friction": _handle_friction,
-    "/heal": _handle_heal,
-    "/artifacts": _handle_artifacts,
-    "/decompose": _handle_decompose,
-    "/research": _handle_research,
-    "/operator_view": _handle_operator_view,
-}
-
-
-__all__ = [
-    "QUERY_DELETE_ROUTES",
-    "QUERY_GET_ROUTES",
-    "QUERY_PUT_ROUTES",
-    "QUERY_POST_ROUTES",
-    "QUERY_ROUTES",
-]
