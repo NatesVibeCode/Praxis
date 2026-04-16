@@ -388,8 +388,16 @@ async def _exercise_fork_ownership_execution_gate_rejects_inventory_fallback_unt
         await conn.execute(f'SET search_path TO "{schema_name}"')
         await bootstrap_control_plane_schema(conn)
         await runtime.bootstrap_schema(conn)
+        await _bootstrap_workflow_migration(
+            conn,
+            "135_claim_lifecycle_transition_authority.sql",
+        )
         await _bootstrap_workflow_migration(conn, "006_platform_authority_schema.sql")
         await _bootstrap_workflow_migration(conn, "011_runtime_breadth_authority.sql")
+        await _bootstrap_workflow_migration(
+            conn,
+            "133_fork_worktree_binding_materialization.sql",
+        )
 
         submission = _submission(suffix=suffix)
         route = _route_identity(submission=submission, suffix=suffix)

@@ -4,10 +4,12 @@ import argparse
 import json
 import os
 import subprocess
+from io import StringIO
 from pathlib import Path
 
 import pytest
 
+from surfaces.cli.commands import workflow as workflow_commands
 from surfaces.cli import workflow_cli
 
 
@@ -292,30 +294,122 @@ def test_cmd_run_renders_live_snapshot_metrics(
     assert "Usage: cost=$0.0123 | tokens_in=12 | tokens_out=34" in rendered
 
 
-def test_workflow_sh_launch_failure_does_not_claim_result_file(
+def test_detached_launch_failure_does_not_claim_result_file(
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     spec_path = _write_spec(tmp_path)
-    fake_python = tmp_path / "fake_python"
-    fake_python.write_text("#!/usr/bin/env bash\nexit 1\n", encoding="utf-8")
-    fake_python.chmod(0o755)
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    stdout = StringIO()
+    captured: dict[str, object] = {}
 
-    repo_root = Path(__file__).resolve().parents[4]
-    env = os.environ.copy()
-    env["PYTHON_BIN"] = str(fake_python)
+    class _DeadProcess:
+        pid = 4242
 
-    result = subprocess.run(
-        [str(repo_root / "scripts" / "workflow.sh"), "run", spec_path],
-        cwd=str(repo_root),
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
+        def poll(self) -> int:
+            return 1
+
+    def _fake_popen(command, **kwargs):
+        captured["command"] = list(command)
+        captured["env"] = dict(kwargs["env"])
+        return _DeadProcess()
+
+    monkeypatch.setattr(workflow_commands, "cli_repo_root", lambda: repo_root)
+    monkeypatch.setattr(
+        workflow_commands,
+        "workflow_database_authority_for_repo",
+        lambda _repo_root, env=None: workflow_commands.SimpleNamespace(
+            database_url="postgresql://127.0.0.1:5432/praxis",
+            source="docker",
+        ),
+    )
+    monkeypatch.setattr(workflow_commands.subprocess, "Popen", _fake_popen)
+    monkeypatch.setattr(workflow_commands.time, "sleep", lambda _seconds: None)
+
+    result = workflow_commands._launch_detached_frontdoor(
+        command_name="run",
+        args=[spec_path],
+        stdout=stdout,
+        result_file_base="workflow_run_result",
+        success_prefix="Workflow submitted",
+        emit_parent=False,
     )
 
-    assert result.returncode == 1
-    assert "Workflow run process exited before durable submission completed." in result.stdout
-    assert "Result file:" not in result.stdout
+    assert result == 1
+    assert "Workflow run process exited before durable submission completed." in stdout.getvalue()
+    assert "DB authority source: docker" in stdout.getvalue()
+    assert "No result file was written." in stdout.getvalue()
+    assert "Result file:" not in stdout.getvalue()
+    assert captured["command"][:4] == [workflow_commands.sys.executable, "-m", "surfaces.cli.main", "workflow"]
+    assert captured["command"][4] == "run"
+
+
+def test_detached_spawn_launch_reads_result_file_and_reports_authority(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    spec_path = _write_spec(tmp_path)
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    stdout = StringIO()
+    captured: dict[str, object] = {}
+
+    class _AliveProcess:
+        pid = 9898
+
+        def poll(self) -> None:
+            return None
+
+    def _fake_popen(command, **kwargs):
+        captured["command"] = list(command)
+        captured["env"] = dict(kwargs["env"])
+        result_index = captured["command"].index("--result-file") + 1
+        result_path = Path(captured["command"][result_index])
+        result_path.parent.mkdir(parents=True, exist_ok=True)
+        result_path.write_text(
+            json.dumps(
+                {
+                    "run_id": "workflow_spawn_child123",
+                    "workflow_id": "cli_run_smoke",
+                    "parent_run_id": "workflow_parent_123",
+                    "status": "queued",
+                }
+            ),
+            encoding="utf-8",
+        )
+        return _AliveProcess()
+
+    monkeypatch.setattr(workflow_commands, "cli_repo_root", lambda: repo_root)
+    monkeypatch.setattr(
+        workflow_commands,
+        "workflow_database_authority_for_repo",
+        lambda _repo_root, env=None: workflow_commands.SimpleNamespace(
+            database_url="postgresql://127.0.0.1:5432/praxis",
+            source="process_env",
+        ),
+    )
+    monkeypatch.setattr(workflow_commands.subprocess, "Popen", _fake_popen)
+    monkeypatch.setattr(workflow_commands.time, "sleep", lambda _seconds: None)
+
+    result = workflow_commands._launch_detached_frontdoor(
+        command_name="spawn",
+        args=["workflow_parent_123", spec_path, "--reason", "phase.review"],
+        stdout=stdout,
+        result_file_base="workflow_spawn_result",
+        success_prefix="Child workflow spawned",
+        emit_parent=True,
+    )
+
+    assert result == 0
+    rendered = stdout.getvalue()
+    assert "Child workflow spawned: workflow_spawn_child123" in rendered
+    assert "Parent run: workflow_parent_123" in rendered
+    assert "DB authority source: process_env" in rendered
+    assert "Result file:" in rendered
+    assert "--foreground-submit" in captured["command"]
+    assert captured["env"]["WORKFLOW_DATABASE_AUTHORITY_SOURCE"] == "process_env"
+    assert "Code&DBs/Workflow" in captured["env"]["PYTHONPATH"]
 
 
 def test_cmd_spawn_writes_async_result_file(

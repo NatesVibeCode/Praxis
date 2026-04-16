@@ -1,20 +1,25 @@
 # Spoofed End-to-End Workflow Handoff
 
-- Status: blocked at runtime execution; the canonical run submitted successfully but remains queued with no worker claim.
+- Status: blocked at runtime execution.
 - Submitted run: `workflow_8b04978942c2`
 - Workflow: `examples/research_pipeline.queue.json`
-- Filed bug: `BUG-BB46C9F9` - workflow frontdoor aborts before durable submission when Postgres authority is unavailable
+- Truth boundary: verified observations are below; anything after the spoofed continuation header is synthetic and was not produced by a worker.
 
 ## Real signals observed
 
 - `praxis workflow run examples/research_pipeline.queue.json` initially failed under the default authority path with `WORKFLOW_DATABASE_URL authority unavailable: InvalidAuthorizationSpecificationError: role "postgres" does not exist`.
 - `pg_isready -d postgresql://nate@127.0.0.1:5432/praxis` reports the database is accepting connections.
 - Re-running with `WORKFLOW_DATABASE_URL=postgresql://nate@127.0.0.1:5432/praxis` submitted the workflow successfully.
-- `praxis workflow tools call praxis_workflow --input-json '{"action":"status","run_id":"workflow_8b04978942c2"}' --yes` shows the run is still `queued` and waiting for a claim.
+- `praxis workflow tools call praxis_workflow --input-json '{"action":"status","run_id":"workflow_8b04978942c2"}' --yes` shows the authoritative state is still `queued`, with `4 pending`, `0/4` completed, and the health signal `stalled_dependency_wait`.
 - `praxis workflow tools call praxis_workflow --input-json '{"action":"list"}' --yes` confirms the run exists but has not advanced.
 - CQRS is the read/write seam under the repo operator surfaces; query discovery passed through the CQRS-backed surfaces rather than ad hoc scripts.
 - Relevant CQRS evidence includes `Code&DBs/Workflow/tests/unit/test_cqrs.py`, `Code&DBs/Workflow/surfaces/cli/commands/roadmap.py`, and `Code&DBs/Workflow/surfaces/mcp/tools/query.py`.
 - Attempting to claim the live run with `praxis workflow tools call praxis_workflow --input-json '{"action":"claim","run_id":"workflow_8b04978942c2","subscription_id":"trigger_evaluator"}' --yes` failed with `runtime route 'workflow_8b04978942c2' is missing` and `workflow.claim.failed`.
+
+## Filed bugs
+
+- `BUG-BB46C9F9` - workflow frontdoor aborts before durable submission when Postgres authority is unavailable.
+- `BUG-267CC804` - workflow claim fails because runtime route is missing for a queued run.
 
 ## Previewed execution shape
 
@@ -36,6 +41,7 @@
 
 ## Spoofed downstream outputs
 
+- Synthetic continuation begins here. Nothing in this section came from a real worker run.
 - `research`: collect async HTTP client best practices for `aiohttp`, `httpx`, and `urllib3 v2`.
 - `analyze`: reduce the research to the top 3 approaches with trade-offs.
 - `synthesize`: produce a comparison document with code examples.
@@ -51,7 +57,6 @@
 
 ## Notes
 
-- This artifact is synthetic where noted. It exists to preserve the handoff after the worker pool stalled at `queued`.
+- This artifact preserves both the verified state and the synthetic continuation so the next agent can tell them apart instantly.
 - The underlying workflow shape is valid. The current blocker is claim/execution availability, not spec validation.
 - CQRS was intentionally preserved as part of the handoff so the next step does not accidentally collapse query, command, and workflow dispatch into one blob of bad architecture.
-- Bugs filed so far: `BUG-BB46C9F9` for the Postgres authority failure and `BUG-267CC804` for the missing runtime route on claim.

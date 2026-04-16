@@ -23,6 +23,7 @@ def _import_module(name: str, path: Path):
 
 _WORKFLOW_ROOT = Path(__file__).resolve().parents[2]
 triggers = _import_module("runtime.triggers", _WORKFLOW_ROOT / "runtime" / "triggers.py")
+cron_scheduler = _import_module("runtime.cron_scheduler", _WORKFLOW_ROOT / "runtime" / "cron_scheduler.py")
 
 
 class _Conn:
@@ -37,6 +38,19 @@ class _Conn:
     def execute(self, query: str, *args):
         self.calls.append((query, args))
         normalized = " ".join(query.split())
+        if (
+            "INSERT INTO public.system_events" in normalized
+            or "INSERT INTO system_events" in normalized
+        ):
+            row = {
+                "id": len(self.workflow_events) + len(self.subscription_events) + 1,
+                "event_type": args[0],
+                "source_id": args[1],
+                "source_type": args[2],
+                "payload": json.loads(args[3]),
+            }
+            self.workflow_events.append(row)
+            return [row]
         if (
             normalized.startswith("SELECT id, event_type, source_id, source_type, payload FROM system_events")
             or normalized.startswith("SELECT id, event_type, source_id, source_type, payload FROM public.system_events")
@@ -404,6 +418,78 @@ def test_evaluate_triggers_matches_schedule_fired_event_against_schedule_trigger
     assert submitted[0]["parent_run_id"] == "daily-report"
     assert submitted[0]["trigger_depth"] == 1
     assert conn.subscription_checkpoints[0]["last_evidence_seq"] == 9
+
+
+def test_hourly_trigger_tick_leads_to_schedule_fired_event_and_workflow_submission(monkeypatch):
+    conn = _Conn()
+    conn.workflow_triggers = [
+        {
+            "id": "trig-hourly",
+            "workflow_id": "agent_handoff_search_db_probe",
+            "event_type": "schedule",
+            "enabled": True,
+            "filter": {},
+            "cron_expression": "@hourly",
+            "last_fired_at": None,
+            "definition": {"definition_revision": "def-agent-handoff-probe"},
+            "compiled_spec": {
+                "definition_revision": "def-agent-handoff-probe",
+                "name": "Agent Handoff Search DB Probe",
+                "workflow_id": "agent_handoff_search_db_probe",
+                "phase": "test",
+                "jobs": [
+                    {
+                        "label": "seed_contract",
+                        "adapter_type": "deterministic_task",
+                        "expected_outputs": {"go": True},
+                    }
+                ],
+                "triggers": [],
+            },
+            "workflow_name": "Agent Handoff Search DB Probe",
+        }
+    ]
+    submitted: list[dict[str, object]] = []
+
+    def _submit(_conn, spec_dict, run_id=None, parent_run_id=None, trigger_depth=0):
+        submitted.append(
+            {
+                "spec": spec_dict,
+                "parent_run_id": parent_run_id,
+                "trigger_depth": trigger_depth,
+            }
+        )
+        return {"run_id": "workflow_hourly_probe_run"}
+
+    _install_submit_stub(monkeypatch, _submit)
+
+    fired_by_cron = cron_scheduler.CronScheduler(conn).tick()
+    fired_by_trigger = triggers.evaluate_triggers(conn)
+
+    assert fired_by_cron == 1
+    assert fired_by_trigger == 1
+    assert len(submitted) == 1
+    assert submitted[0]["parent_run_id"] == "trig-hourly"
+    assert submitted[0]["trigger_depth"] == 1
+    submitted_spec = submitted[0]["spec"]
+    assert submitted_spec["definition_revision"] == "def-agent-handoff-probe"
+    assert submitted_spec["workflow_id"] == "agent_handoff_search_db_probe"
+    assert submitted_spec["phase"] == "test"
+    assert submitted_spec["triggers"] == []
+    assert submitted_spec["jobs"][0]["label"] == "seed_contract"
+    assert submitted_spec["jobs"][0]["adapter_type"] == "deterministic_task"
+    assert submitted_spec["jobs"][0]["expected_outputs"] == {"go": True}
+    assert "## Trigger Context" in submitted_spec["jobs"][0]["prompt"]
+    assert "schedule.fired" in submitted_spec["jobs"][0]["prompt"]
+    emitted_events = [
+        row for row in conn.workflow_events if row["event_type"] == "schedule.fired"
+    ]
+    assert len(emitted_events) == 1
+    assert emitted_events[0]["payload"] == {
+        "trigger_id": "trig-hourly",
+        "workflow_id": "agent_handoff_search_db_probe",
+        "cron_expression": "@hourly",
+    }
 
 
 def test_evaluate_triggers_processes_event_subscriptions_without_checkpoint(monkeypatch):

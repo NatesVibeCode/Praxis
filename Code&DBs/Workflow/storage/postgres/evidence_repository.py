@@ -395,6 +395,33 @@ class PostgresEvidenceRepository:
 
         return result == "UPDATE 1"
 
+    async def update_workflow_run_progress(
+        self,
+        *,
+        run_id: str,
+        last_event_id: str,
+        expected_current_state: str | None = None,
+    ) -> bool:
+        base_query = """
+            UPDATE workflow_runs
+            SET last_event_id = $2
+            WHERE run_id = $1
+        """
+        args: list[object] = [
+            _require_text(run_id, field_name="run_id"),
+            _require_text(last_event_id, field_name="last_event_id"),
+        ]
+        if expected_current_state is not None:
+            base_query += " AND current_state = $3"
+            args.append(
+                _require_text(
+                    expected_current_state,
+                    field_name="expected_current_state",
+                )
+            )
+        result = await self._conn.execute(base_query, *args)
+        return result == "UPDATE 1"
+
 
     async def notify_run_cancelled(self, *, channel: str, run_id: str) -> None:
         await self._conn.execute(

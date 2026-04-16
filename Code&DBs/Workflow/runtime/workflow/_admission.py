@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 import concurrent.futures
+from dataclasses import replace
 import hashlib
 import json
 import logging
@@ -14,23 +15,33 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from adapters import AdapterRegistry, CLILLMAdapter, LLMTaskAdapter, MCPTaskAdapter
+from adapters import AdapterRegistry, CLILLMAdapter, LLMTaskAdapter, MCPTaskAdapter, build_transition_proof
 from adapters.api_task import APITaskAdapter
 from adapters.context_adapter import ContextCompilerAdapter
 from adapters.file_writer_adapter import FileWriterAdapter
 from adapters.output_parser_adapter import OutputParserAdapter
-from adapters.provider_registry import default_provider_slug
 from adapters.verify_adapter import VerifyAdapter
-from contracts.domain import WorkflowRequest
+from contracts.domain import WorkflowEdgeContract, WorkflowNodeContract, WorkflowRequest
 from registry.domain import RegistryResolver, RuntimeProfileAuthorityRecord, WorkspaceAuthorityRecord
 from registry.native_runtime_profile_sync import resolve_native_runtime_profile_config
 from runtime.execution_strategy import StepCompiler
+from runtime.domain import RunState
+from runtime.execution.evidence import _decision_refs_for_admission, _event_id, _now, _receipt_id
+from runtime.execution.orchestrator import (
+    CLAIM_REJECTED_EVENT_TYPE,
+    CLAIM_VALIDATED_EVENT_TYPE,
+    CLAIM_VALIDATION_RECEIPT_TYPE,
+)
+from runtime.execution.request_building import _workflow_request_payload
 from runtime.idempotency import canonical_hash, check_idempotency, record_idempotency
 from runtime.intake import WorkflowIntakePlanner
 from runtime._workflow_database import resolve_runtime_database_url
 from runtime.native_authority import default_native_authority_refs
 from runtime.persistent_evidence import PostgresEvidenceWriter
-from runtime.workflow._workflow_execution import WorkflowExecutionContext, execute_workflow_request
+from runtime.workflow._workflow_execution import (
+    WorkflowExecutionContext,
+    execute_admitted_workflow_request,
+)
 from runtime.workflow_graph_compiler import (
     GraphWorkflowCompileError,
     compile_graph_workflow_request,
@@ -233,6 +244,193 @@ def _graph_request_envelope(request: WorkflowRequest) -> dict[str, object]:
     }
 
 
+def _graph_request_from_envelope(payload: Mapping[str, object]) -> WorkflowRequest:
+    raw_nodes = payload.get("nodes")
+    raw_edges = payload.get("edges")
+    if not isinstance(raw_nodes, list) or not isinstance(raw_edges, list):
+        raise RuntimeError("graph runtime request_envelope is missing nodes/edges arrays")
+    nodes = tuple(
+        WorkflowNodeContract(
+            node_id=str(item["node_id"]),
+            node_type=str(item["node_type"]),
+            adapter_type=str(item["adapter_type"]),
+            display_name=str(item["display_name"]),
+            inputs=dict(item.get("inputs") or {}),
+            expected_outputs=dict(item.get("expected_outputs") or {}),
+            success_condition=dict(item.get("success_condition") or {}),
+            failure_behavior=dict(item.get("failure_behavior") or {}),
+            authority_requirements=dict(item.get("authority_requirements") or {}),
+            execution_boundary=dict(item.get("execution_boundary") or {}),
+            position_index=int(item["position_index"]),
+            template_owner_node_id=(
+                str(item["template_owner_node_id"])
+                if item.get("template_owner_node_id") is not None
+                else None
+            ),
+        )
+        for item in raw_nodes
+        if isinstance(item, Mapping)
+    )
+    edges = tuple(
+        WorkflowEdgeContract(
+            edge_id=str(item["edge_id"]),
+            edge_type=str(item["edge_type"]),
+            from_node_id=str(item["from_node_id"]),
+            to_node_id=str(item["to_node_id"]),
+            release_condition=dict(item.get("release_condition") or {}),
+            payload_mapping=dict(item.get("payload_mapping") or {}),
+            position_index=int(item["position_index"]),
+            template_owner_node_id=(
+                str(item["template_owner_node_id"])
+                if item.get("template_owner_node_id") is not None
+                else None
+            ),
+        )
+        for item in raw_edges
+        if isinstance(item, Mapping)
+    )
+    return WorkflowRequest(
+        schema_version=int(payload["schema_version"]),
+        workflow_id=str(payload["workflow_id"]),
+        request_id=str(payload["request_id"]),
+        workflow_definition_id=str(payload["workflow_definition_id"]),
+        definition_hash=str(payload["definition_hash"]),
+        workspace_ref=str(payload["workspace_ref"]),
+        runtime_profile_ref=str(payload["runtime_profile_ref"]),
+        nodes=nodes,
+        edges=edges,
+    )
+
+
+def _graph_execution_identity(request: WorkflowRequest) -> tuple[str, str | None, str]:
+    for node in request.nodes:
+        provider_slug = str(node.inputs.get("provider_slug") or "").strip()
+        if provider_slug:
+            model_slug = str(node.inputs.get("model_slug") or "").strip() or None
+            return provider_slug, model_slug, node.adapter_type
+    return "openai", None, "graph_runtime"
+
+
+def _persist_graph_submission_evidence(
+    *,
+    evidence_writer: PostgresEvidenceWriter,
+    intake_outcome,
+    request: WorkflowRequest,
+) -> None:
+    submission_identity = replace(intake_outcome.route_identity, transition_seq=1)
+    admission_identity = replace(intake_outcome.route_identity, transition_seq=2)
+    submission_result = evidence_writer.commit_submission(
+        route_identity=submission_identity,
+        request_payload=_workflow_request_payload(request),
+        admitted_definition_ref=(
+            intake_outcome.admitted_definition_ref or request.workflow_definition_id
+        ),
+        admitted_definition_hash=(
+            intake_outcome.admitted_definition_hash or request.definition_hash
+        ),
+    )
+    admission_state = intake_outcome.current_state
+    if admission_state is RunState.CLAIM_REJECTED:
+        event_type = CLAIM_REJECTED_EVENT_TYPE
+    else:
+        event_type = CLAIM_VALIDATED_EVENT_TYPE
+    admission_reason_code = intake_outcome.admission_decision.reason_code
+    admission_proof = build_transition_proof(
+        route_identity=admission_identity,
+        transition_seq=2,
+        event_id=_event_id(
+            run_id=intake_outcome.run_id,
+            evidence_seq=submission_result.evidence_seq + 1,
+        ),
+        receipt_id=_receipt_id(
+            run_id=intake_outcome.run_id,
+            evidence_seq=submission_result.evidence_seq + 2,
+        ),
+        event_type=event_type,
+        receipt_type=CLAIM_VALIDATION_RECEIPT_TYPE,
+        reason_code=admission_reason_code,
+        evidence_seq=submission_result.evidence_seq + 1,
+        occurred_at=_now(),
+        started_at=intake_outcome.admission_decision.decided_at,
+        finished_at=intake_outcome.admission_decision.decided_at,
+        executor_type="runtime.intake",
+        status=admission_state.value,
+        payload={
+            "from_state": RunState.CLAIM_RECEIVED.value,
+            "to_state": admission_state.value,
+            "validation_result_ref": intake_outcome.validation_result.validation_result_ref,
+            "authority_context_ref": intake_outcome.admission_decision.authority_context_ref,
+            "admission_decision_id": intake_outcome.admission_decision.admission_decision_id,
+        },
+        inputs={
+            "validation_result_ref": intake_outcome.validation_result.validation_result_ref,
+            "request_digest": intake_outcome.request_digest,
+            "authority_context_ref": intake_outcome.admission_decision.authority_context_ref,
+        },
+        outputs={
+            "admission_decision_id": intake_outcome.admission_decision.admission_decision_id,
+            "to_state": admission_state.value,
+        },
+        decision_refs=_decision_refs_for_admission(intake_outcome),
+        failure_code=(
+            admission_reason_code if admission_state is RunState.CLAIM_REJECTED else None
+        ),
+    )
+    evidence_writer.append_transition_proof(admission_proof)
+
+
+def _execute_admitted_graph_run(
+    conn: SyncPostgresConnection,
+    *,
+    run_id: str,
+) -> object:
+    rows = conn.execute(
+        """SELECT request_envelope, current_state
+           FROM workflow_runs
+           WHERE run_id = $1""",
+        run_id,
+    )
+    if not rows:
+        raise RuntimeError(f"graph runtime run {run_id!r} is missing workflow_runs authority")
+    row = dict(rows[0])
+    current_state = str(row.get("current_state") or "").strip()
+    if current_state != RunState.CLAIM_ACCEPTED.value:
+        return {"run_id": run_id, "status": current_state or "unknown"}
+    request_envelope = row.get("request_envelope")
+    if not isinstance(request_envelope, Mapping):
+        request_envelope = _json_loads_maybe(request_envelope, {}) or {}
+    if not isinstance(request_envelope, Mapping):
+        raise RuntimeError(f"graph runtime run {run_id!r} has invalid request_envelope")
+    request = _graph_request_from_envelope(request_envelope)
+    registry = _graph_registry_for_request(request)
+    intake_outcome = WorkflowIntakePlanner(registry=registry).plan(request=request)
+    if intake_outcome.run_id != run_id:
+        raise RuntimeError(
+            f"graph runtime run {run_id!r} does not match reconstructed intake {intake_outcome.run_id!r}"
+        )
+    database_url = resolve_runtime_database_url(required=True)
+    evidence_writer = PostgresEvidenceWriter(database_url=database_url)
+    provider_slug, model_slug, adapter_type = _graph_execution_identity(request)
+    context = WorkflowExecutionContext(
+        provider_slug=provider_slug,
+        model_slug=model_slug,
+        adapter_type=adapter_type,
+        started_at=datetime.now(timezone.utc),
+        start_ns=time.monotonic_ns(),
+    )
+    try:
+        execution_result, failure = execute_admitted_workflow_request(
+            intake_outcome=intake_outcome,
+            adapter_registry=_graph_adapter_registry(),
+            evidence_writer=evidence_writer,
+            context=context,
+            timeout=_graph_runtime_timeout_seconds(conn, spec_dict={"name": request.workflow_id}),
+        )
+    finally:
+        evidence_writer.close_blocking()
+    return failure or execution_result
+
+
 def _graph_registry_for_request(request: WorkflowRequest) -> RegistryResolver:
     runtime_profile_ref = request.runtime_profile_ref or _default_runtime_profile_ref()
     config = resolve_native_runtime_profile_config(runtime_profile_ref)
@@ -265,7 +463,7 @@ def _graph_adapter_registry() -> AdapterRegistry:
     registry = AdapterRegistry(
         api_task_adapter=APITaskAdapter(),
         llm_task_adapter=LLMTaskAdapter(),
-        cli_llm_adapter=CLILLMAdapter(prefer_docker=False),
+        cli_llm_adapter=CLILLMAdapter(),
         mcp_task_adapter=MCPTaskAdapter(),
     )
     registry.register("context_compiler", ContextCompilerAdapter(shadow_packet_config=None))
@@ -799,54 +997,25 @@ def _submit_graph_workflow_inline(
             "graph-capable workflow submission requires WORKFLOW_DATABASE_URL for durable runtime execution",
         ) from exc
     evidence_writer = PostgresEvidenceWriter(database_url=database_url)
-    context = WorkflowExecutionContext(
-        provider_slug=default_provider_slug(),
-        model_slug=None,
-        adapter_type="graph_queue_submit",
-        started_at=requested_at,
-        start_ns=time.monotonic_ns(),
-    )
-    timeout_seconds = _graph_runtime_timeout_seconds(conn, spec_dict=spec_dict)
     try:
-        execution_result, failure = execute_workflow_request(
-            intake_outcome=intake_outcome,
-            adapter_registry=_graph_adapter_registry(),
+        _persist_graph_submission_evidence(
             evidence_writer=evidence_writer,
-            context=context,
-            timeout=timeout_seconds,
+            intake_outcome=intake_outcome,
+            request=request,
         )
     finally:
         evidence_writer.close_blocking()
-    result = failure or execution_result
-    if result is None:
-        raise RuntimeError("graph-capable workflow submission returned no execution result")
-    status = getattr(result, "status", None)
-    if not isinstance(status, str) or not status.strip():
-        current_state = getattr(result, "current_state", None)
-        status = getattr(current_state, "value", current_state)
     payload = {
         "run_id": intake_outcome.run_id,
-        "status": str(status or "unknown"),
+        "status": intake_outcome.current_state.value,
         "total_jobs": len(spec_dict.get("jobs", [])) if isinstance(spec_dict.get("jobs"), list) else 0,
         "spec_name": str(spec_dict.get("name") or "inline"),
         "workflow_id": request.workflow_id,
         "packet_reuse_provenance": None,
         "execution_mode": "graph_runtime",
     }
-    reason_code = getattr(result, "reason_code", None)
-    if isinstance(reason_code, str) and reason_code.strip():
-        payload["reason_code"] = reason_code
-    failure_code = getattr(result, "failure_code", None)
-    if isinstance(failure_code, str) and failure_code.strip():
-        payload["failure_code"] = failure_code
-    terminal_reason_code = getattr(result, "terminal_reason_code", None)
-    if isinstance(terminal_reason_code, str) and terminal_reason_code.strip():
-        payload["terminal_reason_code"] = terminal_reason_code
-    outputs = getattr(result, "outputs", None)
-    if isinstance(outputs, Mapping):
-        error = outputs.get("error")
-        if isinstance(error, str) and error.strip():
-            payload["error"] = error
+    payload["reason_code"] = intake_outcome.admission_decision.reason_code
+    conn.execute("SELECT pg_notify('system_event', $1)", intake_outcome.run_id)
     return payload
 
 

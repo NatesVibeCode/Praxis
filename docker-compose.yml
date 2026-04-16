@@ -62,6 +62,7 @@ services:
       WORKFLOW_DATABASE_URL: postgresql://postgres@postgres:5432/praxis
       WORKFLOW_EMBEDDING_BACKEND: service
       WORKFLOW_EMBEDDING_SERVICE_URL: http://semantic-backend:8421
+      CURSOR_API_KEY: ${CURSOR_API_KEY:-}
       PYTHONPATH: "/workspace/Code&DBs/Workflow"
       PRAXIS_API_HOST: 0.0.0.0
       PRAXIS_API_PORT: 8420

@@ -1,0 +1,36 @@
+{
+  "status": "succeeded",
+  "command_status": "succeeded",
+  "command_id": "control.command.a9f3efc07861",
+  "approval_required": false,
+  "run_id": "run:workflow_cli_prompt.49b6bedf65ec:a805ce042a3a3280",
+  "stream_url": "/api/workflow-runs/run:workflow_cli_prompt.49b6bedf65ec:a805ce042a3a3280/stream",
+  "status_url": "/api/workflow-runs/run:workflow_cli_prompt.49b6bedf65ec:a805ce042a3a3280/status",
+  "spec_name": "Reply with exactly: GRAPH_OK",
+  "total_jobs": 1,
+  "result_ref": "workflow_run:run:workflow_cli_prompt.49b6bedf65ec:a805ce042a3a3280",
+  "run_status": "succeeded",
+  "status_source": "live_snapshot",
+  "run_metrics": {
+    "completed_jobs": 3,
+    "total_jobs": 3,
+    "elapsed_seconds": 0.0,
+    "health_state": "healthy",
+    "job_status_counts": {
+      "succeeded": 3
+    },
+    "total_cost_usd": 0.0,
+    "total_duration_ms": 10085,
+    "total_tokens_in": 0,
+    "total_tokens_out": 0,
+    "terminal_reason": "runtime.workflow_succeeded"
+  },
+  "terminal_reason": "runtime.workflow_succeeded",
+  "recovery": {
+    "mode": "done",
+    "reason": "Run already succeeded.",
+    "recommended_tool": null
+  },
+  "job_id": "cli",
+  "workflow_id": "workflow_cli_prompt.49b6bedf65ec"
+}

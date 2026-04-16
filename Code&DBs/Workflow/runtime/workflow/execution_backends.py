@@ -13,6 +13,7 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
+from adapters.docker_runner import normalize_command_parts_for_docker
 from adapters.provider_registry import build_command
 from runtime.load_balancer import get_load_balancer
 from runtime.execution_transport import resolve_execution_transport
@@ -471,24 +472,7 @@ def execute_cli(
                     "error_code": "sandbox_error",
                 }
 
-        # Normalize codex flags for Docker-sandboxed execution.  The Docker
-        # container IS the sandbox, so codex's internal bwrap sandbox must be
-        # bypassed (it requires privileges Docker doesn't grant).  --full-auto
-        # is mutually exclusive with --dangerously-bypass-approvals-and-sandbox,
-        # so strip it if a legacy template still includes it.  Sandbox workspaces
-        # also exclude .git, so codex needs --skip-git-repo-check.
-        cmd0_name = os.path.basename(cmd[0]).strip().lower() if cmd else ""
-        if cmd0_name == "codex":
-            try:
-                exec_idx = [p.strip().lower() for p in cmd].index("exec")
-            except ValueError:
-                exec_idx = -1
-            if exec_idx >= 0:
-                cmd = [part for part in cmd if part != "--full-auto"]
-                if "--skip-git-repo-check" not in cmd:
-                    cmd.insert(exec_idx + 1, "--skip-git-repo-check")
-                if "--dangerously-bypass-approvals-and-sandbox" not in cmd:
-                    cmd.insert(exec_idx + 1, "--dangerously-bypass-approvals-and-sandbox")
+        cmd = normalize_command_parts_for_docker(cmd)
 
         decision_overlays = decision_workspace_overlays(execution_bundle)
         workspace_overlays = [

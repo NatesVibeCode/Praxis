@@ -41,6 +41,7 @@ from .provider_registry import (
 )
 from .structured_output import StructuredOutput, parse_model_output
 from .task_profiles import try_resolve_profile
+from runtime.workflow.execution_policy import resolve_cli_execution_policy
 
 _DEFAULT_TIMEOUT = int(os.environ.get("PRAXIS_CLI_TIMEOUT", "300"))
 
@@ -215,6 +216,7 @@ def _invoke_cli(
     binary_override: str | None = None,
     prefer_docker: bool = True,
     network: bool = False,
+    auth_mount_policy: str = "provider_scoped",
     execution_control: DeterministicExecutionControl | None = None,
 ) -> CLILLMResult:
     """Invoke a provider CLI through the registry-declared prompt channel."""
@@ -261,6 +263,8 @@ def _invoke_cli(
             timeout=timeout,
             prefer_docker=prefer_docker,
             network=network,
+            provider_slug=provider_slug,
+            auth_mount_policy=auth_mount_policy,
             execution_control=execution_control,
         )
     except OSError as exc:
@@ -517,7 +521,24 @@ class CLILLMAdapter(BaseNodeAdapter):
         timeout = int(payload.get("timeout", provider_timeout))
 
         binary_override = self._binary_overrides.get(provider_slug)
-        needs_network = task_type in ("research",)
+        try:
+            execution_policy = resolve_cli_execution_policy(payload, profile=profile)
+        except ValueError as exc:
+            return _fail(
+                request=request,
+                reason_code="cli_adapter.contract_invalid",
+                failure_code="cli_adapter.contract_invalid",
+                started_at=started_at,
+                executor_type=CLILLMAdapter.executor_type,
+                inputs=inputs,
+                outputs={
+                    "transport_kind": transport_kind,
+                    "failure_namespace": failure_namespace,
+                    "provider_slug": provider_slug,
+                    "model_slug": model_slug,
+                    "error": str(exc),
+                },
+            )
 
         try:
             result = _invoke_cli(
@@ -529,7 +550,8 @@ class CLILLMAdapter(BaseNodeAdapter):
                 json_schema=json_schema,
                 binary_override=binary_override,
                 prefer_docker=self._prefer_docker,
-                network=needs_network,
+                network=execution_policy.network_enabled,
+                auth_mount_policy=execution_policy.auth_mount_policy,
                 execution_control=request.execution_control,
             )
         except CLIAdapterError as exc:

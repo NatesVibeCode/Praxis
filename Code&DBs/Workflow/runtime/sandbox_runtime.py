@@ -24,6 +24,7 @@ from uuid import uuid4
 from pathlib import PurePosixPath
 
 from .docker_image_authority import DOCKER_IMAGE_ENV, resolve_docker_image
+from runtime.workflow.execution_policy import validate_auth_mount_policy
 
 _DOCKER_MEMORY_ENV = "PRAXIS_DOCKER_MEMORY"
 _DOCKER_CPUS_ENV = "PRAXIS_DOCKER_CPUS"
@@ -736,7 +737,9 @@ class DockerLocalSandboxProvider:
             "-v",
             f"{session.workspace_root}:/workspace",
         ]
-        auth_mount_policy = str(session.metadata.get("auth_mount_policy") or "provider_scoped").strip().lower()
+        auth_mount_policy = validate_auth_mount_policy(
+            session.metadata.get("auth_mount_policy") or "provider_scoped"
+        )
         if auth_mount_policy != "none":
             provider_slug = (
                 _provider_slug(session.metadata)

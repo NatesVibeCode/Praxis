@@ -1,0 +1,78 @@
+{
+  "review_type": "deterministic_probe_review",
+  "reviewed_at": "2026-04-16T22:39:37.386403+00:00",
+  "probe_id": "agent_handoff_search_db_probe",
+  "current_outputs": {
+    "observed_files": [
+      {
+        "path": "/Users/nate/Praxis/artifacts/workflow_eval/probe_exec_20260416/agent_handoff_search_db_probe.report.json",
+        "exists": true,
+        "proof_class": "observed"
+      },
+      {
+        "path": "/Users/nate/Praxis/artifacts/workflow_eval/probe_exec_20260416/agent_handoff_search_db_probe.continuation_packet.json",
+        "exists": true,
+        "proof_class": "simulated_continuation"
+      },
+      {
+        "path": "/Users/nate/Praxis/artifacts/workflow_eval/probe_exec_20260416/agent_handoff_search_db_probe.improvement_validation_blocker.json",
+        "exists": true,
+        "proof_class": "observed_blocker"
+      }
+    ],
+    "planned_live_workflow_files": [
+      {
+        "path": "/Users/nate/Praxis/artifacts/workflow_eval/probe_exec_20260416/agent_handoff_search_db_probe.handoff.md",
+        "exists": true
+      },
+      {
+        "path": "/Users/nate/Praxis/artifacts/workflow_eval/probe_exec_20260416/agent_handoff_search_db_probe.review.json",
+        "exists": true
+      }
+    ]
+  },
+  "answers": {
+    "what_is_it_outputting_now": [
+      "observed proof report",
+      "simulated continuation packet",
+      "validation blocker packet"
+    ],
+    "workflow_live_outputs_on_success": [
+      "handoff markdown artifact",
+      "review json artifact"
+    ],
+    "regular_outputs_scheduled": false,
+    "deterministic_review_present": true,
+    "workflow_internal_review_is_deterministic": false
+  },
+  "evidence": {
+    "search_exercised": true,
+    "db_action_exercised": true,
+    "validate_currently_ok": true,
+    "preview_currently_ok": true,
+    "run_currently_ok": false,
+    "run_submitted": false,
+    "run_id": null,
+    "workflow_internal_review_mode": "agent",
+    "validation_front_door_ready": true,
+    "command_write_blocked": true,
+    "historical_validation_blocker_present": true
+  },
+  "judgement": {
+    "regular_outputs_proven": false,
+    "live_outputs_proven": false,
+    "post_run_deterministic_review_ready": true,
+    "workflow_internal_review_deterministic": false
+  },
+  "gaps": [
+    "The probe is not attached to a recurring schedule yet.",
+    "The workflow's internal review step is still agent-based, not verifier-based.",
+    "A real workflow run has not produced a durable run_id in the observed packet."
+  ],
+  "required_next_actions": [
+    "Restore workflow front-door health so validate, preview, and bug filing work again.",
+    "Persist the probe as a first-class workflow definition and attach a DB-native cron trigger.",
+    "Replace the internal agent review step with a verifier or other machine-checkable adapter.",
+    "Require a non-null run_id plus durable receipts before calling the probe end-to-end."
+  ]
+}

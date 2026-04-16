@@ -85,4 +85,9 @@ registry.register(
     command_class=SuggestNextNodesCommand,
     handler=handle_suggest_next_nodes,
     description="Context-aware graph autocomplete: suggests the most logical next steps for a given node.",
+    operation_name="workflow_build.suggest_next",
+    operation_kind="query",
+    source_kind="cqrs_query",
+    authority_ref="authority.capability_catalog",
+    projection_ref="projection.capability_catalog",
 )

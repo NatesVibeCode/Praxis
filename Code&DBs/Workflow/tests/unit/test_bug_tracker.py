@@ -39,9 +39,33 @@ def _link_validates_fix_evidence(
     bug_id: str,
     *,
     evidence_ref: str | None = None,
+    status: str = "passed",
 ) -> dict[str, object]:
     reference = evidence_ref or f"verification-run-{_uuid.uuid4().hex[:8]}"
-    tracker._validate_evidence_reference = lambda **_kwargs: None
+    tracker._conn.execute(
+        """
+        INSERT INTO verification_runs (
+            verification_run_id,
+            verifier_ref,
+            target_kind,
+            target_ref,
+            status,
+            inputs,
+            outputs,
+            decision_ref,
+            attempted_at,
+            duration_ms
+        ) VALUES ($1, $2, $3, $4, $5, '{}'::jsonb, '{}'::jsonb, $6, $7, $8)
+        """,
+        reference,
+        "verifier.test",
+        "bug",
+        bug_id,
+        status,
+        "decision.test",
+        datetime(2026, 4, 10, 12, 0, tzinfo=timezone.utc),
+        25,
+    )
     return tracker.link_evidence(
         bug_id,
         evidence_kind="verification_run",
@@ -186,6 +210,45 @@ class TestResolve:
         sample_bug: Bug,
     ):
         with pytest.raises(ValueError, match="validates_fix"):
+            tracker.resolve(sample_bug.bug_id, BugStatus.FIXED)
+
+    def test_resolve_fixed_requires_passed_validates_fix_verification(
+        self,
+        tracker: BugTracker,
+        sample_bug: Bug,
+    ):
+        _link_validates_fix_evidence(
+            tracker,
+            sample_bug.bug_id,
+            status="failed",
+        )
+
+        with pytest.raises(
+            ValueError,
+            match="passed validates_fix verification evidence",
+        ):
+            tracker.resolve(sample_bug.bug_id, BugStatus.FIXED)
+
+    def test_resolve_fixed_surfaces_validates_fix_query_failure_honestly(
+        self,
+        tracker: BugTracker,
+        sample_bug: Bug,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        _link_validates_fix_evidence(tracker, sample_bug.bug_id)
+        original_query_rows_with_error = tracker._query_rows_with_error
+
+        def _query_rows_with_error(query: str, *params: object):
+            if "FROM bug_evidence_links" in query:
+                return [], "RuntimeError: fix proof lane unavailable"
+            return original_query_rows_with_error(query, *params)
+
+        monkeypatch.setattr(tracker, "_query_rows_with_error", _query_rows_with_error)
+
+        with pytest.raises(
+            ValueError,
+            match="could not load validates_fix evidence.*fix proof lane unavailable",
+        ):
             tracker.resolve(sample_bug.bug_id, BugStatus.FIXED)
 
 

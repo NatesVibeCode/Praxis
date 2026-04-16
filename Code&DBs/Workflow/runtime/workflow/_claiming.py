@@ -85,6 +85,128 @@ def _fail_unclaimable_ready_job(
     _recompute_workflow_run_state(conn, str(row["run_id"]))
 
 
+def _update_cancelled_job(
+    conn: SyncPostgresConnection,
+    *,
+    job_id: int,
+    exit_code: int | None,
+    output_path: str,
+    receipt_id: str,
+    stdout_preview: str,
+    token_input: int,
+    token_output: int,
+    cost_usd: float,
+    duration_ms: int,
+    error_code: str,
+) -> bool:
+    updated = conn.execute(
+        """UPDATE workflow_jobs
+           SET status = 'cancelled', finished_at = now(), exit_code = $2, output_path = $3,
+               receipt_id = $4, stdout_preview = $5, token_input = $6, token_output = $7,
+               cost_usd = $8, duration_ms = $9, last_error_code = $10,
+               failure_category = '', failure_zone = '', is_transient = false
+           WHERE id = $1
+             AND status NOT IN ("""
+        + _TERMINAL_STATUS_SQL
+        + """)
+           RETURNING id""",
+        job_id,
+        exit_code,
+        output_path,
+        receipt_id,
+        stdout_preview[:2000],
+        token_input,
+        token_output,
+        cost_usd,
+        duration_ms,
+        error_code,
+    )
+    return bool(updated)
+
+
+def _update_succeeded_job(
+    conn: SyncPostgresConnection,
+    *,
+    job_id: int,
+    exit_code: int | None,
+    output_path: str,
+    receipt_id: str,
+    stdout_preview: str,
+    token_input: int,
+    token_output: int,
+    cost_usd: float,
+    duration_ms: int,
+) -> bool:
+    updated = conn.execute(
+        """UPDATE workflow_jobs
+           SET status = 'succeeded', finished_at = now(), exit_code = $2, output_path = $3,
+               receipt_id = $4, stdout_preview = $5, token_input = $6, token_output = $7,
+               cost_usd = $8, duration_ms = $9
+           WHERE id = $1
+             AND status NOT IN ("""
+        + _TERMINAL_STATUS_SQL
+        + """)
+           RETURNING id""",
+        job_id,
+        exit_code,
+        output_path,
+        receipt_id,
+        stdout_preview[:2000],
+        token_input,
+        token_output,
+        cost_usd,
+        duration_ms,
+    )
+    return bool(updated)
+
+
+def _update_terminal_job(
+    conn: SyncPostgresConnection,
+    *,
+    job_id: int,
+    status: str,
+    exit_code: int | None,
+    output_path: str,
+    receipt_id: str,
+    stdout_preview: str,
+    token_input: int,
+    token_output: int,
+    cost_usd: float,
+    duration_ms: int,
+    error_code: str,
+    failure_category: str,
+    failure_zone: str,
+    is_transient: bool,
+) -> bool:
+    updated = conn.execute(
+        """UPDATE workflow_jobs
+           SET status = $2, finished_at = now(), exit_code = $3, output_path = $4,
+               receipt_id = $5, stdout_preview = $6, token_input = $7, token_output = $8,
+               cost_usd = $9, duration_ms = $10, last_error_code = $11,
+               failure_category = $12, failure_zone = $13, is_transient = $14
+           WHERE id = $1
+             AND status NOT IN ("""
+        + _TERMINAL_STATUS_SQL
+        + """)
+           RETURNING id""",
+        job_id,
+        status,
+        exit_code,
+        output_path,
+        receipt_id,
+        stdout_preview[:2000],
+        token_input,
+        token_output,
+        cost_usd,
+        duration_ms,
+        error_code,
+        failure_category,
+        failure_zone,
+        is_transient,
+    )
+    return bool(updated)
+
+
 def claim_one(conn: SyncPostgresConnection, worker_id: str) -> dict | None:
     """Claim the next ready job after route and touch-key admission checks.
 
@@ -188,10 +310,8 @@ def complete_job(
     failure_zone = ""
     is_transient = False
 
-    # Record provider health in circuit breaker (all completions)
     record_provider_outcome(conn, job_id=job_id, succeeded=(status != "failed"), error_code=error_code)
 
-    # Failed jobs: classify -> retry orchestrator -> requeue or terminal
     if status == "failed":
         outcome = resolve_failed_job(
             conn, job_id=job_id, error_code=error_code,
@@ -215,8 +335,13 @@ def complete_job(
                 + _TERMINAL_STATUS_SQL
                 + """)
                    RETURNING id""",
-                job_id, error_code, failure_category, failure_zone, is_transient,
-                outcome.next_agent, str(outcome.backoff_seconds),
+                job_id,
+                error_code,
+                failure_category,
+                failure_zone,
+                is_transient,
+                outcome.next_agent,
+                str(outcome.backoff_seconds),
             )
             if updated:
                 conn.execute("SELECT pg_notify('job_ready', $1)", str(job_id))
@@ -229,41 +354,37 @@ def complete_job(
         logger.info("Job %d terminal: %s", job_id, outcome.reason)
 
     if status == "cancelled":
-        updated = conn.execute(
-            """UPDATE workflow_jobs
-               SET status = 'cancelled', finished_at = now(), exit_code = $2, output_path = $3,
-                   receipt_id = $4, stdout_preview = $5, token_input = $6, token_output = $7,
-                   cost_usd = $8, duration_ms = $9, last_error_code = $10,
-                   failure_category = '', failure_zone = '', is_transient = false
-               WHERE id = $1
-                 AND status NOT IN ("""
-            + _TERMINAL_STATUS_SQL
-            + """)
-               RETURNING id""",
-            job_id, exit_code, output_path, receipt_id,
-            stdout_preview[:2000], token_input, token_output, cost_usd, duration_ms, error_code,
-        )
-        if not updated:
+        if not _update_cancelled_job(
+            conn,
+            job_id=job_id,
+            exit_code=exit_code,
+            output_path=output_path,
+            receipt_id=receipt_id,
+            stdout_preview=stdout_preview,
+            token_input=token_input,
+            token_output=token_output,
+            cost_usd=cost_usd,
+            duration_ms=duration_ms,
+            error_code=error_code,
+        ):
             return
         _block_descendants(conn, job_id, error_code or "workflow_cancelled")
         _recompute_workflow_run_state(conn, run_id)
         return
 
     if status == "succeeded":
-        updated = conn.execute(
-            """UPDATE workflow_jobs
-               SET status = 'succeeded', finished_at = now(), exit_code = $2, output_path = $3,
-                   receipt_id = $4, stdout_preview = $5, token_input = $6, token_output = $7,
-                   cost_usd = $8, duration_ms = $9
-               WHERE id = $1
-                 AND status NOT IN ("""
-            + _TERMINAL_STATUS_SQL
-            + """)
-               RETURNING id""",
-            job_id, exit_code, output_path, receipt_id,
-            stdout_preview[:2000], token_input, token_output, cost_usd, duration_ms,
-        )
-        if not updated:
+        if not _update_succeeded_job(
+            conn,
+            job_id=job_id,
+            exit_code=exit_code,
+            output_path=output_path,
+            receipt_id=receipt_id,
+            stdout_preview=stdout_preview,
+            token_input=token_input,
+            token_output=token_output,
+            cost_usd=cost_usd,
+            duration_ms=duration_ms,
+        ):
             return
         _record_task_route_outcome(
             conn,
@@ -275,22 +396,23 @@ def complete_job(
         _recompute_workflow_run_state(conn, run_id)
         return
 
-    updated = conn.execute(
-        """UPDATE workflow_jobs
-           SET status = $2, finished_at = now(), exit_code = $3, output_path = $4,
-               receipt_id = $5, stdout_preview = $6, token_input = $7, token_output = $8,
-               cost_usd = $9, duration_ms = $10, last_error_code = $11,
-               failure_category = $12, failure_zone = $13, is_transient = $14
-           WHERE id = $1
-             AND status NOT IN ("""
-        + _TERMINAL_STATUS_SQL
-        + """)
-           RETURNING id""",
-        job_id, final_status, exit_code, output_path, receipt_id,
-        stdout_preview[:2000], token_input, token_output, cost_usd, duration_ms, error_code,
-        failure_category, failure_zone, is_transient,
-    )
-    if not updated:
+    if not _update_terminal_job(
+        conn,
+        job_id=job_id,
+        status=final_status,
+        exit_code=exit_code,
+        output_path=output_path,
+        receipt_id=receipt_id,
+        stdout_preview=stdout_preview,
+        token_input=token_input,
+        token_output=token_output,
+        cost_usd=cost_usd,
+        duration_ms=duration_ms,
+        error_code=error_code,
+        failure_category=failure_category,
+        failure_zone=failure_zone,
+        is_transient=is_transient,
+    ):
         return
     _record_task_route_outcome(
         conn,

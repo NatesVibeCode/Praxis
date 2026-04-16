@@ -15,7 +15,6 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 import json
 import os
-from pathlib import Path
 from typing import Any, Protocol
 
 from contracts.domain import WorkflowEdgeContract, WorkflowNodeContract, WorkflowRequest
@@ -25,11 +24,6 @@ from policy.domain import AdmissionDecisionRecord
 from registry.domain import RegistryResolver
 from runtime.execution import RuntimeOrchestrator
 from runtime.instance import (
-    PRAXIS_INSTANCE_NAME_ENV,
-    PRAXIS_RECEIPTS_DIR_ENV,
-    PRAXIS_RUNTIME_PROFILE_ENV,
-    PRAXIS_TOPOLOGY_DIR_ENV,
-    NativeInstanceResolutionError,
     NativeWorkflowInstance,
     resolve_native_instance,
 )
@@ -232,71 +226,6 @@ def _run_async(awaitable: Awaitable[Any]) -> Any:
         error_type=NativeFrontdoorError,
         reason_code="frontdoor.async_boundary_required",
         message="native frontdoor sync entrypoints require a non-async call boundary",
-    )
-
-
-def _native_boundary_mismatch_if_present(
-    env: Mapping[str, str],
-    *,
-    env_name: str,
-    actual_value: str,
-) -> None:
-    expected_value = str(env.get(env_name) or "").strip()
-    if expected_value and expected_value != actual_value:
-        raise NativeInstanceResolutionError(
-            "native_instance.boundary_mismatch",
-            f"{env_name} does not match the repo-local native instance contract",
-            details={
-                "environment_variable": env_name,
-                "expected": actual_value,
-                "actual": expected_value,
-            },
-        )
-
-
-def _native_path_boundary_mismatch_if_present(
-    env: Mapping[str, str],
-    *,
-    env_name: str,
-    actual_path: Path,
-) -> None:
-    expected_value = str(env.get(env_name) or "").strip()
-    if not expected_value:
-        return
-    expected_path = Path(expected_value).expanduser().resolve()
-    if expected_path != actual_path:
-        raise NativeInstanceResolutionError(
-            "native_instance.boundary_mismatch",
-            f"{env_name} does not match the repo-local native instance contract",
-            details={
-                "environment_variable": env_name,
-                "expected": str(actual_path),
-                "actual": str(expected_path),
-            },
-        )
-
-
-def _assert_repo_local_native_contract(env: Mapping[str, str]) -> None:
-    repo_root = Path(__file__).resolve().parents[4]
-    _native_boundary_mismatch_if_present(
-        env,
-        env_name=PRAXIS_RUNTIME_PROFILE_ENV,
-        actual_value="praxis",
-    )
-    _native_boundary_mismatch_if_present(
-        env,
-        env_name=PRAXIS_INSTANCE_NAME_ENV,
-        actual_value="praxis",
-    )
-    _native_path_boundary_mismatch_if_present(
-        env,
-        env_name=PRAXIS_RECEIPTS_DIR_ENV,
-        actual_path=(repo_root / "artifacts" / "runtime_receipts").resolve(),
-    )
-    _native_path_boundary_mismatch_if_present(
-        env,
-        env_name=PRAXIS_TOPOLOGY_DIR_ENV,
-        actual_path=(repo_root / "artifacts" / "runtime_topology").resolve(),
     )
 
 
@@ -633,7 +562,6 @@ class NativeWorkflowFrontdoor:
 
     def _resolve_instance(self, *, env: Mapping[str, str] | None) -> tuple[Mapping[str, str], NativeWorkflowInstance]:
         source = env if env is not None else os.environ
-        _assert_repo_local_native_contract(source)
         return source, resolve_native_instance(env=source)
 
     def _run_sync_submission(

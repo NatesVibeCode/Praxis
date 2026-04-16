@@ -1,0 +1,26 @@
+{
+  "probe_id": "agent_handoff_search_db_probe",
+  "spec_path": "/Users/nate/Praxis/artifacts/workflow_eval/probe_exec_20260416/agent_handoff_search_db_probe.queue.json",
+  "observed_report_path": "/Users/nate/Praxis/artifacts/workflow_eval/probe_exec_20260416/agent_handoff_search_db_probe.report.json",
+  "continuation_packet_path": "/Users/nate/Praxis/artifacts/workflow_eval/probe_exec_20260416/agent_handoff_search_db_probe.continuation_packet.json",
+  "validation_blocker_path": "/Users/nate/Praxis/artifacts/workflow_eval/probe_exec_20260416/agent_handoff_search_db_probe.improvement_validation_blocker.json",
+  "planned_workflow_outputs": [
+    "/Users/nate/Praxis/artifacts/workflow_eval/probe_exec_20260416/agent_handoff_search_db_probe.handoff.md",
+    "/Users/nate/Praxis/artifacts/workflow_eval/probe_exec_20260416/agent_handoff_search_db_probe.review.json"
+  ],
+  "deterministic_review_output_path": "/Users/nate/Praxis/artifacts/workflow_eval/probe_exec_20260416/agent_handoff_search_db_probe.deterministic_review.json",
+  "schedule_status_output_path": "/Users/nate/Praxis/artifacts/workflow_eval/probe_exec_20260416/agent_handoff_search_db_probe.schedule_status.json",
+  "scheduler_config_candidates": [
+    "/Users/nate/Praxis/config/scheduler.json",
+    "/Users/nate/Praxis/Code&DBs/Workflow/config/scheduler.json"
+  ],
+  "workflow_review_job_label": "probe_review_contract",
+  "expected_internal_review_mode": "deterministic_task",
+  "scheduling_authority": "workflow_triggers",
+  "trigger_payload": {
+    "workflow_id": "agent_handoff_search_db_probe",
+    "event_type": "schedule",
+    "cron_expression": "@hourly",
+    "enabled": true
+  }
+}

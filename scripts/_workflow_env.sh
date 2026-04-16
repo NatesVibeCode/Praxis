@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
-# Shared env bootstrap for workflow frontdoors.
-# Loads checked-in .env when present, but never invents a native localhost
-# authority. Callers must provide an explicit sandbox-owned database URL.
+# Shared env bootstrap for workflow shell frontdoors.
+# The Python workflow resolver owns database authority. This shell helper only
+# asks Python for the canonical answer and exports it for callers like test.sh.
 
 workflow_detect_script_path() {
   if [ -n "${BASH_SOURCE[0]:-}" ]; then
@@ -12,68 +12,95 @@ workflow_detect_script_path() {
   printf '%s\n' "$0"
 }
 
-if [ -f "${PWD}/docker-compose.yml" ] && [ -f "${PWD}/scripts/_workflow_env.sh" ]; then
+if [ -n "${WORKFLOW_ENV_REPO_ROOT:-}" ]; then
+  workflow_env_repo_root="$(cd "${WORKFLOW_ENV_REPO_ROOT}" && pwd)"
+elif [ -f "${PWD}/docker-compose.yml" ] && [ -f "${PWD}/scripts/_workflow_env.sh" ]; then
   workflow_env_repo_root="$(cd "${PWD}" && pwd)"
 else
   workflow_env_script_path="$(workflow_detect_script_path)"
   workflow_env_repo_root="$(cd "$(dirname "${workflow_env_script_path}")/.." && pwd)"
 fi
-workflow_env_dotenv="${workflow_env_repo_root}/.env"
 
-workflow_resolve_docker_database_url() {
-  local compose_file="${workflow_env_repo_root}/docker-compose.yml"
-  [ -f "${compose_file}" ] || return 1
-  command -v docker >/dev/null 2>&1 || return 1
+workflow_python_bin() {
+  if [ -n "${PYTHON_BIN:-}" ] && command -v "${PYTHON_BIN}" >/dev/null 2>&1; then
+    printf '%s\n' "${PYTHON_BIN}"
+    return 0
+  fi
+  command -v python3.14 >/dev/null 2>&1 && { command -v python3.14; return 0; }
+  command -v python3.13 >/dev/null 2>&1 && { command -v python3.13; return 0; }
+  command -v python3 >/dev/null 2>&1 && { command -v python3; return 0; }
+  return 1
+}
 
-  local postgres_container=""
-  postgres_container="$(docker compose -f "${compose_file}" ps -q postgres 2>/dev/null | head -n 1)"
-  [ -n "${postgres_container}" ] || return 1
+workflow_resolve_database_env_json() {
+  local python_bin
+  python_bin="$(workflow_python_bin)" || {
+    echo "python3 is required to resolve workflow database authority." >&2
+    return 1
+  }
 
-  local container_state=""
-  container_state="$(
-    docker inspect \
-      --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \
-      "${postgres_container}" 2>/dev/null || true
-  )"
-  case "${container_state}" in
-    healthy|running) ;;
-    *) return 1 ;;
-  esac
+  local workflow_root="${workflow_env_repo_root}/Code&DBs/Workflow"
+  local pythonpath="${workflow_root}"
+  if [ -n "${PYTHONPATH:-}" ]; then
+    pythonpath="${pythonpath}:${PYTHONPATH}"
+  fi
 
-  local published=""
-  published="$(docker compose -f "${compose_file}" port postgres 5432 2>/dev/null | head -n 1)"
-  [ -n "${published}" ] || return 1
+  REPO_ROOT="${workflow_env_repo_root}" PYTHONPATH="${pythonpath}" "${python_bin}" - <<'PY'
+import json
+import os
+from pathlib import Path
 
-  local docker_host="${published%:*}"
-  local docker_port="${published##*:}"
-  docker_host="${docker_host#\[}"
-  docker_host="${docker_host%\]}"
-  case "${docker_host}" in
-    ""|"0.0.0.0"|"::")
-      docker_host="127.0.0.1"
-      ;;
-  esac
-  [ -n "${docker_port}" ] || return 1
+from surfaces._workflow_database import workflow_database_authority_for_repo
 
-  printf 'postgresql://postgres@%s:%s/praxis\n' "${docker_host}" "${docker_port}"
+repo_root = Path(os.environ["REPO_ROOT"])
+authority = workflow_database_authority_for_repo(repo_root, env=os.environ)
+print(
+    json.dumps(
+        {
+            "database_url": authority.database_url,
+            "authority_source": authority.source,
+        }
+    )
+)
+PY
 }
 
 workflow_load_repo_env() {
-  if [ -f "${workflow_env_dotenv}" ]; then
-    set -a
-    # shellcheck disable=SC1090
-    . "${workflow_env_dotenv}"
-    set +a
-  fi
+  local resolved
+  resolved="$(workflow_resolve_database_env_json)" || return 1
 
-  if [ -z "${WORKFLOW_DATABASE_URL:-}" ]; then
-    WORKFLOW_DATABASE_URL="$(workflow_resolve_docker_database_url || true)"
-  fi
-
-  if [ -z "${WORKFLOW_DATABASE_URL:-}" ]; then
-    echo "WORKFLOW_DATABASE_URL must be set explicitly by Docker or Cloudflare authority; native localhost fallback is disabled." >&2
+  if [ -z "${resolved}" ]; then
+    echo "workflow database authority resolution returned no payload." >&2
     return 1
   fi
 
+  local python_bin
+  python_bin="$(workflow_python_bin)" || {
+    echo "python3 is required to parse workflow authority output." >&2
+    return 1
+  }
+
+  local parsed
+  parsed="$(
+    WORKFLOW_AUTHORITY_JSON="${resolved}" "${python_bin}" - <<'PY'
+import json
+import os
+import sys
+
+payload = json.loads(os.environ["WORKFLOW_AUTHORITY_JSON"])
+database_url = str(payload.get("database_url") or "").strip()
+authority_source = str(payload.get("authority_source") or "").strip()
+if not database_url:
+    sys.stderr.write("canonical workflow resolver returned an empty WORKFLOW_DATABASE_URL\n")
+    raise SystemExit(1)
+print(database_url)
+print(authority_source)
+PY
+  )" || return 1
+
+  WORKFLOW_DATABASE_URL="$(printf '%s\n' "${parsed}" | sed -n '1p')"
+  WORKFLOW_DATABASE_AUTHORITY_SOURCE="$(printf '%s\n' "${parsed}" | sed -n '2p')"
+
   export WORKFLOW_DATABASE_URL
+  export WORKFLOW_DATABASE_AUTHORITY_SOURCE
 }

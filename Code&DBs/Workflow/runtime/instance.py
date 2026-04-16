@@ -79,6 +79,14 @@ def _default_config_path() -> Path:
     return _repo_root() / _CONFIG_DIRNAME / _CONFIG_FILENAME
 
 
+def _default_receipts_dir() -> Path:
+    return (_repo_root() / "artifacts" / "runtime_receipts").resolve()
+
+
+def _default_topology_dir() -> Path:
+    return (_repo_root() / "artifacts" / "runtime_topology").resolve()
+
+
 _fail = partial(_shared_fail, error_type=NativeInstanceResolutionError)
 
 
@@ -199,6 +207,29 @@ def _assert_expected_path(
         )
 
 
+def _assert_repo_local_native_contract(env: Mapping[str, str]) -> None:
+    _assert_expected_text(
+        env,
+        env_name=PRAXIS_RUNTIME_PROFILE_ENV,
+        actual_value="praxis",
+    )
+    _assert_expected_text(
+        env,
+        env_name=PRAXIS_INSTANCE_NAME_ENV,
+        actual_value="praxis",
+    )
+    _assert_expected_path(
+        env,
+        env_name=PRAXIS_RECEIPTS_DIR_ENV,
+        actual_path=_default_receipts_dir(),
+    )
+    _assert_expected_path(
+        env,
+        env_name=PRAXIS_TOPOLOGY_DIR_ENV,
+        actual_path=_default_topology_dir(),
+    )
+
+
 def resolve_native_instance(
     *,
     env: Mapping[str, str] | None = None,
@@ -208,6 +239,7 @@ def resolve_native_instance(
 
     source = env if env is not None else os.environ
     resolved_config_path = _resolve_config_path(config_path=config_path, env=source)
+    _assert_repo_local_native_contract(source)
     try:
         conn = ensure_postgres_available(env=source)
     except PostgresConfigurationError as exc:

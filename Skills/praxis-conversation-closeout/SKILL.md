@@ -92,6 +92,18 @@ praxis workflow tools describe praxis_operator_decisions
 praxis workflow tools call praxis_operator_decisions --input-json '{"action":"record",...}' --yes
 ```
 
+Only use this path when you can provide the minimum durable packet:
+
+- `decision_key`
+- `decision_kind`
+- `title`
+- `rationale`
+- `decided_by`
+- `decision_source`
+- `decision_scope_kind` and `decision_scope_ref` when the decision kind requires typed scope
+
+If you cannot satisfy that packet cleanly, do not write a generic decision row.
+
 Use roadmap write authority for new backlog shape:
 
 ```text
@@ -114,6 +126,7 @@ Use ingest only when no stronger operator table exists and the content still des
 
 ```text
 praxis workflow tools describe praxis_ingest
+praxis workflow recall "<distinctive phrase from the ingested content>"
 ```
 
 ### 3. Persist architecture decisions explicitly
@@ -137,6 +150,8 @@ praxis workflow tools call praxis_operator_architecture_policy --input-json '{"a
 
 If the decision is durable but does not fit the stricter typed path, use `praxis_operator_decisions` with `action:"record"`.
 
+Before recording, confirm the decision kind can carry the scope you plan to write. Some kinds require typed scope and will reject underspecified rows.
+
 Before writing, list similar rows when collision risk is real:
 
 ```text
@@ -148,7 +163,7 @@ praxis workflow tools call praxis_operator_decisions --input-json '{"action":"li
 Use the correct table for the actual object:
 
 - new roadmap item -> `praxis_operator_write` with `preview`, then `validate` when needed, then `commit`
-- completed roadmap item or bug set -> `praxis_operator_closeout`
+- completed roadmap item or bug set -> discover the exact existing ids first, run `praxis_operator_closeout` with `action:"preview"`, inspect the reconciliation result, then `commit` only those exact `bug_ids` and `roadmap_item_ids`
 - new bug -> `praxis_bugs`
 - recallable conversation artifact with no better home -> `praxis_ingest` using `kind:"conversation"` or another schema-valid kind
 
@@ -162,6 +177,7 @@ After mutation, verify through the same operator lane or a read lane that sees t
 - `praxis workflow query "<what changed?>"`
 - `praxis workflow bugs ...`
 - `praxis workflow tools call praxis_operator_roadmap_view --input-json '{...}'`
+- `praxis workflow recall "<distinctive phrase from the ingested conversation record>"`
 
 If you cannot verify the write, call that out plainly.
 

@@ -74,6 +74,9 @@ def tool_praxis_bugs(params: dict) -> dict:
                 serialize_bug=_compact_bug,
                 default_limit=25,
                 include_replay_details=False,
+                parse_status=_parse_bug_status,
+                parse_severity=_parse_bug_severity,
+                parse_category=_parse_bug_category,
             )
 
         if action == "file":
@@ -85,6 +88,8 @@ def tool_praxis_bugs(params: dict) -> dict:
                 filed_by_default="mcp_workflow_server",
                 source_kind_default="mcp_workflow_server",
                 include_similar_bugs=True,
+                parse_severity=_parse_bug_severity,
+                parse_category=_parse_bug_category,
             )
 
         if action == "search":
@@ -94,6 +99,9 @@ def tool_praxis_bugs(params: dict) -> dict:
                 body=params,
                 serialize_bug=_compact_bug,
                 default_limit=20,
+                parse_status=_parse_bug_status,
+                parse_severity=_parse_bug_severity,
+                parse_category=_parse_bug_category,
             )
 
         if action == "stats":
@@ -126,6 +134,7 @@ def tool_praxis_bugs(params: dict) -> dict:
                 body=params,
                 serialize_bug=_bug_to_dict,
                 resolved_statuses=resolved_statuses,
+                parse_status=_parse_bug_status,
             )
 
         if action == "patch_resume":

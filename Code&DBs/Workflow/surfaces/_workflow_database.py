@@ -6,7 +6,11 @@ import os
 from collections.abc import Mapping
 from pathlib import Path
 
-from runtime._workflow_database import resolve_runtime_database_url
+from runtime._workflow_database import (
+    WorkflowDatabaseAuthority,
+    resolve_runtime_database_authority,
+    resolve_runtime_database_url,
+)
 
 
 def workflow_database_url_for_repo(
@@ -24,6 +28,21 @@ def workflow_database_url_for_repo(
     )
 
 
+def workflow_database_authority_for_repo(
+    repo_root: Path,
+    *,
+    env: Mapping[str, str] | None = None,
+) -> WorkflowDatabaseAuthority:
+    """Resolve one explicit DB authority and record where it came from."""
+
+    source = env if env is not None else os.environ
+    return resolve_runtime_database_authority(
+        env=source,
+        repo_root=repo_root,
+        required=True,
+    )
+
+
 def workflow_database_env_for_repo(
     repo_root: Path,
     *,
@@ -32,11 +51,16 @@ def workflow_database_env_for_repo(
     """Resolve one explicit DB authority for a surface entrypoint."""
 
     source = env if env is not None else os.environ
-    database_url = workflow_database_url_for_repo(repo_root, env=source)
+    authority = workflow_database_authority_for_repo(repo_root, env=source)
     return {
-        "WORKFLOW_DATABASE_URL": database_url,
+        "WORKFLOW_DATABASE_URL": str(authority.database_url or ""),
+        "WORKFLOW_DATABASE_AUTHORITY_SOURCE": authority.source,
         "PATH": str(source.get("PATH", "")),
     }
 
 
-__all__ = ["workflow_database_env_for_repo", "workflow_database_url_for_repo"]
+__all__ = [
+    "workflow_database_authority_for_repo",
+    "workflow_database_env_for_repo",
+    "workflow_database_url_for_repo",
+]

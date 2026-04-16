@@ -9,6 +9,7 @@ Flow:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -30,6 +31,8 @@ from storage.postgres.object_lifecycle_repository import (
 )
 from storage.postgres.workflow_runtime_repository import (
     create_app_manifest,
+    load_app_manifest_record,
+    record_app_manifest_history,
     upsert_app_manifest,
 )
 
@@ -128,8 +131,9 @@ class TaskAssembler:
         if looks_like_ticket_drafting_task(task):
             drafts = draft_ticket_responses(task=task, card={}, upstream_outputs={})
             if drafts:
+                manifest_id = self._persist_support_ticket_drafts(task=task, drafts=drafts)
                 return {
-                    "manifest_id": None,
+                    "manifest_id": manifest_id,
                     "plan_summary": f"Drafted {len(drafts)} support ticket response(s) deterministically",
                     "drafts": drafts,
                     "source": "deterministic_support_fallback",
@@ -155,6 +159,59 @@ class TaskAssembler:
             "object_type": plan.object_type.get("name") if plan.object_type else None,
             "module_count": len(plan.modules),
         }
+
+    def _support_ticket_draft_manifest_id(
+        self,
+        *,
+        task: str,
+        drafts: list[dict[str, str]],
+    ) -> str:
+        payload = json.dumps(
+            {"task": task, "drafts": drafts},
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        )
+        digest = hashlib.sha1(payload.encode("utf-8")).hexdigest()[:16]
+        return f"support-ticket-drafts-{digest}"
+
+    def _persist_support_ticket_drafts(
+        self,
+        *,
+        task: str,
+        drafts: list[dict[str, str]],
+    ) -> str:
+        manifest_id = self._support_ticket_draft_manifest_id(task=task, drafts=drafts)
+        manifest = {
+            "kind": "support_reply_drafts",
+            "manifest_family": "support",
+            "manifest_type": "reply_drafts",
+            "status": "draft",
+            "task": task,
+            "drafts": drafts,
+            "draft_count": len(drafts),
+            "source": "deterministic_support_fallback",
+        }
+        existing = load_app_manifest_record(self._conn, manifest_id=manifest_id)
+        version = int(existing.get("version") or 0) + 1 if existing else 1
+        upsert_app_manifest(
+            self._conn,
+            manifest_id=manifest_id,
+            name=task[:80] or "Support ticket drafts",
+            description=f"Deterministic support ticket drafts ({len(drafts)} responses)",
+            manifest=manifest,
+            version=version,
+            status="draft",
+        )
+        record_app_manifest_history(
+            self._conn,
+            manifest_id=manifest_id,
+            version=version,
+            manifest_snapshot=manifest,
+            change_description="Persist deterministic support ticket drafts",
+            changed_by="task_assembler",
+        )
+        return manifest_id
 
     def assemble_operating_model(self, task: str) -> dict:
         """Task string → operating model JSON via the planner CLI chain."""

@@ -69,7 +69,8 @@ WORKFLOW_MIGRATION_SEQUENCE = ('001_v1_control_plane.sql',
  '132_issue_backlog_authority.sql',
  '133_fork_worktree_binding_materialization.sql',
  '134_operator_object_relations.sql',
- '135_claim_lifecycle_transition_authority.sql')
+ '135_claim_lifecycle_transition_authority.sql',
+ '136_operation_catalog_authority.sql')
 
 WORKFLOW_FULL_BOOTSTRAP_SEQUENCE = ('001_v1_control_plane.sql',
  '002_registry_authority.sql',
@@ -231,7 +232,8 @@ WORKFLOW_FULL_BOOTSTRAP_SEQUENCE = ('001_v1_control_plane.sql',
  '132_issue_backlog_authority.sql',
  '133_fork_worktree_binding_materialization.sql',
  '134_operator_object_relations.sql',
- '135_claim_lifecycle_transition_authority.sql')
+ '135_claim_lifecycle_transition_authority.sql',
+ '136_operation_catalog_authority.sql')
 
 WORKFLOW_POLICY_BUCKETS = {'canonical': ('001_v1_control_plane.sql',
                '002_registry_authority.sql',
@@ -296,7 +298,8 @@ WORKFLOW_POLICY_BUCKETS = {'canonical': ('001_v1_control_plane.sql',
                '132_issue_backlog_authority.sql',
                '133_fork_worktree_binding_materialization.sql',
                '134_operator_object_relations.sql',
-               '135_claim_lifecycle_transition_authority.sql'),
+               '135_claim_lifecycle_transition_authority.sql',
+               '136_operation_catalog_authority.sql'),
  'bootstrap_only': ('012_execution_leases.sql',
                     '012_task_type_route_eligibility.sql',
                     '013_dispatch_control_tables.sql',
@@ -461,6 +464,7 @@ WORKFLOW_MIGRATION_POLICIES = {'001_v1_control_plane.sql': 'canonical',
  '133_fork_worktree_binding_materialization.sql': 'canonical',
  '134_operator_object_relations.sql': 'canonical',
  '135_claim_lifecycle_transition_authority.sql': 'canonical',
+ '136_operation_catalog_authority.sql': 'canonical',
  '012_execution_leases.sql': 'bootstrap_only',
  '012_task_type_route_eligibility.sql': 'bootstrap_only',
  '013_dispatch_control_tables.sql': 'bootstrap_only',
@@ -1270,7 +1274,16 @@ WORKFLOW_MIGRATION_EXPECTED_OBJECTS = {'001_v1_control_plane.sql': (('table', 'w
                                                   ('index',
                                                    'claim_lifecycle_transition_state_window_idx'),
                                                   ('index',
-                                                   'claim_lifecycle_transition_from_state_active_idx'))}
+                                                   'claim_lifecycle_transition_from_state_active_idx')),
+ '136_operation_catalog_authority.sql': (('table', 'operation_catalog_registry'),
+                                         ('index',
+                                          'operation_catalog_registry_source_enabled_idx'),
+                                         ('index',
+                                          'operation_catalog_registry_method_path_idx'),
+                                         ('table',
+                                          'operation_catalog_source_policy_registry'),
+                                         ('index',
+                                          'operation_catalog_source_policy_registry_enabled_idx'))}
 
 WORKFLOW_SCHEMA_READINESS_SEQUENCE = (('001_v1_control_plane.sql',
   (('table', 'workflow_definitions'),
@@ -1802,5 +1815,11 @@ WORKFLOW_SCHEMA_READINESS_SEQUENCE = (('001_v1_control_plane.sql',
    ('constraint',
     'workflow_claim_lifecycle_transition_authority.workflow_claim_lifecycle_transition_authority_state_check'),
    ('index', 'claim_lifecycle_transition_state_window_idx'),
-   ('index', 'claim_lifecycle_transition_from_state_active_idx'))))
+   ('index', 'claim_lifecycle_transition_from_state_active_idx'))),
+ ('136_operation_catalog_authority.sql',
+  (('table', 'operation_catalog_registry'),
+   ('index', 'operation_catalog_registry_source_enabled_idx'),
+   ('index', 'operation_catalog_registry_method_path_idx'),
+   ('table', 'operation_catalog_source_policy_registry'),
+   ('index', 'operation_catalog_source_policy_registry_enabled_idx'))))
 

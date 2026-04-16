@@ -2,6 +2,7 @@
   "name": "Agent Handoff Search DB Probe",
   "workflow_id": "agent_handoff_search_db_probe",
   "phase": "execute",
+  "workdir": "/Users/nate/Praxis",
   "outcome_goal": "Exercise one workflow path that uses deterministic tooling, MCP-backed search, agent handoff, and a DB-backed action while surfacing breakage instead of hiding it.",
   "jobs": [
     {
@@ -21,7 +22,7 @@
             ],
             "must_expose": [
               "blocked step details",
-              "spoof guidance for downstream continuation"
+              "non-authoritative outcomes"
             ]
           }
         }
@@ -29,8 +30,7 @@
       "expected_outputs": {
         "probe_id": "agent_handoff_search_db_probe",
         "search_query": "workflow spec with agents handoff deterministic tooling search db action",
-        "db_action": "praxis_bugs.stats",
-        "continuation_rule": "If a step fails, document it, spoof the expected output packet, and keep validating downstream jobs."
+        "db_action": "praxis_bugs.stats"
       }
     },
     {
@@ -41,7 +41,7 @@
       ],
       "inputs": {
         "task_name": "discover_local_code",
-        "server_command": "env PYTHONPATH=/Users/nate/Praxis/Code&DBs/Workflow PRAXIS_MCP_STDIO_TRANSPORT=jsonl WORKFLOW_DATABASE_URL=postgresql://localhost:5432/praxis python3 -m surfaces.mcp",
+        "server_command": "env PRAXIS_MCP_STDIO_TRANSPORT=jsonl /Users/nate/Praxis/Code&DBs/Workflow/scripts/mcp-server.sh",
         "tool_name": "praxis_discover",
         "arguments": {
           "action": "search",
@@ -52,24 +52,14 @@
       }
     },
     {
-      "label": "agent_synthesis",
-      "agent": "openai/gpt-5.4-mini",
-      "workdir": "/Users/nate/Praxis",
-      "prompt": "Read the prior workflow results and produce a blunt operator handoff note. Include: 1) what the search step actually proved, 2) which authority seams still look fake or implicit, and 3) what the next job should verify. If anything upstream failed, say so plainly and include the minimum spoof packet needed for downstream continuation.",
-      "depends_on": [
-        "seed_contract",
-        "discover_local_code"
-      ]
-    },
-    {
       "label": "query_bug_db",
       "adapter_type": "mcp_task",
       "depends_on": [
-        "agent_synthesis"
+        "seed_contract"
       ],
       "inputs": {
         "task_name": "query_bug_db",
-        "server_command": "env PYTHONPATH=/Users/nate/Praxis/Code&DBs/Workflow PRAXIS_MCP_STDIO_TRANSPORT=jsonl WORKFLOW_DATABASE_URL=postgresql://localhost:5432/praxis python3 -m surfaces.mcp",
+        "server_command": "env PRAXIS_MCP_STDIO_TRANSPORT=jsonl /Users/nate/Praxis/Code&DBs/Workflow/scripts/mcp-server.sh",
         "tool_name": "praxis_bugs",
         "arguments": {
           "action": "stats"
@@ -78,14 +68,51 @@
       }
     },
     {
-      "label": "agent_handoff_review",
+      "label": "agent_synthesis",
       "agent": "openai/gpt-5.4-mini",
       "workdir": "/Users/nate/Praxis",
-      "prompt": "Act as the downstream verifier consuming only prior workflow outputs. Decide whether this workflow truly exercised agents, information handoff, deterministic tooling, search, and a DB action. Call out every gap or fake seam. If any required upstream output is missing, emit a spoof packet that would let a human continue the end-to-end test without pretending the gap is solved.",
       "depends_on": [
-        "agent_synthesis",
+        "discover_local_code",
         "query_bug_db"
+      ],
+      "prompt": "Use the prior workflow outputs to create `artifacts/workflow_eval/probe_exec_20260416/agent_handoff_search_db_probe.handoff.md`. The file must contain exactly these markdown headings: `# Search Proof`, `# Authority Gaps`, and `# Next Verification`. Base the content only on upstream workflow outputs. If any upstream step failed or is missing, say so plainly and mark the handoff as non-authoritative. After writing the file, reply with exactly one JSON object on stdout: {\"step\":\"agent_synthesis\",\"status\":\"ok\",\"file\":\"artifacts/workflow_eval/probe_exec_20260416/agent_handoff_search_db_probe.handoff.md\"}.",
+      "write_scope": [
+        "artifacts/workflow_eval/probe_exec_20260416/agent_handoff_search_db_probe.handoff.md"
       ]
+    },
+    {
+      "label": "probe_review_contract",
+      "adapter_type": "deterministic_task",
+      "depends_on": [
+        "discover_local_code",
+        "query_bug_db",
+        "agent_synthesis"
+      ],
+      "inputs": {
+        "task_name": "probe_review_contract",
+        "input_payload": {
+          "deterministic_builder": "runtime.workflow_eval.build_agent_handoff_probe_review",
+          "workspace_root": "/Users/nate/Praxis",
+          "handoff_path": "artifacts/workflow_eval/probe_exec_20260416/agent_handoff_search_db_probe.handoff.md",
+          "review_path": "artifacts/workflow_eval/probe_exec_20260416/agent_handoff_search_db_probe.review.json",
+          "write_side_bug_anchor": "BUG-AE2B9669"
+        }
+      },
+      "expected_outputs": {}
+    },
+    {
+      "label": "write_review_artifact",
+      "adapter_type": "file_writer",
+      "depends_on": [
+        "probe_review_contract"
+      ],
+      "inputs": {
+        "task_name": "write_review_artifact",
+        "input_payload": {
+          "workspace_root": "/Users/nate/Praxis"
+        }
+      },
+      "expected_outputs": {}
     }
   ]
 }

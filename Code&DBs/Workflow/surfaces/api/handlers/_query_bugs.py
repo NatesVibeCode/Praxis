@@ -4,23 +4,103 @@ from __future__ import annotations
 
 from typing import Any
 
+from .._payload_contract import coerce_query_bool, coerce_query_int
+from . import _bug_surface_contract as _bug_contract
+from . import workflow_query_core as _workflow_query_core
+from ._shared import _ClientError, _query_params
+
+
+def _parse_bug_status(bt_mod: Any, raw_status: object):
+    try:
+        return _bug_contract.parse_bug_status(bt_mod, raw_status)
+    except ValueError as exc:
+        raise _ClientError(str(exc)) from exc
+
+
+def _parse_bug_severity(bt_mod: Any, raw_severity: object):
+    try:
+        return _bug_contract.parse_bug_severity(bt_mod, raw_severity)
+    except ValueError as exc:
+        raise _ClientError(str(exc)) from exc
+
+
+def _parse_bug_category(bt_mod: Any, raw_category: object):
+    try:
+        return _bug_contract.parse_bug_category(bt_mod, raw_category)
+    except ValueError as exc:
+        raise _ClientError(str(exc)) from exc
+
 
 def _handle_bugs(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
-    from . import workflow_query as _legacy
-
-    return _legacy._handle_bugs(subs, body)
+    return _workflow_query_core.handle_bugs(
+        subs,
+        body,
+        parse_bug_status=_parse_bug_status,
+        parse_bug_severity=_parse_bug_severity,
+        parse_bug_category=_parse_bug_category,
+    )
 
 
 def _handle_bugs_get(request: Any, path: str) -> None:
-    from . import workflow_query as _legacy
-
-    _legacy._handle_bugs_get(request, path)
+    try:
+        params = _query_params(request.path)
+        limit = coerce_query_int(
+            params.get("limit"),
+            field_name="limit",
+            default=50,
+            minimum=1,
+            strict=True,
+        )
+        replay_ready_only = coerce_query_bool(
+            params.get("replay_ready_only"),
+            field_name="replay_ready_only",
+            default=False,
+        )
+        open_only = coerce_query_bool(
+            params.get("open_only"),
+            field_name="open_only",
+            default=False,
+        )
+        result = _handle_bugs(
+            request.subsystems,
+            {
+                "action": "list",
+                "limit": limit,
+                "replay_ready_only": replay_ready_only,
+                "open_only": open_only,
+            },
+        )
+        request._send_json(200, result)
+    except Exception as exc:
+        request._send_json(500, {"error": str(exc)})
 
 
 def _handle_bugs_replay_ready_get(request: Any, path: str) -> None:
-    from . import workflow_query as _legacy
-
-    _legacy._handle_bugs_replay_ready_get(request, path)
+    try:
+        params = _query_params(request.path)
+        limit = coerce_query_int(
+            params.get("limit"),
+            field_name="limit",
+            default=50,
+            minimum=1,
+            strict=True,
+        )
+        refresh_backfill = coerce_query_bool(
+            params.get("refresh_backfill"),
+            field_name="refresh_backfill",
+            default=True,
+        )
+        result = _workflow_query_core.handle_operator_view(
+            request.subsystems,
+            {
+                "view": "replay_ready_bugs",
+                "limit": limit,
+                "refresh_backfill": refresh_backfill,
+            },
+        )
+        request._send_json(200, result)
+    except Exception as exc:
+        request._send_json(500, {"error": str(exc)})
 
 
 __all__ = [

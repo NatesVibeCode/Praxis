@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TextIO
 
+from surfaces.cli._db import cli_sync_conn
 from surfaces.cli.mcp_tools import print_json, render_health_payload, run_cli_tool
 
 
@@ -325,7 +326,6 @@ def _notifications_command(args: list[str], *, stdout: TextIO) -> int:
     """Handle `workflow notifications [tail|drain]`."""
 
     import json as _json
-    from storage.postgres.connection import SyncPostgresConnection, get_workflow_pool
 
     show_tail = False
     drain_live = False
@@ -358,7 +358,7 @@ def _notifications_command(args: list[str], *, stdout: TextIO) -> int:
         stdout.write((notifications or "No pending workflow notifications.") + "\n")
         return 0
 
-    conn = SyncPostgresConnection(get_workflow_pool())
+    conn = cli_sync_conn()
     if show_tail:
         rows = conn.execute(
             """

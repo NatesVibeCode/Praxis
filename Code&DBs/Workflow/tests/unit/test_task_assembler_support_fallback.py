@@ -148,6 +148,37 @@ def test_assemble_short_circuits_to_support_ticket_drafts(monkeypatch):
     monkeypatch.setattr(task_assembler, "draft_ticket_responses", lambda **kwargs: drafts)
     monkeypatch.setattr(
         task_assembler.TaskAssembler,
+        "_support_ticket_draft_manifest_id",
+        lambda self, *, task, drafts: "support-ticket-drafts-1234567890abcdef",
+    )
+    monkeypatch.setattr(task_assembler, "load_app_manifest_record", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        task_assembler,
+        "upsert_app_manifest",
+        lambda *args, **kwargs: {
+            "id": "support-ticket-drafts-1234567890abcdef",
+            "name": "Draft a support ticket reply",
+            "description": "Deterministic support ticket drafts (1 responses)",
+            "manifest": {
+                "kind": "support_reply_drafts",
+                "manifest_family": "support",
+                "manifest_type": "reply_drafts",
+                "status": "draft",
+                "task": "Draft a support ticket reply",
+                "drafts": drafts,
+                "draft_count": 1,
+                "source": "deterministic_support_fallback",
+            },
+            "version": 1,
+        },
+    )
+    monkeypatch.setattr(
+        task_assembler,
+        "record_app_manifest_history",
+        lambda *args, **kwargs: {"id": "history-1"},
+    )
+    monkeypatch.setattr(
+        task_assembler.TaskAssembler,
         "_pre_suggest",
         lambda self, task: (_ for _ in ()).throw(AssertionError("_pre_suggest should not run")),
     )
@@ -155,7 +186,7 @@ def test_assemble_short_circuits_to_support_ticket_drafts(monkeypatch):
     result = assembler.assemble("Draft a support ticket reply")
 
     assert result == {
-        "manifest_id": None,
+        "manifest_id": "support-ticket-drafts-1234567890abcdef",
         "plan_summary": "Drafted 1 support ticket response(s) deterministically",
         "drafts": drafts,
         "source": "deterministic_support_fallback",

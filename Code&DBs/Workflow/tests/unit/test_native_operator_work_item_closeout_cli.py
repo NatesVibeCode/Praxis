@@ -189,6 +189,7 @@ class _CloseoutRepositorySpy:
     def __init__(self, *, resolved_at: datetime) -> None:
         self.resolved_at = resolved_at
         self.bug_calls: list[tuple[tuple[str, ...], dict[str, str], datetime]] = []
+        self.issue_calls: list[tuple[tuple[str, ...], datetime]] = []
         self.roadmap_calls: list[tuple[tuple[str, ...], str, datetime]] = []
 
     async def mark_bugs_fixed(
@@ -208,6 +209,15 @@ class _CloseoutRepositorySpy:
             }
             for bug_id in bug_ids
         )
+
+    async def mark_issues_resolved_by_bug_ids(
+        self,
+        *,
+        bug_ids: tuple[str, ...],
+        resolved_at: datetime,
+    ) -> tuple[dict[str, object], ...]:
+        self.issue_calls.append((bug_ids, resolved_at))
+        return ()
 
     async def mark_roadmap_items_completed(
         self,
@@ -272,9 +282,10 @@ def test_work_item_closeout_commit_delegates_to_closeout_repository(monkeypatch)
         return {
             "bug.closeout.1": (
                 {
-                    "evidence_kind": "receipt",
-                    "evidence_ref": "receipt.closeout.1",
+                    "evidence_kind": "verification_run",
+                    "evidence_ref": "verification_run.closeout.1",
                     "evidence_role": "validates_fix",
+                    "verification_status": "passed",
                 },
             )
         }
@@ -333,5 +344,82 @@ def test_work_item_closeout_commit_delegates_to_closeout_repository(monkeypatch)
             "status": "completed",
             "completed_at": resolved_at.isoformat(),
             "source_bug_id": "bug.closeout.1",
+        }
+    ]
+
+
+def test_work_item_closeout_requires_passed_fix_verification(monkeypatch) -> None:
+    async def _fetch_bug_rows_for_closeout(self, conn, bug_ids):
+        del conn, bug_ids
+        return (
+            {
+                "bug_id": "bug.closeout.failed",
+                "resolved_at": None,
+                "status": "OPEN",
+            },
+        )
+
+    async def _fetch_roadmap_rows_for_closeout(
+        self,
+        conn,
+        roadmap_item_ids: tuple[str, ...],
+        source_bug_ids: tuple[str, ...],
+    ) -> tuple[dict[str, object], ...]:
+        del self, conn, roadmap_item_ids, source_bug_ids
+        return ()
+
+    async def _fetch_bug_evidence_for_closeout(
+        self,
+        conn,
+        bug_ids: tuple[str, ...],
+    ) -> dict[str, tuple[dict[str, str], ...]]:
+        del self, conn
+        assert bug_ids == ("bug.closeout.failed",)
+        return {
+            "bug.closeout.failed": (
+                {
+                    "evidence_kind": "verification_run",
+                    "evidence_ref": "verification_run.closeout.failed",
+                    "evidence_role": "validates_fix",
+                    "verification_status": "failed",
+                },
+            )
+        }
+
+    monkeypatch.setattr(
+        operator_write.OperatorControlFrontdoor,
+        "_fetch_bug_rows_for_closeout",
+        _fetch_bug_rows_for_closeout,
+    )
+    monkeypatch.setattr(
+        operator_write.OperatorControlFrontdoor,
+        "_fetch_roadmap_rows_for_closeout",
+        _fetch_roadmap_rows_for_closeout,
+    )
+    monkeypatch.setattr(
+        operator_write.OperatorControlFrontdoor,
+        "_fetch_bug_evidence_for_closeout",
+        _fetch_bug_evidence_for_closeout,
+    )
+
+    frontdoor = operator_write.OperatorControlFrontdoor(
+        connect_database=lambda env=None: asyncio.sleep(0, result=_NoSqlConnectionProxy()),
+    )
+
+    payload = asyncio.run(
+        frontdoor.reconcile_work_item_closeout_async(
+            action="preview",
+            bug_ids=("bug.closeout.failed",),
+            roadmap_item_ids=(),
+        )
+    )
+
+    assert payload["proof_threshold"]["bug_requires_passed_verification"] is True
+    assert payload["candidates"]["bugs"] == []
+    assert payload["skipped"]["bugs"] == [
+        {
+            "bug_id": "bug.closeout.failed",
+            "current_status": "OPEN",
+            "reason_codes": ["missing_passed_validates_fix_verification"],
         }
     ]

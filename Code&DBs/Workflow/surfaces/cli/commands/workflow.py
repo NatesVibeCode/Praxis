@@ -3,15 +3,23 @@
 from __future__ import annotations
 
 import contextlib
-import os
 import json
+import os
+from pathlib import Path
+import subprocess
+import sys
 import tempfile
+import time
 from types import SimpleNamespace
 from typing import TextIO
 
-from surfaces.cli._db import cli_sync_conn
+from surfaces.cli._db import cli_repo_root, cli_sync_conn
 from surfaces.cli.mcp_tools import load_json_file, print_json, run_cli_tool
+from surfaces._workflow_database import workflow_database_authority_for_repo
 from runtime.spec_compiler import compile_prompt_launch_spec
+
+_DETACHED_WAIT_ATTEMPTS = 5
+_FOREGROUND_SUBMIT_FLAG = "--foreground-submit"
 
 
 def _workflow_cli():
@@ -136,6 +144,7 @@ def _extract_common_run_options(
         "job_id": None,
         "run_id": None,
         "result_file": None,
+        "foreground_submit": False,
     }
     remaining: list[str] = []
     i = 0
@@ -153,6 +162,10 @@ def _extract_common_run_options(
             options["fresh"] = True
             i += 1
             continue
+        if token == _FOREGROUND_SUBMIT_FLAG:
+            options["foreground_submit"] = True
+            i += 1
+            continue
         if token in {"--job-id", "--run-id", "--result-file"}:
             if i + 1 >= len(args):
                 stdout.write(f"error: {token} requires a value\n")
@@ -163,6 +176,136 @@ def _extract_common_run_options(
         remaining.append(token)
         i += 1
     return options, remaining
+
+
+def _workflow_root(repo_root: Path) -> Path:
+    return repo_root / "Code&DBs" / "Workflow"
+
+
+def _detached_result_file(repo_root: Path, result_file_base: str) -> Path:
+    suffix = f"{int(time.time())}.{os.getpid()}.{time.time_ns() % 1_000_000}.json"
+    return repo_root / "artifacts" / f"{result_file_base}.{suffix}"
+
+
+def _forwarded_job_id(args: list[str]) -> str | None:
+    for index, token in enumerate(args):
+        if token == "--job-id" and index + 1 < len(args):
+            return args[index + 1]
+    return None
+
+
+def _detached_launch_env(repo_root: Path) -> tuple[dict[str, str], str]:
+    authority = workflow_database_authority_for_repo(repo_root, env=os.environ)
+    env = dict(os.environ)
+    env["WORKFLOW_DATABASE_URL"] = str(authority.database_url or "")
+    env["WORKFLOW_DATABASE_AUTHORITY_SOURCE"] = authority.source
+    env["PATH"] = str(os.environ.get("PATH", ""))
+    workflow_root = str(_workflow_root(repo_root))
+    existing_pythonpath = str(os.environ.get("PYTHONPATH", "")).strip()
+    env["PYTHONPATH"] = (
+        workflow_root
+        if not existing_pythonpath
+        else f"{workflow_root}{os.pathsep}{existing_pythonpath}"
+    )
+    return env, authority.source
+
+
+def _emit_detached_submission_status(
+    *,
+    stdout: TextIO,
+    payload: dict[str, object],
+    success_prefix: str,
+    emit_parent: bool,
+    result_file: Path,
+    authority_source: str,
+) -> None:
+    run_id = str(payload.get("run_id") or "unknown")
+    workflow_id = str(payload.get("workflow_id") or "unknown")
+    status = str(payload.get("status") or "unknown")
+    parent_run_id = str(payload.get("parent_run_id") or "unknown")
+    prefix = "Workflow replayed" if status == "replayed" else success_prefix
+
+    stdout.write(f"{prefix}: {run_id}\n")
+    stdout.write(f"Workflow ID: {workflow_id}\n")
+    if emit_parent:
+        stdout.write(f"Parent run: {parent_run_id}\n")
+    stdout.write(f"Submission status: {status}\n")
+    stdout.write(f"DB authority source: {authority_source}\n")
+    stdout.write(f"Result file: {result_file}\n")
+    stdout.write("Use './scripts/praxis workflow active' to observe progress\n")
+
+
+def _launch_detached_frontdoor(
+    *,
+    command_name: str,
+    args: list[str],
+    stdout: TextIO,
+    result_file_base: str,
+    success_prefix: str,
+    emit_parent: bool,
+) -> int:
+    repo_root = cli_repo_root()
+    repo_root.joinpath("artifacts").mkdir(parents=True, exist_ok=True)
+    result_file = _detached_result_file(repo_root, result_file_base)
+    log_path = repo_root / "artifacts" / "workflow.log"
+    env, authority_source = _detached_launch_env(repo_root)
+
+    forwarded_args = list(args)
+    if _forwarded_job_id(forwarded_args) is None:
+        forwarded_args.extend(["--job-id", f"workflow-launch-{int(time.time())}-{os.getpid()}"])
+    forwarded_args.extend(["--result-file", str(result_file), _FOREGROUND_SUBMIT_FLAG])
+    command = [
+        sys.executable,
+        "-m",
+        "surfaces.cli.main",
+        "workflow",
+        command_name,
+        *forwarded_args,
+    ]
+
+    with log_path.open("a", encoding="utf-8") as log_handle:
+        process = subprocess.Popen(
+            command,
+            cwd=str(Path.cwd()),
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=log_handle,
+            stderr=log_handle,
+            start_new_session=True,
+        )
+
+    for _ in range(_DETACHED_WAIT_ATTEMPTS):
+        if result_file.is_file() and result_file.stat().st_size > 0:
+            payload = json.loads(result_file.read_text(encoding="utf-8"))
+            _emit_detached_submission_status(
+                stdout=stdout,
+                payload=payload if isinstance(payload, dict) else {},
+                success_prefix=success_prefix,
+                emit_parent=emit_parent,
+                result_file=result_file,
+                authority_source=authority_source,
+            )
+            return 0
+        if process.poll() is not None:
+            break
+        time.sleep(1)
+
+    if process.poll() is not None and (not result_file.exists() or result_file.stat().st_size == 0):
+        stdout.write(
+            f"Workflow {command_name} process exited before durable submission completed.\n"
+        )
+        stdout.write(f"DB authority source: {authority_source}\n")
+        stdout.write("No result file was written.\n")
+        stdout.write("Check artifacts/workflow.log for the launch error.\n")
+        return 1
+
+    stdout.write(
+        f"Workflow {command_name} process started (PID {process.pid}), awaiting durable submission result.\n"
+    )
+    stdout.write(f"DB authority source: {authority_source}\n")
+    stdout.write(f"Result file: {result_file}\n")
+    stdout.write("Use './scripts/praxis workflow active' to check progress\n")
+    return 0
 
 
 def _run_command(args: list[str], *, stdout: TextIO) -> int:
@@ -177,6 +320,7 @@ def _run_command(args: list[str], *, stdout: TextIO) -> int:
 
     from runtime.workflow_spec import is_batch_spec, load_raw
 
+    original_args = list(args)
     if not args or args[0] in {"-h", "--help"}:
         stdout.write(
             "usage: workflow run <spec.json> [--var key=value ...]\n"
@@ -233,6 +377,19 @@ def _run_command(args: list[str], *, stdout: TextIO) -> int:
     if common_options["dry_run"] and common_options["preview_execution"]:
         stdout.write("error: --preview-execution cannot be combined with --dry-run\n")
         return 2
+    if (
+        not common_options["dry_run"]
+        and not common_options["preview_execution"]
+        and not common_options["foreground_submit"]
+    ):
+        return _launch_detached_frontdoor(
+            command_name="run",
+            args=original_args,
+            stdout=stdout,
+            result_file_base="workflow_run_result",
+            success_prefix="Workflow submitted",
+            emit_parent=False,
+        )
 
     if args[0] in {"-p", "--prompt"}:
         if len(args) < 2:
@@ -373,6 +530,115 @@ def _run_command(args: list[str], *, stdout: TextIO) -> int:
                 os.unlink(rendered_path)
             except OSError:
                 pass
+
+
+def _spawn_command(args: list[str], *, stdout: TextIO) -> int:
+    """Handle `workflow spawn <parent_run_id> <spec.json>` with detached submit parity."""
+
+    if not args or args[0] in {"-h", "--help"}:
+        stdout.write(
+            "usage: workflow spawn <parent_run_id> <spec.json> [--reason <reason>] "
+            "[--parent-job-label <label>] [--lineage-depth <n>] [--fresh] "
+            "[--job-id <id>] [--run-id <id>] [--result-file <path>]\n"
+        )
+        return 2
+
+    original_args = list(args)
+    foreground_submit = False
+    filtered_args: list[str] = []
+    for token in args:
+        if token == _FOREGROUND_SUBMIT_FLAG:
+            foreground_submit = True
+            continue
+        filtered_args.append(token)
+    args = filtered_args
+
+    if len(args) < 2:
+        stdout.write(
+            "usage: workflow spawn <parent_run_id> <spec.json> [--reason <reason>] "
+            "[--parent-job-label <label>] [--lineage-depth <n>] [--fresh] "
+            "[--job-id <id>] [--run-id <id>] [--result-file <path>]\n"
+        )
+        return 2
+
+    if not foreground_submit:
+        return _launch_detached_frontdoor(
+            command_name="spawn",
+            args=original_args,
+            stdout=stdout,
+            result_file_base="workflow_spawn_result",
+            success_prefix="Child workflow spawned",
+            emit_parent=True,
+        )
+
+    parent_run_id = args[0]
+    spec_path = args[1]
+    reason = "cli.spawn"
+    parent_job_label = None
+    lineage_depth = None
+    fresh = False
+    job_id = None
+    run_id = None
+    result_file = None
+
+    i = 2
+    while i < len(args):
+        token = args[i]
+        if token == "--reason" and i + 1 < len(args):
+            reason = args[i + 1]
+            i += 2
+            continue
+        if token == "--parent-job-label" and i + 1 < len(args):
+            parent_job_label = args[i + 1]
+            i += 2
+            continue
+        if token == "--lineage-depth" and i + 1 < len(args):
+            try:
+                lineage_depth = int(args[i + 1])
+            except ValueError:
+                stdout.write(
+                    f"error: --lineage-depth must be an integer, got: {args[i + 1]}\n"
+                )
+                return 2
+            i += 2
+            continue
+        if token == "--fresh":
+            fresh = True
+            i += 1
+            continue
+        if token in {"--job-id", "--run-id", "--result-file"} and i + 1 < len(args):
+            value = args[i + 1]
+            if token == "--job-id":
+                job_id = value
+            elif token == "--run-id":
+                run_id = value
+            else:
+                result_file = value
+            i += 2
+            continue
+        stdout.write(f"error: unknown spawn argument: {token}\n")
+        return 2
+
+    with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stdout):
+        return _workflow_cli().cmd_spawn(
+            SimpleNamespace(
+                parent_run_id=parent_run_id,
+                spec=spec_path,
+                reason=reason,
+                parent_job_label=parent_job_label,
+                lineage_depth=lineage_depth,
+                fresh=fresh,
+                job_id=job_id,
+                run_id=run_id,
+                result_file=result_file,
+            )
+        )
+
+
+def _dry_run_command(args: list[str], *, stdout: TextIO) -> int:
+    """Compatibility alias for `workflow run --dry-run`."""
+
+    return _run_command([*args, "--dry-run"], stdout=stdout)
 
 
 def _chain_command(args: list[str], *, stdout: TextIO) -> int:
@@ -1355,6 +1621,91 @@ def _triggers_command(args: list[str], *, stdout: TextIO) -> int:
     return 2
 
 
+def _workflows_command(args: list[str], *, stdout: TextIO) -> int:
+    """Handle workflow record create/update through the CLI."""
+
+    if not args or args[0] in {"-h", "--help"}:
+        stdout.write(
+            "usage: workflow workflows create (--input-json <json> | --input-file <path>)\n"
+            "       workflow workflows update <workflow_id> (--input-json <json> | --input-file <path>)\n"
+        )
+        return 2
+
+    subcommand = args[0]
+    tail = args[1:]
+    query_mod = _workflow_query_mod()
+    conn = _workflow_subsystems().get_pg_conn()
+
+    try:
+        input_json = None
+        input_file = None
+        workflow_id = None
+        i = 0
+        while i < len(tail):
+            if tail[i] == "--input-json" and i + 1 < len(tail):
+                input_json = tail[i + 1]
+                i += 2
+            elif tail[i] == "--input-file" and i + 1 < len(tail):
+                input_file = tail[i + 1]
+                i += 2
+            elif subcommand == "update" and workflow_id is None:
+                workflow_id = tail[i].strip()
+                i += 1
+            else:
+                stdout.write(f"unknown argument: {tail[i]}\n")
+                return 2
+
+        payload = _load_input_payload(input_json=input_json, input_file=input_file)
+
+        if subcommand == "create":
+            error = query_mod._validate_workflow_body(
+                payload,
+                require_name=True,
+                require_definition=True,
+            )
+            if error:
+                stdout.write(f"error: {error}\n")
+                return 2
+            from runtime.canonical_workflows import save_workflow
+
+            row = save_workflow(conn, workflow_id=None, body=payload)
+            print_json(stdout, {"workflow": query_mod._workflow_to_dict(dict(row), include_definition=True)})
+            return 0
+
+        if subcommand == "update":
+            if not workflow_id:
+                stdout.write(
+                    "usage: workflow workflows update <workflow_id> "
+                    "(--input-json <json> | --input-file <path>)\n"
+                )
+                return 2
+            error = query_mod._validate_workflow_body(
+                payload,
+                require_name=False,
+                require_definition=False,
+            )
+            if error:
+                stdout.write(f"error: {error}\n")
+                return 2
+            if not payload:
+                stdout.write("error: No workflow fields provided for update\n")
+                return 2
+            from runtime.canonical_workflows import save_workflow
+
+            row = save_workflow(conn, workflow_id=workflow_id, body=payload)
+            print_json(stdout, {"workflow": query_mod._workflow_to_dict(dict(row), include_definition=True)})
+            return 0
+    except ValueError as exc:
+        stdout.write(f"error: {exc}\n")
+        return 2
+    except Exception as exc:
+        print_json(stdout, {"error": str(exc)})
+        return 1
+
+    stdout.write(f"unknown workflows subcommand: {subcommand}\n")
+    return 2
+
+
 def _retry_command(args: list[str], *, stdout: TextIO) -> int:
     """Handle `workflow retry <run_id> <label>` via the bus-backed legacy CLI."""
     from contextlib import redirect_stdout
@@ -1811,7 +2162,7 @@ def _queue_command(args: list[str], *, stdout: TextIO) -> int:
                 stdout.write(f"error: unknown argument: {sub_args[i]}\n")
                 return 2
 
-        from runtime.workflow.unified import run_worker_loop
+        from runtime.workflow._worker_loop import run_worker_loop
 
         conn = _workflow_runtime_conn()
         worker_id = f"workflow-worker-{os.getpid()}"

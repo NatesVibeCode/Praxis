@@ -68,7 +68,8 @@ def test_workflow_migration_manifest_includes_provider_route_health_budget_migra
     assert "128_operator_decision_embedding_architecture.sql" in filenames
     assert "132_issue_backlog_authority.sql" in filenames
     assert "135_claim_lifecycle_transition_authority.sql" in filenames
-    assert filenames[-1] == "135_claim_lifecycle_transition_authority.sql"
+    assert "136_operation_catalog_authority.sql" in filenames
+    assert filenames[-1] == "136_operation_catalog_authority.sql"
 
 
 def test_every_manifest_migration_has_expected_object_contract() -> None:
@@ -183,6 +184,20 @@ def test_cursor_local_cli_provider_seed_expected_objects_are_registered() -> Non
     names = {item.object_name for item in objects}
     assert "provider_cli_profiles" in names
     assert "provider_transport_admissions" in names
+
+
+def test_operation_catalog_authority_expected_objects_are_registered() -> None:
+    objects = workflow_migration_expected_objects("136_operation_catalog_authority.sql")
+    names = {item.object_name for item in objects}
+    assert names.issuperset(
+        {
+            "operation_catalog_registry",
+            "operation_catalog_registry_source_enabled_idx",
+            "operation_catalog_registry_method_path_idx",
+            "operation_catalog_source_policy_registry",
+            "operation_catalog_source_policy_registry_enabled_idx",
+        }
+    )
 
 
 def test_operator_decision_scope_policy_expected_objects_are_registered() -> None:

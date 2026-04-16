@@ -95,6 +95,7 @@ _OBJECT_RELATION_STATUSES = frozenset(SUPPORTED_OPERATOR_OBJECT_RELATION_STATUSE
 _OBJECT_RELATION_KINDS = frozenset(SUPPORTED_OPERATOR_OBJECT_KINDS)
 _BUG_CLOSEOUT_EVIDENCE_ROLE = "validates_fix"
 _ROADMAP_COMPLETED_STATUS = "completed"
+_BUG_CLOSEOUT_VERIFICATION_SUCCESS_STATUSES = frozenset({"passed", "succeeded", "success", "ok"})
 
 
 _require_text = require_text
@@ -953,6 +954,10 @@ def _closeout_resolution_summary(*, bug_id: str, evidence_count: int) -> str:
         "Auto-closed by work-item closeout reconciler from explicit "
         f"{_BUG_CLOSEOUT_EVIDENCE_ROLE} proof ({evidence_count} {noun}) for {bug_id}."
     )
+
+
+def _closeout_verification_passed(status: object) -> bool:
+    return str(status or "").strip().lower() in _BUG_CLOSEOUT_VERIFICATION_SUCCESS_STATUSES
 
 
 def _binding_status_supports_pipeline(value: str) -> bool:
@@ -2599,12 +2604,16 @@ class OperatorControlFrontdoor:
         rows = await conn.fetch(
             """
             SELECT
-                bug_id,
-                evidence_kind,
-                evidence_ref,
-                evidence_role
-            FROM bug_evidence_links
-            WHERE bug_id = ANY($1::text[])
+                bel.bug_id,
+                bel.evidence_kind,
+                bel.evidence_ref,
+                bel.evidence_role,
+                vr.status AS verification_status
+            FROM bug_evidence_links AS bel
+            LEFT JOIN verification_runs AS vr
+              ON bel.evidence_kind = 'verification_run'
+             AND vr.verification_run_id = bel.evidence_ref
+            WHERE bel.bug_id = ANY($1::text[])
             ORDER BY bug_id, created_at, bug_evidence_link_id
             """,
             list(bug_ids),
@@ -2705,7 +2714,12 @@ class OperatorControlFrontdoor:
             proof_bug_ids = {
                 bug_id
                 for bug_id, rows in evidence_by_bug_id.items()
-                if any(str(row["evidence_role"]) == _BUG_CLOSEOUT_EVIDENCE_ROLE for row in rows)
+                if any(
+                    str(row["evidence_role"]) == _BUG_CLOSEOUT_EVIDENCE_ROLE
+                    and str(row["evidence_kind"]) == "verification_run"
+                    and _closeout_verification_passed(row.get("verification_status"))
+                    for row in rows
+                )
             }
             now = _now()
 
@@ -2718,9 +2732,16 @@ class OperatorControlFrontdoor:
                         "kind": str(evidence["evidence_kind"]),
                         "ref": str(evidence["evidence_ref"]),
                         "role": str(evidence["evidence_role"]),
+                        "verification_status": (
+                            str(evidence["verification_status"])
+                            if evidence.get("verification_status") is not None
+                            else None
+                        ),
                     }
                     for evidence in evidence_by_bug_id.get(bug_id, ())
                     if str(evidence["evidence_role"]) == _BUG_CLOSEOUT_EVIDENCE_ROLE
+                    and str(evidence["evidence_kind"]) == "verification_run"
+                    and _closeout_verification_passed(evidence.get("verification_status"))
                 ]
                 if row.get("resolved_at") is None and evidence_refs:
                     bug_candidates.append(
@@ -2728,7 +2749,7 @@ class OperatorControlFrontdoor:
                             "bug_id": bug_id,
                             "current_status": str(row["status"]),
                             "next_status": "FIXED",
-                            "reason_codes": ["explicit_fix_proof_present"],
+                            "reason_codes": ["explicit_passed_fix_proof_present"],
                             "evidence_refs": evidence_refs,
                             "resolution_summary": _closeout_resolution_summary(
                                 bug_id=bug_id,
@@ -2741,7 +2762,7 @@ class OperatorControlFrontdoor:
                 if row.get("resolved_at") is not None:
                     reason_codes.append("already_resolved")
                 if bug_id not in proof_bug_ids:
-                    reason_codes.append("missing_validates_fix_evidence")
+                    reason_codes.append("missing_passed_validates_fix_verification")
                 if reason_codes:
                     bug_skipped.append(
                         {
@@ -2768,16 +2789,25 @@ class OperatorControlFrontdoor:
                             "current_status": str(row["status"]),
                             "next_status": _ROADMAP_COMPLETED_STATUS,
                             "reason_codes": [
-                                "source_bug_has_explicit_fix_proof",
+                                "source_bug_has_explicit_passed_fix_proof",
                             ],
                             "evidence_refs": [
                                 {
                                     "kind": str(evidence["evidence_kind"]),
                                     "ref": str(evidence["evidence_ref"]),
                                     "role": str(evidence["evidence_role"]),
+                                    "verification_status": (
+                                        str(evidence["verification_status"])
+                                        if evidence.get("verification_status") is not None
+                                        else None
+                                    ),
                                 }
                                 for evidence in evidence_by_bug_id.get(source_bug_id or "", ())
                                 if str(evidence["evidence_role"]) == _BUG_CLOSEOUT_EVIDENCE_ROLE
+                                and str(evidence["evidence_kind"]) == "verification_run"
+                                and _closeout_verification_passed(
+                                    evidence.get("verification_status")
+                                )
                             ],
                         }
                     )
@@ -2788,7 +2818,7 @@ class OperatorControlFrontdoor:
                 if source_bug_id is None:
                     reason_codes.append("missing_source_bug")
                 elif source_bug_id not in proof_bug_ids:
-                    reason_codes.append("source_bug_missing_validates_fix_evidence")
+                    reason_codes.append("source_bug_missing_passed_fix_verification")
                 if reason_codes:
                     roadmap_skipped.append(
                         {
@@ -2803,6 +2833,7 @@ class OperatorControlFrontdoor:
                 "action": normalized_action,
                 "proof_threshold": {
                     "bug_requires_evidence_role": _BUG_CLOSEOUT_EVIDENCE_ROLE,
+                    "bug_requires_passed_verification": True,
                     "roadmap_requires_source_bug_fix_proof": True,
                 },
                 "evaluated": {

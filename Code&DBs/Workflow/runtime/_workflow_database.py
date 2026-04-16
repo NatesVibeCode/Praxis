@@ -5,11 +5,20 @@ from __future__ import annotations
 import os
 import subprocess
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 from storage.postgres import PostgresConfigurationError, resolve_workflow_database_url
 
 _WORKFLOW_DATABASE_URL_ENV = "WORKFLOW_DATABASE_URL"
+
+
+@dataclass(frozen=True, slots=True)
+class WorkflowDatabaseAuthority:
+    """Resolved workflow database authority plus provenance."""
+
+    database_url: str | None
+    source: str
 
 
 def _runtime_repo_root() -> Path:
@@ -94,14 +103,14 @@ def _try_resolve_docker_database_url(repo_root: Path) -> str | None:
     return f"postgresql://{docker_host}:{docker_port.strip()}/praxis"
 
 
-def resolve_runtime_database_url(
+def resolve_runtime_database_authority(
     database_url: str | None = None,
     *,
     env: Mapping[str, str] | None = None,
     repo_root: Path | None = None,
     required: bool = True,
-) -> str | None:
-    """Resolve runtime database authority from explicit input, process env, or repo .env."""
+) -> WorkflowDatabaseAuthority:
+    """Resolve runtime database authority plus the source that provided it."""
 
     if database_url is not None:
         raw_database_url = str(database_url).strip()
@@ -112,24 +121,39 @@ def resolve_runtime_database_url(
                     f"{_WORKFLOW_DATABASE_URL_ENV} must be set to a Postgres DSN",
                     details={"environment_variable": _WORKFLOW_DATABASE_URL_ENV},
                 )
-            return None
-        return resolve_workflow_database_url(env={_WORKFLOW_DATABASE_URL_ENV: raw_database_url})
+            return WorkflowDatabaseAuthority(database_url=None, source="unconfigured")
+        return WorkflowDatabaseAuthority(
+            database_url=resolve_workflow_database_url(
+                env={_WORKFLOW_DATABASE_URL_ENV: raw_database_url}
+            ),
+            source="argument",
+        )
 
     source = env if env is not None else os.environ
     if _WORKFLOW_DATABASE_URL_ENV in source:
         raw_database_url = source.get(_WORKFLOW_DATABASE_URL_ENV)
         if (not isinstance(raw_database_url, str) or not raw_database_url.strip()) and not required:
-            return None
-        return resolve_workflow_database_url(env=source)
+            return WorkflowDatabaseAuthority(database_url=None, source="unconfigured")
+        return WorkflowDatabaseAuthority(
+            database_url=resolve_workflow_database_url(env=source),
+            source="process_env",
+        )
 
     resolved_repo_root = repo_root if repo_root is not None else _runtime_repo_root()
     repo_env_path = resolved_repo_root / ".env"
     repo_env = _read_repo_env_file(repo_env_path)
     if _WORKFLOW_DATABASE_URL_ENV in repo_env:
-        return resolve_workflow_database_url(env=repo_env)
+        return WorkflowDatabaseAuthority(
+            database_url=resolve_workflow_database_url(env=repo_env),
+            source=f"repo_env:{repo_env_path}",
+        )
+
     docker_database_url = _try_resolve_docker_database_url(resolved_repo_root)
     if docker_database_url is not None:
-        return docker_database_url
+        return WorkflowDatabaseAuthority(
+            database_url=docker_database_url,
+            source="docker",
+        )
 
     if required:
         raise PostgresConfigurationError(
@@ -143,7 +167,23 @@ def resolve_runtime_database_url(
                 "repo_env_path": str(repo_env_path),
             },
         )
-    return None
+    return WorkflowDatabaseAuthority(database_url=None, source="unconfigured")
 
 
-__all__ = ["resolve_runtime_database_url"]
+def resolve_runtime_database_url(
+    database_url: str | None = None,
+    *,
+    env: Mapping[str, str] | None = None,
+    repo_root: Path | None = None,
+    required: bool = True,
+) -> str | None:
+    """Resolve runtime database authority from explicit input, process env, or repo .env."""
+    return resolve_runtime_database_authority(
+        database_url=database_url,
+        env=env,
+        repo_root=repo_root,
+        required=required,
+    ).database_url
+
+
+__all__ = ["WorkflowDatabaseAuthority", "resolve_runtime_database_authority", "resolve_runtime_database_url"]

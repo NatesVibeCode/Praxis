@@ -316,18 +316,6 @@ def _proof_run_state_update(proof: TransitionProofV1) -> _ProofRunStateUpdate | 
                 "transition proof payload contains unknown run state",
                 details={"from_state": proof_from_state, "to_state": proof_to_state},
             ) from exc
-        validate_transition(
-            LifecycleTransition(
-                route_identity=proof.route_identity,
-                from_state=parsed_from_state,
-                to_state=parsed_to_state,
-                reason_code=proof.event.reason_code,
-                evidence_seq=proof.event.evidence_seq,
-                event_type=proof.event.event_type,
-                receipt_type=proof.receipt.receipt_type,
-                occurred_at=proof.event.occurred_at,
-            )
-        )
         return _ProofRunStateUpdate(
             from_state=parsed_from_state,
             to_state=parsed_to_state,
@@ -569,12 +557,9 @@ class PostgresEvidenceWriter:
                 ),
             )
 
-            await self._update_workflow_run_state(
+            await self._update_workflow_run_progress(
                 conn,
                 run_id=run_id,
-                new_state=proof.receipt.status,
-                reason_code=proof.event.reason_code,
-                occurred_at=proof.event.occurred_at,
                 last_event_id=proof.event.event_id,
                 expected_current_state=proof.receipt.status,
             )
@@ -837,6 +822,32 @@ class PostgresEvidenceWriter:
                 run_id=run_id,
             )
 
+    async def _update_workflow_run_progress(
+        self,
+        conn: asyncpg.Connection,
+        run_id: str,
+        *,
+        last_event_id: str,
+        expected_current_state: str | None = None,
+    ) -> None:
+        repository = self._repository(conn)
+        updated = await repository.update_workflow_run_progress(
+            run_id=run_id,
+            last_event_id=last_event_id,
+            expected_current_state=expected_current_state,
+        )
+        if updated:
+            return
+        persisted_state = await repository.load_current_state(run_id=run_id)
+        if persisted_state is None:
+            raise RuntimeBoundaryError(
+                f"persistent evidence missing workflow_runs row for {run_id}"
+            )
+        raise RuntimeBoundaryError(
+            "persistent evidence progress update was rejected due to stale workflow state: "
+            f"run={run_id} current={persisted_state!r} expected={expected_current_state!r}"
+        )
+
     def append_transition_proof(
         self,
         proof: TransitionProofV1,
@@ -1052,29 +1063,32 @@ class PostgresEvidenceWriter:
                     record=normalized_proof.receipt,
                 ),
             )
-            next_run_state = (
-                proof_state_update.new_state
-                if proof_state_update is not None
-                else persisted_state
-            )
             expected_current_state = (
                 proof_state_update.expected_current_state
                 if proof_state_update is not None
                 else persisted_state
             )
-            if next_run_state is None or expected_current_state is None:
+            if expected_current_state is None:
                 raise RuntimeBoundaryError(
                     f"persistent evidence missing workflow_runs row for {run_id}"
                 )
-            await self._update_workflow_run_state(
-                conn,
-                run_id,
-                new_state=next_run_state,
-                reason_code=normalized_proof.receipt.failure_code or normalized_proof.event.reason_code,
-                occurred_at=normalized_proof.receipt.finished_at,
-                last_event_id=normalized_proof.event.event_id,
-                expected_current_state=expected_current_state,
-            )
+            if proof_state_update is None or proof_state_update.is_submission_bootstrap:
+                await self._update_workflow_run_progress(
+                    conn,
+                    run_id,
+                    last_event_id=normalized_proof.event.event_id,
+                    expected_current_state=expected_current_state,
+                )
+            else:
+                await self._update_workflow_run_state(
+                    conn,
+                    run_id,
+                    new_state=proof_state_update.new_state,
+                    reason_code=normalized_proof.receipt.failure_code or normalized_proof.event.reason_code,
+                    occurred_at=normalized_proof.receipt.finished_at,
+                    last_event_id=normalized_proof.event.event_id,
+                    expected_current_state=expected_current_state,
+                )
 
         return EvidenceCommitResult(
             event_id=normalized_proof.event.event_id,

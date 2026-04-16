@@ -59,8 +59,9 @@ from registry.control_plane_manifests import (
     list_control_manifest_history as _list_control_manifest_history,
 )
 from surfaces.api.catalog_authority import build_catalog_payload
+from surfaces.api.operation_catalog_authority import build_operation_catalog_payload
 from storage.postgres.validators import PostgresWriteError
-from . import _bug_surface_contract as _bug_contract
+from . import _query_bugs as _bug_routes
 from . import workflow_query_core as _workflow_query_core
 from ._surface_usage import record_api_route_usage as _record_api_route_usage
 from .._payload_contract import (
@@ -137,25 +138,6 @@ _SOURCE_OPTION_SEEDS: tuple[dict[str, Any], ...] = (
     },
 )
 _DASHBOARD_SECTION_ORDER: tuple[str, ...] = ("live", "saved", "draft")
-def _parse_bug_status(bt_mod, raw_status: object):
-    try:
-        return _bug_contract.parse_bug_status(bt_mod, raw_status)
-    except ValueError as exc:
-        raise _ClientError(str(exc)) from exc
-
-
-def _parse_bug_severity(bt_mod, raw_severity: object):
-    try:
-        return _bug_contract.parse_bug_severity(bt_mod, raw_severity)
-    except ValueError as exc:
-        raise _ClientError(str(exc)) from exc
-
-
-def _parse_bug_category(bt_mod, raw_category: object):
-    try:
-        return _bug_contract.parse_bug_category(bt_mod, raw_category)
-    except ValueError as exc:
-        raise _ClientError(str(exc)) from exc
 
 
 def _market_review_metrics(row: dict[str, Any]) -> dict[str, Any]:
@@ -257,13 +239,7 @@ def _handle_query_post(request: Any, path: str) -> None:
 
 
 def _handle_bugs(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
-    return _workflow_query_core.handle_bugs(
-        subs,
-        body,
-        parse_bug_status=_parse_bug_status,
-        parse_bug_severity=_parse_bug_severity,
-        parse_bug_category=_parse_bug_category,
-    )
+    return _bug_routes._handle_bugs(subs, body)
 
 
 def _handle_recall(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
@@ -2485,6 +2461,15 @@ def _handle_catalog_get(request: Any, path: str) -> None:
         request._send_json(500, {"error": str(exc)})
 
 
+def _handle_operation_catalog_get(request: Any, path: str) -> None:
+    """Return DB-backed CQRS operation definitions and source policies."""
+    try:
+        pg = request.subsystems.get_pg_conn()
+        request._send_json(200, build_operation_catalog_payload(pg))
+    except Exception as exc:
+        request._send_json(500, {"error": str(exc)})
+
+
 def _handle_catalog_review_decisions_get(request: Any, path: str) -> None:
     try:
         params = _query_params(request.path)
@@ -2755,65 +2740,11 @@ def _handle_search_get(request: Any, path: str) -> None:
 
 
 def _handle_bugs_get(request: Any, path: str) -> None:
-    try:
-        params = _query_params(request.path)
-        limit = coerce_query_int(
-            params.get("limit"),
-            field_name="limit",
-            default=50,
-            minimum=1,
-            strict=True,
-        )
-        replay_ready_only = coerce_query_bool(
-            params.get("replay_ready_only"),
-            field_name="replay_ready_only",
-            default=False,
-        )
-        open_only = coerce_query_bool(
-            params.get("open_only"),
-            field_name="open_only",
-            default=False,
-        )
-        result = _handle_bugs(
-            request.subsystems,
-            {
-                "action": "list",
-                "limit": limit,
-                "replay_ready_only": replay_ready_only,
-                "open_only": open_only,
-            },
-        )
-        request._send_json(200, result)
-    except Exception as exc:
-        request._send_json(500, {"error": str(exc)})
+    _bug_routes._handle_bugs_get(request, path)
 
 
 def _handle_bugs_replay_ready_get(request: Any, path: str) -> None:
-    try:
-        params = _query_params(request.path)
-        limit = coerce_query_int(
-            params.get("limit"),
-            field_name="limit",
-            default=50,
-            minimum=1,
-            strict=True,
-        )
-        refresh_backfill = coerce_query_bool(
-            params.get("refresh_backfill"),
-            field_name="refresh_backfill",
-            default=True,
-        )
-        result = _workflow_query_core.handle_operator_view(
-            request.subsystems,
-            {
-                "view": "replay_ready_bugs",
-                "limit": limit,
-                "refresh_backfill": refresh_backfill,
-            },
-        )
-        request._send_json(200, result)
-    except Exception as exc:
-        request._send_json(500, {"error": str(exc)})
+    _bug_routes._handle_bugs_replay_ready_get(request, path)
 
 
 def _handle_registries_search_get(request: Any, path: str) -> None:

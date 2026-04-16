@@ -6,6 +6,7 @@ plus the LISTEN/NOTIFY background listener for instant wakeups.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import threading
@@ -14,6 +15,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor, Future
 from typing import TYPE_CHECKING
 
+from ._admission import _execute_admitted_graph_run
 from ._claiming import claim_one, complete_job, reap_stale_claims, reap_stale_runs
 from ._execution_core import execute_job
 from runtime.execution_transport import resolve_execution_transport
@@ -27,6 +29,31 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = ["run_worker_loop"]
+
+_GRAPH_FAILURE_BACKOFF_SECONDS = 30.0
+
+
+def _graph_run_lock_key(run_id: str) -> int:
+    digest = hashlib.sha256(f"workflow_graph_run:{run_id}".encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big", signed=True)
+
+
+def _list_ready_graph_runs(
+    conn: "SyncPostgresConnection",
+    *,
+    limit: int,
+) -> list[dict[str, object]]:
+    rows = conn.execute(
+        """
+        SELECT run_id, workflow_id, requested_at
+        FROM workflow_runs
+        WHERE current_state = 'claim_accepted'
+        ORDER BY requested_at, run_id
+        LIMIT $1
+        """,
+        limit,
+    )
+    return [dict(row) for row in rows or ()]
 
 
 def _worker_error_code(exc: BaseException, *, fallback: str) -> str:
@@ -171,6 +198,7 @@ def run_worker_loop(
     last_run_reap = time.monotonic()
     run_reap_interval = 300.0  # check for stale runs every 5 minutes
     active_futures: dict[Future, dict] = {}
+    graph_retry_after: dict[str, float] = {}
     _evaluate_background_consumers()
 
     # Each thread gets its own DB connection (can't share asyncpg across threads)
@@ -256,6 +284,32 @@ def run_worker_loop(
         finally:
             stop_heartbeat.set()
 
+    def _run_graph(run_row: dict[str, object]) -> None:
+        pool = get_workflow_pool()
+        thread_conn = _PG(pool)
+        run_id = str(run_row.get("run_id") or "").strip()
+        if not run_id:
+            return
+        lock_key = _graph_run_lock_key(run_id)
+        lock_rows = thread_conn.execute(
+            "SELECT pg_try_advisory_lock($1::bigint) AS locked",
+            lock_key,
+        )
+        locked = bool(lock_rows and bool(dict(lock_rows[0]).get("locked")))
+        if not locked:
+            return
+        try:
+            logger.info("Worker executing admitted graph run %s", run_id)
+            _execute_admitted_graph_run(thread_conn, run_id=run_id)
+        finally:
+            try:
+                thread_conn.execute(
+                    "SELECT pg_advisory_unlock($1::bigint)",
+                    lock_key,
+                )
+            except Exception:
+                logger.debug("Graph advisory unlock failed for %s", run_id, exc_info=True)
+
     # Two pools: unlimited for remote transport, capped for local transport
     api_pool = ThreadPoolExecutor(max_workers=64, thread_name_prefix="api-worker")
     local_pool = ThreadPoolExecutor(max_workers=max_local_concurrent, thread_name_prefix="local-worker")
@@ -264,6 +318,13 @@ def run_worker_loop(
         return sum(1 for f, j in active_futures.items()
                    if not f.done() and j.get("_transport_lane") == lane)
 
+    def _active_graph_runs() -> set[str]:
+        return {
+            str(job.get("run_id"))
+            for future, job in active_futures.items()
+            if not future.done() and job.get("_transport_lane") == "graph_local"
+        }
+
     try:
         while True:
             try:
@@ -271,9 +332,24 @@ def run_worker_loop(
                 done = [f for f in active_futures if f.done()]
                 for f in done:
                     job = active_futures.pop(f)
+                    run_id = str(job.get("run_id") or "").strip()
                     try:
                         f.result()
+                        if job.get("_transport_lane") == "graph_local" and run_id:
+                            graph_retry_after.pop(run_id, None)
                     except Exception as exc:
+                        if job.get("_transport_lane") == "graph_local":
+                            if run_id:
+                                graph_retry_after[run_id] = (
+                                    time.monotonic() + _GRAPH_FAILURE_BACKOFF_SECONDS
+                                )
+                            logger.error(
+                                "Future failed for graph run %s: %s",
+                                job.get("run_id"),
+                                exc,
+                                exc_info=True,
+                            )
+                            continue
                         logger.error("Future failed for %s: %s", job.get("label"), exc, exc_info=True)
                         try:
                             complete_job(
@@ -310,6 +386,32 @@ def run_worker_loop(
                 if notification_wakeup.is_set():
                     notification_wakeup.clear()
                     _evaluate_background_consumers()
+
+                graph_slots = max_local_concurrent - _count_active("local") - len(_active_graph_runs())
+                if graph_slots > 0:
+                    now = time.monotonic()
+                    for run_row in _list_ready_graph_runs(conn, limit=min(graph_slots, 10)):
+                        run_id = str(run_row.get("run_id") or "").strip()
+                        if not run_id or run_id in _active_graph_runs():
+                            continue
+                        retry_after = graph_retry_after.get(run_id)
+                        if retry_after is not None and now < retry_after:
+                            continue
+                        if retry_after is not None:
+                            graph_retry_after.pop(run_id, None)
+                        future = local_pool.submit(_run_graph, run_row)
+                        active_futures[future] = {
+                            "run_id": run_id,
+                            "label": run_id,
+                            "_transport_lane": "graph_local",
+                        }
+                        logger.info(
+                            "Dispatched graph run %s to local pool [active: remote=%d local=%d graph=%d]",
+                            run_id,
+                            _count_active("remote"),
+                            _count_active("local"),
+                            len(_active_graph_runs()),
+                        )
 
                 # Claim as many ready jobs as we can run
                 claimed_any = False

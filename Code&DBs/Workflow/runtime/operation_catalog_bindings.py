@@ -1,0 +1,110 @@
+"""Resolve operation-catalog metadata into live HTTP bindings."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from functools import lru_cache
+import importlib
+from typing import Any, Callable
+
+from pydantic import BaseModel
+
+from runtime.operation_catalog import ResolvedOperationDefinition
+
+
+class OperationBindingResolutionError(RuntimeError):
+    """Raised when an operation-catalog binding cannot be resolved safely."""
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedHttpOperationBinding:
+    operation_name: str
+    http_method: str
+    http_path: str
+    command_class: type[BaseModel]
+    handler: Callable[..., Any]
+    summary: str
+
+
+def _resolve_from_module(module: Any, attrs: tuple[str, ...], *, reference: str) -> Any:
+    resolved = module
+    for attr in attrs:
+        if not hasattr(resolved, attr):
+            raise OperationBindingResolutionError(
+                f"Reference '{reference}' is missing attribute '{attr}'",
+            )
+        resolved = getattr(resolved, attr)
+    return resolved
+
+
+@lru_cache(maxsize=256)
+def resolve_python_reference(reference: str) -> Any:
+    """Resolve a dotted module/object reference into a live Python object."""
+
+    if not isinstance(reference, str) or not reference.strip():
+        raise OperationBindingResolutionError("reference must be a non-empty string")
+
+    parts = tuple(part for part in reference.strip().split(".") if part)
+    if len(parts) < 2:
+        raise OperationBindingResolutionError(
+            f"Reference '{reference}' must include a module and object path",
+        )
+
+    for index in range(len(parts) - 1, 0, -1):
+        module_name = ".".join(parts[:index])
+        attr_path = parts[index:]
+        try:
+            module = importlib.import_module(module_name)
+        except ModuleNotFoundError:
+            continue
+        try:
+            return _resolve_from_module(module, attr_path, reference=reference)
+        except OperationBindingResolutionError:
+            raise
+        except Exception as exc:  # pragma: no cover - defensive guard
+            raise OperationBindingResolutionError(
+                f"Reference '{reference}' failed during attribute resolution",
+            ) from exc
+
+    raise OperationBindingResolutionError(
+        f"Reference '{reference}' could not be imported",
+    )
+
+
+def _resolve_command_class(reference: str) -> type[BaseModel]:
+    candidate = resolve_python_reference(reference)
+    if not isinstance(candidate, type) or not issubclass(candidate, BaseModel):
+        raise OperationBindingResolutionError(
+            f"Reference '{reference}' did not resolve to a Pydantic model class",
+        )
+    return candidate
+
+
+def _resolve_handler(reference: str) -> Callable[..., Any]:
+    candidate = resolve_python_reference(reference)
+    if not callable(candidate):
+        raise OperationBindingResolutionError(
+            f"Reference '{reference}' did not resolve to a callable handler",
+        )
+    return candidate
+
+
+def resolve_http_operation_binding(
+    definition: ResolvedOperationDefinition,
+) -> ResolvedHttpOperationBinding:
+    return ResolvedHttpOperationBinding(
+        operation_name=definition.operation_name,
+        http_method=definition.http_method,
+        http_path=definition.http_path,
+        command_class=_resolve_command_class(definition.input_model_ref),
+        handler=_resolve_handler(definition.handler_ref),
+        summary=definition.operation_name,
+    )
+
+
+__all__ = [
+    "OperationBindingResolutionError",
+    "ResolvedHttpOperationBinding",
+    "resolve_http_operation_binding",
+    "resolve_python_reference",
+]

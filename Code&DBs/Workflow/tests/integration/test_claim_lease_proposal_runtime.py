@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import asyncpg
 import json
 import uuid
 from dataclasses import replace
@@ -10,13 +11,13 @@ import pytest
 
 from runtime import RouteIdentity, RunState, RuntimeBoundaryError
 from runtime import claims as runtime_claims
-from runtime.claim_state_machine import ALLOWED_TRANSITIONS as CLAIM_LIFECYCLE_ALLOWED_TRANSITIONS
 from runtime.claims import (
     ClaimLeaseProposalRuntime,
     ClaimLeaseProposalTransitionRequest,
     SandboxSessionRequest,
 )
 from storage import migrations as workflow_migrations
+from storage.migrations import workflow_migration_statements
 from storage.postgres import (
     PostgresConfigurationError,
     WorkflowAdmissionDecisionWrite,
@@ -26,7 +27,13 @@ from storage.postgres import (
     connect_workflow_database,
     persist_workflow_admission,
 )
-from storage.postgres.claim_lifecycle_repository import PostgresClaimLifecycleRepository
+from storage.postgres.claim_lifecycle_repository import (
+    ClaimLifecycleAuthorityError,
+    PostgresClaimLifecycleRepository,
+)
+
+
+_SCHEMA_BOOTSTRAP_LOCK_ID = 741001
 
 
 def _unique_suffix() -> str:
@@ -38,6 +45,37 @@ def _clear_workflow_migration_caches() -> None:
     workflow_migrations.workflow_migration_manifest.cache_clear()
     workflow_migrations.workflow_migration_sql_text.cache_clear()
     workflow_migrations.workflow_migration_statements.cache_clear()
+
+
+def _is_duplicate_object_error(error: BaseException) -> bool:
+    return getattr(error, "sqlstate", None) in {"42P07", "42710"}
+
+
+async def _bootstrap_workflow_migration(conn: asyncpg.Connection, filename: str) -> None:
+    async with conn.transaction():
+        await conn.execute(
+            "SELECT pg_advisory_xact_lock($1::bigint)",
+            _SCHEMA_BOOTSTRAP_LOCK_ID,
+        )
+        for statement in workflow_migration_statements(filename):
+            try:
+                async with conn.transaction():
+                    await conn.execute(statement)
+            except asyncpg.PostgresError as exc:
+                if _is_duplicate_object_error(exc):
+                    continue
+                raise
+
+
+async def _clear_claim_lifecycle_test_overrides(conn: asyncpg.Connection) -> None:
+    await conn.execute(
+        """
+        DELETE FROM workflow_claim_lifecycle_transition_authority
+        WHERE decision_ref = 'operator.override'
+           OR workflow_claim_lifecycle_transition_id LIKE
+              'claim_lifecycle_transition:%:operator_override'
+        """
+    )
 
 
 def _submission(
@@ -253,6 +291,14 @@ def test_claim_lifecycle_transition_authority_round_trips_from_postgres() -> Non
     asyncio.run(_exercise_claim_lifecycle_authority())
 
 
+def test_runtime_bootstrap_does_not_overwrite_claim_lifecycle_authority_rows() -> None:
+    asyncio.run(_exercise_runtime_bootstrap_preserves_claim_lifecycle_authority())
+
+
+def test_claim_lifecycle_transition_authority_fails_closed_on_ambiguous_active_rows() -> None:
+    asyncio.run(_exercise_claim_lifecycle_authority_ambiguity())
+
+
 async def _exercise_claim_lifecycle_authority() -> None:
     runtime = ClaimLeaseProposalRuntime()
     try:
@@ -265,15 +311,114 @@ async def _exercise_claim_lifecycle_authority() -> None:
     try:
         await bootstrap_control_plane_schema(conn)
         await runtime.bootstrap_schema(conn)
+        await _bootstrap_workflow_migration(
+            conn,
+            "135_claim_lifecycle_transition_authority.sql",
+        )
+        await _clear_claim_lifecycle_test_overrides(conn)
 
         transitions = await PostgresClaimLifecycleRepository(conn).load_allowed_transitions(
             as_of=datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc),
         )
 
-        assert transitions == CLAIM_LIFECYCLE_ALLOWED_TRANSITIONS
         assert transitions[RunState.CLAIM_RECEIVED] == frozenset({RunState.CLAIM_VALIDATING})
         assert RunState.CLAIM_ACCEPTED not in transitions[RunState.CLAIM_RECEIVED]
         assert transitions[RunState.CLAIM_ACCEPTED] == frozenset({RunState.LEASE_REQUESTED})
+    finally:
+        await conn.close()
+
+
+async def _exercise_runtime_bootstrap_preserves_claim_lifecycle_authority() -> None:
+    runtime = ClaimLeaseProposalRuntime()
+    try:
+        conn = await connect_workflow_database()
+    except PostgresConfigurationError as exc:
+        pytest.skip(
+            "WORKFLOW_DATABASE_URL is required for claim lifecycle authority integration test: "
+            f"{exc.reason_code}"
+        )
+    try:
+        await bootstrap_control_plane_schema(conn)
+        await runtime.bootstrap_schema(conn)
+        await _bootstrap_workflow_migration(
+            conn,
+            "135_claim_lifecycle_transition_authority.sql",
+        )
+        await _clear_claim_lifecycle_test_overrides(conn)
+        await conn.execute(
+            """
+            UPDATE workflow_claim_lifecycle_transition_authority
+            SET rationale = $2
+            WHERE workflow_claim_lifecycle_transition_id = $1
+            """,
+            "claim_lifecycle_transition:claim_accepted:lease_requested:v1",
+            "operator override should survive runtime bootstrap",
+        )
+
+        await runtime.bootstrap_schema(conn)
+
+        rationale = await conn.fetchval(
+            """
+            SELECT rationale
+            FROM workflow_claim_lifecycle_transition_authority
+            WHERE workflow_claim_lifecycle_transition_id = $1
+            """,
+            "claim_lifecycle_transition:claim_accepted:lease_requested:v1",
+        )
+        assert rationale == "operator override should survive runtime bootstrap"
+    finally:
+        await conn.close()
+
+
+async def _exercise_claim_lifecycle_authority_ambiguity() -> None:
+    runtime = ClaimLeaseProposalRuntime()
+    try:
+        conn = await connect_workflow_database()
+    except PostgresConfigurationError as exc:
+        pytest.skip(
+            "WORKFLOW_DATABASE_URL is required for claim lifecycle authority integration test: "
+            f"{exc.reason_code}"
+        )
+    try:
+        await bootstrap_control_plane_schema(conn)
+        await runtime.bootstrap_schema(conn)
+        await _bootstrap_workflow_migration(
+            conn,
+            "135_claim_lifecycle_transition_authority.sql",
+        )
+        await _clear_claim_lifecycle_test_overrides(conn)
+        await conn.execute(
+            """
+            INSERT INTO workflow_claim_lifecycle_transition_authority (
+                workflow_claim_lifecycle_transition_id,
+                from_state,
+                to_state,
+                rationale,
+                effective_from,
+                effective_to,
+                decision_ref,
+                created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            """,
+            "claim_lifecycle_transition:claim_accepted:lease_requested:operator_override",
+            RunState.CLAIM_ACCEPTED.value,
+            RunState.LEASE_REQUESTED.value,
+            "Conflicting active row for ambiguity test.",
+            datetime(2026, 2, 1, 0, 0, tzinfo=timezone.utc),
+            None,
+            "operator.override",
+            datetime(2026, 2, 1, 0, 0, tzinfo=timezone.utc),
+        )
+
+        with pytest.raises(
+            ClaimLifecycleAuthorityError,
+            match="overlapping active rows",
+        ) as exc_info:
+            await PostgresClaimLifecycleRepository(conn).load_allowed_transitions(
+                as_of=datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc),
+            )
+
+        assert exc_info.value.reason_code == "claim_lifecycle.ambiguous"
     finally:
         await conn.close()
 
@@ -292,6 +437,11 @@ async def _exercise_runtime_path() -> None:
     try:
         await bootstrap_control_plane_schema(primary)
         await runtime.bootstrap_schema(primary)
+        await _bootstrap_workflow_migration(
+            primary,
+            "135_claim_lifecycle_transition_authority.sql",
+        )
+        await _clear_claim_lifecycle_test_overrides(primary)
 
         suffix = _unique_suffix()
         first_submission = _submission(suffix=suffix, run_index=1)

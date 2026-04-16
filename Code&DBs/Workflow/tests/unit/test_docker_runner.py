@@ -6,8 +6,16 @@ import threading
 
 import pytest
 
+import adapters.docker_runner as docker_runner
 from adapters.deterministic import DeterministicExecutionControl
-from adapters.docker_runner import ExecutionResult, run_in_docker, run_model, run_on_host
+from adapters.docker_runner import (
+    ExecutionResult,
+    normalize_command_parts_for_docker,
+    normalize_shell_command_for_docker,
+    run_in_docker,
+    run_model,
+    run_on_host,
+)
 
 
 class TestRunOnHost:
@@ -148,6 +156,126 @@ def test_run_model_uses_host_when_docker_is_not_preferred(monkeypatch):
 
     assert result.execution_mode == "host"
     assert result.stdout == "ok"
+
+
+def test_normalize_command_parts_for_docker_adds_codex_sandbox_flags():
+    normalized = normalize_command_parts_for_docker(
+        ["codex", "exec", "-", "--json", "--model", "gpt-5.4-mini"],
+    )
+
+    assert normalized == [
+        "codex",
+        "exec",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--skip-git-repo-check",
+        "-",
+        "--json",
+        "--model",
+        "gpt-5.4-mini",
+    ]
+
+
+def test_normalize_shell_command_for_docker_strips_legacy_full_auto():
+    normalized = normalize_shell_command_for_docker(
+        "codex exec --full-auto - --json --model gpt-5.4-mini",
+    )
+
+    assert normalized == (
+        "codex exec --dangerously-bypass-approvals-and-sandbox "
+        "--skip-git-repo-check - --json --model gpt-5.4-mini"
+    )
+
+
+def test_run_model_normalizes_codex_command_before_docker(monkeypatch):
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr("adapters.docker_runner._has_docker", lambda: True)
+    monkeypatch.setattr(
+        "adapters.docker_runner.run_in_docker",
+        lambda **kwargs: captured.update(kwargs) or ExecutionResult(
+            stdout="ok",
+            stderr="",
+            exit_code=0,
+            timed_out=False,
+            latency_ms=1,
+            execution_mode="docker",
+        ),
+    )
+
+    result = run_model(
+        command="codex exec - --json --model gpt-5.4-mini",
+        stdin_text="hello",
+        timeout=1,
+    )
+
+    assert captured["command"] == (
+        "codex exec --dangerously-bypass-approvals-and-sandbox "
+        "--skip-git-repo-check - --json --model gpt-5.4-mini"
+    )
+    assert result.execution_mode == "docker"
+
+
+def test_run_in_docker_mounts_provider_scoped_cli_auth(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class _FakePopen:
+        def __init__(self, cmd, **kwargs):
+            captured["cmd"] = cmd
+            captured["kwargs"] = kwargs
+            self.returncode = 0
+
+        def communicate(self, input=None, timeout=None):
+            captured["stdin"] = input
+            captured["timeout"] = timeout
+            return ("ok", "")
+
+    monkeypatch.setattr(
+        "adapters.docker_runner.resolve_docker_image",
+        lambda **kwargs: ("praxis-worker:latest", {"source": "default", "build_error": None}),
+    )
+    monkeypatch.setattr("adapters.docker_runner._has_docker_image", lambda image: True)
+    monkeypatch.setattr(
+        "adapters.docker_runner._cli_auth_volume_flags",
+        lambda provider_slug=None: (
+            ["-v", "/Users/praxis/.codex/auth.json:/root/.codex/auth.json:ro"]
+            if provider_slug == "openai"
+            else []
+        ),
+    )
+    monkeypatch.setattr("adapters.docker_runner.subprocess.Popen", _FakePopen)
+
+    result = run_in_docker(
+        command="echo hello",
+        stdin_text="",
+        timeout=1,
+        provider_slug="openai",
+    )
+
+    assert result.execution_mode == "docker"
+    assert captured["cmd"][:8] == [
+        "docker",
+        "run",
+        "--rm",
+        "-i",
+        "--memory",
+        "4g",
+        "--cpus",
+        "2",
+    ]
+    assert "-v" in captured["cmd"]
+    assert "/Users/praxis/.codex/auth.json:/root/.codex/auth.json:ro" in captured["cmd"]
+
+
+def test_run_in_docker_rejects_unknown_auth_mount_policy(monkeypatch):
+    monkeypatch.setattr(docker_runner, "resolve_docker_image", lambda **_kwargs: ("praxis-worker:latest", {}))
+    monkeypatch.setattr(docker_runner, "_has_docker_image", lambda _image: True)
+
+    with pytest.raises(ValueError, match="auth_mount_policy must be one of"):
+        run_in_docker(
+            command="echo hello",
+            stdin_text="",
+            auth_mount_policy="sideways",
+        )
 
 
 def test_run_in_docker_requires_local_image(monkeypatch):

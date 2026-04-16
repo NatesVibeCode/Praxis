@@ -1,0 +1,28 @@
+{
+  "review_type": "probe_schedule_status",
+  "reviewed_at": "2026-04-16T22:39:37.386403+00:00",
+  "probe_id": "agent_handoff_search_db_probe",
+  "regular_outputs_enabled": false,
+  "regular_outputs_proven": false,
+  "scheduler_config_candidates": [
+    {
+      "path": "/Users/nate/Praxis/config/scheduler.json",
+      "exists": false
+    },
+    {
+      "path": "/Users/nate/Praxis/Code&DBs/Workflow/config/scheduler.json",
+      "exists": false
+    }
+  ],
+  "db_native_trigger_attached": false,
+  "db_native_trigger_reason": "No persisted workflow run exists, so no DB-native trigger attachment is proven.",
+  "validate_preview_ready": true,
+  "command_write_blocked": true,
+  "command_write_blocker": "WORKFLOW_DATABASE_URL authority drifted to a DSN that tried role \"postgres\" and aborted before durable submission.",
+  "historical_validation_blocker": "The Praxis CLI now fails during import before validate/preview can load the spec because claim lifecycle transition authority initialization hits migration-policy drift.",
+  "next_attachment_path": [
+    "persist a workflow definition with a durable workflow_id",
+    "attach a cron trigger through workflow_triggers",
+    "tick the scheduler or trigger loop and verify schedule.fired plus run submission"
+  ]
+}

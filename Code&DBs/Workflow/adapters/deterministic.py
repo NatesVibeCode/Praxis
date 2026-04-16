@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import importlib
 import threading
 from typing import Any, Callable, Protocol
 
@@ -98,6 +99,27 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _deterministic_builder_outputs(input_payload: Mapping[str, Any]) -> dict[str, Any] | None:
+    builder_ref = input_payload.get("deterministic_builder")
+    if not _is_non_empty_text(builder_ref):
+        return None
+    builder_path = str(builder_ref).strip()
+    module_name, _, function_name = builder_path.rpartition(".")
+    if not module_name or not function_name:
+        raise ValueError(
+            "input_payload.deterministic_builder must be a dotted module path like "
+            "'runtime.workflow_eval.build_agent_handoff_probe_review'"
+        )
+    module = importlib.import_module(module_name)
+    builder = getattr(module, function_name, None)
+    if not callable(builder):
+        raise ValueError(f"deterministic builder not found: {builder_path}")
+    outputs = builder(dict(input_payload))
+    if not isinstance(outputs, Mapping):
+        raise ValueError(f"deterministic builder must return a mapping: {builder_path}")
+    return dict(outputs)
+
+
 def cancelled_task_result(
     *,
     request: DeterministicTaskRequest,
@@ -168,6 +190,12 @@ class DeterministicTaskAdapter:
             )
 
         input_payload = dict(request.input_payload)
+        if request.dependency_inputs:
+            for dependency_key, dependency_value in request.dependency_inputs.items():
+                if isinstance(dependency_value, Mapping):
+                    input_payload[dependency_key] = dict(dependency_value)
+                else:
+                    input_payload[dependency_key] = dependency_value
         if input_payload.get("force_failure") is True:
             failure_code = input_payload.get("failure_code")
             if not _is_non_empty_text(failure_code):
@@ -185,6 +213,24 @@ class DeterministicTaskAdapter:
                 failure_code=str(failure_code),
             )
 
+        try:
+            outputs = _deterministic_builder_outputs(input_payload)
+        except Exception as exc:
+            return DeterministicTaskResult(
+                node_id=request.node_id,
+                task_name=request.task_name,
+                status="failed",
+                reason_code="adapter.execution_failed",
+                executor_type=self.executor_type,
+                inputs=normalized_inputs,
+                outputs={"failure_reason": str(exc)},
+                started_at=started_at,
+                finished_at=_utc_now(),
+                failure_code="adapter.deterministic_builder_failed",
+            )
+        if outputs is None:
+            outputs = dict(request.expected_outputs)
+
         return DeterministicTaskResult(
             node_id=request.node_id,
             task_name=request.task_name,
@@ -192,7 +238,7 @@ class DeterministicTaskAdapter:
             reason_code="adapter.execution_succeeded",
             executor_type=self.executor_type,
             inputs=normalized_inputs,
-            outputs=dict(request.expected_outputs),
+            outputs=outputs,
             started_at=started_at,
             finished_at=_utc_now(),
             failure_code=None,

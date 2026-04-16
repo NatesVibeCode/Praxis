@@ -1,0 +1,70 @@
+{
+  "proof_class": "simulated_continuation",
+  "based_on_observed_proof": "/Users/nate/Praxis/artifacts/workflow_eval/probe_exec_20260416/agent_handoff_search_db_probe.report.json",
+  "agent_synthesis": {
+    "job": "agent_synthesis",
+    "spoofed": true,
+    "ok": false,
+    "status": "failed_pre_submission",
+    "run_id": null,
+    "failure_stage": "launch",
+    "failure_reason": "DB authority drifted to role postgres and aborted before durable submission.",
+    "seed_contract": {
+      "probe_id": "agent_handoff_search_db_probe",
+      "search_query": "workflow spec with agents handoff deterministic tooling search db action",
+      "db_action": "praxis_bugs.stats"
+    },
+    "discover_matches": [
+      "surfaces/workflow_bridge.py",
+      "adapters/deterministic.py",
+      "runtime/workflow_spec.py",
+      "runtime/workflow/_admission.py",
+      "runtime/observability.py",
+      "runtime/workflow_worker.py"
+    ],
+    "durable_submission": false,
+    "durable_receipt": false,
+    "queryable_state": false,
+    "operator_handoff": "Do not trust downstream state until a rerun produces a real run_id."
+  },
+  "agent_handoff_review": {
+    "job": "agent_handoff_review",
+    "overall_verdict": "failed_probe_read_side_only",
+    "end_to_end_probe_passed": false,
+    "agents_exercised": false,
+    "information_handoff_proven": false,
+    "deterministic_tooling_proven": false,
+    "search_exercised": true,
+    "db_action_exercised": true,
+    "cqrs": {
+      "split_brain": true,
+      "assessment": "Read/inspection authority succeeded while command/write authority failed before durable submission.",
+      "read_model_path": {
+        "status": "succeeded",
+        "components": [
+          "validate",
+          "preview",
+          "praxis_discover",
+          "praxis_bugs.stats"
+        ]
+      },
+      "command_write_path": {
+        "status": "failed_pre_submission",
+        "component": "praxis workflow run",
+        "run_id": null,
+        "durable_submission": false,
+        "durable_receipt": false,
+        "queryable_state": false,
+        "failure_reason": "DB authority drifted to role postgres and aborted before durable submission."
+      }
+    },
+    "trust_boundary": "Do not trust downstream state until a rerun produces a real run_id."
+  },
+  "required_next_actions": [
+    "Restore DB write authority to the intended workflow role/path first.",
+    "Rerun praxis workflow run and require a non-null run_id; if run_id is null, stop and mark the probe failed again.",
+    "Once a real run_id exists, verify the admission record off that receipt.",
+    "Verify worker pickup off that same run_id.",
+    "Verify observability emission off that same run_id."
+  ]
+}

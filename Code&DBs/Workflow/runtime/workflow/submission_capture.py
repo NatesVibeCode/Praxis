@@ -31,6 +31,17 @@ from runtime.workflow.submission_policy import (
     _PUBLISH_REVIEW_ROLE_TASK_TYPES,
     evaluate_publish_policy,
 )
+from runtime.workflow.submission_contract import (
+    SubmissionContractError,
+    normalize_declared_operations as _normalize_declared_operations_impl,
+    normalize_path as _normalize_path_impl,
+    normalize_scope_paths as _normalize_scope_paths_impl,
+    normalize_text as _normalize_text_impl,
+    normalize_text_list as _normalize_text_list_impl,
+    normalize_timestamp as _normalize_timestamp_impl,
+    optional_datetime as _optional_datetime_impl,
+    strip_str as _strip_str_impl,
+)
 from runtime.workflow.evidence_sequence_allocator import (
     insert_workflow_event_if_absent_with_deterministic_seq,
 )
@@ -77,114 +88,73 @@ def _utc_now() -> datetime:
 
 def _strip_str(value: str | None) -> str | None:
     """Return stripped string or None if empty."""
-    return (value.strip() or None) if isinstance(value, str) else None
+    return _strip_str_impl(value)
 
 
 def _optional_datetime(value: object | None, *, field_name: str) -> datetime | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        if value.tzinfo is None or value.utcoffset() is None:
-            raise WorkflowSubmissionServiceError(
-                "workflow_submission.invalid_input",
-                f"{field_name} must be timezone-aware",
-                details={"field": field_name},
-            )
-        return value.astimezone(timezone.utc)
-    text = str(value or "").strip()
-    if not text:
-        return None
     try:
-        normalized = datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError as exc:
+        return _optional_datetime_impl(value, field_name=field_name)
+    except SubmissionContractError as exc:
         raise WorkflowSubmissionServiceError(
             "workflow_submission.invalid_input",
-            f"{field_name} must be an ISO-8601 timestamp when provided",
-            details={"field": field_name, "value": text},
+            str(exc),
+            details=exc.details,
         ) from exc
-    if normalized.tzinfo is None or normalized.utcoffset() is None:
-        normalized = normalized.replace(tzinfo=timezone.utc)
-    return normalized.astimezone(timezone.utc)
 
 
 def _normalize_timestamp(value: object) -> str:
-    if isinstance(value, datetime):
-        return value.astimezone(timezone.utc).isoformat()
-    text = str(value or "").strip()
-    return text
+    return _normalize_timestamp_impl(value)
 
 
 def _normalize_text(value: object, *, field_name: str) -> str:
-    text = str(value or "").strip()
-    if not text:
+    try:
+        return _normalize_text_impl(value, field_name=field_name)
+    except SubmissionContractError as exc:
         raise WorkflowSubmissionServiceError(
             "workflow_submission.invalid_input",
-            f"{field_name} must be a non-empty string",
-            details={"field": field_name},
-        )
-    return text
+            str(exc),
+            details=exc.details,
+        ) from exc
 
 
 def _normalize_text_list(value: object | None, *, field_name: str) -> list[str]:
-    if value is None:
-        return []
-    if isinstance(value, str):
-        return [_normalize_text(value, field_name=field_name)]
-    if not isinstance(value, Sequence) or isinstance(value, (bytes, bytearray)):
+    try:
+        return _normalize_text_list_impl(value, field_name=field_name)
+    except SubmissionContractError as exc:
         raise WorkflowSubmissionServiceError(
             "workflow_submission.invalid_input",
-            f"{field_name} must be a list of strings",
-            details={"field": field_name, "value_type": type(value).__name__},
-        )
-    normalized: list[str] = []
-    for index, item in enumerate(value):
-        normalized.append(_normalize_text(item, field_name=f"{field_name}[{index}]"))
-    return normalized
+            str(exc),
+            details=exc.details,
+        ) from exc
 
 
 def _normalize_declared_operations(value: object | None) -> list[dict[str, str]]:
-    if value is None:
-        return []
-    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+    try:
+        return _normalize_declared_operations_impl(value)
+    except SubmissionContractError as exc:
         raise WorkflowSubmissionServiceError(
-            "workflow_submission.invalid_input", "declared_operations must be a list of objects",
-            details={"field": "declared_operations"},
-        )
-    result: list[dict[str, str]] = []
-    for i, item in enumerate(value):
-        if not isinstance(item, Mapping):
-            raise WorkflowSubmissionServiceError(
-                "workflow_submission.invalid_input", f"declared_operations[{i}] must be an object",
-                details={"field": f"declared_operations[{i}]"},
-            )
-        action = _normalize_text(item.get("action"), field_name=f"declared_operations[{i}].action").lower()
-        if action not in {"create", "update", "delete", "rename"}:
-            raise WorkflowSubmissionServiceError(
-                "workflow_submission.invalid_input",
-                "declared_operations action must be create, update, delete, or rename",
-                details={"field": f"declared_operations[{i}].action", "action": action},
-            )
-        entry: dict[str, str] = {"path": _normalize_path(item.get("path"), field_name=f"declared_operations[{i}].path"), "action": action}
-        if item.get("from_path") is not None:
-            entry["from_path"] = _normalize_path(item["from_path"], field_name=f"declared_operations[{i}].from_path")
-        result.append(entry)
-    return result
+            "workflow_submission.invalid_input",
+            str(exc),
+            details=exc.details,
+        ) from exc
 
 
 def _normalize_path(value: object, *, field_name: str) -> str:
-    text = _normalize_text(value, field_name=field_name)
-    if text.startswith("file:"):
-        text = text[5:]
-    normalized = Path(text).as_posix().lstrip("./")
-    return normalized
+    try:
+        return _normalize_path_impl(value, field_name=field_name)
+    except SubmissionContractError as exc:
+        raise WorkflowSubmissionServiceError(
+            "workflow_submission.invalid_input",
+            str(exc),
+            details=exc.details,
+        ) from exc
 
 
 def _normalize_scope_paths(value: object | None) -> list[str]:
     try:
-        normalized = [_normalize_path(item, field_name="write_scope") for item in _normalize_text_list(value, field_name="write_scope")]
-    except WorkflowSubmissionServiceError:
+        return _normalize_scope_paths_impl(value)
+    except SubmissionContractError:
         return []
-    return list(dict.fromkeys(normalized))
 
 
 def _current_job_row(conn, *, run_id: str, job_label: str) -> dict[str, Any]:

@@ -147,6 +147,69 @@ def execute_workflow_request(
     return execution_result, None
 
 
+def execute_admitted_workflow_request(
+    *,
+    intake_outcome,
+    adapter_registry: AdapterRegistry,
+    evidence_writer: AppendOnlyWorkflowEvidenceWriter,
+    context: WorkflowExecutionContext,
+    timeout: int,
+    max_context_tokens: int | None = None,
+):
+    """Execute a workflow whose submission and admission proofs already exist."""
+
+    orchestrator = RuntimeOrchestrator(
+        adapter_registry=adapter_registry,
+        evidence_reader=evidence_writer,
+    )
+    exec_kwargs: dict[str, Any] = {
+        "intake_outcome": intake_outcome,
+        "evidence_writer": evidence_writer,
+    }
+    if max_context_tokens is not None:
+        exec_kwargs["max_context_tokens"] = max_context_tokens
+
+    try:
+        if _workflow_caps.LOAD_BALANCER is not None:
+            with _workflow_caps.LOAD_BALANCER.slot(context.provider_slug) as acquired:
+                if not acquired:
+                    return None, context.failure_result(
+                        run_id=intake_outcome.run_id,
+                        reason_code="route.unhealthy",
+                        failure_code="route.unhealthy",
+                        outputs={"error": f"Provider at capacity: {context.provider_slug}"},
+                    )
+                from .execution_backends import provider_slot_bypass
+
+                with provider_slot_bypass():
+                    execution_result = _run_admitted_workflow(
+                        orchestrator,
+                        timeout=timeout,
+                        exec_kwargs=exec_kwargs,
+                    )
+        else:
+            execution_result = _run_admitted_workflow(
+                orchestrator,
+                timeout=timeout,
+                exec_kwargs=exec_kwargs,
+            )
+    except FuturesTimeoutError:
+        return None, context.failure_result(
+            run_id=intake_outcome.run_id,
+            reason_code="workflow.execution_timeout",
+            failure_code="workflow.timeout",
+        )
+    except Exception as exc:
+        return None, context.failure_result(
+            run_id=intake_outcome.run_id,
+            reason_code="workflow.execution_crash",
+            failure_code="workflow.crash",
+            outputs={"error": str(exc)},
+        )
+
+    return execution_result, None
+
+
 def _run_workflow(
     orchestrator: RuntimeOrchestrator,
     *,
@@ -155,4 +218,15 @@ def _run_workflow(
 ) -> RunExecutionResult:
     with ThreadPoolExecutor(max_workers=1) as pool:
         future = pool.submit(orchestrator.execute_deterministic_path, **exec_kwargs)
+        return future.result(timeout=timeout)
+
+
+def _run_admitted_workflow(
+    orchestrator: RuntimeOrchestrator,
+    *,
+    timeout: int,
+    exec_kwargs: dict[str, Any],
+) -> RunExecutionResult:
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(orchestrator.execute_admitted_deterministic_path, **exec_kwargs)
         return future.result(timeout=timeout)

@@ -35,8 +35,7 @@ from registry.model_routing import (
 )
 from registry.provider_routing import (
     RouteEligibilityStateAuthorityRecord,
-    bound_provider_route_authority,
-    load_provider_route_authority,
+    load_provider_route_authority_snapshot,
     select_route_eligibility_state,
 )
 from registry.route_catalog_repository import (
@@ -605,23 +604,18 @@ class ProviderRouteRuntimeAuthorityOrchestrator:
                     binding_scope=failover_binding_scope,
                     as_of=as_of,
                 )
-            control_tower = await load_provider_route_authority(
+            candidate_refs_for_snapshot = (
+                tuple(binding.candidate_ref for binding in failover_bindings)
+                if failover_bindings
+                else candidate_refs
+            )
+            route_authority_snapshot = await load_provider_route_authority_snapshot(
                 self._conn,
+                as_of=as_of,
                 model_profile_ids=(runtime_profile.model_profile_id,),
                 provider_policy_ids=(runtime_profile.provider_policy_id,),
-                candidate_refs=(
-                    tuple(binding.candidate_ref for binding in failover_bindings)
-                    if failover_bindings
-                    else candidate_refs
-                ),
+                candidate_refs=candidate_refs_for_snapshot,
             )
-
-        route_authority_snapshot = bound_provider_route_authority(
-            control_tower,
-            model_profile_id=runtime_profile.model_profile_id,
-            provider_policy_id=runtime_profile.provider_policy_id,
-            as_of=as_of,
-        )
         router = ModelRouter.from_route_catalog(
             route_catalog,
             route_authority=route_authority_snapshot,

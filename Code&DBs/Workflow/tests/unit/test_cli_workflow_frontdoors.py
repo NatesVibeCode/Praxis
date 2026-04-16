@@ -492,6 +492,7 @@ def test_workflow_run_prompt_frontdoor_uses_prompt_compiler(monkeypatch: pytest.
             "runtime/example.py",
             "--workdir",
             ".",
+            "--foreground-submit",
         ],
         stdout=stdout,
     ) == 0
@@ -550,6 +551,7 @@ def test_workflow_run_prompt_frontdoor_reports_unadmitted_provider(monkeypatch: 
             "cursor",
             "--model",
             "composer-2",
+            "--foreground-submit",
         ],
         stdout=stdout,
     ) == 2
@@ -606,6 +608,7 @@ def test_workflow_run_prompt_frontdoor_skips_default_provider_lookup_when_provid
             "openai",
             "--model",
             "gpt-5.4-mini",
+            "--foreground-submit",
         ],
         stdout=stdout,
     ) == 0
@@ -755,6 +758,75 @@ def test_triggers_frontdoor_supports_list_and_create(monkeypatch: pytest.MonkeyP
     created = json.loads(stdout.getvalue())
     assert created["trigger"]["id"] == "trg_new"
     assert created["trigger"]["workflow_id"] == "wf_1"
+
+
+def test_workflows_frontdoor_supports_create_and_update(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_query_mod = SimpleNamespace(
+        _validate_workflow_body=lambda body, **_kwargs: None,
+        _workflow_to_dict=lambda row, include_definition=False: {
+            "id": row["id"],
+            "name": row["name"],
+            "definition": row["definition"] if include_definition else None,
+            "compiled_spec": row["compiled_spec"],
+        },
+    )
+    monkeypatch.setattr(workflow_commands, "_workflow_subsystems", lambda: _FakeSubsystems(object()))
+    monkeypatch.setattr(workflow_commands, "_workflow_query_mod", lambda: fake_query_mod)
+    import runtime.canonical_workflows as canonical_workflows
+
+    monkeypatch.setattr(
+        canonical_workflows,
+        "save_workflow",
+        lambda _conn, workflow_id=None, body=None: {
+            "id": workflow_id or body.get("id") or "wf_probe",
+            "name": body["name"],
+            "definition": body["definition"],
+            "compiled_spec": body.get("compiled_spec"),
+        },
+    )
+
+    create_payload = {
+        "id": "agent_handoff_search_db_probe",
+        "name": "Agent Handoff Search DB Probe",
+        "definition": {"definition_revision": "def_agent_handoff_search_db_probe"},
+        "compiled_spec": {
+            "definition_revision": "def_agent_handoff_search_db_probe",
+            "jobs": [{"label": "seed_contract"}],
+        },
+    }
+    stdout = StringIO()
+    assert (
+        workflow_cli_main(
+            ["workflows", "create", "--input-json", json.dumps(create_payload)],
+            stdout=stdout,
+        )
+        == 0
+    )
+    created = json.loads(stdout.getvalue())
+    assert created["workflow"]["id"] == "agent_handoff_search_db_probe"
+    assert created["workflow"]["compiled_spec"]["jobs"][0]["label"] == "seed_contract"
+
+    update_payload = {
+        "name": "Agent Handoff Search DB Probe v2",
+        "definition": {"definition_revision": "def_agent_handoff_search_db_probe_v2"},
+    }
+    stdout = StringIO()
+    assert (
+        workflow_cli_main(
+            [
+                "workflows",
+                "update",
+                "agent_handoff_search_db_probe",
+                "--input-json",
+                json.dumps(update_payload),
+            ],
+            stdout=stdout,
+        )
+        == 0
+    )
+    updated = json.loads(stdout.getvalue())
+    assert updated["workflow"]["id"] == "agent_handoff_search_db_probe"
+    assert updated["workflow"]["name"] == "Agent Handoff Search DB Probe v2"
 
 
 def test_manifest_frontdoor_supports_generate_and_save_as(
@@ -1099,4 +1171,99 @@ def test_run_frontdoor_forwards_fresh_launch_intent(
         "job_id": "job-77",
         "run_id": None,
         "result_file": str(tmp_path / "result.json"),
+    }
+
+
+def test_run_frontdoor_uses_detached_launcher_for_async_submit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    spec_path = tmp_path / "spec.queue.json"
+    spec_path.write_text(
+        json.dumps(
+            {
+                "name": "frontdoor detached run",
+                "workflow_id": "frontdoor_detached_run",
+                "phase": "test",
+                "jobs": [{"label": "job-a", "agent": "openai/gpt-5.4-mini", "prompt": "Run it"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        workflow_commands,
+        "_launch_detached_frontdoor",
+        lambda **kwargs: captured.update(kwargs) or 0,
+    )
+    monkeypatch.setattr(
+        workflow_commands,
+        "_workflow_cli",
+        lambda: SimpleNamespace(
+            cmd_run=lambda _args: (_ for _ in ()).throw(AssertionError("cmd_run should not be used"))
+        ),
+    )
+
+    assert workflow_cli_main(["run", str(spec_path)], stdout=StringIO()) == 0
+    assert captured == {
+        "command_name": "run",
+        "args": [str(spec_path)],
+        "stdout": captured["stdout"],
+        "result_file_base": "workflow_run_result",
+        "success_prefix": "Workflow submitted",
+        "emit_parent": False,
+    }
+
+
+def test_spawn_frontdoor_uses_detached_launcher_for_async_submit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    spec_path = tmp_path / "spec.queue.json"
+    spec_path.write_text(
+        json.dumps(
+            {
+                "name": "frontdoor detached spawn",
+                "workflow_id": "frontdoor_detached_spawn",
+                "phase": "test",
+                "jobs": [{"label": "job-a", "agent": "openai/gpt-5.4-mini", "prompt": "Run it"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        workflow_commands,
+        "_launch_detached_frontdoor",
+        lambda **kwargs: captured.update(kwargs) or 0,
+    )
+    monkeypatch.setattr(
+        workflow_commands,
+        "_workflow_cli",
+        lambda: SimpleNamespace(
+            cmd_spawn=lambda _args: (_ for _ in ()).throw(AssertionError("cmd_spawn should not be used"))
+        ),
+    )
+
+    assert (
+        workflow_cli_main(
+            ["spawn", "workflow_parent_123", str(spec_path), "--reason", "phase.review"],
+            stdout=StringIO(),
+        )
+        == 0
+    )
+    assert captured == {
+        "command_name": "spawn",
+        "args": [
+            "workflow_parent_123",
+            str(spec_path),
+            "--reason",
+            "phase.review",
+        ],
+        "stdout": captured["stdout"],
+        "result_file_base": "workflow_spawn_result",
+        "success_prefix": "Child workflow spawned",
+        "emit_parent": True,
     }

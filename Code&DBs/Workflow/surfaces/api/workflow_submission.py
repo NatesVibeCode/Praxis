@@ -18,7 +18,13 @@ from typing import Any, Callable, Protocol
 from surfaces.mcp.catalog import canonical_tool_name
 from surfaces.mcp.helpers import _serialize
 from surfaces.mcp.runtime_context import WorkflowMcpRequestContext, get_current_workflow_mcp_context
-from ._payload_contract import optional_text, require_text
+from runtime.workflow.submission_contract import (
+    SubmissionContractError,
+    normalize_declared_operations as _normalize_declared_operations_impl,
+    normalize_text as _normalize_text_impl,
+    normalize_text_list as _normalize_text_list_impl,
+    optional_text as _optional_text_impl,
+)
 
 
 _SUBMIT_TOOL_NAMES = {
@@ -95,12 +101,12 @@ def _frontdoor_response(tool_name: str, operation: Callable[[], dict[str, Any]])
 
 def _require_text(value: object, *, field_name: str) -> str:
     try:
-        return require_text(value, field_name=field_name)
-    except ValueError as exc:
+        return _normalize_text_impl(value, field_name=field_name)
+    except SubmissionContractError as exc:
         raise SubmissionFrontdoorError(
             "workflow_submission.invalid_input",
             str(exc),
-            details={"field": field_name, "value_type": type(value).__name__},
+            details=exc.details,
         ) from exc
 
 
@@ -108,66 +114,35 @@ def _optional_text(value: object, *, field_name: str) -> str | None:
     if value is None:
         return None
     try:
-        return optional_text(value, field_name=field_name)
-    except ValueError as exc:
+        return _optional_text_impl(value, field_name=field_name)
+    except SubmissionContractError as exc:
         raise SubmissionFrontdoorError(
             "workflow_submission.invalid_input",
             str(exc),
-            details={"field": field_name, "value_type": type(value).__name__},
+            details=exc.details,
         ) from exc
 
 
 def _require_text_list(value: object, *, field_name: str) -> tuple[str, ...]:
-    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+    try:
+        return tuple(_normalize_text_list_impl(value, field_name=field_name))
+    except SubmissionContractError as exc:
         raise SubmissionFrontdoorError(
             "workflow_submission.invalid_input",
-            f"{field_name} must be a list of non-empty strings",
-            details={"field": field_name, "value_type": type(value).__name__},
-        )
-    items = tuple(
-        _require_text(item, field_name=f"{field_name}[{index}]")
-        for index, item in enumerate(value)
-    )
-    return items
+            str(exc),
+            details=exc.details,
+        ) from exc
 
 
 def _require_declared_operations(value: object) -> tuple[dict[str, Any], ...]:
-    if value is None:
-        return ()
-    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+    try:
+        return tuple(_normalize_declared_operations_impl(value))
+    except SubmissionContractError as exc:
         raise SubmissionFrontdoorError(
             "workflow_submission.invalid_input",
-            "declared_operations must be a list of objects",
-            details={"field": "declared_operations", "value_type": type(value).__name__},
-        )
-
-    operations: list[dict[str, Any]] = []
-    for index, item in enumerate(value):
-        if not isinstance(item, Mapping):
-            raise SubmissionFrontdoorError(
-                "workflow_submission.invalid_input",
-                f"declared_operations[{index}] must be an object",
-                details={"field": f"declared_operations[{index}]", "value_type": type(item).__name__},
-            )
-        action = _require_text(item.get("action"), field_name=f"declared_operations[{index}].action").lower()
-        if action not in {"create", "update", "delete", "rename"}:
-            raise SubmissionFrontdoorError(
-                "workflow_submission.invalid_input",
-                "declared_operations action must be one of create, update, delete, rename",
-                details={"field": f"declared_operations[{index}].action", "action": action},
-            )
-        operation = {
-            "path": _require_text(item.get("path"), field_name=f"declared_operations[{index}].path"),
-            "action": action,
-        }
-        from_path = item.get("from_path")
-        if from_path is not None:
-            operation["from_path"] = _require_text(
-                from_path,
-                field_name=f"declared_operations[{index}].from_path",
-            )
-        operations.append(operation)
-    return tuple(operations)
+            str(exc),
+            details=exc.details,
+        ) from exc
 
 
 def _normalize_context(

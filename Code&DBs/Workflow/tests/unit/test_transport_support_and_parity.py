@@ -18,6 +18,7 @@ from adapters.llm_task import LLMTaskAdapter
 from adapters.provider_registry import resolve_api_endpoint
 from runtime.http_transport import TransportExecutionError
 from runtime.task_type_router import TaskTypeRouter
+from runtime.workflow.execution_policy import resolve_cli_execution_policy
 
 
 def _builtin_profiles_map():
@@ -612,6 +613,103 @@ def test_cli_and_api_transports_can_be_compared_for_same_provider_and_model(monk
         }
 
     assert _normalize(cli_result) == _normalize(api_result)
+
+
+def test_cli_transport_enables_network_for_remote_provider_cli(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    import adapters.cli_llm as cli_llm_mod
+
+    def _fake_invoke_cli(**kwargs):
+        captured["network"] = kwargs["network"]
+        return CLILLMResult(
+            content="shared completion",
+            exit_code=0,
+            stderr="",
+            latency_ms=12,
+            raw_json=None,
+            cli_name="codex",
+            provider_slug=str(kwargs["provider_slug"]),
+            model_slug=str(kwargs["model_slug"]),
+        )
+
+    monkeypatch.setattr(cli_llm_mod, "_invoke_cli", _fake_invoke_cli)
+
+    request = DeterministicTaskRequest(
+        node_id="node_network",
+        task_name="transport_network_policy",
+        input_payload={
+            "prompt": "hello",
+            "provider_slug": "openai",
+            "model_slug": "gpt-5.4-mini",
+        },
+        expected_outputs={},
+        dependency_inputs={},
+        execution_boundary_ref="workspace:test",
+    )
+
+    result = CLILLMAdapter(default_provider="openai", prefer_docker=True).execute(request=request)
+
+    assert captured["network"] is True
+    assert result.status == "succeeded"
+
+
+def test_cli_transport_respects_disabled_network_override(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    import adapters.cli_llm as cli_llm_mod
+
+    def _fake_invoke_cli(**kwargs):
+        captured["network"] = kwargs["network"]
+        return CLILLMResult(
+            content="shared completion",
+            exit_code=0,
+            stderr="",
+            latency_ms=12,
+            raw_json=None,
+            cli_name="codex",
+            provider_slug=str(kwargs["provider_slug"]),
+            model_slug=str(kwargs["model_slug"]),
+        )
+
+    monkeypatch.setattr(cli_llm_mod, "_invoke_cli", _fake_invoke_cli)
+
+    request = DeterministicTaskRequest(
+        node_id="node_network_override",
+        task_name="transport_network_override",
+        input_payload={
+            "prompt": "hello",
+            "provider_slug": "openai",
+            "model_slug": "gpt-5.4-mini",
+            "network_policy": "disabled",
+        },
+        expected_outputs={},
+        dependency_inputs={},
+        execution_boundary_ref="workspace:test",
+    )
+
+    result = CLILLMAdapter(default_provider="openai", prefer_docker=True).execute(request=request)
+
+    assert captured["network"] is False
+    assert result.status == "succeeded"
+
+
+def test_cli_execution_policy_uses_explicit_sandbox_contract() -> None:
+    policy = resolve_cli_execution_policy(
+        {
+            "sandbox_profile": {
+                "network_policy": "disabled",
+                "auth_mount_policy": "none",
+            }
+        },
+        profile=SimpleNamespace(
+            api_endpoint="https://api.openai.com/v1",
+            api_protocol_family="openai_responses",
+            api_key_env_vars=("OPENAI_API_KEY",),
+        ),
+    )
+
+    assert policy.network_policy == "disabled"
+    assert policy.network_enabled is False
+    assert policy.auth_mount_policy == "none"
 
 
 def test_llm_task_uses_transport_registry_for_non_chat_protocols(monkeypatch) -> None:

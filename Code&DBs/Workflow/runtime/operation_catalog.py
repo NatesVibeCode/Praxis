@@ -1,0 +1,245 @@
+"""Runtime boundary for operation-catalog authority reads."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+from storage.postgres.operation_catalog_repository import (
+    list_operation_catalog_records as _list_operation_catalog_records,
+    list_operation_source_policy_records as _list_operation_source_policy_records,
+    load_operation_catalog_record as _load_operation_catalog_record,
+    load_operation_catalog_record_by_name as _load_operation_catalog_record_by_name,
+)
+from storage.postgres.validators import PostgresWriteError
+
+
+@dataclass(frozen=True, slots=True)
+class OperationCatalogRecord:
+    operation_ref: str
+    operation_name: str
+    source_kind: str
+    operation_kind: str
+    http_method: str
+    http_path: str
+    input_model_ref: str
+    handler_ref: str
+    authority_ref: str
+    projection_ref: str | None
+    posture: str | None
+    idempotency_policy: str | None
+    enabled: bool
+    binding_revision: str
+    decision_ref: str
+
+
+@dataclass(frozen=True, slots=True)
+class OperationSourcePolicyRecord:
+    policy_ref: str
+    source_kind: str
+    posture: str
+    idempotency_policy: str
+    enabled: bool
+    binding_revision: str
+    decision_ref: str
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedOperationDefinition:
+    operation_ref: str
+    operation_name: str
+    source_kind: str
+    operation_kind: str
+    http_method: str
+    http_path: str
+    input_model_ref: str
+    handler_ref: str
+    authority_ref: str
+    projection_ref: str | None
+    posture: str
+    idempotency_policy: str
+    enabled: bool
+    operation_enabled: bool
+    source_policy_ref: str | None
+    source_policy_enabled: bool | None
+    binding_revision: str
+    decision_ref: str
+
+
+class OperationCatalogBoundaryError(RuntimeError):
+    """Raised when operation catalog ownership rejects a request."""
+
+    def __init__(self, message: str, *, status_code: int = 400) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+def _raise_storage_boundary(exc: PostgresWriteError) -> None:
+    status_code = 400 if exc.reason_code.endswith("invalid_submission") else 500
+    raise OperationCatalogBoundaryError(str(exc), status_code=status_code) from exc
+
+
+def _operation_record_from_row(row: dict[str, Any]) -> OperationCatalogRecord:
+    return OperationCatalogRecord(**row)
+
+
+def _source_policy_record_from_row(row: dict[str, Any]) -> OperationSourcePolicyRecord:
+    return OperationSourcePolicyRecord(**row)
+
+
+def _resolve_operation_definition(
+    record: OperationCatalogRecord,
+    *,
+    source_policy: OperationSourcePolicyRecord | None,
+) -> ResolvedOperationDefinition:
+    posture = record.posture or (source_policy.posture if source_policy else None)
+    idempotency_policy = record.idempotency_policy or (
+        source_policy.idempotency_policy if source_policy else None
+    )
+    if posture is None or idempotency_policy is None:
+        raise OperationCatalogBoundaryError(
+            f"Operation {record.operation_name} is missing source-policy defaults",
+            status_code=500,
+        )
+
+    source_policy_enabled = source_policy.enabled if source_policy else None
+    enabled = record.enabled and (source_policy_enabled if source_policy_enabled is not None else True)
+    return ResolvedOperationDefinition(
+        operation_ref=record.operation_ref,
+        operation_name=record.operation_name,
+        source_kind=record.source_kind,
+        operation_kind=record.operation_kind,
+        http_method=record.http_method,
+        http_path=record.http_path,
+        input_model_ref=record.input_model_ref,
+        handler_ref=record.handler_ref,
+        authority_ref=record.authority_ref,
+        projection_ref=record.projection_ref,
+        posture=posture,
+        idempotency_policy=idempotency_policy,
+        enabled=enabled,
+        operation_enabled=record.enabled,
+        source_policy_ref=source_policy.policy_ref if source_policy else None,
+        source_policy_enabled=source_policy_enabled,
+        binding_revision=record.binding_revision,
+        decision_ref=record.decision_ref,
+    )
+
+
+def list_operation_catalog_records(
+    conn: Any,
+    *,
+    source_kind: str | None = None,
+    include_disabled: bool = False,
+    limit: int = 100,
+) -> list[OperationCatalogRecord]:
+    try:
+        rows = _list_operation_catalog_records(
+            conn,
+            source_kind=source_kind,
+            include_disabled=include_disabled,
+            limit=limit,
+        )
+    except PostgresWriteError as exc:
+        _raise_storage_boundary(exc)
+    return [_operation_record_from_row(row) for row in rows]
+
+
+def list_operation_source_policies(
+    conn: Any,
+    *,
+    include_disabled: bool = False,
+    limit: int = 100,
+) -> list[OperationSourcePolicyRecord]:
+    try:
+        rows = _list_operation_source_policy_records(
+            conn,
+            include_disabled=include_disabled,
+            limit=limit,
+        )
+    except PostgresWriteError as exc:
+        _raise_storage_boundary(exc)
+    return [_source_policy_record_from_row(row) for row in rows]
+
+
+def get_operation_catalog_record(
+    conn: Any,
+    *,
+    operation_ref: str | None = None,
+    operation_name: str | None = None,
+) -> OperationCatalogRecord:
+    if bool(operation_ref) == bool(operation_name):
+        raise OperationCatalogBoundaryError(
+            "exactly one of operation_ref or operation_name must be provided",
+            status_code=400,
+        )
+    try:
+        row = (
+            _load_operation_catalog_record(conn, operation_ref=str(operation_ref))
+            if operation_ref
+            else _load_operation_catalog_record_by_name(conn, operation_name=str(operation_name))
+        )
+    except PostgresWriteError as exc:
+        _raise_storage_boundary(exc)
+    if row is None:
+        missing_value = operation_ref or operation_name or "<unknown>"
+        raise OperationCatalogBoundaryError(
+            f"Operation not found: {missing_value}",
+            status_code=404,
+        )
+    return _operation_record_from_row(row)
+
+
+def get_resolved_operation_definition(
+    conn: Any,
+    *,
+    operation_ref: str | None = None,
+    operation_name: str | None = None,
+) -> ResolvedOperationDefinition:
+    record = get_operation_catalog_record(
+        conn,
+        operation_ref=operation_ref,
+        operation_name=operation_name,
+    )
+    policies = {
+        policy.source_kind: policy
+        for policy in list_operation_source_policies(conn, include_disabled=True)
+    }
+    return _resolve_operation_definition(record, source_policy=policies.get(record.source_kind))
+
+
+def list_resolved_operation_definitions(
+    conn: Any,
+    *,
+    include_disabled: bool = False,
+    limit: int = 100,
+) -> list[ResolvedOperationDefinition]:
+    records = list_operation_catalog_records(
+        conn,
+        include_disabled=True,
+        limit=limit,
+    )
+    policies = {
+        policy.source_kind: policy
+        for policy in list_operation_source_policies(conn, include_disabled=True, limit=limit)
+    }
+    resolved = [
+        _resolve_operation_definition(record, source_policy=policies.get(record.source_kind))
+        for record in records
+    ]
+    if include_disabled:
+        return resolved
+    return [record for record in resolved if record.enabled]
+
+
+__all__ = [
+    "OperationCatalogBoundaryError",
+    "OperationCatalogRecord",
+    "OperationSourcePolicyRecord",
+    "ResolvedOperationDefinition",
+    "get_operation_catalog_record",
+    "get_resolved_operation_definition",
+    "list_operation_catalog_records",
+    "list_operation_source_policies",
+    "list_resolved_operation_definitions",
+]

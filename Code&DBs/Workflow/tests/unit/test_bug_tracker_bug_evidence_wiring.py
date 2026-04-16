@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
+
+import pytest
 
 
 _mod_path = Path(__file__).resolve().parents[2] / "runtime" / "bug_tracker.py"
@@ -133,3 +136,77 @@ def test_link_evidence_writes_through_bug_evidence_repository(monkeypatch) -> No
     assert captured["evidence_role"] == "observed_in"
     assert captured["created_by"] == "tester"
     assert result["notes"] == "wired through repository"
+
+
+def test_resolve_fixed_requires_passed_validates_fix_verification(monkeypatch) -> None:
+    tracker = BugTracker(conn=object())
+    bug = _sample_bug()
+
+    monkeypatch.setattr(tracker, "get", lambda bug_id: bug if bug_id == bug.bug_id else None)
+    monkeypatch.setattr(
+        tracker,
+        "_passed_validates_fix_evidence_with_error",
+        lambda bug_id: ([], None),
+    )
+
+    with pytest.raises(ValueError, match="passed validates_fix verification evidence"):
+        tracker.resolve(bug.bug_id, BugStatus.FIXED)
+
+
+def test_resolve_fixed_surfaces_validates_fix_query_failure(monkeypatch) -> None:
+    tracker = BugTracker(conn=object())
+    bug = _sample_bug()
+
+    monkeypatch.setattr(tracker, "get", lambda bug_id: bug if bug_id == bug.bug_id else None)
+    monkeypatch.setattr(
+        tracker,
+        "_passed_validates_fix_evidence_with_error",
+        lambda bug_id: ([], "bug_evidence_links.query_failed:RuntimeError: proof lane offline"),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="could not load validates_fix evidence.*proof lane offline",
+    ):
+        tracker.resolve(bug.bug_id, BugStatus.FIXED)
+
+
+def test_resolve_fixed_updates_bug_when_passed_verification_exists(monkeypatch) -> None:
+    class _RecordingConn:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+        def execute(self, query: str, *params: object):
+            self.calls.append((query, params))
+            return [{"bug_id": "BUG-TEST"}]
+
+    conn = _RecordingConn()
+    tracker = BugTracker(conn=conn)
+    bug = _sample_bug()
+    resolved_at = datetime(2026, 4, 16, 18, 0, tzinfo=timezone.utc)
+
+    monkeypatch.setattr(tracker, "get", lambda bug_id: bug if bug_id == bug.bug_id else None)
+    monkeypatch.setattr(
+        tracker,
+        "_passed_validates_fix_evidence_with_error",
+        lambda bug_id: ([{"evidence_ref": "verification-run-1"}], None),
+    )
+    monkeypatch.setattr(tracker, "_now", lambda: resolved_at)
+    monkeypatch.setattr(
+        tracker,
+        "_row_to_bug",
+        lambda row: replace(
+            bug,
+            status=BugStatus.FIXED,
+            resolved_at=resolved_at,
+            updated_at=resolved_at,
+        ),
+    )
+
+    resolved = tracker.resolve(bug.bug_id, BugStatus.FIXED)
+
+    assert resolved is not None
+    assert resolved.status == BugStatus.FIXED
+    assert resolved.resolved_at == resolved_at
+    assert conn.calls[0][1][0] == "FIXED"
+    assert conn.calls[0][1][3] == bug.bug_id

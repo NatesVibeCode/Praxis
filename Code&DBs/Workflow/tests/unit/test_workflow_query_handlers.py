@@ -4187,6 +4187,28 @@ def test_handle_query_routes_issue_backlog(monkeypatch) -> None:
     assert result["issues"][0]["issue_id"] == "issue.alpha"
 
 
+def test_handle_query_routes_diagnose() -> None:
+    from runtime import workflow_diagnose
+
+    subs = SimpleNamespace(
+        get_knowledge_graph=lambda: SimpleNamespace(search=lambda *_args, **_kwargs: []),
+    )
+
+    # Patch the runtime helper directly so the shared query core can resolve the run
+    # without touching the database in unit tests.
+    original = workflow_diagnose.diagnose_run
+    workflow_diagnose.diagnose_run = lambda run_id: {"run_id": run_id, "receipt_found": True}
+    try:
+        result = workflow_query_core.handle_query(subs, {"question": "diagnose run run_abc123"})
+    finally:
+        workflow_diagnose.diagnose_run = original
+
+    assert result["routed_to"] == "workflow_diagnose"
+    assert result["run_id"] == "run_abc123"
+    assert result["diagnosis"]["run_id"] == "run_abc123"
+    assert result["diagnosis"]["receipt_found"] is True
+
+
 def test_handle_query_knowledge_graph_error_is_structured() -> None:
     class _BoomGraph:
         def search(self, *_args, **_kwargs):
@@ -4454,6 +4476,77 @@ def test_handle_bugs_resolve_fixed_requires_validates_fix_evidence() -> None:
         assert "validates_fix" in str(exc)
     else:
         raise AssertionError("expected resolve to fail closed without validates_fix evidence")
+
+
+def test_handle_bugs_list_uses_injected_parser_contract() -> None:
+    captured: dict[str, Any] = {}
+
+    class _Bug:
+        bug_id = "BUG-123"
+        title = "authority drift"
+        severity = "P2"
+        category = "ARCHITECTURE"
+        status = "OPEN"
+        description = ""
+        filed_by = "workflow_api"
+        source_kind = "workflow_api"
+        decision_ref = ""
+        discovered_in_run_id = None
+        discovered_in_receipt_id = None
+        owner_ref = None
+        tags = ()
+        created_at = None
+        updated_at = None
+        resolved_at = None
+        resolution_summary = None
+        assigned_to = None
+        resume_context = None
+
+    class _BugTracker:
+        def count_bugs(self, **kwargs):
+            captured["count_bugs"] = kwargs
+            return 1
+
+        def list_bugs(self, **kwargs):
+            captured["list_bugs"] = kwargs
+            return [_Bug()]
+
+        def replay_hint(self, bug_id: str, receipt_limit: int = 1):
+            captured["replay_hint"] = {"bug_id": bug_id, "receipt_limit": receipt_limit}
+            return {}
+
+    class _BugTrackerMod:
+        class BugStatus:
+            FIXED = "FIXED"
+            WONT_FIX = "WONT_FIX"
+            DEFERRED = "DEFERRED"
+
+    subs = SimpleNamespace(
+        get_bug_tracker=lambda: _BugTracker(),
+        get_bug_tracker_mod=lambda: _BugTrackerMod(),
+    )
+
+    result = workflow_query_core.handle_bugs(
+        subs,
+        {
+            "action": "list",
+            "status": "openish",
+            "severity": "seriousish",
+            "category": "archish",
+            "limit": 1,
+        },
+        parse_bug_status=lambda _mod, raw: f"parsed-status:{raw}",
+        parse_bug_severity=lambda _mod, raw: f"parsed-severity:{raw}",
+        parse_bug_category=lambda _mod, raw: f"parsed-category:{raw}",
+    )
+
+    assert captured["count_bugs"]["status"] == "parsed-status:openish"
+    assert captured["count_bugs"]["severity"] == "parsed-severity:seriousish"
+    assert captured["count_bugs"]["category"] == "parsed-category:archish"
+    assert captured["list_bugs"]["status"] == "parsed-status:openish"
+    assert captured["list_bugs"]["severity"] == "parsed-severity:seriousish"
+    assert captured["list_bugs"]["category"] == "parsed-category:archish"
+    assert result["returned_count"] == 1
 
 
 def test_handle_operator_view_issue_backlog_returns_direct_payload(monkeypatch) -> None:

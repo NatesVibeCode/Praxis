@@ -41,4 +41,8 @@ registry.register(
     command_class=MutateWorkflowBuildCommand,
     handler=handle_mutate_workflow_build,
     description="Mutate a workflow build definition or graph.",
+    operation_name="workflow_build.mutate",
+    operation_kind="command",
+    source_kind="cqrs_command",
+    authority_ref="authority.workflow_build",
 )

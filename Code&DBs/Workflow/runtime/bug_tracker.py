@@ -843,17 +843,17 @@ class BugTracker:
         )
         return self._row_to_evidence_link(row) if row else None
 
-    def list_evidence(
+    def _list_evidence_with_error(
         self,
         bug_id: str,
         *,
         evidence_role: str | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], str | None]:
         bug_id = str(bug_id or "").strip()
         if not bug_id:
-            return []
+            return [], None
         if evidence_role:
-            rows = self._query_optional_rows(
+            rows, error = self._query_rows_with_error(
                 """
                 SELECT *
                   FROM bug_evidence_links
@@ -865,7 +865,7 @@ class BugTracker:
                 evidence_role,
             )
         else:
-            rows = self._query_optional_rows(
+            rows, error = self._query_rows_with_error(
                 """
                 SELECT *
                   FROM bug_evidence_links
@@ -874,7 +874,60 @@ class BugTracker:
                 """,
                 bug_id,
             )
-        return [self._row_to_evidence_link(row) for row in rows]
+        if error:
+            return [], f"bug_evidence_links.query_failed:{error}"
+        return [self._row_to_evidence_link(row) for row in rows], None
+
+    def list_evidence(
+        self,
+        bug_id: str,
+        *,
+        evidence_role: str | None = None,
+    ) -> list[dict[str, Any]]:
+        rows, _error = self._list_evidence_with_error(
+            bug_id,
+            evidence_role=evidence_role,
+        )
+        return rows
+
+    def _passed_validates_fix_evidence_with_error(
+        self,
+        bug_id: str,
+    ) -> tuple[list[dict[str, Any]], str | None]:
+        evidence_rows, evidence_error = self._list_evidence_with_error(
+            bug_id,
+            evidence_role="validates_fix",
+        )
+        if evidence_error:
+            return [], evidence_error
+        verification_refs = tuple(
+            sorted(
+                str(row.get("evidence_ref") or "").strip()
+                for row in evidence_rows
+                if str(row.get("evidence_kind") or "") == "verification_run"
+                and str(row.get("evidence_ref") or "").strip()
+            )
+        )
+        if not verification_refs:
+            return [], None
+        verification_rows, verification_error = self._load_verification_rows(
+            "verification_runs",
+            "verification_run_id",
+            verification_refs,
+        )
+        if verification_error:
+            return [], f"verification_runs.query_failed:{verification_error}"
+        return (
+            [
+                row
+                for row in evidence_rows
+                if str(row.get("evidence_kind") or "") == "verification_run"
+                and _verification_passed(
+                    verification_rows.get(str(row.get("evidence_ref") or ""), {}).get("status")
+                )
+            ],
+            None,
+        )
 
     def _link_evidence_if_missing(
         self,
@@ -1646,13 +1699,16 @@ class BugTracker:
         bug = self.get(bug_id)
         if bug is None:
             return None
-        if status == BugStatus.FIXED and not self.list_evidence(
-            bug_id,
-            evidence_role="validates_fix",
-        ):
-            raise ValueError(
-                f"resolve() status {status.value} requires validates_fix evidence for {bug_id}"
-            )
+        if status == BugStatus.FIXED:
+            proof_rows, proof_error = self._passed_validates_fix_evidence_with_error(bug_id)
+            if proof_error:
+                raise ValueError(
+                    f"resolve() could not load validates_fix evidence for {bug_id}: {proof_error}"
+                )
+            if not proof_rows:
+                raise ValueError(
+                    f"resolve() status {status.value} requires passed validates_fix verification evidence for {bug_id}"
+                )
         now = self._now()
         rows = self._conn.execute(
             "UPDATE bugs SET status = $1, resolved_at = $2, updated_at = $3 WHERE bug_id = $4 RETURNING *",

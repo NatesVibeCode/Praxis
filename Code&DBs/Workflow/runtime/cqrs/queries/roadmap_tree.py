@@ -32,4 +32,9 @@ registry.register(
     command_class=QueryRoadmapTree,
     handler=handle_query_roadmap_tree,
     description="Read a roadmap tree with dependency edges and semantic neighbors.",
+    operation_name="operator.roadmap_tree",
+    operation_kind="query",
+    source_kind="cqrs_query",
+    authority_ref="authority.roadmap_items",
+    projection_ref="projection.roadmap_tree",
 )

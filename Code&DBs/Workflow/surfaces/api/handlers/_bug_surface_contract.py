@@ -10,6 +10,7 @@ from runtime import bug_evidence as _bug_evidence
 
 BugSerializer = Callable[[Any], dict[str, Any]]
 Serializer = Callable[[Any], Any]
+BugParser = Callable[[Any, object], Any]
 
 
 def parse_bug_status(bt_mod: Any, raw_status: object) -> Any:
@@ -108,10 +109,13 @@ def list_bugs_payload(
     serialize_bug: BugSerializer,
     default_limit: int,
     include_replay_details: bool,
+    parse_status: BugParser = parse_bug_status,
+    parse_severity: BugParser = parse_bug_severity,
+    parse_category: BugParser = parse_bug_category,
 ) -> dict[str, Any]:
-    parsed_status = parse_bug_status(bt_mod, body.get("status"))
-    parsed_severity = parse_bug_severity(bt_mod, body.get("severity"))
-    category = parse_bug_category(bt_mod, body.get("category"))
+    parsed_status = parse_status(bt_mod, body.get("status"))
+    parsed_severity = parse_severity(bt_mod, body.get("severity"))
+    category = parse_category(bt_mod, body.get("category"))
     limit = max(1, int(body.get("limit", default_limit) or default_limit))
     title_like = body.get("title_like")
     include_replay_state = bool(body.get("include_replay_state", True))
@@ -166,17 +170,19 @@ def file_bug_payload(
     filed_by_default: str,
     source_kind_default: str,
     include_similar_bugs: bool = False,
+    parse_severity: BugParser = parse_bug_severity,
+    parse_category: BugParser = parse_bug_category,
 ) -> dict[str, Any]:
     title = str(body.get("title") or "").strip()
     if not title:
         raise ValueError("title is required to file a bug")
-    category = parse_bug_category(bt_mod, body.get("category")) or bt_mod.BugCategory.OTHER
+    category = parse_category(bt_mod, body.get("category")) or bt_mod.BugCategory.OTHER
     resume_ctx = body.get("resume_context")
     if resume_ctx is not None and not isinstance(resume_ctx, dict):
         raise ValueError("resume_context must be a JSON object when provided")
     filed = bt.file_bug(
         title=title,
-        severity=parse_bug_severity(bt_mod, body.get("severity")) or bt_mod.BugSeverity.P2,
+        severity=parse_severity(bt_mod, body.get("severity")) or bt_mod.BugSeverity.P2,
         category=category,
         description=str(body.get("description") or ""),
         filed_by=str(body.get("filed_by") or filed_by_default).strip() or filed_by_default,
@@ -202,6 +208,9 @@ def search_bugs_payload(
     body: Mapping[str, Any],
     serialize_bug: BugSerializer,
     default_limit: int,
+    parse_status: BugParser = parse_bug_status,
+    parse_severity: BugParser = parse_bug_severity,
+    parse_category: BugParser = parse_bug_category,
 ) -> dict[str, Any]:
     title = str(body.get("title") or "").strip()
     if not title:
@@ -209,9 +218,9 @@ def search_bugs_payload(
     bugs = bt.search(
         title,
         limit=max(1, int(body.get("limit", default_limit) or default_limit)),
-        status=parse_bug_status(bt_mod, body.get("status")),
-        severity=parse_bug_severity(bt_mod, body.get("severity")),
-        category=parse_bug_category(bt_mod, body.get("category")),
+        status=parse_status(bt_mod, body.get("status")),
+        severity=parse_severity(bt_mod, body.get("severity")),
+        category=parse_category(bt_mod, body.get("category")),
         tags=_normalize_tags(body.get("tags")),
         exclude_tags=_normalize_tags(body.get("exclude_tags")),
         open_only=bool(body.get("open_only", False)),
@@ -333,11 +342,12 @@ def resolve_bug_payload(
     body: Mapping[str, Any],
     serialize_bug: BugSerializer,
     resolved_statuses: set[Any],
+    parse_status: BugParser = parse_bug_status,
 ) -> dict[str, Any]:
     bug_id = str(body.get("bug_id") or "").strip()
     if not bug_id:
         raise ValueError("bug_id is required to resolve a bug")
-    status = parse_bug_status(bt_mod, body.get("status"))
+    status = parse_status(bt_mod, body.get("status"))
     if status is None:
         raise ValueError("status is required to resolve a bug")
     if status not in resolved_statuses:

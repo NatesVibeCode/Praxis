@@ -187,6 +187,30 @@ def _is_duplicate_object_error(error: BaseException) -> bool:
     return getattr(error, "sqlstate", None) in _DUPLICATE_SQLSTATES
 
 
+def _strip_leading_sql_comments(statement: str) -> str:
+    text = statement.lstrip()
+    while text:
+        if text.startswith("--"):
+            newline_index = text.find("\n")
+            if newline_index == -1:
+                return ""
+            text = text[newline_index + 1 :].lstrip()
+            continue
+        if text.startswith("/*"):
+            comment_end = text.find("*/", 2)
+            if comment_end == -1:
+                return ""
+            text = text[comment_end + 2 :].lstrip()
+            continue
+        break
+    return text
+
+
+def _statement_mutates_claim_lifecycle_authority_rows(statement: str) -> bool:
+    normalized = _strip_leading_sql_comments(statement).strip().lower()
+    return normalized.startswith("insert into workflow_claim_lifecycle_transition_authority")
+
+
 @lru_cache(maxsize=1)
 def _schema_statements() -> tuple[str, ...]:
     statements: list[str] = []
@@ -202,6 +226,15 @@ def _schema_statements() -> tuple[str, ...]:
                 "runtime schema file could not be read from the canonical workflow migration root"
             ) from exc
     return tuple(statements)
+
+
+@lru_cache(maxsize=1)
+def _bootstrap_schema_statements() -> tuple[str, ...]:
+    return tuple(
+        statement
+        for statement in _schema_statements()
+        if not _statement_mutates_claim_lifecycle_authority_rows(statement)
+    )
 
 
 def _snapshot_from_row(row: asyncpg.Record) -> ClaimLeaseProposalSnapshot:
@@ -323,7 +356,7 @@ class ClaimLeaseProposalRuntime:
 
     async def bootstrap_schema(self, conn: asyncpg.Connection) -> None:
         async with conn.transaction():
-            for statement in _schema_statements():
+            for statement in _bootstrap_schema_statements():
                 try:
                     async with conn.transaction():
                         await conn.execute(statement)

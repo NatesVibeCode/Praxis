@@ -1208,10 +1208,263 @@ class RuntimeOrchestrator(RuntimeOrchestratorContract):
                 context_accumulator=context_accumulator,
                 cancel_signal=cancel_signal,
             )
-            if failure is not None:
-                return failure
+        if failure is not None:
+            return failure
 
         return None
+
+    def _context_accumulator_for_request(
+        self,
+        *,
+        request: WorkflowRequest,
+        pending_nodes: Mapping[str, WorkflowNodeContract],
+        accumulate_context: bool,
+        max_context_tokens: int | None,
+    ) -> ContextAccumulator | None:
+        if not accumulate_context:
+            return None
+        budget: int | None
+        if max_context_tokens is not None:
+            budget = max_context_tokens
+        else:
+            first_node = next(iter(pending_nodes.values()), None)
+            provider = (
+                first_node.inputs.get("provider_slug", "anthropic")
+                if first_node is not None
+                else "anthropic"
+            )
+            model = first_node.inputs.get("model_slug") if first_node is not None else None
+            if isinstance(model, str) and model.strip():
+                try:
+                    budget = safe_context_budget(provider, model)
+                except Exception:
+                    budget = None
+            else:
+                budget = None
+        return ContextAccumulator(max_context_tokens=budget)
+
+    def _resume_cursor_from_evidence(
+        self,
+        *,
+        run_id: str,
+        route_identity: RouteIdentity,
+        evidence_writer: AtomicEvidenceWriter,
+        current_state: RunState,
+    ) -> _ExecutionCursor:
+        if not hasattr(evidence_writer, "evidence_timeline"):
+            raise RuntimeBoundaryError(
+                "deterministic execution resume requires an evidence writer with evidence_timeline()"
+            )
+        timeline = tuple(evidence_writer.evidence_timeline(run_id))
+        if not timeline:
+            raise RuntimeLifecycleError(
+                f"runtime.execution_resume_missing_evidence:{run_id}"
+            )
+        last_row = timeline[-1]
+        return _ExecutionCursor(
+            route_identity=route_identity,
+            transition_seq=last_row.transition_seq + 1,
+            next_evidence_seq=last_row.evidence_seq + 1,
+            current_state=current_state,
+        )
+
+    def _execute_admitted_run(
+        self,
+        *,
+        request: WorkflowRequest,
+        intake_outcome: WorkflowIntakeOutcome,
+        evidence_writer: AtomicEvidenceWriter,
+        writer: TransitionProofWriter,
+        cursor: _ExecutionCursor,
+        operator_frame_repository: OperatorFrameRepository,
+        run_state_reader: RunStateReader | None,
+        cancel_signal: RunCancellationSignal,
+        max_parallel_nodes: int,
+        accumulate_context: bool,
+        max_context_tokens: int | None,
+    ) -> RunExecutionResult:
+        node_results: list[NodeExecutionRecord] = []
+        queue_transition = LifecycleTransition(
+            route_identity=cursor.identity_for_current_transition(),
+            from_state=cursor.current_state,
+            to_state=RunState.QUEUED,
+            reason_code="runtime.execution_ready",
+            evidence_seq=cursor.next_evidence_seq,
+            event_type=WORKFLOW_QUEUED_EVENT_TYPE,
+            receipt_type=WORKFLOW_QUEUE_RECEIPT_TYPE,
+            occurred_at=_now(),
+        )
+        queue_result = self.advance_run(
+            transition=queue_transition,
+            evidence_writer=evidence_writer,
+        )
+        cursor.advance(result=queue_result, new_state=RunState.QUEUED)
+        if cancel_signal.cancel_requested() or (
+            _current_run_state(
+                run_id=intake_outcome.run_id,
+                run_state_reader=run_state_reader,
+            )
+            == RunState.CANCELLED.value
+        ):
+            cancel_signal.close()
+            return self._cancel_run(
+                request=request,
+                intake_outcome=intake_outcome,
+                writer=writer,
+                cursor=cursor,
+                node_results=node_results,
+                cancel_reason=_FailureReason(
+                    reason_code="workflow_cancelled",
+                    details={
+                        "run_id": intake_outcome.run_id,
+                        "pending_node_ids": (),
+                        "completed_node_ids": (),
+                    },
+                ),
+            )
+
+        start_transition = LifecycleTransition(
+            route_identity=cursor.identity_for_current_transition(),
+            from_state=cursor.current_state,
+            to_state=RunState.RUNNING,
+            reason_code="runtime.execution_started",
+            evidence_seq=cursor.next_evidence_seq,
+            event_type=WORKFLOW_STARTED_EVENT_TYPE,
+            receipt_type=WORKFLOW_START_RECEIPT_TYPE,
+            occurred_at=_now(),
+        )
+        start_result = self.advance_run(
+            transition=start_transition,
+            evidence_writer=evidence_writer,
+        )
+        cursor.advance(result=start_result, new_state=RunState.RUNNING)
+
+        completed_nodes: dict[str, NodeExecutionRecord] = {}
+        pending_nodes = {
+            node.node_id: node
+            for node in _node_order(request)
+            if node.template_owner_node_id is None
+        }
+        inbound_edges = _inbound_edges(request=request)
+        execution_order: list[str] = []
+        context_accumulator = self._context_accumulator_for_request(
+            request=request,
+            pending_nodes=pending_nodes,
+            accumulate_context=accumulate_context,
+            max_context_tokens=max_context_tokens,
+        )
+        execution_boundary_ref = _execution_boundary_ref(intake_outcome=intake_outcome)
+
+        failure_reason = self._execute_graph(
+            request=request,
+            intake_outcome=intake_outcome,
+            operator_frame_repository=operator_frame_repository,
+            run_state_reader=run_state_reader,
+            writer=writer,
+            cursor=cursor,
+            pending_nodes=pending_nodes,
+            inbound_edges=inbound_edges,
+            completed_nodes=completed_nodes,
+            node_results=node_results,
+            execution_order=execution_order,
+            execution_boundary_ref=execution_boundary_ref,
+            max_parallel_nodes=max_parallel_nodes,
+            context_accumulator=context_accumulator,
+            cancel_signal=cancel_signal,
+        )
+        if failure_reason is not None:
+            if failure_reason.reason_code == "workflow_cancelled":
+                cancel_signal.close()
+                return self._cancel_run(
+                    request=request,
+                    intake_outcome=intake_outcome,
+                    writer=writer,
+                    cursor=cursor,
+                    node_results=node_results,
+                    cancel_reason=failure_reason,
+                )
+            cancel_signal.close()
+            return self._fail_run(
+                request=request,
+                intake_outcome=intake_outcome,
+                writer=writer,
+                cursor=cursor,
+                node_results=node_results,
+                failure_reason=failure_reason,
+            )
+
+        has_failure = any(nr.status == "failed" for nr in node_results)
+        if has_failure:
+            first_failure = next(nr for nr in node_results if nr.status == "failed")
+            cancel_signal.close()
+            return self._fail_run(
+                request=request,
+                intake_outcome=intake_outcome,
+                writer=writer,
+                cursor=cursor,
+                node_results=node_results,
+                failure_reason=_FailureReason(
+                    reason_code=first_failure.failure_code or "adapter.command_failed",
+                    details={
+                        "node_id": first_failure.node_id,
+                        "task_name": first_failure.task_name,
+                        "pending_node_ids": (),
+                        "completed_node_ids": tuple(sorted(completed_nodes)),
+                    },
+                ),
+            )
+
+        if cancel_signal.cancel_requested() or (
+            _current_run_state(
+                run_id=intake_outcome.run_id,
+                run_state_reader=run_state_reader,
+            )
+            == RunState.CANCELLED.value
+        ):
+            cancel_signal.close()
+            return self._cancel_run(
+                request=request,
+                intake_outcome=intake_outcome,
+                writer=writer,
+                cursor=cursor,
+                node_results=node_results,
+                cancel_reason=_FailureReason(
+                    reason_code="workflow_cancelled",
+                    details={
+                        "run_id": intake_outcome.run_id,
+                        "pending_node_ids": (),
+                        "completed_node_ids": tuple(sorted(completed_nodes)),
+                    },
+                ),
+            )
+
+        success_transition = LifecycleTransition(
+            route_identity=cursor.identity_for_current_transition(),
+            from_state=cursor.current_state,
+            to_state=RunState.SUCCEEDED,
+            reason_code="runtime.workflow_succeeded",
+            evidence_seq=cursor.next_evidence_seq,
+            event_type=WORKFLOW_SUCCEEDED_EVENT_TYPE,
+            receipt_type=WORKFLOW_COMPLETION_RECEIPT_TYPE,
+            occurred_at=_now(),
+        )
+        success_result = self.advance_run(
+            transition=success_transition,
+            evidence_writer=evidence_writer,
+        )
+        cursor.advance(result=success_result, new_state=RunState.SUCCEEDED)
+        cancel_signal.close()
+        return RunExecutionResult(
+            workflow_id=request.workflow_id,
+            run_id=intake_outcome.run_id,
+            request_id=request.request_id,
+            current_state=RunState.SUCCEEDED,
+            terminal_reason_code="runtime.workflow_succeeded",
+            node_order=tuple(execution_order),
+            node_results=tuple(node_results),
+            admitted_definition_ref=intake_outcome.admitted_definition_ref,
+            admitted_definition_hash=intake_outcome.admitted_definition_hash,
+        )
 
     def execute_deterministic_path(
         self,
@@ -1329,202 +1582,76 @@ class RuntimeOrchestrator(RuntimeOrchestratorContract):
                 admitted_definition_ref=intake_outcome.admitted_definition_ref,
                 admitted_definition_hash=intake_outcome.admitted_definition_hash,
             )
-
-        queue_transition = LifecycleTransition(
-            route_identity=cursor.identity_for_current_transition(),
-            from_state=cursor.current_state,
-            to_state=RunState.QUEUED,
-            reason_code="runtime.execution_ready",
-            evidence_seq=cursor.next_evidence_seq,
-            event_type=WORKFLOW_QUEUED_EVENT_TYPE,
-            receipt_type=WORKFLOW_QUEUE_RECEIPT_TYPE,
-            occurred_at=_now(),
-        )
-        queue_result = self.advance_run(
-            transition=queue_transition,
-            evidence_writer=evidence_writer,
-        )
-        cursor.advance(result=queue_result, new_state=RunState.QUEUED)
-        if cancel_signal.cancel_requested() or (
-            _current_run_state(
-                run_id=intake_outcome.run_id,
-                run_state_reader=run_state_reader,
-            )
-            == RunState.CANCELLED.value
-        ):
-            cancel_signal.close()
-            return self._cancel_run(
-                request=request,
-                intake_outcome=intake_outcome,
-                writer=writer,
-                cursor=cursor,
-                node_results=node_results,
-                cancel_reason=_FailureReason(
-                    reason_code="workflow_cancelled",
-                    details={
-                        "run_id": intake_outcome.run_id,
-                        "pending_node_ids": (),
-                        "completed_node_ids": (),
-                    },
-                ),
-            )
-
-        start_transition = LifecycleTransition(
-            route_identity=cursor.identity_for_current_transition(),
-            from_state=cursor.current_state,
-            to_state=RunState.RUNNING,
-            reason_code="runtime.execution_started",
-            evidence_seq=cursor.next_evidence_seq,
-            event_type=WORKFLOW_STARTED_EVENT_TYPE,
-            receipt_type=WORKFLOW_START_RECEIPT_TYPE,
-            occurred_at=_now(),
-        )
-        start_result = self.advance_run(
-            transition=start_transition,
-            evidence_writer=evidence_writer,
-        )
-        cursor.advance(result=start_result, new_state=RunState.RUNNING)
-
-        completed_nodes: dict[str, NodeExecutionRecord] = {}
-        pending_nodes = {
-            node.node_id: node
-            for node in _node_order(request)
-            if node.template_owner_node_id is None
-        }
-        inbound_edges = _inbound_edges(request=request)
-        execution_order: list[str] = []
-        if accumulate_context:
-            _budget: int | None
-            if max_context_tokens is not None:
-                _budget = max_context_tokens
-            else:
-                # Derive budget from the first node's provider/model
-                _first_node = next(iter(pending_nodes.values()), None)
-                _provider = (_first_node.inputs.get("provider_slug", "anthropic")
-                             if _first_node else "anthropic")
-                _model = (_first_node.inputs.get("model_slug")
-                          if _first_node else None)
-                if isinstance(_model, str) and _model.strip():
-                    try:
-                        _budget = safe_context_budget(_provider, _model)
-                    except Exception:
-                        _budget = None
-                else:
-                    _budget = None
-            context_accumulator = ContextAccumulator(max_context_tokens=_budget)
-        else:
-            context_accumulator = None
-        execution_boundary_ref = _execution_boundary_ref(intake_outcome=intake_outcome)
-
-        failure_reason = self._execute_graph(
+        return self._execute_admitted_run(
             request=request,
             intake_outcome=intake_outcome,
-            operator_frame_repository=operator_frame_repository,
-            run_state_reader=run_state_reader,
+            evidence_writer=evidence_writer,
             writer=writer,
             cursor=cursor,
-            pending_nodes=pending_nodes,
-            inbound_edges=inbound_edges,
-            completed_nodes=completed_nodes,
-            node_results=node_results,
-            execution_order=execution_order,
-            execution_boundary_ref=execution_boundary_ref,
-            max_parallel_nodes=max_parallel_nodes,
-            context_accumulator=context_accumulator,
+            operator_frame_repository=operator_frame_repository,
+            run_state_reader=run_state_reader,
             cancel_signal=cancel_signal,
+            max_parallel_nodes=max_parallel_nodes,
+            accumulate_context=accumulate_context,
+            max_context_tokens=max_context_tokens,
         )
-        if failure_reason is not None:
-            if failure_reason.reason_code == "workflow_cancelled":
-                cancel_signal.close()
-                return self._cancel_run(
-                    request=request,
-                    intake_outcome=intake_outcome,
-                    writer=writer,
-                    cursor=cursor,
-                    node_results=node_results,
-                    cancel_reason=failure_reason,
-                )
-            cancel_signal.close()
-            return self._fail_run(
-                request=request,
-                intake_outcome=intake_outcome,
-                writer=writer,
-                cursor=cursor,
-                node_results=node_results,
-                failure_reason=failure_reason,
-            )
 
-        has_failure = any(nr.status == "failed" for nr in node_results)
-        if has_failure:
-            first_failure = next(nr for nr in node_results if nr.status == "failed")
-            cancel_signal.close()
-            return self._fail_run(
-                request=request,
-                intake_outcome=intake_outcome,
-                writer=writer,
-                cursor=cursor,
-                node_results=node_results,
-                failure_reason=_FailureReason(
-                    reason_code=first_failure.failure_code or "adapter.command_failed",
-                    details={
-                        "node_id": first_failure.node_id,
-                        "task_name": first_failure.task_name,
-                        "pending_node_ids": (),
-                        "completed_node_ids": tuple(sorted(completed_nodes)),
-                    },
-                ),
-            )
-
-        if cancel_signal.cancel_requested() or (
-            _current_run_state(
-                run_id=intake_outcome.run_id,
-                run_state_reader=run_state_reader,
-            )
-            == RunState.CANCELLED.value
-        ):
-            cancel_signal.close()
-            return self._cancel_run(
-                request=request,
-                intake_outcome=intake_outcome,
-                writer=writer,
-                cursor=cursor,
-                node_results=node_results,
-                cancel_reason=_FailureReason(
-                    reason_code="workflow_cancelled",
-                    details={
-                        "run_id": intake_outcome.run_id,
-                        "pending_node_ids": (),
-                        "completed_node_ids": tuple(sorted(completed_nodes)),
-                    },
-                ),
-            )
-
-        success_transition = LifecycleTransition(
-            route_identity=cursor.identity_for_current_transition(),
-            from_state=cursor.current_state,
-            to_state=RunState.SUCCEEDED,
-            reason_code="runtime.workflow_succeeded",
-            evidence_seq=cursor.next_evidence_seq,
-            event_type=WORKFLOW_SUCCEEDED_EVENT_TYPE,
-            receipt_type=WORKFLOW_COMPLETION_RECEIPT_TYPE,
-            occurred_at=_now(),
-        )
-        success_result = self.advance_run(
-            transition=success_transition,
+    def execute_admitted_deterministic_path(
+        self,
+        *,
+        intake_outcome: WorkflowIntakeOutcome,
+        evidence_writer: AtomicEvidenceWriter,
+        max_parallel_nodes: int = 4,
+        accumulate_context: bool = True,
+        max_context_tokens: int | None = None,
+    ) -> RunExecutionResult:
+        writer = _validate_execution_writer(evidence_writer)
+        operator_frame_repository = _operator_frame_repository_for_execution(
             evidence_writer=evidence_writer,
+            default_repository=self._default_operator_frames,
         )
-        cursor.advance(result=success_result, new_state=RunState.SUCCEEDED)
-        cancel_signal.close()
-        return RunExecutionResult(
-            workflow_id=request.workflow_id,
+        run_state_reader = _run_state_reader_for_execution(
+            evidence_writer=evidence_writer,
+            evidence_reader=self._evidence_reader,
+        )
+        if intake_outcome.current_state is not RunState.CLAIM_ACCEPTED:
+            raise RuntimeLifecycleError(
+                f"runtime.execution_invalid_resume:{intake_outcome.current_state.value}"
+            )
+        persisted_state = _current_run_state(
             run_id=intake_outcome.run_id,
-            request_id=request.request_id,
-            current_state=RunState.SUCCEEDED,
-            terminal_reason_code="runtime.workflow_succeeded",
-            node_order=tuple(execution_order),
-            node_results=tuple(node_results),
-            admitted_definition_ref=intake_outcome.admitted_definition_ref,
-            admitted_definition_hash=intake_outcome.admitted_definition_hash,
+            run_state_reader=run_state_reader,
+        )
+        if persisted_state != RunState.CLAIM_ACCEPTED.value:
+            raise RuntimeLifecycleError(
+                f"runtime.execution_resume_expected_claim_accepted:{persisted_state or 'missing'}"
+            )
+        cancel_signal = _run_cancellation_signal_for_execution(
+            run_id=intake_outcome.run_id,
+            evidence_writer=evidence_writer,
+            evidence_reader=self._evidence_reader,
+            run_state_reader=run_state_reader,
+        )
+        request = intake_outcome.workflow_request
+        cursor = self._resume_cursor_from_evidence(
+            run_id=intake_outcome.run_id,
+            route_identity=intake_outcome.route_identity,
+            evidence_writer=evidence_writer,
+            current_state=RunState.CLAIM_ACCEPTED,
+        )
+        operator_frame_repository.clear_for_run(run_id=intake_outcome.run_id)
+        return self._execute_admitted_run(
+            request=request,
+            intake_outcome=intake_outcome,
+            evidence_writer=evidence_writer,
+            writer=writer,
+            cursor=cursor,
+            operator_frame_repository=operator_frame_repository,
+            run_state_reader=run_state_reader,
+            cancel_signal=cancel_signal,
+            max_parallel_nodes=max_parallel_nodes,
+            accumulate_context=accumulate_context,
+            max_context_tokens=max_context_tokens,
         )
 
     def _cancel_run(

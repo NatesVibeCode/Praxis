@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -52,6 +53,46 @@ def test_praxis_workflow_passthrough_uses_workflow_frontdoor() -> None:
     assert completed.returncode == 0
     assert "Most used:" in completed.stdout
     assert "workflow tools list" in completed.stdout
+
+
+def test_praxis_workflow_run_no_longer_routes_through_workflow_sh(
+    tmp_path: Path,
+) -> None:
+    spec_path = tmp_path / "spec.queue.json"
+    spec_path.write_text('{"name":"probe","workflow_id":"probe","phase":"test","jobs":[]}\n', encoding="utf-8")
+    capture_path = tmp_path / "python-args.txt"
+    fake_python = tmp_path / "fake_python"
+    fake_python.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env bash",
+                "set -eu",
+                "printf '%s\\n' \"$@\" > \"$CAPTURE_PATH\"",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+
+    completed = subprocess.run(
+        [str(REPO_ROOT / "scripts" / "praxis"), "workflow", "run", str(spec_path), "--dry-run"],
+        cwd=REPO_ROOT,
+        env={
+            **os.environ,
+            "PYTHON_BIN": str(fake_python),
+            "CAPTURE_PATH": str(capture_path),
+        },
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert completed.returncode == 0
+    captured = capture_path.read_text(encoding="utf-8")
+    assert "surfaces.cli.main" in captured
+    assert "workflow\nrun\n" in captured
+    assert "workflow.sh" not in captured
 
 
 def test_praxis_db_passthrough_uses_praxis_root_frontdoor() -> None:

@@ -23,6 +23,12 @@ def _handle_catalog_review_decisions_post(request: Any, path: str) -> None:
     _legacy._handle_catalog_review_decisions_post(request, path)
 
 
+def _handle_operation_catalog_get(request: Any, path: str) -> None:
+    from . import workflow_query as _legacy
+
+    _legacy._handle_operation_catalog_get(request, path)
+
+
 def _handle_integrations_get(request: Any, path: str) -> None:
     from . import workflow_query as _legacy
 
@@ -63,6 +69,7 @@ __all__ = [
     "_handle_catalog_get",
     "_handle_catalog_review_decisions_get",
     "_handle_catalog_review_decisions_post",
+    "_handle_operation_catalog_get",
     "_handle_integrations_get",
     "_handle_market_models_get",
     "_handle_models_get",

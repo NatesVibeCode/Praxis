@@ -4,14 +4,19 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from ..subsystems import workflow_database_env
 from storage.postgres import get_workflow_pool
 from storage.postgres.connection import SyncPostgresConnection
+
+
+def _integration_conn() -> SyncPostgresConnection:
+    return SyncPostgresConnection(get_workflow_pool(env=workflow_database_env()))
 
 
 def tool_praxis_integration(params: dict) -> dict:
     """Call, list, or describe registered integrations."""
     action = params.get("action", "list")
-    conn = SyncPostgresConnection(get_workflow_pool())
+    conn = _integration_conn()
 
     if action == "call":
         return _call_integration(params, conn)

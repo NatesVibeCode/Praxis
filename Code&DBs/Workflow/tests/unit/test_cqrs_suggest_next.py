@@ -35,46 +35,45 @@ def test_cqrs_suggest_next(monkeypatch: Any) -> None:
     ]
     monkeypatch.setattr(capability_catalog, "load_capability_catalog", lambda conn: mock_catalog)
 
-    client = TestClient(rest.app)
-    
-    # 1. Simulate finding something: Should boost analysis/drafting
-    response = client.post(
-        "/api/workflows/wf_123/build/suggest-next",
-        json={
-            "node_id": "step-1",
-            "build_graph": {
-                "nodes": [
-                    {"node_id": "step-1", "title": "Search Google for news", "summary": "Search the web"}
-                ],
-                "edges": []
+    with TestClient(rest.app) as client:
+        # 1. Simulate finding something: Should boost analysis/drafting
+        response = client.post(
+            "/api/workflows/wf_123/build/suggest-next",
+            json={
+                "node_id": "step-1",
+                "build_graph": {
+                    "nodes": [
+                        {"node_id": "step-1", "title": "Search Google for news", "summary": "Search the web"}
+                    ],
+                    "edges": []
+                }
             }
-        }
-    )
-    
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "success"
-    # "Analyze" and "Draft" should be boosted because of the word "search"
-    likely_titles = [cap["title"] for cap in data["likely_next_steps"]]
-    assert "Analyze Data" in likely_titles
-    assert "Draft Email" in likely_titles
-    
-    # 2. Simulate drafting something: Should boost reviewing/notifying
-    response = client.post(
-        "/api/workflows/wf_123/build/suggest-next",
-        json={
-            "node_id": "step-2",
-            "build_graph": {
-                "nodes": [
-                    {"node_id": "step-2", "title": "Draft the announcement", "summary": "Write the blog post"}
-                ],
-                "edges": []
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "success"
+        # "Analyze" and "Draft" should be boosted because of the word "search"
+        likely_titles = [cap["title"] for cap in data["likely_next_steps"]]
+        assert "Analyze Data" in likely_titles
+        assert "Draft Email" in likely_titles
+
+        # 2. Simulate drafting something: Should boost reviewing/notifying
+        response = client.post(
+            "/api/workflows/wf_123/build/suggest-next",
+            json={
+                "node_id": "step-2",
+                "build_graph": {
+                    "nodes": [
+                        {"node_id": "step-2", "title": "Draft the announcement", "summary": "Write the blog post"}
+                    ],
+                    "edges": []
+                }
             }
-        }
-    )
-    
-    assert response.status_code == 200
-    data2 = response.json()
-    likely_titles2 = [cap["title"] for cap in data2["likely_next_steps"]]
-    # GitHub issue matches the notify/review heuristics
-    assert "Create GitHub Issue" in likely_titles2
+        )
+
+        assert response.status_code == 200
+        data2 = response.json()
+        likely_titles2 = [cap["title"] for cap in data2["likely_next_steps"]]
+        # GitHub issue matches the notify/review heuristics
+        assert "Create GitHub Issue" in likely_titles2

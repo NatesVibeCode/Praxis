@@ -224,16 +224,17 @@ if [ "${1:-}" = "workflow" ]; then
     shift
     export PYTHONPATH="$WORKFLOW_DIR${PYTHONPATH:+:$PYTHONPATH}"
     case "${1:-help}" in
-      run|spawn|dry-run)
-        exec "$SCRIPT_DIR/workflow.sh" "$@"
-        ;;
       run-managed)
         shift
-        exec "$SCRIPT_DIR/workflow.sh" run "$@"
+        exec "$PYTHON_BIN" -m surfaces.cli.main workflow run "$@"
         ;;
       spawn-managed)
         shift
-        exec "$SCRIPT_DIR/workflow.sh" spawn "$@"
+        exec "$PYTHON_BIN" -m surfaces.cli.main workflow spawn "$@"
+        ;;
+      dry-run)
+        shift
+        exec "$PYTHON_BIN" -m surfaces.cli.main workflow dry-run "$@"
         ;;
       *)
         exec "$PYTHON_BIN" -m surfaces.cli.main workflow "$@"

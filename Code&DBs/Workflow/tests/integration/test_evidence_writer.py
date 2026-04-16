@@ -10,7 +10,7 @@ from adapters import build_claim_received_proof, build_transition_proof
 from receipts import AppendOnlyWorkflowEvidenceWriter, EvidenceAppendError, LifecycleTransition, RunState
 from runtime import RouteIdentity
 from runtime.domain import RuntimeBoundaryError
-from runtime.persistent_evidence import PostgresEvidenceWriter
+from runtime.persistent_evidence import PostgresEvidenceWriter, query_run_detail
 
 
 def _fail_persistence_run(coro) -> None:
@@ -267,6 +267,9 @@ def test_postgres_append_claim_received_proof_bootstraps_run_state(
         assert writer._run(
             writer._load_current_state(run_id=unique_route_identity.run_id)
         ) == RunState.CLAIM_RECEIVED.value
+        detail = query_run_detail(unique_route_identity.run_id)
+        assert detail is not None
+        assert detail["last_event_id"] == f"workflow_event:{unique_route_identity.run_id}:1"
         timeline = writer.evidence_timeline(unique_route_identity.run_id)
         assert [row.kind for row in timeline] == ["workflow_event", "receipt"]
     finally:
@@ -327,6 +330,9 @@ def test_postgres_append_node_proof_does_not_mutate_workflow_run_state(
         assert writer._run(
             writer._load_current_state(run_id=unique_route_identity.run_id)
         ) == RunState.CLAIM_RECEIVED.value
+        detail = query_run_detail(unique_route_identity.run_id)
+        assert detail is not None
+        assert detail["last_event_id"] == f"workflow_event:{unique_route_identity.run_id}:3"
         timeline = writer.evidence_timeline(unique_route_identity.run_id)
         assert [row.evidence_seq for row in timeline] == [1, 2, 3, 4]
         assert timeline[2].record.event_type == "node_started"

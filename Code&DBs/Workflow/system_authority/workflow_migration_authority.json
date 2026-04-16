@@ -63,7 +63,8 @@
     "132_issue_backlog_authority.sql",
     "133_fork_worktree_binding_materialization.sql",
     "134_operator_object_relations.sql",
-    "135_claim_lifecycle_transition_authority.sql"
+    "135_claim_lifecycle_transition_authority.sql",
+    "136_operation_catalog_authority.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -1997,6 +1998,28 @@
         "object_type": "index",
         "object_name": "claim_lifecycle_transition_from_state_active_idx"
       }
+    ],
+    "136_operation_catalog_authority.sql": [
+      {
+        "object_type": "table",
+        "object_name": "operation_catalog_registry"
+      },
+      {
+        "object_type": "index",
+        "object_name": "operation_catalog_registry_source_enabled_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "operation_catalog_registry_method_path_idx"
+      },
+      {
+        "object_type": "table",
+        "object_name": "operation_catalog_source_policy_registry"
+      },
+      {
+        "object_type": "index",
+        "object_name": "operation_catalog_source_policy_registry_enabled_idx"
+      }
     ]
   },
   "policy_buckets": {
@@ -2064,7 +2087,8 @@
       "132_issue_backlog_authority.sql",
       "133_fork_worktree_binding_materialization.sql",
       "134_operator_object_relations.sql",
-      "135_claim_lifecycle_transition_authority.sql"
+      "135_claim_lifecycle_transition_authority.sql",
+      "136_operation_catalog_authority.sql"
     ],
     "bootstrap_only": [
       "012_execution_leases.sql",

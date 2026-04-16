@@ -148,8 +148,25 @@ class PostgresClaimLifecycleRepository:
         *,
         as_of: datetime,
     ) -> Mapping[RunState, frozenset[RunState]]:
+        seen_pairs: dict[tuple[RunState, RunState], ClaimLifecycleTransitionAuthorityRecord] = {}
         grouped: dict[RunState, set[RunState]] = defaultdict(set)
         for record in await self.fetch_transition_records(as_of=as_of):
+            pair = (record.from_state, record.to_state)
+            previous = seen_pairs.get(pair)
+            if previous is not None:
+                raise ClaimLifecycleAuthorityError(
+                    "claim_lifecycle.ambiguous",
+                    "claim lifecycle transition authority contains overlapping active rows",
+                    details={
+                        "from_state": record.from_state.value,
+                        "to_state": record.to_state.value,
+                        "existing_transition_id": previous.workflow_claim_lifecycle_transition_id,
+                        "conflicting_transition_id": (
+                            record.workflow_claim_lifecycle_transition_id
+                        ),
+                    },
+                )
+            seen_pairs[pair] = record
             grouped[record.from_state].add(record.to_state)
         return {
             from_state: frozenset(sorted(to_states, key=lambda state: state.value))

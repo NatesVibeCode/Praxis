@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import concurrent.futures
 from contextlib import contextmanager
+from dataclasses import replace
 import hashlib
 import inspect
 import json
@@ -2383,10 +2384,7 @@ def test_submit_graph_workflow_inline_reports_current_state_for_success(monkeypa
         validation_result=SimpleNamespace(is_valid=True),
         current_state=SimpleNamespace(value="claim_accepted"),
         run_id="run:graph:inline",
-    )
-    fake_execution_result = SimpleNamespace(
-        current_state=SimpleNamespace(value="succeeded"),
-        terminal_reason_code="runtime.workflow_succeeded",
+        admission_decision=SimpleNamespace(reason_code="claim.validated"),
     )
 
     class _FakePlanner:
@@ -2406,19 +2404,19 @@ def test_submit_graph_workflow_inline_reports_current_state_for_success(monkeypa
     monkeypatch.setenv("WORKFLOW_DATABASE_URL", "postgresql://postgres@127.0.0.1:5432/praxis")
     monkeypatch.setattr(_admission_mod, "compile_graph_workflow_request", lambda *_args, **_kwargs: fake_request)
     monkeypatch.setattr(_admission_mod, "_graph_registry_for_request", lambda *_args, **_kwargs: object())
-    monkeypatch.setattr(_admission_mod, "_graph_adapter_registry", lambda: object())
     monkeypatch.setattr(_admission_mod, "WorkflowIntakePlanner", _FakePlanner)
     monkeypatch.setattr(_admission_mod, "_persist_graph_authority", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(_admission_mod, "PostgresEvidenceWriter", _FakeWriter)
-    monkeypatch.setattr(_admission_mod, "default_provider_slug", lambda: "openai")
-    monkeypatch.setattr(_admission_mod, "_graph_runtime_timeout_seconds", lambda *_args, **_kwargs: 222)
     captured: dict[str, object] = {}
 
-    def _fake_execute_workflow_request(**kwargs):
+    def _fake_persist_graph_submission_evidence(**kwargs):
         captured.update(kwargs)
-        return fake_execution_result, None
 
-    monkeypatch.setattr(_admission_mod, "execute_workflow_request", _fake_execute_workflow_request)
+    monkeypatch.setattr(
+        _admission_mod,
+        "_persist_graph_submission_evidence",
+        _fake_persist_graph_submission_evidence,
+    )
 
     result = _admission_mod._submit_graph_workflow_inline(
         _FakeConn(
@@ -2435,10 +2433,70 @@ def test_submit_graph_workflow_inline_reports_current_state_for_success(monkeypa
     )
 
     assert result["run_id"] == "run:graph:inline"
-    assert result["status"] == "succeeded"
-    assert result["terminal_reason_code"] == "runtime.workflow_succeeded"
+    assert result["status"] == "claim_accepted"
+    assert result["reason_code"] == "claim.validated"
     assert result["execution_mode"] == "graph_runtime"
-    assert captured["timeout"] == 222
+    assert captured["request"] is fake_request
+
+
+def test_persist_graph_submission_evidence_advances_route_identity_from_intake(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class _FakeWriter:
+        def commit_submission(self, **kwargs):
+            captured["submission_route_identity"] = kwargs["route_identity"]
+            return SimpleNamespace(evidence_seq=2)
+
+        def append_transition_proof(self, proof):
+            captured["admission_proof"] = proof
+
+    intake_route_identity = RouteIdentity(
+        workflow_id="workflow.graph",
+        run_id="run:graph:inline",
+        request_id="request.graph",
+        authority_context_ref="authority.graph",
+        authority_context_digest="digest.graph",
+        claim_id="claim.graph",
+        lease_id=None,
+        proposal_id=None,
+        promotion_decision_id=None,
+        attempt_no=1,
+        transition_seq=0,
+    )
+    intake_outcome = SimpleNamespace(
+        route_identity=intake_route_identity,
+        admitted_definition_ref="workflow_definition.graph:v1",
+        admitted_definition_hash="sha256:graph",
+        current_state=SimpleNamespace(value="claim_accepted"),
+        run_id="run:graph:inline",
+        validation_result=SimpleNamespace(validation_result_ref="validation.graph"),
+        request_digest="sha256:req",
+        admission_decision=SimpleNamespace(
+            reason_code="claim.validated",
+            decided_at=datetime(2026, 4, 16, 23, 5, tzinfo=timezone.utc),
+            authority_context_ref="authority.graph",
+            admission_decision_id="admission:graph",
+        ),
+    )
+
+    monkeypatch.setattr(_admission_mod, "_workflow_request_payload", lambda _request: {})
+
+    _admission_mod._persist_graph_submission_evidence(
+        evidence_writer=_FakeWriter(),
+        intake_outcome=intake_outcome,
+        request=SimpleNamespace(workflow_definition_id="workflow_definition.graph:v1", definition_hash="sha256:graph"),
+    )
+
+    assert captured["submission_route_identity"] == replace(intake_route_identity, transition_seq=1)
+    assert captured["admission_proof"].route_identity == replace(intake_route_identity, transition_seq=2)
+    assert captured["admission_proof"].transition_seq == 2
+
+
+def test_graph_adapter_registry_prefers_docker_for_cli_llm() -> None:
+    registry = _admission_mod._graph_adapter_registry()
+    cli_adapter = registry._registry["cli_llm"]
+
+    assert getattr(cli_adapter, "_prefer_docker", None) is True
 
 
 def test_graph_runtime_timeout_seconds_uses_finished_run_history(monkeypatch):
@@ -4294,6 +4352,224 @@ def test_run_worker_loop_starts_job_heartbeat(monkeypatch):
     assert listener_actions == ["start", "stop"]
     assert ("job_ready", "run_complete", "system_event") in listener_channels
     assert heartbeat_queries == [("UPDATE workflow_jobs SET heartbeat_at = now() WHERE id = $1", (123,))]
+
+
+def test_run_worker_loop_dispatches_claim_accepted_graph_runs(monkeypatch):
+    executed_runs: list[str] = []
+    listener_actions: list[str] = []
+    listener_channels: list[tuple[str, ...]] = []
+
+    class _Conn:
+        def __init__(self) -> None:
+            self._graph_queries = 0
+
+        def execute(self, query: str, *args):
+            normalized = " ".join(query.split())
+            if "FROM workflow_runs" in normalized and "current_state = 'claim_accepted'" in normalized:
+                self._graph_queries += 1
+                if self._graph_queries == 1:
+                    return [{
+                        "run_id": "run.graph",
+                        "workflow_id": "workflow.graph",
+                        "requested_at": datetime.now(timezone.utc),
+                    }]
+                return []
+            return []
+
+    class _ThreadConn:
+        def execute(self, query: str, *args):
+            normalized = " ".join(query.split())
+            if normalized.startswith("SELECT pg_try_advisory_lock"):
+                return [{"locked": True}]
+            if normalized.startswith("SELECT pg_advisory_unlock"):
+                return [{"released": True}]
+            return []
+
+    class _FakeListener:
+        def __init__(self, database_url: str, channels: tuple[str, ...], wakeup_event, reconnect_delay: float = 5.0) -> None:
+            self.database_url = database_url
+            self.channels = channels
+            self.wakeup_event = wakeup_event
+            self.reconnect_delay = reconnect_delay
+            listener_channels.append(channels)
+
+        def start(self) -> None:
+            listener_actions.append("start")
+
+        def stop(self) -> None:
+            listener_actions.append("stop")
+
+    class _FakeEvent:
+        def __init__(self) -> None:
+            self._calls = 0
+            self._set = False
+
+        def wait(self, timeout: float) -> bool:
+            self._calls += 1
+            return self._set or self._calls > 1
+
+        def set(self) -> None:
+            self._set = True
+
+        def is_set(self) -> bool:
+            return self._set
+
+    class _ImmediateFuture:
+        def done(self) -> bool:
+            return True
+
+        def result(self):
+            return None
+
+    class _ImmediateExecutor:
+        def __init__(self, *args, **kwargs) -> None:
+            self.shutdown_called = False
+
+        def submit(self, fn, *args, **kwargs):
+            fn(*args, **kwargs)
+            return _ImmediateFuture()
+
+        def shutdown(self, wait: bool = True) -> None:
+            self.shutdown_called = True
+
+    monkeypatch.setattr(_wloop_mod, "_WorkerNotificationListener", _FakeListener)
+    monkeypatch.setattr(_wloop_mod, "_execute_admitted_graph_run", lambda _conn, run_id: executed_runs.append(run_id))
+    monkeypatch.setattr(_wloop_mod, "claim_one", lambda *_args, **_kwargs: (_ for _ in ()).throw(KeyboardInterrupt()))
+    monkeypatch.setattr(_wloop_mod, "reap_stale_claims", lambda _conn: 0)
+    monkeypatch.setattr(_wloop_mod, "reap_stale_runs", lambda _conn: 0)
+    monkeypatch.setenv("WORKFLOW_DATABASE_URL", "postgresql://example.test/workflow")
+    monkeypatch.setattr(_wloop_mod.threading, "Event", _FakeEvent)
+    monkeypatch.setattr(concurrent.futures, "ThreadPoolExecutor", _ImmediateExecutor)
+    monkeypatch.setattr(pg_connection, "get_workflow_pool", lambda: object())
+    monkeypatch.setattr(pg_connection, "SyncPostgresConnection", lambda pool: _ThreadConn())
+
+    _wloop_mod.run_worker_loop(_Conn(), "/repo", poll_interval=0.0, max_local_concurrent=1)
+
+    assert executed_runs == ["run.graph"]
+    assert listener_actions == ["start", "stop"]
+    assert ("job_ready", "run_complete", "system_event") in listener_channels
+
+
+def test_graph_run_lock_key_is_signed_bigint_safe() -> None:
+    lower = -(2**63)
+    upper = 2**63 - 1
+
+    for run_id in (
+        "run.graph",
+        "run:deterministic_smoke:004c3b09c0bf189b",
+        "run:mcp_workflow_live_proof_20260413:3e0c93573e6b1290",
+    ):
+        key = _wloop_mod._graph_run_lock_key(run_id)
+        assert lower <= key <= upper
+
+
+def test_run_worker_loop_backoffs_failing_graph_runs(monkeypatch):
+    executed_runs: list[str] = []
+    listener_actions: list[str] = []
+
+    class _Conn:
+        def execute(self, query: str, *args):
+            normalized = " ".join(query.split())
+            if "FROM workflow_runs" in normalized and "current_state = 'claim_accepted'" in normalized:
+                return [{
+                    "run_id": "run.graph",
+                    "workflow_id": "workflow.graph",
+                    "requested_at": datetime.now(timezone.utc),
+                }]
+            return []
+
+    class _ThreadConn:
+        def execute(self, query: str, *args):
+            normalized = " ".join(query.split())
+            if normalized.startswith("SELECT pg_try_advisory_lock"):
+                return [{"locked": True}]
+            if normalized.startswith("SELECT pg_advisory_unlock"):
+                return [{"released": True}]
+            return []
+
+    class _FakeListener:
+        def __init__(self, database_url: str, channels: tuple[str, ...], wakeup_event, reconnect_delay: float = 5.0) -> None:
+            self.database_url = database_url
+            self.channels = channels
+            self.wakeup_event = wakeup_event
+            self.reconnect_delay = reconnect_delay
+
+        def start(self) -> None:
+            listener_actions.append("start")
+
+        def stop(self) -> None:
+            listener_actions.append("stop")
+
+    class _FakeEvent:
+        def __init__(self) -> None:
+            self._calls = 0
+            self._set = False
+
+        def wait(self, timeout: float) -> bool:
+            self._calls += 1
+            return self._set or self._calls > 1
+
+        def set(self) -> None:
+            self._set = True
+
+        def is_set(self) -> bool:
+            return self._set
+
+    class _ImmediateFuture:
+        def __init__(self, exc: Exception | None = None) -> None:
+            self._exc = exc
+
+        def done(self) -> bool:
+            return True
+
+        def result(self):
+            if self._exc is not None:
+                raise self._exc
+            return None
+
+    class _ImmediateExecutor:
+        def __init__(self, *args, **kwargs) -> None:
+            self.shutdown_called = False
+
+        def submit(self, fn, *args, **kwargs):
+            try:
+                fn(*args, **kwargs)
+            except Exception as exc:  # pragma: no cover - exercised via future.result()
+                return _ImmediateFuture(exc)
+            return _ImmediateFuture()
+
+        def shutdown(self, wait: bool = True) -> None:
+            self.shutdown_called = True
+
+    claim_calls = {"count": 0}
+
+    def _claim_one(*_args, **_kwargs):
+        claim_calls["count"] += 1
+        if claim_calls["count"] >= 2:
+            raise KeyboardInterrupt()
+        return None
+
+    monotonic_values = iter([0.0, 0.0, 0.0, 0.0, 0.1, 0.1, 0.1, 0.1])
+    monkeypatch.setattr(_wloop_mod.time, "monotonic", lambda: next(monotonic_values, 0.1))
+    def _fail_graph_run(_conn, run_id):
+        executed_runs.append(run_id)
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(_wloop_mod, "_WorkerNotificationListener", _FakeListener)
+    monkeypatch.setattr(_wloop_mod, "_execute_admitted_graph_run", _fail_graph_run)
+    monkeypatch.setattr(_wloop_mod, "claim_one", _claim_one)
+    monkeypatch.setattr(_wloop_mod, "reap_stale_claims", lambda _conn: 0)
+    monkeypatch.setattr(_wloop_mod, "reap_stale_runs", lambda _conn: 0)
+    monkeypatch.setenv("WORKFLOW_DATABASE_URL", "postgresql://example.test/workflow")
+    monkeypatch.setattr(_wloop_mod.threading, "Event", _FakeEvent)
+    monkeypatch.setattr(concurrent.futures, "ThreadPoolExecutor", _ImmediateExecutor)
+    monkeypatch.setattr(pg_connection, "get_workflow_pool", lambda: object())
+    monkeypatch.setattr(pg_connection, "SyncPostgresConnection", lambda pool: _ThreadConn())
+
+    _wloop_mod.run_worker_loop(_Conn(), "/repo", poll_interval=0.0, max_local_concurrent=1)
+
+    assert executed_runs == ["run.graph"]
+    assert listener_actions == ["start", "stop"]
 
 
 def test_run_worker_loop_logs_trigger_failures_without_stopping_scheduler(

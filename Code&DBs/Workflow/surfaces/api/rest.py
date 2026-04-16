@@ -43,9 +43,11 @@ from pydantic import BaseModel, Field
 from adapters.provider_registry import default_llm_adapter_type, default_provider_slug
 from contracts.domain import validate_workflow_request
 from runtime.native_authority import default_native_authority_refs
+from runtime.operation_catalog_bindings import resolve_http_operation_binding
 from runtime.workflow._status import summarize_run_health
 from runtime.workflow_graph_compiler import compile_graph_workflow_request, spec_uses_graph_runtime
 from surfaces.api.catalog_authority import build_catalog_payload
+from surfaces.api.operation_catalog_authority import build_operation_catalog_payload
 from storage.postgres import PostgresWorkflowSurfaceUsageRepository
 from .handlers._subsystems import _Subsystems
 from .handlers._surface_usage import record_api_route_usage as _record_api_route_usage
@@ -407,6 +409,7 @@ def _boot_shared_subsystems(target_app: FastAPI) -> _Subsystems | None:
 @asynccontextmanager
 async def _app_lifespan(target_app: FastAPI):
     _boot_shared_subsystems(target_app)
+    mount_capabilities(target_app)
     yield
 
 
@@ -425,54 +428,181 @@ app = FastAPI(
 from .handlers.webhook_ingest import webhook_ingest_router
 app.include_router(webhook_ingest_router)
 
-from runtime.cqrs import registry, CommandBus
+from runtime.operation_catalog import list_resolved_operation_definitions
 
-def mount_capabilities(app: FastAPI) -> None:
-    """Dynamically mount endpoints from the transport-agnostic capability registry."""
+
+def _create_capability_endpoint(
+    target_app: FastAPI,
+    command_class: type[BaseModel],
+    handler: Callable[..., Any],
+):
+    async def endpoint(request: Request):
+        subsystems = _ensure_shared_subsystems(target_app)
+        if subsystems is None:
+            return JSONResponse({"error": "shared subsystems unavailable"}, status_code=503)
+
+        body = {}
+        if request.method in {"POST", "PUT", "PATCH"}:
+            body_bytes = await request.body()
+            try:
+                body = json.loads(body_bytes) if body_bytes else {}
+            except json.JSONDecodeError as e:
+                return JSONResponse({"error": f"Invalid JSON: {e}"}, status_code=400)
+
+        path_params = request.path_params
+        query_params = dict(request.query_params)
+        command_data = {**query_params, **path_params, "body": body}
+
+        try:
+            command = command_class(**command_data)
+        except Exception as e:
+            return JSONResponse({"error": f"Validation Error: {e}"}, status_code=400)
+
+        try:
+            result = handler(command, subsystems)
+            return JSONResponse(result)
+        except Exception as e:
+            logger.error("Command failure: %s", e, exc_info=True)
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    return endpoint
+
+
+def _capability_route_exists(target_app: FastAPI, *, path: str, method: str) -> bool:
+    normalized_method = method.strip().upper()
+    for route in target_app.routes:
+        if not isinstance(route, APIRoute):
+            continue
+        if route.path != path:
+            continue
+        methods = {item.upper() for item in (route.methods or set())}
+        if normalized_method in methods:
+            return True
+    return False
+
+
+def _capability_routes_from_registry() -> list[tuple[Any, str]]:
+    from runtime.cqrs import bootstrap_registry, registry
+
+    bootstrap_registry()
+
+    mounted: list[tuple[Any, str]] = []
     for route in registry.routes:
-        def create_endpoint(cmd_class, path):
-            async def endpoint(request: Request):
-                subsystems = _ensure_shared_subsystems(app)
-                if subsystems is None:
-                    return JSONResponse({"error": "shared subsystems unavailable"}, status_code=503)
-                
-                bus = CommandBus(subsystems)
-                
-                body = {}
-                if request.method in {"POST", "PUT", "PATCH"}:
-                    body_bytes = await request.body()
-                    try:
-                        body = json.loads(body_bytes) if body_bytes else {}
-                    except json.JSONDecodeError as e:
-                        return JSONResponse({"error": f"Invalid JSON: {e}"}, status_code=400)
-                
-                # Merge dynamic path params and explicit body payload
-                path_params = request.path_params
-                query_params = dict(request.query_params)
-                command_data = {**query_params, **path_params, "body": body}
-                
-                try:
-                    command = cmd_class(**command_data)
-                except Exception as e:
-                    return JSONResponse({"error": f"Validation Error: {e}"}, status_code=400)
-                
-                try:
-                    result = bus.dispatch(command)
-                    return JSONResponse(result)
-                except Exception as e:
-                    import logging
-                    logging.getLogger(__name__).error(f"Command failure: {e}", exc_info=True)
-                    return JSONResponse({"error": str(e)}, status_code=500)
-            return endpoint
+        handler = registry.get_handler(route.command_class)
+        if handler is None:
+            logger.warning("registry fallback route missing handler: %s", route.command_class.__name__)
+            continue
+        mounted.append(
+            (
+                SimpleNamespace(
+                    operation_name=route.operation_name or route.command_class.__name__,
+                    http_method=route.method,
+                    http_path=route.path,
+                    command_class=route.command_class,
+                    handler=handler,
+                    summary=route.description or route.command_class.__name__,
+                ),
+                "registry_fallback",
+            )
+        )
+    return mounted
 
-        endpoint_func = create_endpoint(route.command_class, route.path)
-        
-        if route.method == "POST":
-            app.post(route.path, summary=route.description, tags=["cqrs"])(endpoint_func)
-        elif route.method == "GET":
-            app.get(route.path, summary=route.description, tags=["cqrs"])(endpoint_func)
 
-mount_capabilities(app)
+def _capability_routes_from_operation_catalog(target_app: FastAPI) -> list[tuple[Any, str]]:
+    subsystems = _ensure_shared_subsystems(target_app)
+    if subsystems is None:
+        raise RuntimeError("shared subsystems unavailable")
+    resolved = list_resolved_operation_definitions(
+        subsystems.get_pg_conn(),
+        include_disabled=False,
+        limit=500,
+    )
+    mounted: list[tuple[Any, str]] = []
+    for definition in resolved:
+        mounted.append((resolve_http_operation_binding(definition), "operation_catalog"))
+    return mounted
+
+
+def _capability_path_sort_key(route_path: str) -> tuple[int, int, int, str]:
+    segments = [segment for segment in route_path.split("/") if segment]
+    catch_all_count = sum(1 for segment in segments if ":path" in segment)
+    parameter_count = sum(1 for segment in segments if segment.startswith("{") and segment.endswith("}"))
+    literal_count = len(segments) - parameter_count
+    return (
+        catch_all_count,
+        parameter_count,
+        -literal_count,
+        route_path,
+    )
+
+
+def _sort_capability_route_specs(route_specs: list[tuple[Any, str]]) -> list[tuple[Any, str]]:
+    return sorted(
+        route_specs,
+        key=lambda item: (
+            _capability_path_sort_key(item[0].http_path),
+            str(item[0].http_method).upper(),
+            item[0].operation_name,
+        ),
+    )
+
+
+def _preferred_capability_route_insert_index(target_app: FastAPI) -> int:
+    for index, route in enumerate(target_app.router.routes):
+        if isinstance(route, APIRoute) and "{rest_of_path:path}" in route.path:
+            return index
+    return len(target_app.router.routes)
+
+
+def _promote_last_capability_route(target_app: FastAPI) -> None:
+    routes = target_app.router.routes
+    if not routes:
+        return
+    last_index = len(routes) - 1
+    insert_index = _preferred_capability_route_insert_index(target_app)
+    if insert_index >= last_index:
+        return
+    routes.insert(insert_index, routes.pop(last_index))
+
+
+def mount_capabilities(target_app: FastAPI) -> None:
+    """Mount CQRS endpoints from the DB-backed operation catalog when available."""
+    if getattr(target_app.state, "capabilities_mounted", False):
+        return
+
+    try:
+        route_specs = _capability_routes_from_operation_catalog(target_app)
+    except Exception:
+        logger.exception("operation catalog mount failed; falling back to registry routes")
+        route_specs = _capability_routes_from_registry()
+
+    for binding, mount_source in _sort_capability_route_specs(route_specs):
+        route_path = binding.http_path
+        route_method = str(binding.http_method).upper()
+        route_name = binding.operation_name
+        if _capability_route_exists(target_app, path=route_path, method=route_method):
+            continue
+        endpoint_func = _create_capability_endpoint(
+            target_app,
+            binding.command_class,
+            binding.handler,
+        )
+        target_app.add_api_route(
+            route_path,
+            endpoint_func,
+            methods=[route_method],
+            summary=binding.summary,
+            tags=["cqrs"],
+            name=route_name,
+            openapi_extra={
+                "x-praxis-binding-source": mount_source,
+                "x-praxis-operation-name": route_name,
+            },
+        )
+        _promote_last_capability_route(target_app)
+
+    target_app.state.capabilities_mounted = True
+    _apply_route_visibility_policy()
 
 app.add_middleware(
     CORSMiddleware,
@@ -3068,6 +3198,12 @@ def get_catalog() -> dict[str, Any]:
     return build_catalog_payload(_shared_pg_conn())
 
 
+@app.get("/api/catalog/operations")
+def get_operation_catalog() -> dict[str, Any]:
+    """Return DB-backed CQRS operation definitions and source policies."""
+    return build_operation_catalog_payload(_shared_pg_conn())
+
+
 @app.get("/api/catalog/review-decisions")
 async def catalog_review_decisions_get(request: Request) -> Response:
     return await _route_to_handler(request)
@@ -3123,8 +3259,9 @@ def launcher_app_path(path: str = "") -> Any:
     return _launcher_index_response()
 
 
-def _apply_route_visibility_policy() -> None:
-    for route in app.routes:
+def _apply_route_visibility_policy(target_app: FastAPI | None = None) -> None:
+    resolved_app = target_app or app
+    for route in resolved_app.routes:
         if not isinstance(route, APIRoute):
             continue
         visibility = "public" if _is_public_request_path(route.path) else "internal"
@@ -3133,7 +3270,7 @@ def _apply_route_visibility_policy() -> None:
         route.openapi_extra = openapi_extra
         route.include_in_schema = visibility == "public"
 
-    app.openapi_schema = None
+    resolved_app.openapi_schema = None
 
 
-_apply_route_visibility_policy()
+_apply_route_visibility_policy(app)

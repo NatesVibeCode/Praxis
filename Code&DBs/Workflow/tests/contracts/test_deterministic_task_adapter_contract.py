@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import sys
+import types
+
 from adapters import DeterministicTaskAdapter, DeterministicTaskRequest
 
 
@@ -85,3 +88,76 @@ def test_deterministic_task_adapter_emits_explicit_failure_code() -> None:
     assert result.reason_code == "adapter.command_failed"
     assert result.outputs == {}
     assert result.failure_code == "adapter.command_failed"
+
+
+def test_deterministic_task_adapter_executes_builder_with_dependency_inputs() -> None:
+    adapter = DeterministicTaskAdapter()
+    calls: list[dict[str, object]] = []
+    module = types.ModuleType("tests.fake_deterministic_builder")
+
+    def _builder(payload: dict[str, object]) -> dict[str, object]:
+        calls.append(dict(payload))
+        upstream = payload["discover_local_code"]
+        return {"review": upstream["tool_result"]["match_count"] + int(payload["seed"])}
+
+    module.build = _builder
+    sys.modules[module.__name__] = module
+    try:
+        result = adapter.execute(
+            request=DeterministicTaskRequest(
+                node_id="node_builder",
+                task_name="review",
+                input_payload={
+                    "seed": 2,
+                    "deterministic_builder": "tests.fake_deterministic_builder.build",
+                },
+                expected_outputs={},
+                dependency_inputs={
+                    "discover_local_code": {"tool_result": {"match_count": 3}},
+                },
+                execution_boundary_ref="workspace.alpha",
+            )
+        )
+    finally:
+        sys.modules.pop(module.__name__, None)
+
+    assert result.status == "succeeded"
+    assert result.outputs == {"review": 5}
+    assert calls == [
+        {
+            "seed": 2,
+            "deterministic_builder": "tests.fake_deterministic_builder.build",
+            "discover_local_code": {"tool_result": {"match_count": 3}},
+        }
+    ]
+
+
+def test_deterministic_task_adapter_surfaces_builder_failures() -> None:
+    adapter = DeterministicTaskAdapter()
+    module = types.ModuleType("tests.fake_deterministic_builder_failure")
+
+    def _builder(_payload: dict[str, object]) -> dict[str, object]:
+        raise RuntimeError("builder exploded")
+
+    module.build = _builder
+    sys.modules[module.__name__] = module
+    try:
+        result = adapter.execute(
+            request=DeterministicTaskRequest(
+                node_id="node_builder_failure",
+                task_name="review",
+                input_payload={
+                    "deterministic_builder": "tests.fake_deterministic_builder_failure.build",
+                },
+                expected_outputs={},
+                dependency_inputs={},
+                execution_boundary_ref="workspace.alpha",
+            )
+        )
+    finally:
+        sys.modules.pop(module.__name__, None)
+
+    assert result.status == "failed"
+    assert result.reason_code == "adapter.execution_failed"
+    assert result.failure_code == "adapter.deterministic_builder_failed"
+    assert result.outputs["failure_reason"] == "builder exploded"

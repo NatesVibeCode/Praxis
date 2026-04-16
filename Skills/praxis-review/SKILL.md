@@ -1,6 +1,6 @@
 ---
 name: praxis-review
-description: "Praxis repo-local review skill. Use to pressure-test a proposed or shipped change for duplicated authority, hidden state, weak contracts, and simpler durable replacements."
+description: "Praxis repo-local review skill. Use to pressure-test a proposed or shipped change for duplicated authority, hidden state, weak contracts, simpler durable replacements, and math/data-model alternatives."
 ---
 
 # Praxis Review
@@ -12,6 +12,23 @@ Use this skill when a packet is proposed, a slice is built, or a closeout claims
 Answer one question:
 
 Is this the simplest durable shape with one authority, one reason, and one proof path?
+
+## Required Prompt
+
+When the review is retrospective or post-close, ask this question verbatim:
+
+`Review what you built could you have built anything differently mathematically or component wise?`
+
+Then separate candidate alternatives into two buckets only:
+
+- Mathematical/data-model alternatives
+- Component/architecture alternatives
+
+Then ask this question verbatim:
+
+`which ones are genuine improvements?`
+
+Only keep improvements that are measurable, non-trivial, and reduce ambiguity, operational burden, or failure surface.
 
 ## First Moves
 
@@ -37,6 +54,7 @@ Look for:
 4. observability gaps that make outcomes hard to verify
 5. avoidable blast radius
 6. complexity added to preserve a weak pattern
+7. mathematical or data-model alternatives before settling for component churn
 
 Reject:
 

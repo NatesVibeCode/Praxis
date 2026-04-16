@@ -83,6 +83,7 @@ QUERY_GET_ROUTES: list[RouteEntry] = [
     (_exact("/api/models/market"), _catalog._handle_market_models_get),
     (_exact("/api/integrations"), _catalog._handle_integrations_get),
     (_exact("/api/catalog"), _catalog._handle_catalog_get),
+    (_exact("/api/catalog/operations"), _catalog._handle_operation_catalog_get),
     (_exact("/api/catalog/review-decisions"), _catalog._handle_catalog_review_decisions_get),
     (_exact("/api/intent/analyze"), _handler._handle_intent_analyze_get),
     (_exact("/api/search"), _handler._handle_search_get),

@@ -1,4 +1,5 @@
 {
+  "proof_class": "observed",
   "probe": {
     "name": "Agent Handoff Search DB Probe",
     "spec_path": "/Users/nate/Praxis/artifacts/workflow_eval/probe_exec_20260416/agent_handoff_search_db_probe.queue.json",
@@ -95,45 +96,22 @@
       "praxis workflow run"
     ]
   },
-  "spoofed_outputs": {
-    "agent_synthesis": {
-      "job": "agent_synthesis",
-      "spoofed": true,
-      "ok": false,
-      "status": "failed_pre_submission",
-      "run_id": null,
-      "failure_stage": "launch",
-      "failure_reason": "DB authority drifted to role postgres and aborted before durable submission.",
-      "seed_contract": {
-        "probe_id": "agent_handoff_search_db_probe",
-        "search_query": "workflow spec with agents handoff deterministic tooling search db action",
-        "db_action": "praxis_bugs.stats",
-        "continuation_rule": "If a step fails, document it, spoof the expected output packet, and keep validating downstream jobs."
-      },
-      "discover_matches": [
-        "surfaces/workflow_bridge.py",
-        "adapters/deterministic.py",
-        "runtime/workflow_spec.py",
-        "runtime/workflow/_admission.py",
-        "runtime/observability.py",
-        "runtime/workflow_worker.py"
-      ],
-      "durable_submission": false,
-      "durable_receipt": false,
-      "queryable_state": false,
-      "operator_handoff": "Do not trust downstream state until a rerun produces a real run_id."
-    },
-    "agent_handoff_review": {
-      "job": "agent_handoff_review",
-      "overall_verdict": "failed_probe_read_side_only",
-      "end_to_end_probe_passed": false,
-      "agents_exercised": false,
-      "information_handoff_proven": false,
-      "deterministic_tooling_proven": false,
-      "search_exercised": true,
-      "db_action_exercised": true,
-      "trust_boundary": "Do not trust downstream state until a rerun produces a real run_id."
-    }
+  "workflow_shape_after_review": {
+    "changes_applied": [
+      "Front-load the real DB read before agents.",
+      "Use the repo-owned MCP launcher script instead of embedding the raw Python bootstrap and DSN in the spec.",
+      "Make agent handoff explicit through a file artifact (`agent_handoff_search_db_probe.handoff.md`).",
+      "Make the downstream review write a separate JSON artifact (`agent_handoff_search_db_probe.review.json`).",
+      "Move simulated continuation policy out of the workflow spec and into a separate continuation packet."
+    ],
+    "planned_workflow_outputs": [
+      "artifacts/workflow_eval/probe_exec_20260416/agent_handoff_search_db_probe.handoff.md",
+      "artifacts/workflow_eval/probe_exec_20260416/agent_handoff_search_db_probe.review.json"
+    ]
+  },
+  "artifacts": {
+    "continuation_packet": "/Users/nate/Praxis/artifacts/workflow_eval/probe_exec_20260416/agent_handoff_search_db_probe.continuation_packet.json",
+    "improvement_validation_blocker": "/Users/nate/Praxis/artifacts/workflow_eval/probe_exec_20260416/agent_handoff_search_db_probe.improvement_validation_blocker.json"
   },
   "bugs": {
     "filed_this_probe": [
@@ -148,8 +126,9 @@
     ]
   },
   "notes": [
+    "This artifact contains observed proof only.",
     "The probe exercised real search and a real DB-backed read, but not a real workflow run.",
-    "The subagent discovery pass found no single admitted queue spec that already unifies agents, deterministic tooling, search, and explicit key-level handoff without caveats.",
-    "For real end-to-end proof, rerun only after the command-side DB authority is fixed and require a non-null run_id plus durable receipts."
+    "For real end-to-end proof, rerun only after the command-side DB authority is fixed and require a non-null run_id plus durable receipts.",
+    "Post-review validation of the improved spec was later blocked by a separate claim lifecycle migration-policy drift; see the improvement validation blocker artifact."
   ]
 }

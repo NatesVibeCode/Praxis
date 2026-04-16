@@ -31,7 +31,7 @@ def _build_worker_connection():
 
 
 def _run_worker_loop(conn, repo_root: str, *, poll_interval: float = 2.0) -> None:
-    from runtime.workflow.unified import run_worker_loop
+    from runtime.workflow._worker_loop import run_worker_loop
 
     run_worker_loop(conn, repo_root, poll_interval=poll_interval)
 

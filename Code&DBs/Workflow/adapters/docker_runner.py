@@ -23,6 +23,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from runtime.docker_image_authority import DOCKER_IMAGE_ENV, resolve_docker_image
+from runtime.sandbox_runtime import _cli_auth_volume_flags
+from runtime.workflow.execution_policy import validate_auth_mount_policy
 
 if TYPE_CHECKING:
     from .deterministic import DeterministicExecutionControl
@@ -127,6 +129,37 @@ def _build_clean_env() -> dict[str, str]:
     return env
 
 
+def normalize_command_parts_for_docker(command_parts: list[str]) -> list[str]:
+    """Normalize CLI arguments for Docker-sandboxed execution."""
+    if not command_parts:
+        return []
+
+    normalized = list(command_parts)
+    cmd0_name = os.path.basename(normalized[0]).strip().lower()
+    if cmd0_name != "codex":
+        return normalized
+
+    try:
+        exec_idx = [part.strip().lower() for part in normalized].index("exec")
+    except ValueError:
+        return normalized
+
+    normalized = [part for part in normalized if part != "--full-auto"]
+    if "--skip-git-repo-check" not in normalized:
+        normalized.insert(exec_idx + 1, "--skip-git-repo-check")
+    if "--dangerously-bypass-approvals-and-sandbox" not in normalized:
+        normalized.insert(exec_idx + 1, "--dangerously-bypass-approvals-and-sandbox")
+    return normalized
+
+
+def normalize_shell_command_for_docker(command: str) -> str:
+    """Normalize a shell command string for Docker-sandboxed execution."""
+    parts = shlex.split(command)
+    if not parts:
+        return command
+    return shlex.join(normalize_command_parts_for_docker(parts))
+
+
 # ---------------------------------------------------------------------------
 # Docker execution
 # ---------------------------------------------------------------------------
@@ -141,6 +174,8 @@ def run_in_docker(
     image: str | None = None,
     memory: str | None = None,
     cpus: str | None = None,
+    provider_slug: str | None = None,
+    auth_mount_policy: str = "provider_scoped",
     execution_control: DeterministicExecutionControl | None = None,
 ) -> ExecutionResult:
     """Run a command in a Docker container with stdin/stdout only.
@@ -183,6 +218,14 @@ def run_in_docker(
         "--memory", docker_memory,
         "--cpus", docker_cpus,
     ]
+
+    normalized_auth_policy = validate_auth_mount_policy(auth_mount_policy)
+    if normalized_auth_policy != "none":
+        docker_cmd.extend(
+            _cli_auth_volume_flags(
+                provider_slug=provider_slug if normalized_auth_policy == "provider_scoped" else None,
+            ),
+        )
 
     for key, value in sorted((env or {}).items()):
         docker_cmd.extend(["-e", f"{key}={value}"])
@@ -350,6 +393,8 @@ def run_model(
     env: Mapping[str, str] | None = None,
     image: str | None = None,
     workdir: str | None = None,
+    provider_slug: str | None = None,
+    auth_mount_policy: str = "provider_scoped",
     execution_control: DeterministicExecutionControl | None = None,
 ) -> ExecutionResult:
     """Run a model command via Docker or host execution.
@@ -394,6 +439,8 @@ def run_model(
             execution_control=execution_control,
         )
 
+    command = normalize_shell_command_for_docker(command)
+
     if _has_docker():
         return run_in_docker(
             command=command,
@@ -402,6 +449,8 @@ def run_model(
             network=network,
             env=env,
             image=image,
+            provider_slug=provider_slug,
+            auth_mount_policy=auth_mount_policy,
             execution_control=execution_control,
         )
 

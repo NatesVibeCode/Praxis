@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ..subsystems import REPO_ROOT
+from ..subsystems import workflow_database_env
 
 
 _TEMPLATE_PATH = REPO_ROOT / "config" / "specs" / "connector_builder.template.queue.json"
@@ -47,6 +48,13 @@ def _launch_workflow(spec_path: str) -> dict[str, Any]:
     return tool_praxis_workflow({"action": "run", "spec_path": spec_path, "wait": False})
 
 
+def _connector_conn():
+    from storage.postgres import get_workflow_pool
+    from storage.postgres.connection import SyncPostgresConnection
+
+    return SyncPostgresConnection(get_workflow_pool(env=workflow_database_env()))
+
+
 def _connector_status(app_slug: str) -> dict[str, Any]:
     """Check which artifacts exist for a connector."""
     d = _CONNECTORS_DIR / app_slug
@@ -80,11 +88,9 @@ def _register_connector(params: dict) -> dict:
 
     display_name = params.get("app_name") or app_slug.replace("_", " ").title()
 
-    from storage.postgres import get_workflow_pool
-    from storage.postgres.connection import SyncPostgresConnection
     from runtime.integrations.connector_registrar import register_built_connector
 
-    conn = SyncPostgresConnection(get_workflow_pool())
+    conn = _connector_conn()
     return register_built_connector(app_slug, display_name, conn)
 
 
@@ -94,11 +100,9 @@ def _verify_connector(params: dict) -> dict:
     if not app_slug:
         return {"error": "app_slug is required for action='verify'"}
 
-    from storage.postgres import get_workflow_pool
-    from storage.postgres.connection import SyncPostgresConnection
     from runtime.integrations.connector_verifier import verify_connector
 
-    conn = SyncPostgresConnection(get_workflow_pool())
+    conn = _connector_conn()
     actions_filter = params.get("actions")
     if isinstance(actions_filter, str):
         actions_filter = [a.strip() for a in actions_filter.split(",") if a.strip()]
