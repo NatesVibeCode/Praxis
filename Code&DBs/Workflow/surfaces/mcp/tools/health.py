@@ -7,8 +7,8 @@ from adapters import provider_registry as provider_registry_mod
 from runtime.engineering_observability import build_trend_observability
 from runtime.dependency_contract import dependency_truth_report
 from runtime.context_cache import get_context_cache
-from storage.postgres.connection import resolve_workflow_database_url
 
+from surfaces._workflow_database import workflow_database_url_for_repo
 from ..subsystems import _subs, REPO_ROOT, workflow_database_env
 from ..helpers import _serialize
 
@@ -19,7 +19,7 @@ def tool_praxis_health(params: dict, _progress_emitter=None) -> dict:
 
     # Mirror the admin health handler so MCP and /orient expose one probe truth.
     probes: list[Any] = []
-    db_url = resolve_workflow_database_url(env=workflow_database_env())
+    db_url = workflow_database_url_for_repo(REPO_ROOT, env=workflow_database_env())
     probes.append(hs_mod.PostgresProbe(db_url))
     probes.append(hs_mod.PostgresConnectivityProbe(db_url))
 

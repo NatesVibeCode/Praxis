@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -185,6 +187,51 @@ def test_cmd_run_stays_silent_about_result_file_when_not_requested(
     assert "Result written to:" not in rendered
 
 
+def test_cmd_run_preview_execution_prints_structured_payload(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    spec_path = _write_spec(tmp_path)
+    preview_payload = {
+        "action": "preview",
+        "preview_mode": "execution",
+        "spec_name": "cli run smoke",
+        "total_jobs": 1,
+        "jobs": [{"label": "run_job", "mcp_tool_names": ["praxis_query"]}],
+    }
+    monkeypatch.setattr(workflow_cli, "_get_pg_conn", lambda: object())
+    monkeypatch.setattr(
+        workflow_cli,
+        "submit_workflow_command",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("preview should not submit a workflow command")
+        ),
+    )
+    import runtime.workflow.unified as unified
+
+    monkeypatch.setattr(
+        unified,
+        "preview_workflow_execution",
+        lambda _conn, **_kwargs: dict(preview_payload),
+    )
+
+    result = workflow_cli.cmd_run(
+        argparse.Namespace(
+            spec=spec_path,
+            preview_execution=True,
+            dry_run=False,
+            fresh=False,
+            job_id=None,
+            run_id=None,
+            result_file=None,
+        )
+    )
+
+    assert result == 0
+    assert json.loads(capsys.readouterr().out) == preview_payload
+
+
 def test_cmd_run_renders_live_snapshot_metrics(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -243,6 +290,32 @@ def test_cmd_run_renders_live_snapshot_metrics(
     assert "Run metrics: 1/1 completed | health=healthy | elapsed=0.4s" in rendered
     assert "Job states: succeeded=1" in rendered
     assert "Usage: cost=$0.0123 | tokens_in=12 | tokens_out=34" in rendered
+
+
+def test_workflow_sh_launch_failure_does_not_claim_result_file(
+    tmp_path: Path,
+) -> None:
+    spec_path = _write_spec(tmp_path)
+    fake_python = tmp_path / "fake_python"
+    fake_python.write_text("#!/usr/bin/env bash\nexit 1\n", encoding="utf-8")
+    fake_python.chmod(0o755)
+
+    repo_root = Path(__file__).resolve().parents[4]
+    env = os.environ.copy()
+    env["PYTHON_BIN"] = str(fake_python)
+
+    result = subprocess.run(
+        [str(repo_root / "scripts" / "workflow.sh"), "run", spec_path],
+        cwd=str(repo_root),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "Workflow run process exited before durable submission completed." in result.stdout
+    assert "Result file:" not in result.stdout
 
 
 def test_cmd_spawn_writes_async_result_file(

@@ -20,28 +20,60 @@ def ensure_workflow_on_path(workflow_root: Path) -> None:
         sys.path.insert(0, root_str)
 
 
+def _resolve_boot_env(
+    *,
+    repo_root: Path | None = None,
+    workflow_root: Path | None = None,
+    env: dict[str, str] | None = None,
+) -> dict[str, str]:
+    if workflow_root is not None:
+        ensure_workflow_on_path(workflow_root)
+
+    if env is not None:
+        return env
+
+    resolved_repo_root = repo_root
+    if resolved_repo_root is None:
+        if workflow_root is None:
+            raise RuntimeError("create_pg_conn requires repo_root or workflow_root when env is omitted")
+        resolved_repo_root = workflow_root.parents[2]
+    return workflow_database_env_for_repo(resolved_repo_root)
+
+
 def create_pg_conn(
     *,
     repo_root: Path | None = None,
     workflow_root: Path | None = None,
     env: dict[str, str] | None = None,
 ) -> Any:
-    """Create a shared Postgres connection, bootstrap schema, sync registries."""
-    if workflow_root is not None:
-        ensure_workflow_on_path(workflow_root)
+    """Create a shared Postgres connection without hidden startup side effects."""
+    resolved_env = _resolve_boot_env(
+        repo_root=repo_root,
+        workflow_root=workflow_root,
+        env=env,
+    )
 
-    if env is None:
-        resolved_repo_root = repo_root
-        if resolved_repo_root is None:
-            if workflow_root is None:
-                raise RuntimeError("create_pg_conn requires repo_root or workflow_root when env is omitted")
-            resolved_repo_root = workflow_root.parents[2]
-        env = workflow_database_env_for_repo(resolved_repo_root)
+    from storage.postgres.connection import SyncPostgresConnection, get_workflow_pool
+
+    return SyncPostgresConnection(get_workflow_pool(env=resolved_env))
+
+
+def bootstrap_pg_conn(
+    *,
+    repo_root: Path | None = None,
+    workflow_root: Path | None = None,
+    env: dict[str, str] | None = None,
+) -> Any:
+    """Create a shared Postgres connection and explicitly bootstrap schema."""
+    resolved_env = _resolve_boot_env(
+        repo_root=repo_root,
+        workflow_root=workflow_root,
+        env=env,
+    )
 
     from storage.postgres import ensure_postgres_available
 
-    conn = ensure_postgres_available(env=env)
-    return conn
+    return ensure_postgres_available(env=resolved_env)
 
 
 def sync_registries(conn: Any) -> tuple[list[str], list[str]]:
@@ -86,4 +118,4 @@ def sync_registries(conn: Any) -> tuple[list[str], list[str]]:
     return succeeded, skipped
 
 
-__all__ = ["create_pg_conn", "ensure_workflow_on_path", "sync_registries"]
+__all__ = ["bootstrap_pg_conn", "create_pg_conn", "ensure_workflow_on_path", "sync_registries"]

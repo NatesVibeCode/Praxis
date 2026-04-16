@@ -346,6 +346,35 @@ class TestSearch:
         results = tracker.search("nonexistent_term_xyz_99999")
         assert len(results) == 0
 
+    def test_search_filters_by_status_and_severity(self, tracker: BugTracker):
+        pfx = _uuid.uuid4().hex[:8]
+        open_bug, _ = tracker.file_bug(
+            f"Search filter open [{pfx}]",
+            BugSeverity.P1,
+            BugCategory.RUNTIME,
+            f"open bug {pfx}",
+            "alice",
+        )
+        fixed_bug, _ = tracker.file_bug(
+            f"Search filter fixed [{pfx}]",
+            BugSeverity.P2,
+            BugCategory.RUNTIME,
+            f"fixed bug {pfx}",
+            "bob",
+        )
+        tracker.resolve(fixed_bug.bug_id, BugStatus.FIXED)
+
+        open_results = tracker.search(pfx, status=BugStatus.OPEN)
+        fixed_results = tracker.search(pfx, status=BugStatus.FIXED)
+        high_results = tracker.search(pfx, severity=BugSeverity.P1)
+
+        assert any(bug.bug_id == open_bug.bug_id for bug in open_results)
+        assert all(bug.status == BugStatus.OPEN for bug in open_results)
+        assert any(bug.bug_id == fixed_bug.bug_id for bug in fixed_results)
+        assert all(bug.status == BugStatus.FIXED for bug in fixed_results)
+        assert any(bug.bug_id == open_bug.bug_id for bug in high_results)
+        assert all(bug.severity == BugSeverity.P1 for bug in high_results)
+
 
 # ── stats ──────────────────────────────────────────────────────────────
 
@@ -1035,6 +1064,7 @@ class TestEvidencePackets:
 
         monkeypatch.setattr(tracker, "backfill_replay_provenance", _backfill)
         monkeypatch.setattr(tracker, "replay_hint", _hint)
+        monkeypatch.setattr(tracker, "list_bugs", lambda **_kwargs: [bug_ready, bug_blocked])
 
         result = tracker.bulk_backfill_replay_provenance(limit=2)
 

@@ -375,7 +375,7 @@ def list_api_routes(
 
 
 def _ensure_shared_subsystems(target_app: FastAPI) -> _Subsystems | None:
-    """Instantiate the shared subsystem container once for API startup wiring."""
+    """Instantiate the shared subsystem container once for API request handling."""
     subsystems = getattr(target_app.state, "shared_subsystems", None)
     if subsystems is not None:
         return subsystems
@@ -388,9 +388,25 @@ def _ensure_shared_subsystems(target_app: FastAPI) -> _Subsystems | None:
     return subsystems
 
 
+def _should_boot_shared_subsystems() -> bool:
+    return "PYTEST_CURRENT_TEST" not in os.environ
+
+
+def _boot_shared_subsystems(target_app: FastAPI) -> _Subsystems | None:
+    """Run explicit shared subsystem boot during real API startup only."""
+    subsystems = _ensure_shared_subsystems(target_app)
+    if subsystems is None or not _should_boot_shared_subsystems():
+        return subsystems
+    try:
+        subsystems.boot()
+    except Exception:
+        logger.exception("shared subsystem boot failed; API continues in degraded mode")
+    return subsystems
+
+
 @asynccontextmanager
 async def _app_lifespan(target_app: FastAPI):
-    _ensure_shared_subsystems(target_app)
+    _boot_shared_subsystems(target_app)
     yield
 
 

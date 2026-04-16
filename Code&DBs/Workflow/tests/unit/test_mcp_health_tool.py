@@ -83,7 +83,7 @@ def test_tool_dag_health_uses_workflow_database_env(monkeypatch) -> None:
         "workflow_database_env",
         lambda: {"WORKFLOW_DATABASE_URL": "postgresql://repo.test/workflow"},
     )
-    monkeypatch.setattr(health_tool, "resolve_workflow_database_url", _fake_resolve)
+    monkeypatch.setattr(health_tool, "workflow_database_url_for_repo", lambda repo_root, env=None: _fake_resolve(env=env))
     monkeypatch.setattr(health_tool, "get_context_cache", lambda: SimpleNamespace(stats=lambda: {"hit_rate": 0.0}))
     monkeypatch.setattr(health_tool, "_serialize", lambda value: value)
     monkeypatch.setattr(missing_detector, "_now", lambda: datetime(2026, 4, 15, tzinfo=timezone.utc))

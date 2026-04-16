@@ -37,12 +37,9 @@ def _env_flag(name: str, default: bool = False) -> bool:
 
 
 def _prime_workflow_database_env() -> None:
-    """Publish the normalized workflow DB authority for process-wide consumers."""
+    """Fail fast if the API surface cannot resolve an explicit DB authority."""
 
-    env = workflow_database_env()
-    database_url = str(env.get("WORKFLOW_DATABASE_URL") or "").strip()
-    if database_url:
-        os.environ["WORKFLOW_DATABASE_URL"] = database_url
+    workflow_database_env()
 
 
 def start_server(

@@ -137,6 +137,7 @@ def _extract_common_run_options(
 ) -> tuple[dict[str, object], list[str]] | None:
     options: dict[str, object] = {
         "dry_run": False,
+        "preview_execution": False,
         "fresh": False,
         "job_id": None,
         "run_id": None,
@@ -148,6 +149,10 @@ def _extract_common_run_options(
         token = args[i]
         if token == "--dry-run":
             options["dry_run"] = True
+            i += 1
+            continue
+        if token == "--preview-execution":
+            options["preview_execution"] = True
             i += 1
             continue
         if token == "--fresh":
@@ -200,6 +205,7 @@ def _run_command(args: list[str], *, stdout: TextIO) -> int:
             "    --task-type code_review\n"
             "\n"
             "extra launch controls:\n"
+            "  --preview-execution  Print the exact worker-facing execution payload without submitting\n"
             "  --fresh              Force a fresh run while letting Praxis mint the run_id\n"
             "  --job-id <id>        Attach a caller-facing tracking id to the result file\n"
             "  --result-file <path> Write the queued submit payload to disk\n"
@@ -230,6 +236,9 @@ def _run_command(args: list[str], *, stdout: TextIO) -> int:
     if not args:
         stdout.write("error: workflow run requires a spec path or -p <prompt>\n")
         return 2
+    if common_options["dry_run"] and common_options["preview_execution"]:
+        stdout.write("error: --preview-execution cannot be combined with --dry-run\n")
+        return 2
 
     if args[0] in {"-p", "--prompt"}:
         if len(args) < 2:
@@ -246,12 +255,13 @@ def _run_command(args: list[str], *, stdout: TextIO) -> int:
                 "  --timeout <secs>     Execution timeout (default: 300)\n"
                 "  --task-type <type>   Task type for routing: code_generation, review, etc.\n"
                 "  --system <prompt>    System prompt override\n"
+                "  --preview-execution  Print the exact worker-facing execution payload without submitting\n"
                 "  --dry-run            Parse and show the spec without executing\n"
                 "  --fresh              Force a fresh run while letting Praxis mint the run_id\n"
             )
             return 2
 
-        provider = _default_prompt_provider_slug()
+        provider = None
         model = None
         tier = None
         adapter = None
@@ -297,6 +307,8 @@ def _run_command(args: list[str], *, stdout: TextIO) -> int:
             else:
                 clean_args.append(args[i])
                 i += 1
+        if provider is None:
+            provider = _default_prompt_provider_slug()
         prompt = " ".join(clean_args)
         if scope_write and system_prompt is None:
             system_prompt = "You are a code editor. Return ONLY valid JSON structured output."
@@ -320,6 +332,7 @@ def _run_command(args: list[str], *, stdout: TextIO) -> int:
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stdout):
             return _workflow_cli()._submit_workflow_launch(
                 prompt_launch_spec=prompt_launch_spec,
+                preview_execution=bool(common_options["preview_execution"]),
                 dry_run=bool(common_options["dry_run"]),
                 fresh=bool(common_options["fresh"]),
                 job_id=common_options["job_id"],
@@ -352,6 +365,7 @@ def _run_command(args: list[str], *, stdout: TextIO) -> int:
             return _workflow_cli().cmd_run(
                 SimpleNamespace(
                     spec=rendered_path,
+                    preview_execution=bool(common_options["preview_execution"]),
                     dry_run=bool(common_options["dry_run"]),
                     fresh=bool(common_options["fresh"]),
                     job_id=common_options["job_id"],

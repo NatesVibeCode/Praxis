@@ -17,13 +17,13 @@ from runtime.praxis_authoring import (
     scaffold_table,
     scaffold_view,
 )
-from storage.postgres import SyncPostgresConnection, get_workflow_pool
+from surfaces.cli._db import cli_sync_conn
 from surfaces.cli.commands.authority import _catalog_command, _object_command, _object_type_command, _registry_command, _schema_command
 from surfaces.cli.mcp_tools import print_json
 
 
-def _sync_conn() -> SyncPostgresConnection:
-    return SyncPostgresConnection(get_workflow_pool())
+def _sync_conn():
+    return cli_sync_conn()
 
 
 def _text(value: Any) -> str:

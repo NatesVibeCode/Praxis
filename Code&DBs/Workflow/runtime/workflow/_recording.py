@@ -69,6 +69,7 @@ def record_workflow_result(
                 if failure_projection is not None
                 else None
             ),
+            run_id=result.run_id,
         )
     )
 

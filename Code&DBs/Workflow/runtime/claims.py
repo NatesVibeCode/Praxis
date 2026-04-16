@@ -17,14 +17,18 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
-from typing import Final, cast
+from typing import cast
 import hashlib
 import json
 
 import asyncpg
 
 from storage.migrations import WorkflowMigrationError, workflow_migration_statements
-from runtime.execution.state_machine import validate_transition
+from storage.postgres.claim_lifecycle_repository import (
+    ClaimLifecycleAuthorityError,
+    PostgresClaimLifecycleRepository,
+)
+from runtime.claim_state_machine import ALLOWED_TRANSITIONS
 
 from .domain import RouteIdentity, RunState, RuntimeBoundaryError, RuntimeLifecycleError
 from registry.persona_authority import (
@@ -34,7 +38,10 @@ from registry.persona_authority import (
     PostgresPersonaAndForkAuthorityRepository,
 )
 
-_RUNTIME_SCHEMA_FILENAME = "004_claim_lease_proposal_runtime.sql"
+_RUNTIME_SCHEMA_FILENAMES = (
+    "004_claim_lease_proposal_runtime.sql",
+    "135_claim_lifecycle_transition_authority.sql",
+)
 _DUPLICATE_SQLSTATES = {"42P07", "42710"}
 _VALID_SHARE_MODES = frozenset({"exclusive", "shared"})
 _BOUNDED_FORK_OWNERSHIP_REUSE_REASON_CODE = "packet.authoritative_fork"
@@ -61,37 +68,6 @@ _PROPOSAL_REQUIRED_STATES = frozenset(
         RunState.PROPOSAL_INVALID,
     }
 )
-
-ALLOWED_TRANSITIONS: Final[Mapping[RunState, frozenset[RunState]]] = {
-    RunState.CLAIM_RECEIVED: frozenset(
-        {
-            RunState.CLAIM_VALIDATING,
-        }
-    ),
-    RunState.CLAIM_VALIDATING: frozenset(
-        {
-            RunState.CLAIM_ACCEPTED,
-            RunState.CLAIM_BLOCKED,
-            RunState.CLAIM_REJECTED,
-        }
-    ),
-    RunState.CLAIM_BLOCKED: frozenset(
-        {
-            RunState.CLAIM_VALIDATING,
-            RunState.CLAIM_REJECTED,
-        }
-    ),
-    RunState.CLAIM_ACCEPTED: frozenset({RunState.LEASE_REQUESTED}),
-    RunState.LEASE_REQUESTED: frozenset({RunState.LEASE_ACTIVE, RunState.LEASE_BLOCKED}),
-    RunState.LEASE_BLOCKED: frozenset({RunState.LEASE_REQUESTED}),
-    RunState.LEASE_ACTIVE: frozenset(
-        {
-            RunState.LEASE_EXPIRED,
-            RunState.PROPOSAL_SUBMITTED,
-            RunState.PROPOSAL_INVALID,
-        }
-    ),
-}
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,6 +120,14 @@ class ClaimLeaseProposalSnapshot:
     share_mode: str
     reuse_reason_code: str | None
     last_event_id: str | None
+
+
+def route_snapshot_allows_worker_claim(
+    *,
+    route_snapshot: ClaimLeaseProposalSnapshot,
+    inbox_has_facts: bool,
+) -> bool:
+    return route_snapshot.current_state is RunState.CLAIM_ACCEPTED and inbox_has_facts
 
 
 def _json_value(value: object) -> object:
@@ -206,16 +190,19 @@ def _is_duplicate_object_error(error: BaseException) -> bool:
 
 @lru_cache(maxsize=1)
 def _schema_statements() -> tuple[str, ...]:
-    try:
-        return workflow_migration_statements(_RUNTIME_SCHEMA_FILENAME)
-    except WorkflowMigrationError as exc:
-        if exc.reason_code == "workflow.migration_empty":
+    statements: list[str] = []
+    for filename in _RUNTIME_SCHEMA_FILENAMES:
+        try:
+            statements.extend(workflow_migration_statements(filename))
+        except WorkflowMigrationError as exc:
+            if exc.reason_code == "workflow.migration_empty":
+                raise RuntimeBoundaryError(
+                    "runtime schema file did not contain executable statements"
+                ) from exc
             raise RuntimeBoundaryError(
-                "runtime schema file did not contain executable statements"
+                "runtime schema file could not be read from the canonical workflow migration root"
             ) from exc
-        raise RuntimeBoundaryError(
-            "runtime schema file could not be read from the canonical workflow migration root"
-        ) from exc
+    return tuple(statements)
 
 
 def _snapshot_from_row(row: asyncpg.Record) -> ClaimLeaseProposalSnapshot:
@@ -237,12 +224,32 @@ def _snapshot_from_row(row: asyncpg.Record) -> ClaimLeaseProposalSnapshot:
     )
 
 
-def _transition_allowed(*, from_state: RunState, to_state: RunState) -> None:
-    allowed = ALLOWED_TRANSITIONS.get(from_state, frozenset())
+def _transition_allowed(
+    *,
+    allowed_transitions: Mapping[RunState, frozenset[RunState]],
+    from_state: RunState,
+    to_state: RunState,
+) -> None:
+    allowed = allowed_transitions.get(from_state, frozenset())
     if to_state not in allowed:
         raise RuntimeLifecycleError(
             f"invalid claim/lease/proposal transition: {from_state.value} -> {to_state.value}"
         )
+
+
+async def _load_allowed_transitions(
+    conn: asyncpg.Connection,
+    *,
+    as_of: datetime,
+) -> Mapping[RunState, frozenset[RunState]]:
+    try:
+        return await PostgresClaimLifecycleRepository(conn).load_allowed_transitions(
+            as_of=as_of,
+        )
+    except ClaimLifecycleAuthorityError as exc:
+        raise RuntimeBoundaryError(
+            "claim lifecycle transition authority could not be resolved from Postgres",
+        ) from exc
 
 
 def _lease_id_for_transition(
@@ -435,10 +442,17 @@ class ClaimLeaseProposalRuntime:
         *,
         transition: ClaimLeaseProposalTransitionRequest,
     ) -> ClaimLeaseProposalSnapshot:
-        _transition_allowed(from_state=transition.from_state, to_state=transition.to_state)
-        validate_transition(transition)
         _require_utc(transition.occurred_at, field_name="occurred_at")
         _require_text(transition.reason_code, field_name="reason_code")
+        allowed_transitions = await _load_allowed_transitions(
+            conn,
+            as_of=transition.occurred_at,
+        )
+        _transition_allowed(
+            allowed_transitions=allowed_transitions,
+            from_state=transition.from_state,
+            to_state=transition.to_state,
+        )
 
         async with conn.transaction():
             row = await self._fetch_route_row(conn, run_id=transition.run_id, for_update=True)
@@ -1000,4 +1014,5 @@ __all__ = [
     "ClaimLeaseProposalSnapshot",
     "ClaimLeaseProposalTransitionRequest",
     "SandboxSessionRequest",
+    "route_snapshot_allows_worker_claim",
 ]

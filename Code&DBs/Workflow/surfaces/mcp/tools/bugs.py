@@ -199,7 +199,22 @@ def tool_praxis_bugs(params: dict) -> dict:
         title = params.get("title", "")
         if not title:
             return {"error": "title is required for search"}
-        bugs = bt.search(title, limit=max(1, int(params.get("limit", 20) or 20)))
+        try:
+            status = _parse_bug_status(bt_mod, params.get("status"))
+            severity = _parse_bug_severity(bt_mod, params.get("severity"))
+            category = _parse_bug_category(bt_mod, params.get("category"))
+        except ValueError as exc:
+            return {"error": str(exc)}
+        bugs = bt.search(
+            title,
+            limit=max(1, int(params.get("limit", 20) or 20)),
+            status=status,
+            severity=severity,
+            category=category,
+            tags=tuple(params.get("tags") or ()) if isinstance(params.get("tags"), (list, tuple)) else None,
+            exclude_tags=tuple(params.get("exclude_tags") or ()) if isinstance(params.get("exclude_tags"), (list, tuple)) else None,
+            open_only=bool(params.get("open_only", False)),
+        )
         return {"bugs": [_compact_bug(b) for b in bugs], "count": len(bugs)}
 
     if action == "stats":

@@ -345,8 +345,8 @@ def test_provider_onboarding_handler_serializes_result(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         workflow_admin,
-        "resolve_workflow_database_url",
-        lambda: "postgresql://example.test/workflow",
+        "_workflow_env",
+        lambda _subs: {"WORKFLOW_DATABASE_URL": "postgresql://example.test/workflow", "PATH": ""},
     )
 
     payload = workflow_admin._handle_provider_onboarding_post(
@@ -395,8 +395,8 @@ def test_provider_onboarding_mcp_tool_serializes_slots_dataclass(monkeypatch) ->
         lambda **kwargs: expected,
     )
     monkeypatch.setattr(
-        "surfaces.mcp.tools.provider_onboard.resolve_workflow_database_url",
-        lambda env=None: "postgresql://example.test/workflow",
+        "surfaces.mcp.tools.provider_onboard.workflow_database_url_for_repo",
+        lambda repo_root, env=None: "postgresql://example.test/workflow",
     )
     monkeypatch.setattr(
         "surfaces.mcp.tools.provider_onboard.workflow_database_env",
@@ -442,8 +442,8 @@ def test_provider_onboarding_mcp_tool_does_not_force_cli_transport(monkeypatch) 
         lambda **kwargs: expected,
     )
     monkeypatch.setattr(
-        "surfaces.mcp.tools.provider_onboard.resolve_workflow_database_url",
-        lambda env=None: "postgresql://example.test/workflow",
+        "surfaces.mcp.tools.provider_onboard.workflow_database_url_for_repo",
+        lambda repo_root, env=None: "postgresql://example.test/workflow",
     )
     monkeypatch.setattr(
         "surfaces.mcp.tools.provider_onboard.workflow_database_env",
@@ -507,7 +507,7 @@ def test_post_onboarding_sync_updates_native_runtime_allowed_models(monkeypatch)
     )
     monkeypatch.setattr(
         "storage.postgres.connection.get_workflow_pool",
-        lambda: object(),
+        lambda env=None: object(),
     )
 
     result = provider_onboard_tool._post_onboarding_sync(

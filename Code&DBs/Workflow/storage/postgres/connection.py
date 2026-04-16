@@ -43,20 +43,24 @@ def _normalize_authority_error(
     exc: BaseException,
     *,
     database_url: str | None,
+    operation: str | None = None,
 ) -> PostgresConfigurationError:
     """Wrap sandboxed/connectivity authority failures in a typed config error."""
+    details = {
+        "environment_variable": WORKFLOW_DATABASE_URL_ENV,
+        "database_url": database_url or "",
+        "cause_type": type(exc).__name__,
+        "cause_message": str(exc),
+    }
+    if operation:
+        details["operation"] = operation
     return PostgresConfigurationError(
         "postgres.authority_unavailable",
         (
             f"{WORKFLOW_DATABASE_URL_ENV} authority unavailable: "
             f"{type(exc).__name__}: {exc}"
         ),
-        details={
-            "environment_variable": WORKFLOW_DATABASE_URL_ENV,
-            "database_url": database_url or "",
-            "cause_type": type(exc).__name__,
-            "cause_message": str(exc),
-        },
+        details=details,
     )
 
 
@@ -123,7 +127,11 @@ async def connect_workflow_database(
     try:
         return await asyncpg.connect(database_url)
     except _AUTHORITY_UNAVAILABLE_EXCEPTIONS as exc:
-        raise _normalize_authority_error(exc, database_url=database_url) from exc
+        raise _normalize_authority_error(
+            exc,
+            database_url=database_url,
+            operation="connect_workflow_database",
+        ) from exc
 
 
 def _get_bg_loop() -> asyncio.AbstractEventLoop:
@@ -166,7 +174,11 @@ async def create_workflow_pool(
     try:
         return await asyncpg.create_pool(database_url, min_size=min_size, max_size=max_size)
     except _AUTHORITY_UNAVAILABLE_EXCEPTIONS as exc:
-        raise _normalize_authority_error(exc, database_url=database_url) from exc
+        raise _normalize_authority_error(
+            exc,
+            database_url=database_url,
+            operation="create_workflow_pool",
+        ) from exc
 
 
 def get_workflow_pool(env: Mapping[str, str] | None = None) -> asyncpg.Pool:
@@ -393,6 +405,7 @@ def ensure_postgres_available(
     Native Postgres auto-start is forbidden. Callers must provide an explicit
     reachable database authority from the sandboxed runtime lane.
     """
+    database_url = resolve_workflow_database_url(env=env)
     pool = get_workflow_pool(env=env)
 
     # Idempotent schema bootstrap
@@ -412,6 +425,22 @@ def ensure_postgres_available(
                 f"{len(missing_critical)} critical objects still missing"
                 + (f" ({missing})" if missing else "")
             )
-    _run_sync(_bootstrap())
+    try:
+        _run_sync(_bootstrap())
+    except Exception as exc:
+        raise PostgresConfigurationError(
+            "postgres.authority_unavailable",
+            (
+                f"{WORKFLOW_DATABASE_URL_ENV} authority unavailable during "
+                f"workflow schema bootstrap: {type(exc).__name__}: {exc}"
+            ),
+            details={
+                "environment_variable": WORKFLOW_DATABASE_URL_ENV,
+                "database_url": database_url,
+                "operation": "bootstrap_workflow_schema",
+                "cause_type": type(exc).__name__,
+                "cause_message": str(exc),
+            },
+        ) from exc
 
     return SyncPostgresConnection(pool)

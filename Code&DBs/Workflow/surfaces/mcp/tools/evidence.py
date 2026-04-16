@@ -31,14 +31,21 @@ def tool_praxis_receipts(params: dict) -> dict:
             if ctx and ctx.workflow_id:
                 workflow_id = ctx.workflow_id
 
-        results = search_receipts(query, status=status, agent=agent, limit=limit, workflow_id=workflow_id)
+        results = search_receipts(
+            query,
+            status=status,
+            agent=agent,
+            limit=limit,
+            workflow_id=workflow_id,
+            conn=_subs.get_pg_conn(),
+        )
         return {"results": [record.to_search_result() for record in results], "count": len(results)}
 
     if action == "token_burn":
         if get_current_workflow_mcp_context() is not None:
             return {"error": "praxis_receipts action='token_burn' is not permitted inside a workflow session."}
         since_hours = params.get("since_hours", 24)
-        return {"token_burn": receipt_stats(since_hours=since_hours)}
+        return {"token_burn": receipt_stats(since_hours=since_hours, conn=_subs.get_pg_conn())}
 
     return {"error": f"Unknown receipts action: {action}"}
 

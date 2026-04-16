@@ -619,6 +619,36 @@ def test_tool_praxis_workflow_run_returns_async_payload_without_progress_emitter
     }
 
 
+def test_tool_praxis_workflow_preview_returns_execution_payload(monkeypatch, tmp_path) -> None:
+    spec_path = tmp_path / "workflow.queue.json"
+    spec_path.write_text(
+        '{"name":"workflow","workflow_id":"workflow","phase":"test","jobs":[{"label":"job-a"}]}',
+        encoding="utf-8",
+    )
+    preview_payload = {
+        "action": "preview",
+        "preview_mode": "execution",
+        "spec_name": "workflow",
+        "total_jobs": 1,
+        "jobs": [{"label": "job-a", "mcp_tool_names": ["praxis_query"]}],
+    }
+
+    monkeypatch.setattr(workflow_tools._subs, "get_pg_conn", lambda: object())
+    import runtime.workflow.unified as unified
+
+    monkeypatch.setattr(
+        unified,
+        "preview_workflow_execution",
+        lambda _pg, **kwargs: dict(preview_payload, spec_path=kwargs.get("spec_path")),
+    )
+
+    payload = workflow_tools.tool_praxis_workflow({"action": "preview", "spec_path": str(spec_path)})
+
+    assert payload["action"] == "preview"
+    assert payload["spec_path"] == str(spec_path)
+    assert payload["jobs"][0]["mcp_tool_names"] == ["praxis_query"]
+
+
 def test_tool_praxis_workflow_run_passes_forced_run_id_to_submit(monkeypatch, tmp_path) -> None:
     spec_path = tmp_path / "workflow.queue.json"
     spec_path.write_text(

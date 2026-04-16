@@ -102,13 +102,16 @@ def _make_response(request_id: Any, result: Any = None, error: str | None = None
     return msg
 
 
-def _make_error_response(request_id: Any, message: str) -> dict[str, Any]:
+def _make_error_response(request_id: Any, message: str, *, data: Any = None) -> dict[str, Any]:
     normalized = _truncate_text(str(message or ""), limit=_MAX_ERROR_MESSAGE_CHARS)
-    return {
+    error: dict[str, Any] = {
         "jsonrpc": "2.0",
         "id": request_id,
         "error": {"code": -32603, "message": normalized},
     }
+    if data is not None:
+        error["error"]["data"] = data
+    return error
 
 
 def _make_notification(method: str, params: dict[str, Any]) -> dict[str, Any]:
@@ -161,6 +164,28 @@ def _format_tool_error(exc: Exception) -> str:
     if isinstance(exc, PermissionError):
         return f"PermissionError: {exc}"
     return f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
+
+
+def _tool_error_data(exc: Exception) -> dict[str, Any]:
+    """Return structured context for tool-call failures."""
+    if isinstance(exc, PostgresStorageError):
+        payload: dict[str, Any] = {
+            "exception_type": type(exc).__name__,
+            "reason_code": exc.reason_code,
+        }
+        if exc.details:
+            payload["details"] = dict(exc.details)
+        return payload
+    if isinstance(exc, PermissionError):
+        return {
+            "exception_type": type(exc).__name__,
+            "message": str(exc),
+        }
+    details = getattr(exc, "details", None)
+    payload = {"exception_type": type(exc).__name__}
+    if isinstance(details, dict) and details:
+        payload["details"] = details
+    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -310,9 +335,13 @@ def handle_tools_call(
             "content": [{"type": "text", "text": _serialize_tool_result(result)}],
         })
     except ToolInvocationError as exc:
-        return _make_error_response(request_id, exc.message)
+        return _make_error_response(request_id, exc.message, data=exc.to_payload())
     except Exception as e:
-        return _make_error_response(request_id, _format_tool_error(e))
+        return _make_error_response(
+            request_id,
+            _format_tool_error(e),
+            data=_tool_error_data(e),
+        )
 
 
 def handle_request(
@@ -421,12 +450,29 @@ def _read_message() -> dict | None:
     return msg
 
 
+def _should_boot_shared_subsystems() -> bool:
+    return "PYTEST_CURRENT_TEST" not in os.environ
+
+
+def _boot_shared_subsystems() -> None:
+    if not _should_boot_shared_subsystems():
+        return
+    try:
+        from .subsystems import _subs
+
+        _subs.boot()
+    except Exception:
+        print("shared subsystem boot failed; MCP continues in degraded mode", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+
+
 # ---------------------------------------------------------------------------
 # Main loop
 # ---------------------------------------------------------------------------
 
 def main() -> None:
     """Read JSON-RPC messages from stdin, process, write responses to stdout."""
+    _boot_shared_subsystems()
     while True:
         try:
             msg, incoming_transport = _read_message_with_transport()

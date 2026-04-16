@@ -8,6 +8,7 @@ from typing import Any
 
 from ..subsystems import _subs, REPO_ROOT
 from ..helpers import _serialize, _bug_to_dict, _matches
+from surfaces.api.handlers import workflow_query_core
 
 
 _DIAGNOSE_RUN_ID_RE = re.compile(
@@ -31,89 +32,16 @@ def _extract_run_id(question: str) -> str:
 
 def tool_praxis_query(params: dict) -> dict:
     """Natural language query surface — routes to the right subsystem."""
-    from runtime.receipt_store import list_receipts, receipt_stats
+    return workflow_query_core.handle_query(_subs, dict(params))
 
-    question = (params.get("question") or "").strip().lower()
+
+def handle_legacy_query(subs, body: dict) -> dict | None:
+    """Handle query phrases that still live in the legacy MCP router."""
+    from .diagnose import tool_praxis_diagnose
+
+    question = (body.get("question") or "").strip().lower()
     if not question:
-        return {"error": "question is required"}
-
-    # Route based on keywords
-    if _matches(question, ["status", "panel", "snapshot", "overview", "dashboard"]):
-        panel = _subs.get_operator_panel()
-        snap = panel.snapshot()
-        result = {"routed_to": "operator_panel", "snapshot": _serialize(snap)}
-        # Include in-flight workflows
-        try:
-            conn = _subs.get_pg_conn()
-            import json as _json
-            running = conn.execute(
-                """SELECT run_id, requested_at, request_envelope
-                FROM workflow_runs
-                WHERE current_state = 'running'
-                ORDER BY requested_at DESC LIMIT 5""",
-            )
-            if running:
-                in_flight = []
-                for r in running:
-                    env = r["request_envelope"] if isinstance(r["request_envelope"], dict) else _json.loads(r["request_envelope"])
-                    outbox_count = conn.execute(
-                        "SELECT COUNT(*) as cnt FROM workflow_outbox WHERE run_id = $1 AND authority_table = 'receipts'",
-                        r["run_id"],
-                    )
-                    completed = int(outbox_count[0]["cnt"]) if outbox_count else 0
-                    in_flight.append({
-                        "run_id": r["run_id"],
-                        "workflow_name": env.get("name") or env.get("spec_name", ""),
-                        "progress": f"{completed}/{env.get('total_jobs', '?')}",
-                    })
-                result["in_flight_workflows"] = in_flight
-        except Exception:
-            pass
-        result["quick_lookups"] = {
-            "data_dictionary": "praxis_query('data dictionary')",
-            "issue_backlog": "praxis_query('issue backlog')",
-            "import_resolver": "praxis_query('import path for <ClassName>')",
-            "test_commands": "praxis_query('test command for <file.py>')",
-        }
-        return result
-
-    if _matches(question, ["issue backlog", "upstream issue", "upstream issues", "intake issue", "intake issues"]):
-        from .operator import tool_praxis_operator_view
-
-        result = tool_praxis_operator_view({"view": "issue_backlog", "limit": 25, "open_only": True})
-        if isinstance(result, dict):
-            result.setdefault("routed_to", "issue_backlog")
-        return result
-
-    if _matches(question, ["bug", "defect", "issue"]):
-        bt = _subs.get_bug_tracker()
-        bugs = bt.list_bugs(limit=20)
-        return {
-            "routed_to": "bug_tracker",
-            "bugs": [_bug_to_dict(b) for b in bugs],
-            "count": len(bugs),
-        }
-
-    if _matches(question, ["quality", "metric", "rollup", "pass rate"]):
-        qmod = _subs.get_quality_views_mod()
-        qm = _subs.get_quality_materializer()
-        rollup = qm.latest_rollup(qmod.QualityWindow.DAILY)
-        if rollup:
-            return {"routed_to": "quality_views", "rollup": _serialize(rollup)}
-        return {"routed_to": "quality_views", "rollup": None, "message": "no rollup data available"}
-
-    if _matches(question, ["fail", "error", "crash", "broken"]):
-        records = list_receipts(limit=5000, since_hours=24)
-        counts: dict[str, int] = {}
-        for record in records:
-            if record.failure_code:
-                counts[record.failure_code] = counts.get(record.failure_code, 0) + 1
-        top_failure_codes = dict(sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:10])
-        return {
-            "routed_to": "failures",
-            "top_failure_codes": top_failure_codes,
-            "total_receipts_checked": len(records),
-        }
+        return None
 
     if _matches(question, ["diagnose", "diagnosis", "troubleshoot", "why did", "run id"]):
         run_id = _extract_run_id(question)
@@ -122,125 +50,23 @@ def tool_praxis_query(params: dict) -> dict:
                 "routed_to": "workflow_diagnose",
                 "message": "Provide a run_id to diagnose a specific workflow run.",
             }
-        from .diagnose import tool_praxis_diagnose
-
-        diagnosis = tool_praxis_diagnose({"run_id": run_id})
         return {
             "routed_to": "workflow_diagnose",
             "run_id": run_id,
-            "diagnosis": diagnosis,
+            "diagnosis": tool_praxis_diagnose({"run_id": run_id}),
         }
 
-    if _matches(question, ["agent", "leaderboard", "performance", "who", "how are"]):
-        records = list_receipts(limit=10000, since_hours=72)
-        by_agent: dict[str, dict[str, int]] = {}
-        for record in records:
-            bucket = by_agent.setdefault(record.agent, {"total": 0, "succeeded": 0})
-            bucket["total"] += 1
-            if record.status == "succeeded":
-                bucket["succeeded"] += 1
-        leaderboard = []
-        for agent, counts in by_agent.items():
-            total = counts["total"]
-            succeeded = counts["succeeded"]
-            pr = succeeded / total if total else 0.0
-            leaderboard.append({"agent": agent, "dispatches": total, "pass_rate": round(pr, 4)})
-        leaderboard.sort(key=lambda x: (-x["pass_rate"], -x["dispatches"]))
-        return {"routed_to": "leaderboard", "agents": leaderboard}
-
-    if _matches(question, ["discover", "infrastructure", "what exists", "what solves",
-                             "similar", "equivalent", "synonym", "already built"]):
-        from .discover import tool_praxis_discover
-        # Strip routing keywords and pass the rest as query
-        return tool_praxis_discover({"action": "search", "query": question, "limit": 10})
-
-    if _matches(question, ["stale", "staleness", "inactive", "dormant"]):
-        return _run_staleness_query(params)
-
-    if _matches(question, ["import path", "how to import", "where is", "from import",
-                            "import for", "defined in"]):
-        return _import_resolver(question)
-
-    if _matches(question, ["test command", "how to test", "pytest for",
-                            "verify command"]):
-        return _test_command_resolver(question)
-
-    if _matches(question, ["receipt", "token burn", "cost breakdown"]):
-        from .evidence import tool_praxis_receipts
-        return tool_praxis_receipts({"action": "token_burn", "since_hours": 24})
-
-    if _matches(question, ["constraint", "mined constraint", "learned constraint"]):
-        from .evidence import tool_praxis_constraints
-        return tool_praxis_constraints({"action": "list"})
-
-    if _matches(question, ["friction", "guardrail", "bounce"]):
-        from .evidence import tool_praxis_friction
-        return tool_praxis_friction({"action": "stats"})
-
-    if _matches(question, ["artifact", "sandbox artifact"]):
-        from .artifacts import tool_praxis_artifacts
-        return tool_praxis_artifacts({"action": "stats"})
-
-    if _matches(question, ["heartbeat", "memory maintenance", "graph hygiene"]):
-        from .session import tool_praxis_heartbeat
-        return tool_praxis_heartbeat({"action": "status"})
-
-    if _matches(question, ["governance", "secret", "scan"]):
-        return {"routed_to": "governance", "message": "Use praxis_governance with action=scan_prompt or scan_scope."}
-
-    if _matches(question, ["loop", "retry loop", "runaway"]):
-        try:
-            from runtime.loop_detector import LoopDetector
-            detector = LoopDetector()
-            return {"routed_to": "loop_detector", "message": "Loop detector ready. Use praxis_heal for specific failure diagnosis."}
-        except Exception as e:
-            return {"routed_to": "loop_detector", "error": str(e)}
-
-    if _matches(question, ["classify", "failure type", "retryab"]):
-        return {"routed_to": "failure_classifier",
-                "message": "Use praxis_heal to classify a failure. Provide job_label plus failure_code and/or stderr."}
-
-    if _matches(question, ["calibrat", "tuned param", "auto-tune"]):
-        try:
-            from runtime.calibration import CalibrationEngine
-            engine = CalibrationEngine({})
-            cal_path = os.path.join(str(REPO_ROOT), "config", "calibration.json")
-            if os.path.isfile(cal_path):
-                engine.load(cal_path)
-            params = engine.all_params()
-            if not params:
-                return {"routed_to": "calibration", "message": "No calibrated parameters yet."}
-            return {"routed_to": "calibration", "params": {
-                name: {"value": round(p.value, 4), "min": p.lower, "max": p.upper}
-                for name, p in params.items()
-            }}
-        except Exception as e:
-            return {"routed_to": "calibration", "error": str(e)}
-
-    if _matches(question, ["route", "routing", "which model", "tier"]):
-        try:
-            import runtime.auto_router as auto_router_mod
-            tiers = auto_router_mod.all_tiers()
-            decisions = {}
-            for tier in tiers:
-                candidates = auto_router_mod.candidates_for_tier(tier)
-                decisions[tier] = [{"provider": c.provider_slug, "model": c.model_slug,
-                                    "healthy": c.healthy} for c in candidates] if candidates else []
-            return {"routed_to": "auto_router", "tiers": decisions}
-        except Exception as e:
-            return {"routed_to": "auto_router", "error": str(e)}
-
-    if _matches(question, ["timeout", "dynamic timeout", "complexity"]):
-        return {"routed_to": "dynamic_timeout",
-                "message": "Timeouts are auto-computed per complexity tier. Use praxis_query 'calibration' to see tuned parameters."}
-
     if _matches(question, ["operator status", "operator view", "cockpit"]):
-        from .operator import tool_praxis_operator_view
-        return tool_praxis_operator_view({"view": "status"})
+        return workflow_query_core.handle_operator_view(
+            subs,
+            {"view": "status", "run_id": _extract_run_id(question) or body.get("run_id")},
+        )
 
     if _matches(question, ["scoreboard", "cutover"]):
-        from .operator import tool_praxis_operator_view
-        return tool_praxis_operator_view({"view": "scoreboard"})
+        return workflow_query_core.handle_operator_view(
+            subs,
+            {"view": "scoreboard", "run_id": _extract_run_id(question) or body.get("run_id")},
+        )
 
     if _matches(question, ["operator graph", "graph topology", "workflow topology"]):
         return {
@@ -256,25 +82,65 @@ def tool_praxis_query(params: dict) -> dict:
 
     if _matches(question, ["session", "carry forward", "carry-forward"]):
         from .session import tool_praxis_session
+
         return tool_praxis_session({"action": "latest"})
 
-    if _matches(question, ["decompose", "sprint", "breakdown"]):
-        return {"routed_to": "decompose", "message": "Use praxis_decompose with an objective to break it into micro-sprints."}
+    if _matches(question, ["stale", "staleness", "inactive", "dormant"]):
+        return _run_staleness_query(dict(body))
 
-    if _matches(question, ["health", "preflight", "probe"]):
-        from .health import tool_praxis_health
-        return tool_praxis_health({})
+    if _matches(question, ["import path", "how to import", "where is", "from import", "import for", "defined in"]):
+        return _import_resolver(question)
 
-    if _matches(question, ["data dictionary", "what tables", "list tables",
-                            "schema for", "table schema", "valid values",
-                            "what columns", "what fields", "allowed values"]):
+    if _matches(question, ["test command", "how to test", "pytest for", "verify command"]):
+        return _test_command_resolver(question)
+
+    if _matches(question, ["data dictionary", "what tables", "list tables", "schema for", "table schema", "valid values", "what columns", "what fields", "allowed values"]):
         return _data_dictionary(question)
 
-    # Fallback: search knowledge graph (use same clean formatting as praxis_recall)
-    from .knowledge import tool_praxis_recall
-    recall_result = tool_praxis_recall({"query": question})
-    recall_result["routed_to"] = "knowledge_graph"
-    return recall_result
+    if _matches(question, ["calibrat", "tuned param", "auto-tune"]):
+        try:
+            from runtime.calibration import CalibrationEngine
+
+            engine = CalibrationEngine({})
+            cal_path = os.path.join(str(REPO_ROOT), "config", "calibration.json")
+            if os.path.isfile(cal_path):
+                engine.load(cal_path)
+            params = engine.all_params()
+            if not params:
+                return {"routed_to": "calibration", "message": "No calibrated parameters yet."}
+            return {
+                "routed_to": "calibration",
+                "params": {
+                    name: {"value": round(p.value, 4), "min": p.lower, "max": p.upper}
+                    for name, p in params.items()
+                },
+            }
+        except Exception as exc:
+            return {"routed_to": "calibration", "error": str(exc)}
+
+    if _matches(question, ["route", "routing", "which model", "tier"]):
+        try:
+            import runtime.auto_router as auto_router_mod
+
+            tiers = auto_router_mod.all_tiers()
+            decisions = {}
+            for tier in tiers:
+                candidates = auto_router_mod.candidates_for_tier(tier)
+                decisions[tier] = [
+                    {"provider": c.provider_slug, "model": c.model_slug, "healthy": c.healthy}
+                    for c in candidates
+                ] if candidates else []
+            return {"routed_to": "auto_router", "tiers": decisions}
+        except Exception as exc:
+            return {"routed_to": "auto_router", "error": str(exc)}
+
+    if _matches(question, ["timeout", "dynamic timeout", "complexity"]):
+        return {
+            "routed_to": "dynamic_timeout",
+            "message": "Timeouts are auto-computed per complexity tier. Use praxis_query 'calibration' to see tuned parameters.",
+        }
+
+    return None
 
 
 def _parse_int(value: Any, default: int) -> int:

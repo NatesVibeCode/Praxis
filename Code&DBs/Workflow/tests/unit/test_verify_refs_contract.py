@@ -11,7 +11,12 @@ import runtime.compiler as compiler
 import runtime.operating_model_planner as planner
 from runtime.capability_catalog import CapabilityCatalogError
 from runtime.compile_artifacts import CompileArtifactRecord
-from runtime.verification import VerificationAuthorityError, resolve_verify_commands
+from runtime.verification import (
+    VerificationAuthorityError,
+    VerificationBinding,
+    resolve_verification_bindings,
+    resolve_verify_commands,
+)
 from runtime.operating_model_planner import (
     PlanningBlockedError,
     current_compiled_spec,
@@ -195,6 +200,25 @@ def test_resolve_verify_commands_rejects_legacy_binding_objects() -> None:
                 }
             ],
         )
+
+
+def test_resolve_verification_bindings_reads_verification_registry_rows() -> None:
+    conn = _VerifyRefsConn()
+    commands = resolve_verification_bindings(
+        conn,
+        [
+            VerificationBinding(
+                verification_ref="verification.python.py_compile",
+                inputs={"path": "sample.py"},
+                label="Compile sample.py",
+            )
+        ],
+    )
+
+    assert len(commands) == 1
+    assert commands[0].verification_ref == "verification.python.py_compile"
+    assert commands[0].argv == ("python3", "-m", "py_compile", "sample.py")
+    assert commands[0].label == "Compile sample.py"
 
 
 def test_compile_spec_emits_verify_refs_and_persists_authority_rows() -> None:

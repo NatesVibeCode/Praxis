@@ -102,6 +102,12 @@ _optional_text = optional_text
 _coerce_text_sequence = coerce_text_sequence
 
 
+def _require_mapping(value: object, *, field_name: str) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{field_name} must be an object")
+    return value
+
+
 def _normalize_task_route_eligibility_status(value: object) -> str:
     return coerce_choice(
         value,
@@ -1166,7 +1172,11 @@ class OperatorControlFrontdoor:
         created_at: datetime | None = None,
         updated_at: datetime | None = None,
     ) -> FunctionalAreaRecord:
-        normalized_area_slug = coerce_slug(area_slug, field_name="area_slug")
+        normalized_area_slug = coerce_slug(
+            area_slug,
+            field_name="area_slug",
+            separator="-",
+        )
         normalized_title = _require_text(title, field_name="title")
         normalized_summary = _require_text(summary, field_name="summary")
         normalized_status = _normalize_functional_area_status(area_status)

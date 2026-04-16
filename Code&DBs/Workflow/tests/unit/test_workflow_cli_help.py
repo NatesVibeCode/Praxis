@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 import importlib
+from io import StringIO
 
 from surfaces.cli import workflow_cli
+from surfaces.cli.commands import query as workflow_query
 
 workflow_main = importlib.import_module("surfaces.cli.main")
 
@@ -83,12 +86,91 @@ def test_help_topic_diagnose_prints_command_usage(capsys) -> None:
     ) in rendered
 
 
+def test_help_topic_bugs_exposes_the_full_bug_surface(capsys) -> None:
+    rc = workflow_main.main(["help", "bugs"], stdout=None)
+
+    assert rc == 0
+    rendered = capsys.readouterr().out
+    assert (
+        "workflow bugs "
+        "[list|search <query>|stats|file|history|packet|replay|backfill_replay|attach_evidence|patch_resume|resolve]"
+    ) in rendered
+    assert "file               File a new bug" in rendered
+    assert "attach_evidence    Attach canonical evidence to a bug" in rendered
+    assert "resolve            Mark an existing bug fixed, deferred, or won't-fix" in rendered
+
+
 def test_top_level_help_aliases_return_command_index(capsys) -> None:
     rc = workflow_cli.main(["--help"])
 
     assert rc == 0
     rendered = capsys.readouterr().out
     assert "workflow_cli.py repair <run_id>" in rendered
+
+
+def test_modern_help_index_mentions_bug_tracker_surface() -> None:
+    stdout = StringIO()
+
+    rc = workflow_main.main(["commands"], stdout=stdout)
+
+    assert rc == 0
+    rendered = stdout.getvalue()
+    assert "Derived search, analysis, and bug-tracker surfaces" in rendered
+
+
+def test_bugs_command_resolve_dispatches_mutation_payload(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_run_cli_tool(tool_name: str, params: dict[str, object], *, workflow_token: str = ""):
+        captured["tool_name"] = tool_name
+        captured["params"] = dict(params)
+        captured["workflow_token"] = workflow_token
+        return 0, {"resolved": True, "bug": {"bug_id": "BUG-1234", "status": "FIXED"}}
+
+    monkeypatch.setattr(workflow_query, "run_cli_tool", _fake_run_cli_tool)
+
+    stdout = StringIO()
+    rc = workflow_query._bugs_command(
+        ["resolve", "--bug-id", "BUG-1234", "--status", "FIXED"],
+        stdout=stdout,
+    )
+
+    assert rc == 0
+    assert captured["tool_name"] == "praxis_bugs"
+    assert captured["workflow_token"] == ""
+    assert captured["params"]["action"] == "resolve"
+    assert captured["params"]["bug_id"] == "BUG-1234"
+    assert captured["params"]["status"] == "FIXED"
+    assert json.loads(stdout.getvalue()) == {
+        "resolved": True,
+        "bug": {"bug_id": "BUG-1234", "status": "FIXED"},
+    }
+
+
+def test_bugs_command_search_forwards_status_and_severity_filters(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_run_cli_tool(tool_name: str, params: dict[str, object], *, workflow_token: str = ""):
+        captured["tool_name"] = tool_name
+        captured["params"] = dict(params)
+        captured["workflow_token"] = workflow_token
+        return 0, {"bugs": [], "count": 0, "returned_count": 0}
+
+    monkeypatch.setattr(workflow_query, "run_cli_tool", _fake_run_cli_tool)
+
+    stdout = StringIO()
+    rc = workflow_query._bugs_command(
+        ["search", "timeout", "--status", "OPEN", "--severity", "P1", "--json"],
+        stdout=stdout,
+    )
+
+    assert rc == 0
+    assert captured["tool_name"] == "praxis_bugs"
+    assert captured["params"]["action"] == "search"
+    assert captured["params"]["title"] == "timeout"
+    assert captured["params"]["status"] == "OPEN"
+    assert captured["params"]["severity"] == "P1"
+    assert json.loads(stdout.getvalue()) == {"bugs": [], "count": 0, "returned_count": 0}
 
 
 def test_routes_command_delegates_to_modern_frontdoor(monkeypatch, capsys) -> None:

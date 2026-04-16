@@ -464,6 +464,7 @@ async def _fetch_binding_records(
                 work_item_workflow_binding_id,
                 binding_kind,
                 binding_status,
+                issue_id,
                 roadmap_item_id,
                 bug_id,
                 cutover_gate_id,
@@ -490,19 +491,24 @@ async def _fetch_binding_records(
     for row in rows:
         mapping = cast(Mapping[str, object], row)
         bindings.append(
-            WorkItemWorkflowBindingRecord(
-                work_item_workflow_binding_id=_require_text(
-                    mapping["work_item_workflow_binding_id"],
-                    field_name="work_item_workflow_binding_id",
-                ),
+                WorkItemWorkflowBindingRecord(
+                    work_item_workflow_binding_id=_require_text(
+                        mapping["work_item_workflow_binding_id"],
+                        field_name="work_item_workflow_binding_id",
+                    ),
                 binding_kind=_require_text(mapping["binding_kind"], field_name="binding_kind"),
                 binding_status=_require_text(
-                    mapping["binding_status"],
-                    field_name="binding_status",
-                ),
-                roadmap_item_id=(
-                    _require_text(mapping["roadmap_item_id"], field_name="roadmap_item_id")
-                    if mapping["roadmap_item_id"] is not None
+                        mapping["binding_status"],
+                        field_name="binding_status",
+                    ),
+                    issue_id=(
+                        _require_text(mapping["issue_id"], field_name="issue_id")
+                        if mapping["issue_id"] is not None
+                        else None
+                    ),
+                    roadmap_item_id=(
+                        _require_text(mapping["roadmap_item_id"], field_name="roadmap_item_id")
+                        if mapping["roadmap_item_id"] is not None
                     else None
                 ),
                 bug_id=(
@@ -550,17 +556,18 @@ async def _fetch_binding_records(
 
 def _build_nodes(
     *,
+    as_of: datetime,
     bugs: tuple[OperatorGraphBugRecord, ...],
     roadmap_items: tuple[OperatorGraphRoadmapRecord, ...],
+    functional_areas: tuple[OperatorGraphFunctionalAreaRecord, ...],
     operator_decisions: tuple[OperatorDecisionAuthorityRecord, ...],
     cutover_gates: tuple[CutoverGateAuthorityRecord, ...],
-) -> tuple[tuple[OperatorGraphNode, ...], dict[str, str], dict[str, str], dict[str, str], dict[str, str]]:
+    work_item_workflow_bindings: tuple[WorkItemWorkflowBindingRecord, ...],
+    object_relations: tuple[OperatorGraphObjectRelationRecord, ...],
+) -> tuple[tuple[OperatorGraphNode, ...], dict[tuple[str, str], str]]:
     nodes: list[OperatorGraphNode] = []
     node_ids: set[str] = set()
-    bug_id_lookup: dict[str, str] = {}
-    roadmap_id_lookup: dict[str, str] = {}
-    decision_id_lookup: dict[str, str] = {}
-    gate_id_lookup: dict[str, str] = {}
+    node_lookup: dict[tuple[str, str], str] = {}
 
     def add_node(node: OperatorGraphNode) -> None:
         if node.node_id in node_ids:
@@ -571,13 +578,31 @@ def _build_nodes(
             )
         node_ids.add(node.node_id)
         nodes.append(node)
+        node_lookup[(node.node_kind, node.canonical_ref)] = node.node_id
 
-    for record in bugs:
-        node_id = _node_id("bug", record.bug_id)
-        bug_id_lookup[record.bug_id] = node_id
+    def add_reference_node(*, kind: str, ref: str) -> None:
+        if kind not in _REFERENCE_NODE_KINDS:
+            return
+        if (kind, ref) in node_lookup:
+            return
         add_node(
             OperatorGraphNode(
-                node_id=node_id,
+                node_id=_node_id(kind, ref),
+                node_kind=kind,
+                canonical_ref=ref,
+                lookup_ref=ref,
+                title=_reference_node_title(kind, ref),
+                status="reference",
+                summary=_reference_node_summary(kind, ref),
+                created_at=as_of,
+                updated_at=as_of,
+            )
+        )
+
+    for record in bugs:
+        add_node(
+            OperatorGraphNode(
+                node_id=_node_id("bug", record.bug_id),
                 node_kind="bug",
                 canonical_ref=record.bug_id,
                 lookup_ref=record.bug_key,
@@ -590,11 +615,9 @@ def _build_nodes(
         )
 
     for record in roadmap_items:
-        node_id = _node_id("roadmap_item", record.roadmap_item_id)
-        roadmap_id_lookup[record.roadmap_item_id] = node_id
         add_node(
             OperatorGraphNode(
-                node_id=node_id,
+                node_id=_node_id("roadmap_item", record.roadmap_item_id),
                 node_kind="roadmap_item",
                 canonical_ref=record.roadmap_item_id,
                 lookup_ref=record.roadmap_key,
@@ -606,12 +629,25 @@ def _build_nodes(
             )
         )
 
-    for record in operator_decisions:
-        node_id = _node_id("operator_decision", record.operator_decision_id)
-        decision_id_lookup[record.operator_decision_id] = node_id
+    for record in functional_areas:
         add_node(
             OperatorGraphNode(
-                node_id=node_id,
+                node_id=_node_id("functional_area", record.functional_area_id),
+                node_kind="functional_area",
+                canonical_ref=record.functional_area_id,
+                lookup_ref=record.area_slug,
+                title=record.title,
+                status=record.area_status,
+                summary=record.summary,
+                created_at=record.created_at,
+                updated_at=record.updated_at,
+            )
+        )
+
+    for record in operator_decisions:
+        add_node(
+            OperatorGraphNode(
+                node_id=_node_id("operator_decision", record.operator_decision_id),
                 node_kind="operator_decision",
                 canonical_ref=record.operator_decision_id,
                 lookup_ref=record.decision_key,
@@ -624,11 +660,9 @@ def _build_nodes(
         )
 
     for record in cutover_gates:
-        node_id = _node_id("cutover_gate", record.cutover_gate_id)
-        gate_id_lookup[record.cutover_gate_id] = node_id
         add_node(
             OperatorGraphNode(
-                node_id=node_id,
+                node_id=_node_id("cutover_gate", record.cutover_gate_id),
                 node_kind="cutover_gate",
                 canonical_ref=record.cutover_gate_id,
                 lookup_ref=record.gate_key,
@@ -639,18 +673,37 @@ def _build_nodes(
                 updated_at=record.updated_at,
             )
         )
+        add_reference_node(kind=record.target_kind, ref=record.target_ref)
 
-    return tuple(nodes), bug_id_lookup, roadmap_id_lookup, decision_id_lookup, gate_id_lookup
+    for record in work_item_workflow_bindings:
+        if record.issue_id is not None:
+            add_reference_node(kind="issue", ref=record.issue_id)
+        for target_kind, target_ref in record.target_refs.items():
+            add_reference_node(
+                kind=_binding_target_kind(target_kind),
+                ref=target_ref,
+            )
+
+    for record in object_relations:
+        add_reference_node(kind=record.source_kind, ref=record.source_ref)
+        add_reference_node(kind=record.target_kind, ref=record.target_ref)
+
+    return tuple(nodes), node_lookup
 
 
 def _decision_lookup(
     *,
     operator_decisions: tuple[OperatorDecisionAuthorityRecord, ...],
-    decision_id_lookup: dict[str, str],
+    node_lookup: Mapping[tuple[str, str], str],
 ) -> tuple[dict[str, str], dict[str, str]]:
     decision_key_lookup: dict[str, str] = {}
+    decision_id_lookup: dict[str, str] = {}
     for record in operator_decisions:
-        decision_key_lookup[record.decision_key] = decision_id_lookup[record.operator_decision_id]
+        node_id = node_lookup.get(("operator_decision", record.operator_decision_id))
+        if node_id is None:
+            continue
+        decision_key_lookup[record.decision_key] = node_id
+        decision_id_lookup[record.operator_decision_id] = node_id
     return decision_key_lookup, decision_id_lookup
 
 
@@ -678,17 +731,15 @@ def _build_edges(
     operator_decisions: tuple[OperatorDecisionAuthorityRecord, ...],
     cutover_gates: tuple[CutoverGateAuthorityRecord, ...],
     work_item_workflow_bindings: tuple[WorkItemWorkflowBindingRecord, ...],
-    bug_id_lookup: Mapping[str, str],
-    roadmap_id_lookup: Mapping[str, str],
-    decision_id_lookup: Mapping[str, str],
-    gate_id_lookup: Mapping[str, str],
+    object_relations: tuple[OperatorGraphObjectRelationRecord, ...],
+    node_lookup: Mapping[tuple[str, str], str],
 ) -> tuple[tuple[OperatorGraphEdge, ...], tuple[str, ...]]:
     edges: list[OperatorGraphEdge] = []
     edge_ids: set[str] = set()
     missing_refs: list[str] = []
     decision_key_lookup, decision_id_lookup = _decision_lookup(
         operator_decisions=operator_decisions,
-        decision_id_lookup=dict(decision_id_lookup),
+        node_lookup=node_lookup,
     )
 
     def add_edge(
@@ -723,7 +774,7 @@ def _build_edges(
         )
 
     for record in bugs:
-        source_node_id = bug_id_lookup.get(record.bug_id)
+        source_node_id = node_lookup.get(("bug", record.bug_id))
         if source_node_id is None:
             missing_refs.append(f"operator_graph.bug_missing:{record.bug_id}")
             continue
@@ -744,13 +795,13 @@ def _build_edges(
         )
 
     for record in roadmap_items:
-        source_node_id = roadmap_id_lookup.get(record.roadmap_item_id)
+        source_node_id = node_lookup.get(("roadmap_item", record.roadmap_item_id))
         if source_node_id is None:
             missing_refs.append(f"operator_graph.roadmap_missing:{record.roadmap_item_id}")
             continue
 
         if record.parent_roadmap_item_id is not None:
-            target_node_id = roadmap_id_lookup.get(record.parent_roadmap_item_id)
+            target_node_id = node_lookup.get(("roadmap_item", record.parent_roadmap_item_id))
             add_edge(
                 source_kind="roadmap_item",
                 source_node_id=source_node_id,
@@ -766,7 +817,7 @@ def _build_edges(
             )
 
         if record.source_bug_id is not None:
-            target_node_id = bug_id_lookup.get(record.source_bug_id)
+            target_node_id = node_lookup.get(("bug", record.source_bug_id))
             add_edge(
                 source_kind="roadmap_item",
                 source_node_id=source_node_id,
@@ -801,56 +852,27 @@ def _build_edges(
         )
 
     for record in cutover_gates:
-        source_node_id = gate_id_lookup.get(record.cutover_gate_id)
+        source_node_id = node_lookup.get(("cutover_gate", record.cutover_gate_id))
         if source_node_id is None:
             missing_refs.append(f"operator_graph.cutover_gate_missing:{record.cutover_gate_id}")
             continue
 
-        if record.target_kind == "roadmap_item":
-            target_node_id = roadmap_id_lookup.get(record.target_ref)
-            add_edge(
-                source_kind="cutover_gate",
-                source_node_id=source_node_id,
-                edge_kind="target_roadmap_item",
-                target_kind="roadmap_item",
-                target_ref=record.target_ref,
-                target_node_id=target_node_id,
-                created_at=record.created_at,
-                missing_ref=(
-                    f"operator_graph.target_roadmap_missing:"
-                    f"{record.cutover_gate_id}:{record.target_ref}"
-                ),
-            )
-        elif record.target_kind == "workflow_class":
-            add_edge(
-                source_kind="cutover_gate",
-                source_node_id=source_node_id,
-                edge_kind="target_workflow_class",
-                target_kind="workflow_class",
-                target_ref=record.target_ref,
-                target_node_id=None,
-                created_at=record.created_at,
-            )
-        elif record.target_kind == "schedule_definition":
-            add_edge(
-                source_kind="cutover_gate",
-                source_node_id=source_node_id,
-                edge_kind="target_schedule_definition",
-                target_kind="schedule_definition",
-                target_ref=record.target_ref,
-                target_node_id=None,
-                created_at=record.created_at,
-            )
-        else:
-            add_edge(
-                source_kind="cutover_gate",
-                source_node_id=source_node_id,
-                edge_kind=f"target_{record.target_kind}",
-                target_kind=record.target_kind,
-                target_ref=record.target_ref,
-                target_node_id=None,
-                created_at=record.created_at,
-            )
+        target_node_id = node_lookup.get((record.target_kind, record.target_ref))
+        add_edge(
+            source_kind="cutover_gate",
+            source_node_id=source_node_id,
+            edge_kind=f"target_{record.target_kind}",
+            target_kind=record.target_kind,
+            target_ref=record.target_ref,
+            target_node_id=target_node_id,
+            created_at=record.created_at,
+            missing_ref=(
+                f"operator_graph.target_missing:"
+                f"{record.cutover_gate_id}:{record.target_kind}:{record.target_ref}"
+                if target_node_id is None
+                else None
+            ),
+        )
 
         opened_by_node_id = decision_id_lookup.get(record.opened_by_decision_id)
         add_edge(
@@ -885,12 +907,7 @@ def _build_edges(
 
     for record in work_item_workflow_bindings:
         source_kind = record.source_kind
-        if source_kind == "bug":
-            source_node_id = bug_id_lookup.get(record.source_id)
-        elif source_kind == "roadmap_item":
-            source_node_id = roadmap_id_lookup.get(record.source_id)
-        else:
-            source_node_id = gate_id_lookup.get(record.source_id)
+        source_node_id = node_lookup.get((source_kind, record.source_id))
 
         if source_node_id is None:
             missing_refs.append(
@@ -916,14 +933,57 @@ def _build_edges(
             )
 
         for target_kind, target_ref in record.target_refs.items():
+            normalized_target_kind = _binding_target_kind(target_kind)
             add_edge(
                 source_kind=source_kind,
                 source_node_id=source_node_id,
-                edge_kind=f"targets_{_binding_target_kind(target_kind)}",
-                target_kind=_binding_target_kind(target_kind),
+                edge_kind=f"targets_{normalized_target_kind}",
+                target_kind=normalized_target_kind,
                 target_ref=target_ref,
-                target_node_id=None,
+                target_node_id=node_lookup.get((normalized_target_kind, target_ref)),
                 created_at=record.created_at,
+                missing_ref=(
+                    f"operator_graph.binding_target_missing:"
+                    f"{record.work_item_workflow_binding_id}:{normalized_target_kind}:{target_ref}"
+                ),
+            )
+
+    for record in object_relations:
+        source_node_id = node_lookup.get((record.source_kind, record.source_ref))
+        if source_node_id is None:
+            missing_refs.append(
+                f"operator_graph.object_relation_source_missing:"
+                f"{record.operator_object_relation_id}:{record.source_kind}:{record.source_ref}"
+            )
+            continue
+
+        target_node_id = node_lookup.get((record.target_kind, record.target_ref))
+        add_edge(
+            source_kind=record.source_kind,
+            source_node_id=source_node_id,
+            edge_kind=record.relation_kind,
+            target_kind=record.target_kind,
+            target_ref=record.target_ref,
+            target_node_id=target_node_id,
+            created_at=record.created_at,
+            missing_ref=(
+                f"operator_graph.object_relation_target_missing:"
+                f"{record.operator_object_relation_id}:{record.target_kind}:{record.target_ref}"
+            ),
+        )
+        if record.bound_by_decision_id is not None:
+            add_edge(
+                source_kind=record.source_kind,
+                source_node_id=source_node_id,
+                edge_kind="relation_bound_by_decision",
+                target_kind="operator_decision",
+                target_ref=record.bound_by_decision_id,
+                target_node_id=decision_id_lookup.get(record.bound_by_decision_id),
+                created_at=record.created_at,
+                missing_ref=(
+                    f"operator_graph.object_relation_decision_missing:"
+                    f"{record.operator_object_relation_id}:{record.bound_by_decision_id}"
+                ),
             )
 
     return tuple(edges), _dedupe(missing_refs)
@@ -933,9 +993,11 @@ def _freshness_from_rows(
     *,
     bugs: tuple[OperatorGraphBugRecord, ...],
     roadmap_items: tuple[OperatorGraphRoadmapRecord, ...],
+    functional_areas: tuple[OperatorGraphFunctionalAreaRecord, ...],
     operator_decisions: tuple[OperatorDecisionAuthorityRecord, ...],
     cutover_gates: tuple[CutoverGateAuthorityRecord, ...],
     work_item_workflow_bindings: tuple[WorkItemWorkflowBindingRecord, ...],
+    object_relations: tuple[OperatorGraphObjectRelationRecord, ...],
     as_of: datetime,
 ) -> OperatorGraphFreshness:
     latest_created_at: datetime | None = None
@@ -944,6 +1006,9 @@ def _freshness_from_rows(
         latest_created_at = _max_datetime(latest_created_at, record.created_at)
         latest_updated_at = _max_datetime(latest_updated_at, record.updated_at)
     for record in roadmap_items:
+        latest_created_at = _max_datetime(latest_created_at, record.created_at)
+        latest_updated_at = _max_datetime(latest_updated_at, record.updated_at)
+    for record in functional_areas:
         latest_created_at = _max_datetime(latest_created_at, record.created_at)
         latest_updated_at = _max_datetime(latest_updated_at, record.updated_at)
     for record in operator_decisions:
@@ -955,6 +1020,9 @@ def _freshness_from_rows(
     for record in work_item_workflow_bindings:
         latest_created_at = _max_datetime(latest_created_at, record.created_at)
         latest_updated_at = _max_datetime(latest_updated_at, record.updated_at)
+    for record in object_relations:
+        latest_created_at = _max_datetime(latest_created_at, record.created_at)
+        latest_updated_at = _max_datetime(latest_updated_at, record.updated_at)
     return OperatorGraphFreshness(
         as_of=as_of,
         latest_source_created_at=latest_created_at,
@@ -962,9 +1030,11 @@ def _freshness_from_rows(
         source_row_count=(
             len(bugs)
             + len(roadmap_items)
+            + len(functional_areas)
             + len(operator_decisions)
             + len(cutover_gates)
             + len(work_item_workflow_bindings)
+            + len(object_relations)
         ),
     )
 
@@ -974,15 +1044,21 @@ def _build_operator_graph_projection(
     as_of: datetime,
     bugs: tuple[OperatorGraphBugRecord, ...],
     roadmap_items: tuple[OperatorGraphRoadmapRecord, ...],
+    functional_areas: tuple[OperatorGraphFunctionalAreaRecord, ...],
     operator_decisions: tuple[OperatorDecisionAuthorityRecord, ...],
     cutover_gates: tuple[CutoverGateAuthorityRecord, ...],
     work_item_workflow_bindings: tuple[WorkItemWorkflowBindingRecord, ...],
+    object_relations: tuple[OperatorGraphObjectRelationRecord, ...],
 ) -> OperatorGraphReadModel:
-    nodes, bug_id_lookup, roadmap_id_lookup, decision_id_lookup, gate_id_lookup = _build_nodes(
+    nodes, node_lookup = _build_nodes(
+        as_of=as_of,
         bugs=bugs,
         roadmap_items=roadmap_items,
+        functional_areas=functional_areas,
         operator_decisions=operator_decisions,
         cutover_gates=cutover_gates,
+        work_item_workflow_bindings=work_item_workflow_bindings,
+        object_relations=object_relations,
     )
     edges, missing_refs = _build_edges(
         bugs=bugs,
@@ -990,17 +1066,17 @@ def _build_operator_graph_projection(
         operator_decisions=operator_decisions,
         cutover_gates=cutover_gates,
         work_item_workflow_bindings=work_item_workflow_bindings,
-        bug_id_lookup=bug_id_lookup,
-        roadmap_id_lookup=roadmap_id_lookup,
-        decision_id_lookup=decision_id_lookup,
-        gate_id_lookup=gate_id_lookup,
+        object_relations=object_relations,
+        node_lookup=node_lookup,
     )
     freshness = _freshness_from_rows(
         bugs=bugs,
         roadmap_items=roadmap_items,
+        functional_areas=functional_areas,
         operator_decisions=operator_decisions,
         cutover_gates=cutover_gates,
         work_item_workflow_bindings=work_item_workflow_bindings,
+        object_relations=object_relations,
         as_of=as_of,
     )
     return OperatorGraphReadModel(
@@ -1012,9 +1088,11 @@ def _build_operator_graph_projection(
         freshness=freshness,
         bugs=bugs,
         roadmap_items=roadmap_items,
+        functional_areas=functional_areas,
         operator_decisions=operator_decisions,
         cutover_gates=cutover_gates,
         work_item_workflow_bindings=work_item_workflow_bindings,
+        object_relations=object_relations,
         nodes=nodes,
         edges=edges,
     )
@@ -1030,6 +1108,10 @@ async def load_operator_graph_projection(
     normalized_as_of = _normalize_as_of(as_of)
     async with conn.transaction():
         authority = await load_operator_control_authority(conn, as_of=normalized_as_of)
+        object_relation_authority = await load_operator_object_relation_authority(
+            conn,
+            as_of=normalized_as_of,
+        )
         bugs = await _fetch_bug_records(conn, as_of=normalized_as_of)
         roadmap_items = await _fetch_roadmap_records(conn, as_of=normalized_as_of)
         work_item_workflow_bindings = await _fetch_binding_records(
@@ -1040,9 +1122,11 @@ async def load_operator_graph_projection(
         as_of=normalized_as_of,
         bugs=bugs,
         roadmap_items=roadmap_items,
+        functional_areas=object_relation_authority.functional_areas,
         operator_decisions=authority.operator_decisions,
         cutover_gates=authority.cutover_gates,
         work_item_workflow_bindings=work_item_workflow_bindings,
+        object_relations=object_relation_authority.object_relations,
     )
 
 

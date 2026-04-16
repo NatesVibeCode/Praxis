@@ -9,6 +9,7 @@ agents.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import logging
 import os
@@ -23,7 +24,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
-from storage.postgres.connection import resolve_workflow_database_url
+from runtime._workflow_database import resolve_runtime_database_url
+from storage.postgres.connection import connect_workflow_database, resolve_workflow_database_url
 from storage.postgres.validators import PostgresConfigurationError
 
 LOG = logging.getLogger(__name__)
@@ -167,27 +169,25 @@ def database_name_from_url(database_url: str) -> str:
     return database_name or "praxis"
 
 
-def _database_exists(database_name: str) -> bool | None:
-    escaped_name = database_name.replace("'", "''")
-    completed = subprocess.run(
-        [
-            shutil.which("psql") or "psql",
-            "-h",
-            "127.0.0.1",
-            "-p",
-            "5432",
-            "-d",
-            "postgres",
-            "-Atqc",
-            f"SELECT 1 FROM pg_database WHERE datname = '{escaped_name}'",
-        ],
-        capture_output=True,
-        check=False,
-        text=True,
-    )
-    if completed.returncode != 0:
-        return None
-    return completed.stdout.strip() == "1"
+def _database_authority_reachable(database_url: str) -> bool:
+    async def _probe() -> bool:
+        conn = await connect_workflow_database(
+            env={"WORKFLOW_DATABASE_URL": database_url},
+        )
+        try:
+            return True
+        finally:
+            await conn.close()
+
+    try:
+        normalized = resolve_workflow_database_url(
+            env={"WORKFLOW_DATABASE_URL": database_url},
+        )
+        if not normalized:
+            return False
+        return asyncio.run(_probe())
+    except Exception:
+        return False
 
 
 def _read_repo_env_file(path: Path) -> dict[str, str]:
@@ -211,7 +211,6 @@ def _read_repo_env_file(path: Path) -> dict[str, str]:
 
 def discover_database_url(repo_root: Path) -> str:
     launch_agents = Path.home() / "Library" / "LaunchAgents"
-    unresolved_candidates: list[str] = []
     for label in (SUPERVISOR_LABEL, *LEGACY_LAUNCHD_LABELS):
         plist_path = launch_agents / f"{label}.plist"
         if not plist_path.exists():
@@ -225,23 +224,15 @@ def discover_database_url(repo_root: Path) -> str:
             candidate = env_vars.get("WORKFLOW_DATABASE_URL")
             if isinstance(candidate, str) and candidate.strip():
                 candidate = candidate.strip()
-                exists = _database_exists(database_name_from_url(candidate))
-                if exists is True:
+                if _database_authority_reachable(candidate):
                     return candidate
-                unresolved_candidates.append(candidate)
-
     try:
-        return resolve_workflow_database_url()
-    except PostgresConfigurationError:
-        pass
-
-    if unresolved_candidates:
-        return unresolved_candidates[0]
-
-    repo_env_path = repo_root / ".env"
-    try:
-        return resolve_workflow_database_url(_read_repo_env_file(repo_env_path))
+        return resolve_runtime_database_url(
+            repo_root=repo_root,
+            required=True,
+        )
     except PostgresConfigurationError as exc:
+        repo_env_path = repo_root / ".env"
         raise RuntimeError(
             "praxis_supervisor requires explicit WORKFLOW_DATABASE_URL authority "
             f"from process env, launchd, or {repo_env_path}"

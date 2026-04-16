@@ -11,6 +11,19 @@ run_frontdoor() {
   "${PYTHON_BIN}" -m surfaces.cli.main "$@"
 }
 
+has_passthrough_flag() {
+  local arg
+  shift || true
+  for arg in "$@"; do
+    case "$arg" in
+      --preview-execution|--dry-run|-h|--help)
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
 launch_detached() {
   local command=$1
   local launch_id_prefix=$2
@@ -63,7 +76,7 @@ PY
 
   if [ ! -s "${RESULT_FILE}" ] && ! kill -0 "${WORKFLOW_PID}" 2>/dev/null; then
     echo "Workflow ${command} process exited before durable submission completed."
-    echo "Result file: ${RESULT_FILE}"
+    echo "No result file was written."
     echo "Check artifacts/workflow.log for the launch error."
     exit 1
   fi
@@ -75,20 +88,28 @@ PY
 
 case "${1:-help}" in
   run)
-    launch_detached run \
-      "workflow-launch" \
-      "workflow_run_result" \
-      "Workflow submitted" \
-      0 \
-      "${@:2}"
+    if has_passthrough_flag "$@"; then
+      run_frontdoor "$@"
+    else
+      launch_detached run \
+        "workflow-launch" \
+        "workflow_run_result" \
+        "Workflow submitted" \
+        0 \
+        "${@:2}"
+    fi
     ;;
   spawn)
-    launch_detached spawn \
-      "workflow-spawn" \
-      "workflow_spawn_result" \
-      "Child workflow spawned" \
-      1 \
-      "${@:2}"
+    if has_passthrough_flag "$@"; then
+      run_frontdoor "$@"
+    else
+      launch_detached spawn \
+        "workflow-spawn" \
+        "workflow_spawn_result" \
+        "Child workflow spawned" \
+        1 \
+        "${@:2}"
+    fi
     ;;
   dry-run)
     run_frontdoor run --dry-run "${@:2}"

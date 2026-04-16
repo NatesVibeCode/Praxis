@@ -40,6 +40,34 @@ def test_rest_startup_initializes_shared_subsystems_once(monkeypatch) -> None:
             delattr(rest.app.state, "shared_subsystems")
 
 
+def test_rest_startup_boots_shared_subsystems_when_enabled(monkeypatch) -> None:
+    created: list[object] = []
+    booted: list[object] = []
+
+    class _FakeSubsystems:
+        def __init__(self) -> None:
+            created.append(self)
+
+        def boot(self) -> dict[str, object]:
+            booted.append(self)
+            return {"booted": True}
+
+    monkeypatch.setattr(rest, "_Subsystems", _FakeSubsystems)
+    monkeypatch.setattr(rest, "_should_boot_shared_subsystems", lambda: True)
+    if hasattr(rest.app.state, "shared_subsystems"):
+        delattr(rest.app.state, "shared_subsystems")
+
+    try:
+        first = rest._boot_shared_subsystems(rest.app)
+        second = rest._boot_shared_subsystems(rest.app)
+        assert first is second
+        assert created == [first]
+        assert booted == [first, first]
+    finally:
+        if hasattr(rest.app.state, "shared_subsystems"):
+            delattr(rest.app.state, "shared_subsystems")
+
+
 def test_launcher_status_endpoint_delegates_to_handler(monkeypatch) -> None:
     expected = {
         "ok": True,

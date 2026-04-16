@@ -7,9 +7,9 @@ from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from storage.postgres.connection import resolve_workflow_database_url
 from storage.postgres.validators import PostgresConfigurationError
 
+from surfaces._workflow_database import workflow_database_url_for_repo
 from .._payload_contract import coerce_optional_text
 from ._shared import _ClientError, _bug_to_dict, _matches, _serialize
 from .workflow_admin import _handle_health
@@ -23,6 +23,7 @@ def _build_workflow_bridge(subs: Any):
 
     from surfaces.workflow_bridge import build_live_workflow_bridge
 
+    repo_root = getattr(subs, "_repo_root", None)
     postgres_env = getattr(subs, "_postgres_env", None)
     env: dict[str, str] = {}
     if callable(postgres_env):
@@ -31,10 +32,12 @@ def _build_workflow_bridge(subs: Any):
         except Exception:
             env = {}
     try:
-        if env.get("WORKFLOW_DATABASE_URL"):
-            database_url = resolve_workflow_database_url(env=env)
-        else:
-            database_url = resolve_workflow_database_url()
+        if repo_root is None:
+            raise PostgresConfigurationError(
+                "postgres.config_missing",
+                "WORKFLOW_DATABASE_URL is required to inspect workflow bridge state",
+            )
+        database_url = workflow_database_url_for_repo(repo_root, env=env)
     except PostgresConfigurationError as exc:
         raise RuntimeError("WORKFLOW_DATABASE_URL is required to inspect workflow bridge state") from exc
     return build_live_workflow_bridge(database_url)
@@ -196,6 +199,12 @@ def handle_query(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
 
     if _matches(question, ["health", "preflight", "probe"]):
         return _handle_health(subs, {})
+
+    from surfaces.mcp.tools import query as _mcp_query
+
+    legacy_result = _mcp_query.handle_legacy_query(subs, {"question": question})
+    if legacy_result is not None:
+        return legacy_result
 
     try:
         kg = subs.get_knowledge_graph()
@@ -600,12 +609,18 @@ def handle_receipts(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         status = body.get("status") or None
         agent = body.get("agent") or None
         limit = body.get("limit", 20)
-        results = search_receipts(query, status=status, agent=agent, limit=limit)
+        results = search_receipts(
+            query,
+            status=status,
+            agent=agent,
+            limit=limit,
+            conn=subs.get_pg_conn(),
+        )
         return {"results": [record.to_search_result() for record in results], "count": len(results)}
 
     if action == "token_burn":
         since_hours = body.get("since_hours", 24)
-        return {"token_burn": receipt_stats(since_hours=since_hours)}
+        return {"token_burn": receipt_stats(since_hours=since_hours, conn=subs.get_pg_conn())}
 
     raise _ClientError(f"Unknown receipts action: {action}")
 

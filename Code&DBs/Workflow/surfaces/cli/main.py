@@ -427,7 +427,7 @@ def _commands_index_text() -> str:
             "  workflow schema|registry|object-type|object|catalog|reload|reconcile",
             "                                                  Direct database and registry authority frontdoors",
             "  workflow query|recall|discover|architecture|artifacts|bugs|costs|leaderboard|trust|fitness|trends|scope|risk|reviews|receipts",
-            "                                                  Derived search and analysis reads",
+            "                                                  Derived search, analysis, and bug-tracker surfaces",
             "  workflow inspect|replay|graph-topology|graph-lineage|topology|lineage",
             "                                                  Derived observability views",
             "  workflow health|health-map|metrics|events|cache|circuits|slots|params|config|notifications|dashboard|api|supervisor|capabilities|work",

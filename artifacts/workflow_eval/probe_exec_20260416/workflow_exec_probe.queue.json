@@ -1,0 +1,26 @@
+{
+  "name": "Workflow Execution Probe 2026-04-16",
+  "workflow_id": "workflow_exec_probe_20260416",
+  "phase": "test",
+  "outcome_goal": "Prove file-backed Docker workflow execution end-to-end with explicit cli_llm transport, code generation, runtime context, and receipts.",
+  "jobs": [
+    {
+      "label": "step1_probe_codegen",
+      "agent": "openai/gpt-5.4-mini",
+      "adapter_type": "cli_llm",
+      "prompt": "In probe_math.py, implement add(a: int, b: int) -> int and add is_even(value: int) -> bool. Use ZERO from seed_contract.py when sensible. Create test_probe_math.py with pytest coverage for add and is_even across positive, negative, and zero cases. Do not modify seed_notes.md or seed_contract.py.",
+      "timeout": 300,
+      "workdir": "/Users/nate/Praxis/artifacts/workflow_eval/probe_exec_20260416",
+      "task_type": "build",
+      "write_scope": [
+        "probe_math.py",
+        "test_probe_math.py"
+      ],
+      "read_scope": [
+        "seed_notes.md",
+        "seed_contract.py",
+        "probe_math.py"
+      ]
+    }
+  ]
+}

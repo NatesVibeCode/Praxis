@@ -555,7 +555,10 @@ def render_execution_bundle(bundle: Mapping[str, Any] | None) -> str:
                 f"with a summary of your work. Your output will not be recorded unless you submit it.\n"
             )
         else:
-            parts.append("completion_contract: " + json.dumps(dict(completion_contract), default=str))
+            parts.append(
+                "completion_contract: "
+                + json.dumps(dict(completion_contract), sort_keys=True, default=str)
+            )
         if completion_contract.get("verification_required"):
             parts.append(
                 "\n** VERIFICATION REQUIRED **\n"

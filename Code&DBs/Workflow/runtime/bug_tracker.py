@@ -220,19 +220,34 @@ class BugTracker:
 
     @staticmethod
     def _normalize_status(value: object, default: BugStatus = BugStatus.OPEN) -> BugStatus:
-        value_text = str(value).strip().upper().replace("-", "_") if value is not None else ""
+        if isinstance(value, BugStatus):
+            value_text = value.value
+        elif isinstance(value, enum.Enum):
+            value_text = str(value.value).strip().upper().replace("-", "_")
+        else:
+            value_text = str(value).strip().upper().replace("-", "_") if value is not None else ""
         if value_text in {"RESOLVED", "DONE", "CLOSED"}:
             value_text = BugStatus.FIXED.value
         return BugTracker._safe_enum(BugStatus, value_text, default)
 
     @staticmethod
     def _normalize_category(value: object, default: BugCategory = BugCategory.OTHER) -> BugCategory:
-        value_text = str(value).strip().upper().replace("-", "_") if value is not None else ""
+        if isinstance(value, BugCategory):
+            value_text = value.value
+        elif isinstance(value, enum.Enum):
+            value_text = str(value.value).strip().upper().replace("-", "_")
+        else:
+            value_text = str(value).strip().upper().replace("-", "_") if value is not None else ""
         return BugTracker._safe_enum(BugCategory, value_text, default)
 
     @staticmethod
     def _normalize_severity(value: object, default: BugSeverity = BugSeverity.P2) -> BugSeverity:
-        value_text = str(value).strip().upper().replace("-", "_") if value is not None else ""
+        if isinstance(value, BugSeverity):
+            value_text = value.value
+        elif isinstance(value, enum.Enum):
+            value_text = str(value.value).strip().upper().replace("-", "_")
+        else:
+            value_text = str(value).strip().upper().replace("-", "_") if value is not None else ""
         alias_map = {
             "LOW": BugSeverity.P3.value,
             "MEDIUM": BugSeverity.P2.value,
@@ -1693,10 +1708,11 @@ class BugTracker:
         tags: Tuple[str, ...] | None,
         exclude_tags: Tuple[str, ...] | None,
         open_only: bool,
+        start_idx: int = 1,
     ) -> tuple[str, list[object], int]:
         clauses: list[str] = []
         params: list[object] = []
-        idx = 1
+        idx = start_idx
         if status is not None:
             status_values = self._status_filter_values(status)
             placeholders = ", ".join(f"${idx + i}" for i in range(len(status_values)))
@@ -1759,27 +1775,69 @@ class BugTracker:
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         return where, params, idx
 
-    def search(self, query: str, limit: int = 20) -> list[Bug]:
+    def search(
+        self,
+        query: str,
+        limit: int = 20,
+        *,
+        status: BugStatus | None = None,
+        severity: BugSeverity | None = None,
+        category: BugCategory | None = None,
+        tags: Tuple[str, ...] | None = None,
+        exclude_tags: Tuple[str, ...] | None = None,
+        open_only: bool = False,
+    ) -> list[Bug]:
+        parsed_status = self._normalize_status(status, default=None) if status is not None else None
+        parsed_severity = self._normalize_severity(severity, default=None) if severity is not None else None
+        parsed_category = self._normalize_category(category, default=None) if category is not None else None
+        where, params, next_idx = self._build_list_bugs_where_clause(
+            status=parsed_status,
+            severity=parsed_severity,
+            category=parsed_category,
+            title_like=None,
+            tags=tags,
+            exclude_tags=exclude_tags,
+            open_only=open_only,
+            start_idx=2,
+        )
+        extra_where = where[7:] if where.startswith(" WHERE ") else ""
+        extra_where_sql = f" AND {extra_where}" if extra_where else ""
+
         if self._vector_store is None:
             rows = self._conn.execute(
-                "SELECT * FROM bugs WHERE search_vector @@ plainto_tsquery('english', $1) LIMIT $2",
-                query, limit,
+                (
+                    "SELECT * FROM bugs "
+                    "WHERE search_vector @@ plainto_tsquery('english', $1)"
+                    f"{extra_where_sql} "
+                    "ORDER BY ts_rank(search_vector, plainto_tsquery('english', $1)) DESC "
+                    f"LIMIT ${next_idx}"
+                ),
+                query, *params, limit,
             )
             return [self._row_to_bug(r) for r in rows]
 
         vector_query = self._vector_store.prepare(query)
+        vector_filters = []
+        if parsed_status is not None:
+            vector_filters.append(VectorFilter("status", parsed_status.value))
+        if parsed_severity is not None:
+            vector_filters.append(VectorFilter("severity", parsed_severity.value))
+        if parsed_category is not None:
+            vector_filters.append(VectorFilter("category", parsed_category.value))
 
         fts_rows = self._conn.execute(
             """SELECT bug_id,
                       row_number() OVER (ORDER BY ts_rank(search_vector, plainto_tsquery('english', $1)) DESC) AS rank
                FROM bugs
-               WHERE search_vector @@ plainto_tsquery('english', $1)
-               LIMIT $2""",
-            query, limit * 2,
+               WHERE search_vector @@ plainto_tsquery('english', $1)"""
+            f"{extra_where_sql} "
+            f"LIMIT ${next_idx}",
+            query, *params, limit * 2,
         )
         vec_rows = vector_query.search(
             "bugs",
             select_columns=("bug_id",),
+            filters=vector_filters or None,
             limit=limit * 2,
             min_similarity=None,
             score_alias="similarity",

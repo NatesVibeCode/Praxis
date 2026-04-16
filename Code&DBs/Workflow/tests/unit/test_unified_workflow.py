@@ -2052,6 +2052,11 @@ def _patch_routing(monkeypatch):
     monkeypatch.setattr(task_type_router, "TaskTypeRouter", _NoopRouter)
 
 
+@pytest.fixture(autouse=True)
+def _patch_runtime_profile_sandbox_payload(monkeypatch):
+    monkeypatch.setattr(_ctx_mod, "_runtime_profile_sandbox_payload", lambda *args, **kwargs: None)
+
+
 def test_submit_workflow_auto_infers_dependencies_from_scopes(monkeypatch):
     jobs = [
         {"label": "build_a", "prompt": "create a", "agent": "openai/gpt-5.4", "write_scope": ["a.py"]},
@@ -2633,6 +2638,224 @@ def test_submit_workflow_persists_execution_bundle_and_control_prompt(monkeypatc
         "praxis_submit_code_change",
         "praxis_get_submission",
     ]
+
+
+def test_preview_workflow_execution_returns_worker_facing_payload(monkeypatch):
+    inline_spec = {
+        "name": "preview-spec",
+        "workflow_id": "workflow.preview_spec",
+        "phase": "build",
+        "jobs": [
+            {
+                "label": "build_a",
+                "prompt": "Implement the preview execution lane.",
+                "agent": "auto/build",
+                "task_type": "code_generation",
+                "write_scope": ["runtime/workflow/preview.py"],
+                "verify_refs": ["verify.preview"],
+            }
+        ],
+    }
+    monkeypatch.setattr(_ctx_mod, "_runtime_profile_sandbox_payload", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        _ctx_mod,
+        "resolve_job_decision_pack",
+        lambda *args, **kwargs: {
+            "pack_version": 1,
+            "authority_domains": ["workspace_boundary"],
+            "decision_keys": [],
+            "decisions": [],
+        },
+    )
+
+    preview = _admission_mod.preview_workflow_execution(
+        _FakeConn(),
+        inline_spec=inline_spec,
+        repo_root="/repo",
+    )
+
+    assert preview["action"] == "preview"
+    assert preview["preview_mode"] == "execution"
+    assert preview["workspace"]["repo_root"] == "/repo"
+    assert preview["jobs"][0]["label"] == "build_a"
+    assert preview["jobs"][0]["route_status"] == "unresolved"
+    assert preview["jobs"][0]["resolved_agent"] is None
+    assert "preview skips task-type routing" in preview["warnings"][0]
+    assert "--- EXECUTION CONTEXT SHARD ---" in preview["jobs"][0]["rendered_user_prompt"]
+    assert "--- EXECUTION CONTROL BUNDLE ---" in preview["jobs"][0]["rendered_user_prompt"]
+    assert "praxis_query" in preview["jobs"][0]["mcp_tool_names"]
+    assert preview["jobs"][0]["workspace"]["workdir"] == "/repo"
+
+
+def test_preview_workflow_execution_marks_non_agent_jobs_not_applicable(monkeypatch):
+    inline_spec = {
+        "name": "preview-spec-non-agent",
+        "workflow_id": "workflow.preview_spec_non_agent",
+        "phase": "build",
+        "jobs": [
+            {
+                "label": "seed",
+                "prompt": "Seed deterministic state.",
+                "adapter_type": "deterministic_task",
+                "expected_outputs": {"go": True},
+            },
+            {
+                "label": "query_db",
+                "prompt": "Query the current workflow state.",
+                "adapter_type": "mcp_task",
+                "mcp_tools": ["praxis_query"],
+            },
+        ],
+    }
+    monkeypatch.setattr(_ctx_mod, "_runtime_profile_sandbox_payload", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        _ctx_mod,
+        "resolve_job_decision_pack",
+        lambda *args, **kwargs: {
+            "pack_version": 1,
+            "authority_domains": ["workspace_boundary"],
+            "decision_keys": [],
+            "decisions": [],
+        },
+    )
+
+    preview = _admission_mod.preview_workflow_execution(
+        _FakeConn(),
+        inline_spec=inline_spec,
+        repo_root="/repo",
+    )
+
+    assert preview["warnings"] == []
+    assert preview["jobs"][0]["route_status"] == "not_applicable"
+    assert preview["jobs"][0]["requested_agent"] is None
+    assert preview["jobs"][0]["resolved_agent"] is None
+    assert preview["jobs"][1]["route_status"] == "not_applicable"
+    assert preview["jobs"][1]["requested_agent"] is None
+    assert preview["jobs"][1]["resolved_agent"] is None
+
+
+def test_preview_and_submit_share_execution_assembly_until_submit_boundary(monkeypatch):
+    inline_spec = {
+        "name": "preview-submit-shared",
+        "workflow_id": "workflow.preview_submit_shared",
+        "phase": "build",
+        "definition_revision": "definition.preview_submit_shared",
+        "plan_revision": "plan.preview_submit_shared",
+        "jobs": [
+            {
+                "label": "build_a",
+                "prompt": "Implement the shared preview lane contract.",
+                "agent": "openai/gpt-5.4-mini",
+                "adapter_type": "cli_llm",
+                "task_type": "build",
+                "write_scope": ["runtime/workflow/preview.py"],
+                "read_scope": ["runtime/workflow/_admission.py"],
+                "verify_refs": ["verify.preview_shared"],
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        _ctx_mod,
+        "resolve_scope",
+        lambda write_scope, root_dir: SimpleNamespace(
+            computed_read_scope=["runtime/workflow/_admission.py"],
+            test_scope=["tests/unit/test_unified_workflow.py"],
+            blast_radius=["runtime/workflow/_admission.py"],
+            context_sections=[
+                {
+                    "name": "Existing Contract",
+                    "content": "Preview and submit must share execution assembly.",
+                }
+            ],
+        ),
+    )
+    monkeypatch.setattr(
+        _ctx_mod,
+        "proof_metrics",
+        lambda conn: {
+            "receipts": {
+                "total": 10,
+                "verification_coverage": 0.5,
+                "fully_proved_verification_coverage": 0.25,
+                "write_manifest_coverage": 0.75,
+            },
+            "compile_authority": {
+                "execution_packets_ready": True,
+                "verify_refs_ready": True,
+                "verification_registry_ready": True,
+                "repo_snapshots_ready": True,
+            },
+        },
+    )
+    monkeypatch.setattr(_ctx_mod, "_runtime_profile_sandbox_payload", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        _ctx_mod,
+        "resolve_job_decision_pack",
+        lambda *args, **kwargs: {
+            "pack_version": 1,
+            "authority_domains": ["workspace_boundary"],
+            "decision_keys": ["authority.workspace_boundary"],
+            "decisions": [{"decision_key": "authority.workspace_boundary"}],
+        },
+    )
+    monkeypatch.setattr(_admission_mod, "_runtime_profile_ref_from_spec", lambda _spec: None)
+    monkeypatch.setattr("runtime.workflow._routing._runtime_profile_ref_from_spec", lambda _spec: None)
+    monkeypatch.setattr("runtime.workflow._routing._workspace_ref_from_spec", lambda _spec: None)
+
+    preview_conn = _FakeConn()
+    preview = _admission_mod.preview_workflow_execution(
+        preview_conn,
+        inline_spec=inline_spec,
+        repo_root="/repo",
+    )
+
+    submit_conn = _FakeConn()
+    _admission_mod.submit_workflow_inline(
+        submit_conn,
+        inline_spec,
+        run_id="dispatch_preview_submit_shared",
+        packet_provenance={
+            "source_kind": "inline_submit",
+            "repo_root": "/repo",
+            "file_inputs": inline_spec,
+        },
+    )
+
+    _, insert_args = next(
+        (query, args)
+        for query, args in submit_conn.queries
+        if "INSERT INTO workflow_job_runtime_context" in query
+    )
+    persisted_shard = (
+        json.loads(insert_args[3]) if isinstance(insert_args[3], str) else insert_args[3]
+    )
+    persisted_bundle = (
+        json.loads(insert_args[4]) if isinstance(insert_args[4], str) else insert_args[4]
+    )
+    submit_messages = _ctx_mod._execution_model_messages(
+        {
+            **inline_spec["jobs"][0],
+            "_execution_context": persisted_shard,
+            "_execution_bundle": persisted_bundle,
+        }
+    )
+    preview_bundle = dict(preview["execution_bundles"]["build_a"])
+    submit_bundle = dict(persisted_bundle)
+    preview_bundle.pop("run_id", None)
+    submit_bundle.pop("run_id", None)
+
+    assert preview["execution_context_shards"]["build_a"] == persisted_shard
+    assert preview_bundle == submit_bundle
+    assert preview["jobs"][0]["messages"] == submit_messages
+    assert (
+        preview["jobs"][0]["rendered_execution_context_shard"]
+        in preview["jobs"][0]["rendered_user_prompt"]
+    )
+    assert (
+        preview["jobs"][0]["rendered_execution_bundle"]
+        in preview["jobs"][0]["rendered_user_prompt"]
+    )
+    assert any("INSERT INTO workflow_job_runtime_context" in query for query, _ in submit_conn.queries)
 
 
 def test_submit_workflow_prefers_execution_manifest_authority_over_prompt_bucket(monkeypatch):
@@ -3312,6 +3535,8 @@ def test_write_job_receipt_writes_authority_receipt_and_notification():
                         {"key": "file:runtime/example.py", "mode": "write"},
                     ],
                 }]
+            if "WITH lock_token AS (" in normalized and "INSERT INTO receipts (" in normalized:
+                return [{"evidence_seq": 1702}]
             return []
 
     conn = _ReceiptConn()
@@ -3357,10 +3582,11 @@ def test_write_job_receipt_writes_authority_receipt_and_notification():
     query_texts = [query for query, _ in conn.queries]
     receipts_idx = next(i for i, query in enumerate(query_texts) if "INSERT INTO receipts" in query)
     notification_idx = next(i for i, query in enumerate(query_texts) if "INSERT INTO workflow_notifications" in query)
+    receipt_insert_query = query_texts[receipts_idx]
     receipt_insert_args = conn.queries[receipts_idx][1]
-    receipt_inputs = json.loads(receipt_insert_args[10])
-    receipt_outputs = json.loads(receipt_insert_args[11])
-    assert receipt_inputs["transition_seq"] == 1702
+    receipt_inputs = json.loads(receipt_insert_args[15])
+    receipt_outputs = json.loads(receipt_insert_args[16])
+    assert "'{transition_seq}'" in receipt_insert_query
     assert receipt_inputs["workspace_root"] == "/repo"
     assert receipt_inputs["workspace_ref"] == "workspace://praxis"
     assert receipt_inputs["runtime_profile_ref"] == "runtime://praxis"
@@ -3380,8 +3606,8 @@ def test_write_job_receipt_writes_authority_receipt_and_notification():
     assert receipt_outputs["git_provenance"]["available"] is False
     assert receipt_outputs["write_manifest"]["total_files"] == 1
     assert receipt_outputs["mutation_provenance"]["write_paths"] == ["runtime/example.py"]
-    assert receipt_insert_args[6] == datetime(2026, 4, 8, 18, 0, tzinfo=timezone.utc)
-    assert receipt_insert_args[7] == datetime(2026, 4, 8, 18, 0, 5, tzinfo=timezone.utc)
+    assert receipt_insert_args[11] == datetime(2026, 4, 8, 18, 0, tzinfo=timezone.utc)
+    assert receipt_insert_args[12] == datetime(2026, 4, 8, 18, 0, 5, tzinfo=timezone.utc)
     assert notification_idx > receipts_idx
 
 

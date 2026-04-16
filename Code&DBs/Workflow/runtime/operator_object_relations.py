@@ -9,6 +9,7 @@ surface-specific JSON.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -75,6 +76,8 @@ def _optional_text(value: object, *, field_name: str) -> str | None:
 
 
 def _require_mapping(value: object, *, field_name: str) -> Mapping[str, Any]:
+    if isinstance(value, str):
+        value = json.loads(value)
     if not isinstance(value, Mapping):
         raise _fail(
             "operator_object_relation.invalid_value",
@@ -124,6 +127,10 @@ def _slug_fragment(value: object, *, field_name: str) -> str:
             details={"field": field_name},
         )
     return collapsed
+
+
+def _normalize_relation_kind(value: object, *, field_name: str) -> str:
+    return _slug_fragment(value, field_name=field_name).replace("-", "_")
 
 
 def _require_kind(value: object, *, field_name: str) -> str:
@@ -282,7 +289,10 @@ def _operator_object_relation_from_row(
             row.get("operator_object_relation_id"),
             field_name="operator_object_relation_id",
         ),
-        relation_kind=_slug_fragment(row.get("relation_kind"), field_name="relation_kind"),
+        relation_kind=_normalize_relation_kind(
+            row.get("relation_kind"),
+            field_name="relation_kind",
+        ),
         relation_status=_require_status(
             row.get("relation_status"),
             field_name="relation_status",
@@ -617,7 +627,7 @@ class PostgresOperatorObjectRelationRepository:
                 relation.operator_object_relation_id,
                 field_name="relation.operator_object_relation_id",
             ),
-            relation_kind=_slug_fragment(
+            relation_kind=_normalize_relation_kind(
                 relation.relation_kind,
                 field_name="relation.relation_kind",
             ),
@@ -694,7 +704,7 @@ class PostgresOperatorObjectRelationRepository:
             normalized_relation.source_ref,
             normalized_relation.target_kind,
             normalized_relation.target_ref,
-            dict(normalized_relation.relation_metadata),
+            json.dumps(dict(normalized_relation.relation_metadata)),
             normalized_relation.bound_by_decision_id,
             normalized_relation.created_at,
             normalized_relation.updated_at,

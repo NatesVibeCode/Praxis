@@ -221,6 +221,7 @@ def _submit_workflow_launch(
     *,
     spec_path: str | None = None,
     prompt_launch_spec: PromptLaunchSpec | None = None,
+    preview_execution: bool = False,
     dry_run: bool = False,
     fresh: bool = False,
     job_id: str | None = None,
@@ -231,6 +232,9 @@ def _submit_workflow_launch(
 ) -> int:
     if spec_path is None and prompt_launch_spec is None:
         print("ERROR: workflow launch requires a spec path or inline spec", file=sys.stderr)
+        return 1
+    if preview_execution and dry_run:
+        print("ERROR: --preview-execution cannot be combined with --dry-run", file=sys.stderr)
         return 1
 
     if spec_path is not None:
@@ -250,6 +254,34 @@ def _submit_workflow_launch(
         workflow_id = spec.workflow_id
         spec_name = spec.name
         total_jobs = len(spec.jobs)
+
+    if preview_execution:
+        from runtime.workflow.unified import preview_workflow_execution
+
+        try:
+            preview_payload = preview_workflow_execution(
+                _get_pg_conn(),
+                spec_path=spec_path,
+                inline_spec=None if prompt_launch_spec is None else prompt_launch_spec.to_inline_spec_dict(),
+                repo_root=_repo_root(),
+            )
+        except Exception as exc:
+            print(
+                json.dumps(
+                    {
+                        "error": str(exc),
+                        "error_code": "workflow.preview.failed",
+                    },
+                    indent=2,
+                ),
+                file=sys.stderr,
+            )
+            return 1
+        if result_file:
+            _write_result_file(result_file, preview_payload)
+            print(f"Result written to: {result_file}")
+        print(json.dumps(preview_payload, indent=2))
+        return 0
 
     mode_label = "DRY-RUN" if dry_run else "ASYNC"
     print(f"=== Workflow {mode_label}: {spec_name} ===")
@@ -435,6 +467,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         sys.path.insert(0, _WORKFLOW_ROOT)
     return _submit_workflow_launch(
         spec_path=args.spec,
+        preview_execution=bool(getattr(args, "preview_execution", False)),
         dry_run=bool(args.dry_run),
         fresh=bool(getattr(args, "fresh", False)),
         job_id=args.job_id,
@@ -962,6 +995,11 @@ def main(argv: list[str] | None = None) -> int:
 
     run_parser = sub.add_parser("run", help="Run a workflow spec through the workflow pipeline")
     run_parser.add_argument("spec", help="Path to .queue.json spec file")
+    run_parser.add_argument(
+        "--preview-execution",
+        action="store_true",
+        help="Assemble and print the exact worker-facing execution payload without submitting a run",
+    )
     run_parser.add_argument("--dry-run", action="store_true", help="Simulate without executing")
     run_parser.add_argument(
         "--fresh",

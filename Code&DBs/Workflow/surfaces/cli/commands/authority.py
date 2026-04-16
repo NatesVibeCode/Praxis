@@ -33,10 +33,6 @@ from runtime.surface_catalog import (
     upsert_surface_catalog_item,
 )
 from storage.migrations import workflow_migration_expected_objects
-from storage.postgres import (
-    SyncPostgresConnection,
-    get_workflow_pool,
-)
 from storage.postgres.connection import connect_workflow_database
 from storage.postgres.schema import (
     bootstrap_control_plane_schema,
@@ -45,14 +41,15 @@ from storage.postgres.schema import (
     inspect_workflow_schema,
 )
 from storage.postgres.validators import PostgresConfigurationError, PostgresStorageError
+from surfaces.cli._db import cli_sync_conn
 from surfaces.cli.mcp_tools import load_json_file, print_json
 from surfaces.mcp.tools.health import tool_praxis_reload
 
 from .data import _data_command
 
 
-def _sync_conn() -> SyncPostgresConnection:
-    return SyncPostgresConnection(get_workflow_pool())
+def _sync_conn():
+    return cli_sync_conn()
 
 
 def _text(value: Any) -> str:

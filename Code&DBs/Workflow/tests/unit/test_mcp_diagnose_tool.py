@@ -29,15 +29,18 @@ def test_praxis_query_routes_diagnose_requests(monkeypatch) -> None:
     assert result["diagnosis"]["diagnosis"]["receipt_found"] is True
 
 
-def test_praxis_query_routes_issue_backlog_requests(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "surfaces.mcp.tools.operator.tool_praxis_operator_view",
-        lambda params: {"view": params["view"], "count": 2, "issues": [{"issue_id": "issue.alpha"}]},
-    )
+def test_praxis_query_delegates_to_shared_query_core(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _handle_query(subs, body):
+        captured["subs"] = subs
+        captured["body"] = dict(body)
+        return {"routed_to": "shared_core", "question": body["question"]}
+
+    monkeypatch.setattr(query_mod.workflow_query_core, "handle_query", _handle_query)
 
     result = query_mod.tool_praxis_query({"question": "show me the issue backlog"})
 
-    assert result["routed_to"] == "issue_backlog"
-    assert result["view"] == "issue_backlog"
-    assert result["count"] == 2
-    assert result["issues"][0]["issue_id"] == "issue.alpha"
+    assert captured["subs"] is query_mod._subs
+    assert captured["body"] == {"question": "show me the issue backlog"}
+    assert result == {"routed_to": "shared_core", "question": "show me the issue backlog"}

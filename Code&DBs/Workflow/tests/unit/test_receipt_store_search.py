@@ -13,16 +13,21 @@ class _FakeConn:
         self.calls.append((sql, params))
         return [
             {
-                "id": 7,
-                "label": "deploy-check",
-                "agent": "openai/gpt-5.4",
+                "receipt_id": "receipt-7",
+                "workflow_id": "workflow-test",
+                "run_id": "workflow_run_123",
+                "request_id": "request-1",
+                "node_id": "deploy-check",
+                "attempt_no": 1,
+                "started_at": datetime(2026, 4, 8, 18, 40, tzinfo=timezone.utc),
+                "finished_at": datetime(2026, 4, 8, 18, 45, tzinfo=timezone.utc),
+                "executor_type": "openai/gpt-5.4",
                 "status": "succeeded",
                 "failure_code": "",
-                "timestamp": datetime(2026, 4, 8, 18, 45, tzinfo=timezone.utc),
-                "raw_json": {
-                    "run_id": "workflow_run_123",
-                    "outputs": {"note": "receipt evidence"},
-                },
+                "inputs": {},
+                "outputs": {"note": "receipt evidence"},
+                "artifacts": {},
+                "decision_refs": [],
             }
         ]
 
@@ -35,7 +40,27 @@ def test_search_receipts_uses_raw_receipt_evidence(monkeypatch) -> None:
 
     assert len(results) == 1
     sql, params = conn.calls[0]
-    assert "to_tsvector('english', COALESCE(rs.raw_json::text, ''))" in sql
-    assert "spec_name" not in sql
+    assert "COALESCE(outputs::text, '') ILIKE" in sql
+    assert "raw_json" not in sql
     assert params == ("receipt evidence", 3)
     assert results[0].run_id == "workflow_run_123"
+
+
+def test_conn_uses_runtime_database_authority_resolution(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        receipt_store,
+        "resolve_runtime_database_url",
+        lambda: "postgresql://repo.test/workflow",
+    )
+    monkeypatch.setattr(
+        receipt_store,
+        "ensure_postgres_available",
+        lambda *, env: captured.update({"env": env}) or object(),
+    )
+
+    result = receipt_store._conn()
+
+    assert result is not None
+    assert captured["env"] == {"WORKFLOW_DATABASE_URL": "postgresql://repo.test/workflow"}

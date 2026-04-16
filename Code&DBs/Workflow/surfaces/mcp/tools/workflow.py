@@ -7,7 +7,6 @@ import threading
 import uuid
 from typing import Any
 
-from storage.postgres.connection import resolve_workflow_database_url
 from storage.postgres.validators import PostgresConfigurationError
 
 from runtime.failure_projection import project_failure_classification
@@ -20,8 +19,9 @@ from runtime.subscriptions import (
     WorkerSubscriptionBatch,
     WorkerSubscriptionCursor,
 )
+from surfaces._workflow_database import workflow_database_url_for_repo
 from surfaces.workflow_bridge import WorkflowBridge, WorkflowClaimableWork, build_live_workflow_bridge
-from ..subsystems import _subs, REPO_ROOT
+from ..subsystems import _subs, REPO_ROOT, workflow_database_env
 from ..helpers import _serialize
 
 
@@ -45,17 +45,8 @@ def _workflow_spec_mod():
 
 
 def _workflow_database_url() -> str:
-    postgres_env = getattr(_subs, "_postgres_env", None)
-    env: dict[str, str] = {}
-    if callable(postgres_env):
-        try:
-            env = dict(postgres_env() or {})
-        except Exception:
-            env = {}
     try:
-        if env.get("WORKFLOW_DATABASE_URL"):
-            return resolve_workflow_database_url(env=env)
-        return resolve_workflow_database_url()
+        return workflow_database_url_for_repo(REPO_ROOT, env=workflow_database_env())
     except PostgresConfigurationError as exc:
         raise RuntimeError("WORKFLOW_DATABASE_URL is required to inspect workflow bridge state") from exc
 
@@ -1408,6 +1399,32 @@ def tool_praxis_workflow(params: dict, _progress_emitter=None) -> dict:
 
         return {"runs": runs}
 
+    if action == "preview":
+        inline_spec = params.get("inline_spec")
+        if isinstance(inline_spec, str):
+            try:
+                inline_spec = json.loads(inline_spec)
+            except json.JSONDecodeError as exc:
+                return {"error": f"inline_spec must be JSON if provided as a string: {exc}"}
+        spec_path = params.get("spec_path")
+        if bool(spec_path) == isinstance(inline_spec, dict):
+            return {"error": "provide exactly one of spec_path or inline_spec for action='preview'"}
+
+        pg, error = _load_pg_conn(action="preview")
+        if error is not None:
+            return error
+        try:
+            from runtime.workflow.unified import preview_workflow_execution
+
+            return preview_workflow_execution(
+                pg,
+                spec_path=str(spec_path) if spec_path else None,
+                inline_spec=dict(inline_spec) if isinstance(inline_spec, dict) else None,
+                repo_root=str(params.get("repo_root") or REPO_ROOT),
+            )
+        except Exception as exc:
+            return _structured_runtime_error(exc, action="preview")
+
     # --- Run or dry-run ---
     spec_path = params.get("spec_path")
     if not spec_path:
@@ -1417,7 +1434,7 @@ def tool_praxis_workflow(params: dict, _progress_emitter=None) -> dict:
         return {
             "error": (
                 f"Unsupported action='{action}'. Expected one of: "
-                "run, spawn, status, inspect, claim, acknowledge, cancel, list, notifications, retry, repair, chain."
+                "run, spawn, preview, status, inspect, claim, acknowledge, cancel, list, notifications, retry, repair, chain."
             )
         }
 
@@ -1577,6 +1594,8 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "WORKFLOW CONTRACT:\n"
                 "  - action='run' is the kickoff call. Treat run_id as the authority and follow with "
                 "status or stream reads on separate channels.\n"
+                "  - action='preview' assembles the exact worker-facing execution payload without "
+                "creating a workflow run.\n"
                 "  - Kickoff and status payloads now always include dashboard.\n"
                 "  - Direct callers without an MCP emitter receive kickoff-only payloads immediately.\n"
                 "  - MCP callers with wait=true only keep the call open for inline polling when they send "
@@ -1593,6 +1612,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "  - Use kill_if_idle=true on a status call if the run is clearly idle and unhealthy.\n\n"
                 "EXAMPLES:\n"
                 "  Launch:          praxis_workflow(action='run', spec_path='artifacts/workflow/my_spec.queue.json')\n"
+                "  Preview inputs:  praxis_workflow(action='preview', spec_path='artifacts/workflow/my_spec.queue.json')\n"
                 "  Spawn child:     praxis_workflow(action='spawn', spec_path='...', parent_run_id='workflow_parent', dispatch_reason='phase.spawn')\n"
                 "  Force kickoff:   praxis_workflow(action='run', spec_path='...', wait=false)\n"
                 "  Check status:    praxis_workflow(action='status', run_id='workflow_abc123')\n"
@@ -1607,6 +1627,14 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "type": "object",
                 "properties": {
                     "spec_path": {"type": "string", "description": "Path to a .queue.json spec file. Required for 'run' and 'spawn'."},
+                    "inline_spec": {
+                        "type": "object",
+                        "description": "Inline workflow spec. Allowed for action='preview' when no spec_path is provided.",
+                    },
+                    "repo_root": {
+                        "type": "string",
+                        "description": "Optional repo root for preview path resolution. Defaults to the workflow repo root.",
+                    },
                     "wait": {
                         "type": "boolean",
                         "description": (
@@ -1624,6 +1652,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         "description": (
                 "Operation: 'run' (default — submits and returns run_id), "
                             "'spawn' (submits a child workflow with explicit lineage), "
+                            "'preview' (assemble the worker-facing execution payload without creating a run), "
                             "'status' (poll a running/completed workflow with health heuristics), "
                             "'inspect' (deep job inspection of all fields), "
                             "'claim' (inspect claimable worker work for a subscription/run pair), "
@@ -1635,7 +1664,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                             "'notifications' (drain pending completion events), "
                             "'retry' (re-queue a failed job)."
                         ),
-                        "enum": ["run", "spawn", "status", "inspect", "claim", "acknowledge", "cancel", "list", "notifications", "retry", "repair", "chain"],
+                        "enum": ["run", "spawn", "preview", "status", "inspect", "claim", "acknowledge", "cancel", "list", "notifications", "retry", "repair", "chain"],
                         "default": "run",
                     },
                     "parent_run_id": {

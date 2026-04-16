@@ -96,6 +96,7 @@ from ._workflow_state import (  # noqa: F401
 # ── Submission ───────────────────────────────────────────────────────────
 from ._admission import (  # noqa: F401
     IdempotencyConflict,
+    preview_workflow_execution,
     _retry_packet_reuse_provenance,
     load_execution_packets,
     submit_workflow,

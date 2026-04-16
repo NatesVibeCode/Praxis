@@ -98,6 +98,24 @@ class _AuthorityConn:
                 },
             ]
         if normalized.startswith(
+            "SELECT verification_ref, display_name, executor_kind, argv_template, template_inputs, default_timeout_seconds, enabled FROM verification_registry WHERE verification_ref = ANY($1::text[])"
+        ):
+            refs = {str(item) for item in args[0]}
+            rows = []
+            if "verification.python.py_compile" in refs:
+                rows.append(
+                    {
+                        "verification_ref": "verification.python.py_compile",
+                        "display_name": "Python Bytecode Compile",
+                        "executor_kind": "argv",
+                        "argv_template": ["python3", "-m", "py_compile", "{path}"],
+                        "template_inputs": ["path"],
+                        "default_timeout_seconds": 60,
+                        "enabled": True,
+                    }
+                )
+            return rows
+        if normalized.startswith(
             "SELECT healer_ref, display_name, description, executor_kind, action_ref, auto_mode, safety_mode, enabled, decision_ref FROM healer_registry ORDER BY healer_ref ASC"
         ):
             return [
@@ -183,13 +201,18 @@ def test_run_registered_verifier_wraps_verification_registry_executor(
     import runtime.verification as verification
 
     conn = _AuthorityConn()
+    observed_commands = []
     summary = SimpleNamespace(
         all_passed=True,
         to_json=lambda: {"total": 1, "passed": 1, "failed": 0, "all_passed": True, "results": []},
     )
-    monkeypatch.setattr(verification, "resolve_verify_commands", lambda *_args, **_kwargs: ["cmd"])
-    monkeypatch.setattr(verification, "run_verify", lambda *_args, **_kwargs: ("result",))
+    monkeypatch.setattr(
+        verification,
+        "run_verify",
+        lambda commands, **_kwargs: observed_commands.extend(commands) or ("result",),
+    )
     monkeypatch.setattr(verification, "summarize_verification", lambda *_args, **_kwargs: summary)
+    monkeypatch.setattr(verifier_authority, "_maybe_promote_verifier_bug", lambda **_kwargs: None)
 
     payload = verifier_authority.run_registered_verifier(
         "verifier.job.python.py_compile",
@@ -198,7 +221,9 @@ def test_run_registered_verifier_wraps_verification_registry_executor(
     )
 
     assert payload["status"] == "passed"
+    assert payload["target_ref"] == "verifier.job.python.py_compile"
     assert payload["outputs"]["verification_ref"] == "verification.python.py_compile"
+    assert observed_commands[0].argv == ("python3", "-m", "py_compile", "sample.py")
     assert len(conn.verification_inserts) == 1
 
 

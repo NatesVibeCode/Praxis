@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import io
-import threading
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -44,11 +43,13 @@ class _FakeCircuits:
 
 class _FakeRoutes:
     def __init__(self) -> None:
-        self._buffers = {"anthropic": [1, 2]}
-        self._lock = threading.Lock()
+        self._providers = ("anthropic",)
 
     def consecutive_failures(self, provider_slug: str) -> int:  # noqa: ARG002
         return 2
+
+    def provider_slugs(self) -> tuple[str, ...]:
+        return self._providers
 
 
 class _FakeMetricsView:

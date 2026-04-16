@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+import uuid
 
 import pytest
 
@@ -230,3 +231,105 @@ def test_postgres_append_transition_proof_raises_when_persistence_fails(
 
     with pytest.raises(RuntimeBoundaryError, match="persistent evidence proof append failed"):
         writer.append_transition_proof(claim_received_proof)
+
+
+def test_postgres_append_claim_received_proof_bootstraps_run_state(
+    route_identity,
+    request_payload,
+    admitted_definition_ref,
+    admitted_definition_hash,
+    occurred_at,
+) -> None:
+    suffix = uuid.uuid4().hex[:8]
+    unique_route_identity = replace(
+        route_identity,
+        run_id=f"run-bootstrap-{suffix}",
+        request_id=f"request-bootstrap-{suffix}",
+        claim_id=f"claim-bootstrap-{suffix}",
+    )
+    proof = build_claim_received_proof(
+        route_identity=unique_route_identity,
+        event_id=f"workflow_event:{unique_route_identity.run_id}:1",
+        receipt_id=f"receipt:{unique_route_identity.run_id}:2",
+        evidence_seq=1,
+        transition_seq=1,
+        request_payload=request_payload,
+        admitted_definition_ref=admitted_definition_ref,
+        admitted_definition_hash=admitted_definition_hash,
+        occurred_at=occurred_at,
+    )
+    writer = PostgresEvidenceWriter()
+
+    try:
+        result = writer.append_transition_proof(proof)
+
+        assert result.evidence_seq == 2
+        assert writer._run(
+            writer._load_current_state(run_id=unique_route_identity.run_id)
+        ) == RunState.CLAIM_RECEIVED.value
+        timeline = writer.evidence_timeline(unique_route_identity.run_id)
+        assert [row.kind for row in timeline] == ["workflow_event", "receipt"]
+    finally:
+        writer.close_blocking()
+
+
+def test_postgres_append_node_proof_does_not_mutate_workflow_run_state(
+    route_identity,
+    request_payload,
+    admitted_definition_ref,
+    admitted_definition_hash,
+    occurred_at,
+) -> None:
+    suffix = uuid.uuid4().hex[:8]
+    unique_route_identity = replace(
+        route_identity,
+        run_id=f"run-node-{suffix}",
+        request_id=f"request-node-{suffix}",
+        claim_id=f"claim-node-{suffix}",
+    )
+    writer = PostgresEvidenceWriter()
+
+    try:
+        submission_proof = build_claim_received_proof(
+            route_identity=unique_route_identity,
+            event_id=f"workflow_event:{unique_route_identity.run_id}:1",
+            receipt_id=f"receipt:{unique_route_identity.run_id}:2",
+            evidence_seq=1,
+            transition_seq=1,
+            request_payload=request_payload,
+            admitted_definition_ref=admitted_definition_ref,
+            admitted_definition_hash=admitted_definition_hash,
+            occurred_at=occurred_at,
+        )
+        writer.append_transition_proof(submission_proof)
+
+        node_proof = build_transition_proof(
+            route_identity=replace(unique_route_identity, transition_seq=2),
+            transition_seq=2,
+            event_id=f"workflow_event:{unique_route_identity.run_id}:3",
+            receipt_id=f"receipt:{unique_route_identity.run_id}:4",
+            event_type="node_started",
+            receipt_type="node_start_receipt",
+            reason_code="runtime.node_started",
+            evidence_seq=3,
+            occurred_at=occurred_at + timedelta(minutes=1),
+            status="running",
+            payload={"node_id": "node-1"},
+            inputs={"node_id": "node-1"},
+            outputs={"node_id": "node-1", "status": "running"},
+            node_id="node-1",
+            causation_id=f"receipt:{unique_route_identity.run_id}:2",
+        )
+
+        result = writer.append_transition_proof(node_proof)
+
+        assert result.evidence_seq == 4
+        assert writer._run(
+            writer._load_current_state(run_id=unique_route_identity.run_id)
+        ) == RunState.CLAIM_RECEIVED.value
+        timeline = writer.evidence_timeline(unique_route_identity.run_id)
+        assert [row.evidence_seq for row in timeline] == [1, 2, 3, 4]
+        assert timeline[2].record.event_type == "node_started"
+        assert timeline[3].record.receipt_type == "node_start_receipt"
+    finally:
+        writer.close_blocking()

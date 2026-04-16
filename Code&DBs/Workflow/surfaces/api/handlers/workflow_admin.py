@@ -11,7 +11,6 @@ from runtime.engineering_observability import (
     build_code_hotspots,
     build_platform_observability,
 )
-from storage.postgres.connection import resolve_workflow_database_url
 from surfaces.api import operator_read, operator_write
 from surfaces.api.handlers import workflow_launcher
 from surfaces.mcp.catalog import get_tool_catalog
@@ -33,6 +32,13 @@ def _tool_definition(tool_name: str):
     if definition is None:
         raise KeyError(f"unknown MCP tool: {tool_name}")
     return definition
+
+
+def _workflow_env(subs: Any) -> dict[str, str]:
+    postgres_env = getattr(subs, "_postgres_env", None)
+    if callable(postgres_env):
+        return dict(postgres_env() or {})
+    raise RuntimeError("workflow surface is missing an explicit Postgres env authority")
 
 
 def _tool_surface_hint(
@@ -428,7 +434,6 @@ def _parse_optional_iso_datetime(value: object, *, field_name: str) -> datetime 
 
 
 def _handle_task_route_eligibility_post(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
-    del subs
     provider_slug = body.get("provider_slug")
     if not isinstance(provider_slug, str) or not provider_slug.strip():
         raise _ClientError("provider_slug is required")
@@ -455,7 +460,7 @@ def _handle_task_route_eligibility_post(subs: Any, body: dict[str, Any]) -> dict
     ):
         raise _ClientError("decision_ref must be a non-empty string when provided")
 
-    env = {"WORKFLOW_DATABASE_URL": resolve_workflow_database_url()}
+    env = _workflow_env(subs)
     return operator_write.set_task_route_eligibility_window(
         provider_slug=provider_slug,
         eligibility_status=body.get("eligibility_status", "rejected"),
@@ -493,7 +498,6 @@ def _parse_optional_text(value: object, *, field_name: str) -> str | None:
 
 
 def _handle_native_primary_cutover_gate_post(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
-    del subs
     decided_by = body.get("decided_by")
     if not isinstance(decided_by, str) or not decided_by.strip():
         raise _ClientError("decided_by is required")
@@ -529,7 +533,7 @@ def _handle_native_primary_cutover_gate_post(subs: Any, body: dict[str, Any]) ->
         field_name="required_evidence",
     )
 
-    env = {"WORKFLOW_DATABASE_URL": resolve_workflow_database_url()}
+    env = _workflow_env(subs)
     return operator_write.admit_native_primary_cutover_gate(
         decided_by=decided_by.strip(),
         decision_source=decision_source.strip(),
@@ -615,7 +619,6 @@ def _parse_optional_bool(value: object, *, field_name: str) -> bool | None:
 
 
 def _handle_roadmap_write_post(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
-    del subs
     title = body.get("title")
     if not isinstance(title, str) or not title.strip():
         raise _ClientError("title is required")
@@ -624,7 +627,7 @@ def _handle_roadmap_write_post(subs: Any, body: dict[str, Any]) -> dict[str, Any
     if not isinstance(intent_brief, str) or not intent_brief.strip():
         raise _ClientError("intent_brief is required")
 
-    env = {"WORKFLOW_DATABASE_URL": resolve_workflow_database_url()}
+    env = _workflow_env(subs)
     return operator_write.roadmap_write(
         action=body.get("action", "preview"),
         title=title,
@@ -657,12 +660,11 @@ def _handle_roadmap_write_post(subs: Any, body: dict[str, Any]) -> dict[str, Any
 
 
 def _handle_roadmap_view_post(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
-    del subs
     root_roadmap_item_id = body.get("root_roadmap_item_id")
     if not isinstance(root_roadmap_item_id, str) or not root_roadmap_item_id.strip():
         raise _ClientError("root_roadmap_item_id is required")
 
-    env = {"WORKFLOW_DATABASE_URL": resolve_workflow_database_url()}
+    env = _workflow_env(subs)
     return operator_read.query_roadmap_tree(
         root_roadmap_item_id=root_roadmap_item_id,
         env=env,
@@ -670,8 +672,7 @@ def _handle_roadmap_view_post(subs: Any, body: dict[str, Any]) -> dict[str, Any]
 
 
 def _handle_work_item_closeout_post(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
-    del subs
-    env = {"WORKFLOW_DATABASE_URL": resolve_workflow_database_url()}
+    env = _workflow_env(subs)
     return operator_write.reconcile_work_item_closeout(
         action=body.get("action", "preview"),
         bug_ids=_parse_optional_string_list(
@@ -687,7 +688,6 @@ def _handle_work_item_closeout_post(subs: Any, body: dict[str, Any]) -> dict[str
 
 
 def _handle_provider_onboarding_post(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
-    del subs
     from registry.provider_onboarding import normalize_provider_onboarding_spec, run_provider_onboarding
 
     raw_spec = body.get("spec") if isinstance(body.get("spec"), dict) else body
@@ -696,7 +696,7 @@ def _handle_provider_onboarding_post(subs: Any, body: dict[str, Any]) -> dict[st
     except Exception as exc:
         raise _ClientError(str(exc)) from exc
 
-    env = {"WORKFLOW_DATABASE_URL": resolve_workflow_database_url()}
+    env = _workflow_env(subs)
     result = run_provider_onboarding(
         database_url=env["WORKFLOW_DATABASE_URL"],
         spec=spec,
@@ -710,7 +710,7 @@ def _handle_health(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
     from adapters import provider_registry as provider_registry_mod
     dependency_truth = dependency_truth_report(scope="all")
 
-    db_url = resolve_workflow_database_url()
+    db_url = _workflow_env(subs)["WORKFLOW_DATABASE_URL"]
     probes: list[Any] = [
         hs_mod.PostgresProbe(db_url),
         hs_mod.PostgresConnectivityProbe(db_url),

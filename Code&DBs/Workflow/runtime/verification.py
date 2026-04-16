@@ -181,6 +181,64 @@ def _render_argv(argv_template: list[Any], *, inputs: dict[str, Any], verificati
     return tuple(rendered)
 
 
+def resolve_verification_bindings(
+    conn: "SyncPostgresConnection",
+    bindings: list[VerificationBinding] | None,
+) -> list[VerifyCommand]:
+    bindings = list(bindings or [])
+    if not bindings:
+        return []
+
+    rows = _repository(conn).list_verification_registry_rows(
+        verification_refs=[binding.verification_ref for binding in bindings],
+    )
+    authority_rows = {str(row["verification_ref"]): dict(row) for row in rows or []}
+
+    commands: list[VerifyCommand] = []
+    for index, binding in enumerate(bindings):
+        if not isinstance(binding, VerificationBinding):
+            raise VerificationAuthorityError(
+                f"verification_bindings[{index}] must be a VerificationBinding",
+            )
+        row = authority_rows.get(binding.verification_ref)
+        if row is None:
+            raise VerificationAuthorityError(
+                f"verification_registry missing {binding.verification_ref}",
+            )
+        if not bool(row.get("enabled")):
+            raise VerificationAuthorityError(
+                f"verification_registry row {binding.verification_ref} is disabled",
+            )
+        if str(row.get("executor_kind") or "").strip() != "argv":
+            raise VerificationAuthorityError(
+                f"{binding.verification_ref} executor_kind must be 'argv'",
+            )
+        required_inputs = [
+            str(item)
+            for item in _json_array(row.get("template_inputs"), field_name="template_inputs")
+        ]
+        for required_input in required_inputs:
+            if required_input not in binding.inputs:
+                raise VerificationAuthorityError(
+                    f"{binding.verification_ref} requires verify input '{required_input}'",
+                )
+        argv_template = _json_array(row.get("argv_template"), field_name="argv_template")
+        argv = _render_argv(
+            argv_template,
+            inputs=binding.inputs,
+            verification_ref=binding.verification_ref,
+        )
+        commands.append(
+            VerifyCommand(
+                verification_ref=binding.verification_ref,
+                argv=argv,
+                label=binding.label or str(row.get("display_name") or binding.verification_ref),
+                timeout=int(binding.timeout or row.get("default_timeout_seconds") or _DEFAULT_VERIFY_TIMEOUT),
+            )
+        )
+    return commands
+
+
 def resolve_verify_commands(
     conn: "SyncPostgresConnection",
     raw_bindings: list[object] | None,
@@ -201,43 +259,7 @@ def resolve_verify_commands(
         refs.append(verify_ref)
 
     bindings = [_verify_ref_to_binding(conn, verify_ref) for verify_ref in refs]
-    rows = _repository(conn).list_verification_registry_rows(
-        verification_refs=[binding.verification_ref for binding in bindings],
-    )
-    authority_rows = {str(row["verification_ref"]): dict(row) for row in rows or []}
-
-    commands: list[VerifyCommand] = []
-    for binding in bindings:
-        row = authority_rows.get(binding.verification_ref)
-        if row is None:
-            raise VerificationAuthorityError(
-                f"verification_registry missing {binding.verification_ref}",
-            )
-        if not bool(row.get("enabled")):
-            raise VerificationAuthorityError(
-                f"verification_registry row {binding.verification_ref} is disabled",
-            )
-        if str(row.get("executor_kind") or "").strip() != "argv":
-            raise VerificationAuthorityError(
-                f"{binding.verification_ref} executor_kind must be 'argv'",
-            )
-        required_inputs = [str(item) for item in _json_array(row.get("template_inputs"), field_name="template_inputs")]
-        for required_input in required_inputs:
-            if required_input not in binding.inputs:
-                raise VerificationAuthorityError(
-                    f"{binding.verification_ref} requires verify input '{required_input}'",
-                )
-        argv_template = _json_array(row.get("argv_template"), field_name="argv_template")
-        argv = _render_argv(argv_template, inputs=binding.inputs, verification_ref=binding.verification_ref)
-        commands.append(
-            VerifyCommand(
-                verification_ref=binding.verification_ref,
-                argv=argv,
-                label=binding.label or str(row.get("display_name") or binding.verification_ref),
-                timeout=int(binding.timeout or row.get("default_timeout_seconds") or _DEFAULT_VERIFY_TIMEOUT),
-            )
-        )
-    return commands
+    return resolve_verification_bindings(conn, bindings)
 
 
 def sync_verify_refs(

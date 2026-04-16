@@ -160,3 +160,27 @@ def test_connect_workflow_database_wraps_asyncpg_auth_errors_as_authority_unavai
     assert exc_info.value.reason_code == "postgres.authority_unavailable"
     assert exc_info.value.details["cause_type"] == "InvalidAuthorizationSpecificationError"
     assert 'role "test" does not exist' in str(exc_info.value)
+
+
+def test_ensure_postgres_available_wraps_bootstrap_errors_as_authority_unavailable(monkeypatch) -> None:
+    monkeypatch.setattr(
+        connection_mod,
+        "get_workflow_pool",
+        lambda env=None: _FakePool(env["WORKFLOW_DATABASE_URL"]),
+    )
+
+    def _boom(coro):
+        coro.close()
+        raise RuntimeError("schema boom")
+
+    monkeypatch.setattr(connection_mod, "_run_sync", _boom)
+
+    with pytest.raises(PostgresConfigurationError) as exc_info:
+        connection_mod.ensure_postgres_available(
+            env={"WORKFLOW_DATABASE_URL": "postgresql://repo.test/workflow"}
+        )
+
+    assert exc_info.value.reason_code == "postgres.authority_unavailable"
+    assert exc_info.value.details["operation"] == "bootstrap_workflow_schema"
+    assert exc_info.value.details["database_url"] == "postgresql://repo.test/workflow"
+    assert "schema boom" in str(exc_info.value)

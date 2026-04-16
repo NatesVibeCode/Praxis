@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 from typing import Any, TextIO
 
+from surfaces.cli._db import cli_sync_conn
 from surfaces.cli.mcp_tools import (
     get_definition,
     print_json,
@@ -39,8 +40,7 @@ _SQL_CONTEXT_RE = re.compile(
 def _get_conn():
     global _cli_pg_conn
     if _cli_pg_conn is None:
-        from storage.postgres import ensure_postgres_available
-        _cli_pg_conn = ensure_postgres_available()
+        _cli_pg_conn = cli_sync_conn()
     return _cli_pg_conn
 
 
@@ -828,11 +828,21 @@ def _bugs_command(args: list[str], *, stdout: TextIO) -> int:
 
     if args and args[0] in {"-h", "--help"}:
         stdout.write(
-            "usage: workflow bugs [list|search <query>|stats] [--status S] [--severity S] [--limit N] [--json]\n"
+            "usage: workflow bugs "
+            "[list|search <query>|stats|file|history|packet|replay|backfill_replay|attach_evidence|patch_resume|resolve] "
+            "[--status S] [--severity S] [--limit N] [--json]\n"
             "\n"
             "  list               List bugs (default: open only)\n"
             "  search <query>     Hybrid bug search (Postgres FTS plus vector ranking when enabled)\n"
             "  stats              Bug counts by category/severity/status\n"
+            "  file               File a new bug\n"
+            "  history            Show bug history and linked evidence\n"
+            "  packet             Show a replay packet for one bug\n"
+            "  replay             Replay a bug from canonical evidence\n"
+            "  backfill_replay    Backfill replay provenance for bugs\n"
+            "  attach_evidence    Attach canonical evidence to a bug\n"
+            "  patch_resume       Update a bug's resume context\n"
+            "  resolve            Mark an existing bug fixed, deferred, or won't-fix\n"
             "\n"
             "  --status S         Filter: OPEN, IN_PROGRESS, FIXED, WONT_FIX, DEFERRED\n"
             "  --severity S       Filter: P0, P1, P2, P3\n"
@@ -854,35 +864,195 @@ def _bugs_command(args: list[str], *, stdout: TextIO) -> int:
     limit = 25
     open_only = True
     as_json = False
+    params: dict[str, object] = {}
     i = 0
 
     if args and not args[0].startswith("-"):
-        action = args[0]
+        action = args[0].replace("-", "_")
         i = 1
         if action == "search" and i < len(args) and not args[i].startswith("-"):
             search_query = args[i]
             i += 1
 
+    def _require_value(flag: str) -> str | None:
+        nonlocal i
+        if i + 1 >= len(args):
+            stdout.write(f"error: {flag} requires a value\n")
+            return None
+        value = args[i + 1]
+        i += 2
+        return value
+
     while i < len(args):
-        if args[i] == "--status" and i + 1 < len(args):
-            status_filter = args[i + 1].upper()
-            i += 2
-        elif args[i] == "--severity" and i + 1 < len(args):
-            severity_filter = args[i + 1].upper()
-            i += 2
-        elif args[i] == "--limit" and i + 1 < len(args):
-            limit = int(args[i + 1])
-            i += 2
-        elif args[i] == "--all":
+        token = args[i]
+        if token == "--status":
+            value = _require_value(token)
+            if value is None:
+                return 2
+            status_filter = value.upper()
+            continue
+        if token == "--severity":
+            value = _require_value(token)
+            if value is None:
+                return 2
+            severity_filter = value.upper()
+            continue
+        if token == "--limit":
+            value = _require_value(token)
+            if value is None:
+                return 2
+            limit = int(value)
+            continue
+        if token == "--all":
             open_only = False
             i += 1
-        elif args[i] == "--json":
+            continue
+        if token == "--json":
             as_json = True
             i += 1
-        else:
+            continue
+        if token == "--yes":
             i += 1
+            continue
+        if token == "--bug-id":
+            value = _require_value(token)
+            if value is None:
+                return 2
+            params["bug_id"] = value
+            continue
+        if token == "--title":
+            value = _require_value(token)
+            if value is None:
+                return 2
+            params["title"] = value
+            continue
+        if token == "--description":
+            value = _require_value(token)
+            if value is None:
+                return 2
+            params["description"] = value
+            continue
+        if token == "--category":
+            value = _require_value(token)
+            if value is None:
+                return 2
+            params["category"] = value
+            continue
+        if token == "--filed-by":
+            value = _require_value(token)
+            if value is None:
+                return 2
+            params["filed_by"] = value
+            continue
+        if token == "--source-kind":
+            value = _require_value(token)
+            if value is None:
+                return 2
+            params["source_kind"] = value
+            continue
+        if token == "--decision-ref":
+            value = _require_value(token)
+            if value is None:
+                return 2
+            params["decision_ref"] = value
+            continue
+        if token == "--discovered-in-run-id":
+            value = _require_value(token)
+            if value is None:
+                return 2
+            params["discovered_in_run_id"] = value
+            continue
+        if token == "--discovered-in-receipt-id":
+            value = _require_value(token)
+            if value is None:
+                return 2
+            params["discovered_in_receipt_id"] = value
+            continue
+        if token == "--owner-ref":
+            value = _require_value(token)
+            if value is None:
+                return 2
+            params["owner_ref"] = value
+            continue
+        if token == "--evidence-kind":
+            value = _require_value(token)
+            if value is None:
+                return 2
+            params["evidence_kind"] = value
+            continue
+        if token == "--evidence-ref":
+            value = _require_value(token)
+            if value is None:
+                return 2
+            params["evidence_ref"] = value
+            continue
+        if token == "--evidence-role":
+            value = _require_value(token)
+            if value is None:
+                return 2
+            params["evidence_role"] = value
+            continue
+        if token == "--created-by":
+            value = _require_value(token)
+            if value is None:
+                return 2
+            params["created_by"] = value
+            continue
+        if token == "--notes":
+            value = _require_value(token)
+            if value is None:
+                return 2
+            params["notes"] = value
+            continue
+        if token == "--resume-context-json":
+            value = _require_value(token)
+            if value is None:
+                return 2
+            params["resume_context"] = json.loads(value)
+            continue
+        if token == "--resume-patch-json":
+            value = _require_value(token)
+            if value is None:
+                return 2
+            params["resume_patch"] = json.loads(value)
+            continue
+        if token == "--patch-json":
+            value = _require_value(token)
+            if value is None:
+                return 2
+            params["patch"] = json.loads(value)
+            continue
+        if token == "--tags":
+            value = _require_value(token)
+            if value is None:
+                return 2
+            params["tags"] = value
+            continue
+        if token == "--exclude-tags":
+            value = _require_value(token)
+            if value is None:
+                return 2
+            params["exclude_tags"] = value
+            continue
+        if token == "--receipt-limit":
+            value = _require_value(token)
+            if value is None:
+                return 2
+            params["receipt_limit"] = int(value)
+            continue
+        if token == "--include-replay-state":
+            params["include_replay_state"] = True
+            i += 1
+            continue
+        if token == "--replay-ready-only":
+            params["replay_ready_only"] = True
+            i += 1
+            continue
+        stdout.write(f"unknown argument: {token}\n")
+        return 2
 
-    params: dict[str, object] = {"action": action, "limit": limit}
+    params["action"] = action
+    params["limit"] = limit
     if action == "search":
         params["title"] = search_query
     if status_filter:
@@ -893,7 +1063,7 @@ def _bugs_command(args: list[str], *, stdout: TextIO) -> int:
         params["open_only"] = True
 
     exit_code, payload = run_cli_tool("praxis_bugs", params)
-    if as_json or action == "stats":
+    if as_json or action == "stats" or action not in {"list", "search"}:
         print_json(stdout, payload)
         return exit_code
     render_bug_payload(payload, stdout=stdout)

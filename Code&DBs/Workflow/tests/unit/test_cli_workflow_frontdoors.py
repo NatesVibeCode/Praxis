@@ -477,7 +477,11 @@ def test_workflow_run_prompt_frontdoor_uses_prompt_compiler(monkeypatch: pytest.
         lambda: "openai",
     )
     monkeypatch.setattr(workflow_commands, "compile_prompt_launch_spec", _fake_compile_prompt_launch_spec)
-    monkeypatch.setattr(workflow_commands.workflow_cli, "_submit_workflow_launch", _fake_submit_workflow_launch)
+    monkeypatch.setattr(
+        workflow_commands,
+        "_workflow_cli",
+        lambda: SimpleNamespace(_submit_workflow_launch=_fake_submit_workflow_launch),
+    )
     stdout = StringIO()
 
     assert workflow_commands._run_command(
@@ -528,9 +532,13 @@ def test_workflow_run_prompt_frontdoor_reports_unadmitted_provider(monkeypatch: 
         ),
     )
     monkeypatch.setattr(
-        workflow_commands.workflow_cli,
-        "_submit_workflow_launch",
-        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("submit should not run")),
+        workflow_commands,
+        "_workflow_cli",
+        lambda: SimpleNamespace(
+            _submit_workflow_launch=lambda **_kwargs: (_ for _ in ()).throw(
+                AssertionError("submit should not run")
+            )
+        ),
     )
     stdout = StringIO()
 
@@ -548,6 +556,106 @@ def test_workflow_run_prompt_frontdoor_reports_unadmitted_provider(monkeypatch: 
 
     assert "error: provider 'cursor' is not admitted for llm_task" in stdout.getvalue()
     assert "Prompt probe did not complete successfully for cursor/composer-2" in stdout.getvalue()
+
+
+def test_workflow_run_prompt_frontdoor_skips_default_provider_lookup_when_provider_explicit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _PromptLaunchSpec:
+        name = "prompt launch"
+        workflow_id = "workflow_cli_prompt"
+        phase = "execute"
+        jobs = [{"label": "run"}]
+
+        def to_inline_spec_dict(self) -> dict[str, object]:
+            return {
+                "name": self.name,
+                "workflow_id": self.workflow_id,
+                "phase": self.phase,
+                "jobs": self.jobs,
+            }
+
+    monkeypatch.setattr(
+        workflow_commands,
+        "_default_prompt_provider_slug",
+        lambda: (_ for _ in ()).throw(AssertionError("default provider should not be consulted")),
+    )
+    def _fake_compile_prompt_launch_spec(**kwargs):
+        captured["compile_kwargs"] = kwargs
+        return _PromptLaunchSpec()
+
+    def _fake_submit_workflow_launch(**kwargs):
+        captured["launch_kwargs"] = kwargs
+        return 0
+
+    monkeypatch.setattr(workflow_commands, "compile_prompt_launch_spec", _fake_compile_prompt_launch_spec)
+    monkeypatch.setattr(
+        workflow_commands,
+        "_workflow_cli",
+        lambda: SimpleNamespace(_submit_workflow_launch=_fake_submit_workflow_launch),
+    )
+    stdout = StringIO()
+
+    assert workflow_commands._run_command(
+        [
+            "-p",
+            "inspect the preview payload",
+            "--provider",
+            "openai",
+            "--model",
+            "gpt-5.4-mini",
+        ],
+        stdout=stdout,
+    ) == 0
+
+    assert captured["compile_kwargs"]["provider_slug"] == "openai"
+    assert captured["compile_kwargs"]["model_slug"] == "gpt-5.4-mini"
+
+
+def test_workflow_run_prompt_frontdoor_passes_preview_execution_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _PromptLaunchSpec:
+        name = "prompt launch"
+        workflow_id = "workflow_cli_prompt"
+        phase = "execute"
+        jobs = [{"label": "run"}]
+
+        def to_inline_spec_dict(self) -> dict[str, object]:
+            return {
+                "name": self.name,
+                "workflow_id": self.workflow_id,
+                "phase": self.phase,
+                "jobs": self.jobs,
+            }
+
+    monkeypatch.setattr(workflow_commands, "_default_prompt_provider_slug", lambda: "openai")
+    monkeypatch.setattr(workflow_commands, "compile_prompt_launch_spec", lambda **_kwargs: _PromptLaunchSpec())
+    def _fake_submit_workflow_launch(**kwargs):
+        captured["launch_kwargs"] = kwargs
+        return 0
+
+    monkeypatch.setattr(
+        workflow_commands,
+        "_workflow_cli",
+        lambda: SimpleNamespace(_submit_workflow_launch=_fake_submit_workflow_launch),
+    )
+    stdout = StringIO()
+
+    assert workflow_commands._run_command(
+        [
+            "-p",
+            "inspect the preview payload",
+            "--preview-execution",
+        ],
+        stdout=stdout,
+    ) == 0
+
+    assert captured["launch_kwargs"]["preview_execution"] is True
 
 
 def test_prompt_provider_help_lists_registered_providers(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -962,7 +1070,11 @@ def test_run_frontdoor_forwards_fresh_launch_intent(
         captured["result_file"] = args.result_file
         return 0
 
-    monkeypatch.setattr(workflow_commands.workflow_cli, "cmd_run", _fake_cmd_run)
+    monkeypatch.setattr(
+        workflow_commands,
+        "_workflow_cli",
+        lambda: SimpleNamespace(cmd_run=_fake_cmd_run),
+    )
 
     assert (
         workflow_cli_main(

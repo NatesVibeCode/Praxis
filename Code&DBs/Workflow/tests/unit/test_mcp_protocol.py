@@ -62,6 +62,20 @@ def test_jsonl_request_mirrors_jsonl_response(monkeypatch):
     assert response["result"]["protocolVersion"] == "2024-11-05"
 
 
+def test_main_boots_shared_subsystems_before_processing(monkeypatch):
+    calls: list[str] = []
+
+    monkeypatch.setattr(protocol, "_should_boot_shared_subsystems", lambda: True)
+    monkeypatch.setattr(protocol, "_boot_shared_subsystems", lambda: calls.append("boot"))
+    monkeypatch.setattr(sys, "stdin", _FakeStdin(_initialize_request_bytes(transport="jsonl")))
+    stdout = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", stdout)
+
+    protocol.main()
+
+    assert calls == ["boot"]
+
+
 def test_framed_request_mirrors_framed_response(monkeypatch):
     monkeypatch.delenv("PRAXIS_MCP_STDIO_TRANSPORT", raising=False)
     monkeypatch.setattr(sys, "stdin", _FakeStdin(_initialize_request_bytes(transport="content-length")))
@@ -199,6 +213,13 @@ def test_tools_call_formats_postgres_authority_errors_without_traceback(monkeypa
         raise PostgresConfigurationError(
             "postgres.authority_unavailable",
             "WORKFLOW_DATABASE_URL authority unavailable: PermissionError: [Errno 1] Operation not permitted",
+            details={
+                "environment_variable": "WORKFLOW_DATABASE_URL",
+                "database_url": "postgresql://repo.test/workflow",
+                "operation": "bootstrap_workflow_schema",
+                "cause_type": "PermissionError",
+                "cause_message": "[Errno 1] Operation not permitted",
+            },
         )
 
     monkeypatch.setattr(protocol, "invoke_tool", _invoke)
@@ -217,6 +238,8 @@ def test_tools_call_formats_postgres_authority_errors_without_traceback(monkeypa
     message = response["error"]["message"]
     assert "postgres.authority_unavailable" in message
     assert "Traceback" not in message
+    assert response["error"]["data"]["reason_code"] == "postgres.authority_unavailable"
+    assert response["error"]["data"]["details"]["operation"] == "bootstrap_workflow_schema"
 
 
 def test_tools_call_rejects_non_object_arguments_without_traceback(monkeypatch):

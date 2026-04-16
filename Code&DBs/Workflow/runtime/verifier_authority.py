@@ -351,6 +351,24 @@ def _record_healing_run(
     return healing_run_id
 
 
+def _normalized_target_ref(
+    *,
+    target_kind: str,
+    target_ref: str,
+    fallback_ref: str,
+    inputs: dict[str, Any] | None = None,
+) -> str:
+    normalized_target_ref = str(target_ref or "").strip()
+    if normalized_target_ref:
+        return normalized_target_ref
+    if target_kind == "path":
+        for key in ("path", "file", "target", "module"):
+            candidate = inputs.get(key) if isinstance(inputs, dict) else None
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate.strip()
+    return str(fallback_ref or "").strip()
+
+
 def _annotate_control_plane_outputs(
     *,
     kind: str,
@@ -696,24 +714,35 @@ def run_registered_verifier(
     verifier = _load_verifier(verifier_ref, conn=conn)
     merged_inputs = dict(verifier.default_inputs)
     merged_inputs.update(inputs or {})
+    target_ref = _normalized_target_ref(
+        target_kind=target_kind,
+        target_ref=target_ref,
+        fallback_ref=verifier.verifier_ref,
+        inputs=merged_inputs,
+    )
     started_ns = time.monotonic_ns()
     status = "error"
     outputs: dict[str, Any] = {}
     suggested_healer_ref = None
     try:
         if verifier.verifier_kind == "verification_ref":
-            from runtime.verification import resolve_verify_commands, run_verify, summarize_verification
+            from runtime.verification import (
+                VerificationBinding,
+                resolve_verification_bindings,
+                run_verify,
+                summarize_verification,
+            )
 
             db = _connection(conn)
             workdir = str(merged_inputs.get("workdir") or "").strip() or None
-            commands = resolve_verify_commands(
+            commands = resolve_verification_bindings(
                 db,
                 [
-                    {
-                        "verification_ref": verifier.verification_ref,
-                        "inputs": merged_inputs,
-                        "label": verifier.display_name,
-                    }
+                    VerificationBinding(
+                        verification_ref=verifier.verification_ref or "",
+                        inputs=merged_inputs,
+                        label=verifier.display_name,
+                    )
                 ],
             )
             results = run_verify(commands, workdir=workdir)
@@ -857,6 +886,12 @@ def run_registered_healer(
 
     healer = _load_healer(healer_ref, conn=conn)
     merged_inputs = dict(inputs or {})
+    target_ref = _normalized_target_ref(
+        target_kind=target_kind,
+        target_ref=target_ref,
+        fallback_ref=verifier_ref,
+        inputs=merged_inputs,
+    )
     started_ns = time.monotonic_ns()
     action_status = "skipped"
     action_outputs: dict[str, Any] = {}

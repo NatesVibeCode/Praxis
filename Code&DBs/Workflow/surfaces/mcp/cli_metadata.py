@@ -498,6 +498,42 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             ),
         ],
     ),
+    "praxis_operator_relations": _tool(
+        surface="operator",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Record canonical functional areas and cross-object semantic relations when operator entities need one explicit semantic edge instead of hidden tags or prose.",
+        when_not_to_use="Do not use it for read-only operator inspection or generic roadmap authoring.",
+        risks={
+            "default": "write",
+            "actions": {
+                "record_functional_area": "write",
+                "record_relation": "write",
+            },
+        },
+        examples=[
+            _example(
+                "Record a functional area",
+                {
+                    "action": "record_functional_area",
+                    "area_slug": "checkout",
+                    "title": "Checkout",
+                    "summary": "Shared checkout semantics",
+                },
+            ),
+            _example(
+                "Record a semantic relation",
+                {
+                    "action": "record_relation",
+                    "relation_kind": "grouped_in",
+                    "source_kind": "roadmap_item",
+                    "source_ref": "roadmap_item.checkout",
+                    "target_kind": "functional_area",
+                    "target_ref": "checkout",
+                },
+            ),
+        ],
+    ),
     "praxis_operator_architecture_policy": _tool(
         surface="operator",
         tier="advanced",
@@ -734,7 +770,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         surface="workflow",
         tier="advanced",
         recommended_alias=None,
-        when_to_use="Run, inspect, claim, acknowledge, retry, cancel, or list workflows through the MCP workflow surface.",
+        when_to_use="Run, preview, inspect, claim, acknowledge, retry, cancel, or list workflows through the MCP workflow surface.",
         when_not_to_use="Do not use it for natural-language questions or health checks.",
         risks={
             "default": "dispatch",
@@ -745,6 +781,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
                 "inspect": "read",
                 "list": "read",
                 "notifications": "read",
+                "preview": "read",
                 "run": "dispatch",
                 "retry": "dispatch",
                 "cancel": "dispatch",
@@ -753,6 +790,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         examples=[
             _example("List recent workflows", {"action": "list"}),
             _example("Run a spec", {"action": "run", "spec_path": "config/specs/example.queue.json"}),
+            _example("Preview execution inputs", {"action": "preview", "spec_path": "config/specs/example.queue.json"}),
             _example(
                 "Read claimable worker work",
                 {"action": "claim", "subscription_id": "dispatch:worker:bridge", "run_id": "dispatch_001"},

@@ -15,7 +15,7 @@ from typing import Any
 
 from storage.postgres import PostgresConfigurationError
 
-from ._boot import create_pg_conn, ensure_workflow_on_path, sync_registries
+from ._boot import bootstrap_pg_conn, create_pg_conn, ensure_workflow_on_path, sync_registries
 from ._lifecycle import LifecycleManager
 from ._workflow_database import workflow_database_env_for_repo
 
@@ -63,6 +63,10 @@ class _BaseSubsystems:
         self._pg_conn = None
 
         self.receipts_dir = receipts_dir
+        self._boot_done = False
+        self._registry_sync_succeeded: list[str] = []
+        self._registry_sync_skipped: list[str] = []
+        self._registry_sync_done = False
         self._startup_wiring_done = False
 
     def _ensure_init(self) -> None:
@@ -119,6 +123,57 @@ class _BaseSubsystems:
         except Exception as exc:
             self._handle_startup_wiring_error(exc)
 
+    def _sync_registries_once(self) -> tuple[list[str], list[str]]:
+        if self._registry_sync_done:
+            return (list(self._registry_sync_succeeded), list(self._registry_sync_skipped))
+        succeeded, skipped = sync_registries(self.get_pg_conn())
+        self._registry_sync_done = True
+        self._registry_sync_succeeded = list(succeeded)
+        self._registry_sync_skipped = list(skipped)
+        if skipped:
+            skipped_list = ", ".join(skipped)
+            if succeeded:
+                self._logger.warning(
+                    "startup registry sync completed with skipped steps: %s",
+                    skipped_list,
+                )
+            else:
+                self._logger.warning(
+                    "startup registry sync skipped all steps: %s",
+                    skipped_list,
+                )
+        return (list(succeeded), list(skipped))
+
+    def boot(self) -> dict[str, Any]:
+        """Run explicit startup work once for long-lived surfaces."""
+        self._ensure_init()
+        if self._boot_done:
+            return {
+                "booted": True,
+                "registry_sync": {
+                    "succeeded": list(self._registry_sync_succeeded),
+                    "skipped": list(self._registry_sync_skipped),
+                },
+                "heartbeat_started": self._lifecycle.started,
+            }
+        self._ensure_workflow_root_on_path()
+        self._pg_conn = bootstrap_pg_conn(
+            repo_root=self._repo_root,
+            workflow_root=self._workflow_root,
+            env=self._postgres_env(),
+        )
+        succeeded, skipped = self._sync_registries_once()
+        self._maybe_startup_wiring()
+        self._boot_done = True
+        return {
+            "booted": True,
+            "registry_sync": {
+                "succeeded": list(succeeded),
+                "skipped": list(skipped),
+            },
+            "heartbeat_started": self._lifecycle.started,
+        }
+
     def _build_bug_tracker(self):
         from runtime.bug_tracker import BugTracker
         return BugTracker(self.get_pg_conn())
@@ -138,8 +193,6 @@ class _BaseSubsystems:
                 workflow_root=self._workflow_root,
                 env=self._postgres_env(),
             )
-            sync_registries(self._pg_conn)
-        self._maybe_startup_wiring()
         return self._pg_conn
 
     def get_obs_hub(self):

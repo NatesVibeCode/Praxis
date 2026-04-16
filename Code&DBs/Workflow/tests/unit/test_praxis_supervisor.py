@@ -59,11 +59,46 @@ def test_discover_database_url_prefers_legacy_launch_agent_value(monkeypatch, tm
     monkeypatch.setattr(praxis_supervisor.Path, "home", classmethod(lambda cls: home_dir))
     monkeypatch.setattr(
         praxis_supervisor,
-        "_database_exists",
-        lambda name: name == "praxis_test",
+        "_database_authority_reachable",
+        lambda database_url: database_url == "postgresql://localhost:5432/praxis_test",
     )
 
     assert praxis_supervisor.discover_database_url(tmp_path / "repo") == "postgresql://localhost:5432/praxis_test"
+
+
+def test_discover_database_url_ignores_unreachable_launch_agent_value_and_uses_repo_env(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    home_dir = tmp_path / "home"
+    launch_agents = home_dir / "Library" / "LaunchAgents"
+    launch_agents.mkdir(parents=True)
+    plist_path = launch_agents / "com.praxis.api-server.plist"
+    plist_path.write_bytes(
+        plistlib.dumps(
+            {
+                "EnvironmentVariables": {
+                    "WORKFLOW_DATABASE_URL": "postgresql://localhost:5432/missing_db",
+                }
+            }
+        )
+    )
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True)
+    (repo_root / ".env").write_text(
+        "WORKFLOW_DATABASE_URL=postgresql://repo.test/praxis\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.delenv("WORKFLOW_DATABASE_URL", raising=False)
+    monkeypatch.setattr(praxis_supervisor.Path, "home", classmethod(lambda cls: home_dir))
+    monkeypatch.setattr(
+        praxis_supervisor,
+        "_database_authority_reachable",
+        lambda _database_url: False,
+    )
+
+    assert praxis_supervisor.discover_database_url(repo_root) == "postgresql://repo.test/praxis"
 
 
 def test_discover_database_url_uses_repo_env_when_process_authority_missing(monkeypatch, tmp_path: Path) -> None:

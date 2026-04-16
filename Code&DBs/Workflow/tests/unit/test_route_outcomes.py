@@ -34,6 +34,39 @@ def _now() -> datetime:
     return datetime(2026, 4, 8, 12, 0, tzinfo=timezone.utc)
 
 
+class _FakeMetricsView:
+    def recent_route_outcomes(
+        self,
+        *,
+        provider_slug: str,
+        model_slug: str | None = None,
+        adapter_type: str | None = None,
+        limit: int = 20,  # noqa: ARG002
+    ) -> list[dict[str, object]]:
+        if provider_slug != "openai":
+            return []
+        if model_slug not in (None, "gpt-5.4"):
+            return []
+        if adapter_type not in (None, "cli_llm"):
+            return []
+        return [
+            {
+                "run_id": "run-db",
+                "provider_slug": "openai",
+                "model_slug": "gpt-5.4",
+                "adapter_type": "cli_llm",
+                "status": "succeeded",
+                "failure_code": None,
+                "failure_category": "",
+                "latency_ms": 5,
+                "created_at": datetime(2026, 4, 8, 11, 59, tzinfo=timezone.utc),
+            }
+        ]
+
+    def provider_slugs(self) -> tuple[str, ...]:
+        return ("anthropic", "openai")
+
+
 def test_route_outcomes_track_explicit_route_identity_and_ignore_config_noise() -> None:
     store = RouteOutcomeStore(buffer_size=8)
 
@@ -74,6 +107,32 @@ def test_route_outcomes_track_explicit_route_identity_and_ignore_config_noise() 
         model_slug="gpt-5.4",
         max_consecutive_failures=2,
     )
+
+
+def test_route_outcomes_merge_durable_metrics_with_local_overlay() -> None:
+    store = RouteOutcomeStore(
+        buffer_size=8,
+        metrics_view_factory=lambda: _FakeMetricsView(),
+    )
+
+    store.record_outcome(
+        RouteOutcome(
+            provider_slug="openai",
+            model_slug="gpt-5.4",
+            adapter_type="cli_llm",
+            status="failed",
+            failure_code="verification_failed",
+            failure_category="verification_failed",
+            latency_ms=10,
+            recorded_at=_now(),
+            run_id="run-live",
+        )
+    )
+
+    recent = store.recent_outcomes("openai", model_slug="gpt-5.4", adapter_type="cli_llm")
+    assert [outcome.run_id for outcome in recent] == ["run-live", "run-db"]
+    assert store.consecutive_failures("openai", model_slug="gpt-5.4") == 1
+    assert store.provider_slugs() == ("anthropic", "openai")
 
 
 def test_auto_router_skips_only_the_unhealthy_model_route() -> None:

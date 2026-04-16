@@ -237,6 +237,39 @@ def tool_praxis_operator_decisions(params: dict) -> dict:
     )
 
 
+def tool_praxis_operator_relations(params: dict) -> dict:
+    """Record canonical functional areas and cross-object semantic relations."""
+
+    action = str(params.get("action") or "").strip().lower()
+    if action == "record_functional_area":
+        return operator_write.record_functional_area(
+            area_slug=str(params.get("area_slug") or ""),
+            title=str(params.get("title") or ""),
+            summary=str(params.get("summary") or ""),
+            area_status=str(params.get("area_status") or "active"),
+            created_at=params.get("created_at"),
+            updated_at=params.get("updated_at"),
+        )
+    if action == "record_relation":
+        return operator_write.record_operator_object_relation(
+            relation_kind=str(params.get("relation_kind") or ""),
+            source_kind=str(params.get("source_kind") or ""),
+            source_ref=str(params.get("source_ref") or ""),
+            target_kind=str(params.get("target_kind") or ""),
+            target_ref=str(params.get("target_ref") or ""),
+            relation_status=str(params.get("relation_status") or "active"),
+            relation_metadata=params.get("relation_metadata"),
+            bound_by_decision_id=params.get("bound_by_decision_id"),
+            created_at=params.get("created_at"),
+            updated_at=params.get("updated_at"),
+        )
+    return {
+        "error": (
+            "Unknown action. Supported actions: record_functional_area, record_relation"
+        )
+    }
+
+
 def tool_praxis_operator_native_primary_cutover_gate(params: dict) -> dict:
     """Admit one native primary cutover gate through operator-control persistence."""
 
@@ -676,6 +709,87 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         "default": 100,
                     },
                 },
+            },
+        },
+    ),
+    "praxis_operator_relations": (
+        tool_praxis_operator_relations,
+        {
+            "description": (
+                "Record canonical functional areas and cross-object semantic relations.\n\n"
+                "USE WHEN: a bug, roadmap item, repo path, document, workflow target, or decision "
+                "needs one explicit semantic edge instead of hidden tags or prose.\n\n"
+                "ACTIONS:\n"
+                "  'record_functional_area' — create or update one functional area row\n"
+                "  'record_relation' — create or update one cross-object relation row\n\n"
+                "EXAMPLES:\n"
+                "  praxis_operator_relations(action='record_functional_area', area_slug='checkout', title='Checkout', summary='Shared checkout semantics')\n"
+                "  praxis_operator_relations(action='record_relation', relation_kind='grouped_in', source_kind='roadmap_item', source_ref='roadmap_item.checkout', target_kind='functional_area', target_ref='checkout')"
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["record_functional_area", "record_relation"],
+                    },
+                    "area_slug": {"type": "string"},
+                    "title": {"type": "string"},
+                    "summary": {"type": "string"},
+                    "area_status": {
+                        "type": "string",
+                        "enum": ["active", "inactive"],
+                        "default": "active",
+                    },
+                    "relation_kind": {"type": "string"},
+                    "source_kind": {
+                        "type": "string",
+                        "enum": [
+                            "issue",
+                            "bug",
+                            "roadmap_item",
+                            "operator_decision",
+                            "cutover_gate",
+                            "workflow_class",
+                            "schedule_definition",
+                            "workflow_run",
+                            "document",
+                            "repo_path",
+                            "functional_area",
+                        ],
+                    },
+                    "source_ref": {"type": "string"},
+                    "target_kind": {
+                        "type": "string",
+                        "enum": [
+                            "issue",
+                            "bug",
+                            "roadmap_item",
+                            "operator_decision",
+                            "cutover_gate",
+                            "workflow_class",
+                            "schedule_definition",
+                            "workflow_run",
+                            "document",
+                            "repo_path",
+                            "functional_area",
+                        ],
+                    },
+                    "target_ref": {"type": "string"},
+                    "relation_status": {
+                        "type": "string",
+                        "enum": ["active", "inactive"],
+                        "default": "active",
+                    },
+                    "relation_metadata": {
+                        "type": "object",
+                        "description": "Optional structured context for the relation.",
+                    },
+                    "bound_by_decision_id": {"type": "string"},
+                    "created_at": {"type": "string", "description": "ISO-8601 datetime string"},
+                    "updated_at": {"type": "string", "description": "ISO-8601 datetime string"},
+                },
+                "required": ["action"],
             },
         },
     ),

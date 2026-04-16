@@ -1,6 +1,6 @@
 # Praxis MCP Tools
 
-Praxis exposes 48 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
+Praxis exposes 49 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
 
 CLI discovery is generated from the same catalog metadata:
 
@@ -40,6 +40,7 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_operator_closeout` | `operator` | `advanced` | - | `read`, `write` | Preview or commit proof-backed bug and roadmap closeout through the shared reconciliation gate. |
 | `praxis_operator_decisions` | `operator` | `advanced` | - | `read`, `write` | List or record canonical operator decisions through the shared operator_decisions table. |
 | `praxis_operator_native_primary_cutover_gate` | `operator` | `advanced` | - | `write` | Admit a native primary cutover gate into operator-control decision and gate authority tables. |
+| `praxis_operator_relations` | `operator` | `advanced` | - | `write` | Record canonical functional areas and cross-object semantic relations. |
 | `praxis_operator_roadmap_view` | `operator` | `advanced` | - | `read` | Read one roadmap subtree and its dependency edges from DB-backed authority. |
 | `praxis_operator_view` | `operator` | `advanced` | - | `read` | Render detailed operator observability views — deeper than praxis_status. |
 | `praxis_operator_write` | `operator` | `advanced` | - | `read`, `write` | Preview, validate, or commit roadmap rows through the shared operator-write validation gate. |
@@ -583,7 +584,7 @@ Example input:
   "policy_slug": "db-native-authority",
   "title": "Decision tables are DB-native authority",
   "rationale": "Keep authority in Postgres.",
-  "decided_by": "nate",
+  "decided_by": "praxis-admin",
   "decision_source": "cto.guidance"
 }
 ```
@@ -656,6 +657,30 @@ Example input:
 }
 ```
 
+#### `praxis_operator_relations`
+
+- Surface: `operator`
+- Tier: `advanced`
+- Badges: `advanced`, `operator`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow tools call praxis_operator_relations`
+- CLI schema help: `workflow tools describe praxis_operator_relations`
+- When to use: Record canonical functional areas and cross-object semantic relations when operator entities need one explicit semantic edge instead of hidden tags or prose.
+- When not to use: Do not use it for read-only operator inspection or generic roadmap authoring.
+- Selector: `action`; default `record_functional_area`; values `record_functional_area`, `record_relation`
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "action": "record_functional_area",
+  "area_slug": "checkout",
+  "title": "Checkout",
+  "summary": "Shared checkout semantics"
+}
+```
+
 #### `praxis_operator_roadmap_view`
 
 - Surface: `operator`
@@ -683,9 +708,9 @@ Example input:
 - Risks: `read`
 - CLI entrypoint: `workflow tools call praxis_operator_view`
 - CLI schema help: `workflow tools describe praxis_operator_view`
-- When to use: Discover native operator status, scoreboard, topology, or replay-ready bug views.
+- When to use: Discover native operator status, scoreboard, topology, issue backlog, or replay-ready bug views.
 - When not to use: Do not use it to mutate operator state.
-- Selector: `view`; default `status`; values `status`, `scoreboard`, `graph`, `lineage`, `replay_ready_bugs`
+- Selector: `view`; default `status`; values `status`, `scoreboard`, `graph`, `lineage`, `issue_backlog`, `replay_ready_bugs`
 - Required args: `view`
 
 Example input:
@@ -1117,9 +1142,9 @@ Example input:
 - Risks: `dispatch`, `read`, `write`
 - CLI entrypoint: `workflow tools call praxis_workflow`
 - CLI schema help: `workflow tools describe praxis_workflow`
-- When to use: Run, inspect, claim, acknowledge, retry, cancel, or list workflows through the MCP workflow surface.
+- When to use: Run, preview, inspect, claim, acknowledge, retry, cancel, or list workflows through the MCP workflow surface.
 - When not to use: Do not use it for natural-language questions or health checks.
-- Selector: `action`; default `run`; values `run`, `spawn`, `status`, `inspect`, `claim`, `acknowledge`, `cancel`, `list`, `notifications`, `retry`, `repair`, `chain`
+- Selector: `action`; default `run`; values `run`, `spawn`, `preview`, `status`, `inspect`, `claim`, `acknowledge`, `cancel`, `list`, `notifications`, `retry`, `repair`, `chain`
 - Required args: (none)
 
 Example input:

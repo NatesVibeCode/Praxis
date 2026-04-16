@@ -21,7 +21,9 @@ from runtime.receipt_provenance import (
 from runtime.failure_classifier import classify_failure
 from runtime.friction_ledger import FrictionLedger, FrictionType
 from runtime.bug_tracker import BugTracker, BugCategory, BugSeverity, build_failure_signature
+from runtime._workflow_database import resolve_runtime_database_url
 from storage.postgres.receipt_repository import PostgresReceiptRepository
+from storage.postgres import ensure_postgres_available
 from runtime.workflow.evidence_sequence_allocator import (
     insert_receipt_if_absent_with_deterministic_seq,
 )
@@ -166,9 +168,8 @@ class ReceiptRecord:
 
 
 def _conn():
-    from storage.postgres import ensure_postgres_available
-
-    return ensure_postgres_available()
+    database_url = resolve_runtime_database_url()
+    return ensure_postgres_available(env={"WORKFLOW_DATABASE_URL": database_url})
 
 
 def _repository(conn=None) -> PostgresReceiptRepository:
@@ -690,8 +691,9 @@ def search_receipts(
     status: Optional[str] = None,
     agent: Optional[str] = None,
     workflow_id: Optional[str] = None,
+    conn=None,
 ) -> list[ReceiptRecord]:
-    rows = _repository().search_receipts(
+    rows = _repository(conn).search_receipts(
         query=query,
         limit=max(limit, 1),
         status=status,
@@ -720,8 +722,8 @@ def load_receipt_payload(receipt_id: int | str) -> Optional[dict[str, Any]]:
     return normalize_receipt_payload(record.to_dict()) if record is not None else None
 
 
-def receipt_stats(*, since_hours: int = 24) -> dict[str, Any]:
-    rows = _repository().receipt_stats(since_hours=since_hours)
+def receipt_stats(*, since_hours: int = 24, conn=None) -> dict[str, Any]:
+    rows = _repository(conn).receipt_stats(since_hours=since_hours)
 
     by_agent: dict[str, dict[str, Any]] = {}
     totals = {"input_tokens": 0, "output_tokens": 0, "cost": 0.0, "receipts": 0}

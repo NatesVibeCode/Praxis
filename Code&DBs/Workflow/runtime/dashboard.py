@@ -59,13 +59,13 @@ def build_dashboard() -> dict[str, Any]:
     # 4. Route health (consecutive failures)
     route_outcomes = get_route_outcomes()
     route_health: dict[str, int] = {}
-    if hasattr(route_outcomes, "_buffers"):
-        # Peek at the internal buffers (if available)
-        with route_outcomes._lock:
-            for provider_slug in route_outcomes._buffers.keys():
-                route_health[provider_slug] = route_outcomes.consecutive_failures(
-                    provider_slug
-                )
+    try:
+        for provider_slug in route_outcomes.provider_slugs():
+            route_health[provider_slug] = route_outcomes.consecutive_failures(
+                provider_slug
+            )
+    except Exception:
+        route_health = {}
 
     # 5. Leaderboard (top 5)
     try:

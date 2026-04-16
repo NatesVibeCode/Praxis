@@ -5,9 +5,9 @@ import json
 from pathlib import Path
 from typing import Any
 
+from surfaces._workflow_database import workflow_database_url_for_repo
 from ..subsystems import workflow_database_env
 from ..helpers import _serialize
-from storage.postgres.connection import resolve_workflow_database_url
 
 
 _AFFINITY_TO_CAP = {
@@ -85,7 +85,7 @@ def tool_praxis_provider_onboard(params: dict, _progress_emitter=None) -> dict:
     except Exception as exc:
         return {"error": f"Invalid spec: {exc}"}
 
-    db_url = resolve_workflow_database_url(env=workflow_database_env())
+    db_url = workflow_database_url_for_repo(Path(__file__).resolve().parents[4], env=workflow_database_env())
 
     if _progress_emitter:
         label = "probe" if dry_run else "onboard"
@@ -130,7 +130,7 @@ def _post_onboarding_sync(
     """Post-onboarding: populate cap_ columns, routing rows, and native runtime authority."""
     from storage.postgres.connection import SyncPostgresConnection, get_workflow_pool
 
-    conn = SyncPostgresConnection(get_workflow_pool())
+    conn = SyncPostgresConnection(get_workflow_pool(env={"WORKFLOW_DATABASE_URL": db_url}))
     results: dict[str, Any] = {"cap_columns": [], "routing_rows": 0, "native_runtime_profiles": False}
 
     for report in model_reports:

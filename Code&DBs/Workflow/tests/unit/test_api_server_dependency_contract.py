@@ -51,7 +51,7 @@ def test_start_server_checks_dependency_contract_before_launch(monkeypatch) -> N
     }
 
 
-def test_start_server_primes_normalized_workflow_database_url(monkeypatch) -> None:
+def test_start_server_checks_workflow_database_authority_without_mutating_process_env(monkeypatch) -> None:
     observed: dict[str, object] = {}
 
     monkeypatch.setattr(
@@ -80,4 +80,4 @@ def test_start_server_primes_normalized_workflow_database_url(monkeypatch) -> No
 
     server.start_server(host="127.0.0.1", port=9999)
 
-    assert os.environ["WORKFLOW_DATABASE_URL"] == "postgresql://postgres@localhost:5432/praxis"
+    assert os.environ["WORKFLOW_DATABASE_URL"] == "postgresql://localhost:5432/praxis"

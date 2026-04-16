@@ -11,7 +11,7 @@ import pytest
 
 from observability.operator_topology import load_operator_graph_projection
 from policy.workflow_lanes import bootstrap_workflow_lane_catalog_schema
-from storage.migrations import workflow_migration_statements
+from storage.migrations import workflow_bootstrap_migration_statements
 from storage.postgres import (
     PostgresConfigurationError,
     bootstrap_control_plane_schema,
@@ -39,7 +39,7 @@ async def _bootstrap_migration(conn, filename: str) -> None:
             "SELECT pg_advisory_xact_lock($1::bigint)",
             _SCHEMA_BOOTSTRAP_LOCK_ID,
         )
-        for statement in workflow_migration_statements(filename):
+        for statement in workflow_bootstrap_migration_statements(filename):
             try:
                 async with conn.transaction():
                     await conn.execute(statement)
@@ -147,12 +147,15 @@ async def _seed_operator_graph_rows(
     *,
     suffix: str,
     as_of: datetime,
-) -> tuple[str, str, str, str, str]:
+) -> tuple[str, str, str, str, str, str, str, str]:
     bug_id = f"bug.operator-graph.{suffix}"
     roadmap_item_id = f"roadmap_item.operator-graph.{suffix}"
     decision_id = f"operator_decision.operator-graph.{suffix}"
     decision_key = f"decision.operator-graph.{suffix}.primary"
     gate_id = f"cutover_gate.operator-graph.{suffix}"
+    functional_area_id = f"functional_area.operator-graph-{suffix}"
+    document_id = f"document.operator-graph.{suffix}"
+    repo_path = f"Code&DBs/Workflow/runtime/operator_graph_{suffix}.py"
 
     workflow_class_id = await _seed_workflow_lane_and_class(
         conn,
@@ -439,7 +442,119 @@ async def _seed_operator_graph_rows(
         as_of,
     )
 
-    return bug_id, roadmap_item_id, decision_id, gate_id, workflow_class_id
+    await conn.execute(
+        """
+        INSERT INTO functional_areas (
+            functional_area_id,
+            area_slug,
+            title,
+            area_status,
+            summary,
+            created_at,
+            updated_at
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7
+        )
+        ON CONFLICT (functional_area_id) DO UPDATE SET
+            area_slug = EXCLUDED.area_slug,
+            title = EXCLUDED.title,
+            area_status = EXCLUDED.area_status,
+            summary = EXCLUDED.summary,
+            updated_at = EXCLUDED.updated_at
+        """,
+        functional_area_id,
+        f"operator-graph-{suffix}",
+        f"Operator graph area {suffix}",
+        "active",
+        "Functional area row projected into the operator graph.",
+        as_of,
+        as_of,
+    )
+
+    await conn.execute(
+        """
+        INSERT INTO memory_entities (
+            id,
+            entity_type,
+            name,
+            content,
+            metadata,
+            source,
+            confidence,
+            archived,
+            created_at,
+            updated_at
+        ) VALUES (
+            $1, 'document', $2, $3, '{}'::jsonb, 'tests', 1.0, false, $4, $5
+        )
+        ON CONFLICT (id) DO UPDATE SET
+            updated_at = EXCLUDED.updated_at
+        """,
+        document_id,
+        f"Operator graph document {suffix}",
+        "Workflow document projected into the operator graph.",
+        as_of,
+        as_of,
+    )
+
+    await conn.execute(
+        """
+        INSERT INTO operator_object_relations (
+            operator_object_relation_id,
+            relation_kind,
+            relation_status,
+            source_kind,
+            source_ref,
+            target_kind,
+            target_ref,
+            relation_metadata,
+            bound_by_decision_id,
+            created_at,
+            updated_at
+        ) VALUES
+            ($1, 'grouped_in', 'active', 'roadmap_item', $2, 'functional_area', $3, '{"origin":"projection-test"}'::jsonb, $4, $5, $6),
+            ($7, 'described_by', 'active', 'repo_path', $8, 'document', $9, '{"origin":"projection-test"}'::jsonb, NULL, $10, $11),
+            ($12, 'implements', 'active', 'repo_path', $13, 'roadmap_item', $14, '{"origin":"projection-test"}'::jsonb, $15, $16, $17)
+        ON CONFLICT (operator_object_relation_id) DO UPDATE SET
+            relation_kind = EXCLUDED.relation_kind,
+            relation_status = EXCLUDED.relation_status,
+            source_kind = EXCLUDED.source_kind,
+            source_ref = EXCLUDED.source_ref,
+            target_kind = EXCLUDED.target_kind,
+            target_ref = EXCLUDED.target_ref,
+            relation_metadata = EXCLUDED.relation_metadata,
+            bound_by_decision_id = EXCLUDED.bound_by_decision_id,
+            updated_at = EXCLUDED.updated_at
+        """,
+        f"operator_object_relation:grouped-in:roadmap_item:{roadmap_item_id}:functional_area:{functional_area_id}",
+        roadmap_item_id,
+        functional_area_id,
+        decision_id,
+        as_of,
+        as_of,
+        f"operator_object_relation:described-by:repo_path:{repo_path}:document:{document_id}",
+        repo_path,
+        document_id,
+        as_of,
+        as_of,
+        f"operator_object_relation:implements:repo_path:{repo_path}:roadmap_item:{roadmap_item_id}",
+        repo_path,
+        roadmap_item_id,
+        decision_id,
+        as_of,
+        as_of,
+    )
+
+    return (
+        bug_id,
+        roadmap_item_id,
+        decision_id,
+        gate_id,
+        workflow_class_id,
+        functional_area_id,
+        document_id,
+        repo_path,
+    )
 
 
 def test_operator_graph_projection_is_graph_ready_and_explicit() -> None:
@@ -467,17 +582,24 @@ async def _exercise_operator_graph_projection_is_graph_ready_and_explicit() -> N
             "008_workflow_class_and_schedule_schema.sql",
             "009_bug_and_roadmap_authority.sql",
             "010_operator_control_authority.sql",
+            "015_memory_graph.sql",
             "132_issue_backlog_authority.sql",
+            "134_operator_object_relations.sql",
         ):
             await _bootstrap_migration(conn, filename)
 
         suffix = _unique_suffix()
         as_of = _fixed_clock()
-        bug_id, roadmap_item_id, decision_id, gate_id, workflow_class_id = await _seed_operator_graph_rows(
-            conn,
-            suffix=suffix,
-            as_of=as_of,
-        )
+        (
+            bug_id,
+            roadmap_item_id,
+            decision_id,
+            gate_id,
+            workflow_class_id,
+            functional_area_id,
+            document_id,
+            repo_path,
+        ) = await _seed_operator_graph_rows(conn, suffix=suffix, as_of=as_of)
 
         projection = await load_operator_graph_projection(
             conn,
@@ -500,20 +622,31 @@ async def _exercise_operator_graph_projection_is_graph_ready_and_explicit() -> N
         # Find our seeded rows by ID (projection may contain stale data from other runs).
         own_bug_ids = {b.bug_id for b in projection.bugs}
         own_roadmap_ids = {r.roadmap_item_id for r in projection.roadmap_items}
+        own_functional_area_ids = {f.functional_area_id for f in projection.functional_areas}
         own_decision_ids = {d.operator_decision_id for d in projection.operator_decisions}
         own_gate_ids = {g.cutover_gate_id for g in projection.cutover_gates}
         own_binding_ids = {b.work_item_workflow_binding_id for b in projection.work_item_workflow_bindings}
+        own_relation_ids = {r.operator_object_relation_id for r in projection.object_relations}
         assert bug_id in own_bug_ids
         assert roadmap_item_id in own_roadmap_ids
+        assert functional_area_id in own_functional_area_ids
         assert decision_id in own_decision_ids
         assert gate_id in own_gate_ids
         assert f"work_item_workflow_binding.operator-graph.{suffix}" in own_binding_ids
+        assert (
+            f"operator_object_relation:grouped-in:roadmap_item:{roadmap_item_id}:functional_area:{functional_area_id}"
+            in own_relation_ids
+        )
 
         node_ids = {node.node_id for node in projection.nodes}
         assert f"bug:{bug_id}" in node_ids
         assert f"roadmap_item:{roadmap_item_id}" in node_ids
+        assert f"functional_area:{functional_area_id}" in node_ids
         assert f"operator_decision:{decision_id}" in node_ids
         assert f"cutover_gate:{gate_id}" in node_ids
+        assert f"workflow_class:{workflow_class_id}" in node_ids
+        assert f"document:{document_id}" in node_ids
+        assert f"repo_path:{repo_path}" in node_ids
 
         edge_summaries = {
             (edge.edge_kind, edge.source_kind, edge.target_kind, edge.target_ref, edge.target_node_id)
@@ -526,7 +659,11 @@ async def _exercise_operator_graph_projection_is_graph_ready_and_explicit() -> N
             ("target_roadmap_item", "cutover_gate", "roadmap_item", roadmap_item_id, f"roadmap_item:{roadmap_item_id}"),
             ("opened_by_decision", "cutover_gate", "operator_decision", decision_id, f"operator_decision:{decision_id}"),
             ("bound_by_decision", "bug", "operator_decision", decision_id, f"operator_decision:{decision_id}"),
-            ("targets_workflow_class", "bug", "workflow_class", workflow_class_id, None),
+            ("targets_workflow_class", "bug", "workflow_class", workflow_class_id, f"workflow_class:{workflow_class_id}"),
+            ("grouped_in", "roadmap_item", "functional_area", functional_area_id, f"functional_area:{functional_area_id}"),
+            ("described_by", "repo_path", "document", document_id, f"document:{document_id}"),
+            ("implements", "repo_path", "roadmap_item", roadmap_item_id, f"roadmap_item:{roadmap_item_id}"),
+            ("relation_bound_by_decision", "repo_path", "operator_decision", decision_id, f"operator_decision:{decision_id}"),
         }
         assert expected_edges.issubset(edge_summaries), (
             f"missing expected edges: {expected_edges - edge_summaries}"

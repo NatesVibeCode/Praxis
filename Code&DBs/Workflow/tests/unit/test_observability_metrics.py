@@ -239,6 +239,79 @@ def test_sync_metric_wrappers_open_loop_local_connections(monkeypatch) -> None:
     assert len(fake_asyncpg.connect_loops) == 2
 
 
+def test_recent_workflows_wrapper_reads_postgres_rows(monkeypatch) -> None:
+    class _LoopBoundConnection:
+        def __init__(self) -> None:
+            self._loop = asyncio.get_running_loop()
+
+        def _assert_loop(self) -> None:
+            if asyncio.get_running_loop() is not self._loop:
+                raise RuntimeError("got Future attached to a different loop")
+
+        async def fetchval(self, _sql: str):
+            self._assert_loop()
+            return True
+
+        async def fetch(self, sql: str, *_args):
+            self._assert_loop()
+            if "information_schema.columns" in sql:
+                return [
+                    {"column_name": column}
+                    for column in observability_mod._REQUIRED_WORKFLOW_METRICS_COLUMNS
+                ]
+            if "FROM workflow_metrics" in sql and "ORDER BY created_at DESC" in sql:
+                return [
+                    {
+                        "run_id": "run_new",
+                        "provider_slug": "anthropic",
+                        "model_slug": "claude-3",
+                        "status": "failed",
+                        "failure_code": "timeout",
+                        "latency_ms": 250,
+                        "cost_usd": 1.5,
+                        "input_tokens": 11,
+                        "output_tokens": 22,
+                        "attempts": 2,
+                        "review_target_modules": ["runtime/foo.py"],
+                        "adapter_type": "cli_llm",
+                        "created_at": datetime(2099, 1, 4, 12, 0, tzinfo=timezone.utc),
+                    },
+                    {
+                        "run_id": "run_old",
+                        "provider_slug": "openai",
+                        "model_slug": "gpt-4o",
+                        "status": "succeeded",
+                        "failure_code": None,
+                        "latency_ms": 100,
+                        "cost_usd": 0.75,
+                        "input_tokens": 5,
+                        "output_tokens": 10,
+                        "attempts": 1,
+                        "review_target_modules": None,
+                        "adapter_type": "api",
+                        "created_at": datetime(2099, 1, 4, 11, 0, tzinfo=timezone.utc),
+                    },
+                ]
+            raise AssertionError(f"unexpected SQL: {sql}")
+
+        async def close(self) -> None:
+            self._assert_loop()
+
+    class _FakeAsyncPG:
+        async def connect(self, dsn: str):
+            assert dsn == "postgresql://test@localhost:5432/praxis_test"
+            return _LoopBoundConnection()
+
+    monkeypatch.setattr(observability_mod, "asyncpg", _FakeAsyncPG())
+
+    view = WorkflowMetricsView(db_url="postgresql://test@localhost:5432/praxis_test")
+
+    rows = view.recent_workflows(limit=2)
+    assert [row["run_id"] for row in rows] == ["run_new", "run_old"]
+    assert rows[0]["failure_code"] == "timeout"
+    assert rows[1]["status"] == "succeeded"
+
+
 def test_capability_distribution_casts_text_capability_payloads(monkeypatch) -> None:
     observed: dict[str, str] = {}
 

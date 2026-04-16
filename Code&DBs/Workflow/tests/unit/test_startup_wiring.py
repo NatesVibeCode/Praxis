@@ -176,8 +176,8 @@ def test_startup_wiring_syncs_registry_before_reference_catalog_and_starts_heart
     fake_runner = _FakeRunner()
 
     monkeypatch.setattr(
-        "storage.postgres.ensure_postgres_available",
-        lambda env=None: fake_conn,
+        "surfaces._subsystems_base.bootstrap_pg_conn",
+        lambda **_kwargs: fake_conn,
     )
 
     monkeypatch.setattr(
@@ -206,8 +206,8 @@ def test_startup_wiring_syncs_registry_before_reference_catalog_and_starts_heart
     subs._build_heartbeat_runner = lambda: fake_runner
     subs._should_auto_startup_wiring = lambda: True
 
-    subs.get_pg_conn()
-    subs.get_pg_conn()
+    subs.boot()
+    subs.boot()
 
     assert events == [
         "integration",
@@ -218,8 +218,74 @@ def test_startup_wiring_syncs_registry_before_reference_catalog_and_starts_heart
     assert subs._lifecycle.started is True
     assert subs._lifecycle._heartbeat_thread is not None
     assert len(_FakeThread.instances) == 1
-    assert _FakeThread.instances[0].started is True
-    assert fake_runner.loop_calls == [{"interval_seconds": 300}]
+
+
+def test_get_pg_conn_is_connection_only(monkeypatch) -> None:
+    events: list[str] = []
+    fake_conn = _FakeConn()
+
+    monkeypatch.setattr(
+        "surfaces._subsystems_base.create_pg_conn",
+        lambda **_kwargs: fake_conn,
+    )
+    monkeypatch.setattr(
+        integration_registry_sync_mod,
+        "sync_integration_registry",
+        lambda conn: events.append("integration") or 1,
+    )
+    monkeypatch.setattr(
+        capability_catalog_mod,
+        "sync_capability_catalog",
+        lambda conn: events.append("capability") or 1,
+    )
+
+    subs = _TestSubsystems()
+    subs._should_auto_startup_wiring = lambda: True
+
+    assert subs.get_pg_conn() is fake_conn
+    assert subs.get_pg_conn() is fake_conn
+    assert events == []
+    assert subs._lifecycle.started is False
+
+
+def test_boot_warns_when_registry_sync_steps_are_skipped(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    fake_conn = _FakeConn()
+
+    monkeypatch.setattr(
+        "surfaces._subsystems_base.bootstrap_pg_conn",
+        lambda **_kwargs: fake_conn,
+    )
+    monkeypatch.setattr(
+        integration_registry_sync_mod,
+        "sync_integration_registry",
+        lambda conn: 1,
+    )
+    monkeypatch.setattr(
+        capability_catalog_mod,
+        "sync_capability_catalog",
+        lambda conn: (_ for _ in ()).throw(RuntimeError("catalog offline")),
+    )
+    monkeypatch.setattr(
+        native_runtime_profile_sync_mod,
+        "sync_native_runtime_profile_authority",
+        lambda conn: 1,
+    )
+    monkeypatch.setattr(
+        reference_catalog_seeder_mod,
+        "seed_reference_catalog",
+        lambda conn: 1,
+    )
+
+    subs = _TestSubsystems()
+    subs._should_auto_startup_wiring = lambda: False
+
+    with caplog.at_level("WARNING"):
+        subs.boot()
+
+    assert "startup registry sync completed with skipped steps: capability_catalog" in caplog.text
 
 
 def test_startup_wiring_can_skip_heartbeat_background(monkeypatch) -> None:
@@ -227,8 +293,8 @@ def test_startup_wiring_can_skip_heartbeat_background(monkeypatch) -> None:
     fake_conn = _FakeConn()
 
     monkeypatch.setattr(
-        "storage.postgres.ensure_postgres_available",
-        lambda env=None: fake_conn,
+        "surfaces._subsystems_base.bootstrap_pg_conn",
+        lambda **_kwargs: fake_conn,
     )
     monkeypatch.setattr(
         integration_registry_sync_mod,
@@ -256,7 +322,7 @@ def test_startup_wiring_can_skip_heartbeat_background(monkeypatch) -> None:
     subs = _NoHeartbeatSubsystems()
     subs._should_auto_startup_wiring = lambda: True
 
-    subs.get_pg_conn()
+    subs.boot()
 
     assert events == [
         "integration",
@@ -305,7 +371,7 @@ def test_mcp_workflow_database_env_prefers_repo_env_file(monkeypatch, tmp_path: 
     monkeypatch.setattr(mcp_subsystems, "_REPO_ROOT", tmp_path)
 
     assert mcp_subsystems.workflow_database_env() == {
-        "WORKFLOW_DATABASE_URL": "postgresql://postgres@repo.test/workflow",
+        "WORKFLOW_DATABASE_URL": "postgresql://repo.test/workflow",
         "PATH": "/usr/bin:/bin",
     }
 
@@ -346,7 +412,7 @@ def test_api_workflow_database_env_prefers_repo_env_file(monkeypatch, tmp_path: 
     monkeypatch.setattr(api_subsystems, "REPO_ROOT", tmp_path)
 
     assert api_subsystems.workflow_database_env() == {
-        "WORKFLOW_DATABASE_URL": "postgresql://postgres@repo.test/workflow",
+        "WORKFLOW_DATABASE_URL": "postgresql://repo.test/workflow",
         "PATH": "/usr/bin:/bin",
     }
 

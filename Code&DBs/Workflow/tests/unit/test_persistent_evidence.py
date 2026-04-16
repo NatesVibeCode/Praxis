@@ -12,14 +12,14 @@ _WORKFLOW_ROOT = Path(__file__).resolve().parents[2]
 if str(_WORKFLOW_ROOT) not in sys.path:
     sys.path.insert(0, str(_WORKFLOW_ROOT))
 
-from adapters.evidence import build_claim_received_proof
+from adapters.evidence import build_claim_received_proof, build_transition_proof
 from runtime.domain import (
     LifecycleTransition,
     RouteIdentity,
     RunState,
     RuntimeBoundaryError,
 )
-from runtime.persistent_evidence import PostgresEvidenceWriter
+from runtime.persistent_evidence import PostgresEvidenceWriter, _proof_run_state_update
 
 
 def _route_identity(run_id: str) -> RouteIdentity:
@@ -46,6 +46,66 @@ def _claim_received_proof(run_id: str):
         admitted_definition_hash=f"sha256:{run_id}",
         occurred_at=datetime(2026, 4, 9, 15, 0, tzinfo=timezone.utc),
     )
+
+
+def _node_started_proof(run_id: str):
+    return build_transition_proof(
+        route_identity=replace(_route_identity(run_id), transition_seq=2),
+        transition_seq=2,
+        event_id=f"workflow_event:{run_id}:3",
+        receipt_id=f"receipt:{run_id}:4",
+        event_type="node_started",
+        receipt_type="node_start_receipt",
+        reason_code="runtime.node_started",
+        evidence_seq=3,
+        occurred_at=datetime(2026, 4, 9, 15, 1, tzinfo=timezone.utc),
+        status="running",
+        payload={"node_id": "node-1"},
+        inputs={"node_id": "node-1"},
+        outputs={"node_id": "node-1", "status": "running"},
+        node_id="node-1",
+        causation_id=f"receipt:{run_id}:2",
+    )
+
+
+def test_proof_run_state_update_accepts_claim_received_bootstrap() -> None:
+    state_update = _proof_run_state_update(_claim_received_proof("run-bootstrap"))
+
+    assert state_update is not None
+    assert state_update.from_state is None
+    assert state_update.to_state is RunState.CLAIM_RECEIVED
+    assert state_update.expected_current_state == RunState.CLAIM_RECEIVED.value
+    assert state_update.is_submission_bootstrap is True
+
+
+def test_proof_run_state_update_parses_explicit_workflow_transition() -> None:
+    proof = build_transition_proof(
+        route_identity=replace(_route_identity("run-transition"), transition_seq=2),
+        transition_seq=2,
+        event_id="workflow_event:run-transition:3",
+        receipt_id="receipt:run-transition:4",
+        event_type="claim_validated",
+        receipt_type="claim_validation_receipt",
+        reason_code="claim.validated",
+        evidence_seq=3,
+        occurred_at=datetime(2026, 4, 9, 15, 1, tzinfo=timezone.utc),
+        status=RunState.CLAIM_VALIDATING.value,
+        payload={
+            "from_state": RunState.CLAIM_RECEIVED.value,
+            "to_state": RunState.CLAIM_VALIDATING.value,
+        },
+    )
+
+    state_update = _proof_run_state_update(proof)
+
+    assert state_update is not None
+    assert state_update.from_state is RunState.CLAIM_RECEIVED
+    assert state_update.to_state is RunState.CLAIM_VALIDATING
+    assert state_update.is_submission_bootstrap is False
+
+
+def test_proof_run_state_update_leaves_node_evidence_alone() -> None:
+    assert _proof_run_state_update(_node_started_proof("run-node")) is None
 
 
 def test_commit_submission_raises_when_persistence_fails() -> None:

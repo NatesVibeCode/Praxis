@@ -2,15 +2,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import pytest
 
-from datetime import datetime, timezone
-
-from runtime import RunState
+from runtime import RunState, RuntimeBoundaryError
 from runtime.claims import ClaimLeaseProposalSnapshot
 from runtime.outbox import WorkflowOutboxBatch, WorkflowOutboxCursor, WorkflowOutboxRecord
 from runtime.subscription_repository import EventSubscriptionCheckpoint, EventSubscriptionDefinition
-from runtime.subscriptions import WorkerSubscriptionCursor, WorkflowWorkerSubscription
-from surfaces.workflow_bridge import WorkflowBridge
+from runtime.subscriptions import (
+    WorkerInboxFact,
+    WorkerSubscriptionBatch,
+    WorkerSubscriptionCursor,
+    WorkflowWorkerSubscription,
+)
+from surfaces.workflow_bridge import WorkflowBridge, WorkflowClaimableWork
 
 
 def test_dispatch_bridge_consumes_runtime_authority_without_creating_second_state_machine() -> None:
@@ -131,6 +135,70 @@ def test_dispatch_bridge_consumes_runtime_authority_without_creating_second_stat
     assert second_work.inbox_batch.next_cursor.last_acked_evidence_seq == 3
     assert routes.inspect_calls == 2
     assert routes.mutation_attempts == 0
+
+
+def test_dispatch_bridge_acknowledge_fails_closed_for_non_claimable_runtime_state() -> None:
+    route_snapshot = ClaimLeaseProposalSnapshot(
+        run_id="run:dispatch-bridge-blocked",
+        workflow_id="workflow:dispatch-bridge-blocked",
+        request_id="request:dispatch-bridge-blocked",
+        current_state=RunState.CLAIM_BLOCKED,
+        claim_id="claim:dispatch-bridge-blocked",
+        lease_id=None,
+        proposal_id=None,
+        attempt_no=1,
+        transition_seq=1,
+        sandbox_group_id=None,
+        sandbox_session_id=None,
+        share_mode="exclusive",
+        reuse_reason_code=None,
+        last_event_id="workflow_event:dispatch-bridge-blocked:1",
+    )
+    bridge = WorkflowBridge(
+        routes=_FakeRouteReader(snapshot=route_snapshot),
+        subscriptions=WorkflowWorkerSubscription(
+            subscriber=_FakeOutboxSubscriber(rows=()),
+            repository=_FakeSubscriptionRepository(),
+        ),
+    )
+    blocked_work = WorkflowClaimableWork(
+        route_snapshot=route_snapshot,
+        inbox_batch=WorkerSubscriptionBatch(
+            cursor=WorkerSubscriptionCursor(
+                subscription_id="dispatch:worker:bridge",
+                run_id=route_snapshot.run_id,
+            ),
+            next_cursor=WorkerSubscriptionCursor(
+                subscription_id="dispatch:worker:bridge",
+                run_id=route_snapshot.run_id,
+                last_acked_evidence_seq=1,
+            ),
+            facts=(
+                WorkerInboxFact(
+                    inbox_fact_id="inbox:dispatch:worker:bridge:1",
+                    subscription_id="dispatch:worker:bridge",
+                    authority_table="workflow_events",
+                    authority_id="workflow_event:dispatch-bridge-blocked:1",
+                    envelope_kind="workflow_event",
+                    workflow_id=route_snapshot.workflow_id,
+                    run_id=route_snapshot.run_id,
+                    request_id=route_snapshot.request_id,
+                    evidence_seq=1,
+                    transition_seq=1,
+                    authority_recorded_at=datetime(2026, 4, 2, 18, 0, tzinfo=timezone.utc),
+                    envelope={"event_type": "claim_blocked"},
+                ),
+            ),
+            has_more=False,
+        ),
+        claimable=True,
+    )
+
+    with pytest.raises(
+        RuntimeBoundaryError,
+        match="workflow bridge can only acknowledge batches that are claimable from runtime authority",
+    ):
+        bridge.acknowledge(work=blocked_work)
 
 
 @dataclass

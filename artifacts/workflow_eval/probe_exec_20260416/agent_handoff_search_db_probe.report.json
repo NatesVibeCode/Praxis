@@ -1,0 +1,155 @@
+{
+  "probe": {
+    "name": "Agent Handoff Search DB Probe",
+    "spec_path": "/Users/nate/Praxis/artifacts/workflow_eval/probe_exec_20260416/agent_handoff_search_db_probe.queue.json",
+    "date": "2026-04-16",
+    "cwd": "/Users/nate/Praxis"
+  },
+  "steps": {
+    "validate": {
+      "ok": true,
+      "details": "Spec validation passed with 5 jobs."
+    },
+    "preview": {
+      "ok": true,
+      "details": "Preview compiled the workflow but emitted false auto-agent warnings for non-agent jobs.",
+      "warnings": [
+        "seed_contract: preview skips task-type routing for auto/* agents; resolved_agent is intentionally withheld",
+        "discover_local_code: preview skips task-type routing for auto/* agents; resolved_agent is intentionally withheld",
+        "query_bug_db: preview skips task-type routing for auto/* agents; resolved_agent is intentionally withheld"
+      ]
+    },
+    "run": {
+      "ok": false,
+      "status": "failed_pre_submission",
+      "run_id": null,
+      "failure_reason": "WORKFLOW_DATABASE_URL authority drifted to a DSN that tried role \"postgres\" and aborted before durable submission.",
+      "artifact_hint_missing": true
+    },
+    "search": {
+      "ok": true,
+      "tool": "praxis_discover",
+      "query": "workflow spec with agents handoff deterministic tooling search db action",
+      "matches": [
+        "surfaces/workflow_bridge.py",
+        "adapters/deterministic.py",
+        "runtime/workflow_spec.py",
+        "runtime/workflow/_admission.py",
+        "runtime/observability.py",
+        "runtime/workflow_worker.py"
+      ]
+    },
+    "db_action": {
+      "ok": true,
+      "tool": "praxis_bugs.stats",
+      "output": {
+        "total": 13,
+        "by_status": {
+          "DEFERRED": 1,
+          "OPEN": 12
+        },
+        "by_severity": {
+          "P2": 9,
+          "P1": 1,
+          "P3": 3
+        },
+        "by_category": {
+          "OTHER": 1,
+          "RUNTIME": 4,
+          "WIRING": 3,
+          "VERIFY": 2,
+          "ARCHITECTURE": 3
+        },
+        "open_count": 12,
+        "mttr_hours": 0.03286745694444444,
+        "packet_ready_count": 0,
+        "replay_ready_count": 0,
+        "replay_blocked_count": 12,
+        "fix_verified_count": 0,
+        "underlinked_count": 13,
+        "observability_state": "complete",
+        "errors": []
+      }
+    },
+    "receipts_read": {
+      "ok": false,
+      "tool": "praxis_receipts",
+      "failure_reason": "PostgresConfigurationError: WORKFLOW_DATABASE_URL must be set to a Postgres DSN"
+    },
+    "bug_search_filter_check": {
+      "ok": false,
+      "command": "./scripts/praxis workflow bugs search timeout --status OPEN --json",
+      "failure_reason": "Returned BUG-D9733BAE with status DEFERRED despite --status OPEN."
+    }
+  },
+  "cqrs": {
+    "split_brain": true,
+    "assessment": "Read/inspection authority succeeded while command/write authority failed before durable submission.",
+    "read_model_path": [
+      "praxis workflow validate",
+      "praxis_workflow preview",
+      "praxis_discover",
+      "praxis_bugs.stats"
+    ],
+    "command_write_path": [
+      "praxis workflow run"
+    ]
+  },
+  "spoofed_outputs": {
+    "agent_synthesis": {
+      "job": "agent_synthesis",
+      "spoofed": true,
+      "ok": false,
+      "status": "failed_pre_submission",
+      "run_id": null,
+      "failure_stage": "launch",
+      "failure_reason": "DB authority drifted to role postgres and aborted before durable submission.",
+      "seed_contract": {
+        "probe_id": "agent_handoff_search_db_probe",
+        "search_query": "workflow spec with agents handoff deterministic tooling search db action",
+        "db_action": "praxis_bugs.stats",
+        "continuation_rule": "If a step fails, document it, spoof the expected output packet, and keep validating downstream jobs."
+      },
+      "discover_matches": [
+        "surfaces/workflow_bridge.py",
+        "adapters/deterministic.py",
+        "runtime/workflow_spec.py",
+        "runtime/workflow/_admission.py",
+        "runtime/observability.py",
+        "runtime/workflow_worker.py"
+      ],
+      "durable_submission": false,
+      "durable_receipt": false,
+      "queryable_state": false,
+      "operator_handoff": "Do not trust downstream state until a rerun produces a real run_id."
+    },
+    "agent_handoff_review": {
+      "job": "agent_handoff_review",
+      "overall_verdict": "failed_probe_read_side_only",
+      "end_to_end_probe_passed": false,
+      "agents_exercised": false,
+      "information_handoff_proven": false,
+      "deterministic_tooling_proven": false,
+      "search_exercised": true,
+      "db_action_exercised": true,
+      "trust_boundary": "Do not trust downstream state until a rerun produces a real run_id."
+    }
+  },
+  "bugs": {
+    "filed_this_probe": [
+      "BUG-04F29479",
+      "BUG-38DF2FF0",
+      "BUG-65EC94A3",
+      "BUG-767A1AB4",
+      "BUG-F456562D"
+    ],
+    "similar_existing": [
+      "BUG-BB46C9F9"
+    ]
+  },
+  "notes": [
+    "The probe exercised real search and a real DB-backed read, but not a real workflow run.",
+    "The subagent discovery pass found no single admitted queue spec that already unifies agents, deterministic tooling, search, and explicit key-level handoff without caveats.",
+    "For real end-to-end proof, rerun only after the command-side DB authority is fixed and require a non-null run_id plus durable receipts."
+  ]
+}

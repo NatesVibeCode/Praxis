@@ -8,15 +8,23 @@ from fastapi.responses import JSONResponse
 from storage.postgres import PostgresWebhookRepository, get_workflow_pool
 from storage.postgres.connection import SyncPostgresConnection
 from runtime.integrations.webhook_receiver import ingest_webhook
+from surfaces._workflow_database import workflow_database_env_for_repo
+
+from ._shared import REPO_ROOT
 
 webhook_ingest_router = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
+
+
+def _webhook_conn() -> SyncPostgresConnection:
+    env = workflow_database_env_for_repo(REPO_ROOT)
+    return SyncPostgresConnection(get_workflow_pool(env=env))
 
 
 @webhook_ingest_router.post("/endpoints")
 async def create_webhook_endpoint(request: Request) -> JSONResponse:
     """Register a new webhook endpoint. Auto-creates workflow_trigger if target_workflow_id is set."""
     body = await request.json()
-    conn = SyncPostgresConnection(get_workflow_pool())
+    conn = _webhook_conn()
     repository = PostgresWebhookRepository(conn)
 
     endpoint = repository.upsert_webhook_endpoint(
@@ -64,7 +72,7 @@ async def receive_webhook(slug: str, request: Request) -> JSONResponse:
 
     headers = dict(request.headers)
 
-    conn = SyncPostgresConnection(get_workflow_pool())
+    conn = _webhook_conn()
     result = ingest_webhook(conn, slug, payload, headers, raw_body)
 
     if result.error:

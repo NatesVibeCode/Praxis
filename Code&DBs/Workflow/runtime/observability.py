@@ -800,6 +800,159 @@ class WorkflowMetricsView:
         finally:
             loop.close()
 
+    async def recent_workflows_async(
+        self,
+        *,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Return the most recent workflow metrics rows.
+
+        The rows are ordered newest-first and include enough metadata for
+        status and dashboard summaries without consulting process-local state.
+        """
+        async with self._connection() as conn:
+            await self._ensure_schema(conn=conn)
+            rows = await conn.fetch(
+                """
+                SELECT
+                    run_id,
+                    parent_run_id,
+                    reviews_workflow_id,
+                    review_target_modules,
+                    author_model,
+                    provider_slug,
+                    model_slug,
+                    status,
+                    failure_code,
+                    failure_category,
+                    failure_zone,
+                    is_retryable,
+                    is_transient,
+                    latency_ms,
+                    cost_usd,
+                    input_tokens,
+                    output_tokens,
+                    attempts,
+                    retry_count,
+                    tool_use_count,
+                    cache_read_tokens,
+                    cache_creation_tokens,
+                    duration_api_ms,
+                    task_type,
+                    workflow_label,
+                    capabilities,
+                    label,
+                    adapter_type,
+                    created_at
+                FROM workflow_metrics
+                ORDER BY created_at DESC, run_id DESC
+                LIMIT $1
+                """,
+                max(0, int(limit)),
+            )
+            return [dict(row) for row in rows]
+
+    def recent_workflows(
+        self,
+        *,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Synchronous wrapper for recent_workflows_async."""
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(self.recent_workflows_async(limit=limit))
+        finally:
+            loop.close()
+
+    async def recent_route_outcomes_async(
+        self,
+        *,
+        provider_slug: str,
+        model_slug: str | None = None,
+        adapter_type: str | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Return recent workflow metrics rows for one provider route."""
+        async with self._connection() as conn:
+            await self._ensure_schema(conn=conn)
+            query = """
+                SELECT
+                    run_id,
+                    provider_slug,
+                    model_slug,
+                    adapter_type,
+                    status,
+                    failure_code,
+                    failure_category,
+                    latency_ms,
+                    created_at
+                FROM workflow_metrics
+                WHERE provider_slug = $1
+            """
+            params: list[Any] = [provider_slug]
+            if model_slug is not None:
+                query += " AND model_slug = $2"
+                params.append(model_slug)
+                if adapter_type is not None:
+                    query += " AND adapter_type = $3"
+                    params.append(adapter_type)
+            elif adapter_type is not None:
+                query += " AND adapter_type = $2"
+                params.append(adapter_type)
+
+            query += """
+                ORDER BY created_at DESC, run_id DESC
+                LIMIT $%d
+            """ % (len(params) + 1)
+            params.append(max(0, int(limit)))
+            rows = await conn.fetch(query, *params)
+            return [dict(row) for row in rows]
+
+    def recent_route_outcomes(
+        self,
+        *,
+        provider_slug: str,
+        model_slug: str | None = None,
+        adapter_type: str | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Synchronous wrapper for recent_route_outcomes_async."""
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(
+                self.recent_route_outcomes_async(
+                    provider_slug=provider_slug,
+                    model_slug=model_slug,
+                    adapter_type=adapter_type,
+                    limit=limit,
+                )
+            )
+        finally:
+            loop.close()
+
+    async def provider_slugs_async(self) -> list[str]:
+        """Return distinct provider slugs from workflow_metrics."""
+        async with self._connection() as conn:
+            await self._ensure_schema(conn=conn)
+            rows = await conn.fetch(
+                """
+                SELECT DISTINCT provider_slug
+                  FROM workflow_metrics
+                 WHERE provider_slug IS NOT NULL
+                   AND provider_slug <> ''
+                 ORDER BY provider_slug
+                """
+            )
+            return [str(row["provider_slug"]) for row in rows if row["provider_slug"]]
+
+    def provider_slugs(self) -> list[str]:
+        """Synchronous wrapper for provider_slugs_async."""
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(self.provider_slugs_async())
+        finally:
+            loop.close()
+
     async def hourly_workflow_volume_async(
         self,
         *,

@@ -1,0 +1,91 @@
+{
+  "name": "Agent Handoff Search DB Probe",
+  "workflow_id": "agent_handoff_search_db_probe",
+  "phase": "execute",
+  "outcome_goal": "Exercise one workflow path that uses deterministic tooling, MCP-backed search, agent handoff, and a DB-backed action while surfacing breakage instead of hiding it.",
+  "jobs": [
+    {
+      "label": "seed_contract",
+      "adapter_type": "deterministic_task",
+      "inputs": {
+        "task_name": "seed_contract",
+        "input_payload": {
+          "probe": "agent_handoff_search_db_probe",
+          "contract": {
+            "must_exercise": [
+              "deterministic tooling",
+              "search",
+              "agents",
+              "information handoff",
+              "db action"
+            ],
+            "must_expose": [
+              "blocked step details",
+              "spoof guidance for downstream continuation"
+            ]
+          }
+        }
+      },
+      "expected_outputs": {
+        "probe_id": "agent_handoff_search_db_probe",
+        "search_query": "workflow spec with agents handoff deterministic tooling search db action",
+        "db_action": "praxis_bugs.stats",
+        "continuation_rule": "If a step fails, document it, spoof the expected output packet, and keep validating downstream jobs."
+      }
+    },
+    {
+      "label": "discover_local_code",
+      "adapter_type": "mcp_task",
+      "depends_on": [
+        "seed_contract"
+      ],
+      "inputs": {
+        "task_name": "discover_local_code",
+        "server_command": "env PYTHONPATH=/Users/nate/Praxis/Code&DBs/Workflow PRAXIS_MCP_STDIO_TRANSPORT=jsonl WORKFLOW_DATABASE_URL=postgresql://localhost:5432/praxis python3 -m surfaces.mcp",
+        "tool_name": "praxis_discover",
+        "arguments": {
+          "action": "search",
+          "query": "workflow spec with agents handoff deterministic tooling search db action",
+          "limit": 5
+        },
+        "timeout": 45
+      }
+    },
+    {
+      "label": "agent_synthesis",
+      "agent": "openai/gpt-5.4-mini",
+      "workdir": "/Users/nate/Praxis",
+      "prompt": "Read the prior workflow results and produce a blunt operator handoff note. Include: 1) what the search step actually proved, 2) which authority seams still look fake or implicit, and 3) what the next job should verify. If anything upstream failed, say so plainly and include the minimum spoof packet needed for downstream continuation.",
+      "depends_on": [
+        "seed_contract",
+        "discover_local_code"
+      ]
+    },
+    {
+      "label": "query_bug_db",
+      "adapter_type": "mcp_task",
+      "depends_on": [
+        "agent_synthesis"
+      ],
+      "inputs": {
+        "task_name": "query_bug_db",
+        "server_command": "env PYTHONPATH=/Users/nate/Praxis/Code&DBs/Workflow PRAXIS_MCP_STDIO_TRANSPORT=jsonl WORKFLOW_DATABASE_URL=postgresql://localhost:5432/praxis python3 -m surfaces.mcp",
+        "tool_name": "praxis_bugs",
+        "arguments": {
+          "action": "stats"
+        },
+        "timeout": 45
+      }
+    },
+    {
+      "label": "agent_handoff_review",
+      "agent": "openai/gpt-5.4-mini",
+      "workdir": "/Users/nate/Praxis",
+      "prompt": "Act as the downstream verifier consuming only prior workflow outputs. Decide whether this workflow truly exercised agents, information handoff, deterministic tooling, search, and a DB action. Call out every gap or fake seam. If any required upstream output is missing, emit a spoof packet that would let a human continue the end-to-end test without pretending the gap is solved.",
+      "depends_on": [
+        "agent_synthesis",
+        "query_bug_db"
+      ]
+    }
+  ]
+}

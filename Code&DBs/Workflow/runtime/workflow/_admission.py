@@ -47,6 +47,7 @@ from ._routing import (
     _build_request_envelope,
     _derive_touch_keys,
     _runtime_profile_ref_from_spec,
+    _workspace_ref_from_spec,
 )
 from ._workflow_state import (
     _ensure_workflow_authority,
@@ -56,8 +57,11 @@ from ._context_building import (
     _build_job_execution_context_shards,
     _build_job_execution_bundles,
     _build_execution_packet,
+    _execution_model_messages,
+    _render_execution_context_shard,
     _shadow_packet_inspection_from_rows,
 )
+from runtime.workflow.execution_bundle import render_execution_bundle
 from runtime.dynamic_timeout import (
     calculate_timeout_seconds,
     max_complexity_tier,
@@ -76,6 +80,7 @@ __all__ = [
     "IdempotencyConflict",
     "_retry_packet_reuse_provenance",
     "load_execution_packets",
+    "preview_workflow_execution",
     "submit_workflow",
     "submit_workflow_inline",
 ]
@@ -333,6 +338,297 @@ def _graph_runtime_timeout_seconds(
     if explicit_timeout_provided:
         return max(base_timeout, computed_timeout)
     return computed_timeout
+
+
+def _inline_spec_object(spec_dict: dict[str, object]):
+    """Build the lightweight spec object consumed by admission helpers."""
+
+    return type(
+        "InlineSpec",
+        (),
+        {
+            "name": spec_dict.get("name", "inline"),
+            "workflow_id": spec_dict.get("workflow_id", "workflow.inline"),
+            "phase": spec_dict.get("phase", "build"),
+            "jobs": spec_dict.get("jobs", []),
+            "outcome_goal": spec_dict.get("outcome_goal", ""),
+            "output_dir": spec_dict.get("output_dir", ""),
+            "workspace_ref": spec_dict.get("workspace_ref"),
+            "runtime_profile_ref": spec_dict.get("runtime_profile_ref"),
+            "_raw": spec_dict,
+        },
+    )()
+
+
+def _preview_spec_ref(
+    raw_snapshot: Mapping[str, object],
+    *,
+    spec,
+    field_name: str,
+) -> str | None:
+    """Resolve an execution-lane ref only when it is explicit in the spec."""
+
+    value = raw_snapshot.get(field_name)
+    if isinstance(value, str):
+        normalized = value.strip()
+        if normalized:
+            return normalized
+
+    attr = getattr(spec, field_name, None)
+    if isinstance(attr, str):
+        normalized = attr.strip()
+        if normalized:
+            return normalized
+
+    return None
+
+
+def _apply_write_scope_auto_dependencies(spec) -> None:
+    """Populate depends_on from declared write scope when the authority is explicit."""
+
+    scope = {"write_scope": [], "read_scope": {}}
+    file_to_job_labels: dict[str, set[str]] = {}
+    for job in spec.jobs:
+        label = job.get("label")
+        write_scope = job.get("write_scope")
+        if isinstance(write_scope, str):
+            write_scope = [write_scope]
+        if not write_scope:
+            scoped_write = (job.get("scope") or {}).get("write", [])
+            write_scope = [scoped_write] if isinstance(scoped_write, str) else scoped_write
+        read_scope = job.get("read_scope")
+        if isinstance(read_scope, str):
+            read_scope = [read_scope]
+        for path in write_scope or []:
+            if not path:
+                continue
+            scope["write_scope"].append({"path": path, "action": "modify"})
+            file_to_job_labels.setdefault(path, set()).add(label)
+            if isinstance(read_scope, dict):
+                path_reads = read_scope.get(path, [])
+                if isinstance(path_reads, str):
+                    path_reads = [path_reads]
+                if path_reads:
+                    scope["read_scope"][path] = list(path_reads)
+            elif read_scope:
+                scope["read_scope"][path] = list(read_scope)
+
+    if not scope["write_scope"]:
+        return
+
+    try:
+        compiler = StepCompiler()
+        plan = compiler.compile(scope)
+    except Exception as exc:
+        raise RuntimeError(
+            f"workflow submit failed closed while resolving write-scope authority: {exc}",
+        ) from exc
+
+    step_id_to_path = {step.step_id: step.file_path for step in plan.steps}
+    auto_deps: dict[str, set[str]] = {}
+    for step in plan.steps:
+        child_labels = file_to_job_labels.get(step.file_path, set())
+        if not child_labels or not step.depends_on:
+            continue
+        for dep_step_id in step.depends_on:
+            dep_path = step_id_to_path.get(dep_step_id)
+            if not dep_path:
+                continue
+            for parent_label in file_to_job_labels.get(dep_path, set()):
+                for child_label in child_labels:
+                    if parent_label != child_label:
+                        auto_deps.setdefault(child_label, set()).add(parent_label)
+
+    for job in spec.jobs:
+        label = job.get("label")
+        if label in auto_deps and not job.get("depends_on"):
+            job["depends_on"] = sorted(auto_deps[label])
+
+
+def _preview_route_payload(job: Mapping[str, object]) -> dict[str, object]:
+    adapter_type = str(job.get("adapter_type") or "").strip().lower()
+    requested_agent = str(job.get("agent") or "").strip()
+    if adapter_type and adapter_type not in {"cli_llm", "llm_task"}:
+        return {
+            "requested_agent": requested_agent or None,
+            "resolved_agent": None,
+            "route_status": "not_applicable",
+        }
+    requested_agent = requested_agent or "auto/build"
+    if requested_agent.startswith("auto/"):
+        return {
+            "requested_agent": requested_agent,
+            "resolved_agent": None,
+            "route_status": "unresolved",
+            "route_reason": (
+                "preview skips task-type routing for auto/* agents; "
+                "resolved_agent is intentionally withheld"
+            ),
+        }
+    return {
+        "requested_agent": requested_agent,
+        "resolved_agent": requested_agent,
+        "route_status": "explicit",
+    }
+
+
+def preview_workflow_execution(
+    conn: SyncPostgresConnection,
+    *,
+    spec_path: str | None = None,
+    inline_spec: Mapping[str, object] | None = None,
+    repo_root: str | None = None,
+) -> dict[str, object]:
+    """Build the exact worker-facing execution payload without submitting a run."""
+
+    if bool(spec_path) == bool(inline_spec):
+        raise ValueError("pass exactly one of spec_path or inline_spec")
+
+    preview_repo_root = str(repo_root or os.getcwd()).strip() or os.getcwd()
+    preview_source: str
+    resolved_spec_path: str | None = None
+    if spec_path is not None:
+        from runtime.workflow_spec import WorkflowSpec
+
+        resolved_path = Path(spec_path)
+        if not resolved_path.is_absolute():
+            resolved_path = Path(preview_repo_root) / resolved_path
+        resolved_spec_path = str(resolved_path)
+        spec = WorkflowSpec.load(resolved_spec_path)
+        raw_snapshot = dict(getattr(spec, "_raw", {}) or {})
+        preview_source = "spec_path"
+    else:
+        raw_snapshot = json.loads(json.dumps(dict(inline_spec or {}), default=str))
+        spec = _inline_spec_object(raw_snapshot)
+        preview_source = "inline_spec"
+
+    _apply_write_scope_auto_dependencies(spec)
+
+    provenance = {
+        "source_kind": f"{preview_source}_preview",
+        "repo_root": preview_repo_root,
+        "spec_path": resolved_spec_path,
+        "file_inputs": raw_snapshot,
+    }
+    # Preview must not consult native authority defaults. It only reflects the
+    # refs that are already explicit on the spec, so the lane stays DB-optional.
+    runtime_profile_ref = _preview_spec_ref(raw_snapshot, spec=spec, field_name="runtime_profile_ref")
+    workspace_ref = _preview_spec_ref(raw_snapshot, spec=spec, field_name="workspace_ref")
+    execution_context_shards = _build_job_execution_context_shards(
+        conn=conn,
+        spec=spec,
+        raw_snapshot=raw_snapshot,
+        provenance=provenance,
+    )
+    execution_bundles = _build_job_execution_bundles(
+        conn=conn,
+        spec=spec,
+        raw_snapshot=raw_snapshot,
+        execution_context_shards=execution_context_shards,
+        run_id=None,
+        workflow_id=str(getattr(spec, "workflow_id", "") or "").strip() or None,
+        runtime_profile_ref=runtime_profile_ref,
+    )
+
+    spec_verify_refs = _normalize_paths(raw_snapshot.get("verify_refs"))
+    warnings: list[str] = []
+    jobs: list[dict[str, object]] = []
+    for index, job in enumerate(spec.jobs):
+        label = str(job.get("label") or f"job_{index}")
+        route_payload = _preview_route_payload(job)
+        route_reason = str(route_payload.get("route_reason") or "").strip()
+        if route_reason:
+            warnings.append(f"{label}: {route_reason}")
+        context_shard = dict(execution_context_shards.get(label) or {})
+        execution_bundle = dict(execution_bundles.get(label) or {})
+        job_payload = dict(job)
+        if context_shard:
+            job_payload["_execution_context"] = context_shard
+        if execution_bundle:
+            job_payload["_execution_bundle"] = execution_bundle
+        messages = _execution_model_messages(job_payload)
+        rendered_user_prompt = next(
+            (
+                str(message.get("content") or "")
+                for message in messages
+                if str(message.get("role") or "").strip().lower() == "user"
+            ),
+            "",
+        )
+        rendered_system_prompt = next(
+            (
+                str(message.get("content") or "")
+                for message in messages
+                if str(message.get("role") or "").strip().lower() == "system"
+            ),
+            None,
+        )
+        job_workdir = str(job.get("workdir") or raw_snapshot.get("workdir") or preview_repo_root).strip()
+        verify_refs = list(
+            dict.fromkeys(
+                [
+                    *_normalize_paths(context_shard.get("verify_refs")),
+                    *_normalize_paths(job.get("verify_refs")),
+                    *spec_verify_refs,
+                ]
+            )
+        )
+        preview_job: dict[str, object] = {
+            "label": label,
+            "prompt": str(job.get("prompt") or ""),
+            "adapter_type": str(job.get("adapter_type") or "").strip() or None,
+            "task_type": (
+                str(
+                    job.get("task_type")
+                    or getattr(job.get("_route_plan"), "task_type", "")
+                    or job.get("route_task_type")
+                    or ""
+                ).strip()
+                or None
+            ),
+            "messages": messages,
+            "rendered_user_prompt": rendered_user_prompt,
+            "rendered_system_prompt": rendered_system_prompt,
+            "rendered_prompt": rendered_user_prompt,
+            "execution_context_shard": context_shard,
+            "rendered_execution_context_shard": _render_execution_context_shard(context_shard),
+            "execution_bundle": execution_bundle,
+            "rendered_execution_bundle": render_execution_bundle(execution_bundle),
+            "verify_refs": verify_refs,
+            "allowed_tools": _normalize_paths(execution_bundle.get("allowed_tools")),
+            "mcp_tool_names": _normalize_paths(execution_bundle.get("mcp_tool_names")),
+            "skill_refs": _normalize_paths(execution_bundle.get("skill_refs")),
+            "completion_contract": dict(execution_bundle.get("completion_contract") or {}),
+            "workspace": {
+                "repo_root": preview_repo_root,
+                "workdir": job_workdir or preview_repo_root,
+                "workspace_ref": workspace_ref,
+                "runtime_profile_ref": runtime_profile_ref,
+            },
+            **route_payload,
+        }
+        jobs.append(preview_job)
+
+    return {
+        "action": "preview",
+        "preview_mode": "execution",
+        "preview_source": preview_source,
+        "spec_path": resolved_spec_path,
+        "spec_snapshot": json.loads(json.dumps(raw_snapshot, default=str)),
+        "spec_name": str(getattr(spec, "name", "inline") or "inline"),
+        "workflow_id": str(getattr(spec, "workflow_id", "") or "").strip() or None,
+        "phase": str(getattr(spec, "phase", "build") or "build"),
+        "total_jobs": len(getattr(spec, "jobs", []) or []),
+        "workspace": {
+            "repo_root": preview_repo_root,
+            "workspace_ref": workspace_ref,
+            "runtime_profile_ref": runtime_profile_ref,
+        },
+        "execution_context_shards": execution_context_shards,
+        "execution_bundles": execution_bundles,
+        "jobs": jobs,
+        "warnings": list(dict.fromkeys(warnings)),
+    }
 
 
 def _persist_graph_authority(
@@ -926,64 +1222,10 @@ def submit_workflow(
     """Parse a workflow spec file and submit it."""
     from runtime.workflow_spec import WorkflowSpec
 
-    full_path = str(Path(repo_root) / spec_path)
+    path_obj = Path(spec_path)
+    full_path = str(path_obj if path_obj.is_absolute() else Path(repo_root) / path_obj)
     spec = WorkflowSpec.load(full_path)
-
-    # Auto-dependency resolution from write_scope.
-    # If we have write-scope authority, unresolved compiler errors must fail
-    # closed instead of silently submitting through a second mutation path.
-    scope = {"write_scope": [], "read_scope": {}}
-    file_to_job_labels: dict[str, set[str]] = {}
-    for job in spec.jobs:
-        label = job.get("label")
-        write_scope = job.get("write_scope")
-        if isinstance(write_scope, str):
-            write_scope = [write_scope]
-        if not write_scope:
-            scoped_write = (job.get("scope") or {}).get("write", [])
-            write_scope = [scoped_write] if isinstance(scoped_write, str) else scoped_write
-        read_scope = job.get("read_scope")
-        if isinstance(read_scope, str):
-            read_scope = [read_scope]
-        for path in write_scope or []:
-            if not path:
-                continue
-            scope["write_scope"].append({"path": path, "action": "modify"})
-            file_to_job_labels.setdefault(path, set()).add(label)
-            if isinstance(read_scope, dict):
-                path_reads = read_scope.get(path, [])
-                if isinstance(path_reads, str):
-                    path_reads = [path_reads]
-                if path_reads:
-                    scope["read_scope"][path] = list(path_reads)
-            elif read_scope:
-                scope["read_scope"][path] = list(read_scope)
-    if scope["write_scope"]:
-        try:
-            compiler = StepCompiler()
-            plan = compiler.compile(scope)
-        except Exception as exc:
-            raise RuntimeError(
-                f"workflow submit failed closed while resolving write-scope authority: {exc}",
-            ) from exc
-        step_id_to_path = {step.step_id: step.file_path for step in plan.steps}
-        auto_deps: dict[str, set[str]] = {}
-        for step in plan.steps:
-            child_labels = file_to_job_labels.get(step.file_path, set())
-            if not child_labels or not step.depends_on:
-                continue
-            for dep_step_id in step.depends_on:
-                dep_path = step_id_to_path.get(dep_step_id)
-                if not dep_path:
-                    continue
-                for parent_label in file_to_job_labels.get(dep_path, set()):
-                    for child_label in child_labels:
-                        if parent_label != child_label:
-                            auto_deps.setdefault(child_label, set()).add(parent_label)
-        for job in spec.jobs:
-            label = job.get("label")
-            if label in auto_deps and not job.get("depends_on"):
-                job["depends_on"] = sorted(auto_deps[label])
+    _apply_write_scope_auto_dependencies(spec)
 
     force_fresh_run = bool(force_fresh_run or run_id is not None)
     run_id = run_id or f"workflow_{uuid.uuid4().hex[:12]}"
@@ -1036,7 +1278,10 @@ def submit_workflow_inline(
     if trigger_depth > 3:
         raise RuntimeError(f"Trigger depth {trigger_depth} exceeds maximum (3). Possible infinite loop.")
 
-    if spec_uses_graph_runtime(spec_dict):
+    provenance_source_kind = str((packet_provenance or {}).get("source_kind") or "").strip()
+    inline_submit_lane = provenance_source_kind == "inline_submit"
+
+    if not inline_submit_lane and spec_uses_graph_runtime(spec_dict):
         try:
             return _submit_graph_workflow_inline(
                 conn,
@@ -1052,14 +1297,7 @@ def submit_workflow_inline(
     run_id = run_id or f"workflow_{uuid.uuid4().hex[:12]}"
 
     # Build a lightweight spec object with the attributes _do_submit needs
-    spec = type("InlineSpec", (), {
-        "name": spec_dict.get("name", "inline"),
-        "phase": spec_dict.get("phase", "build"),
-        "jobs": spec_dict.get("jobs", []),
-        "outcome_goal": spec_dict.get("outcome_goal", ""),
-        "output_dir": spec_dict.get("output_dir", ""),
-        "_raw": spec_dict,
-    })()
+    spec = _inline_spec_object(spec_dict)
 
     with _submit_transaction(conn) as submit_conn:
         return _do_submit_workflow(
