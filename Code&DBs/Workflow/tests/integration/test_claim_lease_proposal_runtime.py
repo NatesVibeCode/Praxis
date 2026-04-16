@@ -25,6 +25,7 @@ from storage.postgres import (
     connect_workflow_database,
     persist_workflow_admission,
 )
+from storage.postgres.claim_lifecycle_repository import PostgresClaimLifecycleRepository
 
 
 def _unique_suffix() -> str:
@@ -245,6 +246,34 @@ def test_claim_lease_proposal_runtime_schema_resolution_has_no_fallback_to_retir
 
     assert retired_root.exists()
     assert not canonical_root.exists()
+
+
+def test_claim_lifecycle_transition_authority_round_trips_from_postgres() -> None:
+    asyncio.run(_exercise_claim_lifecycle_authority())
+
+
+async def _exercise_claim_lifecycle_authority() -> None:
+    runtime = ClaimLeaseProposalRuntime()
+    try:
+        conn = await connect_workflow_database()
+    except PostgresConfigurationError as exc:
+        pytest.skip(
+            "WORKFLOW_DATABASE_URL is required for claim lifecycle authority integration test: "
+            f"{exc.reason_code}"
+        )
+    try:
+        await bootstrap_control_plane_schema(conn)
+        await runtime.bootstrap_schema(conn)
+
+        transitions = await PostgresClaimLifecycleRepository(conn).load_allowed_transitions(
+            as_of=datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc),
+        )
+
+        assert transitions[RunState.CLAIM_RECEIVED] == frozenset({RunState.CLAIM_VALIDATING})
+        assert RunState.CLAIM_ACCEPTED not in transitions[RunState.CLAIM_RECEIVED]
+        assert transitions[RunState.CLAIM_ACCEPTED] == frozenset({RunState.LEASE_REQUESTED})
+    finally:
+        await conn.close()
 
 
 async def _exercise_runtime_path() -> None:
