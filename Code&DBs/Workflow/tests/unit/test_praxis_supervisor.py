@@ -63,7 +63,7 @@ def test_discover_database_url_prefers_legacy_launch_agent_value(monkeypatch, tm
         lambda name: name == "praxis_test",
     )
 
-    assert praxis_supervisor.discover_database_url(tmp_path / "repo") == "postgresql://postgres@localhost:5432/praxis_test"
+    assert praxis_supervisor.discover_database_url(tmp_path / "repo") == "postgresql://localhost:5432/praxis_test"
 
 
 def test_discover_database_url_uses_repo_env_when_process_authority_missing(monkeypatch, tmp_path: Path) -> None:
@@ -76,7 +76,7 @@ def test_discover_database_url_uses_repo_env_when_process_authority_missing(monk
         encoding="utf-8",
     )
 
-    assert praxis_supervisor.discover_database_url(repo_root) == "postgresql://postgres@repo.test/praxis"
+    assert praxis_supervisor.discover_database_url(repo_root) == "postgresql://repo.test/praxis"
 
 
 def test_discover_database_url_requires_explicit_authority(monkeypatch, tmp_path: Path) -> None:

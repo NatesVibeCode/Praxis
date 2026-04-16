@@ -191,6 +191,8 @@ class ForkWorktreeBindingAuthorityRecord:
     base_ref: str
     fork_ref: str
     worktree_ref: str
+    materialized_repo_root: str | None
+    materialized_workdir: str | None
     created_at: datetime
     retired_at: datetime | None
     decision_ref: str | None
@@ -411,6 +413,14 @@ def _fork_worktree_binding_from_row(
         base_ref=_require_text(row["base_ref"], field_name="base_ref"),
         fork_ref=_require_text(row["fork_ref"], field_name="fork_ref"),
         worktree_ref=_require_text(row["worktree_ref"], field_name="worktree_ref"),
+        materialized_repo_root=_require_nullable_text(
+            row["materialized_repo_root"],
+            field_name="materialized_repo_root",
+        ),
+        materialized_workdir=_require_nullable_text(
+            row["materialized_workdir"],
+            field_name="materialized_workdir",
+        ),
         created_at=_require_datetime(row["created_at"], field_name="created_at"),
         retired_at=_optional_datetime(row["retired_at"], field_name="retired_at"),
         decision_ref=_require_nullable_text(row["decision_ref"], field_name="decision_ref"),
@@ -761,6 +771,8 @@ class PostgresPersonaAndForkAuthorityRepository:
                     base_ref,
                     fork_ref,
                     worktree_ref,
+                    materialized_repo_root,
+                    materialized_workdir,
                     created_at,
                     retired_at,
                     decision_ref

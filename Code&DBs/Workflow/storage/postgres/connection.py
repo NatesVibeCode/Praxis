@@ -8,7 +8,7 @@ from contextlib import contextmanager
 import hashlib
 import os
 import threading as _threading
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlsplit
 
 import asyncpg
 
@@ -23,7 +23,6 @@ _workflow_pool_dsn: str | None = None
 _workflow_authority_scope: "_WorkflowAuthorityScope | None" = None
 _bg_loop: asyncio.AbstractEventLoop | None = None
 _bg_thread: _threading.Thread | None = None
-_DEFAULT_DB_USERNAME = "postgres"
 _AUTHORITY_UNAVAILABLE_EXCEPTIONS = (
     PermissionError,
     OSError,
@@ -59,20 +58,6 @@ def _normalize_authority_error(
             "cause_message": str(exc),
         },
     )
-
-
-def _ensure_postgres_user(database_url: str) -> str:
-    parsed = urlsplit(database_url)
-    if parsed.username or parsed.scheme not in {"postgresql", "postgres"}:
-        return database_url
-    hostname = parsed.hostname or "localhost"
-    netloc = _DEFAULT_DB_USERNAME
-    if parsed.password:
-        netloc += f":{parsed.password}"
-    netloc += f"@{hostname}"
-    if parsed.port is not None:
-        netloc += f":{parsed.port}"
-    return urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
 
 
 def workflow_authority_cache_key(database_url: str) -> str:
@@ -119,7 +104,7 @@ def resolve_workflow_database_url(
             },
         )
 
-    return _ensure_postgres_user(database_url)
+    return database_url
 
 
 def resolve_workflow_authority_cache_key(

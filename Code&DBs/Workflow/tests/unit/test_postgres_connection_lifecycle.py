@@ -41,10 +41,10 @@ def test_get_workflow_pool_rotates_when_dsn_changes(monkeypatch) -> None:
     connection_mod.shutdown_workflow_pool()
 
 
-def test_resolve_workflow_database_url_normalizes_missing_user() -> None:
+def test_resolve_workflow_database_url_preserves_missing_user() -> None:
     assert connection_mod.resolve_workflow_database_url(
         env={"WORKFLOW_DATABASE_URL": "postgresql://localhost:5432/praxis"}
-    ) == "postgresql://postgres@localhost:5432/praxis"
+    ) == "postgresql://localhost:5432/praxis"
 
 
 def test_shutdown_workflow_pool_clears_cached_state() -> None:

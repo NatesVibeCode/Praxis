@@ -104,12 +104,60 @@ function isRelatedPath(subscriberPath: string, changedPath: string): boolean {
   return isBoundaryPrefix(sp, cp) || isBoundaryPrefix(cp, sp);
 }
 
+const WORLD_PERSISTENCE_KEY = 'praxis.world.snapshot.v1';
+
+function getWorldStorage(): Storage | null {
+  const storage = (globalThis as { localStorage?: Storage | undefined }).localStorage;
+  if (!storage) return null;
+  if (typeof storage.getItem !== 'function' || typeof storage.setItem !== 'function') return null;
+  return storage;
+}
+
+function readPersistedSnapshot(): Snapshot | null {
+  const storage = getWorldStorage();
+  if (!storage) return null;
+
+  try {
+    const raw = storage.getItem(WORLD_PERSISTENCE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<Snapshot> | null;
+    if (!parsed || typeof parsed !== 'object') return null;
+    if (!isPlainObject(parsed.state)) return null;
+    if (typeof parsed.version !== 'number' || !Number.isFinite(parsed.version)) return null;
+    return {
+      state: structuredClone(parsed.state),
+      version: Math.max(0, Math.floor(parsed.version)),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writePersistedSnapshot(snapshot: Snapshot): void {
+  const storage = getWorldStorage();
+  if (!storage) return;
+
+  try {
+    storage.setItem(WORLD_PERSISTENCE_KEY, JSON.stringify(snapshot));
+  } catch {
+    // Best effort only. In-memory state remains authoritative if persistence fails.
+  }
+}
+
 export class World {
   private _committed: Record<string, unknown> = {};
   private _proposed: Record<string, unknown> = {};
   private _version = 0;
   private _subs = new Map<string, Set<Callback>>();
   private _useProposed = false;
+
+  constructor() {
+    const snapshot = readPersistedSnapshot();
+    if (snapshot) {
+      this._committed = structuredClone(snapshot.state);
+      this._version = snapshot.version;
+    }
+  }
 
   get version(): number {
     return this._version;
@@ -119,10 +167,12 @@ export class World {
     this._committed = structuredClone(snapshot.state);
     this._version = snapshot.version;
     this._proposed = {};
+    writePersistedSnapshot({ state: this._committed, version: this._version });
     this._notifyAll();
   }
 
   applyDeltas(deltas: Delta[]): void {
+    let mutated = false;
     for (const delta of deltas) {
       if (delta.version <= this._version) continue;
       const path = normalizePath(delta.path);
@@ -141,7 +191,11 @@ export class World {
         }
       }
       this._version = delta.version;
+      mutated = true;
       this._notifyMatching(path);
+    }
+    if (mutated) {
+      writePersistedSnapshot({ state: this._committed, version: this._version });
     }
   }
 

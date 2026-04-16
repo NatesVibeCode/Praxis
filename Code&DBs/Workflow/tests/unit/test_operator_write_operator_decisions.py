@@ -101,7 +101,7 @@ def test_record_operator_decision_uses_stable_id_for_architecture_policy() -> No
         decision_kind="architecture_policy",
         title="Decision tables are DB-native authority",
         rationale="Keep authority in Postgres.",
-        decided_by="nate",
+        decided_by="praxis-admin",
         decision_source="cto.guidance",
         decision_scope_kind="authority_domain",
         decision_scope_ref="decision_tables",

@@ -769,7 +769,7 @@ def test_provider_onboarding_provisions_cli_registry_rows_when_capacity_probe_fa
                 summary="cli ready",
                 details={
                     "selected_transport": spec.selected_transport,
-                    "binary_path": "/Users/nate/.local/bin/localcli-agent",
+                    "binary_path": "/Users/praxis/.local/bin/localcli-agent",
                     "credential_source": "ambient_cli_session",
                 },
             ),

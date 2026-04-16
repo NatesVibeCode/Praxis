@@ -20,13 +20,13 @@ def test_workflow_database_env_falls_back_to_docker_authority(
     monkeypatch.setattr(
         _workflow_database,
         "_try_resolve_docker_database_url",
-        lambda _repo_root: "postgresql://postgres@127.0.0.1:5432/praxis",
+        lambda _repo_root: "postgresql://127.0.0.1:5432/praxis",
     )
 
     resolved = _workflow_database.workflow_database_env_for_repo(repo_root, env={})
 
     assert resolved == {
-        "WORKFLOW_DATABASE_URL": "postgresql://postgres@127.0.0.1:5432/praxis",
+        "WORKFLOW_DATABASE_URL": "postgresql://127.0.0.1:5432/praxis",
         "PATH": "",
     }
 

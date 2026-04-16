@@ -92,7 +92,7 @@ def _try_resolve_docker_database_url(repo_root: Path) -> str | None:
         docker_host = "127.0.0.1"
     if not docker_port.strip():
         return None
-    return f"postgresql://postgres@{docker_host}:{docker_port.strip()}/praxis"
+    return f"postgresql://{docker_host}:{docker_port.strip()}/praxis"
 
 
 def workflow_database_env_for_repo(

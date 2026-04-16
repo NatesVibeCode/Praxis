@@ -28,6 +28,11 @@ from runtime._helpers import (
     _fail as _shared_fail,
     _format_bool,
 )
+from runtime.operator_object_relations import (
+    FunctionalAreaRecord,
+    OperatorObjectRelationRecord,
+    load_operator_object_relation_authority,
+)
 from runtime.work_item_workflow_bindings import WorkItemWorkflowBindingRecord
 
 from .graph_lineage import graph_lineage_run
@@ -47,6 +52,7 @@ __all__ = [
     "NativeCutoverGraphBindingStatus",
     "NativeCutoverGraphGateStatus",
     "NativeCutoverGraphStatusReadModel",
+    "OperatorGraphFunctionalAreaRecord",
     "NativeCutoverReceiptSnapshot",
     "NativeCutoverScoreboardReadModel",
     "NativeCutoverStatusSnapshot",
@@ -54,6 +60,7 @@ __all__ = [
     "OperatorGraphEdge",
     "OperatorGraphFreshness",
     "OperatorGraphNode",
+    "OperatorGraphObjectRelationRecord",
     "OperatorGraphProjectionError",
     "OperatorGraphReadModel",
     "OperatorGraphRoadmapRecord",
@@ -162,12 +169,40 @@ def _binding_target_kind(field_name: str) -> str:
     return field_name
 
 
+_REFERENCE_NODE_KINDS = frozenset(
+    {
+        "issue",
+        "workflow_class",
+        "schedule_definition",
+        "workflow_run",
+        "document",
+        "repo_path",
+    }
+)
+
+
 def _max_datetime(current: datetime | None, candidate: datetime | None) -> datetime | None:
     if current is None:
         return candidate
     if candidate is None:
         return current
     return max(current, candidate)
+
+
+def _reference_node_title(kind: str, ref: str) -> str:
+    if kind == "repo_path":
+        return ref
+    if kind == "document":
+        return ref
+    return ref
+
+
+def _reference_node_summary(kind: str, ref: str) -> str:
+    if kind == "repo_path":
+        return f"repo path reference: {ref}"
+    if kind == "document":
+        return f"document reference: {ref}"
+    return f"{kind} reference: {ref}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -209,6 +244,10 @@ class OperatorGraphRoadmapRecord:
     completed_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+
+OperatorGraphFunctionalAreaRecord = FunctionalAreaRecord
+OperatorGraphObjectRelationRecord = OperatorObjectRelationRecord
 
 
 @dataclass(frozen=True, slots=True)
@@ -259,9 +298,11 @@ class OperatorGraphReadModel:
     freshness: OperatorGraphFreshness
     bugs: tuple[OperatorGraphBugRecord, ...]
     roadmap_items: tuple[OperatorGraphRoadmapRecord, ...]
+    functional_areas: tuple[OperatorGraphFunctionalAreaRecord, ...]
     operator_decisions: tuple[OperatorDecisionAuthorityRecord, ...]
     cutover_gates: tuple[CutoverGateAuthorityRecord, ...]
     work_item_workflow_bindings: tuple[WorkItemWorkflowBindingRecord, ...]
+    object_relations: tuple[OperatorGraphObjectRelationRecord, ...]
     nodes: tuple[OperatorGraphNode, ...]
     edges: tuple[OperatorGraphEdge, ...]
 

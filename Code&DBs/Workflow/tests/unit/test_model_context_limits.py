@@ -117,4 +117,4 @@ def test_context_window_normalizes_missing_user_in_workflow_database_url(
     monkeypatch.setitem(sys.modules, "asyncpg", _FakeAsyncPGModule())
 
     assert model_context_limits.context_window_for_model("openai", "gpt-5.4") == 200_000
-    assert observed["dsn"] == "postgresql://postgres@localhost:5432/praxis_test"
+    assert observed["dsn"] == "postgresql://localhost:5432/praxis_test"

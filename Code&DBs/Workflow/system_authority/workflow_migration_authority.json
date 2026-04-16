@@ -60,7 +60,9 @@
     "129_google_gemini_mcp_settings_authority.sql",
     "130_bugs_resume_context.sql",
     "131_roadmap_items_semantic_clustering.sql",
-    "132_issue_backlog_authority.sql"
+    "132_issue_backlog_authority.sql",
+    "133_fork_worktree_binding_materialization.sql",
+    "134_operator_object_relations.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -1900,6 +1902,82 @@
         "object_type": "index",
         "object_name": "work_item_workflow_bindings_issue_idx"
       }
+    ],
+    "133_fork_worktree_binding_materialization.sql": [
+      {
+        "object_type": "column",
+        "object_name": "fork_worktree_bindings.materialized_repo_root"
+      },
+      {
+        "object_type": "column",
+        "object_name": "fork_worktree_bindings.materialized_workdir"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "fork_worktree_bindings.fork_worktree_bindings_materialized_repo_root_nonblank"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "fork_worktree_bindings.fork_worktree_bindings_materialized_workdir_nonblank"
+      },
+      {
+        "object_type": "index",
+        "object_name": "fork_worktree_bindings_run_status_idx"
+      }
+    ],
+    "134_operator_object_relations.sql": [
+      {
+        "object_type": "table",
+        "object_name": "functional_areas"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "functional_areas.functional_areas_nonblank"
+      },
+      {
+        "object_type": "index",
+        "object_name": "functional_areas_status_updated_idx"
+      },
+      {
+        "object_type": "table",
+        "object_name": "operator_object_relations"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "operator_object_relations.operator_object_relations_nonblank"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "operator_object_relations.operator_object_relations_distinct_endpoints"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "operator_object_relations.operator_object_relations_source_kind_check"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "operator_object_relations.operator_object_relations_target_kind_check"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "operator_object_relations.operator_object_relations_bound_by_decision_id_fkey"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "operator_object_relations.operator_object_relations_unique_edge"
+      },
+      {
+        "object_type": "index",
+        "object_name": "operator_object_relations_source_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "operator_object_relations_target_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "operator_object_relations_decision_idx"
+      }
     ]
   },
   "policy_buckets": {
@@ -1964,7 +2042,9 @@
       "129_google_gemini_mcp_settings_authority.sql",
       "130_bugs_resume_context.sql",
       "131_roadmap_items_semantic_clustering.sql",
-      "132_issue_backlog_authority.sql"
+      "132_issue_backlog_authority.sql",
+      "133_fork_worktree_binding_materialization.sql",
+      "134_operator_object_relations.sql"
     ],
     "bootstrap_only": [
       "012_execution_leases.sql",

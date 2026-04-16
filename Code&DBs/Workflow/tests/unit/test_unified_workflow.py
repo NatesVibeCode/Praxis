@@ -912,6 +912,11 @@ def test_execute_job_always_uses_job_prompt(monkeypatch) -> None:
         "resolve_execution_transport",
         lambda _config: SimpleNamespace(transport_kind="cli"),
     )
+    monkeypatch.setattr(
+        task_type_router,
+        "TaskTypeRouter",
+        lambda _conn: SimpleNamespace(resolve_explicit_eligibility=lambda *args, **kwargs: None),
+    )
     import runtime.agent_spawner as agent_spawner_module
 
     monkeypatch.setattr(
@@ -1104,7 +1109,7 @@ def test_execute_job_non_packet_runtime_injects_execution_bundle(monkeypatch) ->
     assert "--- EXECUTION CONTEXT SHARD ---" in captured["prompt"]
     assert "--- EXECUTION CONTROL BUNDLE ---" in captured["prompt"]
     assert "praxis_query" in captured["prompt"]
-    assert "praxis_context_shard" in captured["prompt"]
+    assert "praxis_context_shard" in execution_bundle["mcp_tool_names"]
     assert execution_bundle["tool_bucket"] == "build"
     assert execution_bundle["completion_contract"]["submission_required"] is True
     assert "praxis_submit_code_change" in execution_bundle["mcp_tool_names"]

@@ -107,26 +107,26 @@ class _ArtifactStore:
 
 
 def test_cli_auth_volume_flags_use_explicit_host_home(monkeypatch) -> None:
-    monkeypatch.setenv("PRAXIS_CLI_AUTH_HOME", "/Users/nate")
+    monkeypatch.setenv("PRAXIS_CLI_AUTH_HOME", "/Users/praxis")
     monkeypatch.setattr(
         sandbox_runtime.os.path,
         "isfile",
         lambda path: path in {
-            "/Users/nate/.codex/auth.json",
-            "/Users/nate/.claude.json",
-            "/Users/nate/.gemini/oauth_creds.json",
+            "/Users/praxis/.codex/auth.json",
+            "/Users/praxis/.claude.json",
+            "/Users/praxis/.gemini/oauth_creds.json",
         },
     )
 
     flags = sandbox_runtime._cli_auth_volume_flags()
 
-    assert "/Users/nate/.codex/auth.json:/root/.codex/auth.json:ro" in flags
-    assert "/Users/nate/.claude.json:/root/.claude.json:ro" in flags
-    assert "/Users/nate/.gemini/oauth_creds.json:/root/.gemini/oauth_creds.json:ro" in flags
+    assert "/Users/praxis/.codex/auth.json:/root/.codex/auth.json:ro" in flags
+    assert "/Users/praxis/.claude.json:/root/.claude.json:ro" in flags
+    assert "/Users/praxis/.gemini/oauth_creds.json:/root/.gemini/oauth_creds.json:ro" in flags
 
 
 def test_cli_auth_volume_flags_accept_host_home_with_worker_home_probe(monkeypatch) -> None:
-    monkeypatch.setenv("PRAXIS_CLI_AUTH_HOME", "/Users/nate")
+    monkeypatch.setenv("PRAXIS_CLI_AUTH_HOME", "/Users/praxis")
     monkeypatch.setattr(sandbox_runtime.os.path, "expanduser", lambda value: "/root" if value == "~" else value)
     monkeypatch.setattr(
         sandbox_runtime.os.path,
@@ -140,20 +140,20 @@ def test_cli_auth_volume_flags_accept_host_home_with_worker_home_probe(monkeypat
 
     flags = sandbox_runtime._cli_auth_volume_flags()
 
-    assert "/Users/nate/.codex/auth.json:/root/.codex/auth.json:ro" in flags
-    assert "/Users/nate/.claude.json:/root/.claude.json:ro" in flags
-    assert "/Users/nate/.gemini/oauth_creds.json:/root/.gemini/oauth_creds.json:ro" in flags
+    assert "/Users/praxis/.codex/auth.json:/root/.codex/auth.json:ro" in flags
+    assert "/Users/praxis/.claude.json:/root/.claude.json:ro" in flags
+    assert "/Users/praxis/.gemini/oauth_creds.json:/root/.gemini/oauth_creds.json:ro" in flags
 
 
 def test_cli_auth_volume_flags_limit_mounts_to_selected_provider(monkeypatch) -> None:
-    monkeypatch.setenv("PRAXIS_CLI_AUTH_HOME", "/Users/nate")
+    monkeypatch.setenv("PRAXIS_CLI_AUTH_HOME", "/Users/praxis")
     monkeypatch.setattr(
         sandbox_runtime.os.path,
         "isfile",
         lambda path: path in {
-            "/Users/nate/.codex/auth.json",
-            "/Users/nate/.claude.json",
-            "/Users/nate/.gemini/oauth_creds.json",
+            "/Users/praxis/.codex/auth.json",
+            "/Users/praxis/.claude.json",
+            "/Users/praxis/.gemini/oauth_creds.json",
         },
     )
 
@@ -162,11 +162,11 @@ def test_cli_auth_volume_flags_limit_mounts_to_selected_provider(monkeypatch) ->
 
     assert openai_flags == [
         "-v",
-        "/Users/nate/.codex/auth.json:/root/.codex/auth.json:ro",
+        "/Users/praxis/.codex/auth.json:/root/.codex/auth.json:ro",
     ]
     assert anthropic_flags == [
         "-v",
-        "/Users/nate/.claude.json:/root/.claude.json:ro",
+        "/Users/praxis/.claude.json:/root/.claude.json:ro",
     ]
 
 
@@ -1036,12 +1036,12 @@ def test_docker_local_exec_mounts_only_provider_auth_files(monkeypatch, tmp_path
     monkeypatch.setattr(
         "runtime.sandbox_runtime.os.path.isfile",
         lambda path: path in {
-            "/Users/nate/.codex/auth.json",
-            "/Users/nate/.claude.json",
-            "/Users/nate/.gemini/oauth_creds.json",
+            "/Users/praxis/.codex/auth.json",
+            "/Users/praxis/.claude.json",
+            "/Users/praxis/.gemini/oauth_creds.json",
         },
     )
-    monkeypatch.setattr("runtime.sandbox_runtime.os.path.expanduser", lambda value: "/Users/nate" if value == "~" else value)
+    monkeypatch.setattr("runtime.sandbox_runtime.os.path.expanduser", lambda value: "/Users/praxis" if value == "~" else value)
     monkeypatch.setattr(
         "runtime.sandbox_runtime.subprocess.Popen",
         lambda args, **kwargs: (
@@ -1092,9 +1092,9 @@ def test_docker_local_exec_mounts_only_provider_auth_files(monkeypatch, tmp_path
 
         run_cmd = next(cmd for cmd in docker_cmds if len(cmd) >= 2 and cmd[:2] == ["docker", "run"])
         joined_cmd = " ".join(run_cmd)
-        assert "/Users/nate/.codex/auth.json:/root/.codex/auth.json:ro" in joined_cmd
-        assert "/Users/nate/.claude.json:/root/.claude.json:ro" not in joined_cmd
-        assert "/Users/nate/.gemini/oauth_creds.json:/root/.gemini/oauth_creds.json:ro" not in joined_cmd
+        assert "/Users/praxis/.codex/auth.json:/root/.codex/auth.json:ro" in joined_cmd
+        assert "/Users/praxis/.claude.json:/root/.claude.json:ro" not in joined_cmd
+        assert "/Users/praxis/.gemini/oauth_creds.json:/root/.gemini/oauth_creds.json:ro" not in joined_cmd
     finally:
         provider.destroy_session(session, "completed")
 

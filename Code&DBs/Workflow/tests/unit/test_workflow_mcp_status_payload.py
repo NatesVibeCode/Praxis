@@ -178,9 +178,9 @@ def test_run_status_payload_prefers_policy_reason_code_for_route_disabled_failur
 
 
 def test_build_platform_context_warns_that_sandbox_commands_use_live_workspace() -> None:
-    context = _exec_mod._build_platform_context("/Users/nate/Praxis")
+    context = _exec_mod._build_platform_context("/Users/praxis/Praxis")
 
-    assert "Host repo root (persistence/output authority): /Users/nate/Praxis" in context
+    assert "Host repo root (persistence/output authority): /Users/praxis/Praxis" in context
     assert "Command workspace: sandboxed workflow execution typically runs inside a hydrated workspace such as /workspace." in context
     assert "do not assume the host repo path exists inside the sandbox" in context
 

@@ -153,7 +153,7 @@ def test_get_normalizes_missing_user_in_workflow_database_url(
         "asyncpg",
         _FakeAsyncPGModule(
             fake_conn,
-            expected_dsn="postgresql://postgres@localhost:5432/praxis_test",
+            expected_dsn="postgresql://localhost:5432/praxis_test",
         ),
     )
 

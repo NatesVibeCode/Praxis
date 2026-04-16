@@ -1,0 +1,23 @@
+{
+  "name": "Docker Anthropic LLM Smoke",
+  "workflow_id": "docker_anthropic_llm_smoke",
+  "phase": "test",
+  "outcome_goal": "Prove Docker can complete a minimal legacy queue workflow through anthropic/claude-sonnet-4-6 on the llm_task transport.",
+  "jobs": [
+    {
+      "label": "step1_echo",
+      "agent": "anthropic/claude-sonnet-4-6",
+      "prompt": "Reply with exactly: STEP1_OK",
+      "timeout": 180
+    },
+    {
+      "label": "step2_echo",
+      "agent": "anthropic/claude-sonnet-4-6",
+      "depends_on": [
+        "step1_echo"
+      ],
+      "prompt": "Reply with exactly: STEP2_OK",
+      "timeout": 180
+    }
+  ]
+}

@@ -55,6 +55,7 @@ from runtime.workflow.verification_runtime import (
     get_verify_bindings as _verification_runtime_get_verify_bindings,
     run_post_execution_verification as _verification_runtime_run_post_execution_verification,
 )
+from registry.native_runtime_profile_sync import resolve_native_runtime_profile_config
 
 if TYPE_CHECKING:
     from storage.postgres.connection import SyncPostgresConnection
@@ -118,6 +119,170 @@ def _approval_checkpoint_for_job(
     )
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_host_workspace_path(raw_path: str, *, base: Path) -> str:
+    candidate = Path(raw_path).expanduser()
+    if not candidate.is_absolute():
+        candidate = (base / candidate).resolve()
+    return str(candidate)
+
+
+def _path_within(path: str, root: str | Path) -> bool:
+    candidate = Path(path).resolve()
+    boundary = Path(root).resolve()
+    try:
+        candidate.relative_to(boundary)
+    except ValueError:
+        return False
+    return True
+
+
+def _load_active_fork_ownership(
+    conn: "SyncPostgresConnection",
+    *,
+    run_row: dict,
+    repo_root: str,
+) -> dict[str, object] | None:
+    normalized_repo_root = str(Path(repo_root).resolve())
+    run_id = str(run_row.get("run_id") or "").strip()
+    if not run_id:
+        return None
+
+    try:
+        rows = conn.execute(
+            """
+            SELECT
+                fork_worktree_binding_id,
+                binding_scope,
+                sandbox_session_id,
+                runtime_profile_ref,
+                fork_ref,
+                worktree_ref,
+                materialized_repo_root,
+                materialized_workdir
+            FROM fork_worktree_bindings
+            WHERE workflow_run_id = $1
+              AND binding_status = 'active'
+              AND retired_at IS NULL
+            ORDER BY created_at DESC, fork_worktree_binding_id
+            """,
+            run_id,
+        )
+    except (AssertionError, NotImplementedError):
+        return None
+    if not rows:
+        return None
+    if len(rows) > 1:
+        raise RuntimeError(
+            f"execution workspace resolution is ambiguous for run {run_id!r}: "
+            f"found {len(rows)} active fork/worktree bindings",
+        )
+
+    row = dict(rows[0])
+    resolved_repo_root = str(row.get("materialized_repo_root") or "").strip()
+    resolved_workdir = str(row.get("materialized_workdir") or "").strip()
+    if resolved_repo_root:
+        resolved_repo_root = _resolve_host_workspace_path(
+            resolved_repo_root,
+            base=Path(normalized_repo_root),
+        )
+    if resolved_workdir:
+        resolved_workdir = _resolve_host_workspace_path(
+            resolved_workdir,
+            base=Path(resolved_repo_root or normalized_repo_root),
+        )
+    return {
+        "fork_worktree_binding_id": str(row.get("fork_worktree_binding_id") or "").strip() or run_id,
+        "binding_scope": str(row.get("binding_scope") or "").strip() or None,
+        "sandbox_session_id": str(row.get("sandbox_session_id") or "").strip() or None,
+        "runtime_profile_ref": str(
+            row.get("runtime_profile_ref")
+            or _workflow_run_envelope(run_row).get("runtime_profile_ref")
+            or ""
+        ).strip() or None,
+        "fork_ref": str(row.get("fork_ref") or "").strip() or None,
+        "worktree_ref": str(row.get("worktree_ref") or "").strip() or None,
+        "materialized_repo_root": resolved_repo_root or None,
+        "materialized_workdir": resolved_workdir or None,
+    }
+
+
+def _resolve_execution_workspace(
+    *,
+    repo_root: str,
+    execution_bundle: dict[str, object] | None,
+) -> dict[str, object]:
+    normalized_repo_root = str(Path(repo_root).resolve())
+    default_workspace = {
+        "repo_root": normalized_repo_root,
+        "workdir": normalized_repo_root,
+        "fork_ownership": None,
+    }
+    if not isinstance(execution_bundle, dict):
+        return default_workspace
+
+    fork_ownership = (
+        dict(execution_bundle.get("fork_ownership"))
+        if isinstance(execution_bundle.get("fork_ownership"), dict)
+        else None
+    )
+    if not fork_ownership:
+        return default_workspace
+
+    binding_id = str(fork_ownership.get("fork_worktree_binding_id") or "").strip() or "unknown"
+    materialized_repo_root = str(fork_ownership.get("materialized_repo_root") or "").strip()
+    materialized_workdir = str(fork_ownership.get("materialized_workdir") or "").strip()
+    if not materialized_repo_root or not materialized_workdir:
+        raise RuntimeError(
+            "active fork/worktree binding "
+            f"{binding_id!r} is missing materialized_repo_root/materialized_workdir",
+        )
+
+    resolved_repo_root = _resolve_host_workspace_path(
+        materialized_repo_root,
+        base=Path(normalized_repo_root),
+    )
+    resolved_workdir = _resolve_host_workspace_path(
+        materialized_workdir,
+        base=Path(resolved_repo_root),
+    )
+    runtime_profile_ref = str(fork_ownership.get("runtime_profile_ref") or "").strip()
+    boundary_root = Path(normalized_repo_root)
+    if runtime_profile_ref:
+        try:
+            boundary_root = Path(
+                resolve_native_runtime_profile_config(runtime_profile_ref).repo_root
+            ).resolve()
+        except Exception as exc:
+            raise RuntimeError(
+                "failed to resolve runtime-profile workspace boundary for "
+                f"sharded execution on binding {binding_id!r}: {exc}",
+            ) from exc
+
+    if not _path_within(resolved_repo_root, boundary_root):
+        raise RuntimeError(
+            "sharded execution rejected active fork/worktree binding "
+            f"{binding_id!r}: materialized_repo_root escapes the declared workspace boundary",
+        )
+    if not _path_within(resolved_workdir, resolved_repo_root):
+        raise RuntimeError(
+            "sharded execution rejected active fork/worktree binding "
+            f"{binding_id!r}: materialized_workdir must stay under materialized_repo_root",
+        )
+    if not _path_within(resolved_workdir, boundary_root):
+        raise RuntimeError(
+            "sharded execution rejected active fork/worktree binding "
+            f"{binding_id!r}: materialized_workdir escapes the declared workspace boundary",
+        )
+
+    fork_ownership["materialized_repo_root"] = resolved_repo_root
+    fork_ownership["materialized_workdir"] = resolved_workdir
+    return {
+        "repo_root": resolved_repo_root,
+        "workdir": resolved_workdir,
+        "fork_ownership": fork_ownership,
+    }
 
 __all__ = ["execute_job"]
 
@@ -286,23 +451,84 @@ def execute_job(
         conn, job=job, run_row=run_row,
     )
 
+    try:
+        fork_ownership = (
+            dict(execution_bundle.get("fork_ownership"))
+            if isinstance(execution_bundle, dict)
+            and isinstance(execution_bundle.get("fork_ownership"), dict)
+            else None
+        )
+        if fork_ownership is None:
+            fork_ownership = _load_active_fork_ownership(
+                conn,
+                run_row=run_row,
+                repo_root=repo_root,
+            )
+        workspace_bundle = execution_bundle
+        if fork_ownership is not None:
+            workspace_bundle = (
+                {
+                    **execution_bundle,
+                    "fork_ownership": fork_ownership,
+                }
+                if isinstance(execution_bundle, dict)
+                else {"fork_ownership": fork_ownership}
+            )
+        execution_workspace = _resolve_execution_workspace(
+            repo_root=repo_root,
+            execution_bundle=workspace_bundle,
+        )
+    except Exception as exc:
+        duration_ms = int((time.monotonic() - start) * 1000)
+        complete_job(
+            conn,
+            job_id,
+            status="failed",
+            error_code="workspace_resolution_failed",
+            duration_ms=duration_ms,
+            stdout_preview=str(exc)[:2000],
+        )
+        return
+    execution_repo_root = str(execution_workspace["repo_root"])
+    execution_workdir = str(execution_workspace["workdir"])
+    fork_ownership = (
+        dict(execution_workspace["fork_ownership"])
+        if isinstance(execution_workspace.get("fork_ownership"), dict)
+        else None
+    )
+
     # Single prompt assembly path: prompt + platform context + shard + bundle
-    platform_context = _build_platform_context(repo_root)
+    platform_context = _build_platform_context(execution_repo_root)
     full_prompt = f"{prompt}\n\n{platform_context}" if platform_context else prompt
 
     if execution_context_shard is None:
         execution_context_shard = _runtime_execution_context_shard(
-            conn, job=job, run_row=run_row, repo_root=repo_root,
+            conn,
+            job=job,
+            run_row=run_row,
+            repo_root=execution_repo_root,
         )
     execution_context_shard_text = _render_execution_context_shard(execution_context_shard)
     if execution_context_shard_text:
-        full_prompt = f"{full_prompt}\n\n{execution_context_shard_text}" if full_prompt else execution_context_shard_text
+        full_prompt = (
+            f"{full_prompt}\n\n{execution_context_shard_text}"
+            if full_prompt
+            else execution_context_shard_text
+        )
 
     if execution_bundle is None:
         execution_bundle = _runtime_execution_bundle(
-            conn, job=job, run_row=run_row, repo_root=repo_root,
+            conn,
+            job=job,
+            run_row=run_row,
+            repo_root=execution_repo_root,
             execution_context_shard=execution_context_shard,
         )
+    if fork_ownership is not None and isinstance(execution_bundle, dict):
+        execution_bundle = {
+            **execution_bundle,
+            "fork_ownership": fork_ownership,
+        }
     execution_bundle_text = render_execution_bundle(execution_bundle)
     if execution_bundle_text:
         full_prompt = f"{full_prompt}\n\n{execution_bundle_text}" if full_prompt else execution_bundle_text
@@ -377,7 +603,7 @@ def execute_job(
             run_id=run_id,
             workflow_id=workflow_id_for_run,
             job_label=label,
-            repo_root=repo_root,
+            repo_root=execution_workdir,
             execution_context_shard=execution_context_shard,
             execution_bundle=execution_bundle,
         )
@@ -413,7 +639,12 @@ def execute_job(
                     stdout_preview=readiness.reason or "CLI provider not ready",
                 )
                 return
-            result = _execute_cli(agent_config, full_prompt, repo_root, execution_bundle=execution_bundle)
+            result = _execute_cli(
+                agent_config,
+                full_prompt,
+                execution_workdir,
+                execution_bundle=execution_bundle,
+            )
         elif transport_kind == "api":
             # Resolve reasoning effort from task_type_routing for this agent + task type.
             # Falls back to provider_model_candidates default if no task-type-specific row.
@@ -447,7 +678,7 @@ def execute_job(
             result = _execute_api(
                 agent_config,
                 full_prompt,
-                repo_root,
+                execution_workdir,
                 execution_bundle=execution_bundle,
                 reasoning_effort=_reasoning_effort,
             )
@@ -466,7 +697,7 @@ def execute_job(
         run_id=run_id,
         job_id=job_id,
         label=label,
-        repo_root=repo_root,
+        repo_root=execution_workdir,
         result=result,
     )
     result = verification_outcome["result"]
@@ -522,7 +753,7 @@ def execute_job(
                     capture_output=True,
                     text=True,
                     timeout=60,
-                    cwd=repo_root,
+                    cwd=execution_workdir,
                 )
                 if verify_result.returncode != 0:
                     final_status = "failed"
@@ -559,7 +790,7 @@ def execute_job(
                 logger.warning("Outcome gate error for %s/%s: %s", run_id, label, exc)
 
     # Write receipt to disk (preserves existing artifact flow)
-    output_path = _write_output(repo_root, run_id, job_id, label, result)
+    output_path = _write_output(execution_repo_root, run_id, job_id, label, result)
 
     # Write canonical receipt row
     receipt_id = _write_job_receipt(
@@ -570,7 +801,7 @@ def execute_job(
         agent_slug,
         result,
         duration_ms,
-        repo_root=repo_root,
+        repo_root=execution_workdir,
         output_path=output_path,
         final_status=final_status,
         final_error_code=final_error_code,

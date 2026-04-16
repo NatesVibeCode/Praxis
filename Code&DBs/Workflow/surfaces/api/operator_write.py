@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from authority.operator_control import OperatorDecisionAuthorityRecord
 from policy.workflow_classes import (
@@ -24,6 +24,17 @@ from policy.native_primary_cutover import (
 )
 from runtime.circuit_breaker import invalidate_circuit_breaker_override_cache
 from runtime.instance import NativeWorkflowInstance, resolve_native_instance
+from runtime.operator_object_relations import (
+    FunctionalAreaRecord,
+    OperatorObjectRelationRecord,
+    OperatorObjectRelationRepository,
+    PostgresOperatorObjectRelationRepository,
+    SUPPORTED_FUNCTIONAL_AREA_STATUSES,
+    SUPPORTED_OPERATOR_OBJECT_KINDS,
+    SUPPORTED_OPERATOR_OBJECT_RELATION_STATUSES,
+    functional_area_id_from_slug,
+    operator_object_relation_id,
+)
 from runtime.route_authority_snapshot import invalidate_route_authority_cache_key
 from runtime.recurring_review_repair_flow import (
     RecurringReviewRepairFlowRequest,
@@ -79,6 +90,9 @@ _ROADMAP_ITEM_KINDS = frozenset({"capability", "initiative"})
 _ROADMAP_STATUSES = frozenset({"active"})
 _ROADMAP_PRIORITIES = frozenset({"p1", "p2"})
 _CIRCUIT_BREAKER_OVERRIDE_STATES = frozenset({"open", "closed", "reset"})
+_FUNCTIONAL_AREA_STATUSES = frozenset(SUPPORTED_FUNCTIONAL_AREA_STATUSES)
+_OBJECT_RELATION_STATUSES = frozenset(SUPPORTED_OPERATOR_OBJECT_RELATION_STATUSES)
+_OBJECT_RELATION_KINDS = frozenset(SUPPORTED_OPERATOR_OBJECT_KINDS)
 _BUG_CLOSEOUT_EVIDENCE_ROLE = "validates_fix"
 _ROADMAP_COMPLETED_STATUS = "completed"
 
@@ -106,6 +120,34 @@ def _normalize_issue_status(value: object | None) -> str:
     )
 
 
+def _normalize_functional_area_status(value: object | None) -> str:
+    if value is None:
+        return "active"
+    return coerce_choice(
+        value,
+        field_name="area_status",
+        choices=_FUNCTIONAL_AREA_STATUSES,
+    )
+
+
+def _normalize_object_relation_status(value: object | None) -> str:
+    if value is None:
+        return "active"
+    return coerce_choice(
+        value,
+        field_name="relation_status",
+        choices=_OBJECT_RELATION_STATUSES,
+    )
+
+
+def _normalize_object_kind(value: object, *, field_name: str) -> str:
+    return coerce_choice(
+        value,
+        field_name=field_name,
+        choices=_OBJECT_RELATION_KINDS,
+    )
+
+
 def _scope_fragment(value: str | None, *, fallback: str) -> str:
     if value is None:
         return fallback
@@ -118,6 +160,18 @@ def _scope_fragment(value: str | None, *, fallback: str) -> str:
     while "--" in collapsed:
         collapsed = collapsed.replace("--", "-")
     return collapsed or fallback
+
+
+def _normalize_relation_kind(value: object) -> str:
+    normalized = _require_text(value, field_name="relation_kind")
+    return _scope_fragment(normalized, fallback="relation").replace("-", "_")
+
+
+def _normalize_functional_area_ref(value: object, *, field_name: str) -> str:
+    normalized = _require_text(value, field_name=field_name)
+    if normalized.startswith("functional_area."):
+        return normalized
+    return functional_area_id_from_slug(normalized)
 
 
 def _operator_decision_id_from_key(
@@ -960,6 +1014,9 @@ class OperatorControlFrontdoor:
     roadmap_repository_factory: Callable[[
         _Connection,
     ], Any] | None = None
+    object_relation_repository_factory: Callable[[
+        _Connection,
+    ], OperatorObjectRelationRepository] | None = None
     binding_repository_factory: Callable[[
         _Connection,
     ], WorkItemWorkflowBindingRepository] | None = None
@@ -981,6 +1038,10 @@ class OperatorControlFrontdoor:
             )
         if self.roadmap_repository_factory is None:
             self.roadmap_repository_factory = self._default_roadmap_repository_factory
+        if self.object_relation_repository_factory is None:
+            self.object_relation_repository_factory = (
+                self._default_object_relation_repository_factory
+            )
         if self.binding_repository_factory is None:
             self.binding_repository_factory = self._default_binding_repository_factory
         if self.native_primary_cutover_repository_factory is None:
@@ -1011,6 +1072,12 @@ class OperatorControlFrontdoor:
         return PostgresRoadmapAuthoringRepository(conn)  # type: ignore[arg-type]
 
     @staticmethod
+    def _default_object_relation_repository_factory(
+        conn: _Connection,
+    ) -> OperatorObjectRelationRepository:
+        return PostgresOperatorObjectRelationRepository(conn)  # type: ignore[arg-type]
+
+    @staticmethod
     def _default_binding_repository_factory(
         conn: _Connection,
     ) -> WorkItemWorkflowBindingRepository:
@@ -1027,6 +1094,220 @@ class OperatorControlFrontdoor:
         conn: _Connection,
     ) -> PostgresWorkItemCloseoutRepository:
         return PostgresWorkItemCloseoutRepository(conn)  # type: ignore[arg-type]
+
+    async def _object_ref_exists(
+        self,
+        conn: _Connection,
+        *,
+        object_kind: str,
+        object_ref: str,
+    ) -> bool:
+        normalized_kind = _normalize_object_kind(object_kind, field_name="object_kind")
+        normalized_ref = (
+            _normalize_functional_area_ref(object_ref, field_name="object_ref")
+            if normalized_kind == "functional_area"
+            else _require_text(object_ref, field_name="object_ref")
+        )
+        if normalized_kind == "repo_path":
+            return True
+        query_by_kind = {
+            "issue": "SELECT 1 FROM issues WHERE issue_id = $1",
+            "bug": "SELECT 1 FROM bugs WHERE bug_id = $1",
+            "roadmap_item": "SELECT 1 FROM roadmap_items WHERE roadmap_item_id = $1",
+            "operator_decision": "SELECT 1 FROM operator_decisions WHERE operator_decision_id = $1",
+            "cutover_gate": "SELECT 1 FROM cutover_gates WHERE cutover_gate_id = $1",
+            "workflow_class": "SELECT 1 FROM workflow_classes WHERE workflow_class_id = $1",
+            "schedule_definition": "SELECT 1 FROM schedule_definitions WHERE schedule_definition_id = $1",
+            "workflow_run": "SELECT 1 FROM workflow_runs WHERE run_id = $1",
+            "document": (
+                "SELECT 1 FROM memory_entities "
+                "WHERE id = $1 AND entity_type = 'document' AND archived = false"
+            ),
+            "functional_area": "SELECT 1 FROM functional_areas WHERE functional_area_id = $1",
+        }
+        query = query_by_kind.get(normalized_kind)
+        if query is None:
+            raise ValueError(f"unsupported object_kind for relation lookup: {normalized_kind}")
+        row = await conn.fetchrow(query, normalized_ref)
+        return row is not None
+
+    async def _require_object_ref_exists(
+        self,
+        conn: _Connection,
+        *,
+        object_kind: str,
+        object_ref: str,
+        field_name: str,
+    ) -> str:
+        normalized_kind = _normalize_object_kind(object_kind, field_name=f"{field_name}.kind")
+        normalized_ref = (
+            _normalize_functional_area_ref(object_ref, field_name=f"{field_name}.ref")
+            if normalized_kind == "functional_area"
+            else _require_text(object_ref, field_name=f"{field_name}.ref")
+        )
+        if not await self._object_ref_exists(
+            conn,
+            object_kind=normalized_kind,
+            object_ref=normalized_ref,
+        ):
+            raise ValueError(
+                f"{field_name}.ref does not resolve to a canonical {normalized_kind} row: {normalized_ref}"
+            )
+        return normalized_ref
+
+    async def _record_functional_area(
+        self,
+        *,
+        env: Mapping[str, str] | None,
+        area_slug: str,
+        title: str,
+        summary: str,
+        area_status: str = "active",
+        created_at: datetime | None = None,
+        updated_at: datetime | None = None,
+    ) -> FunctionalAreaRecord:
+        normalized_area_slug = coerce_slug(area_slug, field_name="area_slug")
+        normalized_title = _require_text(title, field_name="title")
+        normalized_summary = _require_text(summary, field_name="summary")
+        normalized_status = _normalize_functional_area_status(area_status)
+        now = _now()
+        normalized_created_at = (
+            now
+            if created_at is None
+            else _normalize_as_of(
+                created_at,
+                error_type=ValueError,
+                reason_code="operator_control.invalid_created_at",
+            )
+        )
+        normalized_updated_at = (
+            normalized_created_at
+            if updated_at is None
+            else _normalize_as_of(
+                updated_at,
+                error_type=ValueError,
+                reason_code="operator_control.invalid_updated_at",
+            )
+        )
+        functional_area = FunctionalAreaRecord(
+            functional_area_id=functional_area_id_from_slug(normalized_area_slug),
+            area_slug=normalized_area_slug,
+            title=normalized_title,
+            area_status=normalized_status,
+            summary=normalized_summary,
+            created_at=normalized_created_at,
+            updated_at=normalized_updated_at,
+        )
+        conn = await self.connect_database(env)
+        try:
+            assert self.object_relation_repository_factory is not None
+            repository = self.object_relation_repository_factory(conn)
+            return await repository.record_functional_area(functional_area=functional_area)
+        finally:
+            await conn.close()
+
+    async def _record_operator_object_relation(
+        self,
+        *,
+        env: Mapping[str, str] | None,
+        relation_kind: str,
+        source_kind: str,
+        source_ref: str,
+        target_kind: str,
+        target_ref: str,
+        relation_status: str = "active",
+        relation_metadata: Mapping[str, Any] | None = None,
+        bound_by_decision_id: str | None = None,
+        created_at: datetime | None = None,
+        updated_at: datetime | None = None,
+    ) -> OperatorObjectRelationRecord:
+        normalized_relation_kind = _normalize_relation_kind(relation_kind)
+        normalized_source_kind = _normalize_object_kind(source_kind, field_name="source_kind")
+        normalized_target_kind = _normalize_object_kind(target_kind, field_name="target_kind")
+        normalized_status = _normalize_object_relation_status(relation_status)
+        normalized_relation_metadata = (
+            {}
+            if relation_metadata is None
+            else _json_compatible(
+                _require_mapping(
+                    relation_metadata,
+                    field_name="relation_metadata",
+                )
+            )
+        )
+        now = _now()
+        normalized_created_at = (
+            now
+            if created_at is None
+            else _normalize_as_of(
+                created_at,
+                error_type=ValueError,
+                reason_code="operator_control.invalid_created_at",
+            )
+        )
+        normalized_updated_at = (
+            normalized_created_at
+            if updated_at is None
+            else _normalize_as_of(
+                updated_at,
+                error_type=ValueError,
+                reason_code="operator_control.invalid_updated_at",
+            )
+        )
+        conn = await self.connect_database(env)
+        try:
+            normalized_source_ref = (
+                await self._require_object_ref_exists(
+                    conn,
+                    object_kind=normalized_source_kind,
+                    object_ref=source_ref,
+                    field_name="source",
+                )
+                if normalized_source_kind != "repo_path"
+                else _require_text(source_ref, field_name="source.ref")
+            )
+            normalized_target_ref = (
+                await self._require_object_ref_exists(
+                    conn,
+                    object_kind=normalized_target_kind,
+                    object_ref=target_ref,
+                    field_name="target",
+                )
+                if normalized_target_kind != "repo_path"
+                else _require_text(target_ref, field_name="target.ref")
+            )
+            normalized_bound_by_decision_id = None
+            if bound_by_decision_id is not None:
+                normalized_bound_by_decision_id = await self._require_object_ref_exists(
+                    conn,
+                    object_kind="operator_decision",
+                    object_ref=bound_by_decision_id,
+                    field_name="bound_by_decision",
+                )
+            assert self.object_relation_repository_factory is not None
+            repository = self.object_relation_repository_factory(conn)
+            relation = OperatorObjectRelationRecord(
+                operator_object_relation_id=operator_object_relation_id(
+                    relation_kind=normalized_relation_kind,
+                    source_kind=normalized_source_kind,
+                    source_ref=normalized_source_ref,
+                    target_kind=normalized_target_kind,
+                    target_ref=normalized_target_ref,
+                ),
+                relation_kind=normalized_relation_kind,
+                relation_status=normalized_status,
+                source_kind=normalized_source_kind,
+                source_ref=normalized_source_ref,
+                target_kind=normalized_target_kind,
+                target_ref=normalized_target_ref,
+                relation_metadata=cast(Mapping[str, Any], normalized_relation_metadata),
+                bound_by_decision_id=normalized_bound_by_decision_id,
+                created_at=normalized_created_at,
+                updated_at=normalized_updated_at,
+            )
+            return await repository.record_relation(relation=relation)
+        finally:
+            await conn.close()
 
     async def _record_work_item_workflow_binding(
         self,
@@ -3463,6 +3744,62 @@ class OperatorControlFrontdoor:
             ),
         )
 
+    async def record_functional_area_async(
+        self,
+        *,
+        area_slug: str,
+        title: str,
+        summary: str,
+        area_status: str = "active",
+        created_at: datetime | None = None,
+        updated_at: datetime | None = None,
+        env: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Record one canonical functional area in async contexts."""
+
+        record = await self._record_functional_area(
+            env=env,
+            area_slug=area_slug,
+            title=title,
+            summary=summary,
+            area_status=area_status,
+            created_at=created_at,
+            updated_at=updated_at,
+        )
+        return {"functional_area": record.to_json()}
+
+    async def record_operator_object_relation_async(
+        self,
+        *,
+        relation_kind: str,
+        source_kind: str,
+        source_ref: str,
+        target_kind: str,
+        target_ref: str,
+        relation_status: str = "active",
+        relation_metadata: Mapping[str, Any] | None = None,
+        bound_by_decision_id: str | None = None,
+        created_at: datetime | None = None,
+        updated_at: datetime | None = None,
+        env: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Record one canonical cross-object semantic relation in async contexts."""
+
+        record = await self._record_operator_object_relation(
+            env=env,
+            relation_kind=relation_kind,
+            source_kind=source_kind,
+            source_ref=source_ref,
+            target_kind=target_kind,
+            target_ref=target_ref,
+            relation_status=relation_status,
+            relation_metadata=relation_metadata,
+            bound_by_decision_id=bound_by_decision_id,
+            created_at=created_at,
+            updated_at=updated_at,
+        )
+        return {"operator_object_relation": record.to_json()}
+
     async def record_work_item_workflow_binding_async(
         self,
         *,
@@ -3587,6 +3924,74 @@ class OperatorControlFrontdoor:
             payload["auto_promoted_roadmap"] = auto_promoted_roadmap
         return payload
 
+    def record_functional_area(
+        self,
+        *,
+        area_slug: str,
+        title: str,
+        summary: str,
+        area_status: str = "active",
+        created_at: datetime | None = None,
+        updated_at: datetime | None = None,
+        env: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Record one canonical functional area through Postgres."""
+
+        record = _run_async(
+            self._record_functional_area(
+                env=env,
+                area_slug=area_slug,
+                title=title,
+                summary=summary,
+                area_status=area_status,
+                created_at=created_at,
+                updated_at=updated_at,
+            ),
+            message=(
+                "operator_control.async_boundary_required: "
+                "operator control sync entrypoints require a non-async call boundary"
+            ),
+        )
+        return {"functional_area": record.to_json()}
+
+    def record_operator_object_relation(
+        self,
+        *,
+        relation_kind: str,
+        source_kind: str,
+        source_ref: str,
+        target_kind: str,
+        target_ref: str,
+        relation_status: str = "active",
+        relation_metadata: Mapping[str, Any] | None = None,
+        bound_by_decision_id: str | None = None,
+        created_at: datetime | None = None,
+        updated_at: datetime | None = None,
+        env: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Record one canonical cross-object semantic relation through Postgres."""
+
+        record = _run_async(
+            self._record_operator_object_relation(
+                env=env,
+                relation_kind=relation_kind,
+                source_kind=source_kind,
+                source_ref=source_ref,
+                target_kind=target_kind,
+                target_ref=target_ref,
+                relation_status=relation_status,
+                relation_metadata=relation_metadata,
+                bound_by_decision_id=bound_by_decision_id,
+                created_at=created_at,
+                updated_at=updated_at,
+            ),
+            message=(
+                "operator_control.async_boundary_required: "
+                "operator control sync entrypoints require a non-async call boundary"
+            ),
+        )
+        return {"operator_object_relation": record.to_json()}
+
     def admit_native_primary_cutover_gate(
         self,
         *,
@@ -3660,6 +4065,114 @@ def record_work_item_workflow_binding(
         schedule_definition_id=schedule_definition_id,
         workflow_run_id=workflow_run_id,
         binding_status=binding_status,
+        bound_by_decision_id=bound_by_decision_id,
+        created_at=created_at,
+        updated_at=updated_at,
+        env=env,
+    )
+
+
+def record_functional_area(
+    *,
+    area_slug: str,
+    title: str,
+    summary: str,
+    area_status: str = "active",
+    created_at: datetime | None = None,
+    updated_at: datetime | None = None,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Record one canonical functional area through the default frontdoor."""
+
+    return OperatorControlFrontdoor().record_functional_area(
+        area_slug=area_slug,
+        title=title,
+        summary=summary,
+        area_status=area_status,
+        created_at=created_at,
+        updated_at=updated_at,
+        env=env,
+    )
+
+
+async def arecord_functional_area(
+    *,
+    area_slug: str,
+    title: str,
+    summary: str,
+    area_status: str = "active",
+    created_at: datetime | None = None,
+    updated_at: datetime | None = None,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Record one canonical functional area through the default async frontdoor."""
+
+    return await OperatorControlFrontdoor().record_functional_area_async(
+        area_slug=area_slug,
+        title=title,
+        summary=summary,
+        area_status=area_status,
+        created_at=created_at,
+        updated_at=updated_at,
+        env=env,
+    )
+
+
+def record_operator_object_relation(
+    *,
+    relation_kind: str,
+    source_kind: str,
+    source_ref: str,
+    target_kind: str,
+    target_ref: str,
+    relation_status: str = "active",
+    relation_metadata: Mapping[str, Any] | None = None,
+    bound_by_decision_id: str | None = None,
+    created_at: datetime | None = None,
+    updated_at: datetime | None = None,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Record one canonical cross-object semantic relation through the default frontdoor."""
+
+    return OperatorControlFrontdoor().record_operator_object_relation(
+        relation_kind=relation_kind,
+        source_kind=source_kind,
+        source_ref=source_ref,
+        target_kind=target_kind,
+        target_ref=target_ref,
+        relation_status=relation_status,
+        relation_metadata=relation_metadata,
+        bound_by_decision_id=bound_by_decision_id,
+        created_at=created_at,
+        updated_at=updated_at,
+        env=env,
+    )
+
+
+async def arecord_operator_object_relation(
+    *,
+    relation_kind: str,
+    source_kind: str,
+    source_ref: str,
+    target_kind: str,
+    target_ref: str,
+    relation_status: str = "active",
+    relation_metadata: Mapping[str, Any] | None = None,
+    bound_by_decision_id: str | None = None,
+    created_at: datetime | None = None,
+    updated_at: datetime | None = None,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Record one canonical cross-object semantic relation through the default async frontdoor."""
+
+    return await OperatorControlFrontdoor().record_operator_object_relation_async(
+        relation_kind=relation_kind,
+        source_kind=source_kind,
+        source_ref=source_ref,
+        target_kind=target_kind,
+        target_ref=target_ref,
+        relation_status=relation_status,
+        relation_metadata=relation_metadata,
         bound_by_decision_id=bound_by_decision_id,
         created_at=created_at,
         updated_at=updated_at,
@@ -4588,7 +5101,9 @@ __all__ = [
     "TaskRouteEligibilityRecord",
     "TaskRouteEligibilityWriteResult",
     "arecord_architecture_policy_decision",
+    "arecord_functional_area",
     "arecord_issue",
+    "arecord_operator_object_relation",
     "aset_circuit_breaker_override",
     "aadmit_native_primary_cutover_gate",
     "aroadmap_write",
@@ -4599,7 +5114,9 @@ __all__ = [
     "inspect_workflow_flows",
     "inspect_recurring_review_repair_flow",
     "record_architecture_policy_decision",
+    "record_functional_area",
     "record_issue",
+    "record_operator_object_relation",
     "roadmap_write",
     "reconcile_work_item_closeout",
     "record_work_item_workflow_binding",

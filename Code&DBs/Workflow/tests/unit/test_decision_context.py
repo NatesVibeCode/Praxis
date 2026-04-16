@@ -58,7 +58,7 @@ def test_resolve_job_decision_pack_collects_active_architecture_policies() -> No
                 "decision_status": "decided",
                 "title": "Workflow sandbox execution is Docker-only",
                 "rationale": "Use docker_local or admitted cloudflare_remote only.",
-                "decided_by": "nate",
+                "decided_by": "praxis-admin",
                 "decision_source": "cto.guidance",
                 "effective_from": "2026-04-16T18:50:34+00:00",
                 "effective_to": None,

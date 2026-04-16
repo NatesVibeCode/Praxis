@@ -105,7 +105,7 @@ def test_reviewable_plan_tracks_approvals_and_proposal_requests(monkeypatch) -> 
             "slot_ref": "workflow_shape",
             "decision": "widen",
             "actor_type": "human",
-            "actor_ref": "nate",
+            "actor_ref": "praxis-admin",
             "authority_scope": "workflow_build/workflow_shape",
             "approval_mode": "manual",
             "rationale": "Show an alternate escalation-only path.",

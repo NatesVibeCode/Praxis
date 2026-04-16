@@ -132,7 +132,7 @@ def test_default_sync_conn_uses_runtime_database_authority(monkeypatch) -> None:
 
     monkeypatch.setattr(
         "registry.native_runtime_profile_sync.resolve_runtime_database_url",
-        lambda repo_root=None, required=True: "postgresql://postgres@127.0.0.1:5432/praxis",
+        lambda repo_root=None, required=True: "postgresql://127.0.0.1:5432/praxis",
     )
     monkeypatch.setattr(
         "registry.native_runtime_profile_sync.ensure_postgres_available",
@@ -142,6 +142,6 @@ def test_default_sync_conn_uses_runtime_database_authority(monkeypatch) -> None:
     conn = _default_sync_conn()
 
     assert captured["env"] == {
-        "WORKFLOW_DATABASE_URL": "postgresql://postgres@127.0.0.1:5432/praxis",
+        "WORKFLOW_DATABASE_URL": "postgresql://127.0.0.1:5432/praxis",
     }
     assert conn == captured["env"]

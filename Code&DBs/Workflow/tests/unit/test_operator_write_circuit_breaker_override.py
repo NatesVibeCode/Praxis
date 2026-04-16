@@ -122,7 +122,7 @@ def test_record_architecture_policy_decision_uses_authority_domain_scope(monkeyp
         policy_slug="db-native-authority",
         title="Decision tables are DB-native authority",
         rationale="Authority and runtime coordination belong in durable DB primitives.",
-        decided_by="nate",
+        decided_by="praxis-admin",
         decision_source="cto.guidance",
     )
 
