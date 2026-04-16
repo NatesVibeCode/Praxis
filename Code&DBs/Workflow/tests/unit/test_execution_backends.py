@@ -66,6 +66,32 @@ def _sandbox_result(**overrides):
     return SimpleNamespace(**values)
 
 
+class _FakeLoadBalancer:
+    def __init__(self, *, acquired: bool) -> None:
+        self.acquired = acquired
+        self.providers: list[str] = []
+        self.released: list[str] = []
+
+    def slot(self, provider_slug: str, *, cost_weight: float = 1.0, timeout_s: float = 30.0):
+        del cost_weight, timeout_s
+        self.providers.append(provider_slug)
+
+        class _Slot:
+            def __init__(self, parent: "_FakeLoadBalancer", provider: str) -> None:
+                self._parent = parent
+                self._provider = provider
+
+            def __enter__(self):
+                return self._parent.acquired
+
+            def __exit__(self, exc_type, exc, tb):
+                if self._parent.acquired:
+                    self._parent.released.append(self._provider)
+                return False
+
+        return _Slot(self, provider_slug)
+
+
 def test_execute_cli_routes_through_sandbox_runtime(monkeypatch, tmp_path) -> None:
     captured: dict[str, object] = {}
 
@@ -75,6 +101,7 @@ def test_execute_cli_routes_through_sandbox_runtime(monkeypatch, tmp_path) -> No
             return _sandbox_result()
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("PRAXIS_WORKFLOW_MCP_SIGNING_SECRET", "test-secret")
     monkeypatch.setattr(execution_backends, "SandboxRuntime", lambda: _FakeRuntime())
     monkeypatch.setattr(
         execution_backends,
@@ -110,6 +137,77 @@ def test_execute_cli_routes_through_sandbox_runtime(monkeypatch, tmp_path) -> No
     assert result["artifact_refs"] == ["README.md"]
     assert result["workspace_snapshot_ref"] == "workspace_snapshot:test1234"
     assert result["workspace_snapshot_cache_hit"] is True
+
+
+def test_execute_cli_uses_provider_concurrency_slot(monkeypatch, tmp_path) -> None:
+    captured: dict[str, object] = {}
+    load_balancer = _FakeLoadBalancer(acquired=True)
+
+    class _FakeRuntime:
+        def execute_command(self, **kwargs):
+            captured.update(kwargs)
+            return _sandbox_result()
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(execution_backends, "get_load_balancer", lambda: load_balancer)
+    monkeypatch.setattr(execution_backends, "SandboxRuntime", lambda: _FakeRuntime())
+    monkeypatch.setattr(
+        execution_backends,
+        "augment_cli_command_for_workflow_mcp",
+        lambda **kwargs: list(kwargs["command_parts"]),
+    )
+
+    result = execution_backends.execute_cli(_agent(), "hello from stdin", str(tmp_path))
+
+    assert load_balancer.providers == ["openai"]
+    assert load_balancer.released == ["openai"]
+    assert captured["provider_name"] == "docker_local"
+    assert result["status"] == "succeeded"
+
+
+def test_execute_cli_google_emits_manifest_backed_mcp_settings(monkeypatch, tmp_path) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeRuntime:
+        def execute_command(self, **kwargs):
+            captured.update(kwargs)
+            return _sandbox_result()
+
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(execution_backends, "SandboxRuntime", lambda: _FakeRuntime())
+    monkeypatch.setattr(
+        execution_backends,
+        "build_command",
+        lambda provider_slug, model=None: ["gemini", "-p", ".", "-o", "json", "--model", model or provider_slug],
+    )
+    monkeypatch.setattr(
+        "adapters.provider_registry.resolve_mcp_args_template",
+        lambda provider_slug: ["--allowed-mcp-server-names", "dag-workflow"]
+        if provider_slug == "google"
+        else [],
+    )
+    monkeypatch.setenv("PRAXIS_WORKFLOW_MCP_URL", "http://mcp.local/mcp")
+    monkeypatch.setenv("PRAXIS_WORKFLOW_MCP_SIGNING_SECRET", "test-secret")
+
+    result = execution_backends.execute_cli(
+        _agent(wrapper_command=None, provider="google", model="gemini-2.5-flash"),
+        "hello from stdin",
+        str(tmp_path),
+        execution_bundle={
+            "run_id": "run.alpha",
+            "workflow_id": "workflow.alpha",
+            "job_label": "job.alpha",
+            "mcp_tool_names": ["praxis_query", "praxis_discover"],
+        },
+    )
+
+    assert str(captured["command"]).endswith(" --allowed-mcp-server-names dag-workflow")
+    overlays = captured["metadata"]["workspace_overlays"]
+    assert overlays[0]["relative_path"] == ".gemini/settings.json"
+    assert '"dag-workflow"' in overlays[0]["content"]
+    assert captured["env"]["GEMINI_API_KEY"] == "test-key"
+    assert captured["metadata"]["provider_slug"] == "google"
+    assert result["status"] == "succeeded"
 
 
 def test_execute_cli_prefers_bundle_sandbox_profile_contract(monkeypatch, tmp_path) -> None:
@@ -430,6 +528,49 @@ def test_execute_api_routes_through_sandbox_runtime(monkeypatch, tmp_path) -> No
     assert result["stdout"] == "api output"
     assert result["workspace_snapshot_ref"] == "workspace_snapshot:test1234"
     assert result["workspace_snapshot_cache_hit"] is True
+
+
+def test_execute_api_uses_provider_concurrency_slot(monkeypatch, tmp_path) -> None:
+    captured: dict[str, object] = {}
+    load_balancer = _FakeLoadBalancer(acquired=True)
+
+    class _FakeRuntime:
+        def execute_command(self, **kwargs):
+            captured.update(kwargs)
+            return _sandbox_result(
+                stdout="api output",
+                execution_transport="api",
+            )
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setattr(execution_backends, "get_load_balancer", lambda: load_balancer)
+    monkeypatch.setattr(execution_backends, "SandboxRuntime", lambda: _FakeRuntime())
+    monkeypatch.setattr(
+        "adapters.provider_registry.get_profile",
+        lambda provider_slug: _provider_profile(
+            api_protocol_family="anthropic_messages",
+            api_endpoint="https://api.anthropic.test/v1/messages",
+            api_key_env_vars=("ANTHROPIC_API_KEY",),
+        )
+        if provider_slug == "anthropic"
+        else None,
+    )
+
+    result = execution_backends.execute_api(
+        _agent(
+            provider="anthropic",
+            model="claude-haiku-4-5-20251001",
+            wrapper_command=None,
+            execution_transport="api",
+        ),
+        "hello from api",
+        workdir=str(tmp_path),
+    )
+
+    assert load_balancer.providers == ["anthropic"]
+    assert load_balancer.released == ["anthropic"]
+    assert captured["execution_transport"] == "api"
+    assert result["status"] == "succeeded"
 
 
 def test_execute_api_uses_stable_adhoc_sandbox_identity(monkeypatch, tmp_path) -> None:

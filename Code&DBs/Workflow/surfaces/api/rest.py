@@ -409,6 +409,55 @@ app = FastAPI(
 from .handlers.webhook_ingest import webhook_ingest_router
 app.include_router(webhook_ingest_router)
 
+from runtime.cqrs import registry, CommandBus
+
+def mount_capabilities(app: FastAPI) -> None:
+    """Dynamically mount endpoints from the transport-agnostic capability registry."""
+    for route in registry.routes:
+        def create_endpoint(cmd_class, path):
+            async def endpoint(request: Request):
+                subsystems = _ensure_shared_subsystems(app)
+                if subsystems is None:
+                    return JSONResponse({"error": "shared subsystems unavailable"}, status_code=503)
+                
+                bus = CommandBus(subsystems)
+                
+                body = {}
+                if request.method in {"POST", "PUT", "PATCH"}:
+                    body_bytes = await request.body()
+                    try:
+                        body = json.loads(body_bytes) if body_bytes else {}
+                    except json.JSONDecodeError as e:
+                        return JSONResponse({"error": f"Invalid JSON: {e}"}, status_code=400)
+                
+                # Merge dynamic path params and explicit body payload
+                path_params = request.path_params
+                query_params = dict(request.query_params)
+                command_data = {**query_params, **path_params, "body": body}
+                
+                try:
+                    command = cmd_class(**command_data)
+                except Exception as e:
+                    return JSONResponse({"error": f"Validation Error: {e}"}, status_code=400)
+                
+                try:
+                    result = bus.dispatch(command)
+                    return JSONResponse(result)
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).error(f"Command failure: {e}", exc_info=True)
+                    return JSONResponse({"error": str(e)}, status_code=500)
+            return endpoint
+
+        endpoint_func = create_endpoint(route.command_class, route.path)
+        
+        if route.method == "POST":
+            app.post(route.path, summary=route.description, tags=["cqrs"])(endpoint_func)
+        elif route.method == "GET":
+            app.get(route.path, summary=route.description, tags=["cqrs"])(endpoint_func)
+
+mount_capabilities(app)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_configured_cors_origins(),
@@ -1957,22 +2006,6 @@ async def workflows_path_put(request: Request, rest_of_path: str) -> Response:
 
 @app.delete("/api/workflows/{rest_of_path:path}")
 async def workflows_path_delete(request: Request, rest_of_path: str) -> Response:
-    return await _route_to_handler(request)
-
-@app.post("/api/compile")
-async def compile_post(request: Request) -> Response:
-    return await _route_to_handler(request)
-
-@app.post("/api/refine-definition")
-async def refine_definition_post(request: Request) -> Response:
-    return await _route_to_handler(request)
-
-@app.post("/api/plan")
-async def plan_post(request: Request) -> Response:
-    return await _route_to_handler(request)
-
-@app.post("/api/commit")
-async def commit_post(request: Request) -> Response:
     return await _route_to_handler(request)
 
 # -- Files --

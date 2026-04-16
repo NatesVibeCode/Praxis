@@ -63,6 +63,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
                 "packet": "read",
                 "history": "read",
                 "file": "write",
+                "patch_resume": "write",
                 "resolve": "write",
                 "attach_evidence": "write",
                 "replay": "dispatch",
@@ -73,6 +74,17 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             _example("List open P1 bugs", {"action": "list", "status": "OPEN", "severity": "P1"}),
             _example("Search open routing bugs", {"action": "search", "title": "routing", "status": "OPEN"}),
             _example("File a new bug", {"action": "file", "title": "Runner hangs after retry", "severity": "P1"}),
+            _example(
+                "Save investigation handoff on a bug",
+                {
+                    "action": "patch_resume",
+                    "bug_id": "BUG-ABCDEF12",
+                    "resume_patch": {
+                        "hypothesis": "Lease renew races cancel",
+                        "next_steps": ["Trace holder at timeout", "Compare with run X"],
+                    },
+                },
+            ),
         ],
     ),
     "praxis_circuits": _tool(

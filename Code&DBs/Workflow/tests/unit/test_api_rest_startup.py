@@ -166,13 +166,13 @@ def test_surface_usage_metrics_endpoint_returns_serialized_rows(monkeypatch) -> 
 
         def list_usage_rollup(self, *, days: int, entrypoint_name: str | None = None):
             assert days == 14
-            assert entrypoint_name == "/api/compile"
+            assert entrypoint_name == "/api/workflows"
             return [
                 {
                     "surface_kind": "api",
                     "transport_kind": "http",
                     "entrypoint_kind": "route",
-                    "entrypoint_name": "/api/compile",
+                    "entrypoint_name": "/api/workflows",
                     "caller_kind": "direct",
                     "http_method": "POST",
                     "invocation_count": 7,
@@ -186,14 +186,14 @@ def test_surface_usage_metrics_endpoint_returns_serialized_rows(monkeypatch) -> 
 
         def list_usage_daily(self, *, days: int, entrypoint_name: str | None = None):
             assert days == 14
-            assert entrypoint_name == "/api/compile"
+            assert entrypoint_name == "/api/workflows"
             return [
                 {
                     "usage_date": datetime(2026, 4, 15, tzinfo=timezone.utc).date(),
                     "surface_kind": "api",
                     "transport_kind": "http",
                     "entrypoint_kind": "route",
-                    "entrypoint_name": "/api/compile",
+                    "entrypoint_name": "/api/workflows",
                     "caller_kind": "direct",
                     "http_method": "POST",
                     "invocation_count": 3,
@@ -207,7 +207,7 @@ def test_surface_usage_metrics_endpoint_returns_serialized_rows(monkeypatch) -> 
 
         def list_usage_events(self, *, days: int, entrypoint_name: str | None = None, limit: int = 50):
             assert days == 14
-            assert entrypoint_name == "/api/compile"
+            assert entrypoint_name == "/api/workflows"
             assert limit == 5
             return [
                 {
@@ -216,7 +216,7 @@ def test_surface_usage_metrics_endpoint_returns_serialized_rows(monkeypatch) -> 
                     "surface_kind": "api",
                     "transport_kind": "http",
                     "entrypoint_kind": "route",
-                    "entrypoint_name": "/api/compile",
+                    "entrypoint_name": "/api/workflows",
                     "caller_kind": "direct",
                     "http_method": "POST",
                     "status_code": 200,
@@ -285,12 +285,12 @@ def test_surface_usage_metrics_endpoint_returns_serialized_rows(monkeypatch) -> 
     with TestClient(rest.app) as client:
         response = client.get(
             "/api/metrics/surface-usage",
-            params={"days": 14, "entrypoint": "/api/compile", "event_limit": 5},
+            params={"days": 14, "entrypoint": "/api/workflows", "event_limit": 5},
         )
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["filters"] == {"entrypoint": "/api/compile", "event_limit": 5}
+    assert payload["filters"] == {"entrypoint": "/api/workflows", "event_limit": 5}
     assert payload["totals"] == {
         "entry_count": 1,
         "invocation_count": 7,
@@ -1055,13 +1055,13 @@ def test_rest_legacy_api_bridge_routes_unknown_api_paths_to_handler(monkeypatch)
 
     with TestClient(rest.app) as client:
         get_response = client.get("/api/models")
-        post_response = client.post("/api/compile", json={"goal": "test"})
+        post_response = client.post("/api/workflows", json={"goal": "test"})
 
     assert get_response.status_code == 200
     assert get_response.json() == {"ok": True, "path": "/api/models", "method": "GET"}
     assert post_response.status_code == 200
-    assert post_response.json() == {"ok": True, "path": "/api/compile", "method": "POST"}
-    assert seen == [("GET", "/api/models"), ("POST", "/api/compile")]
+    assert post_response.json() == {"ok": True, "path": "/api/workflows", "method": "POST"}
+    assert seen == [("GET", "/api/models"), ("POST", "/api/workflows")]
 
 
 def test_dashboard_route_delegates_to_handler_bridge(monkeypatch) -> None:

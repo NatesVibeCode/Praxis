@@ -99,11 +99,23 @@ def verification_passed(status: object) -> bool:
 
 
 def packet_summary(packet: dict[str, Any]) -> dict[str, Any]:
-    return {
+    summary: dict[str, Any] = {
         "signature": packet.get("signature"),
         "observability_state": packet.get("observability_state"),
         "observability_gaps": packet.get("observability_gaps"),
     }
+    rc = packet.get("resume_context")
+    if isinstance(rc, dict) and rc:
+        summary["resume_context"] = rc
+    sn = packet.get("semantic_neighbors")
+    if isinstance(sn, dict):
+        items = sn.get("items") or ()
+        if items:
+            summary["semantic_neighbor_count"] = len(items)
+            note = sn.get("note")
+            if isinstance(note, str) and note.strip():
+                summary["semantic_neighbors_note"] = note.strip()
+    return summary
 
 
 def attempted_at_sort_key(item: Any) -> datetime:
@@ -507,7 +519,18 @@ def historical_fix_evidence(
     conn: Any,
     bug_id: str,
     evidence_links: list[dict[str, Any]],
+    *,
+    load_verification_rows_fn: Any | None = None,
 ) -> dict[str, Any]:
+    def _load_rows(
+        table_name: str,
+        id_field: str,
+        refs: tuple[str, ...],
+    ) -> tuple[dict[str, dict[str, Any]], str | None]:
+        if load_verification_rows_fn is not None:
+            return load_verification_rows_fn(table_name, id_field, refs)
+        return load_verification_rows(conn, table_name, id_field, refs)
+
     validation_links = [
         evidence
         for evidence in evidence_links
@@ -520,8 +543,7 @@ def historical_fix_evidence(
         if evidence.get("evidence_role") == "attempted_fix"
         and evidence.get("evidence_kind") == "healing_run"
     ]
-    verification_rows, verification_error = load_verification_rows(
-        conn,
+    verification_rows, verification_error = _load_rows(
         "verification_runs",
         "verification_run_id",
         tuple(
@@ -530,8 +552,7 @@ def historical_fix_evidence(
             if str(link.get("evidence_ref") or "").strip()
         ),
     )
-    healing_rows, healing_error = load_verification_rows(
-        conn,
+    healing_rows, healing_error = _load_rows(
         "healing_runs",
         "healing_run_id",
         tuple(
@@ -653,6 +674,7 @@ def assemble_failure_packet(
     blast_radius: dict[str, Any],
     historical_fixes: dict[str, Any],
     backfill: dict[str, Any] | None,
+    semantic_neighbors: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     from runtime.bug_tagging import ordered_unique, payload_keys
 
@@ -843,6 +865,15 @@ def assemble_failure_packet(
         "blast_radius": blast_radius,
         "historical_fixes": historical_fixes,
         "counterfactual_axes": build_counterfactual_axes(latest_receipt or inferred_receipt),
+        "resume_context": dict(getattr(bug, "resume_context", None) or {}),
+        "semantic_neighbors": semantic_neighbors
+        if isinstance(semantic_neighbors, dict)
+        else {
+            "reason_code": "bug.semantic_neighbors.unavailable",
+            "items": (),
+            "note": None,
+            "sources_tried": (),
+        },
         "agent_actions": {
             "replay": replay_action_result,
         },

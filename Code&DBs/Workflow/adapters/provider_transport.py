@@ -250,6 +250,8 @@ BUILTIN_PROVIDER_PROFILES: tuple[ProviderCLIProfile, ...] = (
             "-y",
         ),
         default_timeout=600,
+        mcp_config_style="gemini_project_settings",
+        mcp_args_template=["--allowed-mcp-server-names", "dag-workflow"],
         aliases=("gemini-cli",),
     ),
 )

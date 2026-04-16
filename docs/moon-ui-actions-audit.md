@@ -129,9 +129,9 @@ These are the step/action buttons shown in the trigger picker, node popout, and 
 | trigger picker items | Seed a local `build_graph` immediately. |
 | `Or describe in words` | Switches to prose compile flow. |
 | example prompt chips | Fill the prose box only. |
-| `Build` | Calls `/api/compile`; compiler output replaces local build state. |
-| `Refine` | Calls `/api/refine-definition`; recompiles from prose against current definition endpoint behavior. |
-| `Save draft` | Creates or commits workflow definition through `/api/workflows` or `/api/commit`. |
+| `Build` | DEAD. Was `/api/compile`. Now managed through workflow build authority. |
+| `Refine` | DEAD. Was `/api/refine-definition`. Now managed through workflow build authority. |
+| `Save draft` | Managed through `/api/workflows`. `/api/commit` is DEAD. |
 | dock half-moons | Open or close docks only. |
 | node popout action buttons | Assign node route and persist `build_graph`; they do not execute immediately. |
 | append `+` | Adds a new blank node and persists `build_graph` when workflow id exists. |
@@ -153,7 +153,7 @@ These are the step/action buttons shown in the trigger picker, node popout, and 
 
 | Button | Actual behavior |
 | --- | --- |
-| `Preview plan` | Calls `/api/plan`; does not persist or dispatch. |
+| `Preview plan` | DEAD. Was `/api/plan`. Now managed through workflow build authority. |
 | `Dispatch` | Starts confirmation after a plan exists. |
 | `Confirm Release` | Creates workflow if needed, commits definition/plan, then calls `/api/trigger/{workflow_id}`. |
 | `Fix` | Navigates to the blocking node/dock only. |

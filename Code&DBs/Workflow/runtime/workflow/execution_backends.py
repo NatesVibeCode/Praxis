@@ -8,13 +8,19 @@ import os
 import shlex
 import subprocess
 import sys
+from contextlib import contextmanager, nullcontext
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
 from adapters.provider_registry import build_command
+from runtime.load_balancer import get_load_balancer
 from runtime.execution_transport import resolve_execution_transport
 from runtime.sandbox_runtime import SandboxRuntime, derive_sandbox_identity
-from runtime.workflow.mcp_bridge import augment_cli_command_for_workflow_mcp
+from runtime.workflow.mcp_bridge import (
+    augment_cli_command_for_workflow_mcp,
+    workflow_mcp_workspace_overlays,
+)
 
 
 _WORKFLOW_MODEL_NETWORK_ENV = "PRAXIS_WORKFLOW_MODEL_NETWORK"
@@ -23,6 +29,10 @@ _ALLOWED_MCP_TOOLS_ENV = "PRAXIS_ALLOWED_MCP_TOOLS"
 _LEGACY_ALLOWED_MCP_TOOLS_ENV = "PRAXIS_ALLOWED_MCP_TOOLS"
 _ALLOWED_SKILLS_ENV = "PRAXIS_ALLOWED_SKILLS"
 _SANDBOX_PATH_PREFIX = "/opt/homebrew/bin:/usr/local/bin:"
+_PROVIDER_SLOT_BYPASS: ContextVar[bool] = ContextVar(
+    "workflow_provider_slot_bypass",
+    default=False,
+)
 
 
 def _env_flag_enabled(name: str, *, default: bool) -> bool:
@@ -203,6 +213,39 @@ def _sandbox_provider_for_execution(
         if explicit:
             return explicit
     return resolve_execution_transport(agent_config).sandbox_provider
+
+
+@contextmanager
+def provider_slot_bypass():
+    """Disable provider load-balancer acquisition for one nested call chain."""
+
+    token = _PROVIDER_SLOT_BYPASS.set(True)
+    try:
+        yield
+    finally:
+        _PROVIDER_SLOT_BYPASS.reset(token)
+
+
+def _provider_slot(provider_slug: str):
+    """Acquire the provider concurrency slot unless a parent already owns it."""
+
+    if _PROVIDER_SLOT_BYPASS.get() or not provider_slug:
+        return nullcontext(True)
+    try:
+        return get_load_balancer().slot(provider_slug)
+    except Exception as exc:
+        logger.debug("load_balancer unavailable for %s: %s", provider_slug, exc)
+        return nullcontext(True)
+
+
+def _provider_capacity_failure(provider_slug: str) -> dict[str, Any]:
+    return {
+        "status": "failed",
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": f"Provider at capacity: {provider_slug}",
+        "error_code": "route.unhealthy",
+    }
 
 
 def _sandbox_policy_value(
@@ -388,33 +431,137 @@ def execute_cli(
 ) -> dict[str, Any]:
     """Run workflow-managed CLI models through the normalized sandbox contract."""
     provider_slug = str(getattr(agent_config, "provider", "") or "").strip().lower()
-    env = _build_execution_env(
-        agent_config,
-        workdir=workdir,
-        execution_bundle=execution_bundle,
-    )
+    with _provider_slot(provider_slug) as acquired:
+        if not acquired:
+            return _provider_capacity_failure(provider_slug)
 
-    stdin_text = prompt
-    if getattr(agent_config, "wrapper_command", None):
-        cmd = shlex.split(agent_config.wrapper_command)
-        if "{prompt_file}" in cmd:
-            return {
-                "status": "failed",
-                "exit_code": 1,
-                "stdout": "",
-                "stderr": "sandbox execution does not support {prompt_file}; use stdin or argv prompt delivery",
-                "error_code": "sandbox_error",
-            }
-        if "{prompt}" in cmd:
-            cmd = [prompt if part == "{prompt}" else part for part in cmd]
-            stdin_text = ""
-    else:
+        env = _build_execution_env(
+            agent_config,
+            workdir=workdir,
+            execution_bundle=execution_bundle,
+        )
+
+        stdin_text = prompt
+        if getattr(agent_config, "wrapper_command", None):
+            cmd = shlex.split(agent_config.wrapper_command)
+            if "{prompt_file}" in cmd:
+                return {
+                    "status": "failed",
+                    "exit_code": 1,
+                    "stdout": "",
+                    "stderr": "sandbox execution does not support {prompt_file}; use stdin or argv prompt delivery",
+                    "error_code": "sandbox_error",
+                }
+            if "{prompt}" in cmd:
+                cmd = [prompt if part == "{prompt}" else part for part in cmd]
+                stdin_text = ""
+        else:
+            try:
+                cmd = build_command(
+                    provider_slug=provider_slug,
+                    model=getattr(agent_config, "model", None),
+                )
+            except Exception as exc:
+                return {
+                    "status": "failed",
+                    "exit_code": 1,
+                    "stdout": "",
+                    "stderr": str(exc),
+                    "error_code": "sandbox_error",
+                }
+
+        # Normalize codex flags for Docker-sandboxed execution.  The Docker
+        # container IS the sandbox, so codex's internal bwrap sandbox must be
+        # bypassed (it requires privileges Docker doesn't grant).  --full-auto
+        # is mutually exclusive with --dangerously-bypass-approvals-and-sandbox,
+        # so strip it if a legacy template still includes it.  Sandbox workspaces
+        # also exclude .git, so codex needs --skip-git-repo-check.
+        cmd0_name = os.path.basename(cmd[0]).strip().lower() if cmd else ""
+        if cmd0_name == "codex":
+            try:
+                exec_idx = [p.strip().lower() for p in cmd].index("exec")
+            except ValueError:
+                exec_idx = -1
+            if exec_idx >= 0:
+                cmd = [part for part in cmd if part != "--full-auto"]
+                if "--skip-git-repo-check" not in cmd:
+                    cmd.insert(exec_idx + 1, "--skip-git-repo-check")
+                if "--dangerously-bypass-approvals-and-sandbox" not in cmd:
+                    cmd.insert(exec_idx + 1, "--dangerously-bypass-approvals-and-sandbox")
+
+        workspace_overlays = workflow_mcp_workspace_overlays(
+            provider_slug=provider_slug,
+            execution_bundle=execution_bundle,
+            prefer_docker=_sandbox_provider_for_execution(agent_config, execution_bundle) == "docker_local",
+        )
+        cmd = augment_cli_command_for_workflow_mcp(
+            provider_slug=provider_slug,
+            command_parts=cmd,
+            execution_bundle=execution_bundle,
+            prefer_docker=_sandbox_provider_for_execution(agent_config, execution_bundle) == "docker_local",
+        )
+        timeout = int(getattr(agent_config, "timeout_seconds", 900) or 900)
+        network_policy = _sandbox_policy_value(
+            agent_config,
+            "network_policy",
+            "provider_only"
+            if _env_flag_enabled(_WORKFLOW_MODEL_NETWORK_ENV, default=True)
+            else "disabled",
+            execution_bundle=execution_bundle,
+        )
+        workspace_materialization = _sandbox_policy_value(
+            agent_config,
+            "workspace_materialization",
+            "copy",
+            execution_bundle=execution_bundle,
+        )
+        sandbox_provider = _sandbox_provider_for_execution(agent_config, execution_bundle)
+        sandbox_profile = _sandbox_profile_from_bundle(execution_bundle)
+        sandbox_profile_ref = (
+            str((sandbox_profile or {}).get("sandbox_profile_ref") or "").strip()
+            if isinstance(sandbox_profile, dict)
+            else ""
+        )
+        sandbox_session_id, sandbox_group_id = derive_sandbox_identity(
+            workdir=workdir,
+            execution_bundle=execution_bundle,
+            execution_transport="cli",
+            identity_payload={
+                "provider_slug": provider_slug,
+                "model_slug": getattr(agent_config, "model", None),
+                "command": shlex.join(cmd),
+                "stdin_text": stdin_text,
+                "network_policy": network_policy,
+                "workspace_materialization": workspace_materialization,
+                "sandbox_provider": sandbox_provider,
+                "sandbox_profile_ref": sandbox_profile_ref,
+                "docker_image": _sandbox_image(agent_config, execution_bundle=execution_bundle),
+            },
+        )
+
         try:
-            cmd = build_command(
-                provider_slug=provider_slug,
-                model=getattr(agent_config, "model", None),
+            result = SandboxRuntime().execute_command(
+                provider_name=sandbox_provider,
+                sandbox_session_id=sandbox_session_id,
+                sandbox_group_id=sandbox_group_id,
+                workdir=workdir,
+                command=shlex.join(cmd),
+                stdin_text=stdin_text,
+                env=env,
+                timeout_seconds=timeout,
+                network_policy=network_policy,
+                workspace_materialization=workspace_materialization,
+                execution_transport="cli",
+                image=_sandbox_image(agent_config, execution_bundle=execution_bundle),
+                metadata={
+                    "provider_slug": provider_slug,
+                    "execution_bundle": execution_bundle or {},
+                    **({"workspace_overlays": workspace_overlays} if workspace_overlays else {}),
+                    **(dict(sandbox_profile or {}) if isinstance(sandbox_profile, dict) else {}),
+                },
+                artifact_store=artifact_store,
             )
-        except Exception as exc:
+        except RuntimeError as exc:
             return {
                 "status": "failed",
                 "exit_code": 1,
@@ -422,118 +569,24 @@ def execute_cli(
                 "stderr": str(exc),
                 "error_code": "sandbox_error",
             }
+        except OSError as exc:
+            return {
+                "status": "failed",
+                "exit_code": 1,
+                "stdout": "",
+                "stderr": str(exc),
+                "error_code": "setup_failure",
+            }
 
-    # Normalize codex flags for Docker-sandboxed execution.  The Docker
-    # container IS the sandbox, so codex's internal bwrap sandbox must be
-    # bypassed (it requires privileges Docker doesn't grant).  --full-auto
-    # is mutually exclusive with --dangerously-bypass-approvals-and-sandbox,
-    # so strip it if a legacy template still includes it.  Sandbox workspaces
-    # also exclude .git, so codex needs --skip-git-repo-check.
-    cmd0_name = os.path.basename(cmd[0]).strip().lower() if cmd else ""
-    if cmd0_name == "codex":
-        try:
-            exec_idx = [p.strip().lower() for p in cmd].index("exec")
-        except ValueError:
-            exec_idx = -1
-        if exec_idx >= 0:
-            cmd = [part for part in cmd if part != "--full-auto"]
-            if "--skip-git-repo-check" not in cmd:
-                cmd.insert(exec_idx + 1, "--skip-git-repo-check")
-            if "--dangerously-bypass-approvals-and-sandbox" not in cmd:
-                cmd.insert(exec_idx + 1, "--dangerously-bypass-approvals-and-sandbox")
-
-    cmd = augment_cli_command_for_workflow_mcp(
-        provider_slug=provider_slug,
-        command_parts=cmd,
-        execution_bundle=execution_bundle,
-        prefer_docker=_sandbox_provider_for_execution(agent_config, execution_bundle) == "docker_local",
-    )
-    timeout = int(getattr(agent_config, "timeout_seconds", 900) or 900)
-    network_policy = _sandbox_policy_value(
-        agent_config,
-        "network_policy",
-        "provider_only"
-        if _env_flag_enabled(_WORKFLOW_MODEL_NETWORK_ENV, default=True)
-        else "disabled",
-        execution_bundle=execution_bundle,
-    )
-    workspace_materialization = _sandbox_policy_value(
-        agent_config,
-        "workspace_materialization",
-        "copy",
-        execution_bundle=execution_bundle,
-    )
-    sandbox_provider = _sandbox_provider_for_execution(agent_config, execution_bundle)
-    sandbox_profile = _sandbox_profile_from_bundle(execution_bundle)
-    sandbox_profile_ref = (
-        str((sandbox_profile or {}).get("sandbox_profile_ref") or "").strip()
-        if isinstance(sandbox_profile, dict)
-        else ""
-    )
-    sandbox_session_id, sandbox_group_id = derive_sandbox_identity(
-        workdir=workdir,
-        execution_bundle=execution_bundle,
-        execution_transport="cli",
-        identity_payload={
-            "provider_slug": provider_slug,
-            "model_slug": getattr(agent_config, "model", None),
-            "command": shlex.join(cmd),
-            "stdin_text": stdin_text,
-            "network_policy": network_policy,
-            "workspace_materialization": workspace_materialization,
-            "sandbox_provider": sandbox_provider,
-            "sandbox_profile_ref": sandbox_profile_ref,
-            "docker_image": _sandbox_image(agent_config, execution_bundle=execution_bundle),
-        },
-    )
-
-    try:
-        result = SandboxRuntime().execute_command(
-            provider_name=sandbox_provider,
-            sandbox_session_id=sandbox_session_id,
-            sandbox_group_id=sandbox_group_id,
-            workdir=workdir,
-            command=shlex.join(cmd),
-            stdin_text=stdin_text,
-            env=env,
-            timeout_seconds=timeout,
-            network_policy=network_policy,
-            workspace_materialization=workspace_materialization,
-            execution_transport="cli",
-            image=_sandbox_image(agent_config, execution_bundle=execution_bundle),
-            metadata={
-                "provider_slug": provider_slug,
-                "execution_bundle": execution_bundle or {},
-                **(dict(sandbox_profile or {}) if isinstance(sandbox_profile, dict) else {}),
-            },
-            artifact_store=artifact_store,
-        )
-    except RuntimeError as exc:
-        return {
-            "status": "failed",
-            "exit_code": 1,
-            "stdout": "",
-            "stderr": str(exc),
-            "error_code": "sandbox_error",
-        }
-    except OSError as exc:
-        return {
-            "status": "failed",
-            "exit_code": 1,
-            "stdout": "",
-            "stderr": str(exc),
-            "error_code": "setup_failure",
-        }
-
-    payload = _result_payload(result, timeout=timeout, parse_json_output=True)
-    if sandbox_profile_ref:
-        payload["sandbox_profile_ref"] = sandbox_profile_ref
-    if isinstance(sandbox_profile, dict):
-        payload["workspace_materialization"] = workspace_materialization
-        docker_image = _sandbox_image(agent_config, execution_bundle=execution_bundle)
-        if docker_image:
-            payload["docker_image"] = docker_image
-    return payload
+        payload = _result_payload(result, timeout=timeout, parse_json_output=True)
+        if sandbox_profile_ref:
+            payload["sandbox_profile_ref"] = sandbox_profile_ref
+        if isinstance(sandbox_profile, dict):
+            payload["workspace_materialization"] = workspace_materialization
+            docker_image = _sandbox_image(agent_config, execution_bundle=execution_bundle)
+            if docker_image:
+                payload["docker_image"] = docker_image
+        return payload
 
 
 def execute_api(
@@ -547,130 +600,134 @@ def execute_api(
 ) -> dict[str, Any]:
     """Execute provider-backed API work inside the selected sandbox provider."""
     resolved_workdir = workdir or os.getcwd()
-    env = _build_execution_env(
-        agent_config,
-        workdir=resolved_workdir,
-        execution_bundle=execution_bundle,
-    )
     provider_slug = str(getattr(agent_config, "provider", "") or "").strip().lower()
-    model_slug = str(getattr(agent_config, "model", "") or "").strip()
-    max_output_tokens = int(getattr(agent_config, "max_output_tokens", 4096) or 4096)
-    timeout = int(getattr(agent_config, "timeout_seconds", 90) or 90)
-    contract = resolve_execution_transport(agent_config)
-    # Look up transport metadata from provider_cli_profiles.
-    # The worker dispatches by protocol family — no provider names.
-    from adapters.provider_registry import get_profile as _get_provider_profile
-    _profile = _get_provider_profile(provider_slug)
-    if not _profile or not _profile.api_protocol_family or not _profile.api_endpoint:
-        return {
-            "status": "failed",
-            "exit_code": 1,
-            "stdout": "",
-            "stderr": f"provider_cli_profiles has no api_protocol_family/api_endpoint for '{provider_slug}'",
-            "error_code": "transport_config_missing",
-        }
-    _api_protocol = _profile.api_protocol_family
-    _api_endpoint = _profile.api_endpoint
-    _api_key_env = _profile.api_key_env_vars[0] if _profile.api_key_env_vars else f"{provider_slug.upper()}_API_KEY"
-    _reasoning_flag = (
-        f"--reasoning-effort {shlex.quote(reasoning_effort)}" if reasoning_effort else ""
-    )
-    network_policy = _sandbox_policy_value(
-        agent_config,
-        "network_policy",
-        "provider_only",
-        execution_bundle=execution_bundle,
-    )
-    workspace_materialization = _sandbox_policy_value(
-        agent_config,
-        "workspace_materialization",
-        "copy",
-        execution_bundle=execution_bundle,
-    )
-    sandbox_provider = _sandbox_provider_for_execution(agent_config, execution_bundle)
-    sandbox_profile = _sandbox_profile_from_bundle(execution_bundle)
-    sandbox_profile_ref = (
-        str((sandbox_profile or {}).get("sandbox_profile_ref") or "").strip()
-        if isinstance(sandbox_profile, dict)
-        else ""
-    )
-    python_executable = shlex.quote(sys.executable or "python3")
-    command = (
-        f"{python_executable} -m runtime.api_transport_worker "
-        f"--api-protocol {shlex.quote(_api_protocol)} "
-        f"--api-endpoint {shlex.quote(_api_endpoint)} "
-        f"--api-key-env {shlex.quote(_api_key_env)} "
-        f"--workdir {shlex.quote(resolved_workdir)} "
-        f"--model {shlex.quote(model_slug)} "
-        f"--max-output-tokens {max_output_tokens} "
-        f"--timeout-seconds {timeout}"
-        + (f" {_reasoning_flag}" if _reasoning_flag else "")
-    )
-    sandbox_session_id, sandbox_group_id = derive_sandbox_identity(
-        workdir=resolved_workdir,
-        execution_bundle=execution_bundle,
-        execution_transport="api",
-        identity_payload={
-            "provider_slug": provider_slug,
-            "model_slug": model_slug,
-            "command": command,
-            "stdin_text": prompt,
-            "network_policy": network_policy,
-            "workspace_materialization": workspace_materialization,
-            "max_output_tokens": max_output_tokens,
-            "reasoning_effort": reasoning_effort,
-            "sandbox_provider": sandbox_provider,
-            "sandbox_profile_ref": sandbox_profile_ref,
-            "docker_image": _sandbox_image(agent_config, execution_bundle=execution_bundle),
-        },
-    )
-    try:
-        result = SandboxRuntime().execute_command(
-            provider_name=sandbox_provider,
-            sandbox_session_id=sandbox_session_id,
-            sandbox_group_id=sandbox_group_id,
+    with _provider_slot(provider_slug) as acquired:
+        if not acquired:
+            return _provider_capacity_failure(provider_slug)
+
+        env = _build_execution_env(
+            agent_config,
             workdir=resolved_workdir,
-            command=command,
-            stdin_text=prompt,
-            env=env,
-            timeout_seconds=timeout,
-            network_policy=network_policy,
-            workspace_materialization=workspace_materialization,
+            execution_bundle=execution_bundle,
+        )
+        model_slug = str(getattr(agent_config, "model", "") or "").strip()
+        max_output_tokens = int(getattr(agent_config, "max_output_tokens", 4096) or 4096)
+        timeout = int(getattr(agent_config, "timeout_seconds", 90) or 90)
+        contract = resolve_execution_transport(agent_config)
+        # Look up transport metadata from provider_cli_profiles.
+        # The worker dispatches by protocol family — no provider names.
+        from adapters.provider_registry import get_profile as _get_provider_profile
+        _profile = _get_provider_profile(provider_slug)
+        if not _profile or not _profile.api_protocol_family or not _profile.api_endpoint:
+            return {
+                "status": "failed",
+                "exit_code": 1,
+                "stdout": "",
+                "stderr": f"provider_cli_profiles has no api_protocol_family/api_endpoint for '{provider_slug}'",
+                "error_code": "transport_config_missing",
+            }
+        _api_protocol = _profile.api_protocol_family
+        _api_endpoint = _profile.api_endpoint
+        _api_key_env = _profile.api_key_env_vars[0] if _profile.api_key_env_vars else f"{provider_slug.upper()}_API_KEY"
+        _reasoning_flag = (
+            f"--reasoning-effort {shlex.quote(reasoning_effort)}" if reasoning_effort else ""
+        )
+        network_policy = _sandbox_policy_value(
+            agent_config,
+            "network_policy",
+            "provider_only",
+            execution_bundle=execution_bundle,
+        )
+        workspace_materialization = _sandbox_policy_value(
+            agent_config,
+            "workspace_materialization",
+            "copy",
+            execution_bundle=execution_bundle,
+        )
+        sandbox_provider = _sandbox_provider_for_execution(agent_config, execution_bundle)
+        sandbox_profile = _sandbox_profile_from_bundle(execution_bundle)
+        sandbox_profile_ref = (
+            str((sandbox_profile or {}).get("sandbox_profile_ref") or "").strip()
+            if isinstance(sandbox_profile, dict)
+            else ""
+        )
+        python_executable = shlex.quote(sys.executable or "python3")
+        command = (
+            f"{python_executable} -m runtime.api_transport_worker "
+            f"--api-protocol {shlex.quote(_api_protocol)} "
+            f"--api-endpoint {shlex.quote(_api_endpoint)} "
+            f"--api-key-env {shlex.quote(_api_key_env)} "
+            f"--workdir {shlex.quote(resolved_workdir)} "
+            f"--model {shlex.quote(model_slug)} "
+            f"--max-output-tokens {max_output_tokens} "
+            f"--timeout-seconds {timeout}"
+            + (f" {_reasoning_flag}" if _reasoning_flag else "")
+        )
+        sandbox_session_id, sandbox_group_id = derive_sandbox_identity(
+            workdir=resolved_workdir,
+            execution_bundle=execution_bundle,
             execution_transport="api",
-            image=_sandbox_image(agent_config, execution_bundle=execution_bundle),
-            metadata={
+            identity_payload={
                 "provider_slug": provider_slug,
                 "model_slug": model_slug,
-                "execution_bundle": execution_bundle or {},
-                **(dict(sandbox_profile or {}) if isinstance(sandbox_profile, dict) else {}),
+                "command": command,
+                "stdin_text": prompt,
+                "network_policy": network_policy,
+                "workspace_materialization": workspace_materialization,
+                "max_output_tokens": max_output_tokens,
+                "reasoning_effort": reasoning_effort,
+                "sandbox_provider": sandbox_provider,
+                "sandbox_profile_ref": sandbox_profile_ref,
+                "docker_image": _sandbox_image(agent_config, execution_bundle=execution_bundle),
             },
-            artifact_store=artifact_store,
         )
-    except RuntimeError as exc:
-        return {
-            "status": "failed",
-            "exit_code": 1,
-            "stdout": "",
-            "stderr": str(exc),
-            "error_code": "sandbox_error",
-        }
-    except OSError as exc:
-        return {
-            "status": "failed",
-            "exit_code": 1,
-            "stdout": "",
-            "stderr": str(exc),
-            "error_code": "setup_failure",
-        }
+        try:
+            result = SandboxRuntime().execute_command(
+                provider_name=sandbox_provider,
+                sandbox_session_id=sandbox_session_id,
+                sandbox_group_id=sandbox_group_id,
+                workdir=resolved_workdir,
+                command=command,
+                stdin_text=prompt,
+                env=env,
+                timeout_seconds=timeout,
+                network_policy=network_policy,
+                workspace_materialization=workspace_materialization,
+                execution_transport="api",
+                image=_sandbox_image(agent_config, execution_bundle=execution_bundle),
+                metadata={
+                    "provider_slug": provider_slug,
+                    "model_slug": model_slug,
+                    "execution_bundle": execution_bundle or {},
+                    **(dict(sandbox_profile or {}) if isinstance(sandbox_profile, dict) else {}),
+                },
+                artifact_store=artifact_store,
+            )
+        except RuntimeError as exc:
+            return {
+                "status": "failed",
+                "exit_code": 1,
+                "stdout": "",
+                "stderr": str(exc),
+                "error_code": "sandbox_error",
+            }
+        except OSError as exc:
+            return {
+                "status": "failed",
+                "exit_code": 1,
+                "stdout": "",
+                "stderr": str(exc),
+                "error_code": "setup_failure",
+            }
 
-    payload = _result_payload(result, timeout=timeout, parse_json_output=True)
-    if sandbox_profile_ref:
-        payload["sandbox_profile_ref"] = sandbox_profile_ref
-    if isinstance(sandbox_profile, dict):
-        payload["workspace_materialization"] = workspace_materialization
-        docker_image = _sandbox_image(agent_config, execution_bundle=execution_bundle)
-        if docker_image:
-            payload["docker_image"] = docker_image
-    if payload["status"] == "failed" and not payload["error_code"] and not payload["stdout"]:
-        payload["error_code"] = "api_transport_failed"
-    return payload
+        payload = _result_payload(result, timeout=timeout, parse_json_output=True)
+        if sandbox_profile_ref:
+            payload["sandbox_profile_ref"] = sandbox_profile_ref
+        if isinstance(sandbox_profile, dict):
+            payload["workspace_materialization"] = workspace_materialization
+            docker_image = _sandbox_image(agent_config, execution_bundle=execution_bundle)
+            if docker_image:
+                payload["docker_image"] = docker_image
+        if payload["status"] == "failed" and not payload["error_code"] and not payload["stdout"]:
+            payload["error_code"] = "api_transport_failed"
+        return payload

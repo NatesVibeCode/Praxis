@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -182,6 +183,7 @@ class _FakeBugTracker:
         discovered_in_receipt_id: str | None = None,
         owner_ref: str | None = None,
         tags: tuple[str, ...] = (),
+        resume_context: dict | None = None,
     ) -> "_bug_tracker_mod.Bug":
         now = self._now()
         self._counter += 1
@@ -208,6 +210,7 @@ class _FakeBugTracker:
             owner_ref=owner_ref,
             decision_ref=decision_ref,
             resolution_summary=None,
+            resume_context=dict(resume_context or {}),
         )
 
     def _filtered(
@@ -267,6 +270,7 @@ class _FakeBugTracker:
         discovered_in_receipt_id=None,
         owner_ref=None,
         tags=(),
+        resume_context=None,
     ):
         if discovered_in_run_id not in {None, "run-123"}:
             raise ValueError(f"unknown discovered_in_run_id: {discovered_in_run_id}")
@@ -286,9 +290,26 @@ class _FakeBugTracker:
             discovered_in_receipt_id=discovered_in_receipt_id,
             owner_ref=owner_ref,
             tags=tags,
+            resume_context=resume_context if isinstance(resume_context, dict) else None,
         )
         self._bugs.append(bug)
         return bug, []
+
+    def merge_resume_context(self, bug_id, patch):
+        if not isinstance(patch, dict):
+            raise ValueError("resume patch must be a JSON object")
+        for index, bug in enumerate(self._bugs):
+            if bug.bug_id != bug_id:
+                continue
+            merged = {**bug.resume_context, **patch}
+            updated = replace(
+                bug,
+                resume_context=merged,
+                updated_at=self._now(),
+            )
+            self._bugs[index] = updated
+            return updated
+        raise ValueError(f"bug not found: {bug_id}")
 
     def search(self, query, limit=20):
         needle = str(query).lower()
@@ -318,6 +339,7 @@ class _FakeBugTracker:
             return None
         return {
             "bug": bug,
+            "resume_context": dict(bug.resume_context or {}),
             "signature": {
                 "fingerprint": "fp-test",
                 "failure_code": "timeout_exceeded",
@@ -328,6 +350,23 @@ class _FakeBugTracker:
                 "ready": True,
                 "run_id": "run-123",
                 "receipt_id": "receipt-123",
+            },
+            "semantic_neighbors": {
+                "reason_code": "bug.semantic_neighbors.found",
+                "items": (
+                    {
+                        "bug_id": "BUG-NEIGHBOR-1",
+                        "title": "Same timeout signature on job-b",
+                        "status": "OPEN",
+                        "severity": "P2",
+                        "category": "RUNTIME",
+                        "similarity": 0.81,
+                        "match_kind": "embedding",
+                    },
+                ),
+                "note": "There is 1 other open bug(s) clustered nearby (embedding). "
+                "If you can, skim them while this failure mode is still in working memory.",
+                "sources_tried": ("embedding",),
             },
             "agent_actions": {
                 "replay": {
@@ -497,6 +536,7 @@ class _FakeBugTracker:
                 owner_ref=bug.owner_ref,
                 decision_ref=bug.decision_ref,
                 resolution_summary=bug.resolution_summary,
+                resume_context=bug.resume_context,
             )
             self._bugs[index] = updated
             return updated

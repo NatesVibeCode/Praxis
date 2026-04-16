@@ -197,8 +197,8 @@ def test_register_success(tmp_path):
     assert result["slug"] == "stripe"
     assert len(result["capabilities"]) > 0
 
-    # Verify both registries were written
-    assert pg.execute.call_count == 2
+    # connector_registry + integration_registry upserts + verification_spec update
+    assert pg.execute.call_count == 3
     calls = [str(c) for c in pg.execute.call_args_list]
     assert any("connector_registry" in c for c in calls)
     assert any("integration_registry" in c for c in calls)

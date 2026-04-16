@@ -150,7 +150,7 @@ Example input:
 - When to use: Inspect the bug tracker, run keyword or hybrid search, file a new bug, or drive replay-ready bug workflows.
 - When not to use: Do not use it for general system status or semantic knowledge search.
 - Recommended alias: `workflow bugs`
-- Selector: `action`; default `list`; values `list`, `file`, `search`, `stats`, `packet`, `history`, `replay`, `backfill_replay`, `attach_evidence`, `resolve`
+- Selector: `action`; default `list`; values `list`, `file`, `search`, `stats`, `packet`, `history`, `replay`, `backfill_replay`, `attach_evidence`, `patch_resume`, `resolve`
 - Required args: (none)
 
 Example input:

@@ -1130,3 +1130,75 @@ class TestEvidencePackets:
         assert "node_id" in fix["shared_signature_fields"]
         assert fix["fix_verification"]["fix_verified"] is True
         assert fix["fix_verification"]["verified_validation_count"] == 1
+
+
+class TestSemanticNeighborCluster:
+    def test_failure_packet_surfaces_tag_cluster_siblings(self, tracker: BugTracker):
+        pfx = _uuid.uuid4().hex[:8]
+        tag = f"cluster:{pfx}"
+        alpha, _ = tracker.file_bug(
+            title=f"Alpha lease flake [{pfx}]",
+            severity=BugSeverity.P2,
+            category=BugCategory.RUNTIME,
+            description="Lease renew sometimes drops.",
+            filed_by="qa",
+            tags=(tag, "area:leases"),
+        )
+        beta, _ = tracker.file_bug(
+            title=f"Beta lease flake [{pfx}]",
+            severity=BugSeverity.P2,
+            category=BugCategory.RUNTIME,
+            description="Similar renew window.",
+            filed_by="qa",
+            tags=(tag, "area:leases"),
+        )
+        packet = tracker.failure_packet(alpha.bug_id)
+        assert packet is not None
+        sn = packet.get("semantic_neighbors")
+        assert isinstance(sn, dict)
+        neighbor_ids = {item["bug_id"] for item in sn.get("items") or ()}
+        assert beta.bug_id in neighbor_ids
+        assert alpha.bug_id not in neighbor_ids
+        assert sn.get("note")
+        assert sn.get("reason_code") == "bug.semantic_neighbors.found"
+
+
+class TestResumeContext:
+    def test_file_bug_accepts_initial_resume_context(self, tracker: BugTracker):
+        pfx = _uuid.uuid4().hex[:8]
+        bug, _ = tracker.file_bug(
+            title=f"Resume handoff [{pfx}]",
+            severity=BugSeverity.P2,
+            category=BugCategory.RUNTIME,
+            description="desc",
+            filed_by="tester",
+            resume_context={
+                "hypothesis": "race in lease",
+                "next_steps": ["check TTL", "trace holder"],
+            },
+        )
+        assert bug.resume_context.get("hypothesis") == "race in lease"
+        loaded = tracker.get(bug.bug_id)
+        assert loaded is not None
+        assert loaded.resume_context["next_steps"] == ["check TTL", "trace holder"]
+
+    def test_merge_resume_context_shallow_merges(self, tracker: BugTracker, sample_bug: Bug):
+        first = tracker.merge_resume_context(
+            sample_bug.bug_id, {"verified": "repro on main"}
+        )
+        assert first is not None
+        assert first.resume_context.get("verified") == "repro on main"
+        second = tracker.merge_resume_context(
+            sample_bug.bug_id, {"hypothesis": "stale cache"}
+        )
+        assert second is not None
+        assert second.resume_context["verified"] == "repro on main"
+        assert second.resume_context["hypothesis"] == "stale cache"
+
+    def test_failure_packet_includes_resume_context(
+        self, tracker: BugTracker, sample_bug: Bug
+    ):
+        tracker.merge_resume_context(sample_bug.bug_id, {"hypothesis": "timeout budget"})
+        packet = tracker.failure_packet(sample_bug.bug_id)
+        assert packet is not None
+        assert packet["resume_context"].get("hypothesis") == "timeout budget"

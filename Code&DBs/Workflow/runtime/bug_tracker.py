@@ -7,7 +7,7 @@ import hashlib
 import json
 import re
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from runtime.embedding_service import EmbeddingService
 
 from runtime import bug_evidence as _bug_evidence
-from storage.postgres.vector_store import PostgresVectorStore
+from storage.postgres.vector_store import PostgresVectorStore, VectorFilter
 from runtime.payload_coercion import json_object as _json_object, json_list as _json_list, coerce_datetime as _coerce_datetime
 
 
@@ -30,6 +30,20 @@ _VERIFICATION_SUCCESS_STATUSES = frozenset({"passed", "succeeded", "success", "o
 def _normalize_tag_value(value: object) -> str:
     text = _TAG_VALUE_PATTERN.sub("-", str(value or "").strip().lower())
     return text.strip("-") or "none"
+
+
+def _parse_resume_context_column(raw: Any) -> dict[str, Any]:
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        return dict(raw)
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            return {}
+        return dict(parsed) if isinstance(parsed, dict) else {}
+    return {}
 
 
 def _extract_tag_value(tags: Tuple[str, ...], prefix: str) -> str | None:
@@ -169,6 +183,7 @@ class Bug:
     owner_ref: Optional[str]
     decision_ref: str
     resolution_summary: Optional[str]
+    resume_context: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -284,6 +299,7 @@ class BugTracker:
             owner_ref=row.get("owner_ref"),
             decision_ref=str(row.get("decision_ref") or ""),
             resolution_summary=str(row.get("resolution_summary") or "").strip() or None,
+            resume_context=_parse_resume_context_column(row.get("resume_context")),
         )
 
     def _row_to_evidence_link(self, row: Any) -> dict[str, Any]:
@@ -529,6 +545,7 @@ class BugTracker:
             self._conn,
             bug_id,
             evidence_links,
+            load_verification_rows_fn=self._load_verification_rows,
         )
 
     def _build_historical_fixes(
@@ -657,6 +674,7 @@ class BugTracker:
         discovered_in_receipt_id: str | None = None,
         owner_ref: str | None = None,
         tags: Tuple[str, ...] = (),
+        resume_context: dict[str, Any] | None = None,
     ) -> tuple["Bug", list[dict]]:
         """File a new bug. Returns (bug, similar_bugs) where similar_bugs may be empty."""
         bug_id = f"BUG-{uuid.uuid4().hex[:8].upper()}"
@@ -693,23 +711,51 @@ class BugTracker:
                     "similarity": round(float(r["similarity"]), 4),
                 })
 
+        initial_resume = resume_context if isinstance(resume_context, dict) else {}
         self._conn.execute(
             """INSERT INTO bugs
                 (bug_id, bug_key, title, severity, status, priority, category, description,
                  summary, source_kind, discovered_in_run_id, discovered_in_receipt_id,
                  owner_ref, decision_ref, opened_at, resolved_at, created_at, updated_at,
-                 filed_by, tags)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NULL, $16, $17, $18, $19)""",
+                 filed_by, tags, resume_context)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NULL, $16, $17, $18, $19, $20::jsonb)""",
             bug_id, bug_key, title, severity.value, BugStatus.OPEN.value,
             severity.value, category.value, description,
             description[:200], normalized_source_kind, discovered_in_run_id, discovered_in_receipt_id,
             owner_ref, normalized_decision_ref, now, now, now, filed_by, tags_str,
+            json.dumps(initial_resume, default=str),
         )
         if vector_query is not None:
             vector_query.set_embedding("bugs", "bug_id", bug_id)
 
         row = self._conn.fetchrow("SELECT * FROM bugs WHERE bug_id = $1", bug_id)
         return self._row_to_bug(row), similar_bugs
+
+    def merge_resume_context(self, bug_id: str, patch: dict[str, Any]) -> Bug | None:
+        """Shallow-merge *patch* into bugs.resume_context (jsonb ||)."""
+        bug_id = str(bug_id or "").strip()
+        if not bug_id:
+            raise ValueError("bug_id is required")
+        if not isinstance(patch, dict):
+            raise ValueError("resume patch must be a JSON object")
+        if self.get(bug_id) is None:
+            raise ValueError(f"bug not found: {bug_id}")
+        if not patch:
+            return self.get(bug_id)
+        now = self._now()
+        rows = self._conn.execute(
+            """
+            UPDATE bugs
+               SET resume_context = COALESCE(resume_context, '{}'::jsonb) || $2::jsonb,
+                   updated_at = $3
+             WHERE bug_id = $1
+             RETURNING *
+            """,
+            bug_id,
+            json.dumps(patch, default=str),
+            now,
+        )
+        return self._row_to_bug(rows[0]) if rows else None
 
     def get(self, bug_id: str) -> Bug | None:
         row = self._conn.fetchrow("SELECT * FROM bugs WHERE bug_id = $1", bug_id)
@@ -1041,6 +1087,152 @@ class BugTracker:
             "bugs": tuple(bug_results),
         }
 
+    def _semantic_neighbor_bundle(self, bug: Bug, *, limit: int = 8) -> dict[str, Any]:
+        """Find other *open* bugs in the same semantic neighborhood for batch reading.
+
+        Uses pgvector when the lane is available (stored embedding, then title+body re-query),
+        then falls back to tag overlap so clusters still appear without embeddings.
+        """
+        anchor_id = bug.bug_id
+        collected: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        sources_tried: list[str] = []
+
+        def is_actionable(status_raw: object) -> bool:
+            return self._normalize_status(status_raw) not in _RESOLVED_STATUSES
+
+        def add_row(raw: dict[str, Any], *, via: str) -> None:
+            bid = str(raw.get("bug_id") or "").strip()
+            if not bid or bid == anchor_id or bid in seen:
+                return
+            if not is_actionable(raw.get("status")):
+                return
+            seen.add(bid)
+            sim = raw.get("similarity")
+            collected.append(
+                {
+                    "bug_id": bid,
+                    "title": str(raw.get("title") or ""),
+                    "status": self._normalize_status(raw.get("status")).value,
+                    "severity": self._normalize_severity(raw.get("severity")).value,
+                    "category": self._normalize_category(raw.get("category")).value,
+                    "similarity": round(float(sim), 4) if sim is not None else None,
+                    "match_kind": via,
+                }
+            )
+
+        if self._vector_store is not None:
+            try:
+                row = self._conn.fetchrow(
+                    "SELECT embedding FROM bugs WHERE bug_id = $1",
+                    anchor_id,
+                )
+                emb = row.get("embedding") if row else None
+                if emb is not None:
+                    sources_tried.append("embedding")
+                    rows = self._vector_store.search_vector(
+                        "bugs",
+                        emb,
+                        select_columns=("bug_id", "title", "status", "severity", "category"),
+                        filters=(VectorFilter("bug_id", anchor_id, "<>"),),
+                        limit=max(limit * 3, 24),
+                        min_similarity=0.66,
+                    )
+                    for r in rows:
+                        if len(collected) >= limit:
+                            break
+                        add_row(dict(r), via="embedding")
+            except Exception:
+                pass
+
+            if len(collected) < limit:
+                try:
+                    text = f"{bug.title}\n{bug.description}".strip() or bug.title
+                    if text:
+                        sources_tried.append("text")
+                        pq = self._vector_store.prepare(text[:8000])
+                        rows = pq.search(
+                            "bugs",
+                            select_columns=("bug_id", "title", "status", "severity", "category"),
+                            filters=(VectorFilter("bug_id", anchor_id, "<>"),),
+                            limit=max(limit * 3, 24),
+                            min_similarity=0.70,
+                        )
+                        for r in rows:
+                            if len(collected) >= limit:
+                                break
+                            add_row(dict(r), via="text")
+                except Exception:
+                    pass
+
+        if len(collected) < limit and bug.tags:
+            tag_values = [
+                str(t or "").strip().lower()
+                for t in bug.tags
+                if str(t or "").strip()
+            ][:14]
+            if tag_values:
+                clauses: list[str] = []
+                params: list[object] = [anchor_id]
+                idx = 2
+                for tag in tag_values:
+                    clauses.append(
+                        f"(LOWER(',' || COALESCE(tags, '') || ',') LIKE ${idx})"
+                    )
+                    params.append(f"%,{tag},%")
+                    idx += 1
+                try:
+                    sources_tried.append("tags")
+                    sql = (
+                        "SELECT bug_id, title, status, severity, category FROM bugs "
+                        f"WHERE bug_id <> $1 AND ({' OR '.join(clauses)}) "
+                        f"ORDER BY updated_at DESC NULLS LAST LIMIT ${idx}"
+                    )
+                    params.append(max(limit * 6, 32))
+                    rows = self._conn.execute(sql, *params)
+                    for r in rows:
+                        if len(collected) >= limit:
+                            break
+                        add_row(dict(r), via="tag_overlap")
+                except Exception:
+                    pass
+
+        items = tuple(collected[:limit])
+        sources = tuple(dict.fromkeys(sources_tried))
+        if items:
+            kinds = ", ".join(dict.fromkeys(str(item.get("match_kind") or "") for item in items))
+            note = (
+                f"There are {len(items)} other open bug(s) clustered nearby ({kinds}). "
+                "If you can, skim them while this failure mode is still in working memory."
+            )
+            return {
+                "reason_code": "bug.semantic_neighbors.found",
+                "items": items,
+                "note": note,
+                "sources_tried": sources,
+            }
+
+        if self._vector_store is None and not bug.tags:
+            return {
+                "reason_code": "bug.semantic_neighbors.no_signals",
+                "items": (),
+                "note": "No embedding lane and no tags yet, so related clusters cannot be inferred automatically.",
+                "sources_tried": sources,
+            }
+        if self._vector_store is None:
+            return {
+                "reason_code": "bug.semantic_neighbors.none",
+                "items": (),
+                "note": "No overlapping open bugs found by tags from here.",
+                "sources_tried": sources,
+            }
+        return {
+            "reason_code": "bug.semantic_neighbors.none",
+            "items": (),
+            "note": "No semantically close open bugs crossed the similarity threshold.",
+            "sources_tried": sources,
+        }
+
     def replay_hint(
         self,
         bug_id: str,
@@ -1346,6 +1538,7 @@ class BugTracker:
             bug=bug,
             signature=signature,
         )
+        semantic_neighbors = self._semantic_neighbor_bundle(bug)
         return _bug_evidence.assemble_failure_packet(
             bug=bug,
             bug_status_fixed=BugStatus.FIXED,
@@ -1371,6 +1564,7 @@ class BugTracker:
             ),
             historical_fixes=historical_fixes,
             backfill=backfill,
+            semantic_neighbors=semantic_neighbors,
         )
 
     def replay_bug(
@@ -1391,6 +1585,7 @@ class BugTracker:
             "replay_context": replay_context,
             "packet_summary": _packet_summary(packet),
             "historical_fixes": packet.get("historical_fixes"),
+            "semantic_neighbors": packet.get("semantic_neighbors"),
             "tooling": {"replay": replay_action},
         }
         run_id = str(replay_context.get("run_id") or "").strip()

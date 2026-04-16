@@ -19,6 +19,7 @@ _MCP_HOST_ENV = "PRAXIS_WORKFLOW_MCP_HOST"
 _MCP_PORT_ENV = "PRAXIS_WORKFLOW_MCP_PORT"
 _MCP_SCHEME_ENV = "PRAXIS_WORKFLOW_MCP_SCHEME"
 _DEFAULT_MCP_PATH = "/mcp"
+_WORKFLOW_MCP_SERVER_NAME = "dag-workflow"
 
 
 def _normalize_tool_names(values: object) -> list[str]:
@@ -87,7 +88,7 @@ def _mcp_config_json(*, mcp_url: str) -> str:
     return json.dumps(
         {
             "mcpServers": {
-                "dag-workflow": {
+                _WORKFLOW_MCP_SERVER_NAME: {
                     "type": "http",
                     "url": mcp_url,
                 }
@@ -96,6 +97,69 @@ def _mcp_config_json(*, mcp_url: str) -> str:
         sort_keys=True,
         separators=(",", ":"),
     )
+
+
+def _workflow_mcp_connection(
+    *,
+    execution_bundle: Mapping[str, object] | None,
+    prefer_docker: bool,
+) -> tuple[list[str], str] | None:
+    tool_names = workflow_mcp_tool_names(execution_bundle)
+    if not tool_names:
+        return None
+    workflow_token = mint_workflow_mcp_session_token(
+        run_id=str(execution_bundle.get("run_id") or "").strip() or None,
+        workflow_id=str(execution_bundle.get("workflow_id") or "").strip() or None,
+        job_label=str(execution_bundle.get("job_label") or "").strip(),
+        allowed_tools=tool_names,
+    )
+    mcp_url = build_workflow_mcp_url(
+        tool_names=tool_names,
+        prefer_docker=prefer_docker,
+        workflow_token=workflow_token,
+    )
+    return tool_names, mcp_url
+
+
+def workflow_mcp_workspace_overlays(
+    *,
+    provider_slug: str | None,
+    execution_bundle: Mapping[str, object] | None,
+    prefer_docker: bool,
+) -> list[dict[str, str]]:
+    """Return provider-owned workspace config files for bounded workflow MCP.
+
+    Gemini CLI reads project MCP config from `.gemini/settings.json`. Generate
+    that file from workflow authority instead of relying on ambient host config.
+    """
+
+    provider = str(provider_slug or "").strip().lower()
+    connection = _workflow_mcp_connection(
+        execution_bundle=execution_bundle,
+        prefer_docker=prefer_docker,
+    )
+    if connection is None:
+        return []
+    tool_names, mcp_url = connection
+    if provider not in {"google", "gemini"}:
+        return []
+    settings_payload: dict[str, object] = {
+        "mcpServers": {
+            _WORKFLOW_MCP_SERVER_NAME: {
+                "url": mcp_url,
+                "type": "http",
+                "trust": False,
+            }
+        }
+    }
+    if tool_names:
+        settings_payload["mcpServers"][_WORKFLOW_MCP_SERVER_NAME]["includeTools"] = tool_names
+    return [
+        {
+            "relative_path": ".gemini/settings.json",
+            "content": json.dumps(settings_payload, sort_keys=True, separators=(",", ":")),
+        }
+    ]
 
 
 def _render_mcp_args(template: list[str], *, mcp_url: str) -> list[str]:
@@ -129,23 +193,14 @@ def augment_cli_command_for_workflow_mcp(
     if not base_parts:
         return base_parts
 
-    tool_names = workflow_mcp_tool_names(execution_bundle)
-    if not tool_names:
-        return base_parts
-
-    provider = str(provider_slug or "").strip().lower()
-    workflow_token = mint_workflow_mcp_session_token(
-        run_id=str(execution_bundle.get("run_id") or "").strip() or None,
-        workflow_id=str(execution_bundle.get("workflow_id") or "").strip() or None,
-        job_label=str(execution_bundle.get("job_label") or "").strip(),
-        allowed_tools=tool_names,
-    )
-    mcp_url = build_workflow_mcp_url(
-        tool_names=tool_names,
+    connection = _workflow_mcp_connection(
+        execution_bundle=execution_bundle,
         prefer_docker=prefer_docker,
-        workflow_token=workflow_token,
     )
-
+    if connection is None:
+        return base_parts
+    _tool_names, mcp_url = connection
+    provider = str(provider_slug or "").strip().lower()
     from adapters.provider_registry import resolve_mcp_args_template
 
     template = resolve_mcp_args_template(provider)

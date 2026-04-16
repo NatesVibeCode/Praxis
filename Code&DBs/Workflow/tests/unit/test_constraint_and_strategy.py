@@ -87,7 +87,7 @@ class TestConstraintLedger:
         mc = ledger.add("ImportError", "fix imports", 0.9, ("j1",))
         assert isinstance(mc, MinedConstraint)
         assert mc.pattern == "ImportError"
-        assert mc.confidence == 0.9
+        assert mc.confidence == pytest.approx(0.9)
 
     def test_list_all_respects_min_confidence(self, ledger):
         import uuid
@@ -271,7 +271,7 @@ class TestConstraintLedgerVectors:
         assert result.merged is True
         assert result.similarity == 0.93
         assert result.constraint_id == "existing123"
-        assert result.confidence == 0.9
+        assert result.confidence == pytest.approx(0.9)
         assert result.mined_from_jobs == ("old_job", "new_job")
         assert embedder.calls[0] == "pattern: ImportError\ndescription: fix imports"
         duplicate_sql, duplicate_args = next(

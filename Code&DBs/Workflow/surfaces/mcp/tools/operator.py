@@ -6,6 +6,8 @@ from typing import Any
 
 from surfaces.api import operator_read, operator_write
 from surfaces.api.handlers import workflow_query_core
+from runtime.cqrs import CommandBus
+from runtime.cqrs.queries.roadmap_tree import QueryRoadmapTree
 from storage.postgres.workflow_runtime_repository import reset_observability_metrics
 
 from ..subsystems import _subs
@@ -332,9 +334,12 @@ def tool_praxis_operator_roadmap_view(params: dict) -> dict:
         if not root_roadmap_item_id:
             return {"error": "failed to resolve a default roadmap root"}
 
-    return operator_read.query_roadmap_tree(
+    semantic_neighbor_limit = params.get("semantic_neighbor_limit", 5)
+    command = QueryRoadmapTree(
         root_roadmap_item_id=root_roadmap_item_id,
+        semantic_neighbor_limit=semantic_neighbor_limit,
     )
+    return CommandBus(_subs).dispatch(command)
 
 
 def tool_praxis_circuits(params: dict) -> dict:
@@ -829,12 +834,19 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "external dependency edges, and a rendered markdown outline.\n\n"
                 "EXAMPLES:\n"
                 "  praxis_operator_roadmap_view()\n"
-                "  praxis_operator_roadmap_view(root_roadmap_item_id='roadmap_item.authority.cleanup.unified.operator.write.validation.gate')"
+                "  praxis_operator_roadmap_view(root_roadmap_item_id='roadmap_item.authority.cleanup.unified.operator.write.validation.gate')\n"
+                "  praxis_operator_roadmap_view(root_roadmap_item_id='roadmap_item.authority.cleanup.unified.operator.write.validation.gate', semantic_neighbor_limit=8)"
             ),
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "root_roadmap_item_id": {"type": "string"},
+                    "semantic_neighbor_limit": {
+                        "type": "integer",
+                        "description": "How many semantically similar external roadmap items to include (set 0 to disable).",
+                        "default": 5,
+                        "minimum": 0,
+                    },
                 },
             },
         },

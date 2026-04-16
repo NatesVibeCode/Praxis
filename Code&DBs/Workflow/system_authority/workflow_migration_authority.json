@@ -56,7 +56,10 @@
     "125_cursor_local_cli_provider_seed.sql",
     "126_operator_decision_scope_policy.sql",
     "127_operator_decision_architecture_policies.sql",
-    "128_operator_decision_embedding_architecture.sql"
+    "128_operator_decision_embedding_architecture.sql",
+    "129_google_gemini_mcp_settings_authority.sql",
+    "130_bugs_resume_context.sql",
+    "131_roadmap_items_semantic_clustering.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -1828,6 +1831,28 @@
         "object_type": "table",
         "object_name": "operator_decisions"
       }
+    ],
+    "129_google_gemini_mcp_settings_authority.sql": [
+      {
+        "object_type": "table",
+        "object_name": "provider_cli_profiles"
+      }
+    ],
+    "130_bugs_resume_context.sql": [
+      {
+        "object_type": "column",
+        "object_name": "bugs.resume_context"
+      }
+    ],
+    "131_roadmap_items_semantic_clustering.sql": [
+      {
+        "object_type": "column",
+        "object_name": "roadmap_items.embedding"
+      },
+      {
+        "object_type": "index",
+        "object_name": "roadmap_items_hnsw_idx"
+      }
     ]
   },
   "policy_buckets": {
@@ -1888,7 +1913,10 @@
       "125_cursor_local_cli_provider_seed.sql",
       "126_operator_decision_scope_policy.sql",
       "127_operator_decision_architecture_policies.sql",
-      "128_operator_decision_embedding_architecture.sql"
+      "128_operator_decision_embedding_architecture.sql",
+      "129_google_gemini_mcp_settings_authority.sql",
+      "130_bugs_resume_context.sql",
+      "131_roadmap_items_semantic_clustering.sql"
     ],
     "bootstrap_only": [
       "012_execution_leases.sql",

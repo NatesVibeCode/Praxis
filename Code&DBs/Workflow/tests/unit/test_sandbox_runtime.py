@@ -439,6 +439,25 @@ def test_workspace_snapshot_ref_is_content_addressed(tmp_path) -> None:
     assert changed_ref != first_ref
 
 
+def test_workspace_snapshot_ref_includes_overlay_files(tmp_path) -> None:
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    (source_root / "seed.txt").write_text("alpha", encoding="utf-8")
+
+    base_ref = sandbox_runtime._workspace_snapshot_ref(str(source_root))
+    overlay_ref = sandbox_runtime._workspace_snapshot_ref(
+        str(source_root),
+        overlay_files=(
+            {
+                "relative_path": ".gemini/settings.json",
+                "content": '{"mcpServers":{"dag-workflow":{"url":"http://mcp.local/mcp","type":"http"}}}',
+            },
+        ),
+    )
+
+    assert overlay_ref != base_ref
+
+
 def test_derive_sandbox_identity_is_deterministic_for_matching_adhoc_requests(tmp_path) -> None:
     first_session_id, first_group_id = derive_sandbox_identity(
         workdir=str(tmp_path),
@@ -635,6 +654,58 @@ def test_docker_local_hydrate_workspace_reuses_cached_snapshot_archive(monkeypat
     assert second_receipt.workspace_snapshot_cache_hit is True
     assert (Path(second_session.workspace_root) / "seed.txt").read_text(encoding="utf-8") == "seed"
     provider.destroy_session(second_session, "completed")
+
+
+def test_docker_local_hydrate_workspace_applies_overlay_files(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("PRAXIS_SANDBOX_SNAPSHOT_CACHE_DIR", str(tmp_path / "snapshot-cache"))
+    monkeypatch.setattr("runtime.sandbox_runtime._docker_available", lambda: True)
+
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    (source_root / "seed.txt").write_text("seed", encoding="utf-8")
+    overlay_content = '{"mcpServers":{"dag-workflow":{"url":"http://mcp.local/mcp","type":"http"}}}'
+    snapshot_ref = sandbox_runtime._workspace_snapshot_ref(
+        str(source_root),
+        overlay_files=(
+            {
+                "relative_path": ".gemini/settings.json",
+                "content": overlay_content,
+            },
+        ),
+    )
+
+    provider = DockerLocalSandboxProvider()
+    spec = type(
+        "Spec",
+        (),
+        {
+            "sandbox_session_id": "sandbox_session:run.alpha:job.alpha",
+            "sandbox_group_id": "group:run.alpha",
+            "network_policy": "provider_only",
+            "workspace_materialization": "copy",
+            "timeout_seconds": 30,
+            "metadata": {},
+        },
+    )()
+    session = provider.create_session(spec)
+    receipt = provider.hydrate_workspace(
+        session,
+        WorkspaceSnapshot(
+            source_root=str(source_root),
+            materialization="copy",
+            workspace_snapshot_ref=snapshot_ref,
+            overlay_files=(
+                {
+                    "relative_path": ".gemini/settings.json",
+                    "content": overlay_content,
+                },
+            ),
+        ),
+    )
+
+    assert receipt.workspace_snapshot_ref == snapshot_ref
+    assert (Path(session.workspace_root) / ".gemini" / "settings.json").read_text(encoding="utf-8") == overlay_content
+    provider.destroy_session(session, "completed")
 
 
 def test_cloudflare_remote_syncs_artifacts_for_capture(monkeypatch, tmp_path) -> None:

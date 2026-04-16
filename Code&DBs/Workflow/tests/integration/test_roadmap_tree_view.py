@@ -338,7 +338,13 @@ def test_query_roadmap_tree_reads_subtree_and_dependencies() -> None:
         assert payload["counts"] == {
             "roadmap_items": 2,
             "roadmap_item_dependencies": 2,
+            "semantic_neighbors": 0,
         }
+        assert payload["semantic_neighbors_reason_code"] in {
+            "roadmap.semantic_neighbors.none",
+            "roadmap.semantic_neighbors.schema_unavailable",
+        }
+        assert payload["semantic_neighbors"] == []
         assert payload["root_item"]["roadmap_item_id"] == ids["root_id"]
         assert [row["roadmap_item_id"] for row in payload["roadmap_items"]] == [
             ids["root_id"],
@@ -430,6 +436,7 @@ async def _exercise_roadmap_write_preview_parity() -> None:
             "roadmap_item_dependencies": len(
                 committed["preview"]["roadmap_item_dependencies"]
             ),
+            "semantic_neighbors": len(payload["semantic_neighbors"]),
         }
         assert "Roadmap write preview parity" in payload["rendered_markdown"]
         assert "Blocking roadmap" in payload["rendered_markdown"]

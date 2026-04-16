@@ -202,6 +202,7 @@ class WorkspaceSnapshot:
     source_root: str
     materialization: str = "copy"
     workspace_snapshot_ref: str = ""
+    overlay_files: tuple[dict[str, str], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -412,24 +413,70 @@ def _workspace_manifest(root: str) -> dict[str, tuple[int, int]]:
     return manifest
 
 
-def _workspace_snapshot_ref(root: str) -> str:
+def _normalize_workspace_overlay_files(
+    value: object | None,
+) -> tuple[dict[str, str], ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        raise RuntimeError("workspace_overlays must be a sequence of overlay records")
+    normalized: list[dict[str, str]] = []
+    seen_paths: set[str] = set()
+    for index, item in enumerate(value):
+        if not isinstance(item, Mapping):
+            raise RuntimeError(f"workspace_overlays[{index}] must be an object")
+        relpath = _normalize_relative_path(
+            item.get("relative_path"),
+            field_name=f"workspace_overlays[{index}].relative_path",
+        )
+        content = item.get("content")
+        if not isinstance(content, str):
+            raise RuntimeError(f"workspace_overlays[{index}].content must be a string")
+        if relpath in seen_paths:
+            continue
+        seen_paths.add(relpath)
+        normalized.append(
+            {
+                "relative_path": relpath,
+                "content": content,
+            }
+        )
+    return tuple(normalized)
+
+
+def _workspace_snapshot_ref(
+    root: str,
+    *,
+    overlay_files: Sequence[Mapping[str, str]] | None = None,
+) -> str:
     """Return a stable content-addressed ref for one hydrated workspace input."""
     entries: list[tuple[str, str]] = []
     root_path = Path(root)
+    normalized_overlays = _normalize_workspace_overlay_files(overlay_files)
+    overlay_paths = {overlay["relative_path"] for overlay in normalized_overlays}
     if root_path.exists():
         for dirpath, dirnames, filenames in os.walk(root):
             dirnames[:] = [name for name in dirnames if name not in _IGNORED_MANIFEST_DIRS]
             current_dir = Path(dirpath)
             for filename in filenames:
                 absolute = current_dir / filename
+                relpath = absolute.relative_to(root_path).as_posix()
+                if relpath in overlay_paths:
+                    continue
                 try:
                     content_hash = hashlib.sha256(absolute.read_bytes()).hexdigest()
                 except OSError as exc:
                     raise RuntimeError(
                         f"workspace snapshot fingerprint could not read {absolute}"
                     ) from exc
-                relpath = absolute.relative_to(root_path).as_posix()
                 entries.append((relpath, content_hash))
+    for overlay in normalized_overlays:
+        entries.append(
+            (
+                overlay["relative_path"],
+                hashlib.sha256(overlay["content"].encode("utf-8")).hexdigest(),
+            )
+        )
     entries.sort(key=lambda item: item[0])
     canonical = json.dumps(entries, separators=(",", ":"), ensure_ascii=True)
     digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
@@ -456,7 +503,12 @@ def _read_snapshot_archive_metadata(metadata_path: str) -> dict[str, Any] | None
     return payload if isinstance(payload, dict) else None
 
 
-def _write_workspace_snapshot_archive(source_root: str, archive_path: str) -> int:
+def _write_workspace_snapshot_archive(
+    source_root: str,
+    archive_path: str,
+    *,
+    overlay_files: Sequence[Mapping[str, str]] | None = None,
+) -> int:
     source = Path(source_root)
     if not source.exists():
         raise RuntimeError(f"workspace snapshot source root is missing: {source_root}")
@@ -464,6 +516,8 @@ def _write_workspace_snapshot_archive(source_root: str, archive_path: str) -> in
     archive_target = Path(archive_path)
     archive_target.parent.mkdir(parents=True, exist_ok=True)
     hydrated_files = 0
+    normalized_overlays = _normalize_workspace_overlay_files(overlay_files)
+    overlay_paths = {overlay["relative_path"] for overlay in normalized_overlays}
     with tarfile.open(archive_target, mode="w:gz") as archive:
         archive.add(source_root, arcname="workspace", recursive=False)
         for dirpath, dirnames, filenames in os.walk(source_root):
@@ -479,18 +533,36 @@ def _write_workspace_snapshot_archive(source_root: str, archive_path: str) -> in
                 )
             for filename in filenames:
                 absolute = current_dir / filename
+                relpath = absolute.relative_to(source).as_posix()
+                if relpath in overlay_paths:
+                    continue
                 archive.add(
                     str(absolute),
-                    arcname=str(PurePosixPath("workspace") / absolute.relative_to(source).as_posix()),
+                    arcname=str(PurePosixPath("workspace") / relpath),
                     recursive=False,
                 )
                 hydrated_files += 1
+        for overlay in normalized_overlays:
+            relative_path = overlay["relative_path"]
+            content_bytes = overlay["content"].encode("utf-8")
+            tar_info = tarfile.TarInfo(
+                name=str(PurePosixPath("workspace") / relative_path)
+            )
+            tar_info.size = len(content_bytes)
+            tar_info.mtime = int(time.time())
+            tar_info.mode = 0o644
+            archive.addfile(tar_info, io.BytesIO(content_bytes))
+            hydrated_files += 1
     return hydrated_files
 
 
 def _cached_workspace_snapshot_archive(snapshot: WorkspaceSnapshot) -> WorkspaceSnapshotArchive:
     snapshot_ref = str(
-        getattr(snapshot, "workspace_snapshot_ref", "") or _workspace_snapshot_ref(snapshot.source_root)
+        getattr(snapshot, "workspace_snapshot_ref", "")
+        or _workspace_snapshot_ref(
+            snapshot.source_root,
+            overlay_files=getattr(snapshot, "overlay_files", ()),
+        )
     ).strip()
     if not snapshot_ref:
         raise RuntimeError("workspace_snapshot_ref must be resolved before hydration")
@@ -511,7 +583,11 @@ def _cached_workspace_snapshot_archive(snapshot: WorkspaceSnapshot) -> Workspace
     cache_dir.mkdir(parents=True, exist_ok=True)
     temp_archive = cache_dir / f".{uuid4().hex}.tar.gz"
     temp_metadata = cache_dir / f".{uuid4().hex}.json"
-    hydrated_files = _write_workspace_snapshot_archive(snapshot.source_root, str(temp_archive))
+    hydrated_files = _write_workspace_snapshot_archive(
+        snapshot.source_root,
+        str(temp_archive),
+        overlay_files=getattr(snapshot, "overlay_files", ()),
+    )
     temp_metadata.write_text(
         json.dumps(
             {
@@ -1006,13 +1082,20 @@ class SandboxRuntime:
         )
         disposition = "completed"
         try:
-            workspace_snapshot_ref = _workspace_snapshot_ref(workdir)
+            workspace_overlays = _normalize_workspace_overlay_files(
+                provider_metadata.get("workspace_overlays")
+            )
+            workspace_snapshot_ref = _workspace_snapshot_ref(
+                workdir,
+                overlay_files=workspace_overlays,
+            )
             hydration_receipt = provider.hydrate_workspace(
                 session,
                 WorkspaceSnapshot(
                     source_root=workdir,
                     materialization=workspace_materialization,
                     workspace_snapshot_ref=workspace_snapshot_ref,
+                    overlay_files=workspace_overlays,
                 ),
             )
             before_manifest = _workspace_manifest(session.workspace_root)

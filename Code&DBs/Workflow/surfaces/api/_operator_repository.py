@@ -428,6 +428,16 @@ def _missing_run_operator_frames_table_error(error: BaseException) -> bool:
     )
 
 
+def _missing_roadmap_embedding_column_error(error: BaseException) -> bool:
+    sqlstate = str(getattr(error, "sqlstate", "") or "").strip()
+    if sqlstate and sqlstate != "42703":
+        return False
+    message = str(error).lower()
+    if "embedding" not in message or "roadmap_items" not in message:
+        return False
+    return "does not exist" in message or "undefined column" in message
+
+
 def _workflow_run_failure_category(row: Mapping[str, Any]) -> str:
     pieces = [
         str(row.get("terminal_reason_code") or "").strip().lower(),
@@ -645,6 +655,28 @@ class OperatorRoadmapDependencyRecord:
             "dependency_kind": self.dependency_kind,
             "decision_ref": self.decision_ref,
             "created_at": self.created_at.isoformat(),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class OperatorRoadmapSemanticNeighborRecord:
+    """Semantically close roadmap item discovered from embedding similarity."""
+
+    roadmap_item_id: str
+    title: str
+    status: str
+    priority: str
+    similarity: float
+    match_kind: str = "embedding"
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "roadmap_item_id": self.roadmap_item_id,
+            "title": self.title,
+            "status": self.status,
+            "priority": self.priority,
+            "similarity": round(self.similarity, 4),
+            "match_kind": self.match_kind,
         }
 
 
@@ -873,6 +905,8 @@ class OperatorRoadmapTreeSnapshot:
     roadmap_items: tuple[OperatorRoadmapItemRecord, ...]
     roadmap_item_dependencies: tuple[OperatorRoadmapDependencyRecord, ...]
     as_of: datetime
+    semantic_neighbors: tuple[OperatorRoadmapSemanticNeighborRecord, ...] = ()
+    semantic_neighbors_reason_code: str = "roadmap.semantic_neighbors.none"
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -883,12 +917,15 @@ class OperatorRoadmapTreeSnapshot:
             "counts": {
                 "roadmap_items": len(self.roadmap_items),
                 "roadmap_item_dependencies": len(self.roadmap_item_dependencies),
+                "semantic_neighbors": len(self.semantic_neighbors),
             },
             "root_item": self.root_item.to_json(),
             "roadmap_items": [record.to_json() for record in self.roadmap_items],
             "roadmap_item_dependencies": [
                 record.to_json() for record in self.roadmap_item_dependencies
             ],
+            "semantic_neighbors": [record.to_json() for record in self.semantic_neighbors],
+            "semantic_neighbors_reason_code": self.semantic_neighbors_reason_code,
             "rendered_markdown": _render_roadmap_tree_markdown(
                 root_item=self.root_item,
                 roadmap_items=self.roadmap_items,
@@ -1756,6 +1793,67 @@ class NativeOperatorQueryFrontdoor:
             ) from exc
         return tuple(_roadmap_dependency_record_from_row(row) for row in rows)
 
+    async def _fetch_roadmap_semantic_neighbors(
+        self,
+        *,
+        conn: _Connection,
+        root_roadmap_item_id: str,
+        subtree_roadmap_item_ids: tuple[str, ...],
+        limit: int,
+    ) -> tuple[tuple[OperatorRoadmapSemanticNeighborRecord, ...], str]:
+        if limit <= 0:
+            return (), "roadmap.semantic_neighbors.disabled"
+        try:
+            rows = await conn.fetch(
+                """
+                WITH anchor AS (
+                    SELECT embedding
+                    FROM roadmap_items
+                    WHERE roadmap_item_id = $1
+                      AND embedding IS NOT NULL
+                    LIMIT 1
+                )
+                SELECT
+                    ri.roadmap_item_id,
+                    ri.title,
+                    ri.status,
+                    ri.priority,
+                    1 - (ri.embedding <=> anchor.embedding) AS similarity
+                FROM roadmap_items ri
+                CROSS JOIN anchor
+                WHERE ri.roadmap_item_id <> $1
+                  AND ri.embedding IS NOT NULL
+                  AND (ri.status IS NULL OR lower(ri.status) NOT IN ('completed', 'done', 'closed'))
+                  AND NOT (ri.roadmap_item_id = ANY($2::text[]))
+                ORDER BY ri.embedding <=> anchor.embedding ASC, ri.updated_at DESC, ri.roadmap_item_id
+                LIMIT $3
+                """,
+                root_roadmap_item_id,
+                list(subtree_roadmap_item_ids),
+                limit,
+            )
+        except asyncpg.PostgresError as exc:
+            if _missing_roadmap_embedding_column_error(exc):
+                return (), "roadmap.semantic_neighbors.schema_unavailable"
+            raise NativeOperatorQueryError(
+                "operator_query.read_failed",
+                "failed to read roadmap semantic neighbors",
+                details={"sqlstate": getattr(exc, "sqlstate", None)},
+            ) from exc
+        neighbors = tuple(
+            OperatorRoadmapSemanticNeighborRecord(
+                roadmap_item_id=_require_text(row.get("roadmap_item_id"), field_name="roadmap_item_id"),
+                title=_require_text(row.get("title"), field_name="title"),
+                status=_require_text(row.get("status"), field_name="status"),
+                priority=_require_text(row.get("priority"), field_name="priority"),
+                similarity=float(row.get("similarity") or 0.0),
+            )
+            for row in rows
+        )
+        if neighbors:
+            return neighbors, "roadmap.semantic_neighbors.found"
+        return (), "roadmap.semantic_neighbors.none"
+
     async def _fetch_cutover_gate_records(
         self,
         *,
@@ -2208,6 +2306,7 @@ class NativeOperatorQueryFrontdoor:
         env: Mapping[str, str] | None,
         as_of: datetime,
         root_roadmap_item_id: str,
+        semantic_neighbor_limit: int,
     ) -> OperatorRoadmapTreeSnapshot:
         conn = await self.connect_database(env)
         try:
@@ -2234,11 +2333,23 @@ class NativeOperatorQueryFrontdoor:
                     record.roadmap_item_id for record in roadmap_items
                 ),
             )
+            semantic_neighbors, semantic_neighbors_reason_code = (
+                await self._fetch_roadmap_semantic_neighbors(
+                    conn=conn,
+                    root_roadmap_item_id=root_roadmap_item_id,
+                    subtree_roadmap_item_ids=tuple(
+                        record.roadmap_item_id for record in roadmap_items
+                    ),
+                    limit=semantic_neighbor_limit,
+                )
+            )
             return OperatorRoadmapTreeSnapshot(
                 root_roadmap_item_id=root_roadmap_item_id,
                 root_item=root_item,
                 roadmap_items=roadmap_items,
                 roadmap_item_dependencies=roadmap_item_dependencies,
+                semantic_neighbors=semantic_neighbors,
+                semantic_neighbors_reason_code=semantic_neighbors_reason_code,
                 as_of=as_of,
             )
         finally:
@@ -2301,6 +2412,7 @@ class NativeOperatorQueryFrontdoor:
         self,
         *,
         root_roadmap_item_id: str,
+        semantic_neighbor_limit: int = 5,
         env: Mapping[str, str] | None = None,
         as_of: datetime | None = None,
     ) -> dict[str, Any]:
@@ -2311,6 +2423,20 @@ class NativeOperatorQueryFrontdoor:
             root_roadmap_item_id,
             field_name="root_roadmap_item_id",
         )
+        try:
+            semantic_limit = int(semantic_neighbor_limit)
+        except (TypeError, ValueError) as exc:
+            raise NativeOperatorQueryError(
+                "operator_query.invalid_request",
+                "semantic_neighbor_limit must be an integer",
+                details={"field": "semantic_neighbor_limit"},
+            ) from exc
+        if semantic_limit < 0:
+            raise NativeOperatorQueryError(
+                "operator_query.invalid_request",
+                "semantic_neighbor_limit must be >= 0",
+                details={"field": "semantic_neighbor_limit"},
+            )
         snapshot = _run_async(
             self._query_roadmap_tree(
                 env=source,
@@ -2324,6 +2450,7 @@ class NativeOperatorQueryFrontdoor:
                     )
                 ),
                 root_roadmap_item_id=root_id,
+                semantic_neighbor_limit=semantic_limit,
             ),
             error_type=NativeOperatorQueryError,
             reason_code="operator_query.async_boundary_required",
@@ -2350,6 +2477,7 @@ __all__ = [
     "OperatorBugRecord",
     "OperatorCutoverGateRecord",
     "OperatorRoadmapDependencyRecord",
+    "OperatorRoadmapSemanticNeighborRecord",
     "OperatorRoadmapItemRecord",
     "OperatorRoadmapTreeSnapshot",
     "OperatorWorkflowRunPacketInspectionRecord",

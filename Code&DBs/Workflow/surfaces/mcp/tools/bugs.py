@@ -65,7 +65,7 @@ _SESSION_BLOCKED_ACTIONS = frozenset({"list", "search", "stats", "backfill_repla
 
 
 def tool_praxis_bugs(params: dict) -> dict:
-    """Bug tracker operations: list, file, search, stats, packet, history, replay, backfill_replay, attach_evidence, resolve."""
+    """Bug tracker operations: list, file, search, stats, packet, history, replay, backfill_replay, attach_evidence, patch_resume, resolve."""
     action = params.get("action", "list")
 
     # Sandboxed workflow sessions may only write bugs or look up a specific bug
@@ -74,7 +74,7 @@ def tool_praxis_bugs(params: dict) -> dict:
     if action in _SESSION_BLOCKED_ACTIONS and get_current_workflow_mcp_context() is not None:
         return {
             "error": f"praxis_bugs action='{action}' is not permitted inside a workflow session. "
-                     "Allowed actions: file, resolve, attach_evidence, packet, history, replay."
+                     "Allowed actions: file, resolve, attach_evidence, packet, history, replay, patch_resume."
         }
 
     bt = _subs.get_bug_tracker()
@@ -170,6 +170,9 @@ def tool_praxis_bugs(params: dict) -> dict:
             if str(tag).strip()
         )
         filed_by = str(params.get("filed_by") or "mcp_workflow_server").strip() or "mcp_workflow_server"
+        resume_ctx = params.get("resume_context")
+        if resume_ctx is not None and not isinstance(resume_ctx, dict):
+            return {"error": "resume_context must be a JSON object when provided"}
         try:
             bug, similar_bugs = bt.file_bug(
                 title=title,
@@ -183,6 +186,7 @@ def tool_praxis_bugs(params: dict) -> dict:
                 discovered_in_receipt_id=str(params.get("discovered_in_receipt_id") or "").strip() or None,
                 owner_ref=str(params.get("owner_ref") or "").strip() or None,
                 tags=tags,
+                resume_context=resume_ctx if isinstance(resume_ctx, dict) else None,
             )
         except ValueError as exc:
             return {"error": str(exc)}
@@ -233,6 +237,8 @@ def tool_praxis_bugs(params: dict) -> dict:
                     "historical_fixes": packet.get("historical_fixes"),
                     "fix_verification": packet.get("fix_verification"),
                     "replay_context": packet.get("replay_context"),
+                    "resume_context": packet.get("resume_context"),
+                    "semantic_neighbors": packet.get("semantic_neighbors"),
                     "agent_actions": {
                         "replay": agent_actions.get("replay") if isinstance(agent_actions, dict) else None,
                     },
@@ -313,6 +319,23 @@ def tool_praxis_bugs(params: dict) -> dict:
             return {"error": f"bug not found: {bug_id}"}
         return {"resolved": True, "bug": _bug_to_dict(bug)}
 
+    if action == "patch_resume":
+        bug_id = str(params.get("bug_id", "")).strip()
+        if not bug_id:
+            return {"error": "bug_id is required to patch resume_context"}
+        raw_patch = params.get("resume_patch")
+        if raw_patch is None:
+            raw_patch = params.get("patch")
+        if not isinstance(raw_patch, dict):
+            return {"error": "resume_patch must be a JSON object"}
+        try:
+            bug = bt.merge_resume_context(bug_id, raw_patch)
+        except ValueError as exc:
+            return {"error": str(exc)}
+        if bug is None:
+            return {"error": f"bug not found: {bug_id}"}
+        return {"updated": True, "bug": _bug_to_dict(bug)}
+
     return {"error": f"Unknown bug action: {action}"}
 
 
@@ -338,6 +361,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "  Replay a bug:      praxis_bugs(action='replay', bug_id='BUG-1234')\n"
                 "  Backfill replay:   praxis_bugs(action='backfill_replay')\n"
                 "  Attach evidence:   praxis_bugs(action='attach_evidence', bug_id='BUG-1234', evidence_kind='receipt', evidence_ref='receipt:abc')\n"
+                "  Patch handoff:     praxis_bugs(action='patch_resume', bug_id='BUG-1234', resume_patch={'hypothesis': '...', 'next_steps': ['...']})\n"
                 "  Bug stats:         praxis_bugs(action='stats')\n"
                 "  Resolve a bug:     praxis_bugs(action='resolve', bug_id='BUG-1234', status='WONT_FIX')\n\n"
                 "STATUSES: OPEN, IN_PROGRESS, FIXED, WONT_FIX, DEFERRED\n"
@@ -348,8 +372,8 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "properties": {
                     "action": {
                         "type": "string",
-                        "description": "Operation: 'list', 'file', 'search', 'stats', 'packet', 'history', 'replay', 'backfill_replay', 'attach_evidence', or 'resolve'.",
-                        "enum": ["list", "file", "search", "stats", "packet", "history", "replay", "backfill_replay", "attach_evidence", "resolve"],
+                        "description": "Operation: 'list', 'file', 'search', 'stats', 'packet', 'history', 'replay', 'backfill_replay', 'attach_evidence', 'patch_resume', or 'resolve'.",
+                        "enum": ["list", "file", "search", "stats", "packet", "history", "replay", "backfill_replay", "attach_evidence", "patch_resume", "resolve"],
                     },
                     "bug_id": {"type": "string", "description": "Bug id (for resolve)."},
                     "title": {"type": "string", "description": "Bug title (for file/search)."},
@@ -404,6 +428,18 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "evidence_role": {"type": "string", "description": "Evidence role for attach_evidence, such as observed_in, attempted_fix, or validates_fix."},
                     "created_by": {"type": "string", "description": "Actor attaching evidence."},
                     "notes": {"type": "string", "description": "Optional notes for attach_evidence."},
+                    "resume_context": {
+                        "type": "object",
+                        "description": "Optional initial investigator handoff when filing (hypothesis, next_steps, etc.).",
+                    },
+                    "resume_patch": {
+                        "type": "object",
+                        "description": "Shallow merge into bugs.resume_context for patch_resume (replaces whole array values).",
+                    },
+                    "patch": {
+                        "type": "object",
+                        "description": "Alias for resume_patch on patch_resume.",
+                    },
                 },
                 "required": ["action"],
             },

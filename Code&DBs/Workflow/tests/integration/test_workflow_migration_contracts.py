@@ -66,7 +66,7 @@ def test_workflow_migration_manifest_includes_provider_route_health_budget_migra
     assert "126_operator_decision_scope_policy.sql" in filenames
     assert "127_operator_decision_architecture_policies.sql" in filenames
     assert "128_operator_decision_embedding_architecture.sql" in filenames
-    assert filenames[-1] == "128_operator_decision_embedding_architecture.sql"
+    assert filenames[-1] == "131_roadmap_items_semantic_clustering.sql"
 
 
 def test_every_manifest_migration_has_expected_object_contract() -> None:
@@ -552,6 +552,29 @@ def test_provider_model_candidate_profiles_migration_seeds_cli_configured_candid
     assert "\"cmd_template\":[\"claude\"" in sql_text
     assert "\"cmd_template\":[\"codex\"" in sql_text
     assert "\"cmd_template\":[\"gemini\"" in sql_text
+
+
+def test_google_gemini_mcp_settings_migration_sets_project_scoped_mcp_authority() -> None:
+    sql_text = workflow_migration_sql_text("129_google_gemini_mcp_settings_authority.sql")
+    assert "UPDATE provider_cli_profiles" in sql_text
+    assert "gemini_project_settings" in sql_text
+    assert "--allowed-mcp-server-names" in sql_text
+    assert "WHERE provider_slug = 'google'" in sql_text
+
+
+def test_bugs_resume_context_migration_adds_handoff_column() -> None:
+    sql_text = workflow_migration_sql_text("130_bugs_resume_context.sql")
+    assert "ALTER TABLE bugs" in sql_text
+    assert "resume_context" in sql_text
+    assert "jsonb" in sql_text
+
+
+def test_roadmap_items_semantic_clustering_migration_adds_embedding_lane() -> None:
+    sql_text = workflow_migration_sql_text("131_roadmap_items_semantic_clustering.sql")
+    assert "ALTER TABLE roadmap_items" in sql_text
+    assert "embedding" in sql_text
+    assert "vector(384)" in sql_text
+    assert "roadmap_items_hnsw_idx" in sql_text
 
 
 def test_observability_lineage_migration_guards_optional_tables_before_indexing() -> None:

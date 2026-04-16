@@ -317,6 +317,9 @@ def handle_bugs(
         discovered_in_run_id = _optional_text(body.get("discovered_in_run_id"))
         discovered_in_receipt_id = _optional_text(body.get("discovered_in_receipt_id"))
         owner_ref = _optional_text(body.get("owner_ref"))
+        resume_ctx = body.get("resume_context")
+        if resume_ctx is not None and not isinstance(resume_ctx, dict):
+            raise _ClientError("resume_context must be a JSON object when provided")
         try:
             filed = bt.file_bug(
                 title=title,
@@ -330,6 +333,7 @@ def handle_bugs(
                 discovered_in_receipt_id=discovered_in_receipt_id,
                 owner_ref=owner_ref,
                 tags=tags,
+                resume_context=resume_ctx if isinstance(resume_ctx, dict) else None,
             )
         except ValueError as exc:
             raise _ClientError(str(exc)) from exc
@@ -378,6 +382,8 @@ def handle_bugs(
                     "historical_fixes": packet.get("historical_fixes"),
                     "fix_verification": packet.get("fix_verification"),
                     "replay_context": packet.get("replay_context"),
+                    "resume_context": packet.get("resume_context"),
+                    "semantic_neighbors": packet.get("semantic_neighbors"),
                     "agent_actions": {
                         "replay": agent_actions.get("replay") if isinstance(agent_actions, dict) else None,
                     },
@@ -450,6 +456,23 @@ def handle_bugs(
         if bug is None:
             raise _ClientError(f"bug not found: {bug_id}")
         return {"resolved": True, "bug": _bug_to_dict(bug)}
+
+    if action == "patch_resume":
+        bug_id = str(body.get("bug_id", "")).strip()
+        if not bug_id:
+            raise _ClientError("bug_id is required to patch resume_context")
+        raw_patch = body.get("resume_patch")
+        if raw_patch is None:
+            raw_patch = body.get("patch")
+        if not isinstance(raw_patch, dict):
+            raise _ClientError("resume_patch must be a JSON object")
+        try:
+            bug = bt.merge_resume_context(bug_id, raw_patch)
+        except ValueError as exc:
+            raise _ClientError(str(exc)) from exc
+        if bug is None:
+            raise _ClientError(f"bug not found: {bug_id}")
+        return {"updated": True, "bug": _bug_to_dict(bug)}
 
     raise _ClientError(f"Unknown bug action: {action}")
 

@@ -116,7 +116,10 @@ def execute_workflow_request(
                         failure_code="route.unhealthy",
                         outputs={"error": f"Provider at capacity: {context.provider_slug}"},
                     )
-                execution_result = _run_workflow(orchestrator, timeout=timeout, exec_kwargs=exec_kwargs)
+                from .execution_backends import provider_slot_bypass
+
+                with provider_slot_bypass():
+                    execution_result = _run_workflow(orchestrator, timeout=timeout, exec_kwargs=exec_kwargs)
         else:
             execution_result = _run_workflow(orchestrator, timeout=timeout, exec_kwargs=exec_kwargs)
     except FuturesTimeoutError:

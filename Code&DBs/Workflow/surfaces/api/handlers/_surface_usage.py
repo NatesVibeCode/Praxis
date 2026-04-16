@@ -11,10 +11,6 @@ from storage.postgres import PostgresWorkflowSurfaceUsageRepository
 
 _TRACKED_API_ROUTES = frozenset(
     {
-        "/api/commit",
-        "/api/compile",
-        "/api/plan",
-        "/api/refine-definition",
         "/api/trigger/:workflow_id",
         "/query",
     }
@@ -159,90 +155,6 @@ def _query_result_state(status_code: int, payload: dict[str, Any]) -> str:
     return "ok"
 
 
-def _compile_route_metrics(
-    *,
-    request_body: dict[str, Any],
-    response_payload: dict[str, Any],
-) -> dict[str, Any]:
-    definition = response_payload.get("definition")
-    definition_dict = dict(definition) if isinstance(definition, dict) else {}
-    metrics = _base_definition_metrics(definition_dict) if definition_dict else {}
-    unresolved = response_payload.get("unresolved")
-    refinement = response_payload.get("refinement") if isinstance(response_payload.get("refinement"), dict) else {}
-    metadata: dict[str, Any] = {
-        "compile_index_ref": (
-            definition_dict.get("compile_provenance", {}).get("compile_index_ref")
-            if isinstance(definition_dict.get("compile_provenance"), dict)
-            else None
-        ),
-        "compile_surface_revision": (
-            definition_dict.get("compile_provenance", {}).get("compile_surface_revision")
-            if isinstance(definition_dict.get("compile_provenance"), dict)
-            else None
-        ),
-    }
-    if refinement:
-        metadata["refinement_applied"] = bool(refinement.get("applied"))
-        metadata["refinement_status"] = str(refinement.get("status") or "").strip() or None
-    return {
-        **metrics,
-        "prose_chars": len(str(request_body.get("prose") or "")),
-        "unresolved_count": _list_count(unresolved) if isinstance(unresolved, list) else int(metrics.get("unresolved_count") or 0),
-        "llm_used": bool(refinement.get("used_llm")) if refinement else False,
-        "metadata": {key: value for key, value in metadata.items() if value not in {None, ""}},
-    }
-
-
-def _plan_route_metrics(
-    *,
-    request_body: dict[str, Any],
-    response_payload: dict[str, Any],
-    status_code: int,
-) -> dict[str, Any]:
-    definition = _definition_from_request_body(request_body)
-    metrics = _base_definition_metrics(definition) if definition else {}
-    compiled_spec = response_payload.get("compiled_spec") if isinstance(response_payload.get("compiled_spec"), dict) else {}
-    unresolved = response_payload.get("unresolved")
-    result_state = "blocked" if status_code == 400 and isinstance(unresolved, list) and unresolved else ("error" if status_code >= 400 else "ok")
-    metadata: dict[str, Any] = {}
-    reuse = response_payload.get("reuse_provenance") if isinstance(response_payload.get("reuse_provenance"), dict) else {}
-    if reuse:
-        metadata["reuse_reason_code"] = str(reuse.get("reason_code") or "").strip() or None
-    if compiled_spec:
-        metadata["plan_revision"] = str(compiled_spec.get("plan_revision") or "").strip() or None
-    return {
-        **metrics,
-        "result_state": result_state,
-        "compiled_job_count": _list_count(compiled_spec.get("jobs")),
-        "trigger_count": _list_count(compiled_spec.get("triggers")),
-        "unresolved_count": _list_count(unresolved) if isinstance(unresolved, list) else int(metrics.get("unresolved_count") or 0),
-        "metadata": {key: value for key, value in metadata.items() if value not in {None, ""}},
-    }
-
-
-def _commit_route_metrics(
-    *,
-    request_body: dict[str, Any],
-    response_payload: dict[str, Any],
-) -> dict[str, Any]:
-    definition = _definition_from_request_body(request_body)
-    metrics = _base_definition_metrics(definition) if definition else {}
-    return {
-        **metrics,
-        "workflow_id": str(response_payload.get("workflow_id") or "").strip(),
-        "compiled_job_count": int(response_payload.get("jobs") or 0)
-        if isinstance(response_payload.get("jobs"), int)
-        else 0,
-        "trigger_count": int(response_payload.get("triggers") or 0)
-        if isinstance(response_payload.get("triggers"), int)
-        else 0,
-        "has_current_plan": bool(response_payload.get("has_current_plan")),
-        "metadata": {
-            "title": str(response_payload.get("title") or "").strip() or None,
-        },
-    }
-
-
 def _trigger_route_metrics(
     *,
     conn: Any,
@@ -332,29 +244,8 @@ def record_api_route_usage(
         "reason_code": str(response.get("reason_code") or "").strip(),
         "metadata": {},
     }
-    if normalized_path in {"/api/compile", "/api/refine-definition"}:
-        event_payload.update(
-            _compile_route_metrics(
-                request_body=body_payload,
-                response_payload=response,
-            )
-        )
-    elif normalized_path == "/api/plan":
-        event_payload.update(
-            _plan_route_metrics(
-                request_body=body_payload,
-                response_payload=response,
-                status_code=int(status_code),
-            )
-        )
-    elif normalized_path == "/api/commit":
-        event_payload.update(
-            _commit_route_metrics(
-                request_body=body_payload,
-                response_payload=response,
-            )
-        )
-    elif normalized_path == "/api/trigger/:workflow_id":
+    if normalized_path == "/api/trigger/:workflow_id":
+
         event_payload.update(
             _trigger_route_metrics(
                 conn=route_conn,
