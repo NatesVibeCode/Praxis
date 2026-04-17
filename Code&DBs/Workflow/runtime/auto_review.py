@@ -260,6 +260,15 @@ class ReviewBatchAccumulator:
             )
         return review_run_id
 
+    def flush_due(self) -> str | None:
+        """Flush the queue only when the oldest pending item has aged out."""
+        with self._lock:
+            if not self._queue or self._first_added_at is None:
+                return None
+            if time.monotonic() - self._first_added_at < self._max_wait_seconds:
+                return None
+        return self.flush()
+
     def pending_count(self) -> int:
         with self._lock:
             return len(self._queue)

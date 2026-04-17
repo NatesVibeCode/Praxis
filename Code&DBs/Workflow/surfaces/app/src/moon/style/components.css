@@ -2125,3 +2125,64 @@
 }
 
 }
+
+/* Moon uses layered component CSS, but the global unlayered reset zeroes padding on every
+ * element. Restore Moon control padding locally so button-based cards and controls can own
+ * their spacing again. */
+.moon-page button,
+.moon-page input,
+.moon-page textarea,
+.moon-page select {
+  padding: revert-layer;
+}
+
+.moon-page button {
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+button.moon-selection-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 14px;
+  padding: 28px 32px !important;
+}
+
+button.moon-compose__btn,
+button.moon-center__dock-btn,
+button.moon-dock-form__btn,
+button.moon-dock-form__btn--small,
+button.moon-release__dispatch-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+button.moon-compose__chip {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 13px 16px !important;
+}
+
+button.moon-compose__btn {
+  padding: 0 22px !important;
+}
+
+button.moon-center__dock-btn {
+  padding: 0 16px !important;
+}
+
+button.moon-dock-form__btn {
+  padding: 0 16px !important;
+}
+
+button.moon-dock-form__btn--small {
+  padding: 0 12px !important;
+}
+
+button.moon-release__dispatch-btn {
+  padding: 10px 14px !important;
+}

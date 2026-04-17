@@ -158,6 +158,7 @@ def test_build_modules_include_orchestrator_when_conn(tmp_path, monkeypatch):
     module_names = {getattr(module, "name", "") for module in runner.build_modules()}
 
     assert "trigger_evaluator" in module_names
+    assert "auto_review_flush" in module_names
     assert "relationship_integrity_scanner" in module_names
     assert "schema_consistency_scanner" in module_names
     assert "content_quality_scanner" in module_names
@@ -254,6 +255,54 @@ def test_database_maintenance_module_drains_multiple_batches(monkeypatch):
     assert run_limits == [50, 50, 50]
     assert result.module_name == "database_maintenance"
     assert result.ok is True
+
+
+def test_auto_review_flush_module_runs_due_flush(monkeypatch):
+    fake_auto_review = types.ModuleType("runtime.auto_review")
+    calls: list[object] = []
+
+    class _Accumulator:
+        def flush_due(self):
+            calls.append("flush_due")
+            return "review-run-1"
+
+    def _get_review_accumulator(conn=None):
+        calls.append(conn)
+        return _Accumulator()
+
+    fake_auto_review.get_review_accumulator = _get_review_accumulator
+    monkeypatch.setitem(sys.modules, "runtime.auto_review", fake_auto_review)
+
+    result = heartbeat_runner._AutoReviewFlushModule("conn").run()
+
+    assert calls == ["conn", "flush_due"]
+    assert result.module_name == "auto_review_flush"
+    assert result.ok is True
+
+
+def test_review_batch_accumulator_flush_due_waits_until_age_threshold(monkeypatch):
+    import runtime.auto_review as auto_review
+
+    accumulator = auto_review.ReviewBatchAccumulator(conn=None)
+    accumulator._queue = [types.SimpleNamespace(run_id="run-1")]
+    accumulator._first_added_at = 100.0
+    accumulator._max_wait_seconds = 60.0
+
+    flush_calls: list[str] = []
+
+    def _flush():
+        flush_calls.append("flush")
+        return "review-run-1"
+
+    monkeypatch.setattr(accumulator, "flush", _flush)
+    monkeypatch.setattr(auto_review.time, "monotonic", lambda: 150.0)
+
+    assert accumulator.flush_due() is None
+    assert flush_calls == []
+
+    monkeypatch.setattr(auto_review.time, "monotonic", lambda: 161.0)
+    assert accumulator.flush_due() == "review-run-1"
+    assert flush_calls == ["flush"]
 
 
 def test_heartbeat_modules_return_ok_error_protocol():

@@ -257,6 +257,13 @@ def _delegate_legacy_workflow_cli(
         sys.argv = original_argv
 
 
+def _preview_workflow_cli_command(args: list[str], *, stdout: TextIO) -> int:
+    forwarded_args = list(args)
+    if "--preview-execution" not in forwarded_args:
+        forwarded_args.append("--preview-execution")
+    return _delegate_legacy_workflow_cli("run", forwarded_args, stdout=stdout)
+
+
 _ARG_COMMANDS: dict[str, ArgsCommandHandler] | None = None
 
 
@@ -267,6 +274,7 @@ def _workflow_arg_commands() -> dict[str, ArgsCommandHandler]:
 
     _ARG_COMMANDS = {
         "run": _run_command,
+        "preview": _preview_workflow_cli_command,
         "spawn": _spawn_command,
         "dry-run": _dry_run_command,
         "chain": _chain_command,
@@ -428,6 +436,7 @@ def _commands_index_text() -> str:
             "  workflow help routes                            Same route discovery help from the root help system",
             "  workflow mcp [list|search|describe|call]        Alias for workflow tools discovery",
             "  workflow run <spec.json>                        Submit a workflow spec",
+            "  workflow preview <spec.json>                    Render the exact execution payload without submitting",
             "  workflow spawn <parent_run_id> <spec.json>      Spawn a child workflow with explicit parent lineage",
             "  workflow validate <spec.json>                   Validate a spec without running",
             "  workflow records <create|update|rename>         Persist canonical workflow records",
@@ -470,6 +479,7 @@ def _help_text() -> str:
             "",
             "Most used:",
             "  workflow run <spec.json>",
+            "  workflow preview <spec.json>",
             "  workflow validate <spec.json>",
             "  workflow mcp",
             "  workflow routes",
@@ -499,7 +509,7 @@ def _help_text() -> str:
             "  workflow handoff <latest|lineage|status|history>",
             "  workflow schema|registry|object-type|object|catalog|files|reload|reconcile",
             "  workflow query|recall|discover|architecture|artifacts|bugs|costs|leaderboard|trust|fitness|trends|scope|risk|reviews|receipts",
-            "  workflow run|run-status|status|active|scheduler|fan-out|debate|runs|manifest|triggers|retry|cancel|repair|heal|verify|verify-platform|pipeline|proof|queue|diagnose|inspect-job",
+            "  workflow run|preview|run-status|status|active|scheduler|fan-out|debate|runs|manifest|triggers|retry|cancel|repair|heal|verify|verify-platform|pipeline|proof|queue|diagnose|inspect-job",
             "  workflow inspect|replay|graph-topology|graph-lineage|topology|lineage",
             "  workflow health|health-map|metrics|events|cache|circuits|slots|params|config|notifications|dashboard|api [routes|--host|--port]|routes|supervisor|capabilities|work",
             "  workflow native-operator instance|health|db-health|bootstrap|db-bootstrap|smoke|inspect|status|graph-topology|graph-lineage|cockpit|route-disable|roadmap-write|work-item-closeout|roadmap-tree|provider-onboard|native-primary-cutover-gate",

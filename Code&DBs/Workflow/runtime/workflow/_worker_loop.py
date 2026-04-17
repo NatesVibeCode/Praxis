@@ -21,6 +21,7 @@ from ._execution_core import execute_job
 from runtime.execution_transport import resolve_execution_transport
 from runtime._workflow_database import resolve_runtime_database_url
 from runtime.self_healing import normalize_failure_code
+from runtime.system_events import emit_system_event
 from storage.postgres.validators import PostgresConfigurationError
 
 if TYPE_CHECKING:
@@ -62,6 +63,62 @@ def _worker_error_code(exc: BaseException, *, fallback: str) -> str:
         if isinstance(value, str) and value.strip():
             return normalize_failure_code(value.strip(), str(exc))
     return normalize_failure_code(fallback, str(exc))
+
+
+def _fail_graph_run_closed(
+    conn: "SyncPostgresConnection",
+    *,
+    run_id: str,
+    exc: BaseException,
+) -> str:
+    failure_code = _worker_error_code(exc, fallback="workflow_graph_execution_failed")
+    rows = conn.execute(
+        """
+        UPDATE workflow_runs
+           SET current_state = 'failed',
+               started_at = COALESCE(started_at, admitted_at, requested_at, now()),
+               finished_at = GREATEST(COALESCE(started_at, admitted_at, requested_at, now()), now()),
+               terminal_reason_code = COALESCE(terminal_reason_code, $2)
+         WHERE run_id = $1
+           AND current_state = 'claim_accepted'
+         RETURNING workflow_id, request_id
+        """,
+        run_id,
+        failure_code,
+    )
+    if not rows:
+        return failure_code
+    row = dict(rows[0])
+    workflow_id = str(row.get("workflow_id") or "")
+    payload = {
+        "run_id": run_id,
+        "workflow_id": workflow_id,
+        "status": "failed",
+        "reason_code": failure_code,
+        "total_jobs": 0,
+        "succeeded": 0,
+        "failed": 1,
+        "blocked": 0,
+        "cancelled": 0,
+        "parent_run_id": None,
+        "trigger_depth": 0,
+    }
+    emit_system_event(
+        conn,
+        event_type="workflow.failed",
+        source_id=run_id,
+        source_type="workflow_run",
+        payload=payload,
+    )
+    emit_system_event(
+        conn,
+        event_type="run.failed",
+        source_id=run_id,
+        source_type="workflow_run",
+        payload=payload,
+    )
+    conn.execute("SELECT pg_notify('run_complete', $1)", run_id)
+    return failure_code
 
 
 class _WorkerNotificationListener:
@@ -301,6 +358,15 @@ def run_worker_loop(
         try:
             logger.info("Worker executing admitted graph run %s", run_id)
             _execute_admitted_graph_run(thread_conn, run_id=run_id)
+        except Exception as exc:
+            failure_code = _fail_graph_run_closed(thread_conn, run_id=run_id, exc=exc)
+            logger.error(
+                "Graph run %s failed closed with %s: %s",
+                run_id,
+                failure_code,
+                exc,
+                exc_info=True,
+            )
         finally:
             try:
                 thread_conn.execute(

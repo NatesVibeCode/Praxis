@@ -33,6 +33,11 @@ _SCHEMA_BOOTSTRAP_LOCK_ID = 741001
 _SCHEMA_BOOTSTRAP_LOCK_POLL_INTERVAL_S = 0.25
 _SCHEMA_BOOTSTRAP_WAIT_WARNING_THRESHOLD_S = 2.0
 _SCHEMA_BOOTSTRAP_WAIT_LOG_INTERVAL_S = 10.0
+_ROW_EXPECTATION_KEY_COLUMNS = {
+    "operation_catalog_registry": "operation_name",
+    "operation_catalog_source_policy_registry": "source_kind",
+}
+_STRUCTURAL_EXPECTED_OBJECT_TYPES = frozenset({"table", "index", "column", "constraint", "function"})
 
 logger = logging.getLogger(__name__)
 
@@ -400,13 +405,22 @@ async def inspect_control_plane_schema(
             AND EXISTS (
                 SELECT 1
                 FROM pg_catalog.pg_constraint AS con
-                JOIN pg_catalog.pg_class AS cls
-                    ON cls.oid = con.conrelid
                 JOIN pg_catalog.pg_namespace AS ns
-                    ON ns.oid = cls.relnamespace
+                    ON ns.oid = con.connamespace
+                LEFT JOIN pg_catalog.pg_class AS cls
+                    ON cls.oid = con.conrelid
                 WHERE ns.nspname = 'public'
-                  AND cls.relname = split_part(expected.object_name, '.', 1)
-                  AND con.conname = split_part(expected.object_name, '.', 2)
+                  AND (
+                      (
+                          position('.' in expected.object_name) > 0
+                          AND cls.relname = split_part(expected.object_name, '.', 1)
+                          AND con.conname = split_part(expected.object_name, '.', 2)
+                      )
+                      OR (
+                          position('.' in expected.object_name) = 0
+                          AND con.conname = expected.object_name
+                      )
+                  )
             )
         )
         ORDER BY expected.object_type, expected.object_name
@@ -443,82 +457,142 @@ async def inspect_workflow_schema(
             missing_objects=(),
             missing_by_migration={},
         )
+    structural_expected_objects = tuple(
+        obj for obj in expected_objects if obj.object_type in _STRUCTURAL_EXPECTED_OBJECT_TYPES
+    )
+    row_expected_objects = tuple(obj for obj in expected_objects if obj.object_type == "row")
+    unsupported_expected_objects = tuple(
+        obj
+        for obj in expected_objects
+        if obj.object_type not in _STRUCTURAL_EXPECTED_OBJECT_TYPES and obj.object_type != "row"
+    )
     expected_payload = json.dumps(
         [
             {
                 "object_type": item.object_type,
                 "object_name": item.object_name,
             }
-            for item in expected_objects
+            for item in structural_expected_objects
         ]
     )
-    rows = await conn.fetch(
-        """
-        WITH expected AS (
-            SELECT
-                item->>'object_type' AS object_type,
-                item->>'object_name' AS object_name
-            FROM jsonb_array_elements($1::jsonb) AS item
-        )
-        SELECT expected.object_type, expected.object_name
-        FROM expected
-        WHERE NOT EXISTS (
-            SELECT 1
-            FROM pg_catalog.pg_class AS cls
-            JOIN pg_catalog.pg_namespace AS ns
-                ON ns.oid = cls.relnamespace
-            WHERE ns.nspname = 'public'
-              AND cls.relname = expected.object_name
-              AND (
-                  (expected.object_type = 'table' AND cls.relkind IN ('r', 'p'))
-                  OR (expected.object_type = 'index' AND cls.relkind = 'i')
-              )
-        )
-        AND NOT (
-            expected.object_type = 'column'
-            AND EXISTS (
-                SELECT 1
-                FROM information_schema.columns AS cols
-                WHERE cols.table_schema = 'public'
-                  AND cols.table_name = split_part(expected.object_name, '.', 1)
-                  AND cols.column_name = split_part(expected.object_name, '.', 2)
+    structural_missing_objects: tuple[WorkflowMigrationExpectedObject, ...] = ()
+    if structural_expected_objects:
+        rows = await conn.fetch(
+            """
+            WITH expected AS (
+                SELECT
+                    item->>'object_type' AS object_type,
+                    item->>'object_name' AS object_name
+                FROM jsonb_array_elements($1::jsonb) AS item
             )
-        )
-        AND NOT (
-            expected.object_type = 'constraint'
-            AND EXISTS (
+            SELECT expected.object_type, expected.object_name
+            FROM expected
+            WHERE NOT EXISTS (
                 SELECT 1
-                FROM pg_catalog.pg_constraint AS con
-                JOIN pg_catalog.pg_class AS cls
-                    ON cls.oid = con.conrelid
+                FROM pg_catalog.pg_class AS cls
                 JOIN pg_catalog.pg_namespace AS ns
                     ON ns.oid = cls.relnamespace
                 WHERE ns.nspname = 'public'
-                  AND cls.relname = split_part(expected.object_name, '.', 1)
-                  AND con.conname = split_part(expected.object_name, '.', 2)
+                  AND cls.relname = expected.object_name
+                  AND (
+                      (expected.object_type = 'table' AND cls.relkind IN ('r', 'p'))
+                      OR (expected.object_type = 'index' AND cls.relkind = 'i')
+                  )
             )
-        )
-        AND NOT (
-            expected.object_type = 'function'
-            AND EXISTS (
-                SELECT 1
-                FROM pg_catalog.pg_proc AS proc
-                JOIN pg_catalog.pg_namespace AS ns
-                    ON ns.oid = proc.pronamespace
-                WHERE ns.nspname = 'public'
-                  AND proc.proname = expected.object_name
+            AND NOT (
+                expected.object_type = 'column'
+                AND EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns AS cols
+                    WHERE cols.table_schema = 'public'
+                      AND cols.table_name = split_part(expected.object_name, '.', 1)
+                      AND cols.column_name = split_part(expected.object_name, '.', 2)
+                )
             )
+            AND NOT (
+                expected.object_type = 'constraint'
+                AND EXISTS (
+                    SELECT 1
+                    FROM pg_catalog.pg_constraint AS con
+                    JOIN pg_catalog.pg_namespace AS ns
+                        ON ns.oid = con.connamespace
+                    LEFT JOIN pg_catalog.pg_class AS cls
+                        ON cls.oid = con.conrelid
+                    WHERE ns.nspname = 'public'
+                      AND (
+                          (
+                              position('.' in expected.object_name) > 0
+                              AND cls.relname = split_part(expected.object_name, '.', 1)
+                              AND con.conname = split_part(expected.object_name, '.', 2)
+                          )
+                          OR (
+                              position('.' in expected.object_name) = 0
+                              AND con.conname = expected.object_name
+                          )
+                      )
+                )
+            )
+            AND NOT (
+                expected.object_type = 'function'
+                AND EXISTS (
+                    SELECT 1
+                    FROM pg_catalog.pg_proc AS proc
+                    JOIN pg_catalog.pg_namespace AS ns
+                        ON ns.oid = proc.pronamespace
+                    WHERE ns.nspname = 'public'
+                      AND proc.proname = expected.object_name
+                )
+            )
+            ORDER BY expected.object_type, expected.object_name
+            """,
+            expected_payload,
         )
-        ORDER BY expected.object_type, expected.object_name
-        """,
-        expected_payload,
-    )
+        structural_missing_objects = tuple(
+            WorkflowMigrationExpectedObject(
+                object_type=str(row["object_type"]),
+                object_name=str(row["object_name"]),
+            )
+            for row in rows
+        )
+
+    row_missing_objects: list[WorkflowMigrationExpectedObject] = []
+    row_expectations_by_table: dict[str, list[tuple[str, WorkflowMigrationExpectedObject]]] = {}
+    for item in row_expected_objects:
+        table_name, _, row_key = item.object_name.partition(".")
+        if not table_name or not row_key:
+            row_missing_objects.append(item)
+            continue
+        row_expectations_by_table.setdefault(table_name, []).append((row_key, item))
+    for table_name, entries in row_expectations_by_table.items():
+        key_column = _ROW_EXPECTATION_KEY_COLUMNS.get(table_name)
+        if key_column is None:
+            row_missing_objects.extend(item for _row_key, item in entries)
+            continue
+        table_exists = await conn.fetchval(
+            "SELECT to_regclass($1::text) IS NOT NULL",
+            f"public.{table_name}",
+        )
+        if not table_exists:
+            row_missing_objects.extend(item for _row_key, item in entries)
+            continue
+        expected_row_keys = [row_key for row_key, _item in entries]
+        rows = await conn.fetch(
+            f"SELECT {key_column} AS row_key FROM {table_name} WHERE {key_column} = ANY($1::text[])",
+            expected_row_keys,
+        )
+        existing_row_keys = {str(row["row_key"]) for row in rows}
+        row_missing_objects.extend(
+            item for row_key, item in entries if row_key not in existing_row_keys
+        )
+
+    missing_name_pairs = {
+        (obj.object_type, obj.object_name)
+        for obj in (*structural_missing_objects, *row_missing_objects, *unsupported_expected_objects)
+    }
     missing_objects = tuple(
-        WorkflowMigrationExpectedObject(
-            object_type=str(row["object_type"]),
-            object_name=str(row["object_name"]),
-        )
-        for row in rows
+        obj
+        for obj in expected_objects
+        if (obj.object_type, obj.object_name) in missing_name_pairs
     )
     missing_names = {(obj.object_type, obj.object_name) for obj in missing_objects}
     missing_by_migration = {

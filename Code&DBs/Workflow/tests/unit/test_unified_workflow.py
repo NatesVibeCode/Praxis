@@ -4465,14 +4465,19 @@ def test_graph_run_lock_key_is_signed_bigint_safe() -> None:
         assert lower <= key <= upper
 
 
-def test_run_worker_loop_backoffs_failing_graph_runs(monkeypatch):
+def test_run_worker_loop_fails_failing_graph_runs_closed_without_retry(monkeypatch):
     executed_runs: list[str] = []
     listener_actions: list[str] = []
+    state = {"run_state": "claim_accepted"}
 
     class _Conn:
         def execute(self, query: str, *args):
             normalized = " ".join(query.split())
-            if "FROM workflow_runs" in normalized and "current_state = 'claim_accepted'" in normalized:
+            if (
+                "FROM workflow_runs" in normalized
+                and "current_state = 'claim_accepted'" in normalized
+                and state["run_state"] == "claim_accepted"
+            ):
                 return [{
                     "run_id": "run.graph",
                     "workflow_id": "workflow.graph",
@@ -4487,6 +4492,11 @@ def test_run_worker_loop_backoffs_failing_graph_runs(monkeypatch):
                 return [{"locked": True}]
             if normalized.startswith("SELECT pg_advisory_unlock"):
                 return [{"released": True}]
+            if normalized.startswith("UPDATE workflow_runs SET current_state = 'failed'"):
+                state["run_state"] = "failed"
+                return [{"workflow_id": "workflow.graph", "request_id": "request.graph"}]
+            if normalized.startswith("SELECT pg_notify('run_complete',"):
+                return []
             return []
 
     class _FakeListener:
@@ -4562,6 +4572,7 @@ def test_run_worker_loop_backoffs_failing_graph_runs(monkeypatch):
     monkeypatch.setattr(_wloop_mod, "claim_one", _claim_one)
     monkeypatch.setattr(_wloop_mod, "reap_stale_claims", lambda _conn: 0)
     monkeypatch.setattr(_wloop_mod, "reap_stale_runs", lambda _conn: 0)
+    monkeypatch.setattr(_wloop_mod, "_start_embedding_prewarm_for_worker", lambda: None)
     monkeypatch.setenv("WORKFLOW_DATABASE_URL", "postgresql://example.test/workflow")
     monkeypatch.setattr(_wloop_mod.threading, "Event", _FakeEvent)
     monkeypatch.setattr(concurrent.futures, "ThreadPoolExecutor", _ImmediateExecutor)
@@ -4571,6 +4582,7 @@ def test_run_worker_loop_backoffs_failing_graph_runs(monkeypatch):
     _wloop_mod.run_worker_loop(_Conn(), "/repo", poll_interval=0.0, max_local_concurrent=1)
 
     assert executed_runs == ["run.graph"]
+    assert state["run_state"] == "failed"
     assert listener_actions == ["start", "stop"]
 
 
@@ -4579,6 +4591,7 @@ def test_run_worker_loop_does_not_starve_runnable_graph_runs_behind_backoffed_ru
 ):
     executed_runs: list[str] = []
     listener_actions: list[str] = []
+    state = {"run_old_state": "claim_accepted"}
 
     class _Conn:
         def __init__(self) -> None:
@@ -4588,19 +4601,24 @@ def test_run_worker_loop_does_not_starve_runnable_graph_runs_behind_backoffed_ru
             normalized = " ".join(query.split())
             if "FROM workflow_runs" in normalized and "current_state = 'claim_accepted'" in normalized:
                 self._graph_queries += 1
-                if self._graph_queries <= 2:
-                    return [
+                rows = [
+                    {
+                        "run_id": "run.new",
+                        "workflow_id": "workflow.new",
+                        "requested_at": datetime.now(timezone.utc),
+                    }
+                ]
+                if state["run_old_state"] == "claim_accepted":
+                    rows.insert(
+                        0,
                         {
                             "run_id": "run.old",
                             "workflow_id": "workflow.old",
                             "requested_at": datetime.now(timezone.utc),
                         },
-                        {
-                            "run_id": "run.new",
-                            "workflow_id": "workflow.new",
-                            "requested_at": datetime.now(timezone.utc),
-                        },
-                    ]
+                    )
+                if self._graph_queries <= 2:
+                    return rows
                 return []
             return []
 
@@ -4611,6 +4629,11 @@ def test_run_worker_loop_does_not_starve_runnable_graph_runs_behind_backoffed_ru
                 return [{"locked": True}]
             if normalized.startswith("SELECT pg_advisory_unlock"):
                 return [{"released": True}]
+            if normalized.startswith("UPDATE workflow_runs SET current_state = 'failed'"):
+                state["run_old_state"] = "failed"
+                return [{"workflow_id": "workflow.old", "request_id": "request.old"}]
+            if normalized.startswith("SELECT pg_notify('run_complete',"):
+                return []
             return []
 
     class _FakeListener:
@@ -4707,6 +4730,7 @@ def test_run_worker_loop_does_not_starve_runnable_graph_runs_behind_backoffed_ru
     monkeypatch.setattr(_wloop_mod, "claim_one", _claim_one)
     monkeypatch.setattr(_wloop_mod, "reap_stale_claims", lambda _conn: 0)
     monkeypatch.setattr(_wloop_mod, "reap_stale_runs", lambda _conn: 0)
+    monkeypatch.setattr(_wloop_mod, "_start_embedding_prewarm_for_worker", lambda: None)
     monkeypatch.setenv("WORKFLOW_DATABASE_URL", "postgresql://example.test/workflow")
     monkeypatch.setattr(_wloop_mod.threading, "Event", _FakeEvent)
     monkeypatch.setattr(concurrent.futures, "ThreadPoolExecutor", _ImmediateExecutor)
@@ -4716,6 +4740,179 @@ def test_run_worker_loop_does_not_starve_runnable_graph_runs_behind_backoffed_ru
     _wloop_mod.run_worker_loop(_Conn(), "/repo", poll_interval=0.0, max_local_concurrent=1)
 
     assert executed_runs == ["run.old", "run.new"]
+    assert listener_actions == ["start", "stop"]
+
+
+def test_run_worker_loop_fails_poisoned_graph_run_closed(monkeypatch):
+    listener_actions: list[str] = []
+    emitted_events: list[tuple[str, str, str, dict[str, object]]] = []
+    state = {
+        "current_state": "claim_accepted",
+        "terminal_reason_code": None,
+        "notified_run_complete": False,
+    }
+
+    class _Conn:
+        def execute(self, query: str, *args):
+            normalized = " ".join(query.split())
+            if (
+                "FROM workflow_runs" in normalized
+                and "current_state = 'claim_accepted'" in normalized
+                and state["current_state"] == "claim_accepted"
+            ):
+                return [
+                    {
+                        "run_id": "run.graph",
+                        "workflow_id": "workflow.graph",
+                        "requested_at": datetime.now(timezone.utc),
+                    }
+                ]
+            return []
+
+    class _ThreadConn:
+        def execute(self, query: str, *args):
+            normalized = " ".join(query.split())
+            if normalized.startswith("SELECT pg_try_advisory_lock"):
+                return [{"locked": True}]
+            if normalized.startswith("SELECT pg_advisory_unlock"):
+                return [{"released": True}]
+            if normalized.startswith("UPDATE workflow_runs SET current_state = 'failed'"):
+                state["current_state"] = "failed"
+                state["terminal_reason_code"] = args[1]
+                return [{"workflow_id": "workflow.graph", "request_id": "request.graph"}]
+            if normalized.startswith("SELECT pg_notify('run_complete',"):
+                state["notified_run_complete"] = True
+                return []
+            return []
+
+    class _FakeListener:
+        def __init__(
+            self,
+            database_url: str,
+            channels: tuple[str, ...],
+            wakeup_event,
+            reconnect_delay: float = 5.0,
+        ) -> None:
+            self.database_url = database_url
+            self.channels = channels
+            self.wakeup_event = wakeup_event
+            self.reconnect_delay = reconnect_delay
+
+        def start(self) -> None:
+            listener_actions.append("start")
+
+        def stop(self) -> None:
+            listener_actions.append("stop")
+
+    class _FakeEvent:
+        def __init__(self) -> None:
+            self._calls = 0
+            self._set = False
+
+        def wait(self, timeout: float) -> bool:
+            self._calls += 1
+            return self._set or self._calls > 2
+
+        def set(self) -> None:
+            self._set = True
+
+        def is_set(self) -> bool:
+            return self._set
+
+    class _ImmediateFuture:
+        def done(self) -> bool:
+            return True
+
+        def result(self):
+            return None
+
+    class _ImmediateExecutor:
+        def __init__(self, *args, **kwargs) -> None:
+            self.shutdown_called = False
+
+        def submit(self, fn, *args, **kwargs):
+            fn(*args, **kwargs)
+            return _ImmediateFuture()
+
+        def shutdown(self, wait: bool = True) -> None:
+            self.shutdown_called = True
+
+    claim_calls = {"count": 0}
+
+    def _claim_one(*_args, **_kwargs):
+        claim_calls["count"] += 1
+        if claim_calls["count"] >= 3:
+            raise KeyboardInterrupt()
+        return None
+
+    class _PoisonedGraphError(RuntimeError):
+        reason_code = "registry.runtime_profile_missing"
+
+    monkeypatch.setattr(_wloop_mod, "_WorkerNotificationListener", _FakeListener)
+    monkeypatch.setattr(
+        _wloop_mod,
+        "_execute_admitted_graph_run",
+        lambda _conn, run_id: (_ for _ in ()).throw(_PoisonedGraphError("boom")),
+    )
+    monkeypatch.setattr(_wloop_mod, "claim_one", _claim_one)
+    monkeypatch.setattr(_wloop_mod, "reap_stale_claims", lambda _conn: 0)
+    monkeypatch.setattr(_wloop_mod, "reap_stale_runs", lambda _conn: 0)
+    monkeypatch.setattr(
+        _wloop_mod,
+        "emit_system_event",
+        lambda conn, *, event_type, source_id, source_type, payload: emitted_events.append(
+            (event_type, source_id, source_type, payload)
+        ),
+    )
+    monkeypatch.setenv("WORKFLOW_DATABASE_URL", "postgresql://example.test/workflow")
+    monkeypatch.setattr(_wloop_mod.threading, "Event", _FakeEvent)
+    monkeypatch.setattr(concurrent.futures, "ThreadPoolExecutor", _ImmediateExecutor)
+    monkeypatch.setattr(pg_connection, "get_workflow_pool", lambda: object())
+    monkeypatch.setattr(pg_connection, "SyncPostgresConnection", lambda pool: _ThreadConn())
+
+    _wloop_mod.run_worker_loop(_Conn(), "/repo", poll_interval=0.0, max_local_concurrent=1)
+
+    assert state["current_state"] == "failed"
+    assert state["terminal_reason_code"] == "registry.runtime_profile_missing"
+    assert state["notified_run_complete"] is True
+    assert emitted_events == [
+        (
+            "workflow.failed",
+            "run.graph",
+            "workflow_run",
+            {
+                "run_id": "run.graph",
+                "workflow_id": "workflow.graph",
+                "status": "failed",
+                "reason_code": "registry.runtime_profile_missing",
+                "total_jobs": 0,
+                "succeeded": 0,
+                "failed": 1,
+                "blocked": 0,
+                "cancelled": 0,
+                "parent_run_id": None,
+                "trigger_depth": 0,
+            },
+        ),
+        (
+            "run.failed",
+            "run.graph",
+            "workflow_run",
+            {
+                "run_id": "run.graph",
+                "workflow_id": "workflow.graph",
+                "status": "failed",
+                "reason_code": "registry.runtime_profile_missing",
+                "total_jobs": 0,
+                "succeeded": 0,
+                "failed": 1,
+                "blocked": 0,
+                "cancelled": 0,
+                "parent_run_id": None,
+                "trigger_depth": 0,
+            },
+        ),
+    ]
     assert listener_actions == ["start", "stop"]
 
 

@@ -996,6 +996,26 @@ def test_help_can_show_command_specific_usage() -> None:
     assert "workflow run -p <prompt>" in rendered
 
 
+def test_preview_frontdoor_delegates_to_run_with_preview_execution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    workflow_main_module = importlib.import_module("surfaces.cli.main")
+
+    def _fake_delegate(command_name: str, args: list[str], *, stdout) -> int:
+        captured["command_name"] = command_name
+        captured["args"] = list(args)
+        return 0
+
+    monkeypatch.setattr(workflow_main_module, "_delegate_legacy_workflow_cli", _fake_delegate)
+
+    assert workflow_cli_main(["preview", "spec.queue.json"], stdout=StringIO()) == 0
+    assert captured == {
+        "command_name": "run",
+        "args": ["spec.queue.json", "--preview-execution"],
+    }
+
+
 def test_help_can_show_circuits_usage() -> None:
     stdout = StringIO()
 

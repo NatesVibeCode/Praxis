@@ -336,6 +336,24 @@ class _DatabaseMaintenanceModule(HeartbeatModule):
         return _ok(self.name, t0)
 
 
+class _AutoReviewFlushModule(HeartbeatModule):
+    """Heartbeat adapter for time-gated review queue draining."""
+
+    def __init__(self, conn) -> None:
+        self._conn = conn
+
+    @property
+    def name(self) -> str:
+        return "auto_review_flush"
+
+    def run(self) -> HeartbeatModuleResult:
+        t0 = time.monotonic()
+        from runtime.auto_review import get_review_accumulator
+
+        get_review_accumulator(self._conn).flush_due()
+        return _ok(self.name, t0)
+
+
 class _RateLimitProbeModule(HeartbeatModule):
     """Heartbeat adapter for provider rate-limit health probes."""
 
@@ -428,6 +446,7 @@ class HeartbeatRunner:
                 MemorySync(self._conn, self._engine),
                 SchemaProjector(self._conn, self._engine),
                 _DatabaseMaintenanceModule(self._conn, embedder=self._embedder),
+                _AutoReviewFlushModule(self._conn),
                 RelationshipMiner(self._conn, self._engine),
                 RollupGenerator(self._conn, self._engine),
                 SystemEventsCleanupModule(self._conn),
