@@ -88,7 +88,7 @@ def _handle_bugs_replay_ready_get(request: Any, path: str) -> None:
         refresh_backfill = coerce_query_bool(
             params.get("refresh_backfill"),
             field_name="refresh_backfill",
-            default=True,
+            default=False,
         )
         result = _workflow_query_core.handle_operator_view(
             request.subsystems,

@@ -125,6 +125,10 @@ from .workflow_runtime_repository import (
 )
 from .workflow_schedule_repository import PostgresWorkflowScheduleRepository
 from .webhook_repository import PostgresWebhookRepository
+from .semantic_assertion_repository import (
+    PostgresSemanticAssertionRepository,
+    bootstrap_semantic_assertion_repository_schema,
+)
 
 __all__ = [
     "ControlPlaneSchemaReadiness",
@@ -144,6 +148,7 @@ __all__ = [
     "PostgresProviderConcurrencyRepository",
     "PostgresReceiptRepository",
     "PostgresRoadmapAuthoringRepository",
+    "PostgresSemanticAssertionRepository",
     "PostgresSchemaError",
     "PostgresStorageError",
     "PostgresSubscriptionRepository",
@@ -169,6 +174,7 @@ __all__ = [
     "WorkflowSchemaReadiness",
     "WorkflowRunWrite",
     "bootstrap_operator_control_repository_schema",
+    "bootstrap_semantic_assertion_repository_schema",
     "bootstrap_control_plane_schema",
     "bootstrap_workflow_schema",
     "connect_workflow_database",

@@ -188,6 +188,7 @@ def _bug_list_item(
         "severity": _status_value(getattr(bug, "severity", "")) or "unknown",
         "status": _status_value(getattr(bug, "status", "")) or "unknown",
         "category": _status_value(getattr(bug, "category", "")) or "unknown",
+        "source_issue_id": str(getattr(bug, "source_issue_id", "") or "").strip() or None,
         "recurrence_count": recurrence_count,
         "impacted_run_count": impacted_run_count,
         "has_regression_after_fix": has_regression_after_fix,
@@ -270,7 +271,11 @@ def build_code_hotspots(
             bugs = bug_tracker.list_bugs(limit=max(limit, bug_packet_limit))
             bug_sample_count = len(bugs)
             for bug in bugs:
-                packet = bug_tracker.failure_packet(bug.bug_id, receipt_limit=1) or {}
+                packet = bug_tracker.failure_packet(
+                    bug.bug_id,
+                    receipt_limit=1,
+                    allow_backfill=False,
+                ) or {}
                 item = _bug_list_item(bug, packet, repo_root=repo_root_path)
                 paths = item["file_paths"]
                 if not paths:
@@ -543,7 +548,11 @@ def build_bug_scoreboard(
     packet_errors: list[str] = []
     for bug in sampled_bugs:
         try:
-            packet = bug_tracker.failure_packet(bug.bug_id, receipt_limit=1) or {}
+            packet = bug_tracker.failure_packet(
+                bug.bug_id,
+                receipt_limit=1,
+                allow_backfill=False,
+            ) or {}
         except Exception as exc:
             packet_errors.append(f"{bug.bug_id}: {type(exc).__name__}: {exc}")
             continue

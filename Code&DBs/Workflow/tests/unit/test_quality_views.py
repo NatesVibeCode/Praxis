@@ -32,6 +32,7 @@ FailureCatalogEntry = _mod.FailureCatalogEntry
 QualityRollup = _mod.QualityRollup
 QualityViewMaterializer = _mod.QualityViewMaterializer
 QualityWindow = _mod.QualityWindow
+load_failure_category_zones = _mod.load_failure_category_zones
 
 
 import uuid as _uuid
@@ -41,11 +42,31 @@ _TEST_DATE = "2029-06-15"
 _TEST_HOUR = "14"
 
 
+class _ZoneConn:
+    def __init__(self, rows, *, exc: Exception | None = None):
+        self._rows = rows
+        self._exc = exc
+
+    def execute(self, _sql: str):
+        if self._exc is not None:
+            raise self._exc
+        return self._rows
+
+
 @pytest.fixture
 def mat():
-    from _pg_test_conn import get_test_conn
-    conn = get_test_conn()
-    return QualityViewMaterializer(conn)
+    from _pg_test_conn import transactional_test_conn
+
+    with transactional_test_conn() as conn:
+        conn.execute_script(
+            """
+            TRUNCATE TABLE
+                quality_rollups,
+                agent_profiles,
+                failure_catalog
+            """
+        )
+        yield QualityViewMaterializer(conn)
 
 
 def _receipt(
@@ -107,6 +128,27 @@ class TestIngestAndMaterialize:
         ws = datetime(2029, 6, 15, 14, 0, 0)
         rollup = mat.materialize(QualityWindow.HOURLY, ws)
         assert rollup.overall_pass_rate == pytest.approx(0.0)
+
+
+class TestFailureCategoryZones:
+    def test_load_failure_category_zones_returns_zone_map(self):
+        zone_map = load_failure_category_zones(
+            _ZoneConn([{"category": "provider_timeout", "zone": "external"}]),
+            consumer="praxis_status",
+        )
+
+        assert zone_map == {"provider_timeout": "external"}
+
+    def test_load_failure_category_zones_fails_when_query_errors(self):
+        with pytest.raises(RuntimeError, match="failure_category_zones authority is required for praxis_status"):
+            load_failure_category_zones(
+                _ZoneConn([], exc=RuntimeError("db unavailable")),
+                consumer="praxis_status",
+            )
+
+    def test_load_failure_category_zones_fails_when_rows_missing(self):
+        with pytest.raises(RuntimeError, match="failure_category_zones did not return any rows"):
+            load_failure_category_zones(_ZoneConn([]), consumer="quality views")
 
 
 # ------------------------------------------------------------------

@@ -58,5 +58,15 @@
     "losses": 2,
     "win_rate": 0.0,
     "last_updated": "2026-04-06T20:05:38.475038+00:00"
+  },
+  {
+    "provider_slug": "openai",
+    "model_slug": null,
+    "elo_score": 868.78401722982,
+    "total_runs": 10,
+    "wins": 0,
+    "losses": 10,
+    "win_rate": 0.0,
+    "last_updated": "2026-04-17T06:10:07.845735+00:00"
   }
 ]

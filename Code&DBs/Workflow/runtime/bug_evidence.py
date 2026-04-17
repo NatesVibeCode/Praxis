@@ -489,6 +489,7 @@ def compare_write_sets(conn: Any, latest_receipt: dict[str, Any] | None) -> dict
             "current_write_count": 0,
             "baseline_write_count": 0,
             "note": "no receipt evidence available",
+            "error": None,
         }
     node_id = str(latest_receipt.get("node_id") or "").strip()
     workflow_id = str(latest_receipt.get("workflow_id") or "").strip()
@@ -502,8 +503,10 @@ def compare_write_sets(conn: Any, latest_receipt: dict[str, Any] | None) -> dict
             "current_write_count": len(latest_receipt.get("write_paths") or ()),
             "baseline_write_count": 0,
             "note": "missing workflow or node identity for comparison",
+            "error": None,
         }
     row = None
+    query_error = None
     try:
         row = conn.fetchrow(
             """
@@ -521,8 +524,9 @@ def compare_write_sets(conn: Any, latest_receipt: dict[str, Any] | None) -> dict
             node_id,
             receipt_id,
         )
-    except Exception:
+    except Exception as exc:
         row = None
+        query_error = f"{type(exc).__name__}: {exc}"
     baseline_receipt = row_to_receipt_summary(row) if row else None
     current_paths = set(latest_receipt.get("write_paths") or ())
     baseline_paths = set(
@@ -537,7 +541,12 @@ def compare_write_sets(conn: Any, latest_receipt: dict[str, Any] | None) -> dict
         "unchanged_paths": tuple(sorted(current_paths & baseline_paths)),
         "current_write_count": len(current_paths),
         "baseline_write_count": len(baseline_paths),
-        "note": None if baseline_receipt else "no comparable successful receipt",
+        "note": (
+            None
+            if baseline_receipt
+            else ("baseline receipt lookup failed" if query_error else "no comparable successful receipt")
+        ),
+        "error": query_error,
     }
 
 
@@ -685,6 +694,7 @@ def build_blast_radius(
             "distinct_nodes": 0,
             "distinct_requests": 0,
             "distinct_agents": 0,
+            "error": None,
         }
     clauses: list[str] = []
     params: list[object] = []
@@ -698,6 +708,7 @@ def build_blast_radius(
         params.append(node_id)
         idx += 1
     row = {}
+    query_error = None
     try:
         row = conn.fetchrow(
             f"""
@@ -713,8 +724,9 @@ def build_blast_radius(
             """,
             *params,
         ) or {}
-    except Exception:
+    except Exception as exc:
         row = {}
+        query_error = f"{type(exc).__name__}: {exc}"
     return {
         "window": _BUG_BLAST_RADIUS_WINDOW_SQL,
         "occurrence_count": int(row.get("occurrence_count") or 0),
@@ -723,6 +735,7 @@ def build_blast_radius(
         "distinct_nodes": int(row.get("distinct_nodes") or 0),
         "distinct_requests": int(row.get("distinct_requests") or 0),
         "distinct_agents": int(row.get("distinct_agents") or 0),
+        "error": query_error,
     }
 
 

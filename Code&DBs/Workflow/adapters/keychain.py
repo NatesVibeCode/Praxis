@@ -147,6 +147,11 @@ def resolve_secret(env_var_name: str, *, env: dict[str, str] | None = None) -> s
     This is the standard resolution function — use this instead of
     raw os.environ.get() for any secret/API key lookup.
     """
+    if env is not None:
+        explicit_value = env.get(env_var_name, "").strip()
+        if explicit_value:
+            return explicit_value
+
     # 1. .env file
     dotenv = _load_dotenv()
     value = dotenv.get(env_var_name, "").strip()

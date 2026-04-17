@@ -173,6 +173,11 @@ def test_praxis_ctl_doctor_includes_dependency_truth(monkeypatch, tmp_path: Path
         sync_error_count = 0
 
     monkeypatch.setattr(local_alpha, "local_postgres_health", lambda env=None: _FakeDatabaseStatus())
+    monkeypatch.setattr(
+        local_alpha,
+        "_env_for_authority",
+        lambda: {"WORKFLOW_DATABASE_URL": "postgresql://repo.test/praxis"},
+    )
     monkeypatch.setattr(local_alpha, "dependency_truth_report", lambda scope="all": fake_dependency_truth)
     monkeypatch.setattr(local_alpha, "latest_workflow_run_sync_status", lambda: _FakeSyncStatus())
     monkeypatch.setattr(local_alpha, "get_workflow_run_sync_status", lambda run_id: _FakeSyncStatus())
@@ -203,6 +208,20 @@ def test_praxis_ctl_doctor_includes_dependency_truth(monkeypatch, tmp_path: Path
     assert payload["mcp_bridge_ready"] is True
     assert payload["ui_ready"] is True
     assert payload["launch_url"] == "http://127.0.0.1:8420/app"
+
+
+def test_praxis_ctl_env_for_authority_uses_shared_repo_resolver_when_process_env_missing(monkeypatch) -> None:
+    local_alpha = _load_local_alpha()
+    monkeypatch.delenv("WORKFLOW_DATABASE_URL", raising=False)
+    monkeypatch.setattr(
+        local_alpha,
+        "workflow_database_env_for_repo",
+        lambda repo_root, env=None: {"WORKFLOW_DATABASE_URL": "postgresql://repo.test/praxis"},
+    )
+
+    assert local_alpha._env_for_authority() == {
+        "WORKFLOW_DATABASE_URL": "postgresql://repo.test/praxis",
+    }
 
 
 def test_probe_frontdoor_semantics_uses_ui_header_for_workflow_probes(monkeypatch) -> None:

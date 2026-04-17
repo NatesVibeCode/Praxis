@@ -58,9 +58,9 @@ def _link_validates_fix_evidence(
         ) VALUES ($1, $2, $3, $4, $5, '{}'::jsonb, '{}'::jsonb, $6, $7, $8)
         """,
         reference,
-        "verifier.test",
-        "bug",
-        bug_id,
+        "verifier.platform.schema_authority",
+        "platform",
+        f"bug_resolution:{bug_id}",
         status,
         "decision.test",
         datetime(2026, 4, 10, 12, 0, tzinfo=timezone.utc),
@@ -775,6 +775,53 @@ class TestEvidencePackets:
         assert "bug.evidence_links.missing" in packet["observability_gaps"]
         assert "receipt.missing" in packet["observability_gaps"]
 
+    def test_failure_packet_surfaces_helper_errors(
+        self,
+        tracker: BugTracker,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        bug, _ = tracker.file_bug(
+            title="Helper failure bug",
+            severity=BugSeverity.P2,
+            category=BugCategory.RUNTIME,
+            description="Needs error propagation from helper queries.",
+            filed_by="alice",
+        )
+        monkeypatch.setattr(
+            tracker,
+            "_compare_write_sets",
+            lambda latest_receipt: {
+                "baseline_receipt_id": None,
+                "added_paths": (),
+                "removed_paths": (),
+                "unchanged_paths": (),
+                "current_write_count": 0,
+                "baseline_write_count": 0,
+                "note": "baseline receipt lookup failed",
+                "error": "RuntimeError: receipt lane offline",
+            },
+        )
+        monkeypatch.setattr(
+            tracker,
+            "_build_blast_radius",
+            lambda *, failure_code, node_id: {
+                "window": "7 days",
+                "occurrence_count": 0,
+                "distinct_runs": 0,
+                "distinct_workflows": 0,
+                "distinct_nodes": 0,
+                "distinct_requests": 0,
+                "distinct_agents": 0,
+                "error": "RuntimeError: blast radius lane offline",
+            },
+        )
+
+        packet = tracker.failure_packet(bug.bug_id)
+        assert packet is not None
+        assert packet["observability_state"] == "degraded"
+        assert "write_set_diff.query_failed:RuntimeError: receipt lane offline" in packet["errors"]
+        assert "blast_radius.query_failed:RuntimeError: blast radius lane offline" in packet["errors"]
+
     def test_failure_packet_keeps_fallback_receipts_non_replayable(
         self,
         tracker: BugTracker,
@@ -1211,8 +1258,14 @@ class TestEvidencePackets:
                 "reason_code": "bug.replay_backfill.no_unique_match",
             }
 
-        def _hint(bug_id: str, *, receipt_limit: int = 1):
+        def _hint(
+            bug_id: str,
+            *,
+            receipt_limit: int = 1,
+            allow_backfill: bool = True,
+        ):
             assert receipt_limit == 1
+            assert allow_backfill is False
             if bug_id == bug_ready.bug_id:
                 return {
                     "available": True,
@@ -1359,6 +1412,85 @@ class TestSemanticNeighborCluster:
         assert alpha.bug_id not in neighbor_ids
         assert sn.get("note")
         assert sn.get("reason_code") == "bug.semantic_neighbors.found"
+
+    def test_failure_packet_surfaces_semantic_lookup_failures(
+        self,
+        tracker: BugTracker,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        pfx = _uuid.uuid4().hex[:8]
+        bug, _ = tracker.file_bug(
+            title=f"Broken semantic lookup [{pfx}]",
+            severity=BugSeverity.P2,
+            category=BugCategory.RUNTIME,
+            description="Semantic lookup should report query failures explicitly.",
+            filed_by="qa",
+            tags=(f"cluster:{pfx}", "area:leases"),
+        )
+
+        class _BrokenVectorStore:
+            def search_vector(self, *args, **kwargs):
+                raise RuntimeError("vector lane offline")
+
+            def prepare(self, *args, **kwargs):
+                raise RuntimeError("text lane offline")
+
+        class _BrokenConn:
+            def fetchrow(self, *args, **kwargs):
+                raise RuntimeError("embedding lane offline")
+
+            def execute(self, *args, **kwargs):
+                raise RuntimeError("tag lane offline")
+
+        monkeypatch.setattr(tracker, "get", lambda bug_id: bug if bug_id == bug.bug_id else None)
+        monkeypatch.setattr(tracker, "list_evidence", lambda bug_id: [])
+        monkeypatch.setattr(tracker, "backfill_replay_provenance", lambda bug_id: {
+            "bug_id": bug_id,
+            "linked_refs": (),
+            "linked_count": 0,
+            "reason_code": "bug.replay_backfill.none",
+        })
+        monkeypatch.setattr(tracker, "_find_signature_receipts", lambda **_kwargs: ([], None))
+        monkeypatch.setattr(tracker, "_load_verification_rows", lambda *args, **kwargs: ({}, None))
+        monkeypatch.setattr(tracker, "_build_historical_fixes", lambda **kwargs: {"count": 0, "items": (), "reason_code": "bug.historical_fixes.none", "errors": ()})
+        monkeypatch.setattr(tracker, "_compare_write_sets", lambda latest_receipt: {
+            "baseline_receipt_id": None,
+            "added_paths": (),
+            "removed_paths": (),
+            "unchanged_paths": (),
+            "current_write_count": 0,
+            "baseline_write_count": 0,
+            "note": "no receipt evidence available",
+            "error": None,
+        })
+        monkeypatch.setattr(tracker, "_build_blast_radius", lambda *, failure_code, node_id: {
+            "window": "7 days",
+            "occurrence_count": 0,
+            "distinct_runs": 0,
+            "distinct_workflows": 0,
+            "distinct_nodes": 0,
+            "distinct_requests": 0,
+            "distinct_agents": 0,
+            "error": None,
+        })
+        monkeypatch.setattr(tracker, "_replay_action", lambda **_kwargs: {
+            "available": False,
+            "automatic": False,
+            "reason_code": "bug.replay_not_ready",
+            "tool": "praxis_bugs",
+            "arguments": {"action": "replay", "bug_id": bug.bug_id},
+        })
+        monkeypatch.setattr(tracker, "_vector_store", _BrokenVectorStore())
+        monkeypatch.setattr(tracker, "_conn", _BrokenConn())
+
+        packet = tracker.failure_packet(bug.bug_id)
+        assert packet is not None
+        assert packet["observability_state"] == "degraded"
+        assert "semantic_neighbors.query_failed:embedding.query_failed:RuntimeError: embedding lane offline" in packet["errors"]
+        sn = packet["semantic_neighbors"]
+        assert sn["reason_code"] == "bug.semantic_neighbors.query_failed"
+        assert "embedding.query_failed:RuntimeError: embedding lane offline" in sn["errors"]
+        assert "tags.query_failed:RuntimeError: tag lane offline" in sn["errors"]
 
 
 class TestResumeContext:

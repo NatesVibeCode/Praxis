@@ -2,15 +2,30 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
+import plistlib
 import subprocess
+import threading
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+import asyncpg
+
 from storage.postgres import PostgresConfigurationError, resolve_workflow_database_url
 
 _WORKFLOW_DATABASE_URL_ENV = "WORKFLOW_DATABASE_URL"
+_WORKFLOW_DATABASE_PROBE_TIMEOUT_S = 3.0
+_WORKFLOW_DATABASE_LAUNCHD_LABELS = (
+    "com.praxis.engine",
+    "com.praxis.postgres",
+    "com.praxis.api-server",
+    "com.praxis.workflow-api",
+    "com.praxis.workflow-worker",
+    "com.praxis.scheduler",
+    "com.praxis.queue-worker",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +38,10 @@ class WorkflowDatabaseAuthority:
 
 def _runtime_repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
+
+
+def _launch_agents_root() -> Path:
+    return Path.home() / "Library" / "LaunchAgents"
 
 
 def _read_repo_env_file(path: Path) -> dict[str, str]:
@@ -42,6 +61,68 @@ def _read_repo_env_file(path: Path) -> dict[str, str]:
         if key and value:
             resolved[key] = value
     return resolved
+
+
+def _probe_workflow_database_url(database_url: str) -> bool:
+    normalized_database_url = resolve_workflow_database_url(
+        env={_WORKFLOW_DATABASE_URL_ENV: database_url}
+    )
+
+    async def _probe() -> bool:
+        conn = await asyncpg.connect(
+            normalized_database_url,
+            timeout=_WORKFLOW_DATABASE_PROBE_TIMEOUT_S,
+        )
+        try:
+            return True
+        finally:
+            await conn.close()
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        try:
+            return asyncio.run(_probe())
+        except Exception:
+            return False
+
+    result: dict[str, bool] = {}
+
+    def _run_probe() -> None:
+        try:
+            result["reachable"] = asyncio.run(_probe())
+        except Exception:
+            result["reachable"] = False
+
+    probe_thread = threading.Thread(target=_run_probe, daemon=True, name="workflow-db-probe")
+    probe_thread.start()
+    probe_thread.join(timeout=_WORKFLOW_DATABASE_PROBE_TIMEOUT_S + 1.0)
+    return bool(result.get("reachable"))
+
+
+def _try_resolve_launchd_database_url(repo_root: Path) -> tuple[str, str] | None:
+    launch_agents = _launch_agents_root()
+    if not launch_agents.is_dir():
+        return None
+
+    for label in _WORKFLOW_DATABASE_LAUNCHD_LABELS:
+        plist_path = launch_agents / f"{label}.plist"
+        if not plist_path.exists():
+            continue
+        try:
+            payload = plistlib.loads(plist_path.read_bytes())
+        except Exception:
+            continue
+        env_vars = payload.get("EnvironmentVariables")
+        if not isinstance(env_vars, dict):
+            continue
+        candidate = env_vars.get(_WORKFLOW_DATABASE_URL_ENV)
+        if not isinstance(candidate, str) or not candidate.strip():
+            continue
+        candidate = candidate.strip()
+        if _probe_workflow_database_url(candidate):
+            return candidate, label
+    return None
 
 
 def _try_resolve_docker_database_url(repo_root: Path) -> str | None:
@@ -140,6 +221,14 @@ def resolve_runtime_database_authority(
         )
 
     resolved_repo_root = repo_root if repo_root is not None else _runtime_repo_root()
+    launchd_authority = _try_resolve_launchd_database_url(resolved_repo_root)
+    if launchd_authority is not None:
+        launchd_database_url, launchd_label = launchd_authority
+        return WorkflowDatabaseAuthority(
+            database_url=launchd_database_url,
+            source=f"launchd:{launchd_label}",
+        )
+
     repo_env_path = resolved_repo_root / ".env"
     repo_env = _read_repo_env_file(repo_env_path)
     if _WORKFLOW_DATABASE_URL_ENV in repo_env:

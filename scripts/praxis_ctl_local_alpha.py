@@ -26,6 +26,7 @@ if str(WORKFLOW_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKFLOW_ROOT))
 
 from surfaces.api import operator_read
+from surfaces._workflow_database import workflow_database_env_for_repo
 from runtime.dependency_contract import dependency_truth_report
 from runtime.post_workflow_sync import (
     get_workflow_run_sync_status,
@@ -39,15 +40,16 @@ from storage.dev_postgres import local_postgres_bootstrap, local_postgres_health
 DISABLED_MESSAGE = (
     "Native local-alpha control is disabled. Use Docker or Cloudflare sandbox authority only."
 )
-DEFAULT_DB_URL = os.environ.get("WORKFLOW_DATABASE_URL", "postgresql://postgres@localhost:5432/praxis")
 DEFAULT_API_BASE_URL = "http://127.0.0.1:8420"
 DEFAULT_WORKFLOW_API_BASE_URL = "http://127.0.0.1:8420"
 
 
 def _env_for_authority() -> dict[str, str]:
-    return {
-        "WORKFLOW_DATABASE_URL": os.environ.get("WORKFLOW_DATABASE_URL", DEFAULT_DB_URL),
-    }
+    database_url = str(os.environ.get("WORKFLOW_DATABASE_URL", "")).strip()
+    if database_url:
+        return {"WORKFLOW_DATABASE_URL": database_url}
+    resolved = workflow_database_env_for_repo(REPO_ROOT, env=os.environ)
+    return {"WORKFLOW_DATABASE_URL": resolved["WORKFLOW_DATABASE_URL"]}
 
 
 def _serialize_exception(exc: BaseException) -> dict[str, Any]:

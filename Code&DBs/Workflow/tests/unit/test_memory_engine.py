@@ -163,6 +163,9 @@ def _edge(src: str, tgt: str, rel: RelationType = RelationType.related_to) -> Ed
 def test_add_get_edges_outgoing():
     eng = MemoryEngine(conn=get_test_conn())
     a, b, c = _uid("eo_a"), _uid("eo_b"), _uid("eo_c")
+    eng.insert(_entity(a, name="source"))
+    eng.insert(_entity(b, name="target-b"))
+    eng.insert(_entity(c, name="target-c"))
     eng.add_edge(_edge(a, b))
     eng.add_edge(_edge(a, c))
     edges = eng.get_edges(a, direction="outgoing")
@@ -174,6 +177,9 @@ def test_add_get_edges_outgoing():
 def test_get_edges_incoming():
     eng = MemoryEngine(conn=get_test_conn())
     a, b, c = _uid("ei_a"), _uid("ei_b"), _uid("ei_c")
+    eng.insert(_entity(a, name="source-a"))
+    eng.insert(_entity(b, name="target-b"))
+    eng.insert(_entity(c, name="source-c"))
     eng.add_edge(_edge(a, b))
     eng.add_edge(_edge(c, b))
     edges = eng.get_edges(b, direction="incoming")
@@ -183,6 +189,8 @@ def test_get_edges_incoming():
 def test_remove_edge():
     eng = MemoryEngine(conn=get_test_conn())
     a, b = _uid("re_a"), _uid("re_b")
+    eng.insert(_entity(a, name="source"))
+    eng.insert(_entity(b, name="target"))
     eng.add_edge(_edge(a, b))
     assert eng.remove_edge(a, b, RelationType.related_to)
     edges = eng.get_edges(a)

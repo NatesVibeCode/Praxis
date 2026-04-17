@@ -69,6 +69,21 @@ _COMPILE_AUTHORITY_REQUIREMENT_TABLES = (
     ("healer_authority_ready", ("healer_registry", "verifier_healer_bindings", "healing_runs")),
 )
 
+_COMPILE_AUTHORITY_READINESS_ORDER = (
+    "compile_artifacts",
+    "capability_catalog",
+    "verify_refs",
+    "verification_registry",
+    "compile_index_snapshots",
+    "execution_packets",
+    "repo_snapshots",
+    "verifier_registry",
+    "healer_registry",
+    "verifier_healer_bindings",
+    "verification_runs",
+    "healing_runs",
+)
+
 _WORKFLOW_READY_TABLES = {
     object_name
     for _, objects in WORKFLOW_SCHEMA_READINESS_SEQUENCE
@@ -101,15 +116,16 @@ def workflow_compile_authority_readiness_requirements() -> tuple[
 def workflow_compile_authority_readiness_tables() -> tuple[str, ...]:
     """Return the flattened list of readiness tables for compile-authority checks."""
 
-    tables: list[str] = []
-    seen: set[str] = set()
-    for _check_name, table_names in workflow_compile_authority_readiness_requirements():
-        for table_name in table_names:
-            if table_name in seen:
-                continue
-            tables.append(table_name)
-            seen.add(table_name)
-    return tuple(tables)
+    required_tables = {
+        table_name
+        for _check_name, table_names in workflow_compile_authority_readiness_requirements()
+        for table_name in table_names
+    }
+    return tuple(
+        table_name
+        for table_name in _COMPILE_AUTHORITY_READINESS_ORDER
+        if table_name in required_tables
+    )
 
 
 @dataclass(frozen=True, slots=True)

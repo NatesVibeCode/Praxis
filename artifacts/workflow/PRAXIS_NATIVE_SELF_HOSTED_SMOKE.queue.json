@@ -1,5 +1,5 @@
 {
-  "name": "Native Self-Hosted Dispatch Smoke",
+  "name": "Native Self-Hosted Smoke",
   "queue_id": "dag_native_self_hosted_smoke",
   "workflow_id": "dag_native_self_hosted_smoke",
   "phase": "DAGW11G",
@@ -16,17 +16,17 @@
   ],
   "jobs": [
     {
-      "label": "DAGW11G.1_build_self_hosted_dag_workflow_smoke",
+      "label": "PRAXW01.1_build_self_hosted_smoke",
       "agent": "openai/gpt-5.4-mini",
-      "prompt": "Build the native self-hosted smoke contract path from queue to durable evidence and keep the sequence repo-local."
+      "prompt": "Build the native self-hosted smoke contract path from queue to canonical receipts and outbox proof without introducing a second orchestration lane."
     }
   ],
   "native_smoke": {
     "authority_path": {
-      "queue_contract": "artifacts/workflow/DAG_NATIVE_SELF_HOSTED_SMOKE.queue.json",
+      "queue_contract": "artifacts/workflow/PRAXIS_NATIVE_SELF_HOSTED_SMOKE.queue.json",
       "instance_resolver": "runtime.instance.resolve_native_instance",
       "registry_authority": "registry.repository.load_registry_resolver",
-      "frontdoor": "surfaces.api.frontdoor.NativeDagFrontdoor",
+      "frontdoor": "surfaces.api.frontdoor.NativeWorkflowFrontdoor",
       "durable_run_authority": "workflow_runs",
       "durable_outcome_authority": [
         "workflow_events",
@@ -36,8 +36,8 @@
     },
     "workflow_request": {
       "schema_version": 1,
-      "workspace_ref": "dag-project",
-      "runtime_profile_ref": "dag-project",
+      "workspace_ref": "praxis",
+      "runtime_profile_ref": "praxis",
       "workflow_id": "workflow.native-self-hosted-smoke",
       "request_id": "request.native-self-hosted-smoke",
       "workflow_definition_id": "workflow_definition.native_self_hosted_smoke.v1",
@@ -60,17 +60,17 @@
             "result": "prepared"
           },
           "success_condition": {
-            "status": "success"
+            "kind": "always"
           },
           "failure_behavior": {
-            "status": "fail_closed"
+            "kind": "stop"
           },
           "authority_requirements": {
-            "workspace_ref": "dag-project",
-            "runtime_profile_ref": "dag-project"
+            "workspace_ref": "praxis",
+            "runtime_profile_ref": "praxis"
           },
           "execution_boundary": {
-            "workspace_ref": "dag-project"
+            "workspace_ref": "praxis"
           },
           "position_index": 0
         },
@@ -91,17 +91,17 @@
             "result": "persisted"
           },
           "success_condition": {
-            "status": "success"
+            "kind": "always"
           },
           "failure_behavior": {
-            "status": "fail_closed"
+            "kind": "stop"
           },
           "authority_requirements": {
-            "workspace_ref": "dag-project",
-            "runtime_profile_ref": "dag-project"
+            "workspace_ref": "praxis",
+            "runtime_profile_ref": "praxis"
           },
           "execution_boundary": {
-            "workspace_ref": "dag-project"
+            "workspace_ref": "praxis"
           },
           "position_index": 1
         }
@@ -113,7 +113,7 @@
           "from_node_id": "node_0",
           "to_node_id": "node_1",
           "release_condition": {
-            "upstream_result": "success"
+            "kind": "always"
           },
           "payload_mapping": {
             "prepared_result": "result"
@@ -123,10 +123,10 @@
       ]
     },
     "runtime_env": {
-      "WORKFLOW_DATABASE_URL": "postgresql://nate@127.0.0.1:5432/dag_workflow",
-      "DAG_RUNTIME_PROFILES_CONFIG": "config/runtime_profiles.json",
-      "DAG_RUNTIME_PROFILE": "dag-project",
-      "DAG_LOCAL_POSTGRES_DATA_DIR": "Code&DBs/Databases/postgres-dev/data"
+      "WORKFLOW_DATABASE_URL": "postgresql://nate@localhost:5432/praxis",
+      "PRAXIS_RUNTIME_PROFILES_CONFIG": "config/runtime_profiles.json",
+      "PRAXIS_RUNTIME_PROFILE": "praxis",
+      "PRAXIS_LOCAL_POSTGRES_DATA_DIR": "Code&DBs/Databases/postgres-dev/data"
     },
     "outcome_proof": {
       "required_terminal_state": "succeeded",

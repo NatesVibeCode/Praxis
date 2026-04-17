@@ -776,14 +776,14 @@ def main(
     """Parse argv and relay to the repo-local operator surfaces."""
 
     stdout = sys.stdout if stdout is None else stdout
-    source = dict(os.environ if env is None else env)
-    if not str(source.get("WORKFLOW_DATABASE_URL") or "").strip():
-        repo_root = Path(__file__).resolve().parents[4]
-        source = workflow_database_env_for_repo(repo_root, env=source)
     args = list(sys.argv[1:] if argv is None else argv)
     if not args or args[0] in {"-h", "--help", "help"}:
         stdout.write(_help_text() + "\n")
         return 0
+    source = dict(os.environ if env is None else env)
+    if not str(source.get("WORKFLOW_DATABASE_URL") or "").strip():
+        repo_root = Path(__file__).resolve().parents[4]
+        source = workflow_database_env_for_repo(repo_root, env=source)
     try:
         command = _parse(args)
     except ValueError as exc:

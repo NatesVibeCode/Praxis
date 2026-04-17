@@ -89,7 +89,15 @@ def tool_praxis_discover(params: dict, _progress_emitter=None) -> dict:
         result = indexer.index_codebase(subdirs=subdirs, force=force)
         if _progress_emitter:
             count = result.get("indexed", result.get("count", "?")) if isinstance(result, dict) else "?"
-            _progress_emitter.emit(progress=1, total=1, message=f"Done — {count} entities indexed")
+            if isinstance(result, dict) and str(result.get("observability_state") or "complete") != "complete":
+                error_count = len(tuple(result.get("errors") or ()))
+                _progress_emitter.emit(
+                    progress=1,
+                    total=1,
+                    message=f"Degraded — {count} entities indexed, {error_count} errors",
+                )
+            else:
+                _progress_emitter.emit(progress=1, total=1, message=f"Done — {count} entities indexed")
         return {
             "action": "reindex",
             "result": result,

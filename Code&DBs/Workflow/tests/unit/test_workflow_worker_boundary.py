@@ -4,6 +4,7 @@ import sys
 import types
 from typing import Any
 
+import runtime.workflow.worker as workflow_worker
 from runtime.workflow.worker import WorkflowWorker
 
 
@@ -29,28 +30,28 @@ class _FakeRunNodeRepository:
         self.calls.append(("mark_terminal_state", (), kwargs))
         return True
 
+    def mark_awaiting_human(self, **kwargs) -> bool:
+        self.calls.append(("mark_awaiting_human", (), kwargs))
+        return True
+
     def mark_failed(self, **kwargs) -> bool:
         self.calls.append(("mark_failed", (), kwargs))
         return True
 
 
-class _FakeNotificationRepository:
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, dict[str, Any]]] = []
-
-    def emit_notification(self, **kwargs) -> None:
-        self.calls.append(("emit_notification", kwargs))
-
-
-def test_workflow_worker_delegates_run_node_state_and_notifications(monkeypatch) -> None:
+def test_workflow_worker_delegates_terminal_state_to_receipt_backed_repository(monkeypatch) -> None:
     run_nodes = _FakeRunNodeRepository()
-    notifications = _FakeNotificationRepository()
     released: list[tuple[str, str]] = []
     worker = WorkflowWorker(
         _NoopConn(),
         "/repo",
         run_node_repository=run_nodes,
-        notification_repository=notifications,
+    )
+    receipt_calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        workflow_worker,
+        "write_run_node_receipt",
+        lambda _conn, **kwargs: receipt_calls.append(dict(kwargs)) or "receipt:run-1:card.plan:1:terminal",
     )
 
     monkeypatch.setitem(
@@ -86,34 +87,36 @@ def test_workflow_worker_delegates_run_node_state_and_notifications(monkeypatch)
                 "state": "succeeded",
                 "output_payload": {"artifact": "ok"},
                 "failure_code": "",
+                "receipt_id": "receipt:run-1:card.plan:1:terminal",
             },
         ),
     ]
-    assert notifications.calls == [
-        (
-            "emit_notification",
-            {
-                "run_id": "run-1",
-                "job_label": "card.plan",
-                "spec_name": "model_run",
-                "agent_slug": "card_executor",
-                "status": "succeeded",
-                "failure_code": "",
-                "duration_seconds": 0.0,
-            },
-        )
+    assert receipt_calls == [
+        {
+            "run_node_id": "node-1",
+            "phase": "terminal",
+            "receipt_type": "node_execution_receipt",
+            "status": "succeeded",
+            "outputs": {"artifact": "ok"},
+            "failure_code": "",
+            "agent_slug": "card_executor",
+            "executor_type": "runtime.workflow.worker",
+        }
     ]
     assert released == [("run-1", "card.plan")]
 
 
 def test_workflow_worker_delegates_failure_persistence_to_repository(monkeypatch) -> None:
     run_nodes = _FakeRunNodeRepository()
-    notifications = _FakeNotificationRepository()
     worker = WorkflowWorker(
         _NoopConn(),
         "/repo",
         run_node_repository=run_nodes,
-        notification_repository=notifications,
+    )
+    monkeypatch.setattr(
+        workflow_worker,
+        "write_run_node_receipt",
+        lambda _conn, **kwargs: "receipt:run-2:card.build:1:terminal",
     )
 
     def _raise(_conn, _row, _repo_root):
@@ -148,7 +151,73 @@ def test_workflow_worker_delegates_failure_persistence_to_repository(monkeypatch
         (
             "mark_failed",
             (),
-            {"run_node_id": "node-2", "failure_code": "explode"},
+            {
+                "run_node_id": "node-2",
+                "failure_code": "explode",
+                "receipt_id": "receipt:run-2:card.build:1:terminal",
+            },
         ),
     ]
-    assert notifications.calls == []
+
+
+def test_workflow_worker_records_awaiting_human_with_canonical_receipt(monkeypatch) -> None:
+    run_nodes = _FakeRunNodeRepository()
+    worker = WorkflowWorker(
+        _NoopConn(),
+        "/repo",
+        run_node_repository=run_nodes,
+    )
+    receipt_calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        workflow_worker,
+        "write_run_node_receipt",
+        lambda _conn, **kwargs: receipt_calls.append(dict(kwargs)) or "receipt:run-3:card.review:1:awaiting_human",
+    )
+
+    monkeypatch.setitem(
+        sys.modules,
+        "runtime.model_executor",
+        types.SimpleNamespace(
+            execute_card=lambda conn, row, repo_root: {
+                "status": "awaiting_human",
+                "outputs": {"reason": "Human approval required"},
+            },
+            release_downstream=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("awaiting_human should not release downstream cards")
+            ),
+        ),
+    )
+
+    worker._execute_card_node(
+        {
+            "run_node_id": "node-3",
+            "run_id": "run-3",
+            "node_id": "card.review",
+            "node_type": "card_decision",
+            "input_payload": {"executor": {"kind": "human"}},
+        }
+    )
+
+    assert run_nodes.calls == [
+        ("claim_ready_run_node", (), {"run_node_id": "node-3"}),
+        (
+            "mark_awaiting_human",
+            (),
+            {
+                "run_node_id": "node-3",
+                "output_payload": {"reason": "Human approval required"},
+                "receipt_id": "receipt:run-3:card.review:1:awaiting_human",
+            },
+        ),
+    ]
+    assert receipt_calls == [
+        {
+            "run_node_id": "node-3",
+            "phase": "awaiting_human",
+            "receipt_type": "node_awaiting_human_receipt",
+            "status": "awaiting_human",
+            "outputs": {"reason": "Human approval required"},
+            "agent_slug": "human",
+            "executor_type": "runtime.workflow.worker",
+        }
+    ]

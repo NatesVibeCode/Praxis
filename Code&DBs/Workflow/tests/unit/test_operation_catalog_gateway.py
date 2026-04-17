@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 from pydantic import BaseModel
@@ -134,3 +135,83 @@ def test_execute_query_operation_also_attaches_operation_receipt(monkeypatch) ->
     assert result["value"] == "query"
     assert result["operation_receipt"]["operation_name"] == "operator.query_example"
     assert result["operation_receipt"]["result_status"] is None
+
+
+def test_aexecute_operation_from_subsystems_awaits_async_handlers(monkeypatch) -> None:
+    async def _handler(command: _ExampleCommand, _subsystems: object) -> dict[str, object]:
+        return {"value": command.value}
+
+    binding = SimpleNamespace(
+        operation_ref="semantic_assertions.list",
+        operation_name="semantic_assertions.list",
+        source_kind="operation_query",
+        operation_kind="query",
+        command_class=_ExampleCommand,
+        handler=_handler,
+        authority_ref="authority.semantic_assertions",
+        projection_ref="projection.semantic_current_assertions",
+        posture="observe",
+        idempotency_policy="read_only",
+        binding_revision="binding.operation.semantic_assertions.20260416",
+        decision_ref="decision.operation.semantic_assertions.20260416",
+    )
+
+    class _Subsystems:
+        def get_pg_conn(self) -> object:
+            return object()
+
+    monkeypatch.setattr(
+        gateway,
+        "resolve_named_operation_binding",
+        lambda conn, operation_name: binding,
+    )
+
+    result = asyncio.run(
+        gateway.aexecute_operation_from_subsystems(
+            _Subsystems(),
+            operation_name="semantic_assertions.list",
+            payload={"value": "async"},
+        )
+    )
+
+    assert result["value"] == "async"
+    assert result["operation_receipt"]["operation_name"] == "semantic_assertions.list"
+
+
+def test_execute_operation_from_subsystems_runs_async_handlers_for_sync_surfaces(monkeypatch) -> None:
+    async def _handler(command: _ExampleCommand, _subsystems: object) -> dict[str, object]:
+        return {"value": command.value}
+
+    binding = SimpleNamespace(
+        operation_ref="semantic_assertions.list",
+        operation_name="semantic_assertions.list",
+        source_kind="operation_query",
+        operation_kind="query",
+        command_class=_ExampleCommand,
+        handler=_handler,
+        authority_ref="authority.semantic_assertions",
+        projection_ref="projection.semantic_current_assertions",
+        posture="observe",
+        idempotency_policy="read_only",
+        binding_revision="binding.operation.semantic_assertions.20260416",
+        decision_ref="decision.operation.semantic_assertions.20260416",
+    )
+
+    class _Subsystems:
+        def get_pg_conn(self) -> object:
+            return object()
+
+    monkeypatch.setattr(
+        gateway,
+        "resolve_named_operation_binding",
+        lambda conn, operation_name: binding,
+    )
+
+    result = gateway.execute_operation_from_subsystems(
+        _Subsystems(),
+        operation_name="semantic_assertions.list",
+        payload={"value": "sync-surface"},
+    )
+
+    assert result["value"] == "sync-surface"
+    assert result["operation_receipt"]["operation_name"] == "semantic_assertions.list"

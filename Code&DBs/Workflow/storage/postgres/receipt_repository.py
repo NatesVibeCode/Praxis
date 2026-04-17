@@ -418,43 +418,6 @@ class PostgresReceiptRepository:
 
         return int(evidence_seq)
 
-    def insert_workflow_notification_if_absent(
-        self,
-        *,
-        run_id: str,
-        job_label: str,
-        spec_name: str,
-        agent_slug: str,
-        status: str,
-        failure_code: str | None,
-        duration_seconds: float,
-        cpu_percent: int | float | None = None,
-        mem_bytes: int | float | None = None,
-        created_at: datetime | None = None,
-    ) -> None:
-        normalized_failure_code = str(failure_code or "").strip() or None
-        self._conn.execute(
-            """
-            INSERT INTO workflow_notifications
-                   (run_id, job_label, spec_name, agent_slug, status, failure_code,
-                    duration_seconds, cpu_percent, mem_bytes, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-            ON CONFLICT DO NOTHING
-            """,
-            _require_text(run_id, field_name="run_id"),
-            _require_text(job_label, field_name="job_label"),
-            str(spec_name or ""),
-            _require_text(agent_slug, field_name="agent_slug"),
-            _require_text(status, field_name="status"),
-            _optional_text(normalized_failure_code, field_name="failure_code"),
-            _normalize_duration_seconds(duration_seconds, field_name="duration_seconds"),
-            _normalize_optional_number(cpu_percent, field_name="cpu_percent"),
-            _normalize_optional_number(mem_bytes, field_name="mem_bytes"),
-            _require_utc(created_at, field_name="created_at")
-            if created_at is not None
-            else None,
-        )
-
     def notify_job_completed(self, *, run_id: str) -> None:
         self._conn.execute(
             "SELECT pg_notify('job_completed', $1)",
@@ -553,10 +516,7 @@ class PostgresReceiptRepository:
         run_id: str | None = None,
         descending: bool = False,
     ) -> list[dict[str, Any]]:
-        clauses = [
-            "r.receipt_type = 'workflow_job'",
-            "r.evidence_seq > $1",
-        ]
+        clauses = ["r.evidence_seq > $1"]
         params: list[Any] = [
             _require_nonnegative_int(
                 since_evidence_seq,
@@ -576,50 +536,117 @@ class PostgresReceiptRepository:
 
         rows = self._conn.execute(
             f"""
-            SELECT
-                r.evidence_seq AS id,
-                r.run_id,
-                COALESCE(j.label, r.inputs->>'job_label', r.node_id, '') AS job_label,
-                COALESCE(
-                    wr.request_envelope->>'name',
-                    wr.request_envelope->>'workflow_label',
-                    r.workflow_id,
-                    ''
-                ) AS spec_name,
-                COALESCE(
-                    NULLIF(j.resolved_agent, ''),
-                    NULLIF(j.agent_slug, ''),
-                    NULLIF(r.inputs->>'agent_slug', ''),
-                    NULLIF(r.inputs->>'agent', ''),
-                    NULLIF(r.outputs->>'author_model', ''),
-                    r.executor_type,
-                    ''
-                ) AS agent_slug,
-                COALESCE(j.status, r.status, '') AS status,
-                COALESCE(NULLIF(j.last_error_code, ''), r.failure_code, '') AS failure_code,
-                COALESCE(
-                    NULLIF(j.duration_ms, 0)::double precision / 1000.0,
-                    NULLIF(r.outputs->>'duration_ms', '')::double precision / 1000.0,
-                    GREATEST(
-                        EXTRACT(
-                            EPOCH FROM (
-                                COALESCE(r.finished_at, r.started_at) - r.started_at
-                            )
-                        ),
-                        0
-                    )
-                ) AS duration_seconds,
-                NULLIF(r.outputs->>'cpu_percent', '')::double precision AS cpu_percent,
-                NULLIF(r.outputs->>'mem_bytes', '')::bigint AS mem_bytes,
-                COALESCE(r.finished_at, r.started_at) AS created_at
-            FROM receipts AS r
-            JOIN workflow_jobs AS j
-              ON j.receipt_id = r.receipt_id
-             AND j.run_id = r.run_id
-            LEFT JOIN workflow_runs AS wr
-              ON wr.run_id = r.run_id
-            WHERE {' AND '.join(clauses)}
-            ORDER BY r.evidence_seq {order}
+            WITH notification_rows AS (
+                SELECT
+                    r.evidence_seq AS id,
+                    r.run_id,
+                    COALESCE(j.label, r.inputs->>'job_label', r.node_id, '') AS job_label,
+                    COALESCE(
+                        wr.request_envelope->>'name',
+                        wr.request_envelope->>'workflow_label',
+                        wr.request_envelope->>'type',
+                        r.workflow_id,
+                        ''
+                    ) AS spec_name,
+                    COALESCE(
+                        NULLIF(j.resolved_agent, ''),
+                        NULLIF(j.agent_slug, ''),
+                        NULLIF(r.inputs->>'agent_slug', ''),
+                        NULLIF(r.inputs->>'agent', ''),
+                        NULLIF(r.outputs->>'author_model', ''),
+                        r.executor_type,
+                        ''
+                    ) AS agent_slug,
+                    COALESCE(j.status, r.status, '') AS status,
+                    COALESCE(NULLIF(j.last_error_code, ''), r.failure_code, '') AS failure_code,
+                    COALESCE(
+                        NULLIF(j.duration_ms, 0)::double precision / 1000.0,
+                        NULLIF(r.outputs->>'duration_ms', '')::double precision / 1000.0,
+                        GREATEST(
+                            EXTRACT(
+                                EPOCH FROM (
+                                    COALESCE(r.finished_at, r.started_at) - r.started_at
+                                )
+                            ),
+                            0
+                        )
+                    ) AS duration_seconds,
+                    NULLIF(r.outputs->>'cpu_percent', '')::double precision AS cpu_percent,
+                    NULLIF(r.outputs->>'mem_bytes', '')::bigint AS mem_bytes,
+                    COALESCE(r.finished_at, r.started_at) AS created_at
+                FROM receipts AS r
+                JOIN workflow_jobs AS j
+                  ON j.receipt_id = r.receipt_id
+                 AND j.run_id = r.run_id
+                LEFT JOIN workflow_runs AS wr
+                  ON wr.run_id = r.run_id
+                WHERE r.receipt_type = 'workflow_job'
+                  AND {' AND '.join(clauses)}
+
+                UNION ALL
+
+                SELECT
+                    r.evidence_seq AS id,
+                    r.run_id,
+                    COALESCE(rn.node_id, r.node_id, r.inputs->>'job_label', '') AS job_label,
+                    COALESCE(
+                        wr.request_envelope->>'name',
+                        wr.request_envelope->>'workflow_label',
+                        wr.request_envelope->>'type',
+                        r.workflow_id,
+                        ''
+                    ) AS spec_name,
+                    COALESCE(
+                        NULLIF(r.inputs->>'agent_slug', ''),
+                        NULLIF(r.outputs->>'resolved_agent', ''),
+                        NULLIF(r.outputs->>'executed_by', ''),
+                        NULLIF(r.outputs->>'author_model', ''),
+                        r.executor_type,
+                        ''
+                    ) AS agent_slug,
+                    COALESCE(r.status, rn.current_state, '') AS status,
+                    COALESCE(r.failure_code, NULLIF(rn.failure_code, ''), '') AS failure_code,
+                    COALESCE(
+                        NULLIF(r.outputs->>'duration_seconds', '')::double precision,
+                        NULLIF(r.outputs->>'duration_ms', '')::double precision / 1000.0,
+                        GREATEST(
+                            EXTRACT(
+                                EPOCH FROM (
+                                    COALESCE(r.finished_at, r.started_at) - r.started_at
+                                )
+                            ),
+                            0
+                        )
+                    ) AS duration_seconds,
+                    NULLIF(r.outputs->>'cpu_percent', '')::double precision AS cpu_percent,
+                    NULLIF(r.outputs->>'mem_bytes', '')::bigint AS mem_bytes,
+                    COALESCE(r.finished_at, r.started_at) AS created_at
+                FROM receipts AS r
+                JOIN run_nodes AS rn
+                  ON rn.run_id = r.run_id
+                 AND rn.node_id = r.node_id
+                 AND rn.attempt_number = COALESCE(r.attempt_no, rn.attempt_number)
+                LEFT JOIN workflow_runs AS wr
+                  ON wr.run_id = r.run_id
+                WHERE r.receipt_type IN (
+                    'node_execution_receipt',
+                    'node_awaiting_human_receipt'
+                )
+                  AND {' AND '.join(clauses)}
+            )
+            SELECT id,
+                   run_id,
+                   job_label,
+                   spec_name,
+                   agent_slug,
+                   status,
+                   failure_code,
+                   duration_seconds,
+                   cpu_percent,
+                   mem_bytes,
+                   created_at
+            FROM notification_rows
+            ORDER BY id {order}
             {limit_sql}
             """,
             *params,
@@ -632,10 +659,7 @@ class PostgresReceiptRepository:
         since_evidence_seq: int = 0,
         run_id: str | None = None,
     ) -> int:
-        clauses = [
-            "r.receipt_type = 'workflow_job'",
-            "r.evidence_seq > $1",
-        ]
+        clauses = ["r.evidence_seq > $1"]
         params: list[Any] = [
             _require_nonnegative_int(
                 since_evidence_seq,
@@ -648,12 +672,31 @@ class PostgresReceiptRepository:
 
         rows = self._conn.execute(
             f"""
+            WITH notification_rows AS (
+                SELECT r.evidence_seq AS id
+                FROM receipts AS r
+                JOIN workflow_jobs AS j
+                  ON j.receipt_id = r.receipt_id
+                 AND j.run_id = r.run_id
+                WHERE r.receipt_type = 'workflow_job'
+                  AND {' AND '.join(clauses)}
+
+                UNION ALL
+
+                SELECT r.evidence_seq AS id
+                FROM receipts AS r
+                JOIN run_nodes AS rn
+                  ON rn.run_id = r.run_id
+                 AND rn.node_id = r.node_id
+                 AND rn.attempt_number = COALESCE(r.attempt_no, rn.attempt_number)
+                WHERE r.receipt_type IN (
+                    'node_execution_receipt',
+                    'node_awaiting_human_receipt'
+                )
+                  AND {' AND '.join(clauses)}
+            )
             SELECT COUNT(*) AS c
-            FROM receipts AS r
-            JOIN workflow_jobs AS j
-              ON j.receipt_id = r.receipt_id
-             AND j.run_id = r.run_id
-            WHERE {' AND '.join(clauses)}
+            FROM notification_rows
             """,
             *params,
         )

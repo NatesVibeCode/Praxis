@@ -7,7 +7,6 @@ import concurrent.futures
 import enum
 import http.client
 import json
-import math
 import os
 import shutil
 import socket
@@ -19,6 +18,15 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from runtime.queue_admission import (
+    DEFAULT_QUEUE_CRITICAL_THRESHOLD,
+    DEFAULT_QUEUE_WARNING_THRESHOLD,
+    AdmissionDecision,
+    QUEUE_DEPTH_BREAKDOWN_QUERY,
+    QueueAdmissionGate,
+    queue_admission_check,
+    queue_depth_snapshot_from_row,
+)
 from storage.postgres.connection import resolve_workflow_database_url
 from storage.postgres.validators import PostgresConfigurationError
 
@@ -97,20 +105,8 @@ def _asyncpg_module():
     return asyncpg
 
 
-def _psycopg2_module():
-    import psycopg2
-
-    return psycopg2
-
-
 def _run_async(awaitable: Any) -> Any:
     return asyncio.run(awaitable)
-
-
-def _queue_utilization_pct(total_queued: int, critical_threshold: int) -> float:
-    if critical_threshold <= 0:
-        return 999.9 if total_queued > 0 else 0.0
-    return min(round(total_queued / critical_threshold * 100, 1), 999.9)
 
 
 def _build_check(
@@ -570,8 +566,8 @@ class QueueDepthProbe(HealthProbe):
         self,
         database_url: str | None = None,
         timeout_seconds: float = _DEFAULT_CONNECT_TIMEOUT,
-        warning_threshold: int = 500,
-        critical_threshold: int = 1000,
+        warning_threshold: int = DEFAULT_QUEUE_WARNING_THRESHOLD,
+        critical_threshold: int = DEFAULT_QUEUE_CRITICAL_THRESHOLD,
     ) -> None:
         self._database_url = database_url
         self._timeout_seconds = timeout_seconds
@@ -597,63 +593,33 @@ class QueueDepthProbe(HealthProbe):
                 duration_ms=None,
             )
 
-        async def _check() -> tuple[int, int, int, int]:
+        async def _check():
             asyncpg = _asyncpg_module()
             conn = await asyncio.wait_for(asyncpg.connect(url), timeout=self._timeout_seconds)
             try:
                 row = await asyncio.wait_for(
-                    conn.fetchrow(
-                        """
-                        SELECT
-                            COUNT(*) FILTER (WHERE status = 'pending') AS pending,
-                            COUNT(*) FILTER (WHERE status = 'ready') AS ready,
-                            COUNT(*) FILTER (WHERE status = 'claimed') AS claimed,
-                            COUNT(*) FILTER (WHERE status = 'running') AS running
-                        FROM workflow_jobs
-                        WHERE status IN ('pending', 'ready', 'claimed', 'running')
-                        """
-                    ),
+                    conn.fetchrow(QUEUE_DEPTH_BREAKDOWN_QUERY),
                     timeout=self._timeout_seconds,
                 )
-                return (
-                    int(row["pending"] or 0),
-                    int(row["ready"] or 0),
-                    int(row["claimed"] or 0),
-                    int(row["running"] or 0),
-                )
+                return row
             finally:
                 await conn.close()
 
         try:
-            pending, ready, claimed, running = _run_async(_check())
-            total_queued = pending + ready
-            utilization_pct = _queue_utilization_pct(total_queued, self._critical_threshold)
-            if total_queued >= self._critical_threshold:
-                passed = False
-                status = "critical"
-            elif total_queued >= self._warning_threshold:
-                passed = True
-                status = "warning"
-            else:
-                passed = True
-                status = "ok"
+            row = _run_async(_check())
+            snapshot = queue_depth_snapshot_from_row(
+                row,
+                warning_threshold=self._warning_threshold,
+                critical_threshold=self._critical_threshold,
+            )
             return _build_check(
                 name=self.name,
-                passed=passed,
-                message=f"{total_queued} jobs pending or ready",
+                passed=snapshot.passed,
+                message=f"{snapshot.total_queued} jobs pending or ready",
                 started_at=started_at,
                 started_monotonic=started_monotonic,
-                status=status,
-                details={
-                    "pending": pending,
-                    "ready": ready,
-                    "claimed": claimed,
-                    "running": running,
-                    "total_queued": total_queued,
-                    "warning_threshold": self._warning_threshold,
-                    "critical_threshold": self._critical_threshold,
-                    "utilization_pct": utilization_pct,
-                },
+                status=snapshot.status,
+                details=snapshot.details(),
             )
         except asyncio.TimeoutError:
             return _build_check(
@@ -673,92 +639,6 @@ class QueueDepthProbe(HealthProbe):
                 started_monotonic=started_monotonic,
                 status="failed",
             )
-
-
-@dataclass(frozen=True)
-class AdmissionDecision:
-    admitted: bool
-    reason: str
-    queue_depth: int
-    utilization_pct: float
-
-
-class QueueAdmissionGate:
-    def __init__(
-        self,
-        database_url: str | None = None,
-        critical_threshold: int = 1000,
-        timeout_seconds: float = 2.0,
-    ) -> None:
-        self._database_url = database_url
-        self._critical_threshold = critical_threshold
-        self._timeout_seconds = timeout_seconds
-
-    def check(self, job_count: int = 1) -> AdmissionDecision:
-        """Check if job_count new jobs can be admitted."""
-        database_url = str(_resolve_database_url(self._database_url) or "").strip()
-        if not database_url:
-            raise RuntimeError("QueueAdmissionGate requires explicit WORKFLOW_DATABASE_URL")
-        psycopg2 = _psycopg2_module()
-        connect_timeout = max(1, math.ceil(self._timeout_seconds))
-        statement_timeout_ms = max(1, int(self._timeout_seconds * 1000))
-        try:
-            with psycopg2.connect(
-                database_url,
-                connect_timeout=connect_timeout,
-                options=f"-c statement_timeout={statement_timeout_ms}",
-            ) as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        "SELECT COUNT(*) FROM workflow_jobs WHERE status IN ('pending', 'ready')"
-                    )
-                    row = cur.fetchone()
-        except Exception as exc:
-            return AdmissionDecision(
-                admitted=False,
-                reason=f"queue admission check failed: {exc}",
-                queue_depth=-1,
-                utilization_pct=0.0,
-            )
-
-        queue_depth = int((row or [0])[0] or 0)
-        projected_depth = queue_depth + max(0, job_count)
-        utilization_pct = _queue_utilization_pct(queue_depth, self._critical_threshold)
-        if queue_depth >= self._critical_threshold:
-            return AdmissionDecision(
-                admitted=False,
-                reason=(
-                    f"queue depth {queue_depth} is at or above critical threshold "
-                    f"{self._critical_threshold}"
-                ),
-                queue_depth=queue_depth,
-                utilization_pct=utilization_pct,
-            )
-        if projected_depth > self._critical_threshold:
-            return AdmissionDecision(
-                admitted=False,
-                reason=(
-                    f"queue depth {queue_depth} + {max(0, job_count)} new jobs "
-                    f"would exceed critical threshold {self._critical_threshold}"
-                ),
-                queue_depth=queue_depth,
-                utilization_pct=utilization_pct,
-            )
-        return AdmissionDecision(
-            admitted=True,
-            reason=(
-                f"queue depth {queue_depth} within critical threshold {self._critical_threshold}"
-            ),
-            queue_depth=queue_depth,
-            utilization_pct=utilization_pct,
-        )
-
-
-def queue_admission_check(job_count: int = 1, critical_threshold: int = 1000) -> AdmissionDecision:
-    """Quick admission check. Returns AdmissionDecision."""
-    gate = QueueAdmissionGate(critical_threshold=critical_threshold)
-    return gate.check(job_count)
-
 
 class SchedulerProbe(HealthProbe):
     """Checks whether the scheduler has ticked recently."""

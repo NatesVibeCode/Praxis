@@ -272,7 +272,13 @@ def test_index_codebase_upserts_embedding_in_same_statement(monkeypatch):
     assert "EXCLUDED.embedding" in insert_query
     assert isinstance(insert_args[9], str)
     assert insert_args[9].startswith("[")
-    assert result == {"indexed": 1, "skipped": 0, "total": 1}
+    assert result == {
+        "indexed": 1,
+        "skipped": 0,
+        "total": 1,
+        "observability_state": "complete",
+        "errors": (),
+    }
 
 
 def test_index_codebase_skips_missing_embedding_without_writing_null(monkeypatch, capsys):
@@ -323,7 +329,13 @@ def test_index_codebase_skips_missing_embedding_without_writing_null(monkeypatch
     result = ModuleIndexer(conn=conn, repo_root="/repo").index_codebase(subdirs=["src"])
     captured = capsys.readouterr()
 
-    assert result == {"indexed": 0, "skipped": 0, "total": 1}
+    assert result["indexed"] == 0
+    assert result["skipped"] == 0
+    assert result["total"] == 1
+    assert result["observability_state"] == "degraded"
+    assert result["errors"] == (
+        "src/example.py:module:example:RuntimeError: embedding_missing",
+    )
     assert "embedding_missing" in captured.err
     assert not any("INSERT INTO module_embeddings" in query for query, _ in conn.calls)
 
@@ -468,3 +480,54 @@ def test_indexer_skips_unchanged(pg_conn):
         pg_conn.execute(
             "DELETE FROM module_embeddings WHERE module_path LIKE 'src/%'"
         )
+
+
+def test_stats_surfaces_backend_errors():
+    class _BrokenConn:
+        def fetchval(self, query: str):
+            raise RuntimeError("index snapshot offline")
+
+        def execute(self, query: str):
+            raise RuntimeError("index snapshot offline")
+
+    indexer = ModuleIndexer(conn=_BrokenConn(), repo_root=os.getcwd())
+    stats = indexer.stats()
+
+    assert stats["total_indexed"] == 0
+    assert stats["by_kind"] == {}
+    assert stats["observability_state"] == "degraded"
+    assert stats["errors"] == ("RuntimeError: index snapshot offline",)
+
+
+def test_indexer_surfaces_write_failures(monkeypatch):
+    class _BrokenConn:
+        def execute(self, query: str, *params):
+            if query.strip().startswith("INSERT INTO module_embeddings"):
+                raise RuntimeError("write lane offline")
+            return []
+
+    class _FakeEmbedder:
+        dimensions = 2
+
+        def embed(self, summaries):
+            return [(0.1, 0.2) for _ in summaries]
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        srcdir = os.path.join(tmpdir, "src")
+        os.makedirs(srcdir)
+        with open(os.path.join(srcdir, "writer.py"), "w") as f:
+            f.write('"""Writer module."""\ndef write_item():\n    return True\n')
+
+        indexer = ModuleIndexer(conn=_BrokenConn(), repo_root=tmpdir)
+        monkeypatch.setattr(indexer, "_embedder", _FakeEmbedder())
+
+        result = indexer.index_codebase(subdirs=["src"], force=True)
+
+    assert result["indexed"] == 0
+    assert result["skipped"] == 0
+    assert result["total"] == 2
+    assert result["observability_state"] == "degraded"
+    assert result["errors"] == (
+        "src/writer.py:module:writer:RuntimeError: write lane offline",
+        "src/writer.py:function:write_item:RuntimeError: write lane offline",
+    )

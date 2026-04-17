@@ -17,7 +17,7 @@
     "authority_path": {
       "workflow_classes": "policy.workflow_classes.PostgresWorkflowClassRepository",
       "native_scheduler": "surfaces.api.native_scheduler.NativeSchedulerFrontdoor",
-      "native_truth": "artifacts/workflow/DAG_NATIVE_STATUS_AND_RECEIPT_TRUTH.md"
+      "native_truth": "artifacts/workflow/PRAXIS_NATIVE_STATUS_AND_RECEIPT_TRUTH.md"
     },
     "parallel_wave": {
       "target_ref": "workspace.alpha",
@@ -43,7 +43,7 @@
       "command": "PYTHONPATH='/Users/nate/Praxis/Code&DBs/Workflow' python3 -m pytest -q '/Users/nate/Praxis/Code&DBs/Workflow/tests/integration/test_native_default_parallel_proof.py'"
     },
     {
-      "command": "cd '/Users/nate/Praxis' && ./scripts/validate-queue.sh'/Users/nate/Praxis/artifacts/workflow/DAG_NATIVE_DEFAULT_PARALLEL_PROOF.queue.json'"
+      "command": "cd '/Users/nate/Praxis' && ./scripts/validate-queue.sh'/Users/nate/Praxis/artifacts/workflow/PRAXIS_NATIVE_DEFAULT_PARALLEL_PROOF.queue.json'"
     }
   ]
 }

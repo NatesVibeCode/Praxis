@@ -54,8 +54,14 @@ def _prompt_provider_choices() -> tuple[str, ...]:
 
 def _default_prompt_provider_slug() -> str:
     from adapters import provider_registry as provider_registry_mod
+    from adapters.provider_transport import BUILTIN_PROVIDER_PROFILES, builtin_default_provider_slug
 
-    return provider_registry_mod.default_provider_slug()
+    try:
+        return provider_registry_mod.default_provider_slug()
+    except Exception:
+        return builtin_default_provider_slug(
+            {profile.provider_slug: profile for profile in BUILTIN_PROVIDER_PROFILES}
+        )
 
 
 def _prompt_provider_help_line() -> str:

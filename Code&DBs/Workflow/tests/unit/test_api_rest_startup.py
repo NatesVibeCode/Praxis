@@ -68,6 +68,25 @@ def test_rest_startup_boots_shared_subsystems_when_enabled(monkeypatch) -> None:
             delattr(rest.app.state, "shared_subsystems")
 
 
+def test_rest_startup_degrades_when_capability_mount_fails(monkeypatch) -> None:
+    monkeypatch.setattr(
+        rest,
+        "mount_capabilities",
+        lambda _app: (_ for _ in ()).throw(RuntimeError("db unavailable")),
+    )
+    monkeypatch.setattr(
+        rest.launcher_handlers,
+        "launcher_status_payload",
+        lambda: {"ok": True, "ready": False},
+    )
+
+    with TestClient(rest.app) as client:
+        response = client.get("/api/launcher/status")
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "ready": False}
+
+
 def test_launcher_status_endpoint_delegates_to_handler(monkeypatch) -> None:
     expected = {
         "ok": True,
@@ -356,12 +375,11 @@ def test_launcher_app_serves_index_from_dist(monkeypatch, tmp_path: Path) -> Non
     assert "root" in response.text
 
 
-def test_legacy_ui_redirects_to_launcher_app() -> None:
+def test_legacy_ui_routes_are_absent() -> None:
     with TestClient(rest.app) as client:
         response = client.get("/ui", follow_redirects=False)
 
-    assert response.status_code in {307, 308}
-    assert response.headers["location"] == "/app"
+    assert response.status_code == 404
 
 
 def test_launcher_app_reports_missing_build(monkeypatch, tmp_path: Path) -> None:

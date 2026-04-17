@@ -72,7 +72,13 @@
     "141_operation_catalog_provider_onboarding.sql",
     "142_operation_catalog_operator_decision_bindings.sql",
     "143_object_field_registry_authority.sql",
-    "144_object_field_registry_hard_cutover.sql"
+    "144_object_field_registry_hard_cutover.sql",
+    "145_operation_catalog_object_schema_bindings.sql",
+    "146_semantic_assertion_substrate.sql",
+    "147_operation_catalog_semantic_assertions.sql",
+    "148_drop_workflow_notifications.sql",
+    "149_native_self_hosted_smoke_definition.sql",
+    "150_native_self_hosted_smoke_execution_identity.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -2108,6 +2114,134 @@
         "object_type": "constraint",
         "object_name": "object_field_registry.object_field_registry_field_name_nonblank"
       }
+    ],
+    "145_operation_catalog_object_schema_bindings.sql": [
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.object_schema.type_list"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.object_schema.type_get"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.object_schema.type_upsert"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.object_schema.type_upsert_by_id"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.object_schema.type_delete"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.object_schema.field_list"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.object_schema.field_upsert"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.object_schema.field_retire"
+      }
+    ],
+    "146_semantic_assertion_substrate.sql": [
+      {
+        "object_type": "table",
+        "object_name": "semantic_predicates"
+      },
+      {
+        "object_type": "table",
+        "object_name": "semantic_assertions"
+      },
+      {
+        "object_type": "table",
+        "object_name": "semantic_current_assertions"
+      },
+      {
+        "object_type": "index",
+        "object_name": "semantic_predicates_status_updated_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "semantic_assertions_predicate_subject_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "semantic_current_assertions_predicate_subject_idx"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "semantic_predicates.semantic_predicates_cardinality_check"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "semantic_assertions.semantic_assertions_valid_window_check"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "semantic_current_assertions.semantic_current_assertions_qualifiers_object_check"
+      }
+    ],
+    "147_operation_catalog_semantic_assertions.sql": [
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.semantic_assertions.register_predicate"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.semantic_assertions.record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.semantic_assertions.retract"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.semantic_assertions.list"
+      }
+    ],
+    "148_drop_workflow_notifications.sql": [
+      {
+        "object_type": "absent_table",
+        "object_name": "workflow_notifications"
+      }
+    ],
+    "149_native_self_hosted_smoke_definition.sql": [
+      {
+        "object_type": "row",
+        "object_name": "workflow_definitions.workflow_definition.native_self_hosted_smoke.v1"
+      },
+      {
+        "object_type": "row",
+        "object_name": "workflow_definition_nodes.workflow_definition.native_self_hosted_smoke.v1:node_0"
+      },
+      {
+        "object_type": "row",
+        "object_name": "workflow_definition_nodes.workflow_definition.native_self_hosted_smoke.v1:node_1"
+      },
+      {
+        "object_type": "row",
+        "object_name": "workflow_definition_edges.workflow_definition.native_self_hosted_smoke.v1:edge_0"
+      }
+    ],
+    "150_native_self_hosted_smoke_execution_identity.sql": [
+      {
+        "object_type": "row",
+        "object_name": "workflow_definitions.workflow_definition.native_self_hosted_smoke.v1"
+      },
+      {
+        "object_type": "row",
+        "object_name": "workflow_definition_nodes.workflow_definition.native_self_hosted_smoke.v1:node_0"
+      },
+      {
+        "object_type": "row",
+        "object_name": "workflow_definition_nodes.workflow_definition.native_self_hosted_smoke.v1:node_1"
+      }
     ]
   },
   "policy_buckets": {
@@ -2184,7 +2318,13 @@
       "141_operation_catalog_provider_onboarding.sql",
       "142_operation_catalog_operator_decision_bindings.sql",
       "143_object_field_registry_authority.sql",
-      "144_object_field_registry_hard_cutover.sql"
+      "144_object_field_registry_hard_cutover.sql",
+      "145_operation_catalog_object_schema_bindings.sql",
+      "146_semantic_assertion_substrate.sql",
+      "147_operation_catalog_semantic_assertions.sql",
+      "148_drop_workflow_notifications.sql",
+      "149_native_self_hosted_smoke_definition.sql",
+      "150_native_self_hosted_smoke_execution_identity.sql"
     ],
     "bootstrap_only": [
       "012_execution_leases.sql",

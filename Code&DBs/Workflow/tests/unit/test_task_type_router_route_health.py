@@ -22,6 +22,11 @@ _spec.loader.exec_module(_mod)  # type: ignore[union-attr]
 from runtime.task_type_router import TaskTypeRouter
 
 
+@pytest.fixture(autouse=True)
+def _stub_router_provider_defaults(monkeypatch):
+    monkeypatch.setattr(_mod, "default_llm_adapter_type", lambda: "cli")
+
+
 def _policy_row() -> dict[str, object]:
     return {
         "task_rank_weight": 0.35,

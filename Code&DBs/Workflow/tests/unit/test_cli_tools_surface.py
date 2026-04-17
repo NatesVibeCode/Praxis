@@ -196,6 +196,18 @@ def test_tools_describe_surfaces_cli_metadata() -> None:
     assert '"question"' in rendered
 
 
+def test_tools_describe_praxis_bugs_smoke() -> None:
+    stdout = StringIO()
+
+    assert workflow_cli_main(["tools", "describe", "praxis_bugs"], stdout=stdout) == 0
+
+    rendered = stdout.getvalue()
+    assert "praxis_bugs" in rendered
+    assert "entrypoint: workflow bugs" in rendered
+    assert "describe_command: workflow tools describe praxis_bugs" in rendered
+    assert "resolve+verifier_ref" in rendered
+
+
 def test_tools_describe_accepts_unique_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tools_commands, "get_definition", lambda tool_name: None)
     monkeypatch.setattr(

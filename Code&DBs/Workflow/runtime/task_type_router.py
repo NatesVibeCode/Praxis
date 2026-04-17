@@ -871,7 +871,7 @@ class TaskTypeRouter:
             if not name:
                 continue
             self._routing_repository.update_explicit_benchmark_score(
-                task_type,
+                task_type=task_type,
                 provider_slug=str(row["provider_slug"]),
                 model_slug=str(row["model_slug"]),
                 benchmark_score=score,

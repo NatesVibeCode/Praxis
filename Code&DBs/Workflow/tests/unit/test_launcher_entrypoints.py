@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -14,6 +16,10 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 
 def test_legacy_launch_ui_shell_wrapper_is_absent() -> None:
     assert not (REPO_ROOT / "Code&DBs" / "Workflow" / "scripts" / "launch-ui.sh").exists()
+
+
+def test_legacy_service_manager_shell_wrapper_is_absent() -> None:
+    assert not (REPO_ROOT / "scripts" / "praxis-service-manager").exists()
 
 
 def _run_launcher_help(script_name: str) -> subprocess.CompletedProcess[str]:
@@ -38,11 +44,13 @@ def test_praxis_help_uses_canonical_command_name() -> None:
     assert "Usage: praxis <command> [service]" in completed.stdout
     assert "workflow ...            Canonical execution, query, and operator authority" in completed.stdout
     assert "db ...                  Schema authority plus SQL scaffolds" in completed.stdout
+    assert "launch                  Start Docker services, probe launcher readiness, and optionally open /app" in completed.stdout
+    assert "doctor --json           Emit semantic launcher readiness as JSON" in completed.stdout
     assert "start [service...]" in completed.stdout
     assert "scheduler" in completed.stdout
-    assert "Native launchd control is disabled." in completed.stdout
+    assert "Native launchd install/setup control has been removed." in completed.stdout
     assert "Scheduler is not containerized yet." not in completed.stdout
-    assert "praxis-ctl start" not in completed.stdout
+    assert "praxis-service-manager" not in completed.stdout
 
 
 def test_praxis_workflow_passthrough_uses_workflow_frontdoor() -> None:
@@ -131,8 +139,86 @@ def test_praxis_ctl_help_preserves_alias_command_name() -> None:
     completed = _run_launcher_help("praxis-ctl")
 
     assert "Usage: praxis-ctl <command> [service]" in completed.stdout
-    assert "praxis-ctl start [--foreground|postgres|api|workflow-api|worker|scheduler]" in completed.stdout
-    assert "praxis start [postgres|api|workflow-api|worker|scheduler]" not in completed.stdout
+    assert "launch                  Start Docker services, probe launcher readiness, and optionally open /app" in completed.stdout
+    assert "doctor --json           Emit semantic launcher readiness as JSON" in completed.stdout
+    assert "scripts/praxis-ctl remains a compatibility alias." in completed.stdout
+
+
+def test_praxis_install_reports_removed_native_service_manager() -> None:
+    completed = subprocess.run(
+        [str(REPO_ROOT / "scripts" / "praxis"), "install"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert completed.returncode == 1
+    assert "praxis install is no longer supported." in completed.stderr
+    assert "Native install/setup launchd control has been removed." in completed.stderr
+    assert "Native Praxis service-manager is disabled." not in completed.stderr
+
+
+def test_praxis_status_json_is_served_from_canonical_frontdoor(tmp_path: Path) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_docker = fake_bin / "docker"
+    fake_docker.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env bash",
+                "set -eu",
+                "if [ \"$1\" != \"compose\" ]; then",
+                "  echo \"unexpected command: $*\" >&2",
+                "  exit 1",
+                "fi",
+                "shift",
+                "if [ \"$1\" = \"ps\" ] && [ \"$2\" = \"--format\" ] && [ \"$3\" = \"json\" ]; then",
+                "  cat <<'EOF'",
+                "[",
+                "  {\"Service\":\"postgres\",\"State\":\"running\",\"Publishers\":[{\"PublishedPort\":5432,\"TargetPort\":5432,\"Protocol\":\"tcp\",\"URL\":\"tcp://127.0.0.1\"}]},",
+                "  {\"Service\":\"api-server\",\"State\":\"running\",\"Publishers\":[{\"PublishedPort\":8420,\"TargetPort\":8420,\"Protocol\":\"tcp\",\"URL\":\"tcp://127.0.0.1\"}]},",
+                "  {\"Service\":\"workflow-worker\",\"State\":\"running\",\"Publishers\":[]},",
+                "  {\"Service\":\"scheduler\",\"State\":\"running\",\"Publishers\":[]}",
+                "]",
+                "EOF",
+                "  exit 0",
+                "fi",
+                "echo \"unexpected docker invocation: $*\" >&2",
+                "exit 1",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    fake_docker.chmod(0o755)
+
+    completed = subprocess.run(
+        [str(REPO_ROOT / "scripts" / "praxis"), "status", "--json"],
+        cwd=REPO_ROOT,
+        env={
+            **os.environ,
+            "PATH": f"{fake_bin}:{os.environ.get('PATH', '')}",
+            "PYTHON_BIN": sys.executable,
+            "WORKFLOW_DATABASE_URL": "postgresql://localhost:5432/praxis",
+            "PRAXIS_LAUNCHER_STATE_DIR": str(tmp_path / "state"),
+        },
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert completed.returncode == 0
+    payload = json.loads(completed.stdout)
+    assert payload["service_manager"] == "scripts/praxis"
+    assert payload["compatibility_alias"] == "scripts/praxis-ctl"
+    assert payload["preferred_command"] == "praxis"
+    assert [service["name"] for service in payload["services"]] == [
+        "postgres",
+        "api-server",
+        "workflow-worker",
+        "scheduler",
+    ]
 
 
 def test_launcher_status_payload_uses_fast_frontdoor_profile(monkeypatch) -> None:

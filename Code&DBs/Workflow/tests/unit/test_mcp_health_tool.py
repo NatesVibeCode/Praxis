@@ -89,15 +89,28 @@ def test_tool_dag_health_uses_workflow_database_env(monkeypatch) -> None:
     monkeypatch.setattr(missing_detector, "_now", lambda: datetime(2026, 4, 15, tzinfo=timezone.utc))
     monkeypatch.setattr(
         health_tool,
-        "provider_registry_mod",
-        SimpleNamespace(
-            registered_providers=lambda: ("openai", "google"),
-            default_provider_slug=lambda: "openai",
-            default_llm_adapter_type=lambda: "cli_llm",
-            supports_adapter=lambda provider_slug, adapter_type: not (
-                provider_slug == "google" and adapter_type == "llm_task"
-            ),
-        ),
+        "query_transport_support",
+        lambda **_kwargs: {
+            "default_provider_slug": "openai",
+            "default_adapter_type": "cli_llm",
+            "support_basis": "provider_execution_registry + provider_model_candidates + transport probes",
+            "providers": [
+                {
+                    "provider_slug": "openai",
+                    "transports": {
+                        "cli_llm": {"supported": True},
+                        "llm_task": {"supported": True},
+                    },
+                },
+                {
+                    "provider_slug": "google",
+                    "transports": {
+                        "cli_llm": {"supported": True},
+                        "llm_task": {"supported": False},
+                    },
+                },
+            ],
+        },
     )
     monkeypatch.setattr(
         health_tool,
@@ -113,6 +126,7 @@ def test_tool_dag_health_uses_workflow_database_env(monkeypatch) -> None:
                 ),
                 PreflightRunner=_CapturingPreflightRunner,
             ),
+            get_pg_conn=lambda: "pg-conn",
             get_operator_panel=lambda: _FakePanel(),
             get_memory_engine=lambda: SimpleNamespace(_connect=lambda: _FakeConn()),
         ),
@@ -139,6 +153,7 @@ def test_tool_dag_health_uses_workflow_database_env(monkeypatch) -> None:
             {"provider_slug": "openai", "adapters": ["cli_llm", "llm_task"]},
             {"provider_slug": "google", "adapters": ["cli_llm"]},
         ],
+        "support_basis": "provider_execution_registry + provider_model_candidates + transport probes",
     }
     assert result["dependency_truth"] == {"ok": True, "scope": "all"}
     assert provider_probe_calls == [

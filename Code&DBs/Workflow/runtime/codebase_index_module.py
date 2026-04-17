@@ -176,7 +176,12 @@ class CodebaseIndexModule(HeartbeatModule):
             from runtime.module_indexer import ModuleIndexer
             conn = self._ensure_conn()
             indexer = ModuleIndexer(conn=conn, repo_root=self._repo_root)
-            indexer.index_codebase()
+            index_result = indexer.index_codebase()
+            if str(index_result.get("observability_state") or "complete") != "complete":
+                detail = "; ".join(str(item) for item in tuple(index_result.get("errors") or ())[:3])
+                if not detail:
+                    detail = "partial indexing failure"
+                errors.append(f"discovery index degraded: {detail}")
         except Exception as exc:
             errors.append(f"discovery index: {exc}")
 

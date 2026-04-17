@@ -71,6 +71,7 @@ class _FakeTrendDetector:
 
 class _FakeBugTracker:
     def __init__(self) -> None:
+        self.failure_packet_calls: list[dict[str, object]] = []
         self._bugs = [
             _bug(
                 bug_id="BUG-1",
@@ -124,8 +125,20 @@ class _FakeBugTracker:
         del args, kwargs
         return list(self._bugs)
 
-    def failure_packet(self, bug_id: str, *, receipt_limit: int = 1):
-        del receipt_limit
+    def failure_packet(
+        self,
+        bug_id: str,
+        *,
+        receipt_limit: int = 1,
+        allow_backfill: bool = True,
+    ):
+        self.failure_packet_calls.append(
+            {
+                "bug_id": bug_id,
+                "receipt_limit": receipt_limit,
+                "allow_backfill": allow_backfill,
+            }
+        )
         return self._packets[bug_id]
 
     def stats(self):
@@ -154,9 +167,10 @@ def test_build_code_hotspots_merges_static_risk_and_bug_signals(monkeypatch, tmp
     monkeypatch.setattr(observability_mod, "HealthMapper", _FakeHealthMapper)
     monkeypatch.setattr(observability_mod, "RiskScorer", _FakeRiskScorer)
 
+    tracker = _FakeBugTracker()
     payload = observability_mod.build_code_hotspots(
         repo_root=tmp_path,
-        bug_tracker=_FakeBugTracker(),
+        bug_tracker=tracker,
         roots=("runtime",),
         limit=5,
     )
@@ -168,6 +182,8 @@ def test_build_code_hotspots_merges_static_risk_and_bug_signals(monkeypatch, tmp
     assert payload["files"][0]["risk_score"] == 57.5
     assert "under-observed bug(s)" in " ".join(payload["files"][0]["signals"])
     assert payload["components"][0]["component"] == "runtime"
+    assert tracker.failure_packet_calls
+    assert all(call["allow_backfill"] is False for call in tracker.failure_packet_calls)
 
 
 def test_build_bug_scoreboard_surfaces_recurring_and_under_observed_bugs(tmp_path: Path) -> None:
@@ -184,6 +200,8 @@ def test_build_bug_scoreboard_surfaces_recurring_and_under_observed_bugs(tmp_pat
     assert payload["top_recurring"][0]["bug_id"] == "BUG-1"
     assert payload["regressions"][0]["bug_id"] == "BUG-1"
     assert payload["under_observed"][0]["bug_id"] == "BUG-2"
+    assert tracker.failure_packet_calls
+    assert all(call["allow_backfill"] is False for call in tracker.failure_packet_calls)
 
 
 def test_build_platform_observability_flattens_probe_state() -> None:

@@ -20,6 +20,8 @@ _mod = importlib.util.module_from_spec(_spec)
 sys.modules["runtime.health"] = _mod
 _spec.loader.exec_module(_mod)
 
+import runtime.queue_admission as queue_admission
+
 DatabaseProbe = _mod.DatabaseProbe
 DiskSpaceProbe = _mod.DiskSpaceProbe
 FileExistsProbe = _mod.FileExistsProbe
@@ -231,11 +233,20 @@ class _FakePsycopg2:
         return _FakePsycopgConnection(self._row)
 
 
+class _FakeSyncQueueConn:
+    def __init__(self, row):
+        self._row = row
+
+    def execute(self, query):
+        self.query = query
+        return [self._row]
+
+
 class TestQueueAdmissionGate:
     def test_admits_when_projected_depth_stays_within_threshold(self):
         gate = QueueAdmissionGate(database_url="postgresql://example/db", critical_threshold=10)
         fake_psycopg2 = _FakePsycopg2((8,))
-        with patch.object(_mod, "_psycopg2_module", return_value=fake_psycopg2):
+        with patch.object(queue_admission, "_psycopg2_module", return_value=fake_psycopg2):
             decision = gate.check(job_count=2)
 
         assert decision.admitted is True
@@ -245,7 +256,7 @@ class TestQueueAdmissionGate:
     def test_rejects_when_projected_depth_exceeds_threshold(self):
         gate = QueueAdmissionGate(database_url="postgresql://example/db", critical_threshold=10)
         fake_psycopg2 = _FakePsycopg2((10,))
-        with patch.object(_mod, "_psycopg2_module", return_value=fake_psycopg2):
+        with patch.object(queue_admission, "_psycopg2_module", return_value=fake_psycopg2):
             decision = gate.check(job_count=1)
 
         assert decision.admitted is False
@@ -256,11 +267,20 @@ class TestQueueAdmissionGate:
     def test_helper_uses_gate_defaults(self):
         fake_psycopg2 = _FakePsycopg2((3,))
         with patch.dict(os.environ, {"WORKFLOW_DATABASE_URL": "postgresql://example/db"}, clear=False):
-            with patch.object(_mod, "_psycopg2_module", return_value=fake_psycopg2):
+            with patch.object(queue_admission, "_psycopg2_module", return_value=fake_psycopg2):
                 decision = queue_admission_check(job_count=1, critical_threshold=10)
 
         assert decision.admitted is True
         assert decision.queue_depth == 3
+
+    def test_shared_gate_checks_existing_sync_connection(self):
+        gate = QueueAdmissionGate(critical_threshold=10)
+
+        decision = gate.check_connection(_FakeSyncQueueConn({"count": 8}), job_count=2)
+
+        assert decision.admitted is True
+        assert decision.queue_depth == 8
+        assert decision.utilization_pct == 80.0
 
 
 # ---- PreflightRunner aggregation ------------------------------------------

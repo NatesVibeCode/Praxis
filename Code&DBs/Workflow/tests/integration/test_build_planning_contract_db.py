@@ -14,7 +14,7 @@ from storage.postgres.workflow_runtime_repository import (
     load_workflow_record,
     persist_workflow_record,
 )
-from surfaces.api.handlers.workflow_query import _workflow_build_payload
+from runtime.workflow_build_moment import build_workflow_build_moment
 
 
 ensure_test_database_ready()
@@ -215,7 +215,7 @@ def _persist_ap_invoice_workflow(
 def _latest_payload(conn, *, workflow_id: str) -> dict[str, object]:
     row = load_workflow_record(conn, workflow_id=workflow_id)
     assert row is not None
-    return _workflow_build_payload(row, conn=conn)
+    return build_workflow_build_moment(row, conn=conn)
 
 
 def test_real_db_candidate_manifest_and_payload_require_explicit_binding_approval() -> None:

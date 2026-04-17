@@ -12,6 +12,7 @@ import pytest
 os.environ.setdefault("WORKFLOW_DATABASE_URL", "postgresql://postgres@localhost:5432/praxis")
 
 import surfaces.api.rest as rest
+from surfaces.cli import workflow_cli as legacy_workflow_cli
 from surfaces.cli.main import main as workflow_cli_main
 from surfaces.cli.commands import operate as operate_commands
 from surfaces.cli.commands import workflow as workflow_commands
@@ -1002,18 +1003,75 @@ def test_preview_frontdoor_delegates_to_run_with_preview_execution(
     captured: dict[str, object] = {}
     workflow_main_module = importlib.import_module("surfaces.cli.main")
 
-    def _fake_delegate(command_name: str, args: list[str], *, stdout) -> int:
-        captured["command_name"] = command_name
+    def _fake_run(args: list[str], *, stdout) -> int:
         captured["args"] = list(args)
         return 0
 
-    monkeypatch.setattr(workflow_main_module, "_delegate_legacy_workflow_cli", _fake_delegate)
+    monkeypatch.setattr(workflow_main_module, "_run_command", _fake_run)
 
     assert workflow_cli_main(["preview", "spec.queue.json"], stdout=StringIO()) == 0
     assert captured == {
-        "command_name": "run",
         "args": ["spec.queue.json", "--preview-execution"],
     }
+
+
+def test_generate_frontdoor_uses_direct_compat_handler(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_generate(args) -> int:
+        captured["manifest_file"] = args.manifest_file
+        captured["output"] = args.output
+        captured["strict"] = args.strict
+        captured["merge"] = args.merge
+        return 0
+
+    monkeypatch.setattr(legacy_workflow_cli, "cmd_generate", _fake_generate)
+
+    assert workflow_cli_main(["generate", "manifest.json", "spec.queue.json"], stdout=StringIO()) == 0
+    assert captured == {
+        "manifest_file": "manifest.json",
+        "output": "spec.queue.json",
+        "strict": False,
+        "merge": False,
+    }
+
+
+def test_legacy_workflow_cli_run_delegates_to_modern_frontdoor(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    captured: dict[str, object] = {}
+    workflow_main_module = importlib.import_module("surfaces.cli.main")
+
+    def _fake_main(argv, *, stdout=None):
+        captured["argv"] = list(argv)
+        stdout.write("run delegated\n")
+        return 0
+
+    monkeypatch.setattr(workflow_main_module, "main", _fake_main)
+
+    assert legacy_workflow_cli.main(["run", "spec.queue.json"]) == 0
+    assert captured["argv"] == ["run", "spec.queue.json"]
+    assert "run delegated" in capsys.readouterr().out
+
+
+def test_legacy_workflow_cli_generate_delegates_to_modern_frontdoor(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    captured: dict[str, object] = {}
+    workflow_main_module = importlib.import_module("surfaces.cli.main")
+
+    def _fake_main(argv, *, stdout=None):
+        captured["argv"] = list(argv)
+        stdout.write("generate delegated\n")
+        return 0
+
+    monkeypatch.setattr(workflow_main_module, "main", _fake_main)
+
+    assert legacy_workflow_cli.main(["generate", "manifest.json", "spec.queue.json"]) == 0
+    assert captured["argv"] == ["generate", "manifest.json", "spec.queue.json"]
+    assert "generate delegated" in capsys.readouterr().out
 
 
 def test_help_can_show_circuits_usage() -> None:

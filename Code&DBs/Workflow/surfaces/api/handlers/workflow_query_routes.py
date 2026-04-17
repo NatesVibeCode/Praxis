@@ -45,7 +45,6 @@ QUERY_POST_ROUTES: list[RouteEntry] = [
         _objects._handle_documents_post,
     ),
     (_exact("/api/files"), _files._handle_files_post),
-    (_exact("/api/object-types"), _objects._handle_object_types_post),
     (
         lambda candidate: candidate in {
             "/api/objects",
@@ -59,7 +58,6 @@ QUERY_POST_ROUTES: list[RouteEntry] = [
 
 QUERY_PUT_ROUTES: list[RouteEntry] = [
     (_exact("/api/objects/update"), _objects._handle_objects_post),
-    (_prefix_single_segment("/api/object-types/"), _objects._handle_object_types_put),
     (_prefix_single_segment("/api/objects/"), _objects._handle_objects_put),
     (
         _prefix_single_segment("/api/workflows/", excluded={"run", "delete"}),
@@ -98,9 +96,7 @@ QUERY_GET_ROUTES: list[RouteEntry] = [
     (_prefix_suffix("/api/files/", "/content"), _files._handle_files_get),
     (_exact("/api/files"), _files._handle_files_get),
     (_exact("/api/documents"), _objects._handle_documents_get),
-    (_exact("/api/object-types"), _objects._handle_object_types_get),
     (_exact("/api/objects"), _objects._handle_objects_get),
-    (_prefix_single_segment("/api/object-types/"), _objects._handle_object_types_get),
     (_prefix_single_segment("/api/objects/"), _objects._handle_objects_get),
     (_exact("/api/workflows"), _workflows._handle_workflows_get),
     (_workflow_build_path, _workflows._handle_workflow_build_get),
@@ -111,7 +107,6 @@ QUERY_GET_ROUTES: list[RouteEntry] = [
 
 QUERY_DELETE_ROUTES: list[RouteEntry] = [
     (_exact("/api/objects/delete"), _objects._handle_objects_post),
-    (_prefix_single_segment("/api/object-types/"), _objects._handle_object_types_delete),
     (_prefix_single_segment("/api/objects/"), _objects._handle_objects_delete),
     (_prefix_single_segment("/api/workflows/delete/"), _workflows._handle_workflow_delete),
     (

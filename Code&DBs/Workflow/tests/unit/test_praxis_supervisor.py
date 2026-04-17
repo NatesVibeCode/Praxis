@@ -8,7 +8,12 @@ import pytest
 from runtime import praxis_supervisor
 
 
-def _paths(tmp_path: Path, *, db_url: str = "postgresql://test@localhost:5432/praxis_test") -> praxis_supervisor.SupervisorPaths:
+def _paths(
+    tmp_path: Path,
+    *,
+    db_url: str = "postgresql://test@localhost:5432/praxis_test",
+    authority_source: str = "argument",
+) -> praxis_supervisor.SupervisorPaths:
     repo_root = tmp_path / "Praxis"
     workflow_dir = repo_root / "Code&DBs" / "Workflow"
     state_dir = repo_root / ".cache" / "praxis-supervisor"
@@ -25,6 +30,7 @@ def _paths(tmp_path: Path, *, db_url: str = "postgresql://test@localhost:5432/pr
         state_file=state_dir / "state.json",
         control_file=state_dir / "control.json",
         database_url=db_url,
+        database_authority_source=authority_source,
     )
 
 
@@ -37,89 +43,84 @@ def test_render_launch_agent_plist_uses_single_praxis_authority(tmp_path: Path) 
     assert payload["Program"] == str(paths.wrapper_program)
     assert payload["ProgramArguments"] == [str(paths.wrapper_program), "agent-run"]
     assert payload["EnvironmentVariables"]["WORKFLOW_DATABASE_URL"] == "postgresql://test@localhost:5432/praxis_test"
+    assert payload["EnvironmentVariables"]["WORKFLOW_DATABASE_AUTHORITY_SOURCE"] == "argument"
     assert "praxis-wait-pg" not in praxis_supervisor.render_launch_agent_plist(paths)
 
 
-def test_discover_database_url_prefers_legacy_launch_agent_value(monkeypatch, tmp_path: Path) -> None:
-    home_dir = tmp_path / "home"
-    launch_agents = home_dir / "Library" / "LaunchAgents"
-    launch_agents.mkdir(parents=True)
-    plist_path = launch_agents / "com.praxis.api-server.plist"
-    plist_path.write_bytes(
-        plistlib.dumps(
-            {
-                "EnvironmentVariables": {
-                    "WORKFLOW_DATABASE_URL": "postgresql://localhost:5432/praxis_test",
-                }
-            }
-        )
-    )
+def test_discover_database_url_uses_runtime_authority(monkeypatch, tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
 
-    monkeypatch.delenv("WORKFLOW_DATABASE_URL", raising=False)
-    monkeypatch.setattr(praxis_supervisor.Path, "home", classmethod(lambda cls: home_dir))
+    def _fake_resolve_runtime_database_authority(*, repo_root: Path, required: bool) -> praxis_supervisor.WorkflowDatabaseAuthority:
+        captured["repo_root"] = repo_root
+        captured["required"] = required
+        return praxis_supervisor.WorkflowDatabaseAuthority(
+            database_url="postgresql://localhost:5432/praxis_test",
+            source="launchd:com.praxis.engine",
+        )
+
     monkeypatch.setattr(
         praxis_supervisor,
-        "_database_authority_reachable",
-        lambda database_url: database_url == "postgresql://localhost:5432/praxis_test",
+        "resolve_runtime_database_authority",
+        _fake_resolve_runtime_database_authority,
     )
 
-    assert praxis_supervisor.discover_database_url(tmp_path / "repo") == "postgresql://localhost:5432/praxis_test"
-
-
-def test_discover_database_url_ignores_unreachable_launch_agent_value_and_uses_repo_env(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    home_dir = tmp_path / "home"
-    launch_agents = home_dir / "Library" / "LaunchAgents"
-    launch_agents.mkdir(parents=True)
-    plist_path = launch_agents / "com.praxis.api-server.plist"
-    plist_path.write_bytes(
-        plistlib.dumps(
-            {
-                "EnvironmentVariables": {
-                    "WORKFLOW_DATABASE_URL": "postgresql://localhost:5432/missing_db",
-                }
-            }
-        )
-    )
     repo_root = tmp_path / "repo"
-    repo_root.mkdir(parents=True)
-    (repo_root / ".env").write_text(
-        "WORKFLOW_DATABASE_URL=postgresql://repo.test/praxis\n",
-        encoding="utf-8",
-    )
 
-    monkeypatch.delenv("WORKFLOW_DATABASE_URL", raising=False)
-    monkeypatch.setattr(praxis_supervisor.Path, "home", classmethod(lambda cls: home_dir))
+    assert praxis_supervisor.discover_database_url(repo_root) == "postgresql://localhost:5432/praxis_test"
+    assert captured == {"repo_root": repo_root, "required": True}
+
+
+def test_discover_database_authority_returns_runtime_source(monkeypatch, tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
     monkeypatch.setattr(
         praxis_supervisor,
-        "_database_authority_reachable",
-        lambda _database_url: False,
+        "resolve_runtime_database_authority",
+        lambda *, repo_root, required: praxis_supervisor.WorkflowDatabaseAuthority(
+            database_url="postgresql://repo.test/praxis",
+            source="repo_env:/tmp/repo/.env",
+        ),
     )
 
-    assert praxis_supervisor.discover_database_url(repo_root) == "postgresql://repo.test/praxis"
-
-
-def test_discover_database_url_uses_repo_env_when_process_authority_missing(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.delenv("WORKFLOW_DATABASE_URL", raising=False)
-    monkeypatch.setattr(praxis_supervisor.Path, "home", classmethod(lambda cls: tmp_path / "home"))
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir(parents=True)
-    (repo_root / ".env").write_text(
-        "WORKFLOW_DATABASE_URL=postgresql://repo.test/praxis\n",
-        encoding="utf-8",
+    assert praxis_supervisor.discover_database_authority(repo_root) == praxis_supervisor.WorkflowDatabaseAuthority(
+        database_url="postgresql://repo.test/praxis",
+        source="repo_env:/tmp/repo/.env",
     )
-
-    assert praxis_supervisor.discover_database_url(repo_root) == "postgresql://repo.test/praxis"
 
 
 def test_discover_database_url_requires_explicit_authority(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.delenv("WORKFLOW_DATABASE_URL", raising=False)
-    monkeypatch.setattr(praxis_supervisor.Path, "home", classmethod(lambda cls: tmp_path / "home"))
+    def _raise_missing(*, repo_root: Path, required: bool) -> praxis_supervisor.WorkflowDatabaseAuthority:
+        raise praxis_supervisor.PostgresConfigurationError(
+            "postgres.config_missing",
+            "WORKFLOW_DATABASE_URL must be set",
+        )
+
+    monkeypatch.setattr(
+        praxis_supervisor,
+        "resolve_runtime_database_authority",
+        _raise_missing,
+    )
 
     with pytest.raises(RuntimeError, match="requires explicit WORKFLOW_DATABASE_URL authority"):
         praxis_supervisor.discover_database_url(tmp_path / "repo")
+
+
+def test_build_paths_records_database_authority_source(monkeypatch, tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir(parents=True)
+    monkeypatch.setattr(
+        praxis_supervisor,
+        "discover_database_authority",
+        lambda _repo_root: praxis_supervisor.WorkflowDatabaseAuthority(
+            database_url="postgresql://repo.test/praxis",
+            source="repo_env:/tmp/repo/.env",
+        ),
+    )
+
+    paths = praxis_supervisor.build_paths(repo_root)
+
+    assert paths.database_url == "postgresql://repo.test/praxis"
+    assert paths.database_authority_source == "repo_env:/tmp/repo/.env"
+    assert paths.environment["WORKFLOW_DATABASE_AUTHORITY_SOURCE"] == "repo_env:/tmp/repo/.env"
 
 
 def test_apply_control_action_updates_desired_state_and_restart_tokens(monkeypatch, tmp_path: Path) -> None:

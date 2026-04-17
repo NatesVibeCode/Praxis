@@ -273,7 +273,6 @@ class _ReceiptConn:
                 "outputs": {"old": True},
             }
         }
-        self.notifications: list[dict[str, object]] = []
         self.job_completed: list[str] = []
         self.runtime_context: dict[tuple[str, str], dict[str, object]] = {}
 
@@ -286,16 +285,6 @@ class _ReceiptConn:
             row["inputs"] = json.loads(args[1])
             row["outputs"] = json.loads(args[2])
             return [{"receipt_id": args[0]}]
-        if "INSERT INTO workflow_notifications" in normalized:
-            self.notifications.append(
-                {
-                    "run_id": args[0],
-                    "job_label": args[1],
-                    "status": args[4],
-                    "duration_seconds": args[6],
-                }
-            )
-            return []
         if "SELECT pg_notify('job_completed', $1)" in normalized:
             self.job_completed.append(str(args[0]))
             return []
@@ -735,30 +724,6 @@ def test_receipt_repository_round_trip_updates_payloads_and_runtime_context() ->
         artifacts={"log": "artifact.wave_e"},
         failure_code=None,
     )
-    repository.insert_workflow_notification_if_absent(
-        run_id="run.wave_e",
-        job_label="wave_e_tests",
-        spec_name="wave_e",
-        agent_slug="gpt-5.4",
-        status="succeeded",
-        failure_code=None,
-        duration_seconds=3.5,
-        cpu_percent=10,
-        mem_bytes=1024,
-        created_at=now,
-    )
-    repository.insert_workflow_notification_if_absent(
-        run_id="run.wave_e",
-        job_label="wave_e_blank_failure",
-        spec_name="wave_e",
-        agent_slug="gpt-5.4",
-        status="succeeded",
-        failure_code="",
-        duration_seconds=1.0,
-        cpu_percent=None,
-        mem_bytes=None,
-        created_at=now,
-    )
     repository.notify_job_completed(run_id="run.wave_e")
     context_key = repository.upsert_workflow_job_runtime_context(
         run_id="run.wave_e",
@@ -771,20 +736,6 @@ def test_receipt_repository_round_trip_updates_payloads_and_runtime_context() ->
     assert updated is True
     assert inserted == "receipt.wave_e.2"
     assert conn.receipts["receipt.wave_e"]["outputs"] == {"status": "ok"}
-    assert conn.notifications == [
-        {
-            "run_id": "run.wave_e",
-            "job_label": "wave_e_tests",
-            "status": "succeeded",
-            "duration_seconds": 3.5,
-        },
-        {
-            "run_id": "run.wave_e",
-            "job_label": "wave_e_blank_failure",
-            "status": "succeeded",
-            "duration_seconds": 1.0,
-        },
-    ]
     assert conn.job_completed == ["run.wave_e"]
     assert context_key == "wave_e_tests"
     assert conn.runtime_context[("run.wave_e", "wave_e_tests")] == {

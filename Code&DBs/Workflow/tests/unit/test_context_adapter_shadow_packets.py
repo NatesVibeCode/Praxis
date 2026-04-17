@@ -402,7 +402,7 @@ def test_context_compiler_persists_deterministic_shadow_execution_packet(tmp_pat
     assert row["payload"]["scope_writes"] == ["app.py"]
     assert row["reference_bindings"][0]["reference_slugs"] == ["@repo/search"]
     assert row["capability_bindings"][0]["capabilities"] == ["capability.alpha"]
-    assert "Read" in row["capability_bindings"][0]["allowed_tools"]
+    assert "rg" in row["capability_bindings"][0]["allowed_tools"]
     assert "pytest" in row["capability_bindings"][0]["allowed_tools"]
     assert row["capability_bindings"][0]["tool_bucket"] == "build"
     assert "praxis_query" in row["capability_bindings"][0]["mcp_tools"]
@@ -478,7 +478,6 @@ def test_context_compiler_hydrates_shadow_packet_from_explicit_job_authority(tmp
     assert row["reference_bindings"][0]["depends_on"] == ["prep.alpha"]
     assert row["reference_bindings"][0]["reference_slugs"] == ["@repo/search", "review-agent"]
     assert row["capability_bindings"][0]["capabilities"] == ["capability.explicit", "capability.definition"]
-    assert "Read" in row["capability_bindings"][0]["allowed_tools"]
     assert "rg" in row["capability_bindings"][0]["allowed_tools"]
     assert "fd" in row["capability_bindings"][0]["allowed_tools"]
     assert row["capability_bindings"][0]["tool_bucket"] == "build"
@@ -610,6 +609,8 @@ def test_runtime_setup_routes_migrated_specs_through_packet_only_edge() -> None:
         model_slug="gpt-5.4",
         adapter_type="cli_llm",
         workdir="/tmp/workspace.alpha",
+        workspace_ref="workspace.alpha",
+        runtime_profile_ref="runtime_profile.alpha",
         scope_write=["app.py"],
         definition_revision="def_alpha",
         plan_revision="plan_alpha",

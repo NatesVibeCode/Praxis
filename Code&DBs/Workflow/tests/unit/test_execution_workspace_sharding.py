@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import importlib
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+import adapters.provider_registry as provider_registry_module
+import registry.agent_config as agent_config_module
 from runtime.workflow import _execution_core as _exec_mod
 
 
@@ -180,6 +183,41 @@ def test_execute_job_uses_materialized_workdir_for_cli(monkeypatch, tmp_path) ->
                 return []
             if "INSERT INTO workflow_job_runtime_context" in normalized:
                 return []
+            if "FROM route_policy_registry" in normalized:
+                return [{
+                    "task_rank_weight": 0.35,
+                    "route_health_weight": 0.40,
+                    "cost_weight": 0.10,
+                    "benchmark_weight": 0.15,
+                    "prefer_cost_task_rank_weight": 0.25,
+                    "prefer_cost_route_health_weight": 0.35,
+                    "prefer_cost_cost_weight": 0.30,
+                    "prefer_cost_benchmark_weight": 0.10,
+                    "claim_route_health_weight": 0.55,
+                    "claim_rank_weight": 0.30,
+                    "claim_load_weight": 0.15,
+                    "claim_internal_failure_penalty_step": 0.08,
+                    "claim_priority_penalty_step": 0.01,
+                    "neutral_benchmark_score": 0.50,
+                    "mixed_benchmark_score": 0.55,
+                    "neutral_route_health": 0.65,
+                    "min_route_health": 0.05,
+                    "max_route_health": 1.0,
+                    "success_health_bump": 0.04,
+                    "review_success_bump": 0.02,
+                    "consecutive_failure_penalty_step": 0.08,
+                    "consecutive_failure_penalty_cap": 0.20,
+                    "internal_failure_penalties": {"verification_failed": 0.25, "unknown": 0.10},
+                    "review_severity_penalties": {"high": 0.15, "medium": 0.08, "low": 0.03},
+                }]
+            if "FROM failure_category_zones" in normalized:
+                return [{"category": "verification_failed", "zone": "internal"}]
+            if "FROM task_type_route_profiles" in normalized:
+                return []
+            if "FROM market_benchmark_metric_registry" in normalized:
+                return []
+            if "FROM task_type_route_eligibility" in normalized:
+                return []
             raise AssertionError(f"Unexpected query: {normalized}")
 
     captured: dict[str, object] = {}
@@ -192,7 +230,8 @@ def test_execute_job_uses_materialized_workdir_for_cli(monkeypatch, tmp_path) ->
     )
     monkeypatch.setattr(_exec_mod, "mark_running", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
-        "registry.agent_config.AgentRegistry.load_from_postgres",
+        agent_config_module.AgentRegistry,
+        "load_from_postgres",
         lambda _conn: SimpleNamespace(get=lambda _slug: SimpleNamespace(provider="openai")),
     )
     monkeypatch.setattr(_exec_mod, "_runtime_profile_ref_for_run", lambda *_args, **_kwargs: "praxis")
@@ -201,10 +240,8 @@ def test_execute_job_uses_materialized_workdir_for_cli(monkeypatch, tmp_path) ->
         "resolve_execution_transport",
         lambda _config: SimpleNamespace(transport_kind="cli"),
     )
-    monkeypatch.setattr(
-        "runtime.task_type_router.TaskTypeRouter",
-        lambda _conn: SimpleNamespace(resolve_explicit_eligibility=lambda *args, **kwargs: None),
-    )
+    monkeypatch.setattr(provider_registry_module, "default_llm_adapter_type", lambda: "cli")
+    monkeypatch.setattr(importlib.import_module("runtime.task_type_router"), "default_llm_adapter_type", lambda: "cli")
     monkeypatch.setattr(
         _exec_mod,
         "_resolve_job_prompt_authority",

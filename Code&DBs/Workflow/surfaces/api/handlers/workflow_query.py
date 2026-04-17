@@ -48,6 +48,7 @@ from runtime.surface_catalog_reviews import (
     list_surface_catalog_reviews,
     record_surface_catalog_review,
 )
+from runtime.workflow_build_moment import build_workflow_build_moment
 from runtime.integrations.display_names import (
     base_integration_name,
     display_name_for_integration,
@@ -57,6 +58,11 @@ from registry.control_plane_manifests import (
     CONTROL_MANIFEST_KIND as _CONTROL_MANIFEST_KIND,
     list_control_manifest_heads as _list_control_manifest_heads,
     list_control_manifest_history as _list_control_manifest_history,
+)
+from runtime.queue_admission import (
+    DEFAULT_QUEUE_CRITICAL_THRESHOLD,
+    DEFAULT_QUEUE_WARNING_THRESHOLD,
+    query_queue_depth_snapshot,
 )
 from surfaces.api.catalog_authority import build_catalog_payload
 from surfaces.api.operation_catalog_authority import build_operation_catalog_payload
@@ -1064,130 +1070,6 @@ def _load_workflow_build_row(pg: Any, workflow_id: str) -> dict[str, Any]:
         raise _ClientError(f"Workflow not found: {workflow_id}")
     return dict(row)
 
-
-def _workflow_build_payload(
-    row: dict[str, Any],
-    *,
-    conn: Any | None = None,
-    definition: dict[str, Any] | None = None,
-    compiled_spec: dict[str, Any] | None = None,
-    build_bundle: dict[str, Any] | None = None,
-    planning_notes: list[str] | None = None,
-    intent_brief: dict[str, Any] | None = None,
-    execution_manifest: dict[str, Any] | None = None,
-    undo_receipt: dict[str, Any] | None = None,
-    mutation_event_id: int | None = None,
-) -> dict[str, Any]:
-    effective_definition = _parse_json_field(definition if definition is not None else row.get("definition")) or {}
-    effective_compiled_spec = _parse_json_field(compiled_spec if compiled_spec is not None else row.get("compiled_spec"))
-    if not isinstance(build_bundle, dict):
-        from runtime.build_authority import build_authority_bundle
-        from runtime.build_review_decisions import materialize_reviewed_build_definition
-        from runtime.build_planning_contract import (
-            build_candidate_resolution_manifest,
-            build_intent_brief,
-            build_reviewable_plan,
-        )
-        from runtime.operating_model_planner import current_compiled_spec
-        from storage.postgres.workflow_build_planning_repository import (
-            load_latest_workflow_build_execution_manifest,
-        )
-
-        current_plan = current_compiled_spec(effective_definition, effective_compiled_spec)
-        if conn is not None:
-            effective_definition, _ = materialize_reviewed_build_definition(
-                conn,
-                workflow_id=_text(row.get("id")),
-                definition=effective_definition,
-                compiled_spec=current_plan,
-            )
-        else:
-            from runtime.build_authority import apply_authority_bundle
-
-            effective_definition = apply_authority_bundle(effective_definition, compiled_spec=current_plan)
-        effective_compiled_spec = current_plan
-        build_bundle = build_authority_bundle(effective_definition, compiled_spec=current_plan)
-        if not isinstance(intent_brief, dict):
-            intent_brief = build_intent_brief(
-                definition=effective_definition,
-                workflow_id=_text(row.get("id")) or None,
-                conn=conn,
-            )
-        if not isinstance(execution_manifest, dict) and conn is not None:
-            definition_revision = _text(effective_definition.get("definition_revision"))
-            if definition_revision and isinstance(effective_compiled_spec, dict):
-                try:
-                    execution_manifest = load_latest_workflow_build_execution_manifest(
-                        conn,
-                        workflow_id=_text(row.get("id")),
-                        definition_revision=definition_revision,
-                    )
-                except Exception:
-                    execution_manifest = None
-    else:
-        from runtime.build_planning_contract import (
-            build_candidate_resolution_manifest,
-            build_intent_brief,
-            build_reviewable_plan,
-        )
-        if not isinstance(intent_brief, dict):
-            intent_brief = build_intent_brief(
-                definition=effective_definition,
-                workflow_id=_text(row.get("id")) or None,
-                conn=conn,
-            )
-    blocking_issues = [
-        issue
-        for issue in build_bundle.get("build_issues", [])
-        if isinstance(issue, dict) and _text(issue.get("severity")) == "blocking"
-    ]
-    candidate_resolution_manifest = build_candidate_resolution_manifest(
-        definition=effective_definition,
-        workflow_id=_text(row.get("id")) or None,
-        conn=conn,
-        compiled_spec=effective_compiled_spec,
-    )
-    reviewable_plan = build_reviewable_plan(
-        definition=effective_definition,
-        workflow_id=_text(row.get("id")) or None,
-        conn=conn,
-        compiled_spec=effective_compiled_spec,
-        candidate_manifest=candidate_resolution_manifest,
-    )
-    return {
-        "workflow": {
-            "id": row["id"],
-            "name": row.get("name"),
-            "description": row.get("description"),
-            "version": int(row.get("version") or 1),
-            "updated_at": _isoformat(row.get("updated_at")),
-        },
-        "intent_brief": intent_brief or {},
-        "definition": effective_definition,
-        "compiled_spec": effective_compiled_spec,
-        "planning_notes": planning_notes or [],
-        "build_state": _text(build_bundle.get("projection_status", {}).get("state")) or "blocked",
-        "build_blockers": blocking_issues,
-        "build_graph": build_bundle.get("build_graph"),
-        "binding_ledger": build_bundle.get("binding_ledger") or [],
-        "import_snapshots": build_bundle.get("import_snapshots") or [],
-        "authority_attachments": build_bundle.get("authority_attachments") or [],
-        "review_state": (
-            _serialize(effective_definition.get("review_state"))
-            if isinstance(effective_definition.get("review_state"), dict)
-            else {}
-        ),
-        "build_issues": build_bundle.get("build_issues") or [],
-        "projection_status": build_bundle.get("projection_status") or {},
-        "compiled_spec_projection": build_bundle.get("compiled_spec_projection"),
-        "candidate_resolution_manifest": candidate_resolution_manifest,
-        "reviewable_plan": reviewable_plan,
-        "execution_manifest": execution_manifest,
-        "undo_receipt": undo_receipt,
-        "mutation_event_id": mutation_event_id,
-    }
-
-
 def _validate_workflow_body(
     body: dict[str, Any],
     *,
@@ -1534,7 +1416,7 @@ def _handle_workflow_build_get(request: Any, path: str) -> None:
             return
         pg = request.subsystems.get_pg_conn()
         row = _load_workflow_build_row(pg, workflow_id)
-        request._send_json(200, _workflow_build_payload(row, conn=pg))
+        request._send_json(200, build_workflow_build_moment(row, conn=pg))
     except _ClientError as exc:
         message = str(exc)
         status = 404 if message.startswith("Workflow not found:") else 400
@@ -1552,17 +1434,18 @@ def _handle_workflow_build_post(request: Any, path: str) -> None:
 
     try:
         workflow_id, subpath = _workflow_build_subpath(path)
+        pg = request.subsystems.get_pg_conn()
         result = mutate_workflow_build(
-            request.subsystems.get_pg_conn(),
+            pg,
             workflow_id=workflow_id,
             subpath=subpath,
             body=body,
         )
         request._send_json(
             200,
-            _workflow_build_payload(
+            build_workflow_build_moment(
                 result["row"],
-                conn=request.subsystems.get_pg_conn(),
+                conn=pg,
                 definition=result["definition"],
                 compiled_spec=result["compiled_spec"],
                 build_bundle=result["build_bundle"],
@@ -2961,15 +2844,9 @@ def _handle_leaderboard_get(request: Any, path: str) -> None:
         request._send_json(500, {"error": str(exc)})
 
 
-def _queue_utilization_pct(total_queued: int, critical_threshold: int) -> float:
-    if critical_threshold <= 0:
-        return 999.9 if total_queued > 0 else 0.0
-    return min(round(total_queued / critical_threshold * 100, 1), 999.9)
-
-
 def _queue_depth_snapshot(pg: Any) -> dict[str, Any]:
-    warning_threshold = 500
-    critical_threshold = 1000
+    warning_threshold = DEFAULT_QUEUE_WARNING_THRESHOLD
+    critical_threshold = DEFAULT_QUEUE_CRITICAL_THRESHOLD
     if pg is None or not hasattr(pg, "execute"):
         return {
             "queue_depth": 0,
@@ -2985,39 +2862,22 @@ def _queue_depth_snapshot(pg: Any) -> dict[str, Any]:
             "queue_depth_error": "pg connection unavailable",
         }
     try:
-        rows = pg.execute(
-            """SELECT
-                      COUNT(*) FILTER (WHERE status = 'pending') AS pending,
-                      COUNT(*) FILTER (WHERE status = 'ready') AS ready,
-                      COUNT(*) FILTER (WHERE status = 'claimed') AS claimed,
-                      COUNT(*) FILTER (WHERE status = 'running') AS running
-               FROM workflow_jobs
-               WHERE status IN ('pending', 'ready', 'claimed', 'running')"""
+        snapshot = query_queue_depth_snapshot(
+            pg,
+            warning_threshold=warning_threshold,
+            critical_threshold=critical_threshold,
         )
-        row = rows[0] if rows else {}
-        pending = int(row.get("pending") or 0)
-        ready = int(row.get("ready") or 0)
-        claimed = int(row.get("claimed") or 0)
-        running = int(row.get("running") or 0)
-        total_queued = pending + ready
-        utilization_pct = _queue_utilization_pct(total_queued, critical_threshold)
-        if total_queued >= critical_threshold:
-            queue_status = "critical"
-        elif total_queued >= warning_threshold:
-            queue_status = "warning"
-        else:
-            queue_status = "ok"
         return {
-            "queue_depth": total_queued,
-            "queue_depth_status": queue_status,
-            "queue_depth_pending": pending,
-            "queue_depth_ready": ready,
-            "queue_depth_claimed": claimed,
-            "queue_depth_running": running,
-            "queue_depth_total": total_queued,
+            "queue_depth": snapshot.total_queued,
+            "queue_depth_status": snapshot.status,
+            "queue_depth_pending": snapshot.pending,
+            "queue_depth_ready": snapshot.ready,
+            "queue_depth_claimed": snapshot.claimed,
+            "queue_depth_running": snapshot.running,
+            "queue_depth_total": snapshot.total_queued,
             "queue_depth_warning_threshold": warning_threshold,
             "queue_depth_critical_threshold": critical_threshold,
-            "queue_depth_utilization_pct": utilization_pct,
+            "queue_depth_utilization_pct": snapshot.utilization_pct,
             "queue_depth_error": None,
         }
     except Exception as exc:

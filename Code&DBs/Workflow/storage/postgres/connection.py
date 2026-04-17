@@ -185,6 +185,12 @@ def get_workflow_pool(env: Mapping[str, str] | None = None) -> asyncpg.Pool:
     """Get or create the singleton workflow connection pool."""
     global _workflow_pool, _workflow_pool_dsn, _workflow_authority_scope
     database_url = resolve_workflow_database_url(env=env)
+    if _workflow_pool is not None and bool(
+        getattr(_workflow_pool, "_closed", False) or getattr(_workflow_pool, "closed", False)
+    ):
+        _workflow_pool = None
+        _workflow_pool_dsn = None
+        _workflow_authority_scope = None
     if _workflow_pool is not None and _workflow_pool_dsn != database_url:
         shutdown_workflow_pool()
     if _workflow_pool is None:
@@ -232,46 +238,61 @@ class SyncPostgresConnection:
 
     def __init__(self, pool: asyncpg.Pool) -> None:
         self._pool = pool
+        self._singleton_managed = pool is _workflow_pool
+        self._database_url = _workflow_pool_dsn if self._singleton_managed else None
         self._authority_scope = _workflow_authority_scope or _WorkflowAuthorityScope(
             cache_key=f"workflow_pool:{id(pool)}",
         )
         self._authority_cache_key = self._authority_scope.cache_key
 
+    def _pool_handle(self) -> asyncpg.Pool:
+        if not bool(getattr(self._pool, "_closed", False) or getattr(self._pool, "closed", False)):
+            return self._pool
+        if not self._singleton_managed or not self._database_url:
+            return self._pool
+        self._pool = get_workflow_pool(env={"WORKFLOW_DATABASE_URL": self._database_url})
+        self._singleton_managed = self._pool is _workflow_pool
+        self._database_url = _workflow_pool_dsn if self._singleton_managed else self._database_url
+        self._authority_scope = _workflow_authority_scope or self._authority_scope
+        self._authority_cache_key = self._authority_scope.cache_key
+        return self._pool
+
     def execute(self, query: str, *args) -> list:
         async def _do():
-            async with self._pool.acquire() as conn:
+            async with self._pool_handle().acquire() as conn:
                 return await conn.fetch(query, *args)
         return _run_sync(_do())
 
     def fetch(self, query: str, *args) -> list:
         async def _do():
-            async with self._pool.acquire() as conn:
+            async with self._pool_handle().acquire() as conn:
                 return await conn.fetch(query, *args)
         return _run_sync(_do())
 
     def fetchrow(self, query: str, *args):
         async def _do():
-            async with self._pool.acquire() as conn:
+            async with self._pool_handle().acquire() as conn:
                 return await conn.fetchrow(query, *args)
         return _run_sync(_do())
 
     def fetchval(self, query: str, *args):
         async def _do():
-            async with self._pool.acquire() as conn:
+            async with self._pool_handle().acquire() as conn:
                 return await conn.fetchval(query, *args)
         return _run_sync(_do())
 
     @contextmanager
     def transaction(self):
         async def _begin():
-            conn = await self._pool.acquire()
+            pool = self._pool_handle()
+            conn = await pool.acquire()
             tx = conn.transaction()
             await tx.start()
-            return conn, tx
+            return pool, conn, tx
 
-        raw_conn, tx = _run_sync(_begin())
+        pool, raw_conn, tx = _run_sync(_begin())
         pinned = _PinnedSyncPostgresConnection(
-            pool=self._pool,
+            pool=pool,
             conn=raw_conn,
             tx=tx,
             authority_scope=self._authority_scope,
@@ -286,13 +307,13 @@ class SyncPostgresConnection:
 
     def execute_many(self, query: str, args_list: list):
         async def _do():
-            async with self._pool.acquire() as conn:
+            async with self._pool_handle().acquire() as conn:
                 await conn.executemany(query, args_list)
         _run_sync(_do())
 
     def execute_script(self, sql: str):
         async def _do():
-            async with self._pool.acquire() as conn:
+            async with self._pool_handle().acquire() as conn:
                 await conn.execute(sql)
         _run_sync(_do())
 

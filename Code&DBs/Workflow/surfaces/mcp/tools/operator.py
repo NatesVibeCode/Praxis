@@ -5,7 +5,9 @@ from datetime import datetime
 from typing import Any
 
 from runtime.operation_catalog_gateway import execute_operation_from_subsystems
+from runtime.semantic_projection_subscriber import consume_semantic_projection_events
 from surfaces.api.handlers import workflow_query_core
+from surfaces.api.operator_write import OperatorControlFrontdoor
 from storage.postgres.workflow_runtime_repository import reset_observability_metrics
 
 from ..subsystems import _subs
@@ -25,13 +27,16 @@ def _parse_iso_datetime(value: object, *, field_name: str) -> datetime:
 
 def tool_praxis_status(params: dict) -> dict:
     """Recent workflow status from canonical receipts, with categorized failure breakdown."""
-    from runtime.receipt_store import list_receipts
+    from runtime.quality_views import load_failure_category_zones
+    from runtime.receipt_store import list_receipts, receipt_stats
 
     conn = _subs.get_pg_conn()
 
     since_hours = params.get("since_hours", 24)
 
-    records = list_receipts(limit=5000, since_hours=since_hours)
+    totals = receipt_stats(since_hours=since_hours, conn=conn).get("totals", {})
+    receipt_count = int(totals.get("receipts") or 0)
+    records = list_receipts(limit=receipt_count, since_hours=since_hours) if receipt_count > 0 else []
     total = len(records)
     succeeded = sum(1 for record in records if record.status == "succeeded")
     failure_counts: dict[str, int] = {}
@@ -45,12 +50,10 @@ def tool_praxis_status(params: dict) -> dict:
     # ── Categorized failure breakdown ─────────────────────────────────
     zone_counts: dict[str, int] = {}
     category_counts: dict[str, int] = {}
+    zone_authority_ready = True
+    zone_authority_error: str | None = None
     try:
-        zone_lookup = {
-            str(row["category"]): str(row["zone"])
-            for row in conn.execute("SELECT category, zone FROM failure_category_zones")
-            if row.get("category")
-        }
+        zone_lookup = load_failure_category_zones(conn, consumer="praxis_status")
         for record in records:
             payload = record.to_dict()
             failure_classification = payload.get("failure_classification")
@@ -63,13 +66,16 @@ def tool_praxis_status(params: dict) -> dict:
             category_counts[category] = category_counts.get(category, 0) + 1
             zone = zone_lookup.get(category, "internal")
             zone_counts[zone] = zone_counts.get(zone, 0) + 1
-    except Exception:
-        pass  # Graceful degradation if zone table missing
+    except Exception as exc:
+        zone_authority_ready = False
+        zone_authority_error = str(exc)
 
     # Adjusted pass rate: exclude external (provider/network) failures from denominator
     external_failures = zone_counts.get("external", 0)
     adjusted_denominator = total - external_failures
-    adjusted_pass_rate = (succeeded / adjusted_denominator) if adjusted_denominator > 0 else 0.0
+    adjusted_pass_rate = None
+    if zone_authority_ready:
+        adjusted_pass_rate = (succeeded / adjusted_denominator) if adjusted_denominator > 0 else 0.0
 
     # In-flight workflows from workflow_runs
     in_flight = []
@@ -110,14 +116,23 @@ def tool_praxis_status(params: dict) -> dict:
     result: dict[str, Any] = {
         "total_workflows": total,
         "pass_rate": round(pass_rate, 4),
-        "adjusted_pass_rate": round(adjusted_pass_rate, 4),
+        "adjusted_pass_rate": round(adjusted_pass_rate, 4) if adjusted_pass_rate is not None else None,
         "failure_breakdown": {
             "by_zone": zone_counts,
             "by_category": category_counts,
         },
         "top_failure_codes": top_failures,
         "since_hours": since_hours,
+        "zone_authority_ready": zone_authority_ready,
+        "observability_state": "ready" if zone_authority_ready else "degraded",
     }
+    if zone_authority_error:
+        result["errors"] = [
+            {
+                "code": "failure_category_zones_lookup_failed",
+                "message": zone_authority_error,
+            }
+        ]
     if in_flight:
         result["in_flight_workflows"] = in_flight
     return result
@@ -127,6 +142,29 @@ def tool_praxis_maintenance(params: dict) -> dict:
     """Run explicit operator maintenance actions outside observability surfaces."""
 
     action = params.get("action", "")
+    if action == "backfill_semantic_bridges":
+        as_of = params.get("as_of")
+        return OperatorControlFrontdoor().backfill_semantic_bridges(
+            include_object_relations=bool(params.get("include_object_relations", True)),
+            include_operator_decisions=bool(params.get("include_operator_decisions", True)),
+            as_of=(
+                _parse_iso_datetime(as_of, field_name="as_of")
+                if as_of is not None
+                else None
+            ),
+        )
+    if action == "refresh_semantic_projection":
+        as_of = params.get("as_of")
+        return {
+            "semantic_projection_refresh": consume_semantic_projection_events(
+                limit=max(1, int(params.get("limit", 100) or 100)),
+                as_of=(
+                    _parse_iso_datetime(as_of, field_name="as_of")
+                    if as_of is not None
+                    else None
+                ),
+            )
+        }
     if action == "backfill_bug_replay_provenance":
         bug_tracker = _subs.get_bug_tracker()
         limit_raw = params.get("limit")
@@ -142,7 +180,8 @@ def tool_praxis_maintenance(params: dict) -> dict:
         return {
             "error": (
                 "Unknown maintenance action. Supported actions: reset_metrics, "
-                "backfill_bug_replay_provenance"
+                "backfill_bug_replay_provenance, backfill_semantic_bridges, "
+                "refresh_semantic_projection"
             )
         }
     if not params.get("confirm"):
@@ -159,7 +198,7 @@ def tool_praxis_maintenance(params: dict) -> dict:
 
 
 def tool_praxis_operator_view(params: dict) -> dict:
-    """Observability views: operator status, scoreboard, graph, lineage, issue backlog, and replay-ready bugs."""
+    """Observability views: operator status, scoreboard, workflow graph, operator graph, semantics, lineage, issue backlog, and replay-ready bugs."""
 
     try:
         return workflow_query_core.handle_operator_view(_subs, params)
@@ -281,6 +320,128 @@ def tool_praxis_operator_relations(params: dict) -> dict:
     }
 
 
+def tool_praxis_semantic_assertions(params: dict) -> dict:
+    """Register predicates, record or retract assertions, and query semantic authority."""
+
+    action = str(params.get("action") or "list").strip().lower()
+    if action == "list":
+        as_of = params.get("as_of")
+        return execute_operation_from_subsystems(
+            _subs,
+            operation_name="semantic_assertions.list",
+            payload={
+                "predicate_slug": params.get("predicate_slug"),
+                "subject_kind": params.get("subject_kind"),
+                "subject_ref": params.get("subject_ref"),
+                "object_kind": params.get("object_kind"),
+                "object_ref": params.get("object_ref"),
+                "source_kind": params.get("source_kind"),
+                "source_ref": params.get("source_ref"),
+                "active_only": bool(params.get("active_only", True)),
+                "as_of": (
+                    _parse_iso_datetime(as_of, field_name="as_of")
+                    if as_of is not None
+                    else None
+                ),
+                "limit": int(params.get("limit", 100) or 100),
+            },
+        )
+    if action == "register_predicate":
+        created_at = params.get("created_at")
+        updated_at = params.get("updated_at")
+        return execute_operation_from_subsystems(
+            _subs,
+            operation_name="semantic_assertions.register_predicate",
+            payload={
+                "predicate_slug": str(params.get("predicate_slug") or ""),
+                "subject_kind_allowlist": params.get("subject_kind_allowlist") or (),
+                "object_kind_allowlist": params.get("object_kind_allowlist") or (),
+                "cardinality_mode": str(params.get("cardinality_mode") or "many"),
+                "predicate_status": str(params.get("predicate_status") or "active"),
+                "description": params.get("description"),
+                "created_at": (
+                    _parse_iso_datetime(created_at, field_name="created_at")
+                    if created_at is not None
+                    else None
+                ),
+                "updated_at": (
+                    _parse_iso_datetime(updated_at, field_name="updated_at")
+                    if updated_at is not None
+                    else None
+                ),
+            },
+        )
+    if action == "record_assertion":
+        valid_from = params.get("valid_from")
+        valid_to = params.get("valid_to")
+        created_at = params.get("created_at")
+        updated_at = params.get("updated_at")
+        return execute_operation_from_subsystems(
+            _subs,
+            operation_name="semantic_assertions.record",
+            payload={
+                "predicate_slug": str(params.get("predicate_slug") or ""),
+                "subject_kind": str(params.get("subject_kind") or ""),
+                "subject_ref": str(params.get("subject_ref") or ""),
+                "object_kind": str(params.get("object_kind") or ""),
+                "object_ref": str(params.get("object_ref") or ""),
+                "qualifiers_json": params.get("qualifiers_json"),
+                "source_kind": str(params.get("source_kind") or ""),
+                "source_ref": str(params.get("source_ref") or ""),
+                "evidence_ref": params.get("evidence_ref"),
+                "bound_decision_id": params.get("bound_decision_id"),
+                "valid_from": (
+                    _parse_iso_datetime(valid_from, field_name="valid_from")
+                    if valid_from is not None
+                    else None
+                ),
+                "valid_to": (
+                    _parse_iso_datetime(valid_to, field_name="valid_to")
+                    if valid_to is not None
+                    else None
+                ),
+                "assertion_status": str(params.get("assertion_status") or "active"),
+                "semantic_assertion_id": params.get("semantic_assertion_id"),
+                "created_at": (
+                    _parse_iso_datetime(created_at, field_name="created_at")
+                    if created_at is not None
+                    else None
+                ),
+                "updated_at": (
+                    _parse_iso_datetime(updated_at, field_name="updated_at")
+                    if updated_at is not None
+                    else None
+                ),
+            },
+        )
+    if action == "retract_assertion":
+        retracted_at = params.get("retracted_at")
+        updated_at = params.get("updated_at")
+        return execute_operation_from_subsystems(
+            _subs,
+            operation_name="semantic_assertions.retract",
+            payload={
+                "semantic_assertion_id": str(params.get("semantic_assertion_id") or ""),
+                "retracted_at": (
+                    _parse_iso_datetime(retracted_at, field_name="retracted_at")
+                    if retracted_at is not None
+                    else None
+                ),
+                "updated_at": (
+                    _parse_iso_datetime(updated_at, field_name="updated_at")
+                    if updated_at is not None
+                    else None
+                ),
+            },
+        )
+    return {
+        "error": (
+            "Unknown action. Supported actions: "
+            "list, register_predicate, record_assertion, retract_assertion"
+        )
+    }
+
+
 def tool_praxis_operator_native_primary_cutover_gate(params: dict) -> dict:
     """Admit one native primary cutover gate through operator-control persistence."""
 
@@ -364,7 +525,7 @@ def tool_praxis_operator_closeout(params: dict) -> dict:
 
 
 def tool_praxis_operator_roadmap_view(params: dict) -> dict:
-    """Read one roadmap subtree and its dependency edges from DB-backed authority."""
+    """Read one roadmap subtree, dependency edges, and semantic-first external neighbors."""
 
     root_roadmap_item_id = str(params.get("root_roadmap_item_id", "")).strip()
     if not root_roadmap_item_id:
@@ -538,7 +699,9 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "mixing destructive actions into read-only status surfaces.\n\n"
                 "EXAMPLES:\n"
                 "  praxis_maintenance(action='reset_metrics', confirm=true)\n"
-                "  praxis_maintenance(action='backfill_bug_replay_provenance')"
+                "  praxis_maintenance(action='backfill_bug_replay_provenance')\n"
+                "  praxis_maintenance(action='backfill_semantic_bridges')\n"
+                "  praxis_maintenance(action='refresh_semantic_projection')"
             ),
             "inputSchema": {
                 "type": "object",
@@ -546,7 +709,12 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "action": {
                         "type": "string",
                         "description": "Maintenance action to run.",
-                        "enum": ["reset_metrics", "backfill_bug_replay_provenance"],
+                        "enum": [
+                            "reset_metrics",
+                            "backfill_bug_replay_provenance",
+                            "backfill_semantic_bridges",
+                            "refresh_semantic_projection",
+                        ],
                     },
                     "confirm": {
                         "type": "boolean",
@@ -573,6 +741,20 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         "minimum": 1,
                         "default": 1,
                     },
+                    "as_of": {
+                        "type": "string",
+                        "description": "Optional ISO-8601 cutoff for semantic bridge replay or semantic projection refresh.",
+                    },
+                    "include_object_relations": {
+                        "type": "boolean",
+                        "description": "When action='backfill_semantic_bridges', replay operator_object_relations into semantic assertions.",
+                        "default": True,
+                    },
+                    "include_operator_decisions": {
+                        "type": "boolean",
+                        "description": "When action='backfill_semantic_bridges', replay operator_decisions into semantic assertions.",
+                        "default": True,
+                    },
                 },
                 "required": ["action"],
             },
@@ -586,16 +768,22 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "VIEWS:\n"
                 "  'status'     — operator status with outbox depth, subscription state, watermark drift\n"
                 "  'scoreboard' — cutover readiness: which gates are proven, which are blocked\n"
-                "  'graph'      — full operator graph projection: bugs, roadmap items, decisions, "
-                "gates, and their connections\n"
+                "  'graph'      — run-scoped workflow graph topology for one workflow run\n"
+                "  'operator_graph' — cross-domain operator graph projection sourced from semantic assertions first,\n"
+                "                   with legacy relation rows only as compatibility input\n"
+                "  'semantics'  — unified semantic assertion inspection over semantic_current_assertions\n"
                 "  'lineage'    — graph lineage for one run, including operator frames\n"
                 "  'issue_backlog' — canonical upstream issue intake rows before bug promotion\n"
-                "  'replay_ready_bugs' — replayable bug backlog with optional safe provenance refresh\n\n"
+                "  'replay_ready_bugs' — replayable bug backlog from already-authoritative provenance\n\n"
                 "USE WHEN: you need detailed operational insight beyond pass/fail rates. "
-                "'Show me the operator graph.' 'What's the cutover status?' 'Show the issue backlog.' "
+                "'Show me the workflow graph for this run.' 'Show me the operator graph.' "
+                "'Show me the semantic links.' "
+                "'What's the cutover status?' 'Show the issue backlog.' "
                 "'Which bugs can I replay right now?'\n\n"
                 "EXAMPLES:\n"
                 "  praxis_operator_view(view='graph', run_id='run_123')\n"
+                "  praxis_operator_view(view='operator_graph')\n"
+                "  praxis_operator_view(view='semantics', predicate_slug='grouped_in')\n"
                 "  praxis_operator_view(view='lineage', run_id='run_123')\n"
                 "  praxis_operator_view(view='issue_backlog')\n"
                 "  praxis_operator_view(view='replay_ready_bugs')"
@@ -605,12 +793,12 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "properties": {
                     "view": {
                         "type": "string",
-                        "description": "View to render: 'status', 'scoreboard', 'graph', 'lineage', 'issue_backlog', or 'replay_ready_bugs'.",
-                        "enum": ["status", "scoreboard", "graph", "lineage", "issue_backlog", "replay_ready_bugs"],
+                        "description": "View to render: 'status', 'scoreboard', 'graph', 'operator_graph', 'semantics', 'lineage', 'issue_backlog', or 'replay_ready_bugs'.",
+                        "enum": ["status", "scoreboard", "graph", "operator_graph", "semantics", "lineage", "issue_backlog", "replay_ready_bugs"],
                     },
                     "run_id": {
                         "type": "string",
-                        "description": "Required for run-scoped views: 'status', 'scoreboard', 'graph', and 'lineage'.",
+                        "description": "Required for run-scoped views: 'status', 'scoreboard', 'graph', and 'lineage'. Not used by 'operator_graph' or 'semantics'.",
                     },
                     "status": {
                         "type": "string",
@@ -623,14 +811,46 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "Maximum rows to return for issue_backlog or replay_ready_bugs.",
+                        "description": "Maximum rows to return for issue_backlog, replay_ready_bugs, or semantics.",
                         "minimum": 1,
                         "default": 50,
                     },
-                    "refresh_backfill": {
+                    "predicate_slug": {
+                        "type": "string",
+                        "description": "Optional semantic predicate filter for view='semantics'.",
+                    },
+                    "subject_kind": {
+                        "type": "string",
+                        "description": "Optional semantic subject kind filter for view='semantics'.",
+                    },
+                    "subject_ref": {
+                        "type": "string",
+                        "description": "Optional semantic subject ref filter for view='semantics'.",
+                    },
+                    "object_kind": {
+                        "type": "string",
+                        "description": "Optional semantic object kind filter for view='semantics'.",
+                    },
+                    "object_ref": {
+                        "type": "string",
+                        "description": "Optional semantic object ref filter for view='semantics'.",
+                    },
+                    "source_kind": {
+                        "type": "string",
+                        "description": "Optional semantic source kind filter for view='semantics'.",
+                    },
+                    "source_ref": {
+                        "type": "string",
+                        "description": "Optional semantic source ref filter for view='semantics'.",
+                    },
+                    "active_only": {
                         "type": "boolean",
-                        "description": "When true, refresh safe replay provenance before listing replay-ready bugs.",
+                        "description": "When view='semantics', prefer semantic_current_assertions instead of historical reads.",
                         "default": True,
+                    },
+                    "as_of": {
+                        "type": "string",
+                        "description": "Optional ISO-8601 as-of timestamp for historical semantic inspection or operator_graph projection reads.",
                     },
                 },
                 "required": ["view"],
@@ -814,6 +1034,90 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
             },
         },
     ),
+    "praxis_semantic_assertions": (
+        tool_praxis_semantic_assertions,
+        {
+            "description": (
+                "Register semantic predicates, record or retract semantic assertions, and query the canonical semantic substrate.\n\n"
+                "USE WHEN: semantics should become typed authority rows with explicit provenance and validity "
+                "instead of hidden metadata fields or prose.\n\n"
+                "ACTIONS:\n"
+                "  'list' — query semantic assertions through the CQRS read path\n"
+                "  'register_predicate' — register or update one predicate vocabulary row\n"
+                "  'record_assertion' — record one semantic assertion row and emit a semantic bus event\n"
+                "  'retract_assertion' — retract one semantic assertion row and emit a semantic bus event\n\n"
+                "EXAMPLES:\n"
+                "  praxis_semantic_assertions(action='register_predicate', predicate_slug='grouped_in', subject_kind_allowlist=['bug'], object_kind_allowlist=['functional_area'])\n"
+                "  praxis_semantic_assertions(action='record_assertion', predicate_slug='grouped_in', subject_kind='bug', subject_ref='bug.checkout.1', object_kind='functional_area', object_ref='functional_area.checkout', source_kind='operator', source_ref='nate')"
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": [
+                            "list",
+                            "register_predicate",
+                            "record_assertion",
+                            "retract_assertion",
+                        ],
+                        "default": "list",
+                    },
+                    "predicate_slug": {"type": "string"},
+                    "subject_kind_allowlist": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    "object_kind_allowlist": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    "cardinality_mode": {
+                        "type": "string",
+                        "enum": [
+                            "many",
+                            "single_active_per_subject",
+                            "single_active_per_edge",
+                        ],
+                        "default": "many",
+                    },
+                    "predicate_status": {
+                        "type": "string",
+                        "enum": ["active", "inactive"],
+                        "default": "active",
+                    },
+                    "description": {"type": "string"},
+                    "subject_kind": {"type": "string"},
+                    "subject_ref": {"type": "string"},
+                    "object_kind": {"type": "string"},
+                    "object_ref": {"type": "string"},
+                    "qualifiers_json": {"type": "object"},
+                    "source_kind": {"type": "string"},
+                    "source_ref": {"type": "string"},
+                    "evidence_ref": {"type": "string"},
+                    "bound_decision_id": {"type": "string"},
+                    "valid_from": {"type": "string"},
+                    "valid_to": {"type": "string"},
+                    "assertion_status": {
+                        "type": "string",
+                        "enum": ["active", "superseded", "retracted"],
+                        "default": "active",
+                    },
+                    "semantic_assertion_id": {"type": "string"},
+                    "retracted_at": {"type": "string"},
+                    "created_at": {"type": "string"},
+                    "updated_at": {"type": "string"},
+                    "as_of": {"type": "string"},
+                    "active_only": {"type": "boolean", "default": True},
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "default": 100,
+                    },
+                },
+            },
+        },
+    ),
     "praxis_operator_native_primary_cutover_gate": (
         tool_praxis_operator_native_primary_cutover_gate,
         {
@@ -978,7 +1282,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
             "description": (
                 "Read one roadmap subtree and its dependency edges from DB-backed authority.\n\n"
                 "USE WHEN: you want the full package view for a roadmap item, including generated child waves, "
-                "external dependency edges, and a rendered markdown outline.\n\n"
+                "external dependency edges, canonical semantic neighbors, and a rendered markdown outline.\n\n"
                 "EXAMPLES:\n"
                 "  praxis_operator_roadmap_view()\n"
                 "  praxis_operator_roadmap_view(root_roadmap_item_id='roadmap_item.authority.cleanup.unified.operator.write.validation.gate')\n"
@@ -990,7 +1294,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "root_roadmap_item_id": {"type": "string"},
                     "semantic_neighbor_limit": {
                         "type": "integer",
-                        "description": "How many semantically similar external roadmap items to include (set 0 to disable).",
+                        "description": "How many external roadmap neighbors to include. Semantic-assertion matches are preferred; embedding similarity is a fallback when no canonical semantic neighbors exist.",
                         "default": 5,
                         "minimum": 0,
                     },

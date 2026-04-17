@@ -3,7 +3,13 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import runtime.chat_orchestrator as chat_orchestrator_mod
-from runtime.chat_orchestrator import ChatOrchestrator, _extract_cli_chat_text, _extract_cli_error
+from runtime.chat_orchestrator import (
+    ChatOrchestrator,
+    ResolvedChatRoute,
+    _extract_cli_chat_text,
+    _extract_cli_error,
+    _should_use_cli_fast_path,
+)
 
 import pathlib
 
@@ -16,6 +22,41 @@ class _FakeRouter:
 
     def resolve(self, _agent_slug: str):
         return self.result
+
+
+class _FakeChatStore:
+    def __init__(self) -> None:
+        self.messages: list[dict[str, object]] = []
+        self.title = "New conversation"
+        self.updated = False
+
+    def append_message(self, conversation_id: str, role: str, content: str, **kwargs) -> str:
+        message_id = f"msg-{len(self.messages) + 1}"
+        self.messages.append(
+            {
+                "id": message_id,
+                "conversation_id": conversation_id,
+                "role": role,
+                "content": content,
+                **kwargs,
+            }
+        )
+        return message_id
+
+    def get_conversation_cost(self, conversation_id: str) -> float:
+        return 0.0
+
+    def list_conversation_messages(self, conversation_id: str) -> list[dict[str, object]]:
+        return []
+
+    def get_title(self, conversation_id: str) -> str | None:
+        return self.title
+
+    def update_title(self, conversation_id: str, title: str) -> None:
+        self.title = title
+
+    def touch_updated_at(self, conversation_id: str) -> None:
+        self.updated = True
 
 
 def test_resolve_model_accepts_single_route_decision(monkeypatch) -> None:
@@ -82,3 +123,115 @@ def test_extract_cli_error_reads_provider_json_error_payload() -> None:
     )
 
     assert _extract_cli_error(stdout, "") == "Failed to authenticate"
+
+
+def test_should_use_cli_fast_path_only_when_no_http_lane_exists() -> None:
+    cli_route = ResolvedChatRoute(
+        provider_slug="openai",
+        model_slug="gpt-5.4",
+        adapter_type="cli_llm",
+    )
+    http_route = ResolvedChatRoute(
+        provider_slug="openai",
+        model_slug="gpt-5.4",
+        adapter_type="llm_task",
+        endpoint_uri="https://api.openai.com/v1/chat/completions",
+        api_key="openai-key",
+    )
+
+    assert _should_use_cli_fast_path([cli_route]) is True
+    assert _should_use_cli_fast_path([cli_route, http_route]) is False
+
+
+def test_send_message_prefers_http_lane_when_cli_route_is_sticky(monkeypatch) -> None:
+    store = _FakeChatStore()
+    orchestrator = ChatOrchestrator(object(), _REPO_ROOT, chat_store=store)
+    cli_route = ResolvedChatRoute(
+        provider_slug="openai",
+        model_slug="gpt-5.4",
+        adapter_type="cli_llm",
+    )
+    http_route = ResolvedChatRoute(
+        provider_slug="openai",
+        model_slug="gpt-5.4",
+        adapter_type="llm_task",
+        endpoint_uri="https://api.openai.com/v1/chat/completions",
+        api_key="openai-key",
+    )
+
+    monkeypatch.setattr(orchestrator, "_resolve_route_chain", lambda: [cli_route, http_route])
+    monkeypatch.setattr(
+        orchestrator,
+        "_resolve_model",
+        lambda: ("openai", "gpt-5.4", "https://api.openai.com/v1/chat/completions", "openai-key"),
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_send_via_cli",
+        lambda routes, messages: (_ for _ in ()).throw(AssertionError("CLI fast path should be skipped")),
+    )
+    monkeypatch.setattr(
+        chat_orchestrator_mod,
+        "call_llm",
+        lambda request: SimpleNamespace(
+            content="HTTP lane response",
+            provider_slug="openai",
+            model="gpt-5.4",
+            usage={"input_tokens": 1, "output_tokens": 1},
+            latency_ms=12,
+            tool_calls=(),
+        ),
+    )
+
+    result = orchestrator.send_message("conv-1", "Please use tools if needed")
+
+    assert result["content"] == "HTTP lane response"
+    assert result["model_used"] == "openai/gpt-5.4"
+    assert [message["role"] for message in store.messages] == ["user", "assistant"]
+
+
+def test_send_message_streaming_prefers_http_lane_when_cli_route_is_sticky(monkeypatch) -> None:
+    store = _FakeChatStore()
+    orchestrator = ChatOrchestrator(object(), _REPO_ROOT, chat_store=store)
+    cli_route = ResolvedChatRoute(
+        provider_slug="openai",
+        model_slug="gpt-5.4",
+        adapter_type="cli_llm",
+    )
+    http_route = ResolvedChatRoute(
+        provider_slug="openai",
+        model_slug="gpt-5.4",
+        adapter_type="llm_task",
+        endpoint_uri="https://api.openai.com/v1/chat/completions",
+        api_key="openai-key",
+    )
+
+    monkeypatch.setattr(orchestrator, "_resolve_route_chain", lambda: [cli_route, http_route])
+    monkeypatch.setattr(
+        orchestrator,
+        "_resolve_model",
+        lambda: ("openai", "gpt-5.4", "https://api.openai.com/v1/chat/completions", "openai-key"),
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_send_via_cli",
+        lambda routes, messages: (_ for _ in ()).throw(AssertionError("CLI fast path should be skipped")),
+    )
+    monkeypatch.setattr(
+        chat_orchestrator_mod,
+        "call_llm_streaming",
+        lambda request: iter(
+            (
+                {"type": "text_delta", "text": "HTTP "},
+                {"type": "text_delta", "text": "stream"},
+                {"type": "message_stop", "stop_reason": "end_turn"},
+            )
+        ),
+    )
+
+    events = list(orchestrator.send_message_streaming("conv-1", "Please use tools if needed"))
+
+    assert events[0] == {"event": "text_delta", "data": {"text": "HTTP "}}
+    assert events[1] == {"event": "text_delta", "data": {"text": "stream"}}
+    assert events[-1]["event"] == "done"
+    assert events[-1]["data"]["model_used"] == "openai/gpt-5.4"

@@ -103,6 +103,7 @@ interface WorkflowSection {
   description: string;
   emptyTitle: string;
   emptyCopy: string;
+  emptyAction: string;
   count: number;
   workflows: Workflow[];
   tone: 'live' | 'saved' | 'draft';
@@ -254,6 +255,7 @@ function WorkflowSectionBlock({
   onViewRun,
   onRunNow,
   onDelete,
+  primaryActionLabel,
 }: {
   section: WorkflowSection;
   loading: boolean;
@@ -263,6 +265,7 @@ function WorkflowSectionBlock({
   onViewRun: (runId: string) => void;
   onRunNow: (workflowId: string) => void;
   onDelete: (workflowId: string) => void;
+  primaryActionLabel: string;
 }) {
   return (
     <section className={`dash-section dash-section--${section.tone}`}>
@@ -295,7 +298,7 @@ function WorkflowSectionBlock({
           <div className="dash-empty__title">{section.emptyTitle}</div>
           <div className="dash-empty__copy">{section.emptyCopy}</div>
           <button type="button" className="dash-empty__action" onClick={onPrimaryAction}>
-            Create from here
+            {primaryActionLabel}
           </button>
         </div>
       )}
@@ -436,34 +439,37 @@ export function Dashboard({
     : 'Describe the operating model if you know the intent, or start from scratch if you want hands-on control over every step.';
 
   const sectionMeta: Record<'live' | 'saved' | 'draft', Omit<WorkflowSection, 'count' | 'workflows'>> = {
-    live: {
-      key: 'live',
-      title: 'Live Lanes',
-      eyebrow: 'Active execution',
-      description: 'Workflows with a trigger or schedule already wired into the world.',
-      emptyTitle: 'No live lanes yet',
-      emptyCopy: 'Promote a validated workflow into a live lane once you trust the execution path.',
-      tone: 'live',
-    },
-    saved: {
-      key: 'saved',
-      title: 'Validated Workflows',
-      eyebrow: 'Reusable build assets',
-      description: 'Saved workflows with history behind them, ready to inspect, rerun, or evolve.',
-      emptyTitle: 'No validated workflows yet',
-      emptyCopy: 'Run a workflow once to turn the draft into a reusable operating asset.',
-      tone: 'saved',
-    },
-    draft: {
-      key: 'draft',
-      title: 'Draft Bench',
-      eyebrow: 'Work in progress',
-      description: 'Early models and builders that have not seen execution yet.',
-      emptyTitle: 'The draft bench is empty',
-      emptyCopy: 'Start a fresh workflow or describe an operating model to seed the first draft.',
-      tone: 'draft',
-    },
-  };
+      live: {
+        key: 'live',
+        title: 'Live Lanes',
+        eyebrow: 'Active execution',
+        description: 'Workflows with a trigger or schedule already wired into the world.',
+        emptyTitle: 'No live lanes yet',
+        emptyCopy: 'Promote a validated workflow into a live lane once you trust the execution path.',
+        emptyAction: 'Describe the first lane',
+        tone: 'live',
+      },
+      saved: {
+        key: 'saved',
+        title: 'Validated Workflows',
+        eyebrow: 'Reusable build assets',
+        description: 'Saved workflows with history behind them, ready to inspect, rerun, or evolve.',
+        emptyTitle: 'No validated workflows yet',
+        emptyCopy: 'Run a workflow once to turn the draft into a reusable operating asset.',
+        emptyAction: 'Open the builder',
+        tone: 'saved',
+      },
+      draft: {
+        key: 'draft',
+        title: 'Draft Bench',
+        eyebrow: 'Work in progress',
+        description: 'Early models and builders that have not seen execution yet.',
+        emptyTitle: 'The draft bench is empty',
+        emptyCopy: 'Start a fresh workflow or describe an operating model to seed the first draft.',
+        emptyAction: 'Start the first workflow',
+        tone: 'draft',
+      },
+    };
 
   const workflowSections: WorkflowSection[] = (snapshot?.sections ?? [
     { key: 'live', count: 0, workflow_ids: [] },
@@ -718,6 +724,7 @@ export function Dashboard({
                   section={section}
                   loading={loading}
                   onPrimaryAction={section.key === 'draft' ? onNewWorkflow : onDescribe}
+                  primaryActionLabel={section.emptyAction}
                   onEditWorkflow={onEditWorkflow}
                   onEditModel={onEditModel}
                   onViewRun={onViewRun}

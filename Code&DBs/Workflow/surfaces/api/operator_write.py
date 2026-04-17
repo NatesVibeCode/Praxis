@@ -6,11 +6,14 @@ import os
 import re
 from collections.abc import AsyncIterator
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Protocol, cast
 
-from authority.operator_control import OperatorDecisionAuthorityRecord
+from authority.operator_control import (
+    OperatorDecisionAuthorityRecord,
+    operator_decision_scope_policy,
+)
 from policy.workflow_classes import (
     WorkflowClassAuthorityRecord,
     WorkflowClassCatalog,
@@ -23,6 +26,7 @@ from policy.native_primary_cutover import (
     PostgresNativePrimaryCutoverRepository,
 )
 from runtime.circuit_breaker import invalidate_circuit_breaker_override_cache
+from runtime.event_log import CHANNEL_SEMANTIC_ASSERTION, aemit
 from runtime.instance import NativeWorkflowInstance, resolve_native_instance
 from runtime.operator_object_relations import (
     FunctionalAreaRecord,
@@ -41,6 +45,12 @@ from runtime.recurring_review_repair_flow import (
     RecurringReviewRepairFlowResolution,
     resolve_recurring_review_repair_flow,
 )
+from runtime.semantic_assertions import (
+    SemanticAssertionRecord,
+    SemanticAssertionRepository,
+    SemanticPredicateRecord,
+    normalize_semantic_assertion_record,
+)
 from runtime.work_item_workflow_bindings import (
     PostgresWorkItemWorkflowBindingRepository,
     WorkItemWorkflowBindingRecord,
@@ -51,6 +61,7 @@ from storage.postgres import (
     PostgresOperatorControlRepository,
     PostgresWorkItemCloseoutRepository,
     PostgresRoadmapAuthoringRepository,
+    PostgresSemanticAssertionRepository,
     PostgresTaskRouteEligibilityRepository,
     connect_workflow_database,
     resolve_workflow_authority_cache_key,
@@ -93,6 +104,12 @@ _CIRCUIT_BREAKER_OVERRIDE_STATES = frozenset({"open", "closed", "reset"})
 _FUNCTIONAL_AREA_STATUSES = frozenset(SUPPORTED_FUNCTIONAL_AREA_STATUSES)
 _OBJECT_RELATION_STATUSES = frozenset(SUPPORTED_OPERATOR_OBJECT_RELATION_STATUSES)
 _OBJECT_RELATION_KINDS = frozenset(SUPPORTED_OPERATOR_OBJECT_KINDS)
+_OBJECT_RELATION_SEMANTIC_PREDICATE_ALLOWLIST = tuple(SUPPORTED_OPERATOR_OBJECT_KINDS)
+_OBJECT_RELATION_SEMANTIC_SOURCE_KIND = "operator_object_relation"
+_OBJECT_RELATION_SEMANTIC_CARDINALITY_MODE = "single_active_per_edge"
+_DECISION_SEMANTIC_SOURCE_KIND = "operator_decision"
+_DECISION_SEMANTIC_OBJECT_ALLOWLIST = ("operator_decision",)
+_DECISION_SEMANTIC_CARDINALITY_MODE = "many"
 _BUG_CLOSEOUT_EVIDENCE_ROLE = "validates_fix"
 _ROADMAP_COMPLETED_STATUS = "completed"
 _BUG_CLOSEOUT_VERIFICATION_SUCCESS_STATUSES = frozenset({"passed", "succeeded", "success", "ok"})
@@ -1028,6 +1045,9 @@ class OperatorControlFrontdoor:
     object_relation_repository_factory: Callable[[
         _Connection,
     ], OperatorObjectRelationRepository] | None = None
+    semantic_assertion_repository_factory: Callable[[
+        _Connection,
+    ], SemanticAssertionRepository] | None = None
     binding_repository_factory: Callable[[
         _Connection,
     ], WorkItemWorkflowBindingRepository] | None = None
@@ -1052,6 +1072,10 @@ class OperatorControlFrontdoor:
         if self.object_relation_repository_factory is None:
             self.object_relation_repository_factory = (
                 self._default_object_relation_repository_factory
+            )
+        if self.semantic_assertion_repository_factory is None:
+            self.semantic_assertion_repository_factory = (
+                self._default_semantic_assertion_repository_factory
             )
         if self.binding_repository_factory is None:
             self.binding_repository_factory = self._default_binding_repository_factory
@@ -1087,6 +1111,12 @@ class OperatorControlFrontdoor:
         conn: _Connection,
     ) -> OperatorObjectRelationRepository:
         return PostgresOperatorObjectRelationRepository(conn)  # type: ignore[arg-type]
+
+    @staticmethod
+    def _default_semantic_assertion_repository_factory(
+        conn: _Connection,
+    ) -> SemanticAssertionRepository:
+        return PostgresSemanticAssertionRepository(conn)  # type: ignore[arg-type]
 
     @staticmethod
     def _default_binding_repository_factory(
@@ -1320,9 +1350,316 @@ class OperatorControlFrontdoor:
                 created_at=normalized_created_at,
                 updated_at=normalized_updated_at,
             )
-            return await repository.record_relation(relation=relation)
+            async with conn.transaction():
+                persisted_relation = await repository.record_relation(relation=relation)
+                await self._sync_semantic_bridge_for_relation(
+                    conn,
+                    relation=persisted_relation,
+                )
+            return persisted_relation
         finally:
             await conn.close()
+
+    async def _ensure_semantic_bridge_predicate_for_relation(
+        self,
+        conn: _Connection,
+        *,
+        repository: SemanticAssertionRepository,
+        relation: OperatorObjectRelationRecord,
+    ) -> SemanticPredicateRecord:
+        expected_predicate = SemanticPredicateRecord(
+            predicate_slug=relation.relation_kind,
+            predicate_status="active",
+            subject_kind_allowlist=_OBJECT_RELATION_SEMANTIC_PREDICATE_ALLOWLIST,
+            object_kind_allowlist=_OBJECT_RELATION_SEMANTIC_PREDICATE_ALLOWLIST,
+            cardinality_mode=_OBJECT_RELATION_SEMANTIC_CARDINALITY_MODE,
+            description=(
+                "Auto-registered bridge predicate mirroring "
+                f"operator_object_relations relation_kind '{relation.relation_kind}'."
+            ),
+            created_at=relation.created_at,
+            updated_at=relation.updated_at,
+        )
+        existing_predicate = await repository.load_predicate(
+            predicate_slug=expected_predicate.predicate_slug,
+        )
+        needs_sync = (
+            existing_predicate is None
+            or existing_predicate.predicate_status != expected_predicate.predicate_status
+            or existing_predicate.subject_kind_allowlist
+            != expected_predicate.subject_kind_allowlist
+            or existing_predicate.object_kind_allowlist
+            != expected_predicate.object_kind_allowlist
+            or existing_predicate.cardinality_mode != expected_predicate.cardinality_mode
+            or existing_predicate.description != expected_predicate.description
+        )
+        if not needs_sync:
+            return existing_predicate
+        persisted_predicate = await repository.upsert_predicate(
+            predicate=expected_predicate,
+        )
+        await aemit(
+            conn,
+            channel=CHANNEL_SEMANTIC_ASSERTION,
+            event_type="semantic_predicate_registered",
+            entity_id=persisted_predicate.predicate_slug,
+            entity_kind="semantic_predicate",
+            payload={
+                "semantic_predicate": persisted_predicate.to_json(),
+                "bridge_source": "operator_object_relations",
+            },
+            emitted_by="operator_write.record_operator_object_relation",
+        )
+        return persisted_predicate
+
+    @staticmethod
+    def _semantic_bridge_assertion_for_relation(
+        relation: OperatorObjectRelationRecord,
+    ) -> SemanticAssertionRecord:
+        qualifiers_json = (
+            {"relation_metadata": dict(relation.relation_metadata)}
+            if relation.relation_metadata
+            else {}
+        )
+        return normalize_semantic_assertion_record(
+            SemanticAssertionRecord(
+                semantic_assertion_id="",
+                predicate_slug=relation.relation_kind,
+                assertion_status="active",
+                subject_kind=relation.source_kind,
+                subject_ref=relation.source_ref,
+                object_kind=relation.target_kind,
+                object_ref=relation.target_ref,
+                qualifiers_json=qualifiers_json,
+                source_kind=_OBJECT_RELATION_SEMANTIC_SOURCE_KIND,
+                source_ref=relation.operator_object_relation_id,
+                evidence_ref=None,
+                bound_decision_id=relation.bound_by_decision_id,
+                valid_from=relation.created_at,
+                valid_to=None,
+                created_at=relation.created_at,
+                updated_at=relation.updated_at,
+            )
+        )
+
+    async def _sync_semantic_bridge_for_relation(
+        self,
+        conn: _Connection,
+        *,
+        relation: OperatorObjectRelationRecord,
+    ) -> str:
+        assert self.semantic_assertion_repository_factory is not None
+        repository = self.semantic_assertion_repository_factory(conn)
+        predicate = await self._ensure_semantic_bridge_predicate_for_relation(
+            conn,
+            repository=repository,
+            relation=relation,
+        )
+        bridge_assertion = self._semantic_bridge_assertion_for_relation(relation)
+        if relation.relation_status == "inactive":
+            existing_assertion = await repository.load_assertion(
+                semantic_assertion_id=bridge_assertion.semantic_assertion_id,
+            )
+            if existing_assertion is None:
+                tombstone_assertion = replace(
+                    bridge_assertion,
+                    assertion_status="retracted",
+                    valid_to=relation.updated_at,
+                )
+                persisted_assertion, superseded_assertions = await repository.record_assertion(
+                    assertion=tombstone_assertion,
+                    cardinality_mode=predicate.cardinality_mode,
+                    as_of=relation.updated_at,
+                )
+                await aemit(
+                    conn,
+                    channel=CHANNEL_SEMANTIC_ASSERTION,
+                    event_type="semantic_assertion_recorded",
+                    entity_id=persisted_assertion.semantic_assertion_id,
+                    entity_kind="semantic_assertion",
+                    payload={
+                        "semantic_assertion": persisted_assertion.to_json(),
+                        "superseded_assertion_ids": [
+                            item.semantic_assertion_id for item in superseded_assertions
+                        ],
+                        "bridge_source": "operator_object_relations",
+                        "bridge_state": "inactive_tombstone",
+                    },
+                    emitted_by="operator_write.record_operator_object_relation",
+                )
+                return "tombstoned"
+            retracted_assertion = await repository.retract_assertion(
+                semantic_assertion_id=bridge_assertion.semantic_assertion_id,
+                retracted_at=relation.updated_at,
+                updated_at=relation.updated_at,
+            )
+            await aemit(
+                conn,
+                channel=CHANNEL_SEMANTIC_ASSERTION,
+                event_type="semantic_assertion_retracted",
+                entity_id=retracted_assertion.semantic_assertion_id,
+                entity_kind="semantic_assertion",
+                payload={
+                    "semantic_assertion": retracted_assertion.to_json(),
+                    "bridge_source": "operator_object_relations",
+                },
+                emitted_by="operator_write.record_operator_object_relation",
+            )
+            return "retracted"
+        persisted_assertion, superseded_assertions = await repository.record_assertion(
+            assertion=bridge_assertion,
+            cardinality_mode=predicate.cardinality_mode,
+            as_of=relation.updated_at,
+        )
+        await aemit(
+            conn,
+            channel=CHANNEL_SEMANTIC_ASSERTION,
+            event_type="semantic_assertion_recorded",
+            entity_id=persisted_assertion.semantic_assertion_id,
+            entity_kind="semantic_assertion",
+            payload={
+                "semantic_assertion": persisted_assertion.to_json(),
+                "superseded_assertion_ids": [
+                    item.semantic_assertion_id for item in superseded_assertions
+                ],
+                "bridge_source": "operator_object_relations",
+            },
+            emitted_by="operator_write.record_operator_object_relation",
+        )
+        return "recorded"
+
+    async def _ensure_semantic_bridge_predicate_for_operator_decision(
+        self,
+        conn: _Connection,
+        *,
+        repository: SemanticAssertionRepository,
+        decision: OperatorDecisionAuthorityRecord,
+    ) -> SemanticPredicateRecord | None:
+        if decision.decision_scope_kind is None or decision.decision_scope_ref is None:
+            return None
+        policy = operator_decision_scope_policy(decision_kind=decision.decision_kind)
+        if policy.scope_mode == "none":
+            return None
+        subject_kind_allowlist = (
+            policy.allowed_scope_kinds
+            if policy.allowed_scope_kinds
+            else (decision.decision_scope_kind,)
+        )
+        expected_predicate = SemanticPredicateRecord(
+            predicate_slug=decision.decision_kind,
+            predicate_status="active",
+            subject_kind_allowlist=subject_kind_allowlist,
+            object_kind_allowlist=_DECISION_SEMANTIC_OBJECT_ALLOWLIST,
+            cardinality_mode=_DECISION_SEMANTIC_CARDINALITY_MODE,
+            description=(
+                "Auto-registered bridge predicate mirroring "
+                f"operator_decisions decision_kind '{decision.decision_kind}' "
+                "onto scoped semantic edges."
+            ),
+            created_at=decision.created_at,
+            updated_at=decision.updated_at,
+        )
+        existing_predicate = await repository.load_predicate(
+            predicate_slug=expected_predicate.predicate_slug,
+        )
+        needs_sync = (
+            existing_predicate is None
+            or existing_predicate.predicate_status != expected_predicate.predicate_status
+            or existing_predicate.subject_kind_allowlist
+            != expected_predicate.subject_kind_allowlist
+            or existing_predicate.object_kind_allowlist
+            != expected_predicate.object_kind_allowlist
+            or existing_predicate.cardinality_mode != expected_predicate.cardinality_mode
+            or existing_predicate.description != expected_predicate.description
+        )
+        if not needs_sync:
+            return existing_predicate
+        persisted_predicate = await repository.upsert_predicate(
+            predicate=expected_predicate,
+        )
+        await aemit(
+            conn,
+            channel=CHANNEL_SEMANTIC_ASSERTION,
+            event_type="semantic_predicate_registered",
+            entity_id=persisted_predicate.predicate_slug,
+            entity_kind="semantic_predicate",
+            payload={
+                "semantic_predicate": persisted_predicate.to_json(),
+                "bridge_source": "operator_decisions",
+            },
+            emitted_by="operator_write.record_operator_decision",
+        )
+        return persisted_predicate
+
+    @staticmethod
+    def _semantic_bridge_assertion_for_operator_decision(
+        decision: OperatorDecisionAuthorityRecord,
+    ) -> SemanticAssertionRecord | None:
+        if decision.decision_scope_kind is None or decision.decision_scope_ref is None:
+            return None
+        return normalize_semantic_assertion_record(
+            SemanticAssertionRecord(
+                semantic_assertion_id="",
+                predicate_slug=decision.decision_kind,
+                assertion_status="active",
+                subject_kind=decision.decision_scope_kind,
+                subject_ref=decision.decision_scope_ref,
+                object_kind="operator_decision",
+                object_ref=decision.operator_decision_id,
+                qualifiers_json={
+                    "decision_key": decision.decision_key,
+                    "decision_source": decision.decision_source,
+                    "decision_status": decision.decision_status,
+                },
+                source_kind=_DECISION_SEMANTIC_SOURCE_KIND,
+                source_ref=decision.operator_decision_id,
+                evidence_ref=None,
+                bound_decision_id=None,
+                valid_from=decision.effective_from,
+                valid_to=decision.effective_to,
+                created_at=decision.created_at,
+                updated_at=decision.updated_at,
+            )
+        )
+
+    async def _sync_semantic_bridge_for_operator_decision(
+        self,
+        conn: _Connection,
+        *,
+        decision: OperatorDecisionAuthorityRecord,
+        emitted_by: str,
+    ) -> str:
+        assert self.semantic_assertion_repository_factory is not None
+        repository = self.semantic_assertion_repository_factory(conn)
+        predicate = await self._ensure_semantic_bridge_predicate_for_operator_decision(
+            conn,
+            repository=repository,
+            decision=decision,
+        )
+        bridge_assertion = self._semantic_bridge_assertion_for_operator_decision(decision)
+        if predicate is None or bridge_assertion is None:
+            return "skipped_unscoped"
+        persisted_assertion, superseded_assertions = await repository.record_assertion(
+            assertion=bridge_assertion,
+            cardinality_mode=predicate.cardinality_mode,
+            as_of=decision.updated_at,
+        )
+        await aemit(
+            conn,
+            channel=CHANNEL_SEMANTIC_ASSERTION,
+            event_type="semantic_assertion_recorded",
+            entity_id=persisted_assertion.semantic_assertion_id,
+            entity_kind="semantic_assertion",
+            payload={
+                "semantic_assertion": persisted_assertion.to_json(),
+                "superseded_assertion_ids": [
+                    item.semantic_assertion_id for item in superseded_assertions
+                ],
+                "bridge_source": "operator_decisions",
+            },
+            emitted_by=emitted_by,
+        )
+        return "recorded"
 
     async def _record_work_item_workflow_binding(
         self,
@@ -1422,22 +1759,45 @@ class OperatorControlFrontdoor:
             runtime = NativePrimaryCutoverRuntime(
                 repository=self.native_primary_cutover_repository_factory(conn),
             )
-            return await runtime.admit_gate(
-                decided_by=decided_by,
-                decision_source=decision_source,
-                rationale=rationale,
-                roadmap_item_id=roadmap_item_id,
-                workflow_class_id=workflow_class_id,
-                schedule_definition_id=schedule_definition_id,
-                title=title,
-                gate_name=gate_name,
-                gate_policy=gate_policy,
-                required_evidence=required_evidence,
-                decided_at=decided_at,
-                opened_at=opened_at,
-                created_at=created_at,
-                updated_at=updated_at,
-            )
+            async with conn.transaction():
+                record = await runtime.admit_gate(
+                    decided_by=decided_by,
+                    decision_source=decision_source,
+                    rationale=rationale,
+                    roadmap_item_id=roadmap_item_id,
+                    workflow_class_id=workflow_class_id,
+                    schedule_definition_id=schedule_definition_id,
+                    title=title,
+                    gate_name=gate_name,
+                    gate_policy=gate_policy,
+                    required_evidence=required_evidence,
+                    decided_at=decided_at,
+                    opened_at=opened_at,
+                    created_at=created_at,
+                    updated_at=updated_at,
+                )
+                await self._sync_semantic_bridge_for_operator_decision(
+                    conn,
+                    decision=OperatorDecisionAuthorityRecord(
+                        operator_decision_id=record.decision_id,
+                        decision_key=record.decision_key,
+                        decision_kind="native_primary_cutover",
+                        decision_status=record.decision_status,
+                        title=record.title,
+                        rationale=record.rationale,
+                        decided_by=record.decided_by,
+                        decision_source=record.decision_source,
+                        effective_from=record.opened_at,
+                        effective_to=None,
+                        decided_at=record.opened_at,
+                        created_at=record.created_at,
+                        updated_at=record.updated_at,
+                        decision_scope_kind=record.target_kind,
+                        decision_scope_ref=record.target_ref,
+                    ),
+                    emitted_by="operator_write.admit_native_primary_cutover_gate",
+                )
+            return record
         finally:
             await conn.close()
 
@@ -3022,9 +3382,15 @@ class OperatorControlFrontdoor:
         try:
             assert self.operator_control_repository_factory is not None
             repository = self.operator_control_repository_factory(conn)
-            persisted = await repository.record_operator_decision(
-                operator_decision=decision,
-            )
+            async with conn.transaction():
+                persisted = await repository.record_operator_decision(
+                    operator_decision=decision,
+                )
+                await self._sync_semantic_bridge_for_operator_decision(
+                    conn,
+                    decision=persisted,
+                    emitted_by="operator_write.set_circuit_breaker_override",
+                )
         finally:
             await conn.close()
 
@@ -3134,9 +3500,15 @@ class OperatorControlFrontdoor:
         try:
             assert self.operator_control_repository_factory is not None
             repository = self.operator_control_repository_factory(conn)
-            persisted = await repository.record_operator_decision(
-                operator_decision=decision,
-            )
+            async with conn.transaction():
+                persisted = await repository.record_operator_decision(
+                    operator_decision=decision,
+                )
+                await self._sync_semantic_bridge_for_operator_decision(
+                    conn,
+                    decision=persisted,
+                    emitted_by="operator_write.record_architecture_policy_decision",
+                )
         finally:
             await conn.close()
 
@@ -3419,12 +3791,130 @@ class OperatorControlFrontdoor:
         try:
             assert self.operator_control_repository_factory is not None
             repository = self.operator_control_repository_factory(conn)
-            persisted = await repository.record_operator_decision(
-                operator_decision=decision,
-            )
+            async with conn.transaction():
+                persisted = await repository.record_operator_decision(
+                    operator_decision=decision,
+                )
+                await self._sync_semantic_bridge_for_operator_decision(
+                    conn,
+                    decision=persisted,
+                    emitted_by="operator_write.record_operator_decision",
+                )
         finally:
             await conn.close()
         return {"operator_decision": _operator_decision_to_json(persisted)}
+
+    async def backfill_semantic_bridges_async(
+        self,
+        *,
+        include_object_relations: bool = True,
+        include_operator_decisions: bool = True,
+        as_of: datetime | None = None,
+        env: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
+        if not include_object_relations and not include_operator_decisions:
+            raise ValueError(
+                "backfill_semantic_bridges requires include_object_relations or "
+                "include_operator_decisions"
+            )
+        normalized_as_of = (
+            None
+            if as_of is None
+            else _normalize_as_of(
+                as_of,
+                error_type=ValueError,
+                reason_code="operator_control.invalid_as_of",
+            )
+        )
+        conn = await self.connect_database(env)
+        try:
+            relation_summary = {
+                "processed": 0,
+                "recorded": 0,
+                "retracted": 0,
+                "tombstoned": 0,
+            }
+            decision_summary = {
+                "processed": 0,
+                "recorded": 0,
+                "skipped_unscoped": 0,
+            }
+            projection_as_of = normalized_as_of or _now()
+            async with conn.transaction():
+                if include_object_relations:
+                    assert self.object_relation_repository_factory is not None
+                    relation_repository = self.object_relation_repository_factory(conn)
+                    relation_rows = await relation_repository.list_relations(
+                        as_of=normalized_as_of,
+                    )
+                    for relation in sorted(
+                        relation_rows,
+                        key=lambda record: (
+                            record.created_at,
+                            record.updated_at,
+                            record.operator_object_relation_id,
+                        ),
+                    ):
+                        relation_summary["processed"] += 1
+                        outcome = await self._sync_semantic_bridge_for_relation(
+                            conn,
+                            relation=relation,
+                        )
+                        relation_summary[outcome] += 1
+                if include_operator_decisions:
+                    assert self.operator_control_repository_factory is not None
+                    operator_repository = self.operator_control_repository_factory(conn)
+                    if not hasattr(
+                        operator_repository,
+                        "fetch_operator_decisions_for_semantic_bridge",
+                    ):
+                        raise ValueError(
+                            "operator_control_repository_factory must provide "
+                            "fetch_operator_decisions_for_semantic_bridge for semantic replay"
+                        )
+                    decision_rows = await operator_repository.fetch_operator_decisions_for_semantic_bridge(  # type: ignore[attr-defined]
+                        as_of=normalized_as_of,
+                    )
+                    for decision in decision_rows:
+                        decision_summary["processed"] += 1
+                        outcome = await self._sync_semantic_bridge_for_operator_decision(
+                            conn,
+                            decision=decision,
+                            emitted_by="operator_write.backfill_semantic_bridges",
+                        )
+                        decision_summary[outcome] += 1
+                assert self.semantic_assertion_repository_factory is not None
+                semantic_repository = self.semantic_assertion_repository_factory(conn)
+                await semantic_repository.rebuild_current_assertions(
+                    as_of=projection_as_of,
+                )
+                await aemit(
+                    conn,
+                    channel=CHANNEL_SEMANTIC_ASSERTION,
+                    event_type="semantic_bridge_backfilled",
+                    entity_id="operator_control",
+                    entity_kind="operator_control",
+                    payload={
+                        "bridge_source": "operator_control",
+                        "as_of": (
+                            None
+                            if normalized_as_of is None
+                            else normalized_as_of.isoformat()
+                        ),
+                        "object_relations": dict(relation_summary),
+                        "operator_decisions": dict(decision_summary),
+                    },
+                    emitted_by="operator_write.backfill_semantic_bridges",
+                )
+        finally:
+            await conn.close()
+        return {
+            "semantic_bridge_backfill": {
+                "as_of": None if normalized_as_of is None else normalized_as_of.isoformat(),
+                "object_relations": relation_summary,
+                "operator_decisions": decision_summary,
+            }
+        }
 
     async def list_operator_decisions_async(
         self,
@@ -3558,6 +4048,27 @@ class OperatorControlFrontdoor:
                 effective_to=effective_to,
                 decision_scope_kind=decision_scope_kind,
                 decision_scope_ref=decision_scope_ref,
+                env=env,
+            ),
+            message=(
+                "operator_control.async_boundary_required: "
+                "operator control sync entrypoints require a non-async call boundary"
+            ),
+        )
+
+    def backfill_semantic_bridges(
+        self,
+        *,
+        include_object_relations: bool = True,
+        include_operator_decisions: bool = True,
+        as_of: datetime | None = None,
+        env: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
+        return _run_async(
+            self.backfill_semantic_bridges_async(
+                include_object_relations=include_object_relations,
+                include_operator_decisions=include_operator_decisions,
+                as_of=as_of,
                 env=env,
             ),
             message=(
@@ -4343,6 +4854,40 @@ async def arecord_operator_decision(
         effective_to=effective_to,
         decision_scope_kind=decision_scope_kind,
         decision_scope_ref=decision_scope_ref,
+        env=env,
+    )
+
+
+def backfill_semantic_bridges(
+    *,
+    include_object_relations: bool = True,
+    include_operator_decisions: bool = True,
+    as_of: datetime | None = None,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Replay legacy operator semantic rows into semantic_assertions."""
+
+    return OperatorControlFrontdoor().backfill_semantic_bridges(
+        include_object_relations=include_object_relations,
+        include_operator_decisions=include_operator_decisions,
+        as_of=as_of,
+        env=env,
+    )
+
+
+async def abackfill_semantic_bridges(
+    *,
+    include_object_relations: bool = True,
+    include_operator_decisions: bool = True,
+    as_of: datetime | None = None,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Replay legacy operator semantic rows into semantic_assertions in async contexts."""
+
+    return await OperatorControlFrontdoor().backfill_semantic_bridges_async(
+        include_object_relations=include_object_relations,
+        include_operator_decisions=include_operator_decisions,
+        as_of=as_of,
         env=env,
     )
 
@@ -5141,9 +5686,11 @@ __all__ = [
     "OperatorControlFrontdoor",
     "TaskRouteEligibilityRecord",
     "TaskRouteEligibilityWriteResult",
+    "abackfill_semantic_bridges",
     "arecord_architecture_policy_decision",
     "arecord_functional_area",
     "arecord_issue",
+    "arecord_operator_decision",
     "arecord_operator_object_relation",
     "aset_circuit_breaker_override",
     "aadmit_native_primary_cutover_gate",
@@ -5154,10 +5701,14 @@ __all__ = [
     "admit_native_primary_cutover_gate",
     "inspect_workflow_flows",
     "inspect_recurring_review_repair_flow",
+    "backfill_semantic_bridges",
     "record_architecture_policy_decision",
     "record_functional_area",
     "record_issue",
+    "record_operator_decision",
     "record_operator_object_relation",
+    "list_operator_decisions",
+    "alist_operator_decisions",
     "roadmap_write",
     "reconcile_work_item_closeout",
     "record_work_item_workflow_binding",

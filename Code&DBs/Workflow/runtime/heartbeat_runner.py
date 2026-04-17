@@ -6,33 +6,27 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import logging
+import os
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+from collections.abc import Mapping
 
 from memory.engine import MemoryEngine
 
-import importlib.util as _ilu
-import pathlib as _pl
-import sys as _sys
-
-_hb_path = str(_pl.Path(__file__).resolve().parent / "heartbeat.py")
-_hb_spec = _ilu.spec_from_file_location("runtime.heartbeat", _hb_path)
-_hb = _ilu.module_from_spec(_hb_spec)
-_sys.modules.setdefault("runtime.heartbeat", _hb)
-_hb_spec.loader.exec_module(_hb)
-
-DuplicateScanner = _hb.DuplicateScanner
-GapScanner = _hb.GapScanner
-HeartbeatCycleResult = _hb.HeartbeatCycleResult
-HeartbeatModule = _hb.HeartbeatModule
-HeartbeatModuleResult = _hb.HeartbeatModuleResult
-HeartbeatOrchestrator = _hb.HeartbeatOrchestrator
-OrphanEdgeCleanup = _hb.OrphanEdgeCleanup
-StaleEntityDetector = _hb.StaleEntityDetector
-_ok = _hb._ok
-_fail = _hb._fail
+from runtime.heartbeat import (
+    DuplicateScanner,
+    GapScanner,
+    HeartbeatCycleResult,
+    HeartbeatModule,
+    HeartbeatModuleResult,
+    HeartbeatOrchestrator,
+    OrphanEdgeCleanup,
+    StaleEntityDetector,
+    _fail,
+    _ok,
+)
 
 from runtime.cron_scheduler import CronScheduler as _CronScheduler
 
@@ -354,6 +348,45 @@ class _AutoReviewFlushModule(HeartbeatModule):
         return _ok(self.name, t0)
 
 
+class _SemanticProjectionRefreshModule(HeartbeatModule):
+    """Heartbeat adapter for cursor-driven semantic projection refresh."""
+
+    def __init__(
+        self,
+        *,
+        workflow_env: Mapping[str, str] | None = None,
+        limit: int = 100,
+    ) -> None:
+        self._workflow_env = None if workflow_env is None else dict(workflow_env)
+        self._limit = max(1, int(limit or 100))
+
+    @property
+    def name(self) -> str:
+        return "semantic_projection_refresh"
+
+    def _has_workflow_authority(self) -> bool:
+        if self._workflow_env and str(self._workflow_env.get("WORKFLOW_DATABASE_URL") or "").strip():
+            return True
+        return bool(str(os.environ.get("WORKFLOW_DATABASE_URL") or "").strip())
+
+    def run(self) -> HeartbeatModuleResult:
+        t0 = time.monotonic()
+        if not self._has_workflow_authority():
+            return _ok(self.name, t0)
+        try:
+            from runtime.semantic_projection_subscriber import (
+                consume_semantic_projection_events,
+            )
+
+            consume_semantic_projection_events(
+                limit=self._limit,
+                env=self._workflow_env,
+            )
+        except Exception as exc:
+            return _fail(self.name, t0, str(exc))
+        return _ok(self.name, t0)
+
+
 class _RateLimitProbeModule(HeartbeatModule):
     """Heartbeat adapter for provider rate-limit health probes."""
 
@@ -404,12 +437,14 @@ class HeartbeatRunner:
         conn=None,
         embedder=None,
         include_probers: bool = True,
+        workflow_env: Mapping[str, str] | None = None,
     ) -> None:
         self._engine_db_path = engine_db_path
         self._results_dir = results_dir
         self._conn = conn
         self._embedder = embedder
         self._include_probers = include_probers
+        self._workflow_env = None if workflow_env is None else dict(workflow_env)
         self._engine = MemoryEngine(conn=conn, db_path=engine_db_path, embedder=embedder)
         self._rate_limit_probe_module: _RateLimitProbeModule | None = None
 
@@ -450,6 +485,7 @@ class HeartbeatRunner:
                 RelationshipMiner(self._conn, self._engine),
                 RollupGenerator(self._conn, self._engine),
                 SystemEventsCleanupModule(self._conn),
+                _SemanticProjectionRefreshModule(workflow_env=self._workflow_env),
             ])
             if self._embedder is not None:
                 from runtime.codebase_index_module import CodebaseIndexModule

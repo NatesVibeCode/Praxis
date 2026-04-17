@@ -11,6 +11,7 @@ import pytest
 
 from observability.operator_topology import load_operator_graph_projection
 from policy.workflow_lanes import bootstrap_workflow_lane_catalog_schema
+from runtime.semantic_assertions import semantic_assertion_id
 from storage.migrations import workflow_bootstrap_migration_statements
 from storage.postgres import (
     PostgresConfigurationError,
@@ -557,6 +558,178 @@ async def _seed_operator_graph_rows(
     )
 
 
+async def _seed_semantic_assertion_rows(
+    conn,
+    *,
+    suffix: str,
+    as_of: datetime,
+    roadmap_item_id: str,
+    functional_area_id: str,
+    decision_id: str,
+) -> tuple[str, str]:
+    authority_domain_ref = f"authority_domain.operator-graph.{suffix}"
+    grouped_in_relation_id = (
+        "operator_object_relation:grouped-in:roadmap_item:"
+        f"{roadmap_item_id}:functional_area:{functional_area_id}"
+    )
+    grouped_in_assertion_id = semantic_assertion_id(
+        predicate_slug="grouped_in",
+        subject_kind="roadmap_item",
+        subject_ref=roadmap_item_id,
+        object_kind="functional_area",
+        object_ref=functional_area_id,
+        source_kind="operator_object_relation",
+        source_ref=grouped_in_relation_id,
+    )
+    governed_by_policy_assertion_id = semantic_assertion_id(
+        predicate_slug="governed_by_policy",
+        subject_kind="authority_domain",
+        subject_ref=authority_domain_ref,
+        object_kind="operator_decision",
+        object_ref=decision_id,
+        source_kind="operator_decision",
+        source_ref=decision_id,
+    )
+
+    await conn.execute(
+        """
+        INSERT INTO semantic_predicates (
+            predicate_slug,
+            predicate_status,
+            subject_kind_allowlist,
+            object_kind_allowlist,
+            cardinality_mode,
+            description,
+            created_at,
+            updated_at
+        ) VALUES
+            (
+                'grouped_in',
+                'active',
+                '["roadmap_item"]'::jsonb,
+                '["functional_area"]'::jsonb,
+                'single_active_per_edge',
+                'Compatibility overlay for roadmap_item grouped_in functional_area.',
+                $1,
+                $2
+            ),
+            (
+                'governed_by_policy',
+                'active',
+                '["authority_domain"]'::jsonb,
+                '["operator_decision"]'::jsonb,
+                'many',
+                'Authority-domain policy edge.',
+                $3,
+                $4
+            )
+        ON CONFLICT (predicate_slug) DO UPDATE SET
+            predicate_status = EXCLUDED.predicate_status,
+            subject_kind_allowlist = EXCLUDED.subject_kind_allowlist,
+            object_kind_allowlist = EXCLUDED.object_kind_allowlist,
+            cardinality_mode = EXCLUDED.cardinality_mode,
+            description = EXCLUDED.description,
+            updated_at = EXCLUDED.updated_at
+        """,
+        as_of,
+        as_of,
+        as_of,
+        as_of,
+    )
+
+    await conn.execute(
+        """
+        INSERT INTO semantic_assertions (
+            semantic_assertion_id,
+            predicate_slug,
+            assertion_status,
+            subject_kind,
+            subject_ref,
+            object_kind,
+            object_ref,
+            qualifiers_json,
+            source_kind,
+            source_ref,
+            evidence_ref,
+            bound_decision_id,
+            valid_from,
+            valid_to,
+            created_at,
+            updated_at
+        ) VALUES
+            (
+                $1,
+                'grouped_in',
+                'active',
+                'roadmap_item',
+                $2,
+                'functional_area',
+                $3,
+                '{"origin":"semantic-overlay"}'::jsonb,
+                'operator_object_relation',
+                $4,
+                NULL,
+                $5,
+                $6,
+                NULL,
+                $7,
+                $8
+            ),
+            (
+                $9,
+                'governed_by_policy',
+                'active',
+                'authority_domain',
+                $10,
+                'operator_decision',
+                $11,
+                '{"origin":"semantic-test"}'::jsonb,
+                'operator_decision',
+                $12,
+                NULL,
+                $13,
+                $14,
+                NULL,
+                $15,
+                $16
+            )
+        ON CONFLICT (semantic_assertion_id) DO UPDATE SET
+            predicate_slug = EXCLUDED.predicate_slug,
+            assertion_status = EXCLUDED.assertion_status,
+            subject_kind = EXCLUDED.subject_kind,
+            subject_ref = EXCLUDED.subject_ref,
+            object_kind = EXCLUDED.object_kind,
+            object_ref = EXCLUDED.object_ref,
+            qualifiers_json = EXCLUDED.qualifiers_json,
+            source_kind = EXCLUDED.source_kind,
+            source_ref = EXCLUDED.source_ref,
+            evidence_ref = EXCLUDED.evidence_ref,
+            bound_decision_id = EXCLUDED.bound_decision_id,
+            valid_from = EXCLUDED.valid_from,
+            valid_to = EXCLUDED.valid_to,
+            created_at = EXCLUDED.created_at,
+            updated_at = EXCLUDED.updated_at
+        """,
+        grouped_in_assertion_id,
+        roadmap_item_id,
+        functional_area_id,
+        grouped_in_relation_id,
+        decision_id,
+        as_of,
+        as_of,
+        as_of,
+        governed_by_policy_assertion_id,
+        authority_domain_ref,
+        decision_id,
+        decision_id,
+        decision_id,
+        as_of,
+        as_of,
+        as_of,
+    )
+    return grouped_in_assertion_id, governed_by_policy_assertion_id
+
+
 def test_operator_graph_projection_is_graph_ready_and_explicit() -> None:
     asyncio.run(_exercise_operator_graph_projection_is_graph_ready_and_explicit())
 
@@ -585,6 +758,7 @@ async def _exercise_operator_graph_projection_is_graph_ready_and_explicit() -> N
             "015_memory_graph.sql",
             "132_issue_backlog_authority.sql",
             "134_operator_object_relations.sql",
+            "146_semantic_assertion_substrate.sql",
         ):
             await _bootstrap_migration(conn, filename)
 
@@ -600,6 +774,14 @@ async def _exercise_operator_graph_projection_is_graph_ready_and_explicit() -> N
             document_id,
             repo_path,
         ) = await _seed_operator_graph_rows(conn, suffix=suffix, as_of=as_of)
+        grouped_in_assertion_id, governed_by_policy_assertion_id = await _seed_semantic_assertion_rows(
+            conn,
+            suffix=suffix,
+            as_of=as_of,
+            roadmap_item_id=roadmap_item_id,
+            functional_area_id=functional_area_id,
+            decision_id=decision_id,
+        )
 
         projection = await load_operator_graph_projection(
             conn,
@@ -607,6 +789,8 @@ async def _exercise_operator_graph_projection_is_graph_ready_and_explicit() -> N
         )
 
         assert projection.as_of == as_of
+        assert projection.semantic_authority_state == "ready"
+        assert projection.semantic_authority_reason_code == "semantic_assertions.active_window"
         # Completeness may be incomplete if the DB has stale test data from
         # previous runs with unresolvable decision_refs. Verify our own
         # seeded rows are present and correctly projected rather than
@@ -627,6 +811,7 @@ async def _exercise_operator_graph_projection_is_graph_ready_and_explicit() -> N
         own_gate_ids = {g.cutover_gate_id for g in projection.cutover_gates}
         own_binding_ids = {b.work_item_workflow_binding_id for b in projection.work_item_workflow_bindings}
         own_relation_ids = {r.operator_object_relation_id for r in projection.object_relations}
+        own_semantic_assertion_ids = {r.semantic_assertion_id for r in projection.semantic_assertions}
         assert bug_id in own_bug_ids
         assert roadmap_item_id in own_roadmap_ids
         assert functional_area_id in own_functional_area_ids
@@ -637,6 +822,8 @@ async def _exercise_operator_graph_projection_is_graph_ready_and_explicit() -> N
             f"operator_object_relation:grouped-in:roadmap_item:{roadmap_item_id}:functional_area:{functional_area_id}"
             in own_relation_ids
         )
+        assert grouped_in_assertion_id in own_semantic_assertion_ids
+        assert governed_by_policy_assertion_id in own_semantic_assertion_ids
 
         node_ids = {node.node_id for node in projection.nodes}
         assert f"bug:{bug_id}" in node_ids
@@ -647,26 +834,49 @@ async def _exercise_operator_graph_projection_is_graph_ready_and_explicit() -> N
         assert f"workflow_class:{workflow_class_id}" in node_ids
         assert f"document:{document_id}" in node_ids
         assert f"repo_path:{repo_path}" in node_ids
+        assert f"authority_domain:authority_domain.operator-graph.{suffix}" in node_ids
 
         edge_summaries = {
-            (edge.edge_kind, edge.source_kind, edge.target_kind, edge.target_ref, edge.target_node_id)
+            (
+                edge.edge_kind,
+                edge.source_kind,
+                edge.target_kind,
+                edge.target_ref,
+                edge.target_node_id,
+                edge.authority_source,
+            )
             for edge in projection.edges
         }
         expected_edges = {
-            ("decision_ref", "bug", "operator_decision", "decision.operator-graph." + suffix + ".primary", f"operator_decision:{decision_id}"),
-            ("source_bug", "roadmap_item", "bug", bug_id, f"bug:{bug_id}"),
-            ("decision_ref", "roadmap_item", "operator_decision", "decision.operator-graph." + suffix + ".primary", f"operator_decision:{decision_id}"),
-            ("target_roadmap_item", "cutover_gate", "roadmap_item", roadmap_item_id, f"roadmap_item:{roadmap_item_id}"),
-            ("opened_by_decision", "cutover_gate", "operator_decision", decision_id, f"operator_decision:{decision_id}"),
-            ("bound_by_decision", "bug", "operator_decision", decision_id, f"operator_decision:{decision_id}"),
-            ("targets_workflow_class", "bug", "workflow_class", workflow_class_id, f"workflow_class:{workflow_class_id}"),
-            ("grouped_in", "roadmap_item", "functional_area", functional_area_id, f"functional_area:{functional_area_id}"),
-            ("described_by", "repo_path", "document", document_id, f"document:{document_id}"),
-            ("implements", "repo_path", "roadmap_item", roadmap_item_id, f"roadmap_item:{roadmap_item_id}"),
-            ("relation_bound_by_decision", "repo_path", "operator_decision", decision_id, f"operator_decision:{decision_id}"),
+            ("decision_ref", "bug", "operator_decision", "decision.operator-graph." + suffix + ".primary", f"operator_decision:{decision_id}", "bugs"),
+            ("source_bug", "roadmap_item", "bug", bug_id, f"bug:{bug_id}", "roadmap_items"),
+            ("decision_ref", "roadmap_item", "operator_decision", "decision.operator-graph." + suffix + ".primary", f"operator_decision:{decision_id}", "roadmap_items"),
+            ("target_roadmap_item", "cutover_gate", "roadmap_item", roadmap_item_id, f"roadmap_item:{roadmap_item_id}", "cutover_gates"),
+            ("opened_by_decision", "cutover_gate", "operator_decision", decision_id, f"operator_decision:{decision_id}", "cutover_gates"),
+            ("bound_by_decision", "bug", "operator_decision", decision_id, f"operator_decision:{decision_id}", "work_item_workflow_bindings"),
+            ("targets_workflow_class", "bug", "workflow_class", workflow_class_id, f"workflow_class:{workflow_class_id}", "work_item_workflow_bindings"),
+            ("grouped_in", "roadmap_item", "functional_area", functional_area_id, f"functional_area:{functional_area_id}", "semantic_assertions"),
+            ("bound_by_decision", "roadmap_item", "operator_decision", decision_id, f"operator_decision:{decision_id}", "semantic_assertions"),
+            ("governed_by_policy", "authority_domain", "operator_decision", decision_id, f"operator_decision:{decision_id}", "semantic_assertions"),
+            ("bound_by_decision", "authority_domain", "operator_decision", decision_id, f"operator_decision:{decision_id}", "semantic_assertions"),
+            ("described_by", "repo_path", "document", document_id, f"document:{document_id}", "operator_object_relations_compatibility"),
+            ("implements", "repo_path", "roadmap_item", roadmap_item_id, f"roadmap_item:{roadmap_item_id}", "operator_object_relations_compatibility"),
+            ("relation_bound_by_decision", "repo_path", "operator_decision", decision_id, f"operator_decision:{decision_id}", "operator_object_relations_compatibility"),
         }
         assert expected_edges.issubset(edge_summaries), (
             f"missing expected edges: {expected_edges - edge_summaries}"
         )
+        assert projection.freshness.semantic_source_row_count >= 2
+        assert projection.freshness.compatibility_source_row_count >= 3
+        assert projection.freshness.source_row_count >= 7
+        grouped_in_edges = [
+            edge
+            for edge in projection.edges
+            if edge.edge_kind == "grouped_in"
+            and edge.source_kind == "roadmap_item"
+            and edge.target_ref == functional_area_id
+        ]
+        assert len(grouped_in_edges) == 1
+        assert grouped_in_edges[0].authority_source == "semantic_assertions"
     finally:
         await conn.close()

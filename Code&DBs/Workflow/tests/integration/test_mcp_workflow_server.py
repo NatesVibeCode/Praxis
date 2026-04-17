@@ -141,10 +141,11 @@ def _receipt_row(
     }
 
 
-def _receipt_record(*, status: str, failure_code: str = ""):
+def _receipt_record(*, status: str, failure_code: str = "", failure_category: str = ""):
     payload = {
         "status": status,
         "failure_code": failure_code,
+        "failure_category": failure_category,
     }
     return SimpleNamespace(
         status=status,
@@ -182,6 +183,7 @@ class _FakeBugTracker:
         discovered_in_run_id: str | None = None,
         discovered_in_receipt_id: str | None = None,
         owner_ref: str | None = None,
+        source_issue_id: str | None = None,
         tags: tuple[str, ...] = (),
         resume_context: dict | None = None,
     ) -> "_bug_tracker_mod.Bug":
@@ -208,6 +210,7 @@ class _FakeBugTracker:
             discovered_in_run_id=discovered_in_run_id,
             discovered_in_receipt_id=discovered_in_receipt_id,
             owner_ref=owner_ref,
+            source_issue_id=source_issue_id,
             decision_ref=decision_ref,
             resolution_summary=None,
             resume_context=dict(resume_context or {}),
@@ -223,6 +226,7 @@ class _FakeBugTracker:
         open_only=False,
         tags=None,
         exclude_tags=None,
+        source_issue_id=None,
     ):
         del tags, exclude_tags
         bugs = list(self._bugs)
@@ -247,6 +251,8 @@ class _FakeBugTracker:
                 bug for bug in bugs
                 if needle in bug.title.lower() or needle in bug.description.lower()
             ]
+        if source_issue_id is not None:
+            bugs = [bug for bug in bugs if bug.source_issue_id == source_issue_id]
         bugs.sort(key=lambda bug: bug.filed_at, reverse=True)
         return bugs
 
@@ -269,6 +275,7 @@ class _FakeBugTracker:
         discovered_in_run_id=None,
         discovered_in_receipt_id=None,
         owner_ref=None,
+        source_issue_id=None,
         tags=(),
         resume_context=None,
     ):
@@ -289,6 +296,7 @@ class _FakeBugTracker:
             discovered_in_run_id=discovered_in_run_id,
             discovered_in_receipt_id=discovered_in_receipt_id,
             owner_ref=owner_ref,
+            source_issue_id=source_issue_id,
             tags=tags,
             resume_context=resume_context if isinstance(resume_context, dict) else None,
         )
@@ -311,10 +319,11 @@ class _FakeBugTracker:
             return updated
         raise ValueError(f"bug not found: {bug_id}")
 
-    def search(self, query, limit=20):
+    def search(self, query, limit=20, **kwargs):
         needle = str(query).lower()
+        bugs = self._filtered(**kwargs)
         bugs = [
-            bug for bug in self._bugs
+            bug for bug in bugs
             if needle in bug.title.lower() or needle in bug.description.lower()
         ]
         bugs.sort(key=lambda bug: bug.filed_at, reverse=True)
@@ -333,7 +342,8 @@ class _FakeBugTracker:
             "underlinked_count": 0,
         }
 
-    def failure_packet(self, bug_id, *, receipt_limit=5):
+    def failure_packet(self, bug_id, *, receipt_limit=5, allow_backfill=True):
+        del allow_backfill
         bug = next((item for item in self._bugs if item.bug_id == bug_id), None)
         if bug is None:
             return None
@@ -429,8 +439,12 @@ class _FakeBugTracker:
             },
         }
 
-    def replay_hint(self, bug_id, *, receipt_limit=1):
-        packet = self.failure_packet(bug_id, receipt_limit=receipt_limit)
+    def replay_hint(self, bug_id, *, receipt_limit=1, allow_backfill=True):
+        packet = self.failure_packet(
+            bug_id,
+            receipt_limit=receipt_limit,
+            allow_backfill=allow_backfill,
+        )
         if packet is None:
             return None
         replay = packet.get("agent_actions", {}).get("replay", {})
@@ -534,6 +548,7 @@ class _FakeBugTracker:
                 discovered_in_run_id=bug.discovered_in_run_id,
                 discovered_in_receipt_id=bug.discovered_in_receipt_id,
                 owner_ref=bug.owner_ref,
+                source_issue_id=bug.source_issue_id,
                 decision_ref=bug.decision_ref,
                 resolution_summary=bug.resolution_summary,
                 resume_context=bug.resume_context,
@@ -553,15 +568,23 @@ class _FakePGConn:
         workflow_run_rows=None,
         dispatch_jobs_rows=None,
         dispatch_totals_row=None,
+        failure_category_zone_rows=None,
+        fail_zone_lookup: bool = False,
     ):
         self._receipt_rows = receipt_rows or []
         self._workflow_run_rows = workflow_run_rows or []
         self._dispatch_jobs_rows = dispatch_jobs_rows or []
         self._dispatch_totals_row = dispatch_totals_row or []
+        self._failure_category_zone_rows = failure_category_zone_rows or []
+        self._fail_zone_lookup = fail_zone_lookup
 
     def execute(self, sql: str, *args):
         if "FROM receipts" in sql:
             return self._receipt_rows
+        if "FROM failure_category_zones" in sql:
+            if self._fail_zone_lookup:
+                raise RuntimeError("zone authority unavailable")
+            return self._failure_category_zone_rows
         if "SELECT * FROM workflow_runs" in sql:
             return self._workflow_run_rows
         if (
@@ -745,6 +768,10 @@ class TestDagStatus:
     def test_status_empty_receipts(self, monkeypatch):
         server._subs._pg_conn = _FakePGConn()
         monkeypatch.setattr("runtime.receipt_store.list_receipts", lambda **_kwargs: [])
+        monkeypatch.setattr(
+            "runtime.receipt_store.receipt_stats",
+            lambda **_kwargs: {"totals": {"receipts": 0}},
+        )
         result = _call_tool("praxis_status", {})
         assert result["total_workflows"] == 0
         assert result["pass_rate"] == 0.0
@@ -756,6 +783,7 @@ class TestDagStatus:
                 _receipt_row(receipt_id="receipt:2", run_id="workflow_b", label="job-b", status="succeeded"),
                 _receipt_row(receipt_id="receipt:3", run_id="workflow_c", label="job-c", status="failed", failure_code="exit_1"),
             ],
+            failure_category_zone_rows=[{"category": "provider_timeout", "zone": "external"}],
         )
         monkeypatch.setattr(
             "runtime.receipt_store.list_receipts",
@@ -765,10 +793,49 @@ class TestDagStatus:
                 _receipt_record(status="failed", failure_code="exit_1"),
             ],
         )
+        monkeypatch.setattr(
+            "runtime.receipt_store.receipt_stats",
+            lambda **_kwargs: {"totals": {"receipts": 3}},
+        )
         result = _call_tool("praxis_status", {"since_hours": 24})
         assert result["total_workflows"] == 3
         assert abs(result["pass_rate"] - 0.6667) < 0.01
         assert result["top_failure_codes"] == {"exit_1": 1}
+
+    def test_status_reports_degraded_when_zone_authority_lookup_fails(self, monkeypatch):
+        server._subs._pg_conn = _FakePGConn(
+            receipt_rows=[
+                _receipt_row(
+                    receipt_id="receipt:1",
+                    run_id="workflow_a",
+                    label="job-a",
+                    status="failed",
+                    failure_code="provider_timeout",
+                ),
+            ],
+            fail_zone_lookup=True,
+        )
+        monkeypatch.setattr(
+            "runtime.receipt_store.list_receipts",
+            lambda **_kwargs: [
+                _receipt_record(
+                    status="failed",
+                    failure_code="provider_timeout",
+                    failure_category="provider_timeout",
+                ),
+            ],
+        )
+        monkeypatch.setattr(
+            "runtime.receipt_store.receipt_stats",
+            lambda **_kwargs: {"totals": {"receipts": 1}},
+        )
+
+        result = _call_tool("praxis_status", {"since_hours": 24})
+
+        assert result["observability_state"] == "degraded"
+        assert result["zone_authority_ready"] is False
+        assert result["adjusted_pass_rate"] is None
+        assert result["errors"][0]["code"] == "failure_category_zones_lookup_failed"
 
 
 class TestDagMaintenance:
@@ -850,6 +917,39 @@ class TestDagBugs:
         assert "Test bug from MCP" in titles
         listed_bug = next(b for b in listed["bugs"] if b["title"] == "Test bug from MCP")
         assert "replay_ready" in listed_bug
+
+    def test_bug_lineage_round_trips_through_mcp_surface(self):
+        filed = _call_tool(
+            "praxis_bugs",
+            {
+                "action": "file",
+                "title": "Issue-linked bug from MCP",
+                "severity": "P2",
+                "source_issue_id": "issue.dispatch-gap",
+            },
+        )
+        assert filed["bug"]["source_issue_id"] == "issue.dispatch-gap"
+
+        listed = _call_tool(
+            "praxis_bugs",
+            {
+                "action": "list",
+                "source_issue_id": "issue.dispatch-gap",
+            },
+        )
+        assert listed["count"] >= 1
+        assert all(bug["source_issue_id"] == "issue.dispatch-gap" for bug in listed["bugs"])
+
+        found = _call_tool(
+            "praxis_bugs",
+            {
+                "action": "search",
+                "title": "issue-linked",
+                "source_issue_id": "issue.dispatch-gap",
+            },
+        )
+        assert found["count"] >= 1
+        assert all(bug["source_issue_id"] == "issue.dispatch-gap" for bug in found["bugs"])
 
     def test_list_bugs_filters_by_category(self):
         _call_tool("praxis_bugs", {
@@ -1144,9 +1244,62 @@ class TestDagOperatorView:
     def test_replay_ready_bugs_view_returns_direct_payload(self):
         result = _call_tool("praxis_operator_view", {"view": "replay_ready_bugs", "limit": 10})
         assert result["view"] == "replay_ready_bugs"
-        assert result["maintenance"]["backfilled_count"] >= 1
+        assert "maintenance" not in result
         assert result["bugs"][0]["replay_ready"] is True
         assert result["returned_count"] >= 1
+
+    def test_operator_graph_view_returns_direct_payload(self, monkeypatch):
+        captured: dict[str, object] = {}
+
+        class _Conn:
+            def __init__(self) -> None:
+                self.closed = False
+
+            async def close(self) -> None:
+                self.closed = True
+
+        async def _connect_database(env=None):
+            captured["env"] = dict(env or {})
+            conn = _Conn()
+            captured["conn"] = conn
+            return conn
+
+        async def _load_operator_graph(conn, *, as_of):
+            captured["load_conn"] = conn
+            captured["as_of"] = as_of
+            return {
+                "kind": "operator_graph",
+                "semantic_authority_state": "ready",
+                "semantic_authority_reason_code": "semantic_assertions.active_window",
+                "edges": [
+                    {
+                        "edge_kind": "governed_by_policy",
+                        "authority_source": "semantic_assertions",
+                    }
+                ],
+            }
+
+        monkeypatch.setattr("storage.postgres.connect_workflow_database", _connect_database)
+        monkeypatch.setattr(
+            "observability.operator_topology.load_operator_graph_projection",
+            _load_operator_graph,
+        )
+
+        result = _call_tool(
+            "praxis_operator_view",
+            {
+                "view": "operator_graph",
+                "as_of": "2026-04-16T20:05:00+00:00",
+            },
+        )
+
+        assert captured["env"]["WORKFLOW_DATABASE_URL"]
+        assert captured["load_conn"] is captured["conn"]
+        assert captured["as_of"].isoformat() == "2026-04-16T20:05:00+00:00"
+        assert captured["conn"].closed is True
+        assert result["view"] == "operator_graph"
+        assert result["payload"]["semantic_authority_state"] == "ready"
+        assert result["payload"]["edges"][0]["authority_source"] == "semantic_assertions"
 
 
 class TestDagRecall:

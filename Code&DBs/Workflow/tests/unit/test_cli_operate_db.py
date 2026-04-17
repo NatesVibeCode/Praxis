@@ -24,5 +24,5 @@ def test_notifications_command_uses_cli_db_authority_for_persisted_rows(monkeypa
     assert exit_code == 0
     assert fake_conn.calls
     _, params = fake_conn.calls[0]
-    assert params == (5,)
+    assert params == (0, 5)
     assert stdout.getvalue().strip() == "no notifications found"

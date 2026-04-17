@@ -1,0 +1,235 @@
+from __future__ import annotations
+
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from types import SimpleNamespace
+
+_WORKFLOW_ROOT = Path(__file__).resolve().parents[2]
+if str(_WORKFLOW_ROOT) not in sys.path:
+    sys.path.insert(0, str(_WORKFLOW_ROOT))
+
+from runtime.bug_tracker import Bug, BugCategory, BugSeverity, BugStatus, BugTracker
+import runtime.engineering_observability as observability_mod
+from surfaces.api.handlers import _bug_surface_contract as bug_contract
+from surfaces.api.handlers._shared import _bug_to_dict
+
+
+def _sample_bug(*, source_issue_id: str | None = "issue.dispatch-gap") -> Bug:
+    now = datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc)
+    return Bug(
+        bug_id="BUG-LINEAGE",
+        bug_key="bug_lineage",
+        title="Issue lineage regression",
+        severity=BugSeverity.P1,
+        status=BugStatus.OPEN,
+        priority="P1",
+        category=BugCategory.ARCHITECTURE,
+        description="Bug lineage should stay attached to the canonical bug surface.",
+        summary="Bug lineage should stay attached to the canonical bug surface.",
+        filed_at=now,
+        updated_at=now,
+        resolved_at=None,
+        created_at=now,
+        filed_by="tester",
+        assigned_to=None,
+        tags=("cluster:lineage",),
+        source_kind="manual",
+        discovered_in_run_id=None,
+        discovered_in_receipt_id=None,
+        owner_ref=None,
+        source_issue_id=source_issue_id,
+        decision_ref="",
+        resolution_summary=None,
+        resume_context={},
+    )
+
+
+class _RecordingConn:
+    def __init__(self) -> None:
+        self.insert_query: str | None = None
+        self.insert_params: tuple[object, ...] | None = None
+
+    def execute(self, query: str, *params: object):
+        self.insert_query = query
+        self.insert_params = params
+        return []
+
+    def fetchrow(self, query: str, *params: object):
+        del query, params
+        if self.insert_params is None:
+            return None
+        return {
+            "bug_id": self.insert_params[0],
+            "bug_key": self.insert_params[1],
+            "title": self.insert_params[2],
+            "severity": self.insert_params[3],
+            "status": self.insert_params[4],
+            "priority": self.insert_params[5],
+            "category": self.insert_params[6],
+            "description": self.insert_params[7],
+            "summary": self.insert_params[8],
+            "source_kind": self.insert_params[9],
+            "discovered_in_run_id": self.insert_params[10],
+            "discovered_in_receipt_id": self.insert_params[11],
+            "owner_ref": self.insert_params[12],
+            "source_issue_id": self.insert_params[13],
+            "decision_ref": self.insert_params[14],
+            "opened_at": self.insert_params[15],
+            "resolved_at": None,
+            "created_at": self.insert_params[16],
+            "updated_at": self.insert_params[17],
+            "filed_by": self.insert_params[18],
+            "tags": self.insert_params[19],
+            "resume_context": self.insert_params[20],
+        }
+
+
+class _FakeBugTrackerMod:
+    class BugSeverity:
+        P2 = BugSeverity.P2
+
+    class BugCategory:
+        OTHER = BugCategory.OTHER
+
+
+def test_bug_tracker_file_bug_persists_source_issue_id() -> None:
+    conn = _RecordingConn()
+    tracker = BugTracker(conn=conn)
+
+    bug, similar = tracker.file_bug(
+        title="Persist lineage",
+        severity=BugSeverity.P2,
+        category=BugCategory.RUNTIME,
+        description="Persist the source issue id through the runtime tracker.",
+        filed_by="tester",
+        source_issue_id="issue.dispatch-gap",
+    )
+
+    assert similar == []
+    assert conn.insert_query is not None
+    assert "source_issue_id" in conn.insert_query
+    assert bug.source_issue_id == "issue.dispatch-gap"
+    assert _bug_to_dict(bug)["source_issue_id"] == "issue.dispatch-gap"
+
+
+def test_file_bug_payload_forwards_source_issue_id_to_tracker() -> None:
+    captured: dict[str, object] = {}
+    bug = _sample_bug()
+
+    class _FakeBugTracker:
+        def file_bug(self, **kwargs):
+            captured.update(kwargs)
+            return bug, []
+
+    payload = bug_contract.file_bug_payload(
+        bt=_FakeBugTracker(),
+        bt_mod=_FakeBugTrackerMod(),
+        body={
+            "title": bug.title,
+            "description": bug.description,
+            "source_issue_id": "issue.dispatch-gap",
+        },
+        serialize_bug=_bug_to_dict,
+        filed_by_default="workflow_api",
+        source_kind_default="workflow_api",
+    )
+
+    assert captured["source_issue_id"] == "issue.dispatch-gap"
+    assert payload["bug"]["source_issue_id"] == "issue.dispatch-gap"
+
+
+def test_list_and_search_payloads_apply_source_issue_filter() -> None:
+    captured: dict[str, dict[str, object]] = {}
+    bug = _sample_bug()
+
+    class _FakeBugTracker:
+        def count_bugs(self, **kwargs):
+            captured["count_bugs"] = kwargs
+            return 1
+
+        def list_bugs(self, **kwargs):
+            captured["list_bugs"] = kwargs
+            return [bug]
+
+        def search(self, *_args, **kwargs):
+            captured["search"] = kwargs
+            return [bug]
+
+    tracker = _FakeBugTracker()
+    listed = bug_contract.list_bugs_payload(
+        bt=tracker,
+        bt_mod=_FakeBugTrackerMod(),
+        body={"source_issue_id": "issue.dispatch-gap"},
+        serialize_bug=_bug_to_dict,
+        default_limit=10,
+        include_replay_details=False,
+    )
+    found = bug_contract.search_bugs_payload(
+        bt=tracker,
+        bt_mod=_FakeBugTrackerMod(),
+        body={
+            "title": "lineage",
+            "source_issue_id": "issue.dispatch-gap",
+        },
+        serialize_bug=_bug_to_dict,
+        default_limit=10,
+    )
+
+    assert captured["count_bugs"]["source_issue_id"] == "issue.dispatch-gap"
+    assert captured["list_bugs"]["source_issue_id"] == "issue.dispatch-gap"
+    assert captured["search"]["source_issue_id"] == "issue.dispatch-gap"
+    assert listed["bugs"][0]["source_issue_id"] == "issue.dispatch-gap"
+    assert found["bugs"][0]["source_issue_id"] == "issue.dispatch-gap"
+
+
+def test_bug_scoreboard_surfaces_source_issue_id(tmp_path: Path) -> None:
+    bug = _sample_bug(source_issue_id="issue.dispatch-gap")
+
+    class _FakeBugTracker:
+        def list_bugs(self, *args, **kwargs):
+            del args, kwargs
+            return [bug]
+
+        def failure_packet(self, bug_id: str, *, receipt_limit: int = 1, allow_backfill: bool = True):
+            del bug_id, receipt_limit, allow_backfill
+            return {
+                "latest_receipt": {
+                    "write_paths": ("runtime/engine.py",),
+                    "verified_paths": ("runtime/engine.py",),
+                },
+                "lifecycle": {
+                    "recurrence_count": 3,
+                    "impacted_run_count": 2,
+                    "has_regression_after_fix": False,
+                },
+                "replay_context": {"ready": True},
+                "fix_verification": {"fix_verified": False},
+                "observability_state": "complete",
+                "observability_gaps": (),
+            }
+
+        def stats(self):
+            return SimpleNamespace(
+                total=1,
+                by_status={"OPEN": 1},
+                by_severity={"P1": 1},
+                by_category={"ARCHITECTURE": 1},
+                open_count=1,
+                mttr_hours=None,
+                packet_ready_count=1,
+                replay_ready_count=1,
+                replay_blocked_count=0,
+                fix_verified_count=0,
+                underlinked_count=0,
+                observability_state="complete",
+                errors=(),
+            )
+
+    payload = observability_mod.build_bug_scoreboard(
+        bug_tracker=_FakeBugTracker(),
+        limit=5,
+        repo_root=tmp_path,
+    )
+
+    assert payload["top_recurring"][0]["source_issue_id"] == "issue.dispatch-gap"

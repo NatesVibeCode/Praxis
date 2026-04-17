@@ -187,6 +187,7 @@ class Bug:
     discovered_in_run_id: Optional[str]
     discovered_in_receipt_id: Optional[str]
     owner_ref: Optional[str]
+    source_issue_id: Optional[str]
     decision_ref: str
     resolution_summary: Optional[str]
     resume_context: dict[str, Any] = field(default_factory=dict)
@@ -318,6 +319,7 @@ class BugTracker:
             discovered_in_run_id=row.get("discovered_in_run_id"),
             discovered_in_receipt_id=row.get("discovered_in_receipt_id"),
             owner_ref=row.get("owner_ref"),
+            source_issue_id=row.get("source_issue_id"),
             decision_ref=str(row.get("decision_ref") or ""),
             resolution_summary=str(row.get("resolution_summary") or "").strip() or None,
             resume_context=_parse_resume_context_column(row.get("resume_context")),
@@ -701,6 +703,7 @@ class BugTracker:
         discovered_in_run_id: str | None = None,
         discovered_in_receipt_id: str | None = None,
         owner_ref: str | None = None,
+        source_issue_id: str | None = None,
         tags: Tuple[str, ...] = (),
         resume_context: dict[str, Any] | None = None,
     ) -> tuple["Bug", list[dict]]:
@@ -712,6 +715,7 @@ class BugTracker:
         tags_str = ",".join(normalized_tags)
         normalized_source_kind = source_kind.strip() or "dispatch"
         normalized_decision_ref = decision_ref.strip()
+        normalized_source_issue_id = str(source_issue_id or "").strip() or None
         self._validate_bug_provenance(
             discovered_in_run_id=discovered_in_run_id,
             discovered_in_receipt_id=discovered_in_receipt_id,
@@ -744,13 +748,13 @@ class BugTracker:
             """INSERT INTO bugs
                 (bug_id, bug_key, title, severity, status, priority, category, description,
                  summary, source_kind, discovered_in_run_id, discovered_in_receipt_id,
-                 owner_ref, decision_ref, opened_at, resolved_at, created_at, updated_at,
-                 filed_by, tags, resume_context)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NULL, $16, $17, $18, $19, $20::jsonb)""",
+                 owner_ref, source_issue_id, decision_ref, opened_at, resolved_at,
+                 created_at, updated_at, filed_by, tags, resume_context)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NULL, $17, $18, $19, $20, $21::jsonb)""",
             bug_id, bug_key, title, severity.value, BugStatus.OPEN.value,
             severity.value, category.value, description,
             description[:200], normalized_source_kind, discovered_in_run_id, discovered_in_receipt_id,
-            owner_ref, normalized_decision_ref, now, now, now, filed_by, tags_str,
+            owner_ref, normalized_source_issue_id, normalized_decision_ref, now, now, now, filed_by, tags_str,
             json.dumps(initial_resume, default=str),
         )
         if vector_query is not None:
@@ -1106,7 +1110,11 @@ class BugTracker:
                 "linked_refs": (),
                 "reason_code": "bug.replay_backfill.missing_bug",
             }
-            hint = self.replay_hint(bug.bug_id, receipt_limit=receipt_limit) or {
+            hint = self.replay_hint(
+                bug.bug_id,
+                receipt_limit=receipt_limit,
+                allow_backfill=False,
+            ) or {
                 "available": False,
                 "reason_code": "bug.replay_not_ready",
                 "run_id": None,
@@ -1160,6 +1168,7 @@ class BugTracker:
         collected: list[dict[str, Any]] = []
         seen: set[str] = set()
         sources_tried: list[str] = []
+        errors: list[str] = []
 
         def is_actionable(status_raw: object) -> bool:
             return self._normalize_status(status_raw) not in _RESOLVED_STATUSES
@@ -1205,8 +1214,8 @@ class BugTracker:
                         if len(collected) >= limit:
                             break
                         add_row(dict(r), via="embedding")
-            except Exception:
-                pass
+            except Exception as exc:
+                errors.append(f"embedding.query_failed:{type(exc).__name__}: {exc}")
 
             if len(collected) < limit:
                 try:
@@ -1225,8 +1234,8 @@ class BugTracker:
                             if len(collected) >= limit:
                                 break
                             add_row(dict(r), via="text")
-                except Exception:
-                    pass
+                except Exception as exc:
+                    errors.append(f"text.query_failed:{type(exc).__name__}: {exc}")
 
         if len(collected) < limit and bug.tags:
             tag_values = [
@@ -1257,8 +1266,8 @@ class BugTracker:
                         if len(collected) >= limit:
                             break
                         add_row(dict(r), via="tag_overlap")
-                except Exception:
-                    pass
+                except Exception as exc:
+                    errors.append(f"tags.query_failed:{type(exc).__name__}: {exc}")
 
         items = tuple(collected[:limit])
         sources = tuple(dict.fromkeys(sources_tried))
@@ -1273,6 +1282,7 @@ class BugTracker:
                 "items": items,
                 "note": note,
                 "sources_tried": sources,
+                "errors": tuple(errors),
             }
 
         if self._vector_store is None and not bug.tags:
@@ -1281,6 +1291,15 @@ class BugTracker:
                 "items": (),
                 "note": "No embedding lane and no tags yet, so related clusters cannot be inferred automatically.",
                 "sources_tried": sources,
+                "errors": tuple(errors),
+            }
+        if errors:
+            return {
+                "reason_code": "bug.semantic_neighbors.query_failed",
+                "items": (),
+                "note": "Semantic neighbor lookup failed before any related bugs could be confirmed.",
+                "sources_tried": sources,
+                "errors": tuple(errors),
             }
         if self._vector_store is None:
             return {
@@ -1288,12 +1307,14 @@ class BugTracker:
                 "items": (),
                 "note": "No overlapping open bugs found by tags from here.",
                 "sources_tried": sources,
+                "errors": tuple(errors),
             }
         return {
             "reason_code": "bug.semantic_neighbors.none",
             "items": (),
             "note": "No semantically close open bugs crossed the similarity threshold.",
             "sources_tried": sources,
+            "errors": tuple(errors),
         }
 
     def replay_hint(
@@ -1301,8 +1322,13 @@ class BugTracker:
         bug_id: str,
         *,
         receipt_limit: int = 1,
+        allow_backfill: bool = True,
     ) -> dict[str, Any] | None:
-        packet = self.failure_packet(bug_id, receipt_limit=receipt_limit)
+        packet = self.failure_packet(
+            bug_id,
+            receipt_limit=receipt_limit,
+            allow_backfill=allow_backfill,
+        )
         if packet is None:
             return None
         replay = _json_object(_json_object(packet.get("agent_actions")).get("replay"))
@@ -1319,11 +1345,21 @@ class BugTracker:
         bug_id: str,
         *,
         receipt_limit: int = 5,
+        allow_backfill: bool = True,
     ) -> dict[str, Any] | None:
         bug = self.get(bug_id)
         if bug is None:
             return None
-        backfill = self.backfill_replay_provenance(bug.bug_id)
+        backfill = (
+            self.backfill_replay_provenance(bug.bug_id)
+            if allow_backfill
+            else {
+                "bug_id": bug.bug_id,
+                "linked_count": 0,
+                "linked_refs": (),
+                "reason_code": "bug.replay_backfill.skipped_read_only",
+            }
+        )
 
         evidence_links = self.list_evidence(bug_id)
         receipt_refs: set[str] = set()
@@ -1605,7 +1641,23 @@ class BugTracker:
             bug=bug,
             signature=signature,
         )
+        write_set_diff = self._compare_write_sets(latest_receipt)
+        blast_radius = self._build_blast_radius(
+            failure_code=failure_code,
+            node_id=node_id,
+        )
+        for scope, payload in (
+            ("write_set_diff", write_set_diff),
+            ("blast_radius", blast_radius),
+        ):
+            helper_error = str(payload.get("error") or "").strip()
+            if helper_error:
+                query_errors.append(f"{scope}.query_failed:{helper_error}")
         semantic_neighbors = self._semantic_neighbor_bundle(bug)
+        for helper_error in tuple(semantic_neighbors.get("errors") or ()):
+            helper_text = str(helper_error).strip()
+            if helper_text:
+                query_errors.append(f"semantic_neighbors.query_failed:{helper_text}")
         return _bug_evidence.assemble_failure_packet(
             bug=bug,
             bug_status_fixed=BugStatus.FIXED,
@@ -1624,11 +1676,8 @@ class BugTracker:
                 bug_id=bug.bug_id,
                 replay_context=replay_context,
             ),
-            write_set_diff=self._compare_write_sets(latest_receipt),
-            blast_radius=self._build_blast_radius(
-                failure_code=failure_code,
-                node_id=node_id,
-            ),
+            write_set_diff=write_set_diff,
+            blast_radius=blast_radius,
             historical_fixes=historical_fixes,
             backfill=backfill,
             semantic_neighbors=semantic_neighbors,
@@ -1724,6 +1773,7 @@ class BugTracker:
         title_like: str | None = None,
         tags: Tuple[str, ...] | None = None,
         exclude_tags: Tuple[str, ...] | None = None,
+        source_issue_id: str | None = None,
         open_only: bool = False,
         limit: int = 50,
     ) -> list[Bug]:
@@ -1734,6 +1784,7 @@ class BugTracker:
             title_like=title_like,
             tags=tags,
             exclude_tags=exclude_tags,
+            source_issue_id=source_issue_id,
             open_only=open_only,
         )
         query = f"SELECT * FROM bugs{where} ORDER BY created_at DESC LIMIT ${next_idx}"
@@ -1750,6 +1801,7 @@ class BugTracker:
         title_like: str | None = None,
         tags: Tuple[str, ...] | None = None,
         exclude_tags: Tuple[str, ...] | None = None,
+        source_issue_id: str | None = None,
         open_only: bool = False,
     ) -> int:
         where, params, _next_idx = self._build_list_bugs_where_clause(
@@ -1759,6 +1811,7 @@ class BugTracker:
             title_like=title_like,
             tags=tags,
             exclude_tags=exclude_tags,
+            source_issue_id=source_issue_id,
             open_only=open_only,
         )
         return int(self._conn.fetchval(f"SELECT COUNT(*) FROM bugs{where}", *params) or 0)
@@ -1772,6 +1825,7 @@ class BugTracker:
         title_like: str | None,
         tags: Tuple[str, ...] | None,
         exclude_tags: Tuple[str, ...] | None,
+        source_issue_id: str | None,
         open_only: bool,
         start_idx: int = 1,
     ) -> tuple[str, list[object], int]:
@@ -1816,6 +1870,10 @@ class BugTracker:
             )
             params.append(title_pattern)
             idx += 1
+        if source_issue_id is not None:
+            clauses.append(f"source_issue_id = ${idx}")
+            params.append(source_issue_id)
+            idx += 1
         if tags:
             for raw_tag in tags:
                 tag = str(raw_tag).strip().lower()
@@ -1850,6 +1908,7 @@ class BugTracker:
         category: BugCategory | None = None,
         tags: Tuple[str, ...] | None = None,
         exclude_tags: Tuple[str, ...] | None = None,
+        source_issue_id: str | None = None,
         open_only: bool = False,
     ) -> list[Bug]:
         parsed_status = self._normalize_status(status, default=None) if status is not None else None
@@ -1862,6 +1921,7 @@ class BugTracker:
             title_like=None,
             tags=tags,
             exclude_tags=exclude_tags,
+            source_issue_id=source_issue_id,
             open_only=open_only,
             start_idx=2,
         )
@@ -1889,6 +1949,8 @@ class BugTracker:
             vector_filters.append(VectorFilter("severity", parsed_severity.value))
         if parsed_category is not None:
             vector_filters.append(VectorFilter("category", parsed_category.value))
+        if source_issue_id is not None:
+            vector_filters.append(VectorFilter("source_issue_id", source_issue_id))
 
         fts_rows = self._conn.execute(
             """SELECT bug_id,

@@ -82,6 +82,32 @@ class _FailureAccum:
     agents: set[str] = field(default_factory=set)
 
 
+def load_failure_category_zones(
+    conn: "SyncPostgresConnection",
+    *,
+    consumer: str,
+) -> dict[str, str]:
+    """Load the canonical failure-category zone map or fail explicitly."""
+
+    try:
+        rows = conn.execute(
+            """
+            SELECT category, zone
+              FROM failure_category_zones
+            """,
+        )
+    except Exception as exc:
+        raise RuntimeError(f"failure_category_zones authority is required for {consumer}") from exc
+    zone_map = {
+        str(row["category"]): str(row["zone"])
+        for row in rows or []
+        if row.get("category")
+    }
+    if not zone_map:
+        raise RuntimeError("failure_category_zones did not return any rows")
+    return zone_map
+
+
 class QualityViewMaterializer:
     """Accumulates workflow receipts and materializes quality rollups into Postgres."""
 
@@ -100,20 +126,7 @@ class QualityViewMaterializer:
         self._failure_accums: dict[str, _FailureAccum] = defaultdict(_FailureAccum)
 
     def _load_zone_map(self) -> dict[str, str]:
-        rows = self._conn.execute(
-            """
-            SELECT category, zone
-              FROM failure_category_zones
-            """,
-        )
-        zone_map = {
-            str(row["category"]): str(row["zone"])
-            for row in rows or []
-            if row.get("category")
-        }
-        if not zone_map:
-            raise RuntimeError("failure_category_zones authority is required for quality views")
-        return zone_map
+        return load_failure_category_zones(self._conn, consumer="quality views")
 
     # ------------------------------------------------------------------
     # Ingest

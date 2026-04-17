@@ -177,6 +177,20 @@ def test_build_modules_include_rate_limit_prober_when_conn(tmp_path, monkeypatch
     assert "rate_limit_prober" in module_names
 
 
+def test_build_modules_include_semantic_projection_refresh_when_conn(tmp_path, monkeypatch):
+    monkeypatch.setattr(heartbeat_runner, "MemoryEngine", _Engine)
+    runner = heartbeat_runner.HeartbeatRunner(
+        engine_db_path=str(tmp_path / "test.db"),
+        results_dir=str(tmp_path / "results"),
+        conn=_Conn([]),
+        workflow_env={"WORKFLOW_DATABASE_URL": "postgresql://example"},
+    )
+
+    module_names = {getattr(module, "name", "") for module in runner.build_modules()}
+
+    assert "semantic_projection_refresh" in module_names
+
+
 def test_trigger_evaluator_module_runs_runtime_trigger_loop(monkeypatch):
     fake_triggers = types.ModuleType("runtime.triggers")
     calls: list[object] = []
@@ -277,6 +291,48 @@ def test_auto_review_flush_module_runs_due_flush(monkeypatch):
 
     assert calls == ["conn", "flush_due"]
     assert result.module_name == "auto_review_flush"
+    assert result.ok is True
+
+
+def test_semantic_projection_refresh_module_consumes_events(monkeypatch):
+    fake_subscriber = types.ModuleType("runtime.semantic_projection_subscriber")
+    calls: list[dict[str, object]] = []
+
+    def _consume_semantic_projection_events(*, limit: int, env=None):
+        calls.append({"limit": limit, "env": dict(env or {})})
+        return {"refreshed": True}
+
+    fake_subscriber.consume_semantic_projection_events = _consume_semantic_projection_events
+    monkeypatch.setitem(sys.modules, "runtime.semantic_projection_subscriber", fake_subscriber)
+
+    result = heartbeat_runner._SemanticProjectionRefreshModule(
+        workflow_env={"WORKFLOW_DATABASE_URL": "postgresql://example"},
+        limit=25,
+    ).run()
+
+    assert result.module_name == "semantic_projection_refresh"
+    assert result.ok is True
+    assert calls == [
+        {
+            "limit": 25,
+            "env": {"WORKFLOW_DATABASE_URL": "postgresql://example"},
+        }
+    ]
+
+
+def test_semantic_projection_refresh_module_skips_without_workflow_authority(monkeypatch):
+    fake_subscriber = types.ModuleType("runtime.semantic_projection_subscriber")
+
+    def _consume_semantic_projection_events(*, limit: int, env=None):
+        raise AssertionError("semantic projection refresh should not run without workflow authority")
+
+    fake_subscriber.consume_semantic_projection_events = _consume_semantic_projection_events
+    monkeypatch.setitem(sys.modules, "runtime.semantic_projection_subscriber", fake_subscriber)
+    monkeypatch.delenv("WORKFLOW_DATABASE_URL", raising=False)
+
+    result = heartbeat_runner._SemanticProjectionRefreshModule(workflow_env={}).run()
+
+    assert result.module_name == "semantic_projection_refresh"
     assert result.ok is True
 
 

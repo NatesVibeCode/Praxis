@@ -48,6 +48,7 @@ logger = logging.getLogger(__name__)
 # Channels
 CHANNEL_BUILD_STATE = "build_state"
 CHANNEL_JOB_LIFECYCLE = "job_lifecycle"
+CHANNEL_SEMANTIC_ASSERTION = "semantic_assertion"
 CHANNEL_SYSTEM = "system"
 CHANNEL_WEBHOOK = "webhook"
 
@@ -155,6 +156,38 @@ def emit(
     return event_id
 
 
+async def aemit(
+    conn: Any,
+    *,
+    channel: str,
+    event_type: str,
+    entity_id: str = "",
+    entity_kind: str = "",
+    payload: dict[str, Any] | None = None,
+    emitted_by: str = "",
+) -> int:
+    """Async append path for event_log writes inside asyncpg transactions."""
+
+    row = await conn.fetchrow(
+        """INSERT INTO event_log (channel, event_type, entity_id, entity_kind, payload, emitted_by)
+           VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+           RETURNING id""",
+        channel,
+        event_type,
+        entity_id,
+        entity_kind,
+        json.dumps(payload or {}),
+        emitted_by,
+    )
+    event_id = int(row["id"]) if row is not None else 0
+    await conn.execute(
+        "SELECT pg_notify($1, $2)",
+        channel,
+        json.dumps({"id": event_id, "type": event_type, "entity": entity_id}),
+    )
+    return event_id
+
+
 # ---------------------------------------------------------------------------
 # Read path
 # ---------------------------------------------------------------------------
@@ -185,8 +218,44 @@ def read_since(
                WHERE channel = $1 AND id > $2
                ORDER BY id ASC LIMIT $3""",
             channel, cursor, limit,
-        )
+    )
     return [_row_to_event(r) for r in rows]
+
+
+async def aread_since(
+    conn: Any,
+    *,
+    channel: str,
+    cursor: int = 0,
+    entity_id: str | None = None,
+    limit: int = 100,
+) -> list[Event]:
+    """Async read path over one channel after the given cursor."""
+
+    if entity_id is not None:
+        rows = await conn.fetch(
+            """SELECT id, channel, event_type, entity_id, entity_kind,
+                      payload, emitted_at, emitted_by
+               FROM event_log
+               WHERE channel = $1 AND entity_id = $2 AND id > $3
+               ORDER BY id ASC LIMIT $4""",
+            channel,
+            entity_id,
+            cursor,
+            limit,
+        )
+    else:
+        rows = await conn.fetch(
+            """SELECT id, channel, event_type, entity_id, entity_kind,
+                      payload, emitted_at, emitted_by
+               FROM event_log
+               WHERE channel = $1 AND id > $2
+               ORDER BY id ASC LIMIT $3""",
+            channel,
+            cursor,
+            limit,
+        )
+    return [_row_to_event(dict(r)) for r in rows]
 
 
 def read_all_since(
@@ -347,6 +416,19 @@ def get_cursor(conn: Any, subscriber_id: str, channel: str) -> int:
     return rows[0]["last_event_id"] if rows else 0
 
 
+async def aget_cursor(conn: Any, subscriber_id: str, channel: str) -> int:
+    """Async cursor lookup for one subscriber and channel."""
+
+    row = await conn.fetchrow(
+        "SELECT last_event_id FROM event_log_cursors WHERE subscriber_id = $1 AND channel = $2",
+        subscriber_id,
+        channel,
+    )
+    if row is None:
+        return 0
+    return int(row["last_event_id"] or 0)
+
+
 def advance_cursor(conn: Any, subscriber_id: str, channel: str, event_id: int) -> None:
     """Advance a subscriber's cursor. Only moves forward."""
     conn.execute(
@@ -356,4 +438,19 @@ def advance_cursor(conn: Any, subscriber_id: str, channel: str, event_id: int) -
            DO UPDATE SET last_event_id = GREATEST(event_log_cursors.last_event_id, $3),
                          updated_at = NOW()""",
         subscriber_id, channel, event_id,
+    )
+
+
+async def aadvance_cursor(conn: Any, subscriber_id: str, channel: str, event_id: int) -> None:
+    """Async cursor advance for one subscriber and channel."""
+
+    await conn.execute(
+        """INSERT INTO event_log_cursors (subscriber_id, channel, last_event_id, updated_at)
+           VALUES ($1, $2, $3, NOW())
+           ON CONFLICT (subscriber_id, channel)
+           DO UPDATE SET last_event_id = GREATEST(event_log_cursors.last_event_id, $3),
+                         updated_at = NOW()""",
+        subscriber_id,
+        channel,
+        event_id,
     )

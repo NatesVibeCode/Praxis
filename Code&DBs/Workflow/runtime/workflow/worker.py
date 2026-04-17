@@ -15,6 +15,12 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Mapping, Optional, Protocol
 
+from runtime.execution.records import (
+    NODE_AWAITING_HUMAN_RECEIPT_TYPE,
+    NODE_EXECUTION_RECEIPT_TYPE,
+)
+from runtime.run_node_receipts import write_run_node_receipt
+
 if TYPE_CHECKING:
     from storage.postgres.connection import SyncPostgresConnection
 
@@ -33,24 +39,22 @@ class RunNodeStateRepository(Protocol):
         state: str,
         output_payload: Mapping[str, Any] | None = None,
         failure_code: str | None = None,
+        receipt_id: str | None = None,
     ) -> bool: ...
-    def mark_failed(self, *, run_node_id: str, failure_code: str) -> bool: ...
-
-
-class WorkflowNotificationEmitter(Protocol):
-    """Minimal storage contract for durable workflow notification rows."""
-
-    def emit_notification(
+    def mark_awaiting_human(
         self,
         *,
-        run_id: str,
-        job_label: str,
-        spec_name: str,
-        agent_slug: str,
-        status: str,
-        failure_code: str | None = None,
-        duration_seconds: float = 0.0,
-    ) -> None: ...
+        run_node_id: str,
+        output_payload: Mapping[str, Any] | None = None,
+        receipt_id: str | None = None,
+    ) -> bool: ...
+    def mark_failed(
+        self,
+        *,
+        run_node_id: str,
+        failure_code: str,
+        receipt_id: str | None = None,
+    ) -> bool: ...
 
 
 class WorkflowWorker:
@@ -63,27 +67,21 @@ class WorkflowWorker:
         poll_interval: float = 2.0,
         *,
         run_node_repository: RunNodeStateRepository | None = None,
-        notification_repository: WorkflowNotificationEmitter | None = None,
     ) -> None:
         self._conn = conn
         self._repo_root = Path(repo_root)
         self._poll_interval = poll_interval
         self._running = False
         self._thread: Optional[threading.Thread] = None
-        if run_node_repository is None or notification_repository is None:
+        if run_node_repository is None:
             from storage.postgres.workflow_orchestration_repository import (
                 PostgresRunNodeStateRepository,
-                PostgresWorkflowNotificationRepository,
             )
 
             run_node_repository = (
                 run_node_repository or PostgresRunNodeStateRepository(conn)
             )
-            notification_repository = (
-                notification_repository or PostgresWorkflowNotificationRepository(conn)
-            )
         self._run_node_repository = run_node_repository
-        self._notification_repository = notification_repository
 
     # ------------------------------------------------------------------
     # Worker thread
@@ -200,33 +198,73 @@ class WorkflowWorker:
             status = result.get("status", "failed")
 
             if status == "awaiting_human":
-                # Don't update — execute_card already set awaiting_human
+                receipt_id = write_run_node_receipt(
+                    self._conn,
+                    run_node_id=run_node_id,
+                    phase="awaiting_human",
+                    receipt_type=NODE_AWAITING_HUMAN_RECEIPT_TYPE,
+                    status="awaiting_human",
+                    outputs=result.get("outputs", {}),
+                    agent_slug="human",
+                    executor_type="runtime.workflow.worker",
+                )
+                self._run_node_repository.mark_awaiting_human(
+                    run_node_id=run_node_id,
+                    output_payload=result.get("outputs", {}),
+                    receipt_id=receipt_id,
+                )
                 logger.info("Card %s awaiting human approval", node_id)
                 return
 
+            receipt_id = write_run_node_receipt(
+                self._conn,
+                run_node_id=run_node_id,
+                phase="terminal",
+                receipt_type=NODE_EXECUTION_RECEIPT_TYPE,
+                status=str(status),
+                outputs=result.get("outputs", {}),
+                failure_code=result.get("failure_code", ""),
+                agent_slug=str(
+                    result.get("outputs", {}).get("resolved_agent")
+                    or result.get("outputs", {}).get("executed_by")
+                    or "card_executor"
+                ),
+                executor_type="runtime.workflow.worker",
+            )
             self._run_node_repository.mark_terminal_state(
                 run_node_id=run_node_id,
                 state="succeeded" if status == "succeeded" else "failed",
                 output_payload=result.get("outputs", {}),
                 failure_code=result.get("failure_code", "") or "",
-            )
-
-            self._notification_repository.emit_notification(
-                run_id=run_id,
-                job_label=node_id,
-                spec_name="model_run",
-                agent_slug="card_executor",
-                status=status,
-                failure_code=result.get("failure_code", ""),
-                duration_seconds=0.0,
+                receipt_id=receipt_id,
             )
 
             release_downstream(self._conn, run_id, node_id)
         except Exception as exc:
             logger.error("Card execution failed for %s: %s", node_id, exc, exc_info=True)
+            receipt_id = None
+            try:
+                receipt_id = write_run_node_receipt(
+                    self._conn,
+                    run_node_id=run_node_id,
+                    phase="terminal",
+                    receipt_type=NODE_EXECUTION_RECEIPT_TYPE,
+                    status="failed",
+                    outputs={"error": str(exc)[:500]},
+                    failure_code=str(exc)[:200],
+                    agent_slug="card_executor",
+                    executor_type="runtime.workflow.worker",
+                )
+            except Exception:
+                logger.error(
+                    "Failed to persist canonical failure receipt for run_node %s",
+                    run_node_id,
+                    exc_info=True,
+                )
             self._run_node_repository.mark_failed(
                 run_node_id=run_node_id,
                 failure_code=str(exc)[:200],
+                receipt_id=receipt_id,
             )
             raise
 

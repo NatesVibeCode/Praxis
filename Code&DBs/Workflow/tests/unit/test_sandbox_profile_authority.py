@@ -20,16 +20,14 @@ class _FakeConn:
         return self.rows
 
 
-def test_load_runtime_sandbox_profile_authority_rejects_unknown_runtime_profile(monkeypatch) -> None:
-    monkeypatch.setattr("registry.sandbox_profile_authority.is_native_runtime_profile_ref", lambda _: False)
+def test_load_runtime_sandbox_profile_authority_rejects_unknown_runtime_profile() -> None:
     conn = _FakeConn(rows=[])
 
     with pytest.raises(SandboxProfileAuthorityError, match="missing sandbox authority"):
         load_runtime_sandbox_profile_authority(conn, runtime_profile_ref="runtime.missing")
 
 
-def test_load_runtime_sandbox_profile_authority_rejects_missing_sandbox_profile(monkeypatch) -> None:
-    monkeypatch.setattr("registry.sandbox_profile_authority.is_native_runtime_profile_ref", lambda _: False)
+def test_load_runtime_sandbox_profile_authority_rejects_missing_sandbox_profile() -> None:
     conn = _FakeConn(
         rows=[
             {
@@ -44,16 +42,7 @@ def test_load_runtime_sandbox_profile_authority_rejects_missing_sandbox_profile(
         load_runtime_sandbox_profile_authority(conn, runtime_profile_ref="praxis")
 
 
-def test_load_runtime_sandbox_profile_authority_returns_authoritative_record(monkeypatch) -> None:
-    sync_calls: list[str] = []
-    monkeypatch.setattr(
-        "registry.sandbox_profile_authority.is_native_runtime_profile_ref",
-        lambda runtime_profile_ref: runtime_profile_ref == "praxis",
-    )
-    monkeypatch.setattr(
-        "registry.sandbox_profile_authority.sync_native_runtime_profile_authority",
-        lambda conn, prune=False: sync_calls.append(f"sync:{prune}"),
-    )
+def test_load_runtime_sandbox_profile_authority_returns_authoritative_record() -> None:
     conn = _FakeConn(
         rows=[
             {
@@ -74,7 +63,6 @@ def test_load_runtime_sandbox_profile_authority_returns_authoritative_record(mon
 
     record = load_runtime_sandbox_profile_authority(conn, runtime_profile_ref="praxis")
 
-    assert sync_calls == ["sync:False"]
     assert record == SandboxProfileAuthorityRecord(
         sandbox_profile_ref="sandbox_profile.praxis.default",
         sandbox_provider="docker_local",

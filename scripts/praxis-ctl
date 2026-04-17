@@ -7,4 +7,4 @@ export PRAXIS_COMMAND_NAME="praxis-ctl"
 export PRAXIS_SERVICE_MANAGER_PATH="scripts/praxis"
 export PRAXIS_COMPATIBILITY_ALIAS_PATH="scripts/praxis-ctl"
 
-exec "$SCRIPT_DIR/praxis-service-manager" "$@"
+exec "$SCRIPT_DIR/praxis" "$@"

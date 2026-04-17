@@ -3,10 +3,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from adapters import provider_registry as provider_registry_mod
 from runtime.engineering_observability import build_trend_observability
 from runtime.dependency_contract import dependency_truth_report
 from runtime.context_cache import get_context_cache
+from surfaces.api.operator_read import (
+    build_provider_registry_summary,
+    query_transport_support,
+)
 
 from surfaces._workflow_database import workflow_database_url_for_repo
 from ..subsystems import _subs, REPO_ROOT, workflow_database_env
@@ -24,21 +27,13 @@ def tool_praxis_health(params: dict, _progress_emitter=None) -> dict:
     probes.append(hs_mod.PostgresConnectivityProbe(db_url))
 
     probes.append(hs_mod.DiskSpaceProbe(str(REPO_ROOT)))
-    registered_providers = tuple(provider_registry_mod.registered_providers())
-    provider_registry_summary: list[dict[str, Any]] = []
-    for provider_slug in registered_providers:
-        adapters: list[str] = []
-        for adapter_type in ("cli_llm", "llm_task"):
-            if not provider_registry_mod.supports_adapter(provider_slug, adapter_type):
-                continue
-            adapters.append(adapter_type)
-            probes.append(hs_mod.ProviderTransportProbe(provider_slug, adapter_type))
-        provider_registry_summary.append(
-            {
-                "provider_slug": provider_slug,
-                "adapters": adapters,
-            }
-        )
+    transport_support = query_transport_support(
+        health_mod=hs_mod,
+        pg=_subs.get_pg_conn(),
+    )
+    provider_registry = build_provider_registry_summary(transport_support)
+    for provider_slug, adapter_type in provider_registry["probe_targets"]:
+        probes.append(hs_mod.ProviderTransportProbe(provider_slug, adapter_type))
 
     if _progress_emitter:
         _progress_emitter.log(f"Running {len(probes)} health probes")
@@ -131,10 +126,11 @@ def tool_praxis_health(params: dict, _progress_emitter=None) -> dict:
             "degraded_cause": lane.degraded_cause,
         },
         "provider_registry": {
-            "default_provider_slug": provider_registry_mod.default_provider_slug(),
-            "default_adapter_type": provider_registry_mod.default_llm_adapter_type(),
-            "registered_providers": list(registered_providers),
-            "providers": provider_registry_summary,
+            "default_provider_slug": provider_registry["default_provider_slug"],
+            "default_adapter_type": provider_registry["default_adapter_type"],
+            "registered_providers": list(provider_registry["registered_providers"]),
+            "providers": list(provider_registry["providers"]),
+            "support_basis": provider_registry["support_basis"],
         },
         "dependency_truth": dependency_truth,
         "context_cache": cache_stats,

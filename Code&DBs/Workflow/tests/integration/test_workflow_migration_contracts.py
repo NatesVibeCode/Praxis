@@ -75,7 +75,11 @@ def test_workflow_migration_manifest_includes_provider_route_health_budget_migra
     assert "142_operation_catalog_operator_decision_bindings.sql" in filenames
     assert "143_object_field_registry_authority.sql" in filenames
     assert "144_object_field_registry_hard_cutover.sql" in filenames
-    assert filenames[-1] == "144_object_field_registry_hard_cutover.sql"
+    assert "145_operation_catalog_object_schema_bindings.sql" in filenames
+    assert "146_semantic_assertion_substrate.sql" in filenames
+    assert "147_operation_catalog_semantic_assertions.sql" in filenames
+    assert "148_drop_workflow_notifications.sql" in filenames
+    assert filenames[-1] == "148_drop_workflow_notifications.sql"
 
 
 def test_every_manifest_migration_has_expected_object_contract() -> None:
@@ -263,6 +267,53 @@ def test_object_field_registry_hard_cutover_expected_objects_are_registered() ->
     objects = workflow_migration_expected_objects("144_object_field_registry_hard_cutover.sql")
     names = {item.object_name for item in objects}
     assert names == {"object_field_registry.object_field_registry_field_name_nonblank"}
+
+
+def test_operation_catalog_object_schema_bindings_expected_objects_are_registered() -> None:
+    objects = workflow_migration_expected_objects("145_operation_catalog_object_schema_bindings.sql")
+    names = {item.object_name for item in objects}
+    assert names == {
+        "operation_catalog_registry.object_schema.type_list",
+        "operation_catalog_registry.object_schema.type_get",
+        "operation_catalog_registry.object_schema.type_upsert",
+        "operation_catalog_registry.object_schema.type_upsert_by_id",
+        "operation_catalog_registry.object_schema.type_delete",
+        "operation_catalog_registry.object_schema.field_list",
+        "operation_catalog_registry.object_schema.field_upsert",
+        "operation_catalog_registry.object_schema.field_retire",
+    }
+
+
+def test_semantic_assertion_substrate_expected_objects_are_registered() -> None:
+    objects = workflow_migration_expected_objects("146_semantic_assertion_substrate.sql")
+    names = {item.object_name for item in objects}
+    assert names.issuperset(
+        {
+            "semantic_predicates",
+            "semantic_predicates_status_updated_idx",
+            "semantic_assertions",
+            "semantic_assertions_predicate_subject_idx",
+            "semantic_current_assertions",
+            "semantic_current_assertions_predicate_subject_idx",
+        }
+    )
+
+
+def test_semantic_assertion_operation_catalog_expected_rows_are_registered() -> None:
+    objects = workflow_migration_expected_objects("147_operation_catalog_semantic_assertions.sql")
+    names = {item.object_name for item in objects}
+    assert names == {
+        "operation_catalog_registry.semantic_assertions.register_predicate",
+        "operation_catalog_registry.semantic_assertions.record",
+        "operation_catalog_registry.semantic_assertions.retract",
+        "operation_catalog_registry.semantic_assertions.list",
+    }
+
+
+def test_drop_workflow_notifications_expected_objects_are_registered() -> None:
+    objects = workflow_migration_expected_objects("148_drop_workflow_notifications.sql")
+    names = {(item.object_type, item.object_name) for item in objects}
+    assert names == {("absent_table", "workflow_notifications")}
 
 
 def test_operator_decision_scope_policy_expected_objects_are_registered() -> None:

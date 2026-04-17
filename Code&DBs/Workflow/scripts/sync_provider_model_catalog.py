@@ -38,22 +38,10 @@ from scripts.sync_framework import (
 OPENAI_MODELS_CACHE_PATH = Path.home() / ".codex" / "models_cache.json"
 GOOGLE_OAUTH_PATH = Path.home() / ".gemini" / "oauth_creds.json"
 GOOGLE_PUBLISHER_MODELS_URL = "https://aiplatform.googleapis.com/v1beta1/publishers/google/models"
-MODEL_PROFILE_AUTHORITY_PATH = _WORKFLOW_ROOT / "docs" / "model_catalog_classification_2026-04-08.json"
-
-# https://platform.claude.com/docs/en/about-claude/models/overview — observed 2026-04-08
-ANTHROPIC_DOC_MODELS = ("claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5-20251001")
-
-ACTIVE_MODEL_MIGRATIONS: dict[str, dict[str, str]] = {
-    "anthropic": {
-        "claude-sonnet-4-5": "claude-sonnet-4-6",
-        "claude-haiku-4-5": "claude-haiku-4-5-20251001",
-    },
-}
 
 _LEGACY_TIER = {"high": "frontier", "medium": "mid", "low": "economy"}
 _PRIORITY_BASE = {"high": 500, "medium": 700, "low": 900}
 _BALANCE_WEIGHT = {"high": 1, "medium": 2, "low": 3}
-_PROFILE_AUTHORITY_CACHE: dict[str, Any] | None = None
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -64,60 +52,94 @@ def _load_json(path: Path) -> dict[str, Any]:
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"invalid JSON in {path}: {exc}") from exc
 
-def _load_profile_authority() -> dict[str, Any]:
-    global _PROFILE_AUTHORITY_CACHE
-    if _PROFILE_AUTHORITY_CACHE is not None:
-        return _PROFILE_AUTHORITY_CACHE
-    payload = _load_json(MODEL_PROFILE_AUTHORITY_PATH)
-    source_index, profiles = payload.get("source_index"), payload.get("profiles")
-    if not isinstance(source_index, dict) or not isinstance(profiles, list):
-        raise RuntimeError(f"{MODEL_PROFILE_AUTHORITY_PATH} did not contain source_index + profiles")
-    index: dict[tuple[str, str], dict[str, Any]] = {}
-    for raw in profiles:
-        if not isinstance(raw, dict):
-            raise RuntimeError(f"{MODEL_PROFILE_AUTHORITY_PATH} contained a non-object profile entry")
-        p, m = raw.get("provider"), raw.get("models")
-        if not isinstance(p, str) or not p.strip():
-            raise RuntimeError(f"{MODEL_PROFILE_AUTHORITY_PATH} profile missing provider")
-        if not isinstance(m, list) or not m:
-            raise RuntimeError(f"{MODEL_PROFILE_AUTHORITY_PATH} profile {raw!r} missing models")
-        for slug in m:
-            if not isinstance(slug, str) or not slug.strip():
-                raise RuntimeError(f"{MODEL_PROFILE_AUTHORITY_PATH} profile {p!r} blank model slug")
-            key = (p.strip(), slug.strip())
-            if key in index:
-                raise RuntimeError(f"{MODEL_PROFILE_AUTHORITY_PATH} duplicated profile for {p}/{slug}")
-            index[key] = dict(raw)
-    _PROFILE_AUTHORITY_CACHE = {"source_index": dict(source_index), "profiles": profiles, "index": index}
-    return _PROFILE_AUTHORITY_CACHE
+def _json_object(value: Any, *, field_name: str, model_key: str) -> dict[str, Any]:
+    if isinstance(value, str):
+        value = json.loads(value)
+    if not isinstance(value, dict):
+        raise RuntimeError(f"invalid {field_name} for {model_key}")
+    return dict(value)
 
-def _model_profile(provider_slug: str, model_slug: str) -> dict[str, Any]:
-    profile = _load_profile_authority()["index"].get((provider_slug, model_slug))
+
+def _json_string_array(value: Any, *, field_name: str, model_key: str) -> tuple[str, ...]:
+    if isinstance(value, str):
+        value = json.loads(value)
+    if not isinstance(value, list):
+        raise RuntimeError(f"invalid {field_name} for {model_key}")
+    return _normalize_unique(str(item) for item in value if str(item).strip())
+
+
+def _normalize_profile_authority_rows(rows: Iterable[dict[str, Any] | asyncpg.Record]) -> dict[str, Any]:
+    profiles: list[dict[str, Any]] = []
+    index: dict[tuple[str, str], dict[str, Any]] = {}
+    for raw_row in rows:
+        row = dict(raw_row)
+        provider_slug = str(row.get("provider_slug") or "").strip()
+        model_slug = str(row.get("model_slug") or "").strip()
+        model_key = f"{provider_slug}/{model_slug}" if provider_slug and model_slug else repr(row)
+        if not provider_slug or not model_slug:
+            raise RuntimeError(f"profile authority row missing provider/model slug: {row!r}")
+        profile = {
+            "profile_id": str(row.get("profile_id") or f"profile.{provider_slug}.{model_slug}"),
+            "provider": provider_slug,
+            "models": [model_slug],
+            "route_tier": str(row.get("route_tier") or "").strip(),
+            "route_tier_rank": int(row.get("route_tier_rank")),
+            "latency_class": str(row.get("latency_class") or "").strip(),
+            "latency_rank": int(row.get("latency_rank")),
+            "reasoning_control": _json_object(
+                row.get("reasoning_control"),
+                field_name="reasoning_control",
+                model_key=model_key,
+            ),
+            "task_affinities": _json_object(
+                row.get("task_affinities"),
+                field_name="task_affinities",
+                model_key=model_key,
+            ),
+            "benchmark_profile": _json_object(
+                row.get("benchmark_profile"),
+                field_name="benchmark_profile",
+                model_key=model_key,
+            ),
+        }
+        key = (provider_slug, model_slug)
+        if key in index:
+            raise RuntimeError(f"provider model authority duplicated profile for {provider_slug}/{model_slug}")
+        index[key] = profile
+        profiles.append(profile)
+    return {"profiles": profiles, "index": index}
+
+
+async def _load_profile_authority(conn: asyncpg.Connection) -> dict[str, Any]:
+    rows = await conn.fetch(
+        "SELECT provider_slug, model_slug, route_tier, route_tier_rank, latency_class, latency_rank, "
+        "reasoning_control, task_affinities, benchmark_profile "
+        "FROM provider_model_candidates "
+        "WHERE status='active' "
+        "ORDER BY provider_slug, model_slug"
+    )
+    if not rows:
+        raise RuntimeError("provider_model_candidates did not contain any active profile authority rows")
+    return _normalize_profile_authority_rows(rows)
+
+
+def _model_profile(authority: dict[str, Any], provider_slug: str, model_slug: str) -> dict[str, Any]:
+    profile = authority["index"].get((provider_slug, model_slug))
     if profile is None:
         raise RuntimeError(
             f"missing model classification authority for {provider_slug}/{model_slug}. "
-            f"Update {MODEL_PROFILE_AUTHORITY_PATH} before syncing new inventory."
+            "Admit the model into provider_model_candidates before syncing new inventory."
         )
     return profile
 
-def _expanded_benchmark_profile(profile: dict[str, Any]) -> dict[str, Any]:
+def _benchmark_profile(profile: dict[str, Any]) -> dict[str, Any]:
     bp = profile.get("benchmark_profile")
     if not isinstance(bp, dict):
         raise RuntimeError(f"invalid benchmark_profile for {profile.get('profile_id')}")
     refs = bp.get("source_refs") or []
     if not isinstance(refs, list):
         raise RuntimeError(f"invalid source_refs for {profile.get('profile_id')}")
-    idx = _load_profile_authority()["source_index"]
-    pid = profile.get("profile_id")
-    urls = []
-    for ref in refs:
-        if not isinstance(ref, str) or not ref.strip():
-            raise RuntimeError(f"blank source ref for {pid}")
-        url = idx.get(ref)
-        if not isinstance(url, str) or not url.strip():
-            raise RuntimeError(f"missing source_index entry {ref!r} for {pid}")
-        urls.append(url.strip())
-    return {**bp, "source_urls": urls}
+    return dict(bp)
 
 
 def _normalize_unique(items: Iterable[str]) -> tuple[str, ...]:
@@ -194,8 +216,37 @@ def load_google_inventory() -> tuple[str, ...]:
     return inventory
 
 
-def load_anthropic_inventory() -> tuple[str, ...]:
-    return ANTHROPIC_DOC_MODELS
+async def _load_model_sync_config(conn: asyncpg.Connection) -> dict[str, dict[str, Any]]:
+    rows = await conn.fetch(
+        "SELECT provider_slug, doc_model_ids, migration_rules "
+        "FROM model_sync_config"
+    )
+    config: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        provider_slug = str(row["provider_slug"]).strip()
+        config[provider_slug] = {
+            "doc_model_ids": _json_string_array(
+                row["doc_model_ids"],
+                field_name="doc_model_ids",
+                model_key=provider_slug,
+            ),
+            "migration_rules": _json_object(
+                row["migration_rules"],
+                field_name="migration_rules",
+                model_key=provider_slug,
+            ),
+        }
+    return config
+
+
+def load_anthropic_inventory(sync_config: dict[str, dict[str, Any]]) -> tuple[str, ...]:
+    provider_config = sync_config.get("anthropic")
+    if provider_config is None:
+        raise RuntimeError("model_sync_config is missing authoritative anthropic doc_model_ids")
+    models = provider_config.get("doc_model_ids")
+    if not isinstance(models, tuple) or not models:
+        raise RuntimeError("model_sync_config anthropic.doc_model_ids is empty")
+    return models
 
 
 def _build_cli_config(profile: asyncpg.Record) -> dict[str, Any]:
@@ -273,7 +324,7 @@ def _profile_params(
         int(profile["latency_rank"]),
         jsonb(profile["reasoning_control"]),
         jsonb(profile["task_affinities"]),
-        jsonb(_expanded_benchmark_profile(profile)),
+        jsonb(_benchmark_profile(profile)),
     )
 
 
@@ -319,6 +370,7 @@ _INSERT_SQL = """
 async def _ensure_safe_cli_config(
     conn: asyncpg.Connection,
     *,
+    profile_authority: dict[str, Any],
     provider_slug: str,
     model_slug: str,
     decision_ref: str,
@@ -327,7 +379,7 @@ async def _ensure_safe_cli_config(
     source_tag: str,
     synced_at: Any,
 ) -> int:
-    profile = _model_profile(provider_slug, model_slug)
+    profile = _model_profile(profile_authority, provider_slug, model_slug)
     pp = _profile_params(profile, provider_slug=provider_slug, model_slug=model_slug,
                          cli_config=cli_config, source=source, source_tag=source_tag,
                          synced_at=synced_at, decision_ref=decision_ref)
@@ -338,6 +390,7 @@ async def _ensure_safe_cli_config(
 async def _upsert_candidate(
     conn: asyncpg.Connection,
     *,
+    profile_authority: dict[str, Any],
     provider_slug: str,
     model_slug: str,
     position: int,
@@ -351,7 +404,7 @@ async def _upsert_candidate(
     existing = await conn.fetchval(
         "SELECT candidate_ref FROM provider_model_candidates WHERE candidate_ref=$1", candidate_ref
     )
-    profile = _model_profile(provider_slug, model_slug)
+    profile = _model_profile(profile_authority, provider_slug, model_slug)
     tier = str(profile["route_tier"])
     pp = _profile_params(profile, provider_slug=provider_slug, model_slug=model_slug,
                          cli_config=cli_config, source=source, source_tag=source_tag,
@@ -379,11 +432,13 @@ async def _upsert_candidate(
 async def sync_provider_inventory(
     conn: asyncpg.Connection,
     *,
+    profile_authority: dict[str, Any],
     provider_slug: str,
     models: tuple[str, ...],
     source: str,
     source_tag: str,
     decision_ref: str,
+    migrations: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     row = await conn.fetchrow(
         "SELECT * FROM provider_cli_profiles WHERE provider_slug=$1 AND status='active'", provider_slug
@@ -396,7 +451,7 @@ async def sync_provider_inventory(
         "migrated_alias_rows": 0, "updated_active_rows": 0,
         "inserted_models": 0, "reactivated_models": 0, "source": source,
     }
-    migrations = ACTIVE_MODEL_MIGRATIONS.get(provider_slug, {})
+    migrations = migrations or {}
     if migrations:
         summary["migrated_alias_rows"] = await _migrate_active_aliases(
             conn, provider_slug=provider_slug, decision_ref=decision_ref,
@@ -405,13 +460,15 @@ async def sync_provider_inventory(
     synced_at = utc_now()
     for position, model_slug in enumerate(models):
         summary["updated_active_rows"] += await _ensure_safe_cli_config(
-            conn, provider_slug=provider_slug, model_slug=model_slug, decision_ref=decision_ref,
+            conn, profile_authority=profile_authority,
+            provider_slug=provider_slug, model_slug=model_slug, decision_ref=decision_ref,
             cli_config=cli_config, source=source, source_tag=source_tag, synced_at=synced_at,
         )
         if await _active_model_exists(conn, provider_slug=provider_slug, model_slug=model_slug):
             continue
         action = await _upsert_candidate(
-            conn, provider_slug=provider_slug, model_slug=model_slug, position=position,
+            conn, profile_authority=profile_authority,
+            provider_slug=provider_slug, model_slug=model_slug, position=position,
             decision_ref=decision_ref, cli_config=cli_config,
             source=source, source_tag=source_tag, synced_at=synced_at,
         )
@@ -429,14 +486,35 @@ async def _model_counts(conn: asyncpg.Connection, *, distinct: bool) -> dict[str
 
 
 async def run_sync(*, database_url: str, dry_run: bool) -> dict[str, Any]:
-    inventories = {
-        "anthropic": {"models": load_anthropic_inventory(), "source": "anthropic-docs-models-overview", "source_tag": "anthropic-docs"},
-        "google":    {"models": load_google_inventory(),    "source": "google-vertex-publisher-models",  "source_tag": "google-vertex"},
-        "openai":    {"models": load_openai_inventory(),    "source": "codex-models-cache",              "source_tag": "codex-cache"},
-    }
     dec_ref = make_decision_ref("provider-model-sync")
     conn = await db_connect(database_url)
     try:
+        sync_config = await _load_model_sync_config(conn)
+        profile_authority = await _load_profile_authority(conn)
+        inventories = {
+            "anthropic": {
+                "models": load_anthropic_inventory(sync_config),
+                "source": "anthropic-docs-models-overview",
+                "source_tag": "anthropic-docs",
+                "migrations": {
+                    old_slug: str(new_slug).strip()
+                    for old_slug, new_slug in sync_config.get("anthropic", {}).get("migration_rules", {}).items()
+                    if str(old_slug).strip() and str(new_slug).strip()
+                },
+            },
+            "google": {
+                "models": load_google_inventory(),
+                "source": "google-vertex-publisher-models",
+                "source_tag": "google-vertex",
+                "migrations": {},
+            },
+            "openai": {
+                "models": load_openai_inventory(),
+                "source": "codex-models-cache",
+                "source_tag": "codex-cache",
+                "migrations": {},
+            },
+        }
         before = await _model_counts(conn, distinct=True)
         if dry_run:
             return {
@@ -450,8 +528,14 @@ async def run_sync(*, database_url: str, dry_run: bool) -> dict[str, Any]:
         async with conn.transaction():
             summaries = {
                 p: await sync_provider_inventory(
-                    conn, provider_slug=p, models=c["models"],
-                    source=c["source"], source_tag=c["source_tag"], decision_ref=dec_ref,
+                    conn,
+                    profile_authority=profile_authority,
+                    provider_slug=p,
+                    models=c["models"],
+                    source=c["source"],
+                    source_tag=c["source_tag"],
+                    decision_ref=dec_ref,
+                    migrations=c["migrations"],
                 )
                 for p, c in inventories.items()
             }

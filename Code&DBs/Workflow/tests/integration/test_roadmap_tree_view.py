@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 import asyncpg
 import pytest
 
+from runtime.semantic_assertions import semantic_assertion_id
 from storage.migrations import workflow_migration_statements
 from storage.postgres import PostgresConfigurationError, connect_workflow_database
 from surfaces.api import operator_read, operator_write
@@ -34,6 +35,11 @@ def _is_postgres_unavailable_error(error: BaseException) -> bool:
     return isinstance(error, (PostgresConfigurationError, PermissionError)) or (
         isinstance(error, OSError) and getattr(error, "errno", None) == 1
     )
+
+
+def _assert_mapping_contains(actual: dict[str, object], expected: dict[str, object]) -> None:
+    for key, value in expected.items():
+        assert actual[key] == value
 
 
 async def _bootstrap_migration(conn, filename: str) -> None:
@@ -143,6 +149,131 @@ async def _seed_dependency(
     )
 
 
+async def _seed_semantic_neighbors(
+    conn,
+    *,
+    suffix: str,
+    root_id: str,
+    blocker_id: str,
+) -> None:
+    clock = _fixed_clock()
+    shared_area_ref = f"functional_area.test.tree.shared.{suffix}"
+    predicate_slug = "grouped_in"
+    root_assertion_id = semantic_assertion_id(
+        predicate_slug=predicate_slug,
+        subject_kind="roadmap_item",
+        subject_ref=root_id,
+        object_kind="functional_area",
+        object_ref=shared_area_ref,
+        source_kind="test_seed",
+        source_ref=f"roadmap_tree.semantic_neighbor.root.{suffix}",
+    )
+    blocker_assertion_id = semantic_assertion_id(
+        predicate_slug=predicate_slug,
+        subject_kind="roadmap_item",
+        subject_ref=blocker_id,
+        object_kind="functional_area",
+        object_ref=shared_area_ref,
+        source_kind="test_seed",
+        source_ref=f"roadmap_tree.semantic_neighbor.blocker.{suffix}",
+    )
+    await conn.execute(
+        """
+        INSERT INTO semantic_predicates (
+            predicate_slug,
+            predicate_status,
+            subject_kind_allowlist,
+            object_kind_allowlist,
+            cardinality_mode,
+            description,
+            created_at,
+            updated_at
+        ) VALUES (
+            $1,
+            'active',
+            '["roadmap_item"]'::jsonb,
+            '["functional_area"]'::jsonb,
+            'single_active_per_edge',
+            'Roadmap tree semantic neighbor anchor.',
+            $2,
+            $3
+        )
+        ON CONFLICT (predicate_slug) DO UPDATE SET
+            predicate_status = EXCLUDED.predicate_status,
+            subject_kind_allowlist = EXCLUDED.subject_kind_allowlist,
+            object_kind_allowlist = EXCLUDED.object_kind_allowlist,
+            cardinality_mode = EXCLUDED.cardinality_mode,
+            description = EXCLUDED.description,
+            updated_at = EXCLUDED.updated_at
+        """,
+        predicate_slug,
+        clock,
+        clock,
+    )
+    await conn.execute(
+        """
+        INSERT INTO semantic_assertions (
+            semantic_assertion_id,
+            predicate_slug,
+            assertion_status,
+            subject_kind,
+            subject_ref,
+            object_kind,
+            object_ref,
+            qualifiers_json,
+            source_kind,
+            source_ref,
+            evidence_ref,
+            bound_decision_id,
+            valid_from,
+            valid_to,
+            created_at,
+            updated_at
+        ) VALUES
+            (
+                $1, $2, 'active', 'roadmap_item', $3, 'functional_area', $4,
+                '{"origin":"roadmap-tree-test"}'::jsonb, 'test_seed', $5, NULL, NULL, $6, NULL, $7, $8
+            ),
+            (
+                $9, $10, 'active', 'roadmap_item', $11, 'functional_area', $12,
+                '{"origin":"roadmap-tree-test"}'::jsonb, 'test_seed', $13, NULL, NULL, $14, NULL, $15, $16
+            )
+        ON CONFLICT (semantic_assertion_id) DO UPDATE SET
+            predicate_slug = EXCLUDED.predicate_slug,
+            assertion_status = EXCLUDED.assertion_status,
+            subject_kind = EXCLUDED.subject_kind,
+            subject_ref = EXCLUDED.subject_ref,
+            object_kind = EXCLUDED.object_kind,
+            object_ref = EXCLUDED.object_ref,
+            qualifiers_json = EXCLUDED.qualifiers_json,
+            source_kind = EXCLUDED.source_kind,
+            source_ref = EXCLUDED.source_ref,
+            evidence_ref = EXCLUDED.evidence_ref,
+            bound_decision_id = EXCLUDED.bound_decision_id,
+            valid_from = EXCLUDED.valid_from,
+            valid_to = EXCLUDED.valid_to,
+            created_at = EXCLUDED.created_at,
+            updated_at = EXCLUDED.updated_at
+        """,
+        root_assertion_id,
+        predicate_slug,
+        root_id,
+        shared_area_ref,
+        f"roadmap_tree.semantic_neighbor.root.{suffix}",
+        clock,
+        clock,
+        clock,
+        blocker_assertion_id,
+        predicate_slug,
+        blocker_id,
+        shared_area_ref,
+        f"roadmap_tree.semantic_neighbor.blocker.{suffix}",
+        clock,
+        clock,
+        clock,
+    )
+
+
 async def _seed_tree_rows() -> tuple[dict[str, str], dict[str, str]]:
     database_url = os.environ.get("WORKFLOW_DATABASE_URL", "postgresql://127.0.0.1/postgres")
     conn = await connect_workflow_database(env={"WORKFLOW_DATABASE_URL": database_url})
@@ -152,6 +283,7 @@ async def _seed_tree_rows() -> tuple[dict[str, str], dict[str, str]]:
     blocker_id = f"roadmap_item.test.tree.blocker.{suffix}"
     try:
         await _bootstrap_migration(conn, "009_bug_and_roadmap_authority.sql")
+        await _bootstrap_migration(conn, "146_semantic_assertion_substrate.sql")
         await _seed_roadmap_item(
             conn,
             roadmap_item_id=root_id,
@@ -185,6 +317,12 @@ async def _seed_tree_rows() -> tuple[dict[str, str], dict[str, str]]:
             roadmap_item_id=child_id,
             depends_on_roadmap_item_id=root_id,
         )
+        await _seed_semantic_neighbors(
+            conn,
+            suffix=suffix,
+            root_id=root_id,
+            blocker_id=blocker_id,
+        )
         return (
             {"WORKFLOW_DATABASE_URL": database_url},
             {
@@ -201,6 +339,10 @@ async def _seed_tree_rows() -> tuple[dict[str, str], dict[str, str]]:
 async def _cleanup_tree_rows(env: dict[str, str], ids: dict[str, str]) -> None:
     conn = await connect_workflow_database(env=env)
     try:
+        await conn.execute(
+            "DELETE FROM semantic_assertions WHERE source_ref LIKE $1",
+            f"roadmap_tree.semantic_neighbor.%{ids['suffix']}",
+        )
         await conn.execute(
             "DELETE FROM roadmap_item_dependencies WHERE roadmap_item_id LIKE $1 OR depends_on_roadmap_item_id LIKE $1",
             f"roadmap_item.test.tree.%{ids['suffix']}%",
@@ -336,16 +478,22 @@ def test_query_roadmap_tree_reads_subtree_and_dependencies() -> None:
         assert payload["instruction_authority"]["kind"] == "roadmap_tree_instruction_authority"
         assert payload["instruction_authority"]["roadmap_truth"]["root_roadmap_item_id"] == ids["root_id"]
         assert payload["root_roadmap_item_id"] == ids["root_id"]
-        assert payload["counts"] == {
-            "roadmap_items": 2,
-            "roadmap_item_dependencies": 2,
-            "semantic_neighbors": 0,
-        }
-        assert payload["semantic_neighbors_reason_code"] in {
-            "roadmap.semantic_neighbors.none",
-            "roadmap.semantic_neighbors.schema_unavailable",
-        }
-        assert payload["semantic_neighbors"] == []
+        assert payload["counts"]["roadmap_items"] == 2
+        assert payload["counts"]["roadmap_item_dependencies"] == 2
+        assert payload["counts"]["work_item_assessments"] == 2
+        assert payload["counts"]["semantic_neighbors"] == 1
+        assert payload["semantic_neighbors_reason_code"] == "roadmap.semantic_neighbors.semantic_assertions"
+        assert payload["semantic_neighbors"] == [
+            {
+                "roadmap_item_id": ids["blocker_id"],
+                "title": f"External blocker {ids['suffix']}",
+                "status": "active",
+                "priority": "p1",
+                "similarity": 1.0,
+                "match_kind": "semantic_assertion",
+                "shared_signal_count": 1,
+            }
+        ]
         assert payload["root_item"]["roadmap_item_id"] == ids["root_id"]
         assert [row["roadmap_item_id"] for row in payload["roadmap_items"]] == [
             ids["root_id"],
@@ -428,8 +576,17 @@ async def _exercise_roadmap_write_preview_parity() -> None:
             root_roadmap_item_id=root_roadmap_item_id,
         )
 
-        assert payload["root_item"] == committed["preview"]["roadmap_items"][0]
-        assert payload["roadmap_items"] == committed["preview"]["roadmap_items"]
+        _assert_mapping_contains(
+            payload["root_item"],
+            committed["preview"]["roadmap_items"][0],
+        )
+        assert len(payload["roadmap_items"]) == len(committed["preview"]["roadmap_items"])
+        for actual, expected in zip(
+            payload["roadmap_items"],
+            committed["preview"]["roadmap_items"],
+            strict=True,
+        ):
+            _assert_mapping_contains(actual, expected)
         dependency_sort_key = lambda row: (
             row["roadmap_item_id"],
             row["created_at"],
@@ -444,6 +601,7 @@ async def _exercise_roadmap_write_preview_parity() -> None:
             "roadmap_item_dependencies": len(
                 committed["preview"]["roadmap_item_dependencies"]
             ),
+            "work_item_assessments": len(payload["work_item_assessments"]),
             "semantic_neighbors": len(payload["semantic_neighbors"]),
         }
         assert "Roadmap write preview parity" in payload["rendered_markdown"]

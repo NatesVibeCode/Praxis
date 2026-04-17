@@ -9,7 +9,6 @@ agents.
 from __future__ import annotations
 
 import argparse
-import asyncio
 import json
 import logging
 import os
@@ -24,8 +23,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
-from runtime._workflow_database import resolve_runtime_database_url
-from storage.postgres.connection import connect_workflow_database, resolve_workflow_database_url
+from runtime._workflow_database import (
+    WorkflowDatabaseAuthority,
+    resolve_runtime_database_authority,
+)
 from storage.postgres.validators import PostgresConfigurationError
 
 LOG = logging.getLogger(__name__)
@@ -125,6 +126,7 @@ class SupervisorPaths:
     state_file: Path
     control_file: Path
     database_url: str
+    database_authority_source: str
     python_bin: Path = field(default_factory=lambda: Path(shutil.which("python3", path=SERVICE_PATH) or "python3"))
     postgres_bin: Path = field(default_factory=lambda: Path(shutil.which("postgres", path=SERVICE_PATH) or "postgres"))
     pg_isready_bin: Path = field(default_factory=lambda: Path(shutil.which("pg_isready", path=SERVICE_PATH) or "pg_isready"))
@@ -136,6 +138,7 @@ class SupervisorPaths:
             "PATH": self.service_path,
             "PYTHONPATH": str(self.workflow_dir),
             "WORKFLOW_DATABASE_URL": self.database_url,
+            "WORKFLOW_DATABASE_AUTHORITY_SOURCE": self.database_authority_source,
         }
 
 
@@ -168,66 +171,9 @@ def database_name_from_url(database_url: str) -> str:
     database_name = path_part.split("?", 1)[0].split("#", 1)[0]
     return database_name or "praxis"
 
-
-def _database_authority_reachable(database_url: str) -> bool:
-    async def _probe() -> bool:
-        conn = await connect_workflow_database(
-            env={"WORKFLOW_DATABASE_URL": database_url},
-        )
-        try:
-            return True
-        finally:
-            await conn.close()
-
+def discover_database_authority(repo_root: Path) -> WorkflowDatabaseAuthority:
     try:
-        normalized = resolve_workflow_database_url(
-            env={"WORKFLOW_DATABASE_URL": database_url},
-        )
-        if not normalized:
-            return False
-        return asyncio.run(_probe())
-    except Exception:
-        return False
-
-
-def _read_repo_env_file(path: Path) -> dict[str, str]:
-    try:
-        content = path.read_text(encoding="utf-8")
-    except OSError:
-        return {}
-
-    parsed: dict[str, str] = {}
-    for raw_line in content.splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip().strip("'\"")
-        if key and value:
-            parsed[key] = value
-    return parsed
-
-
-def discover_database_url(repo_root: Path) -> str:
-    launch_agents = Path.home() / "Library" / "LaunchAgents"
-    for label in (SUPERVISOR_LABEL, *LEGACY_LAUNCHD_LABELS):
-        plist_path = launch_agents / f"{label}.plist"
-        if not plist_path.exists():
-            continue
-        try:
-            payload = plistlib.loads(plist_path.read_bytes())
-        except Exception:
-            continue
-        env_vars = payload.get("EnvironmentVariables")
-        if isinstance(env_vars, dict):
-            candidate = env_vars.get("WORKFLOW_DATABASE_URL")
-            if isinstance(candidate, str) and candidate.strip():
-                candidate = candidate.strip()
-                if _database_authority_reachable(candidate):
-                    return candidate
-    try:
-        return resolve_runtime_database_url(
+        return resolve_runtime_database_authority(
             repo_root=repo_root,
             required=True,
         )
@@ -239,11 +185,21 @@ def discover_database_url(repo_root: Path) -> str:
         ) from exc
 
 
+def discover_database_url(repo_root: Path) -> str:
+    authority = discover_database_authority(repo_root)
+    return str(authority.database_url or "")
+
+
 def build_paths(repo_root: Path, database_url: str | None = None) -> SupervisorPaths:
     repo_root = repo_root.resolve()
     workflow_dir = repo_root / "Code&DBs" / "Workflow"
     launch_agents_dir = Path.home() / "Library" / "LaunchAgents"
-    resolved_db_url = database_url or discover_database_url(repo_root)
+    authority = (
+        resolve_runtime_database_authority(database_url=database_url, required=True)
+        if database_url is not None
+        else discover_database_authority(repo_root)
+    )
+    resolved_db_url = str(authority.database_url or "")
     state_dir = repo_root / ".cache" / "praxis-supervisor"
     return SupervisorPaths(
         repo_root=repo_root,
@@ -257,6 +213,7 @@ def build_paths(repo_root: Path, database_url: str | None = None) -> SupervisorP
         state_file=state_dir / "state.json",
         control_file=state_dir / "control.json",
         database_url=resolved_db_url,
+        database_authority_source=authority.source,
     )
 
 

@@ -6,17 +6,22 @@ import json
 import os
 import uuid
 from collections.abc import Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
 from registry.domain import RegistryResolver
 from registry.repository import bootstrap_registry_authority_schema, load_registry_resolver
+from runtime.execution import RuntimeOrchestrator
 from runtime.instance import (
     PRAXIS_RUNTIME_PROFILE_ENV,
     PRAXIS_RUNTIME_PROFILES_CONFIG_ENV,
 )
-from storage.postgres import connect_workflow_database
+from runtime.outbox import PostgresWorkflowOutboxSubscriber
+from runtime.workflow._admission import _execute_admitted_graph_run
+from storage.postgres import PostgresEvidenceReader, connect_workflow_database
+from storage.postgres.connection import SyncPostgresConnection, get_workflow_pool
 from surfaces.api import frontdoor, native_ops
 from ._operator_helpers import _run_async
 from ._operator_repository import _repo_root
@@ -91,6 +96,9 @@ _SMOKE_PATH_ENV_NAMES = {
     "PRAXIS_LOCAL_POSTGRES_DATA_DIR",
     PRAXIS_RUNTIME_PROFILES_CONFIG_ENV,
 }
+_SMOKE_REQUIRED_TERMINAL_STATE = "succeeded"
+_SMOKE_REQUIRED_NODE_ORDER = ("node_0", "node_1")
+_SMOKE_REQUIRED_RECEIPT_TYPE = "workflow_completion_receipt"
 
 
 def _default_smoke_runtime_env() -> dict[str, str]:
@@ -345,6 +353,24 @@ def _require_database_ready(
         )
 
 
+def _load_database_status(
+    *,
+    env: Mapping[str, str],
+    field_name: str,
+    bootstrap: bool,
+) -> dict[str, Any]:
+    payload = _require_frontdoor_mapping(
+        frontdoor.health(env=env, bootstrap=bootstrap),
+        field_name=field_name,
+    )
+    return dict(
+        _require_frontdoor_mapping(
+            payload.get("database"),
+            field_name=f"{field_name}.database",
+        )
+    )
+
+
 def _merge_run_envelopes(
     *,
     submit_run: Mapping[str, Any],
@@ -352,19 +378,26 @@ def _merge_run_envelopes(
     admission_decision: object,
     inspection: object,
 ) -> dict[str, Any]:
-    merged_run = dict(status_run)
-    for key, value in submit_run.items():
-        if key in merged_run and merged_run[key] != value:
+    immutable_fields = {
+        "run_id",
+        "workflow_id",
+        "request_id",
+        "workflow_definition_id",
+        "admitted_definition_hash",
+    }
+    merged_run = dict(submit_run)
+    for key, value in status_run.items():
+        if key in immutable_fields and key in merged_run and merged_run[key] != value:
             raise frontdoor.NativeFrontdoorError(
                 "operator_flow.run_mismatch",
-                "frontdoor submit and status returned conflicting run fields",
+                "frontdoor submit and status returned conflicting immutable run fields",
                 details={
                     "field": key,
-                    "submit_value": value,
-                    "status_value": merged_run[key],
+                    "submit_value": merged_run[key],
+                    "status_value": value,
                 },
             )
-        merged_run.setdefault(key, value)
+        merged_run[key] = value
 
     if admission_decision is not None:
         merged_run["admission_decision"] = dict(
@@ -378,6 +411,218 @@ def _merge_run_envelopes(
             _require_frontdoor_mapping(inspection, field_name="status_payload.inspection")
         )
     return merged_run
+
+
+@contextmanager
+def _temporary_process_env(env: Mapping[str, str]):
+    original: dict[str, str | None] = {}
+    for key, value in env.items():
+        original[key] = os.environ.get(key)
+        os.environ[key] = value
+    try:
+        yield
+    finally:
+        for key, prior_value in original.items():
+            if prior_value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = prior_value
+
+
+def _normalize_execution_result(result: object) -> dict[str, Any]:
+    if isinstance(result, Mapping):
+        raw_current_state = result.get("current_state", result.get("status"))
+        raw_terminal_reason = result.get("terminal_reason", result.get("terminal_reason_code"))
+        raw_node_order = result.get("node_order", ())
+    else:
+        raw_current_state = getattr(result, "current_state", None)
+        if raw_current_state is None:
+            raw_current_state = getattr(result, "status", None)
+        raw_terminal_reason = getattr(result, "terminal_reason", None)
+        if raw_terminal_reason is None:
+            raw_terminal_reason = getattr(result, "terminal_reason_code", None)
+        if raw_terminal_reason is None:
+            raw_terminal_reason = getattr(result, "reason_code", None)
+        raw_node_order = getattr(result, "node_order", ())
+
+    if hasattr(raw_current_state, "value"):
+        raw_current_state = raw_current_state.value
+    node_order = (
+        [str(node_id) for node_id in raw_node_order]
+        if isinstance(raw_node_order, (list, tuple))
+        else []
+    )
+    return {
+        "current_state": str(raw_current_state or "").strip() or None,
+        "terminal_reason": (
+            str(raw_terminal_reason).strip()
+            if isinstance(raw_terminal_reason, str) and raw_terminal_reason.strip()
+            else None
+        ),
+        "node_order": node_order,
+    }
+
+
+def _execute_smoke_run(
+    *,
+    run_id: str,
+    env: Mapping[str, str],
+) -> dict[str, Any]:
+    with _temporary_process_env(env):
+        conn = SyncPostgresConnection(get_workflow_pool(env=env))
+        try:
+            result = _execute_admitted_graph_run(conn, run_id=run_id)
+        finally:
+            conn.close()
+    return _normalize_execution_result(result)
+
+
+def _load_smoke_proof(
+    *,
+    run_id: str,
+    env: Mapping[str, str],
+) -> dict[str, Any]:
+    reader = PostgresEvidenceReader(env=env)
+    canonical_evidence = tuple(reader.evidence_timeline(run_id))
+    inspection = RuntimeOrchestrator(evidence_reader=reader).inspect_run(run_id=run_id)
+    outbox_batch = PostgresWorkflowOutboxSubscriber(env=env).read_batch(
+        run_id=run_id,
+        limit=64,
+    )
+    node_order: list[str] = []
+    for entry in inspection.node_timeline:
+        node_id = str(entry).split(":", 1)[0].strip()
+        if node_id and node_id not in node_order:
+            node_order.append(node_id)
+    first_evidence_seq = canonical_evidence[0].evidence_seq if canonical_evidence else None
+    last_evidence_seq = canonical_evidence[-1].evidence_seq if canonical_evidence else None
+    last_outbox_row = outbox_batch.rows[-1] if outbox_batch.rows else None
+    last_envelope = last_outbox_row.envelope if last_outbox_row is not None else {}
+    if not isinstance(last_envelope, Mapping):
+        last_envelope = {}
+    return {
+        "inspection": {
+            "current_state": inspection.current_state,
+            "terminal_reason": inspection.terminal_reason,
+            "node_order": node_order,
+            "node_timeline": list(inspection.node_timeline),
+            "evidence_refs": list(inspection.evidence_refs),
+            "completeness": {
+                "is_complete": inspection.completeness.is_complete,
+                "missing_evidence_refs": list(inspection.completeness.missing_evidence_refs),
+            },
+            "watermark": {
+                "evidence_seq": inspection.watermark.evidence_seq,
+                "source": inspection.watermark.source,
+            },
+        },
+        "evidence": {
+            "count": len(canonical_evidence),
+            "first_evidence_seq": first_evidence_seq,
+            "last_evidence_seq": last_evidence_seq,
+        },
+        "outbox": {
+            "row_count": len(outbox_batch.rows),
+            "cursor_last_evidence_seq": outbox_batch.cursor.last_evidence_seq,
+            "has_more": outbox_batch.has_more,
+            "first_authority_table": (
+                outbox_batch.rows[0].authority_table if outbox_batch.rows else None
+            ),
+            "last_authority_table": (
+                last_outbox_row.authority_table if last_outbox_row is not None else None
+            ),
+            "last_envelope_kind": (
+                last_outbox_row.envelope_kind if last_outbox_row is not None else None
+            ),
+            "last_receipt_type": (
+                str(last_envelope.get("receipt_type")).strip()
+                if isinstance(last_envelope.get("receipt_type"), str)
+                and str(last_envelope.get("receipt_type")).strip()
+                else None
+            ),
+            "last_status": (
+                str(last_envelope.get("status")).strip()
+                if isinstance(last_envelope.get("status"), str)
+                and str(last_envelope.get("status")).strip()
+                else None
+            ),
+        },
+    }
+
+
+def _require_smoke_terminal_proof(
+    *,
+    status_run: Mapping[str, Any],
+    execution: Mapping[str, Any],
+    proof: Mapping[str, Any],
+) -> None:
+    execution_state = execution.get("current_state")
+    if execution_state != _SMOKE_REQUIRED_TERMINAL_STATE:
+        raise frontdoor.NativeFrontdoorError(
+            "operator_flow.smoke_execution_invalid",
+            "native smoke execution did not report a succeeded terminal state",
+            details={
+                "expected_state": _SMOKE_REQUIRED_TERMINAL_STATE,
+                "actual_state": execution_state,
+                "terminal_reason": execution.get("terminal_reason"),
+            },
+        )
+
+    inspection = proof.get("inspection")
+    inspection_node_order = (
+        list(inspection.get("node_order", ())) if isinstance(inspection, Mapping) else []
+    )
+    if inspection_node_order != list(_SMOKE_REQUIRED_NODE_ORDER):
+        raise frontdoor.NativeFrontdoorError(
+            "operator_flow.smoke_execution_invalid",
+            "native smoke proof did not preserve the expected node order",
+            details={
+                "expected_node_order": list(_SMOKE_REQUIRED_NODE_ORDER),
+                "actual_node_order": inspection_node_order,
+            },
+        )
+
+    if not isinstance(inspection, Mapping) or inspection.get("current_state") != _SMOKE_REQUIRED_TERMINAL_STATE:
+        raise frontdoor.NativeFrontdoorError(
+            "operator_flow.smoke_proof_invalid",
+            "native smoke inspection proof did not report a succeeded terminal state",
+            details={"inspection": inspection},
+        )
+
+    evidence = proof.get("evidence")
+    if not isinstance(evidence, Mapping) or int(evidence.get("count", 0) or 0) <= 0:
+        raise frontdoor.NativeFrontdoorError(
+            "operator_flow.smoke_proof_invalid",
+            "native smoke proof must include canonical evidence rows",
+            details={"evidence": evidence},
+        )
+
+    outbox = proof.get("outbox")
+    if not isinstance(outbox, Mapping):
+        raise frontdoor.NativeFrontdoorError(
+            "operator_flow.smoke_proof_invalid",
+            "native smoke proof must include outbox replay evidence",
+            details={"outbox": outbox},
+        )
+    if outbox.get("last_receipt_type") != _SMOKE_REQUIRED_RECEIPT_TYPE:
+        raise frontdoor.NativeFrontdoorError(
+            "operator_flow.smoke_proof_invalid",
+            "native smoke must end with the canonical workflow completion receipt in outbox",
+            details={
+                "expected_receipt_type": _SMOKE_REQUIRED_RECEIPT_TYPE,
+                "actual_receipt_type": outbox.get("last_receipt_type"),
+                "actual_authority_table": outbox.get("last_authority_table"),
+            },
+        )
+    if outbox.get("last_status") != _SMOKE_REQUIRED_TERMINAL_STATE:
+        raise frontdoor.NativeFrontdoorError(
+            "operator_flow.smoke_proof_invalid",
+            "native smoke outbox proof did not record a succeeded terminal receipt",
+            details={
+                "expected_status": _SMOKE_REQUIRED_TERMINAL_STATE,
+                "actual_status": outbox.get("last_status"),
+            },
+        )
 
 
 def run_native_self_hosted_smoke(
@@ -419,17 +664,15 @@ def run_local_operator_flow(
             field_name="native_instance",
         )
     )
-    bootstrap_status = dict(
-        _require_frontdoor_mapping(
-            native_ops.db_bootstrap(env=source),
-            field_name="bootstrap",
-        )
+    bootstrap_status = _load_database_status(
+        env=source,
+        field_name="bootstrap",
+        bootstrap=True,
     )
-    health_status = dict(
-        _require_frontdoor_mapping(
-            native_ops.db_health(env=source),
-            field_name="health",
-        )
+    health_status = _load_database_status(
+        env=source,
+        field_name="health",
+        bootstrap=False,
     )
     _require_database_ready(status=bootstrap_status, field_name="bootstrap")
     _require_database_ready(status=health_status, field_name="health")
@@ -473,6 +716,7 @@ def run_local_operator_flow(
             details={"field": "submit_payload.run.run_id"},
         )
 
+    execution = _execute_smoke_run(run_id=run_id, env=source)
     status_payload = _require_frontdoor_mapping(
         service.status(run_id=run_id, env=source),
         field_name="status_payload",
@@ -505,6 +749,15 @@ def run_local_operator_flow(
                 "actual": status_run_id,
             },
         )
+    proof = _load_smoke_proof(run_id=run_id, env=source)
+    _require_smoke_terminal_proof(
+        status_run=status_run,
+        execution=execution,
+        proof=proof,
+    )
+    inspection_payload = status_payload.get("inspection")
+    if inspection_payload is None:
+        inspection_payload = proof.get("inspection")
 
     return {
         "step_order": [
@@ -512,16 +765,20 @@ def run_local_operator_flow(
             "db_bootstrap",
             "db_health",
             "submit",
+            "execute",
             "status",
+            "proof",
         ],
         "native_instance": instance_contract,
         "bootstrap": bootstrap_status,
         "health": health_status,
+        "execution": execution,
+        "proof": proof,
         "run": _merge_run_envelopes(
             submit_run=submit_run,
             status_run=status_run,
             admission_decision=submit_payload.get("admission_decision"),
-            inspection=status_payload.get("inspection"),
+            inspection=inspection_payload,
         ),
     }
 

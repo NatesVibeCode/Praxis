@@ -11,6 +11,10 @@ from runtime.engineering_observability import (
     build_platform_observability,
 )
 from surfaces._boot import resolve_surface_env, workflow_database_status
+from surfaces.api.operator_read import (
+    build_provider_registry_summary,
+    query_transport_support,
+)
 from surfaces.api.handlers import workflow_launcher
 from surfaces.mcp.catalog import get_tool_catalog
 
@@ -408,28 +412,26 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
             "service_manager": "scripts/praxis",
             "compatibility_alias": "scripts/praxis-ctl",
             "commands": {
-                "install": "praxis install — install the single Praxis background agent (auto-start on login)",
-                "launch": "praxis launch — auto-heal services, ensure /app build, prove launcher readiness, and open the launcher",
-                "status": "praxis status — show all services, PIDs, ports, and semantic readiness",
+                "launch": "praxis launch — start Docker services, probe launcher readiness, and open the launcher",
+                "doctor": "praxis doctor --json — emit launcher readiness as JSON",
+                "status": "praxis status — show Docker service state and semantic readiness",
                 "restart": "praxis restart [postgres|api|workflow-api|worker|scheduler] — restart services",
                 "stop": "praxis stop — stop all services",
                 "logs": "praxis logs [postgres|api|workflow-api|worker|scheduler] — tail logs",
             },
             "services": [
-                {"label": "com.praxis.engine", "keep_alive": True, "contains": ["postgres", "api-server", "workflow-worker", "scheduler"]},
-                {"label": "com.praxis.postgres", "port": 5432, "managed_by": "com.praxis.engine"},
-                {"label": "com.praxis.api-server", "port": 8420, "managed_by": "com.praxis.engine"},
-                {"label": "com.praxis.workflow-worker", "managed_by": "com.praxis.engine"},
-                {"label": "com.praxis.scheduler", "interval_sec": 60, "managed_by": "com.praxis.engine"},
+                {"label": "postgres", "port": 5432, "managed_by": "docker-compose"},
+                {"label": "api-server", "port": 8420, "managed_by": "docker-compose"},
+                {"label": "workflow-worker", "managed_by": "docker-compose"},
+                {"label": "scheduler", "interval_sec": 60, "managed_by": "docker-compose"},
             ],
-            "notes": "scripts/praxis is the preferred launcher entrypoint; scripts/praxis-ctl remains a compatibility alias. launchd only sees the single com.praxis.engine background item, while Praxis supervises postgres, api-server, workflow-worker, and scheduler internally. The launcher front door is http://127.0.0.1:8420/app and the always-on MCP bridge is served from the API surface.",
+            "notes": "scripts/praxis is the preferred launcher entrypoint; scripts/praxis-ctl remains a compatibility alias. Docker Compose owns postgres, api-server, workflow-worker, and scheduler. Native launchd install/setup control has been removed. The launcher front door is http://127.0.0.1:8420/app and the always-on MCP bridge is served from the API surface.",
         },
 }
 
 
 def _handle_health(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
     hs_mod = subs.get_health_mod()
-    from adapters import provider_registry as provider_registry_mod
     dependency_truth = dependency_truth_report(scope="all")
 
     db_url = _workflow_env(subs)["WORKFLOW_DATABASE_URL"]
@@ -438,11 +440,13 @@ def _handle_health(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         hs_mod.PostgresConnectivityProbe(db_url),
         hs_mod.DiskSpaceProbe(str(REPO_ROOT)),
     ]
-    for provider_slug in provider_registry_mod.registered_providers():
-        for adapter_type in ("cli_llm", "llm_task"):
-            if not provider_registry_mod.supports_adapter(provider_slug, adapter_type):
-                continue
-            probes.append(hs_mod.ProviderTransportProbe(provider_slug, adapter_type))
+    transport_support = query_transport_support(
+        health_mod=hs_mod,
+        pg=subs.get_pg_conn(),
+    )
+    provider_registry = build_provider_registry_summary(transport_support)
+    for provider_slug, adapter_type in provider_registry["probe_targets"]:
+        probes.append(hs_mod.ProviderTransportProbe(provider_slug, adapter_type))
 
     runner = hs_mod.PreflightRunner(probes)
     preflight = runner.run()
@@ -499,6 +503,13 @@ def _handle_health(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         "proof_metrics": proof_payload,
         "schema_authority": schema_authority,
         "dependency_truth": dependency_truth,
+        "provider_registry": {
+            "default_provider_slug": provider_registry["default_provider_slug"],
+            "default_adapter_type": provider_registry["default_adapter_type"],
+            "registered_providers": list(provider_registry["registered_providers"]),
+            "providers": list(provider_registry["providers"]),
+            "support_basis": provider_registry["support_basis"],
+        },
         "lane_recommendation": {
             "recommended_posture": lane.recommended_posture,
             "confidence": lane.confidence,

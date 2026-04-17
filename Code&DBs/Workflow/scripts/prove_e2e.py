@@ -28,7 +28,8 @@ sys.path.insert(0, str(WORKFLOW_ROOT))
 
 from adapters.structured_output import parse_model_output
 from adapters.docker_runner import run_on_host
-from adapters.cli_llm import PROVIDER_PROFILES, _build_provider_cmd
+from adapters.cli_llm import PROVIDER_PROFILES
+from registry.provider_execution_registry import build_command
 from runtime.prompt_renderer import render_prompt, RenderedPrompt
 from runtime.output_writer import apply_structured_output
 
@@ -130,11 +131,11 @@ class RunState(str, Enum):
     claude_path = shutil.which("claude")
     if not claude_path:
         print("SKIP: claude binary not found on PATH")
-            print("Running with mock output to prove the pipeline...")
-            return _prove_with_mock(workspace, target_file, rendered)
+        print("Running with mock output to prove the pipeline...")
+        return _prove_with_mock(workspace, target_file, rendered)
 
     # Build the command — stdin/stdout only
-    cmd_parts = _build_provider_cmd("anthropic", claude_path, "claude-sonnet-4-6")
+    cmd_parts = build_command("anthropic", "claude-sonnet-4-6", binary_override=claude_path)
     shell_cmd = " ".join(cmd_parts)
     print(f"Command: {shell_cmd}")
 

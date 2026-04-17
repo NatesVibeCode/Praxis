@@ -9,6 +9,8 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
+import pytest
+
 from runtime import canonical_workflows
 from runtime.compile_index import CompileIndexAuthorityError
 from runtime.operations.queries import handoff as handoff_queries
@@ -680,6 +682,41 @@ def test_handle_status_get_includes_queue_depth_snapshot() -> None:
     assert payload["queue_depth_running"] == 8
     assert payload["queue_depth_utilization_pct"] == 55.0
     assert payload["queue_depth_error"] is None
+
+
+class _CriticalQueueStatusPg:
+    def execute(self, query: str, *params: Any) -> list[dict[str, Any]]:
+        normalized = " ".join(query.split())
+        if "FROM workflow_jobs" in normalized:
+            return [{"pending": 600, "ready": 400, "claimed": 1, "running": 2}]
+        if "COUNT(*) AS total" in normalized:
+            return [{"total": 0, "passed": 0, "failed": 0}]
+        raise AssertionError(f"unexpected query: {query}")
+
+
+class _CriticalQueueStatusSubsystems:
+    def __init__(self) -> None:
+        self._pg = _CriticalQueueStatusPg()
+        self._ingester = _QueueStatusIngester()
+
+    def get_pg_conn(self):
+        return self._pg
+
+    def get_receipt_ingester(self):
+        return self._ingester
+
+
+def test_handle_status_get_marks_queue_critical_at_shared_threshold() -> None:
+    request = _RequestStub(subsystems=_CriticalQueueStatusSubsystems())
+
+    workflow_query._handle_status_get(request, "/api/status")
+
+    assert request.sent is not None
+    status, payload = request.sent
+    assert status == 200
+    assert payload["queue_depth"] == 1000
+    assert payload["queue_depth_status"] == "critical"
+    assert payload["queue_depth_utilization_pct"] == 100.0
 
 
 class _DashboardPg:
@@ -2585,9 +2622,10 @@ def test_handle_workflow_build_post_build_graph_emits_db_backed_restore_receipt(
 
 
 def test_handle_workflow_build_post_delegates_to_runtime_owner() -> None:
+    pg = _RecordingPg()
     request = _RequestStub(
         {"node_id": "step-001", "authority_kind": "reference", "authority_ref": "@gmail/search"},
-        subsystems=SimpleNamespace(get_pg_conn=lambda: _RecordingPg()),
+        subsystems=SimpleNamespace(get_pg_conn=lambda: pg),
         path="/api/workflows/wf_build/build/attachments",
     )
     runtime_result = {
@@ -2605,14 +2643,30 @@ def test_handle_workflow_build_post_delegates_to_runtime_owner() -> None:
         "build_bundle": {"projection_status": {"state": "ready"}},
         "planning_notes": [],
     }
+    built_payload = {"workflow": {"id": "wf_build"}}
 
-    with patch.object(workflow_query, "mutate_workflow_build", return_value=runtime_result) as mutate_mock:
+    with (
+        patch.object(workflow_query, "mutate_workflow_build", return_value=runtime_result) as mutate_mock,
+        patch.object(workflow_query, "build_workflow_build_moment", return_value=built_payload) as build_mock,
+    ):
         workflow_query._handle_workflow_build_post(request, "/api/workflows/wf_build/build/attachments")
 
     mutate_mock.assert_called_once()
+    build_mock.assert_called_once_with(
+        runtime_result["row"],
+        conn=pg,
+        definition=runtime_result["definition"],
+        compiled_spec=runtime_result["compiled_spec"],
+        build_bundle=runtime_result["build_bundle"],
+        planning_notes=runtime_result["planning_notes"],
+        intent_brief=runtime_result.get("intent_brief"),
+        execution_manifest=runtime_result.get("execution_manifest"),
+        undo_receipt=runtime_result.get("undo_receipt"),
+        mutation_event_id=runtime_result.get("mutation_event_id"),
+    )
     assert request.sent is not None
     assert request.sent[0] == 200
-    assert request.sent[1]["workflow"]["id"] == "wf_build"
+    assert request.sent[1] == built_payload
 
 
 def test_handle_workflow_triggers_post_delegates_to_runtime_owner() -> None:
@@ -4257,6 +4311,81 @@ def test_handle_query_routes_issue_backlog(monkeypatch) -> None:
     assert result["issues"][0]["issue_id"] == "issue.alpha"
 
 
+def test_handle_query_routes_operator_graph_view(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def _handle_operator_view(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
+        captured["subsystems"] = subs
+        captured["body"] = dict(body)
+        return {
+            "view": "operator_graph",
+            "payload": {"semantic_authority_state": "ready"},
+        }
+
+    monkeypatch.setattr(workflow_query_core, "handle_operator_view", _handle_operator_view)
+    subs = SimpleNamespace()
+
+    result = workflow_query_core.handle_query(
+        subs,
+        {
+            "question": "show me the operator graph",
+            "as_of": "2026-04-16T20:05:00+00:00",
+        },
+    )
+
+    assert captured["subsystems"] is subs
+    assert captured["body"] == {
+        "view": "operator_graph",
+        "as_of": "2026-04-16T20:05:00+00:00",
+    }
+    assert result["view"] == "operator_graph"
+    assert result["payload"]["semantic_authority_state"] == "ready"
+
+
+def test_handle_query_routes_semantic_assertions_view(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def _handle_operator_view(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
+        captured["subsystems"] = subs
+        captured["body"] = dict(body)
+        return {
+            "view": "semantics",
+            "returned_count": 1,
+            "semantic_assertions": [{"predicate_slug": "grouped_in"}],
+        }
+
+    monkeypatch.setattr(workflow_query_core, "handle_operator_view", _handle_operator_view)
+    subs = SimpleNamespace()
+
+    result = workflow_query_core.handle_query(
+        subs,
+        {
+            "question": "show me semantic assertions",
+            "predicate_slug": "grouped_in",
+            "subject_kind": "roadmap_item",
+            "active_only": False,
+            "limit": 7,
+        },
+    )
+
+    assert captured["subsystems"] is subs
+    assert captured["body"] == {
+        "view": "semantics",
+        "predicate_slug": "grouped_in",
+        "subject_kind": "roadmap_item",
+        "subject_ref": None,
+        "object_kind": None,
+        "object_ref": None,
+        "source_kind": None,
+        "source_ref": None,
+        "active_only": False,
+        "as_of": None,
+        "limit": 7,
+    }
+    assert result["view"] == "semantics"
+    assert result["returned_count"] == 1
+
+
 def test_handle_query_routes_diagnose() -> None:
     from runtime import workflow_diagnose
 
@@ -4421,17 +4550,8 @@ def test_handle_operator_view_status_returns_direct_payload(monkeypatch) -> None
 
 def test_handle_operator_view_replay_ready_bugs_returns_direct_payload() -> None:
     class _BugTracker:
-        def bulk_backfill_replay_provenance(self, *, open_only: bool, receipt_limit: int):
-            assert open_only is True
-            assert receipt_limit == 1
-            return {
-                "scanned_count": 1,
-                "backfilled_count": 1,
-                "linked_count": 2,
-                "replay_ready_count": 1,
-                "replay_blocked_count": 0,
-                "bugs": [],
-            }
+        def __init__(self) -> None:
+            self.bulk_backfill_called = False
 
         def count_bugs(self, **_kwargs):
             return 1
@@ -4465,9 +4585,10 @@ def test_handle_operator_view_replay_ready_bugs_returns_direct_payload() -> None
                 )
             ]
 
-        def replay_hint(self, bug_id: str, *, receipt_limit: int):
+        def replay_hint(self, bug_id: str, *, receipt_limit: int, allow_backfill: bool):
             assert bug_id == "BUG-001"
             assert receipt_limit == 1
+            assert allow_backfill is False
             return {
                 "available": True,
                 "reason_code": "bug.replay_ready",
@@ -4505,9 +4626,164 @@ def test_handle_operator_view_replay_ready_bugs_returns_direct_payload() -> None
     )
 
     assert result["view"] == "replay_ready_bugs"
-    assert result["maintenance"]["backfilled_count"] == 1
     assert result["bugs"][0]["replay_ready"] is True
     assert result["returned_count"] == 1
+    assert "maintenance" not in result
+
+
+def test_handle_operator_view_replay_ready_bugs_rejects_refresh_backfill() -> None:
+    class _BugTracker:
+        def count_bugs(self, **_kwargs):
+            return 0
+
+        def list_bugs(self, **_kwargs):
+            return []
+
+    class _BugTrackerMod:
+        class BugStatus:
+            FIXED = "FIXED"
+            WONT_FIX = "WONT_FIX"
+            DEFERRED = "DEFERRED"
+
+        class BugTracker:
+            @staticmethod
+            def _normalize_status(raw, default=None):
+                return default
+
+            @staticmethod
+            def _normalize_severity(raw, default=None):
+                return default
+
+            @staticmethod
+            def _normalize_category(raw, default=None):
+                return default
+
+    subs = SimpleNamespace(
+        get_bug_tracker=lambda: _BugTracker(),
+        get_bug_tracker_mod=lambda: _BugTrackerMod(),
+    )
+
+    with pytest.raises(workflow_query_core._ClientError, match="read-only"):
+        workflow_query_core.handle_operator_view(
+            subs,
+            {"view": "replay_ready_bugs", "limit": 10, "refresh_backfill": True},
+        )
+
+
+def test_handle_operator_view_semantics_uses_unified_semantic_substrate(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def _execute(subsystems, *, operation_name: str, payload: dict[str, Any]):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {
+            "semantic_assertions": [
+                {
+                    "semantic_assertion_id": "semantic_assertion.grouped_in.abc123",
+                    "predicate": {"slug": "grouped_in"},
+                    "subject": {"kind": "bug", "ref": "bug.semantic.checkout"},
+                    "object": {
+                        "kind": "functional_area",
+                        "ref": "functional_area.checkout",
+                    },
+                }
+            ],
+            "projection_source": "semantic_current_assertions",
+            "active_only": True,
+            "as_of": "2026-04-16T20:05:00+00:00",
+            "filters": {"predicate_slug": "grouped_in", "limit": 7},
+        }
+
+    monkeypatch.setattr(
+        "runtime.operation_catalog_gateway.execute_operation_from_subsystems",
+        _execute,
+    )
+
+    result = workflow_query_core.handle_operator_view(
+        SimpleNamespace(),
+        {
+            "view": "semantics",
+            "predicate_slug": "grouped_in",
+            "subject_kind": "bug",
+            "active_only": True,
+            "as_of": "2026-04-16T20:05:00+00:00",
+            "limit": 7,
+        },
+    )
+
+    assert captured["operation_name"] == "semantic_assertions.list"
+    assert captured["payload"]["predicate_slug"] == "grouped_in"
+    assert captured["payload"]["subject_kind"] == "bug"
+    assert captured["payload"]["limit"] == 7
+    assert captured["payload"]["as_of"].isoformat() == "2026-04-16T20:05:00+00:00"
+    assert result["view"] == "semantics"
+    assert result["returned_count"] == 1
+    assert result["projection_source"] == "semantic_current_assertions"
+    assert result["semantic_assertions"][0]["subject"]["ref"] == "bug.semantic.checkout"
+
+
+def test_handle_operator_view_operator_graph_uses_semantic_projection(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    class _Conn:
+        def __init__(self) -> None:
+            self.closed = False
+
+        async def close(self) -> None:
+            self.closed = True
+
+    async def _connect_database(env=None):
+        captured["env"] = dict(env or {})
+        conn = _Conn()
+        captured["conn"] = conn
+        return conn
+
+    async def _load_operator_graph(conn, *, as_of):
+        captured["load_conn"] = conn
+        captured["as_of"] = as_of
+        return {
+            "kind": "operator_graph",
+            "semantic_authority_state": "ready",
+            "semantic_authority_reason_code": "semantic_assertions.active_window",
+            "nodes": [{"node_id": "authority_domain:authority_domain.checkout"}],
+        }
+
+    monkeypatch.setattr("storage.postgres.connect_workflow_database", _connect_database)
+    monkeypatch.setattr(
+        "observability.operator_topology.load_operator_graph_projection",
+        _load_operator_graph,
+    )
+
+    result = workflow_query_core.handle_operator_view(
+        SimpleNamespace(
+            _postgres_env=lambda: {
+                "WORKFLOW_DATABASE_URL": "postgresql://example/operator_graph"
+            }
+        ),
+        {
+            "view": "operator_graph",
+            "as_of": "2026-04-16T20:05:00+00:00",
+        },
+    )
+
+    assert captured["env"]["WORKFLOW_DATABASE_URL"] == "postgresql://example/operator_graph"
+    assert captured["load_conn"] is captured["conn"]
+    assert captured["as_of"].isoformat() == "2026-04-16T20:05:00+00:00"
+    assert captured["conn"].closed is True
+    assert result == {
+        "view": "operator_graph",
+        "requires": {
+            "runtime": "sync_postgres",
+            "driver": "postgres",
+        },
+        "payload": {
+            "kind": "operator_graph",
+            "semantic_authority_state": "ready",
+            "semantic_authority_reason_code": "semantic_assertions.active_window",
+            "nodes": [{"node_id": "authority_domain:authority_domain.checkout"}],
+        },
+    }
 
 
 def test_handle_bugs_resolve_fixed_requires_validates_fix_evidence() -> None:
@@ -4581,7 +4857,13 @@ def test_handle_bugs_list_uses_injected_parser_contract() -> None:
             captured["list_bugs"] = kwargs
             return [_Bug()]
 
-        def replay_hint(self, bug_id: str, receipt_limit: int = 1):
+        def replay_hint(
+            self,
+            bug_id: str,
+            *,
+            receipt_limit: int = 1,
+            allow_backfill: bool = True,
+        ):
             captured["replay_hint"] = {"bug_id": bug_id, "receipt_limit": receipt_limit}
             return {}
 
@@ -4617,6 +4899,90 @@ def test_handle_bugs_list_uses_injected_parser_contract() -> None:
     assert captured["list_bugs"]["severity"] == "parsed-severity:seriousish"
     assert captured["list_bugs"]["category"] == "parsed-category:archish"
     assert result["returned_count"] == 1
+    assert "replay_hint" not in captured
+    assert "replay_ready" not in result["bugs"][0]
+
+
+def test_handle_bugs_search_include_replay_state_uses_read_only_hint() -> None:
+    captured: dict[str, Any] = {}
+
+    class _Bug:
+        bug_id = "BUG-321"
+        title = "replayable drift"
+        severity = "P2"
+        category = "RUNTIME"
+        status = "OPEN"
+        description = ""
+        filed_by = "workflow_api"
+        source_kind = "workflow_api"
+        decision_ref = ""
+        discovered_in_run_id = None
+        discovered_in_receipt_id = None
+        owner_ref = None
+        tags = ()
+        created_at = None
+        updated_at = None
+        resolved_at = None
+        resolution_summary = None
+        assigned_to = None
+        resume_context = None
+
+    class _BugTracker:
+        def search(self, *args, **kwargs):
+            captured["search"] = {"args": args, "kwargs": kwargs}
+            return [_Bug()]
+
+        def replay_hint(
+            self,
+            bug_id: str,
+            *,
+            receipt_limit: int = 1,
+            allow_backfill: bool = True,
+        ):
+            captured["replay_hint"] = {
+                "bug_id": bug_id,
+                "receipt_limit": receipt_limit,
+                "allow_backfill": allow_backfill,
+            }
+            return {
+                "available": True,
+                "reason_code": "bug.replay_ready",
+                "run_id": "run-321",
+                "receipt_id": "receipt-321",
+                "automatic": False,
+            }
+
+    class _BugTrackerMod:
+        class BugStatus:
+            FIXED = "FIXED"
+            WONT_FIX = "WONT_FIX"
+            DEFERRED = "DEFERRED"
+
+    subs = SimpleNamespace(
+        get_bug_tracker=lambda: _BugTracker(),
+        get_bug_tracker_mod=lambda: _BugTrackerMod(),
+    )
+
+    result = workflow_query_core.handle_bugs(
+        subs,
+        {
+            "action": "search",
+            "title": "replayable drift",
+            "limit": 1,
+            "include_replay_state": True,
+        },
+        parse_bug_status=lambda _mod, raw: raw,
+        parse_bug_severity=lambda _mod, raw: raw,
+        parse_bug_category=lambda _mod, raw: raw,
+    )
+
+    assert captured["search"]["args"] == ("replayable drift",)
+    assert captured["replay_hint"] == {
+        "bug_id": "BUG-321",
+        "receipt_limit": 1,
+        "allow_backfill": False,
+    }
+    assert result["bugs"][0]["replay_ready"] is True
 
 
 def test_handle_operator_view_issue_backlog_returns_direct_payload(monkeypatch) -> None:

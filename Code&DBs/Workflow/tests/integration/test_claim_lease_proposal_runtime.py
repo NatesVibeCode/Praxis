@@ -287,6 +287,24 @@ def test_claim_lease_proposal_runtime_schema_resolution_has_no_fallback_to_retir
     assert not canonical_root.exists()
 
 
+def test_claim_lease_proposal_runtime_schema_resolution_reads_live_canonical_authority() -> None:
+    _clear_workflow_migration_caches()
+    runtime_claims._schema_statements.cache_clear()
+    try:
+        statements = runtime_claims._schema_statements()
+    finally:
+        _clear_workflow_migration_caches()
+        runtime_claims._schema_statements.cache_clear()
+
+    assert statements
+    assert any("workflow_claim_lease_proposal_runtime" in statement for statement in statements)
+    assert any("sandbox_sessions" in statement for statement in statements)
+    assert any(
+        "workflow_claim_lifecycle_transition_authority" in statement
+        for statement in statements
+    )
+
+
 def test_claim_lifecycle_transition_authority_round_trips_from_postgres() -> None:
     asyncio.run(_exercise_claim_lifecycle_authority())
 

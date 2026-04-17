@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from _pg_test_conn import get_test_env
 from storage.postgres import SyncPostgresConnection, get_workflow_pool
 from storage.postgres.vector_store import PostgresVectorStore
 from runtime.embedding_service import (
@@ -83,11 +84,7 @@ def _shared_test_conn() -> SyncPostgresConnection:
     global _TEST_CONN
     if _TEST_CONN is None:
         _TEST_CONN = SyncPostgresConnection(
-            get_workflow_pool(
-                env={
-                    "WORKFLOW_DATABASE_URL": "postgresql://test@localhost:5432/praxis_test",
-                }
-            )
+            get_workflow_pool(env=get_test_env())
         )
     return _TEST_CONN
 

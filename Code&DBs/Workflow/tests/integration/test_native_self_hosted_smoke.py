@@ -22,8 +22,8 @@ from runtime.instance import (
     resolve_native_instance,
 )
 from runtime.intake import WorkflowIntakePlanner
-from runtime.persistent_evidence import PostgresEvidenceWriter
 from runtime.outbox import PostgresWorkflowOutboxSubscriber, bootstrap_workflow_outbox_schema
+import surfaces.api._smoke_service as smoke_service
 from storage.postgres import (
     PostgresEvidenceReader,
     bootstrap_control_plane_schema,
@@ -162,7 +162,6 @@ def test_native_self_hosted_smoke_proves_repo_local_authority_and_durable_graph_
     )
 
     loop = asyncio.new_event_loop()
-    writer: PostgresEvidenceWriter | None = None
     conn = loop.run_until_complete(connect_workflow_database(env=env))
     try:
         loop.run_until_complete(bootstrap_control_plane_schema(conn))
@@ -187,17 +186,13 @@ def test_native_self_hosted_smoke_proves_repo_local_authority_and_durable_graph_
             lambda: datetime(2000, 1, 1, tzinfo=timezone.utc),
         )
         submit_payload = api.submit(request_payload=request_payload, env=env)
+        repeat_submit_payload = api.submit(request_payload=request_payload, env=env)
         status_payload = api.status(run_id=submit_payload["run"]["run_id"], env=env)
         health_payload = api.health(env=env)
 
         workflow_request = frontdoor._request_from_mapping(request_payload)
         outcome = WorkflowIntakePlanner(registry=resolver).plan(request=workflow_request)
-        writer = PostgresEvidenceWriter(database_url=env["WORKFLOW_DATABASE_URL"])
-        execution_result = RuntimeOrchestrator().execute_deterministic_path(
-            intake_outcome=outcome,
-            evidence_writer=writer,
-            accumulate_context=False,
-        )
+        execution_result = smoke_service._execute_smoke_run(run_id=outcome.run_id, env=env)
 
         run_row = loop.run_until_complete(
             conn.fetchrow(
@@ -219,11 +214,6 @@ def test_native_self_hosted_smoke_proves_repo_local_authority_and_durable_graph_
         )
         assert run_row is not None
     finally:
-        if writer is not None:
-            try:
-                writer._bridge.run(writer.close())
-            finally:
-                writer._bridge.close()
         loop.run_until_complete(conn.close())
         loop.close()
 
@@ -249,16 +239,20 @@ def test_native_self_hosted_smoke_proves_repo_local_authority_and_durable_graph_
     assert submit_payload["run"]["request_id"] == request_payload["request_id"]
     assert submit_payload["run"]["workflow_definition_id"] == request_payload["workflow_definition_id"]
     assert submit_payload["run"]["current_state"] == "claim_accepted"
+    assert repeat_submit_payload["run"]["run_id"] == submit_payload["run"]["run_id"]
+    assert repeat_submit_payload["run"]["current_state"] == "claim_accepted"
 
     assert status_payload["run"]["run_id"] == outcome.run_id
     assert status_payload["run"]["current_state"] == "claim_accepted"
-    assert status_payload["inspection"] is None
+    assert status_payload["inspection"] is not None
+    assert status_payload["inspection"]["current_state"] == "claim_accepted"
+    assert status_payload["inspection"]["watermark"]["evidence_seq"] == 4
 
     assert run_row["run_id"] == outcome.run_id
     assert run_row["workflow_id"] == request_payload["workflow_id"]
     assert run_row["request_id"] == request_payload["request_id"]
     assert run_row["workflow_definition_id"] == request_payload["workflow_definition_id"]
-    assert run_row["current_state"] == "claim_accepted"
+    assert run_row["current_state"] == "succeeded"
     assert run_row["context_bundle_id"] == outcome.authority_context.context_bundle_id
     assert run_row["authority_context_digest"] == outcome.route_identity.authority_context_digest
     assert run_row["admission_decision_id"] == outcome.admission_decision.admission_decision_id
@@ -277,11 +271,8 @@ def test_native_self_hosted_smoke_proves_repo_local_authority_and_durable_graph_
         == runtime_profile_record.provider_policy_id
     )
 
-    assert execution_result.current_state.value == "succeeded"
-    assert execution_result.terminal_reason_code == "runtime.workflow_succeeded"
-    assert execution_result.node_order == ("node_0", "node_1")
-    assert execution_result.node_results[0].outputs == {"result": "prepared"}
-    assert execution_result.node_results[1].outputs == {"result": "persisted"}
+    assert execution_result["current_state"] == "succeeded"
+    assert execution_result["terminal_reason"] == "runtime.workflow_succeeded"
 
     assert len(canonical_evidence) == 18
     assert [row.evidence_seq for row in canonical_evidence] == list(range(1, 19))

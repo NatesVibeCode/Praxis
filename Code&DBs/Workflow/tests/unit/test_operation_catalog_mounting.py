@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
@@ -377,6 +377,108 @@ def test_provider_onboarding_has_no_static_route_owner() -> None:
         isinstance(route, APIRoute) and route.path == "/api/operator/provider-onboarding"
         for route in rest.app.routes
     )
+
+
+def test_mount_capabilities_json_encodes_datetime_results(monkeypatch) -> None:
+    class ListObjectTypesQuery(BaseModel):
+        pass
+
+    target_app = FastAPI()
+    monkeypatch.setattr(
+        rest,
+        "_ensure_shared_subsystems",
+        lambda _app: SimpleNamespace(get_pg_conn=lambda: object()),
+    )
+    monkeypatch.setattr(
+        rest,
+        "list_resolved_operation_definitions",
+        lambda _conn, include_disabled=False, limit=500: [
+            SimpleNamespace(
+                operation_name="object_schema.type_list",
+                http_method="GET",
+                http_path="/api/object-types",
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        rest,
+        "resolve_http_operation_binding",
+        lambda definition: _binding(
+            operation_name=definition.operation_name,
+            http_method=definition.http_method,
+            http_path=definition.http_path,
+            command_class=ListObjectTypesQuery,
+            handler=lambda *_args, **_kwargs: {
+                "types": [
+                    {
+                        "type_id": "schema-smoke",
+                        "created_at": datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc),
+                    }
+                ]
+            },
+        ),
+    )
+
+    rest.mount_capabilities(target_app)
+
+    client = TestClient(target_app)
+    response = client.get("/api/object-types")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["operation_receipt"]["operation_name"] == "object_schema.type_list"
+    assert payload["types"][0]["created_at"] in {
+        "2026-04-16T12:00:00Z",
+        "2026-04-16T12:00:00+00:00",
+    }
+
+
+def test_mount_capabilities_awaits_async_handlers(monkeypatch) -> None:
+    class QuerySemanticAssertions(BaseModel):
+        pass
+
+    target_app = FastAPI()
+    monkeypatch.setattr(
+        rest,
+        "_ensure_shared_subsystems",
+        lambda _app: SimpleNamespace(get_pg_conn=lambda: object()),
+    )
+    monkeypatch.setattr(
+        rest,
+        "list_resolved_operation_definitions",
+        lambda _conn, include_disabled=False, limit=500: [
+            SimpleNamespace(
+                operation_name="semantic_assertions.list",
+                http_method="GET",
+                http_path="/api/semantic/assertions",
+            )
+        ],
+    )
+
+    async def _handler(*_args, **_kwargs):
+        return {"boundary": "async-handler", "semantic_assertions": []}
+
+    monkeypatch.setattr(
+        rest,
+        "resolve_http_operation_binding",
+        lambda definition: _binding(
+            operation_name=definition.operation_name,
+            http_method=definition.http_method,
+            http_path=definition.http_path,
+            command_class=QuerySemanticAssertions,
+            handler=_handler,
+        ),
+    )
+
+    rest.mount_capabilities(target_app)
+
+    client = TestClient(target_app)
+    response = client.get("/api/semantic/assertions")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["operation_receipt"]["operation_name"] == "semantic_assertions.list"
+    assert payload["boundary"] == "async-handler"
 
 
 def test_mount_capabilities_accepts_raw_provider_onboarding_body(monkeypatch) -> None:

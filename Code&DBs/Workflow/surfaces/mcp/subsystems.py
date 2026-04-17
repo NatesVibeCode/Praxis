@@ -62,6 +62,7 @@ class _Subsystems(_BaseSubsystems):
         return HeartbeatRunner(
             conn=self.get_pg_conn(),
             embedder=self.get_embedding_service(),
+            workflow_env=self._postgres_env(),
         )
 
 

@@ -154,7 +154,12 @@ def test_sync_integration_registry_projects_static_and_mcp_rows() -> None:
     assert [cap["action"] for cap in praxis_status_caps] == ["status"]
 
     praxis_maintenance_caps = json.loads(by_id["praxis_maintenance"][4])
-    assert {"reset_metrics", "backfill_bug_replay_provenance"} <= {
+    assert {
+        "reset_metrics",
+        "backfill_bug_replay_provenance",
+        "backfill_semantic_bridges",
+        "refresh_semantic_projection",
+    } <= {
         cap["action"] for cap in praxis_maintenance_caps
     }
 
@@ -164,6 +169,8 @@ def test_sync_integration_registry_projects_static_and_mcp_rows() -> None:
         "status",
         "scoreboard",
         "graph",
+        "operator_graph",
+        "semantics",
         "lineage",
         "issue_backlog",
         "replay_ready_bugs",
@@ -372,6 +379,7 @@ def test_mcp_workflow_database_env_prefers_repo_env_file(monkeypatch, tmp_path: 
 
     assert mcp_subsystems.workflow_database_env() == {
         "WORKFLOW_DATABASE_URL": "postgresql://repo.test/workflow",
+        "WORKFLOW_DATABASE_AUTHORITY_SOURCE": f"repo_env:{tmp_path / '.env'}",
         "PATH": "/usr/bin:/bin",
     }
 
@@ -413,6 +421,7 @@ def test_api_workflow_database_env_prefers_repo_env_file(monkeypatch, tmp_path: 
 
     assert api_subsystems.workflow_database_env() == {
         "WORKFLOW_DATABASE_URL": "postgresql://repo.test/workflow",
+        "WORKFLOW_DATABASE_AUTHORITY_SOURCE": f"repo_env:{tmp_path / '.env'}",
         "PATH": "/usr/bin:/bin",
     }
 

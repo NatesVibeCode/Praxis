@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from adapters.provider_registry import resolve_adapter_contract
+from adapters.provider_types import ProviderAdapterContract
 from runtime.default_path_pilot import DefaultPathPilotError, DefaultPathPilotResolution
 
 
@@ -103,8 +103,44 @@ def _resolution_payload_stub() -> DefaultPathPilotResolution:
     return resolution
 
 
-def test_default_path_pilot_accepts_first_party_adapter_contract_with_explicit_failover_codes() -> None:
+def _adapter_contract_stub() -> ProviderAdapterContract:
+    return ProviderAdapterContract(
+        provider_slug="openai",
+        adapter_type="llm_task",
+        transport_kind="http",
+        execution_kind="request",
+        failure_namespace="provider.openai",
+        prompt_envelope={"protocol_family": "openai_chat_completions"},
+        tool_policy={"mode": "catalog"},
+        structured_output={"format": "json"},
+        timeout_seconds=300,
+        telemetry={"authority": "test"},
+        retry_policy={"max_attempts": 3},
+        failure_mapping={"timeout": "provider.openai.timeout"},
+        readiness={"status": "ready"},
+        retryable_failure_codes=(
+            "provider.openai.timeout",
+            "provider.openai.rate_limited",
+            "provider.openai.service_unavailable",
+        ),
+        failover_failure_codes=(
+            "provider.openai.timeout",
+            "provider.openai.service_unavailable",
+        ),
+    )
+
+
+def test_default_path_pilot_accepts_first_party_adapter_contract_with_explicit_failover_codes(
+    monkeypatch,
+) -> None:
+    import runtime.default_path_pilot as default_path_pilot_mod
+
     resolution = _resolution_stub()
+    monkeypatch.setattr(
+        default_path_pilot_mod,
+        "resolve_adapter_contract",
+        lambda *_args, **_kwargs: _adapter_contract_stub(),
+    )
 
     contract = resolution.first_party_provider_adapter_contract()
 
@@ -120,8 +156,7 @@ def test_default_path_pilot_rejects_first_party_contract_without_explicit_failov
     import runtime.default_path_pilot as default_path_pilot_mod
 
     resolution = _resolution_stub()
-    base_contract = resolve_adapter_contract("openai", "llm_task")
-    assert base_contract is not None
+    base_contract = _adapter_contract_stub()
     invalid_contract = replace(base_contract, failover_failure_codes=())
     monkeypatch.setattr(
         default_path_pilot_mod,
@@ -138,8 +173,17 @@ def test_default_path_pilot_rejects_first_party_contract_without_explicit_failov
     }
 
 
-def test_default_path_pilot_payload_exposes_route_and_failover_seams_for_llm_task() -> None:
+def test_default_path_pilot_payload_exposes_route_and_failover_seams_for_llm_task(
+    monkeypatch,
+) -> None:
+    import runtime.default_path_pilot as default_path_pilot_mod
+
     resolution = _resolution_payload_stub()
+    monkeypatch.setattr(
+        default_path_pilot_mod,
+        "resolve_adapter_contract",
+        lambda *_args, **_kwargs: _adapter_contract_stub(),
+    )
 
     payload = resolution.to_llm_task_input_payload()
 

@@ -18,10 +18,14 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from runtime.execution.records import (
+    NODE_EXECUTION_RECEIPT_TYPE,
+)
+from runtime.run_node_receipts import write_run_node_receipt
 from runtime.native_authority import default_native_runtime_profile_ref_required
 from runtime.execution_transport import resolve_execution_transport
 from storage.postgres.workflow_orchestration_repository import (
-    PostgresWorkflowNotificationRepository,
+    PostgresRunNodeStateRepository,
 )
 
 logger = logging.getLogger(__name__)
@@ -267,24 +271,13 @@ def _execute_decision(conn, run_id: str, run_node_row: dict, card: dict) -> dict
     authority = card.get('authority', 'autonomous')
 
     if authority in ('human_review', 'human_approve', 'human_execute'):
-        # Pause — set awaiting_human, publish notification
-        conn.execute(
-            """UPDATE run_nodes SET current_state = 'awaiting_human'
-               WHERE run_node_id = $1""",
-            run_node_row['run_node_id'],
-        )
-        # Legacy run_nodes still use the workflow_notifications bridge until
-        # they emit canonical receipts of their own.
-        PostgresWorkflowNotificationRepository(conn).emit_notification(
-            run_id=run_id,
-            job_label=card['id'],
-            spec_name='model_run',
-            agent_slug='human',
-            status='awaiting_human',
-            failure_code='',
-            duration_seconds=0.0,
-        )
-        return {"status": "awaiting_human", "outputs": {}}
+        return {
+            "status": "awaiting_human",
+            "outputs": {
+                "reason": "Human approval required",
+                "authority": authority,
+            },
+        }
 
     # Autonomous: pick recommended option or first
     options = card.get('options', [])
@@ -599,31 +592,75 @@ def _finalize_run_if_terminal(conn, run_id: str) -> None:
         logger.info("Model run %s completed: %s", run_id, terminal_state)
 
 
+def _latest_awaiting_human_run_node_id(conn, run_id: str, card_id: str) -> str:
+    run_node_id = conn.fetchval(
+        """SELECT run_node_id
+           FROM run_nodes
+           WHERE run_id=$1 AND node_id=$2 AND current_state='awaiting_human'
+           ORDER BY attempt_number DESC
+           LIMIT 1""",
+        run_id,
+        card_id,
+    )
+    if not run_node_id:
+        raise RuntimeError(
+            f"No awaiting_human run_node found for run_id={run_id!r} card_id={card_id!r}"
+        )
+    return str(run_node_id)
+
+
 # ---------------------------------------------------------------------------
 # approve_card: human approval via UI
 # ---------------------------------------------------------------------------
 
 def approve_card(conn, run_id: str, card_id: str, decision: str, notes: str = '') -> dict:
     """Handle human approval/rejection for a decision card."""
+    outputs = {
+        "decision": "approved" if decision == "approved" else "rejected",
+        "notes": notes,
+        "decided_by": "human",
+    }
+    state_repository = PostgresRunNodeStateRepository(conn)
+    run_node_id = _latest_awaiting_human_run_node_id(conn, run_id, card_id)
     if decision == 'approved':
-        conn.execute(
-            """UPDATE run_nodes SET current_state='succeeded',
-                      finished_at=NOW(),
-                      output_payload=$3::jsonb
-               WHERE run_id=$1 AND node_id=$2 AND current_state='awaiting_human'""",
-            run_id, card_id,
-            json.dumps({"decision": "approved", "notes": notes, "decided_by": "human"}),
+        receipt_id = write_run_node_receipt(
+            conn,
+            run_id=run_id,
+            node_id=card_id,
+            phase="terminal",
+            receipt_type=NODE_EXECUTION_RECEIPT_TYPE,
+            status="succeeded",
+            outputs=outputs,
+            agent_slug="human",
+            executor_type="runtime.model_executor.approve_card",
+        )
+        state_repository.mark_terminal_state(
+            run_node_id=run_node_id,
+            state="succeeded",
+            output_payload=outputs,
+            receipt_id=receipt_id,
         )
         released = release_downstream(conn, run_id, card_id)
         return {"status": "approved", "released_cards": released}
     else:
-        conn.execute(
-            """UPDATE run_nodes SET current_state='failed',
-                      finished_at=NOW(), failure_code='human_rejected',
-                      output_payload=$3::jsonb
-               WHERE run_id=$1 AND node_id=$2 AND current_state='awaiting_human'""",
-            run_id, card_id,
-            json.dumps({"decision": "rejected", "notes": notes, "decided_by": "human"}),
+        receipt_id = write_run_node_receipt(
+            conn,
+            run_id=run_id,
+            node_id=card_id,
+            phase="terminal",
+            receipt_type=NODE_EXECUTION_RECEIPT_TYPE,
+            status="failed",
+            outputs=outputs,
+            failure_code="human_rejected",
+            agent_slug="human",
+            executor_type="runtime.model_executor.approve_card",
+        )
+        state_repository.mark_terminal_state(
+            run_node_id=run_node_id,
+            state="failed",
+            output_payload=outputs,
+            failure_code="human_rejected",
+            receipt_id=receipt_id,
         )
         released = release_downstream(conn, run_id, card_id)
         _finalize_run_if_terminal(conn, run_id)

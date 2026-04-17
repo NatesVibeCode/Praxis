@@ -97,7 +97,7 @@ def _bug_to_dict(bug: Any) -> dict[str, Any]:
     if isinstance(resume_ctx, dict) and resume_ctx:
         out["resume_context"] = resume_ctx
 
-    for field in ("filed_by", "assigned_to", "owner_ref", "decision_ref",
+    for field in ("filed_by", "assigned_to", "owner_ref", "source_issue_id", "decision_ref",
                   "resolution_summary", "discovered_in_run_id", "discovered_in_receipt_id"):
         v = _bug_field(bug, field, default=None)
         if v is not None and str(v).strip():

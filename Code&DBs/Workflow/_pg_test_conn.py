@@ -94,7 +94,7 @@ def ensure_test_database_ready() -> str:
 
 def _resolve_test_env() -> dict[str, str]:
     database_url = os.environ.get("WORKFLOW_DATABASE_URL")
-    if database_url is None:
+    if database_url is None or not str(database_url).strip():
         database_url = ensure_test_database_ready()
     return {
         "WORKFLOW_DATABASE_URL": database_url,
@@ -102,8 +102,18 @@ def _resolve_test_env() -> dict[str, str]:
     }
 
 
+def get_test_env() -> dict[str, str]:
+    """Return the canonical environment for DB-backed workflow tests."""
+
+    return dict(_resolve_test_env())
+
+
 def _get_pool():
     global _pool
+    if _pool is not None and bool(
+        getattr(_pool, "_closed", False) or getattr(_pool, "closed", False)
+    ):
+        _pool = None
     if _pool is None:
         from storage.postgres.connection import get_workflow_pool
         try:
@@ -136,6 +146,11 @@ def get_test_conn():
     get_isolated_conn() in tests that insert or update authority tables.
     """
     global _conn
+    if _conn is not None and bool(
+        getattr(getattr(_conn, "_pool", None), "_closed", False)
+        or getattr(getattr(_conn, "_pool", None), "closed", False)
+    ):
+        _conn = None
     if _conn is None:
         from storage.postgres import SyncPostgresConnection
         _conn = SyncPostgresConnection(_get_pool())

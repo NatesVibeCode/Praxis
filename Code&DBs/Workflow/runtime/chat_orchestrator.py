@@ -146,7 +146,7 @@ class ChatOrchestrator:
 
         routes = self._resolve_route_chain()
 
-        if routes and routes[0].adapter_type == "cli_llm":
+        if _should_use_cli_fast_path(routes):
             assistant_content, model_used, latency_ms = self._send_via_cli(routes, messages)
             msg_id = self._persist_message(
                 conversation_id,
@@ -279,7 +279,7 @@ class ChatOrchestrator:
 
         routes = self._resolve_route_chain()
 
-        if routes and routes[0].adapter_type == "cli_llm":
+        if _should_use_cli_fast_path(routes):
             assistant_content, model_used, latency_ms = self._send_via_cli(routes, messages)
             msg_id = self._persist_message(
                 conversation_id,
@@ -606,6 +606,15 @@ def _prioritize_last_good_cli_route(routes: list[ResolvedChatRoute]) -> list[Res
         return routes
     remainder = [route for route in routes if (route.provider_slug, route.model_slug) != preferred_key]
     return preferred + remainder
+
+
+def _should_use_cli_fast_path(routes: list[ResolvedChatRoute]) -> bool:
+    if not routes or routes[0].adapter_type != "cli_llm":
+        return False
+    return not any(
+        route.adapter_type == "llm_task" and route.endpoint_uri and route.api_key
+        for route in routes
+    )
 
 
 def _record_last_good_cli_route(route: ResolvedChatRoute) -> None:

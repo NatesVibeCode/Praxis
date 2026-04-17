@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass
+import inspect
 from typing import Any
 
 from storage.postgres import SyncPostgresConnection, get_workflow_pool
@@ -81,6 +83,35 @@ def _with_operation_receipt(
     }
 
 
+async def _await_handler_result(result: Any) -> Any:
+    if inspect.isawaitable(result):
+        return await result
+    return result
+
+
+def _run_awaitable_sync(result: Any) -> Any:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(result)
+    raise RuntimeError(
+        "operation.sync_execution_in_async_boundary: "
+        "use aexecute_operation_binding() when invoking async operation handlers "
+        "from an active event loop"
+    )
+
+
+async def aexecute_operation_binding(
+    binding: ResolvedHttpOperationBinding,
+    *,
+    payload: Mapping[str, Any] | None = None,
+    subsystems: Any,
+) -> Any:
+    command = build_operation_command(binding, payload=payload)
+    result = await _await_handler_result(binding.handler(command, subsystems))
+    return _with_operation_receipt(binding, result)
+
+
 def execute_operation_binding(
     binding: ResolvedHttpOperationBinding,
     *,
@@ -89,7 +120,28 @@ def execute_operation_binding(
 ) -> Any:
     command = build_operation_command(binding, payload=payload)
     result = binding.handler(command, subsystems)
+    if inspect.isawaitable(result):
+        result = _run_awaitable_sync(result)
     return _with_operation_receipt(binding, result)
+
+
+async def aexecute_operation_from_subsystems(
+    subsystems: Any,
+    *,
+    operation_name: str,
+    payload: Mapping[str, Any] | None = None,
+) -> Any:
+    if not hasattr(subsystems, "get_pg_conn") or not callable(subsystems.get_pg_conn):
+        raise RuntimeError("operation execution requires subsystems.get_pg_conn()")
+    binding = resolve_named_operation_binding(
+        subsystems.get_pg_conn(),
+        operation_name=operation_name,
+    )
+    return await aexecute_operation_binding(
+        binding,
+        payload=payload,
+        subsystems=subsystems,
+    )
 
 
 def execute_operation_from_subsystems(
@@ -128,6 +180,8 @@ def execute_operation_from_env(
 
 
 __all__ = [
+    "aexecute_operation_binding",
+    "aexecute_operation_from_subsystems",
     "build_operation_command",
     "execute_operation_binding",
     "execute_operation_from_env",

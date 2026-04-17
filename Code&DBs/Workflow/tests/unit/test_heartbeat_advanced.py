@@ -20,6 +20,9 @@ _RUN = uuid.uuid4().hex[:8]
 _rt_dir = Path(__file__).resolve().parents[2] / "runtime"
 
 def _direct_load(name: str, filename: str):
+    existing = _sys.modules.get(name)
+    if existing is not None:
+        return existing
     path = _rt_dir / filename
     spec = importlib.util.spec_from_file_location(name, str(path))
     mod = importlib.util.module_from_spec(spec)
@@ -49,7 +52,7 @@ def _make_entity(
     created_at: datetime | None = None,
     updated_at: datetime | None = None,
 ) -> Entity:
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     return Entity(
         id=uuid.uuid4().hex,
         entity_type=etype,
@@ -61,6 +64,11 @@ def _make_entity(
         source="test",
         confidence=confidence,
     )
+
+
+def _finding_present(result: object, needle: str) -> bool:
+    error = str(getattr(result, "error", "") or "")
+    return needle in error
 
 
 def _insert_raw_edge(engine: MemoryEngine, src: str, tgt: str,
@@ -140,6 +148,8 @@ class TestRelationshipIntegrityScanner:
         scanner = RelationshipIntegrityScanner(engine)
         result = scanner.run()
         assert result.module_name == "relationship_integrity_scanner"
+        assert not _finding_present(result, e1.id)
+        assert not _finding_present(result, e2.id)
 
     def test_invalid_relation_type(self):
         src, tgt = f"t_{_RUN}_ir_a", f"t_{_RUN}_ir_b"
@@ -153,7 +163,8 @@ class TestRelationshipIntegrityScanner:
         )
         scanner = RelationshipIntegrityScanner(engine)
         result = scanner.run()
-        assert any("invalid_relation" in f for f in result.findings)
+        assert result.ok is False
+        assert _finding_present(result, "invalid_relation")
 
     def test_weight_out_of_range(self):
         src, tgt = f"t_{_RUN}_wr_a", f"t_{_RUN}_wr_b"
@@ -167,7 +178,8 @@ class TestRelationshipIntegrityScanner:
         )
         scanner = RelationshipIntegrityScanner(engine)
         result = scanner.run()
-        assert any("bad_weight" in f for f in result.findings)
+        assert result.ok is False
+        assert _finding_present(result, "bad_weight")
 
     def test_negative_weight(self):
         src, tgt = f"t_{_RUN}_nw_a", f"t_{_RUN}_nw_b"
@@ -180,7 +192,8 @@ class TestRelationshipIntegrityScanner:
             }]
         )
         result = RelationshipIntegrityScanner(engine).run()
-        assert any("bad_weight" in f for f in result.findings)
+        assert result.ok is False
+        assert _finding_present(result, "bad_weight")
 
     def test_self_referential_edge(self):
         nid = f"t_{_RUN}_self"
@@ -194,7 +207,8 @@ class TestRelationshipIntegrityScanner:
         )
         scanner = RelationshipIntegrityScanner(engine)
         result = scanner.run()
-        assert any("self_ref" in f for f in result.findings)
+        assert result.ok is False
+        assert _finding_present(result, "self_ref")
 
     def test_multiple_violations_single_edge(self):
         nid = f"t_{_RUN}_multi"
@@ -207,9 +221,10 @@ class TestRelationshipIntegrityScanner:
             }]
         )
         result = RelationshipIntegrityScanner(engine).run()
-        # self-ref AND invalid relation AND bad weight - at minimum 3 findings for this edge
-        edge_findings = [f for f in result.findings if nid in f]
-        assert len(edge_findings) >= 3
+        assert result.ok is False
+        assert _finding_present(result, "self_ref")
+        assert _finding_present(result, "invalid_relation")
+        assert _finding_present(result, "bad_weight")
 
 
 # ===========================================================================
@@ -220,9 +235,11 @@ class TestSchemaConsistencyScanner:
 
     def test_clean_entities_runs(self):
         engine = MemoryEngine(conn=get_test_conn())
-        engine.insert(_make_entity())
+        entity = _make_entity()
+        engine.insert(entity)
         result = SchemaConsistencyScanner(engine).run()
         assert result.module_name == "schema_consistency_scanner"
+        assert not _finding_present(result, entity.id)
 
     def test_future_created_at(self):
         future = datetime.now(timezone.utc) + timedelta(days=10)
@@ -236,7 +253,8 @@ class TestSchemaConsistencyScanner:
             }]
         )
         result = SchemaConsistencyScanner(engine).run()
-        assert any("future_created" in f for f in result.findings)
+        assert result.ok is False
+        assert _finding_present(result, "future_created")
 
     def test_updated_before_created(self):
         created = datetime.now(timezone.utc)
@@ -251,7 +269,8 @@ class TestSchemaConsistencyScanner:
             }]
         )
         result = SchemaConsistencyScanner(engine).run()
-        assert any("updated_before_created" in f for f in result.findings)
+        assert result.ok is False
+        assert _finding_present(result, "updated_before_created")
 
     def test_mixed_naive_and_aware_timestamps_are_normalized(self):
         created = datetime.now(timezone.utc)
@@ -266,7 +285,8 @@ class TestSchemaConsistencyScanner:
             }]
         )
         result = SchemaConsistencyScanner(engine).run()
-        assert any("updated_before_created" in f for f in result.findings)
+        assert result.ok is False
+        assert _finding_present(result, "updated_before_created")
 
     def test_bad_confidence(self):
         eid = f"t_{_RUN}_bc1"
@@ -279,7 +299,8 @@ class TestSchemaConsistencyScanner:
             }]
         )
         result = SchemaConsistencyScanner(engine).run()
-        assert any("bad_confidence" in f for f in result.findings)
+        assert result.ok is False
+        assert _finding_present(result, "bad_confidence")
 
     def test_negative_confidence(self):
         eid = f"t_{_RUN}_nc1"
@@ -292,7 +313,8 @@ class TestSchemaConsistencyScanner:
             }]
         )
         result = SchemaConsistencyScanner(engine).run()
-        assert any("bad_confidence" in f for f in result.findings)
+        assert result.ok is False
+        assert _finding_present(result, "bad_confidence")
 
 
 # ===========================================================================
@@ -303,23 +325,30 @@ class TestContentQualityScanner:
 
     def test_clean_entities_runs(self):
         engine = MemoryEngine(conn=get_test_conn())
-        engine.insert(_make_entity(name="good name", content="good content"))
+        entity = _make_entity(
+            name=f"good-name-{uuid.uuid4().hex[:8]}",
+            content=f"good-content-{uuid.uuid4().hex}",
+        )
+        engine.insert(entity)
         result = ContentQualityScanner(engine).run()
         assert result.module_name == "content_quality_scanner"
+        assert not _finding_present(result, entity.id)
 
     def test_whitespace_only_content(self):
         engine = MemoryEngine(conn=get_test_conn())
         eid = f"t_{_RUN}_ws1"
         _insert_raw_entity(engine, eid, EntityType.fact, name="ok", content="   \t\n  ")
         result = ContentQualityScanner(engine).run()
-        assert any("whitespace_content" in f for f in result.findings)
+        assert result.ok is False
+        assert _finding_present(result, "whitespace_content")
 
     def test_single_char_name(self):
         engine = MemoryEngine(conn=get_test_conn())
         eid = f"t_{_RUN}_sc1"
         _insert_raw_entity(engine, eid, EntityType.fact, name="X", content="valid")
         result = ContentQualityScanner(engine).run()
-        assert any("short_name" in f for f in result.findings)
+        assert result.ok is False
+        assert _finding_present(result, "short_name")
 
     def test_duplicate_content_same_type(self):
         engine = MemoryEngine(conn=get_test_conn())
@@ -329,7 +358,8 @@ class TestContentQualityScanner:
         _insert_raw_entity(engine, eid1, EntityType.fact, name="first", content=dup_content)
         _insert_raw_entity(engine, eid2, EntityType.fact, name="second", content=dup_content)
         result = ContentQualityScanner(engine).run()
-        assert any("dup_content" in f for f in result.findings)
+        assert result.ok is False
+        assert _finding_present(result, "dup_content")
 
     def test_invalid_json_metadata_rejected_by_db(self):
         """Postgres jsonb column rejects invalid JSON at the DB level."""
@@ -347,4 +377,4 @@ class TestContentQualityScanner:
                             metadata='{"key": "val"}')
         result = ContentQualityScanner(engine).run()
         # Our specific entity should not show bad_metadata
-        assert not any(eid in f and "bad_metadata" in f for f in result.findings)
+        assert not _finding_present(result, f"bad_metadata:{eid}")

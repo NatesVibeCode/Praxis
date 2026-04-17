@@ -1,25 +1,28 @@
 from typing import Any
 from pydantic import BaseModel
 
+from runtime.workflow_build_moment import build_workflow_build_moment
+
+
 class MutateWorkflowBuildCommand(BaseModel):
     workflow_id: str
     subpath: str
     body: dict[str, Any]
 
+
 def handle_mutate_workflow_build(command: MutateWorkflowBuildCommand, subsystems: Any) -> dict[str, Any]:
     from runtime.canonical_workflows import mutate_workflow_build
-    from surfaces.api.handlers.workflow_query import _workflow_build_payload
-    
+
     conn = subsystems.get_pg_conn()
-    
+
     result = mutate_workflow_build(
         conn,
         workflow_id=command.workflow_id,
         subpath=command.subpath,
         body=command.body,
     )
-    
-    return _workflow_build_payload(
+
+    return build_workflow_build_moment(
         result["row"],
         conn=conn,
         definition=result["definition"],

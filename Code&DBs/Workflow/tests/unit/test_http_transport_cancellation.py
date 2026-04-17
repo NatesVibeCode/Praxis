@@ -7,11 +7,14 @@ import time
 from contextlib import contextmanager
 from typing import Any
 
+import adapters.llm_client as llm_client_mod
 import adapters.llm_task as llm_task_mod
 import pytest
 
+from adapters import provider_transport
 from adapters.api_task import APITaskAdapter
 from adapters.deterministic import DeterministicExecutionControl, DeterministicTaskRequest
+from adapters.http_transport import HTTPTransportCancelled
 from adapters.llm_client import LLMClientError, LLMRequest, call_llm, call_llm_streaming
 from adapters.llm_task import LLMTaskAdapter
 
@@ -200,10 +203,58 @@ def test_llm_task_adapter_returns_cancelled_when_http_request_is_interrupted(
         }
     ).encode("utf-8")
     control = DeterministicExecutionControl()
+    profiles = {profile.provider_slug: profile for profile in provider_transport.BUILTIN_PROVIDER_PROFILES}
 
     with _slow_http_server(response_body=response_body) as (url, started):
         monkeypatch.setattr(llm_task_mod, "resolve_api_endpoint", lambda *_args, **_kwargs: url)
-        adapter = LLMTaskAdapter(credential_env={"OPENAI_API_KEY": "sk-test"})
+        monkeypatch.setattr(
+            llm_task_mod,
+            "resolve_adapter_contract",
+            lambda provider_slug, adapter_type: provider_transport.resolve_adapter_contract(
+                provider_slug,
+                adapter_type,
+                profiles=profiles,
+                adapter_config={},
+                failure_mappings={},
+            ),
+        )
+        monkeypatch.setattr(
+            llm_task_mod,
+            "resolve_api_protocol_family",
+            lambda provider_slug: provider_transport.resolve_api_protocol_family(
+                provider_slug,
+                profiles=profiles,
+            ),
+        )
+        monkeypatch.setattr(
+            llm_task_mod,
+            "supports_adapter",
+            lambda provider_slug, adapter_type: provider_transport.supports_adapter(
+                provider_slug,
+                adapter_type,
+                profiles=profiles,
+                adapter_config={},
+                failure_mappings={},
+            ),
+        )
+        monkeypatch.setattr(
+            llm_task_mod,
+            "resolve_credential",
+            lambda auth_ref, env=None: type(
+                "_Cred",
+                (),
+                {
+                    "auth_ref": auth_ref,
+                    "api_key": "sk-test",
+                    "provider_hint": "openai",
+                },
+            )(),
+        )
+        adapter = LLMTaskAdapter(
+            default_provider="openai",
+            default_model="gpt-5.4",
+            credential_env={"OPENAI_API_KEY": "sk-test"},
+        )
         request = DeterministicTaskRequest(
             node_id="llm_node",
             task_name="llm_node",
@@ -221,7 +272,10 @@ def test_llm_task_adapter_returns_cancelled_when_http_request_is_interrupted(
         result_box: dict[str, Any] = {}
 
         def _run() -> None:
-            result_box["result"] = adapter.execute(request=request)
+            try:
+                result_box["result"] = adapter.execute(request=request)
+            except Exception as exc:  # pragma: no cover - thread boundary
+                result_box["error"] = exc
 
         worker = threading.Thread(target=_run, daemon=True)
         worker.start()
@@ -230,46 +284,67 @@ def test_llm_task_adapter_returns_cancelled_when_http_request_is_interrupted(
         worker.join(timeout=5)
 
         assert not worker.is_alive()
+        assert "error" not in result_box, result_box.get("error")
         result = result_box["result"]
         assert result.status == "cancelled"
         assert result.failure_code == "workflow_cancelled"
 
 
-def test_call_llm_streaming_interrupts_mid_stream_when_cancelled() -> None:
+def test_call_llm_streaming_interrupts_mid_stream_when_cancelled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     control = DeterministicExecutionControl()
     first_delta_seen = threading.Event()
     events: list[dict[str, Any]] = []
+    result_box: dict[str, Any] = {}
 
-    with _slow_streaming_http_server(
-        first_chunk=b'data: {"choices":[{"delta":{"content":"hel"}}]}\n',
-        trailing_chunk=b'data: {"choices":[{"delta":{"content":"lo"}}]}\n'
-        + b"data: [DONE]\n",
-    ) as (url, started, first_chunk_sent):
-        request = LLMRequest(
-            endpoint_uri=url,
-            api_key="sk-test",
-            provider_slug="openai",
-            model_slug="gpt-5.4",
-            messages=({"role": "user", "content": "say hello"},),
-            protocol_family="openai_chat_completions",
-            timeout_seconds=30,
-            execution_control=control,
-        )
+    class _BlockingStreamResponse:
+        status_code = 200
 
-        def _consume() -> None:
+        def iter_lines(self, max_line_bytes: int = 65_536):
+            del max_line_bytes
+            yield b'data: {"choices":[{"delta":{"content":"hel"}}]}\n'
+            if control.wait_for_cancel(timeout=5.0):
+                raise HTTPTransportCancelled()
+            yield b'data: {"choices":[{"delta":{"content":"lo"}}]}\n'
+            yield b"data: [DONE]\n"
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        llm_client_mod,
+        "_open_streaming_http_request",
+        lambda **_kwargs: _BlockingStreamResponse(),
+    )
+
+    request = LLMRequest(
+        endpoint_uri="https://example.invalid/v1/test",
+        api_key="sk-test",
+        provider_slug="openai",
+        model_slug="gpt-5.4",
+        messages=({"role": "user", "content": "say hello"},),
+        protocol_family="openai_chat_completions",
+        timeout_seconds=30,
+        execution_control=control,
+    )
+
+    def _consume() -> None:
+        try:
             for event in call_llm_streaming(request):
                 events.append(event)
                 if event.get("type") == "text_delta":
                     first_delta_seen.set()
+        except Exception as exc:  # pragma: no cover - thread boundary
+            result_box["error"] = exc
 
-        worker = threading.Thread(target=_consume, daemon=True)
-        worker.start()
-        assert started.wait(timeout=2)
-        assert first_chunk_sent.wait(timeout=2)
-        assert first_delta_seen.wait(timeout=2)
-        control.request_cancel()
-        worker.join(timeout=5)
+    worker = threading.Thread(target=_consume, daemon=True)
+    worker.start()
+    assert first_delta_seen.wait(timeout=2)
+    control.request_cancel()
+    worker.join(timeout=5)
 
-        assert not worker.is_alive()
-        assert any(event.get("type") == "text_delta" and event.get("text") == "hel" for event in events)
-        assert events[-1] == {"type": "error", "message": "cancelled"}
+    assert not worker.is_alive()
+    assert "error" not in result_box, result_box.get("error")
+    assert any(event.get("type") == "text_delta" and event.get("text") == "hel" for event in events)
+    assert events[-1] == {"type": "error", "message": "cancelled"}

@@ -71,7 +71,7 @@ class CLILLMResult:
     cancelled: bool = False
 
 
-# Backward-compat: PROVIDER_PROFILES dict built from registry at import time.
+# PROVIDER_PROFILES dict built from registry at import time.
 # Tests and other code that reads this dict get registry data, not hardcoded values.
 from .provider_registry import get_all_profiles as _get_all_profiles
 PROVIDER_PROFILES: dict[str, dict[str, Any]] = {
@@ -83,20 +83,6 @@ PROVIDER_PROFILES: dict[str, dict[str, Any]] = {
     }
     for slug, p in _get_all_profiles().items()
 }
-
-
-def _build_provider_cmd(
-    provider_slug: str,
-    binary: str,
-    model: str | None,
-) -> list[str]:
-    """Backward-compat shim. Delegates to registry."""
-    try:
-        return build_command(provider_slug, model, binary_override=binary)
-    except ValueError as exc:
-        raise CLIAdapterError("cli_adapter.provider_unmapped", str(exc))
-    except FileNotFoundError as exc:
-        raise CLIAdapterError("cli_adapter.binary_not_found", str(exc))
 
 
 def _resolve_provider(

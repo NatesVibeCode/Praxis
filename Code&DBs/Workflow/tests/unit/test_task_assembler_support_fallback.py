@@ -207,7 +207,22 @@ def test_pre_suggest_includes_workflow_registry_matches():
     assert "MATCHED WORKFLOWS:" in prompt
 
 
-def test_task_type_router_resolves_auto_support():
+def test_task_type_router_resolves_auto_support(monkeypatch):
+    monkeypatch.setattr(task_type_router, "default_llm_adapter_type", lambda: "cli")
+    monkeypatch.setattr(
+        task_type_router,
+        "_resolve_route_economics",
+        lambda **kwargs: {
+            "adapter_type": "cli",
+            "billing_mode": "owned_compute",
+            "budget_bucket": "native",
+            "effective_marginal_cost": 0.0,
+            "spend_pressure": "low",
+            "budget_status": "",
+            "prefer_prepaid": True,
+            "allow_payg_fallback": True,
+        },
+    )
     router = task_type_router.TaskTypeRouter(_FakeRouterConn())
 
     decision = router.resolve("auto/support")

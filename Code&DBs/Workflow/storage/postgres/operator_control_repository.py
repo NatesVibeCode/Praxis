@@ -712,6 +712,47 @@ class PostgresOperatorControlRepository:
             ) from exc
         return tuple(_decision_record_from_row(row) for row in rows)
 
+    async def fetch_operator_decisions_for_semantic_bridge(
+        self,
+        *,
+        as_of=None,
+    ) -> tuple[OperatorDecisionAuthorityRecord, ...]:
+        """Return canonical operator decisions for deterministic semantic bridge replay."""
+
+        normalized_as_of = None if as_of is None else _normalize_as_of(as_of)
+        try:
+            rows = await self._conn.fetch(
+                """
+                SELECT
+                    operator_decision_id,
+                    decision_key,
+                    decision_kind,
+                    decision_status,
+                    title,
+                    rationale,
+                    decided_by,
+                    decision_source,
+                    effective_from,
+                    effective_to,
+                    decided_at,
+                    created_at,
+                    updated_at,
+                    decision_scope_kind,
+                    decision_scope_ref
+                FROM operator_decisions
+                WHERE ($1::timestamptz IS NULL OR created_at <= $1)
+                ORDER BY effective_from ASC, decided_at ASC, created_at ASC, operator_decision_id ASC
+                """,
+                normalized_as_of,
+            )
+        except asyncpg.PostgresError as exc:
+            raise OperatorControlRepositoryError(
+                "operator_control.read_failed",
+                "failed to fetch operator decision rows for semantic bridge replay",
+                details={"sqlstate": getattr(exc, "sqlstate", None)},
+            ) from exc
+        return tuple(_decision_record_from_row(row) for row in rows)
+
     async def fetch_cutover_gate_records(
         self,
         *,

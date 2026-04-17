@@ -204,8 +204,8 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     },
                     "include_replay_state": {
                         "type": "boolean",
-                        "description": "When true, annotate listed bugs with replay readiness and reason codes.",
-                        "default": True,
+                        "description": "When true, annotate listed or searched bugs with replay readiness and reason codes.",
+                        "default": False,
                     },
                     "replay_ready_only": {
                         "type": "boolean",
@@ -235,6 +235,10 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "discovered_in_run_id": {"type": "string", "description": "Run provenance for file actions."},
                     "discovered_in_receipt_id": {"type": "string", "description": "Receipt provenance for file actions."},
                     "owner_ref": {"type": "string", "description": "Bug owner reference for file actions."},
+                    "source_issue_id": {
+                        "type": "string",
+                        "description": "Optional linked issue id. Accepted on file and as an exact lineage filter for list/search.",
+                    },
                     "receipt_limit": {"type": "integer", "description": "How many recent receipts to include in packet output.", "minimum": 1, "default": 5},
                     "evidence_kind": {"type": "string", "description": "Evidence kind for attach_evidence, such as receipt, run, verification_run, or healing_run."},
                     "evidence_ref": {"type": "string", "description": "Evidence reference id for attach_evidence."},

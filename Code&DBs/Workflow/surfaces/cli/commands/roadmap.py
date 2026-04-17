@@ -23,7 +23,7 @@ def _help_text() -> str:
             "CQRS roadmap surface:",
             "  Query:",
             "    workflow roadmap view [--root <roadmap_item_id>] [--semantic-neighbor-limit <n>]",
-            "      Read roadmap items from the CQRS read model (no run id required).",
+            "      Read roadmap items from the CQRS read model with semantic-first external neighbors (no run id required).",
             "    workflow roadmap status --run-id <run_id>",
             "    workflow roadmap scoreboard --run-id <run_id>",
             "    workflow roadmap graph --run-id <run_id>",

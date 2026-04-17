@@ -63,6 +63,33 @@ def test_shutdown_workflow_pool_clears_cached_state() -> None:
     assert connection_mod._bg_thread is None
 
 
+def test_get_workflow_pool_reopens_closed_cached_pool(monkeypatch) -> None:
+    connection_mod.shutdown_workflow_pool()
+    created: list[_FakePool] = []
+
+    async def _fake_create_workflow_pool(env=None, **kwargs):
+        del kwargs
+        pool = _FakePool(env["WORKFLOW_DATABASE_URL"])
+        created.append(pool)
+        return pool
+
+    monkeypatch.setattr(connection_mod, "create_workflow_pool", _fake_create_workflow_pool)
+
+    first = connection_mod.get_workflow_pool(
+        env={"WORKFLOW_DATABASE_URL": "postgresql://example"}
+    )
+    first.closed = True
+
+    second = connection_mod.get_workflow_pool(
+        env={"WORKFLOW_DATABASE_URL": "postgresql://example"}
+    )
+
+    assert first is created[0]
+    assert second is created[1]
+    assert second.closed is False
+    connection_mod.shutdown_workflow_pool()
+
+
 def test_sync_connection_close_delegates_to_shutdown(monkeypatch) -> None:
     called: list[bool] = []
     conn = connection_mod.SyncPostgresConnection(_FakePool("postgresql://example"))
@@ -76,6 +103,25 @@ def test_sync_connection_close_delegates_to_shutdown(monkeypatch) -> None:
     conn.close()
 
     assert called == [True]
+
+
+def test_sync_connection_rebinds_closed_singleton_pool(monkeypatch) -> None:
+    connection_mod.shutdown_workflow_pool()
+    first = _FakePool("postgresql://example")
+    second = _FakePool("postgresql://example")
+    first.closed = True
+    connection_mod._workflow_pool = first
+    connection_mod._workflow_pool_dsn = first.label
+
+    conn = connection_mod.SyncPostgresConnection(first)
+
+    monkeypatch.setattr(
+        connection_mod,
+        "get_workflow_pool",
+        lambda env=None: second,
+    )
+
+    assert conn._pool_handle() is second
 
 
 def test_resolve_workflow_authority_cache_key_sanitizes_database_identity() -> None:

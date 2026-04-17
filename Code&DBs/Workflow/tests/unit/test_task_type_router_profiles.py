@@ -23,6 +23,11 @@ from runtime.task_type_router import TaskTypeRouter
 from runtime.task_type_router import TaskRouteAuthorityError
 
 
+@pytest.fixture(autouse=True)
+def _stub_router_provider_defaults(monkeypatch):
+    monkeypatch.setattr(_mod, "default_llm_adapter_type", lambda: "cli")
+
+
 class _FakeConn:
     def execute(self, sql: str, *params):
         if "FROM route_policy_registry" in sql:

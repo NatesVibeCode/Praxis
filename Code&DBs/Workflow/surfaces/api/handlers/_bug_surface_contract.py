@@ -74,6 +74,11 @@ def _optional_text(value: object) -> str | None:
     return text or None
 
 
+def _source_issue_filter_kwargs(body: Mapping[str, Any]) -> dict[str, Any]:
+    source_issue_id = _optional_text(body.get("source_issue_id"))
+    return {"source_issue_id": source_issue_id} if source_issue_id is not None else {}
+
+
 def _optional_object(value: object, *, field_name: str) -> dict[str, Any]:
     if value in (None, ""):
         return {}
@@ -104,7 +109,11 @@ def annotate_bug_dicts_with_replay_state(
     for bug in bugs:
         bug_dict = dict(serialize_bug(bug))
         replay_state = _bug_evidence.replay_state_from_hint(
-            bt.replay_hint(bug.bug_id, receipt_limit=receipt_limit)
+            bt.replay_hint(
+                bug.bug_id,
+                receipt_limit=receipt_limit,
+                allow_backfill=False,
+            )
         )
         bug_dict["replay_ready"] = replay_state["replay_ready"]
         if include_replay_details:
@@ -134,12 +143,13 @@ def list_bugs_payload(
     category = parse_category(bt_mod, body.get("category"))
     limit = max(1, int(body.get("limit", default_limit) or default_limit))
     title_like = body.get("title_like")
-    include_replay_state = bool(body.get("include_replay_state", True))
+    include_replay_state = bool(body.get("include_replay_state", False))
     replay_ready_only = bool(body.get("replay_ready_only", False))
     open_only = bool(body.get("open_only", False))
     tags = _normalize_tags(body.get("tags"))
     exclude_tags = _normalize_tags(body.get("exclude_tags"))
 
+    filter_kwargs = _source_issue_filter_kwargs(body)
     total_count = bt.count_bugs(
         status=parsed_status,
         severity=parsed_severity,
@@ -148,6 +158,7 @@ def list_bugs_payload(
         tags=tags,
         exclude_tags=exclude_tags,
         open_only=open_only,
+        **filter_kwargs,
     )
     bugs = bt.list_bugs(
         status=parsed_status,
@@ -158,6 +169,7 @@ def list_bugs_payload(
         exclude_tags=exclude_tags,
         open_only=open_only,
         limit=max(total_count, limit) if replay_ready_only else limit,
+        **filter_kwargs,
     )
     if include_replay_state or replay_ready_only:
         bug_dicts = annotate_bug_dicts_with_replay_state(
@@ -207,6 +219,7 @@ def file_bug_payload(
         discovered_in_run_id=_optional_text(body.get("discovered_in_run_id")),
         discovered_in_receipt_id=_optional_text(body.get("discovered_in_receipt_id")),
         owner_ref=_optional_text(body.get("owner_ref")),
+        source_issue_id=_optional_text(body.get("source_issue_id")),
         tags=_normalize_tags(body.get("tags")) or (),
         resume_context=resume_ctx if isinstance(resume_ctx, dict) else None,
     )
@@ -231,17 +244,31 @@ def search_bugs_payload(
     title = str(body.get("title") or "").strip()
     if not title:
         raise ValueError("title is required for search")
+    limit = max(1, int(body.get("limit", default_limit) or default_limit))
+    include_replay_state = bool(body.get("include_replay_state", False))
+    filter_kwargs = _source_issue_filter_kwargs(body)
     bugs = bt.search(
         title,
-        limit=max(1, int(body.get("limit", default_limit) or default_limit)),
+        limit=limit,
         status=parse_status(bt_mod, body.get("status")),
         severity=parse_severity(bt_mod, body.get("severity")),
         category=parse_category(bt_mod, body.get("category")),
         tags=_normalize_tags(body.get("tags")),
         exclude_tags=_normalize_tags(body.get("exclude_tags")),
         open_only=bool(body.get("open_only", False)),
+        **filter_kwargs,
     )
-    return {"bugs": [serialize_bug(bug) for bug in bugs], "count": len(bugs)}
+    if include_replay_state:
+        bug_dicts = annotate_bug_dicts_with_replay_state(
+            bt,
+            bugs,
+            serialize_bug=serialize_bug,
+            include_replay_details=True,
+            limit=limit,
+        )
+    else:
+        bug_dicts = [serialize_bug(bug) for bug in bugs]
+    return {"bugs": bug_dicts, "count": len(bug_dicts)}
 
 
 def stats_payload(*, bt: Any, serialize: Serializer) -> dict[str, Any]:

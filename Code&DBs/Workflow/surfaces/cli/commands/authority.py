@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 from typing import Any, TextIO
 
+from runtime import operation_catalog_gateway
 from runtime.app_manifest_registry import (
     AppManifestRegistryBoundaryError,
     get_app_manifest,
@@ -19,14 +21,8 @@ from runtime.object_lifecycle import (
     create_object,
     delete_object,
     get_object,
-    get_object_type,
-    list_object_fields,
     list_objects,
-    list_object_types,
-    retire_object_field,
     update_object,
-    upsert_object_field,
-    upsert_object_type,
 )
 from runtime.surface_catalog import (
     SurfaceCatalogBoundaryError,
@@ -53,6 +49,10 @@ from .data import _data_command
 
 def _sync_conn():
     return cli_sync_conn()
+
+
+def _operation_env() -> dict[str, str]:
+    return dict(os.environ)
 
 
 def _text(value: Any) -> str:
@@ -546,15 +546,20 @@ def _object_type_command(args: list[str], *, stdout: TextIO) -> int:
         return 2
     try:
         if action == "list":
-            conn = _sync_conn()
-            payload = list_object_types(conn, query=query, limit=limit)
+            payload = operation_catalog_gateway.execute_operation_from_env(
+                env=_operation_env(),
+                operation_name="object_schema.type_list",
+                payload={"q": query, "limit": limit},
+            )
         elif action == "get":
-            conn = _sync_conn()
-            payload = {"type": get_object_type(conn, type_id=type_id)}
+            payload = operation_catalog_gateway.execute_operation_from_env(
+                env=_operation_env(),
+                operation_name="object_schema.type_get",
+                payload={"type_id": type_id},
+            )
         elif action == "upsert":
             if not confirmed:
                 return _render_confirmation(stdout=stdout)
-            conn = _sync_conn()
             fields = (
                 _load_json_value(
                     file_path=fields_file,
@@ -564,16 +569,18 @@ def _object_type_command(args: list[str], *, stdout: TextIO) -> int:
                 if fields_file or fields_json
                 else []
             )
-            payload = {
-                "type": upsert_object_type(
-                    conn,
-                    type_id=type_id or None,
-                    name=name,
-                    description=description,
-                    icon=icon,
-                    fields=fields,
-                )
-            }
+            operation_name = "object_schema.type_upsert_by_id" if type_id else "object_schema.type_upsert"
+            payload = operation_catalog_gateway.execute_operation_from_env(
+                env=_operation_env(),
+                operation_name=operation_name,
+                payload={
+                    "type_id": type_id or None,
+                    "name": name,
+                    "description": description,
+                    "icon": icon,
+                    "fields": fields,
+                },
+            )
         else:
             stdout.write(_object_type_help_text() + "\n")
             return 2
@@ -687,12 +694,14 @@ def _object_field_command(args: list[str], *, stdout: TextIO) -> int:
         stdout.write(f"unexpected argument: {token}\n")
         return 2
     try:
-        conn = _sync_conn()
         if action == "list":
-            payload = list_object_fields(
-                conn,
-                type_id=type_id,
-                include_retired=include_retired,
+            payload = operation_catalog_gateway.execute_operation_from_env(
+                env=_operation_env(),
+                operation_name="object_schema.field_list",
+                payload={
+                    "type_id": type_id,
+                    "include_retired": include_retired,
+                },
             )
         elif action == "upsert":
             if not confirmed:
@@ -715,25 +724,31 @@ def _object_field_command(args: list[str], *, stdout: TextIO) -> int:
                 if options_file or options_json
                 else []
             )
-            payload = upsert_object_field(
-                conn,
-                type_id=type_id,
-                field_name=field_name,
-                field_kind=field_kind,
-                label=label,
-                description=description,
-                required=required,
-                default_value=default_value,
-                options=options,
-                display_order=display_order,
+            payload = operation_catalog_gateway.execute_operation_from_env(
+                env=_operation_env(),
+                operation_name="object_schema.field_upsert",
+                payload={
+                    "type_id": type_id,
+                    "field_name": field_name,
+                    "field_kind": field_kind,
+                    "label": label,
+                    "description": description,
+                    "required": required,
+                    "default_value": default_value,
+                    "options": options,
+                    "display_order": display_order,
+                },
             )
         elif action == "retire":
             if not confirmed:
                 return _render_confirmation(stdout=stdout)
-            payload = retire_object_field(
-                conn,
-                type_id=type_id,
-                field_name=field_name,
+            payload = operation_catalog_gateway.execute_operation_from_env(
+                env=_operation_env(),
+                operation_name="object_schema.field_retire",
+                payload={
+                    "type_id": type_id,
+                    "field_name": field_name,
+                },
             )
         else:
             stdout.write(_object_field_help_text() + "\n")

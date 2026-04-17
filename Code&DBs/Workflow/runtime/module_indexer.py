@@ -719,7 +719,13 @@ class ModuleIndexer:
             to_index.append(unit)
 
         if not to_index:
-            return {"indexed": 0, "skipped": skipped, "total": len(units)}
+            return {
+                "indexed": 0,
+                "skipped": skipped,
+                "total": len(units),
+                "observability_state": "complete",
+                "errors": (),
+            }
 
         # Batch embed all summaries
         summaries = [u.summary for u in to_index]
@@ -731,6 +737,7 @@ class ModuleIndexer:
 
         # Upsert into Postgres
         indexed = 0
+        errors: list[str] = []
         for unit, embedding in zip(to_index, embeddings):
             try:
                 if embedding is None:
@@ -773,11 +780,20 @@ class ModuleIndexer:
                 )
                 indexed += 1
             except Exception as exc:
-                # Log but don't fail the whole batch
+                errors.append(
+                    f"{unit.module_path}:{unit.kind}:{unit.name}:{type(exc).__name__}: {exc}"
+                )
+                # Keep stderr noise for operators, but do not pretend the batch was healthy.
                 import sys
                 print(f"[module_indexer] Failed to index {unit.name}: {exc}", file=sys.stderr)
 
-        return {"indexed": indexed, "skipped": skipped, "total": len(units)}
+        return {
+            "indexed": indexed,
+            "skipped": skipped,
+            "total": len(units),
+            "observability_state": "degraded" if errors else "complete",
+            "errors": tuple(errors),
+        }
 
     def search(
         self,
@@ -913,6 +929,13 @@ class ModuleIndexer:
             return {
                 "total_indexed": total,
                 "by_kind": {r["kind"]: int(r["cnt"]) for r in by_kind},
+                "observability_state": "complete",
+                "errors": (),
             }
-        except Exception:
-            return {"total_indexed": 0, "by_kind": {}}
+        except Exception as exc:
+            return {
+                "total_indexed": 0,
+                "by_kind": {},
+                "observability_state": "degraded",
+                "errors": (f"{type(exc).__name__}: {exc}",),
+            }

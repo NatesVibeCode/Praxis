@@ -1,6 +1,6 @@
 # Praxis MCP Tools
 
-Praxis exposes 49 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
+Praxis exposes 50 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
 
 CLI discovery is generated from the same catalog metadata:
 
@@ -24,7 +24,7 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_governance` | `governance` | `advanced` | - | `read` | Safety checks before dispatching work. Scan prompts for leaked secrets (API keys, tokens, passwords) or verify that a set of file paths falls within allowed scope. |
 | `praxis_heal` | `governance` | `advanced` | - | `read` | Diagnose why a workflow job failed and get a recommended recovery action: retry (transient error), escalate (needs human attention), skip (non-critical), or halt (stop the pipeline). |
 | `praxis_integration` | `integration` | `advanced` | - | `dispatch`, `read` | Call, list, or describe registered integrations (API connectors, webhooks, and other external services). |
-| `praxis_provider_onboard` | `integration` | `advanced` | - | `read`, `write` | Onboard a CLI or API provider into Praxis Engine. Probes transport, discovers models, tests capacity, writes to all routing tables, and updates native runtime authority. |
+| `praxis_provider_onboard` | `integration` | `advanced` | - | `read`, `write` | Onboard a CLI or API provider into Praxis Engine through one catalog-backed operation. Probes transport, discovers models, writes onboarding authority, and performs the canonical post-onboarding sync. |
 | `praxis_graph` | `knowledge` | `advanced` | - | `read` | Explore connections from one knowledge-graph entity. Shows what an entity depends on, what depends on it, and the blast radius of changes. |
 | `praxis_ingest` | `knowledge` | `advanced` | - | `write` | Store new information in the knowledge graph so it can be recalled later via praxis_recall. Content is automatically entity-extracted, deduplicated, and embedded for vector search. |
 | `praxis_recall` | `knowledge` | `stable` | `workflow recall` | `read` | Search the platform's knowledge graph for information about modules, functions, decisions, patterns, bugs, constraints, people, or any previously ingested content. Returns ranked results with confidence scores and how each result was found (text match, graph traversal, or vector similarity). |
@@ -44,6 +44,7 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_operator_roadmap_view` | `operator` | `advanced` | - | `read` | Read one roadmap subtree and its dependency edges from DB-backed authority. |
 | `praxis_operator_view` | `operator` | `advanced` | - | `read` | Render detailed operator observability views — deeper than praxis_status. |
 | `praxis_operator_write` | `operator` | `advanced` | - | `read`, `write` | Preview, validate, or commit roadmap rows through the shared operator-write validation gate. |
+| `praxis_semantic_assertions` | `operator` | `advanced` | - | `read`, `write` | Register semantic predicates, record or retract semantic assertions, and query the canonical semantic substrate. |
 | `praxis_decompose` | `planning` | `stable` | - | `read` | Break down a large objective into small, workflow-ready micro-sprints. Returns each sprint with estimated complexity, dependencies between sprints, and the critical path. |
 | `praxis_intent_match` | `planning` | `stable` | - | `read` | Find existing UI components, workflows, and integrations that match what you want to build. Searches the registry and proposes how to compose them into an app. |
 | `praxis_manifest_generate` | `planning` | `advanced` | - | `write` | Generate a complete app manifest (UI layout, data flow, integrations) from a natural language description. Combines intent matching with LLM generation to produce a ready-to-render manifest. |
@@ -509,7 +510,7 @@ Example input:
 - CLI schema help: `workflow tools describe praxis_maintenance`
 - When to use: Run explicit operator maintenance actions that mutate runtime state.
 - When not to use: Do not use it for ordinary observability or health reading.
-- Selector: `action`; default `reset_metrics`; values `reset_metrics`, `backfill_bug_replay_provenance`
+- Selector: `action`; default `reset_metrics`; values `reset_metrics`, `backfill_bug_replay_provenance`, `backfill_semantic_bridges`, `refresh_semantic_projection`
 - Required args: (none)
 
 Example input:
@@ -689,7 +690,7 @@ Example input:
 - Risks: `read`
 - CLI entrypoint: `workflow tools call praxis_operator_roadmap_view`
 - CLI schema help: `workflow tools describe praxis_operator_roadmap_view`
-- When to use: Read roadmap and operator backlog views without mutating them.
+- When to use: Read one roadmap subtree, its dependency edges, and semantic-first external neighbors without mutating roadmap authority.
 - When not to use: Do not use it to commit roadmap changes.
 - Selector: none
 - Required args: (none)
@@ -708,9 +709,9 @@ Example input:
 - Risks: `read`
 - CLI entrypoint: `workflow tools call praxis_operator_view`
 - CLI schema help: `workflow tools describe praxis_operator_view`
-- When to use: Discover native operator status, scoreboard, topology, issue backlog, or replay-ready bug views.
+- When to use: Discover native operator status, cutover readiness, run-scoped workflow topology, cross-domain operator graph topology, semantic assertion, issue backlog, or replay-ready bug views.
 - When not to use: Do not use it to mutate operator state.
-- Selector: `view`; default `status`; values `status`, `scoreboard`, `graph`, `lineage`, `issue_backlog`, `replay_ready_bugs`
+- Selector: `view`; default `status`; values `status`, `scoreboard`, `graph`, `operator_graph`, `semantics`, `lineage`, `issue_backlog`, `replay_ready_bugs`
 - Required args: `view`
 
 Example input:
@@ -742,6 +743,28 @@ Example input:
   "action": "preview",
   "title": "Consolidate CLI frontdoors",
   "intent_brief": "one authority for operator CLI"
+}
+```
+
+#### `praxis_semantic_assertions`
+
+- Surface: `operator`
+- Tier: `advanced`
+- Badges: `advanced`, `operator`, `mutates-state`
+- Risks: `read`, `write`
+- CLI entrypoint: `workflow tools call praxis_semantic_assertions`
+- CLI schema help: `workflow tools describe praxis_semantic_assertions`
+- When to use: Register semantic predicates, record or retract semantic assertions, or query the current semantic substrate when semantics need durable typed authority.
+- When not to use: Do not use it for generic roadmap authoring, issue triage, or workflow telemetry reads.
+- Selector: `action`; default `list`; values `list`, `register_predicate`, `record_assertion`, `retract_assertion`
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "action": "list",
+  "predicate_slug": "grouped_in"
 }
 ```
 

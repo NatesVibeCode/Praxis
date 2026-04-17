@@ -47,6 +47,7 @@ def _sample_bug() -> Bug:
         discovered_in_run_id=None,
         discovered_in_receipt_id=None,
         owner_ref=None,
+        source_issue_id=None,
         decision_ref="",
         resolution_summary=None,
     )
@@ -95,6 +96,40 @@ def test_bug_tracker_helpers_delegate_to_bug_evidence(monkeypatch) -> None:
 
     assert gaps == ("wired",)
     assert write_diff == {"wire": True}
+
+
+def test_compare_write_sets_surfaces_query_failure() -> None:
+    class _BrokenConn:
+        def fetchrow(self, *args, **kwargs):
+            raise RuntimeError("receipt lane offline")
+
+    result = _mod._bug_evidence.compare_write_sets(
+        _BrokenConn(),
+        {
+            "receipt_id": "receipt-1",
+            "workflow_id": "workflow-1",
+            "node_id": "node-1",
+            "write_paths": ["src/a.py"],
+        },
+    )
+
+    assert result["error"] == "RuntimeError: receipt lane offline"
+    assert result["note"] == "baseline receipt lookup failed"
+
+
+def test_build_blast_radius_surfaces_query_failure() -> None:
+    class _BrokenConn:
+        def fetchrow(self, *args, **kwargs):
+            raise RuntimeError("blast radius lane offline")
+
+    result = _mod._bug_evidence.build_blast_radius(
+        _BrokenConn(),
+        failure_code="timeout_exceeded",
+        node_id="node-a",
+    )
+
+    assert result["error"] == "RuntimeError: blast radius lane offline"
+    assert result["occurrence_count"] == 0
 
 
 def test_link_evidence_writes_through_bug_evidence_repository(monkeypatch) -> None:

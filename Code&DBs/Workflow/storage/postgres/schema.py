@@ -36,8 +36,12 @@ _SCHEMA_BOOTSTRAP_WAIT_LOG_INTERVAL_S = 10.0
 _ROW_EXPECTATION_KEY_COLUMNS = {
     "operation_catalog_registry": "operation_name",
     "operation_catalog_source_policy_registry": "source_kind",
+    "workflow_definitions": "workflow_definition_id",
+    "workflow_definition_nodes": "workflow_definition_node_id",
+    "workflow_definition_edges": "workflow_definition_edge_id",
 }
 _STRUCTURAL_EXPECTED_OBJECT_TYPES = frozenset({"table", "index", "column", "constraint", "function"})
+_ABSENCE_EXPECTED_OBJECT_TYPE_PREFIX = "absent_"
 
 logger = logging.getLogger(__name__)
 
@@ -207,6 +211,139 @@ def _workflow_schema_readiness_by_migration() -> tuple[
 @lru_cache(maxsize=1)
 def _workflow_schema_manifest_filenames() -> tuple[str, ...]:
     return tuple(filename for filename, _objects in _workflow_schema_readiness_by_migration())
+
+
+def _absence_base_object_type(object_type: str) -> str | None:
+    if not object_type.startswith(_ABSENCE_EXPECTED_OBJECT_TYPE_PREFIX):
+        return None
+    base_type = object_type[len(_ABSENCE_EXPECTED_OBJECT_TYPE_PREFIX) :]
+    if base_type in _STRUCTURAL_EXPECTED_OBJECT_TYPES or base_type == "row":
+        return base_type
+    return None
+
+
+async def _workflow_expected_object_exists(
+    conn: asyncpg.Connection,
+    expected: WorkflowMigrationExpectedObject,
+    *,
+    object_type: str | None = None,
+) -> bool:
+    effective_type = object_type or expected.object_type
+    object_name = expected.object_name
+
+    if effective_type == "table":
+        row = await conn.fetchrow(
+            """
+            SELECT 1
+            FROM pg_catalog.pg_class AS cls
+            JOIN pg_catalog.pg_namespace AS ns
+                ON ns.oid = cls.relnamespace
+            WHERE ns.nspname = 'public'
+              AND cls.relname = $1
+              AND cls.relkind IN ('r', 'p')
+            LIMIT 1
+            """,
+            object_name,
+        )
+        return row is not None
+    if effective_type == "index":
+        row = await conn.fetchrow(
+            """
+            SELECT 1
+            FROM pg_catalog.pg_class AS cls
+            JOIN pg_catalog.pg_namespace AS ns
+                ON ns.oid = cls.relnamespace
+            WHERE ns.nspname = 'public'
+              AND cls.relname = $1
+              AND cls.relkind = 'i'
+            LIMIT 1
+            """,
+            object_name,
+        )
+        return row is not None
+    if effective_type == "column":
+        table_name, _, column_name = object_name.partition(".")
+        if not table_name or not column_name:
+            return False
+        row = await conn.fetchrow(
+            """
+            SELECT 1
+            FROM information_schema.columns AS cols
+            WHERE cols.table_schema = 'public'
+              AND cols.table_name = $1
+              AND cols.column_name = $2
+            LIMIT 1
+            """,
+            table_name,
+            column_name,
+        )
+        return row is not None
+    if effective_type == "constraint":
+        relation_name, _, constraint_name = object_name.partition(".")
+        if relation_name and constraint_name:
+            row = await conn.fetchrow(
+                """
+                SELECT 1
+                FROM pg_catalog.pg_constraint AS con
+                JOIN pg_catalog.pg_namespace AS ns
+                    ON ns.oid = con.connamespace
+                LEFT JOIN pg_catalog.pg_class AS cls
+                    ON cls.oid = con.conrelid
+                WHERE ns.nspname = 'public'
+                  AND cls.relname = $1
+                  AND con.conname = $2
+                LIMIT 1
+                """,
+                relation_name,
+                constraint_name,
+            )
+            return row is not None
+        row = await conn.fetchrow(
+            """
+            SELECT 1
+            FROM pg_catalog.pg_constraint AS con
+            JOIN pg_catalog.pg_namespace AS ns
+                ON ns.oid = con.connamespace
+            WHERE ns.nspname = 'public'
+              AND con.conname = $1
+            LIMIT 1
+            """,
+            object_name,
+        )
+        return row is not None
+    if effective_type == "function":
+        row = await conn.fetchrow(
+            """
+            SELECT 1
+            FROM pg_catalog.pg_proc AS proc
+            JOIN pg_catalog.pg_namespace AS ns
+                ON ns.oid = proc.pronamespace
+            WHERE ns.nspname = 'public'
+              AND proc.proname = $1
+            LIMIT 1
+            """,
+            object_name,
+        )
+        return row is not None
+    if effective_type == "row":
+        table_name, _, row_key = object_name.partition(".")
+        if not table_name or not row_key:
+            return False
+        key_column = _ROW_EXPECTATION_KEY_COLUMNS.get(table_name)
+        if key_column is None:
+            return False
+        table_exists = await conn.fetchval(
+            "SELECT to_regclass($1::text) IS NOT NULL",
+            f"public.{table_name}",
+        )
+        if not table_exists:
+            return False
+        row = await conn.fetchrow(
+            f"SELECT 1 FROM {table_name} WHERE {key_column} = $1 LIMIT 1",
+            row_key,
+        )
+        return row is not None
+    return False
 
 
 
@@ -461,10 +598,15 @@ async def inspect_workflow_schema(
         obj for obj in expected_objects if obj.object_type in _STRUCTURAL_EXPECTED_OBJECT_TYPES
     )
     row_expected_objects = tuple(obj for obj in expected_objects if obj.object_type == "row")
+    absent_expected_objects = tuple(
+        obj for obj in expected_objects if _absence_base_object_type(obj.object_type) is not None
+    )
     unsupported_expected_objects = tuple(
         obj
         for obj in expected_objects
-        if obj.object_type not in _STRUCTURAL_EXPECTED_OBJECT_TYPES and obj.object_type != "row"
+        if obj.object_type not in _STRUCTURAL_EXPECTED_OBJECT_TYPES
+        and obj.object_type != "row"
+        and _absence_base_object_type(obj.object_type) is None
     )
     expected_payload = json.dumps(
         [
@@ -585,9 +727,23 @@ async def inspect_workflow_schema(
             item for row_key, item in entries if row_key not in existing_row_keys
         )
 
+    absent_missing_objects: list[WorkflowMigrationExpectedObject] = []
+    for item in absent_expected_objects:
+        base_type = _absence_base_object_type(item.object_type)
+        if base_type is None:
+            absent_missing_objects.append(item)
+            continue
+        if await _workflow_expected_object_exists(conn, item, object_type=base_type):
+            absent_missing_objects.append(item)
+
     missing_name_pairs = {
         (obj.object_type, obj.object_name)
-        for obj in (*structural_missing_objects, *row_missing_objects, *unsupported_expected_objects)
+        for obj in (
+            *structural_missing_objects,
+            *row_missing_objects,
+            *absent_missing_objects,
+            *unsupported_expected_objects,
+        )
     }
     missing_objects = tuple(
         obj

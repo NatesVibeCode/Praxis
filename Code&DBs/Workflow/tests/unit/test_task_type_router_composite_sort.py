@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 import runtime.task_type_router as _ttr_mod
 from runtime.task_type_router import TaskTypeRouter
 
@@ -27,6 +29,16 @@ def _passthrough_economics(
 
 
 _ttr_mod._resolve_route_economics = _passthrough_economics
+
+
+@pytest.fixture(autouse=True)
+def _stub_router_provider_defaults(monkeypatch):
+    monkeypatch.setitem(TaskTypeRouter.__init__.__globals__, "default_llm_adapter_type", lambda: "cli")
+    monkeypatch.setitem(
+        TaskTypeRouter._build_profile_task_rows.__globals__,
+        "_resolve_route_economics",
+        _passthrough_economics,
+    )
 
 
 class _FakeConn:

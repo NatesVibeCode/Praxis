@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from surfaces.mcp.tools import operator
 
 
@@ -169,3 +171,114 @@ def test_mcp_operator_decisions_list_uses_operation_catalog_gateway(monkeypatch)
     assert result["operation_receipt"]["operation_name"] == "operator.decision_list"
     assert captured["operation_name"] == "operator.decision_list"
     assert captured["payload"]["decision_scope_ref"] == "provider_onboarding"
+
+
+def test_mcp_semantic_assertions_list_uses_operation_catalog_gateway(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(operator, "_subs", object())
+
+    def _execute(subsystems, *, operation_name: str, payload):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"operation_receipt": {"operation_name": operation_name}}
+
+    monkeypatch.setattr(operator, "execute_operation_from_subsystems", _execute)
+
+    result = operator.tool_praxis_semantic_assertions(
+        {
+            "action": "list",
+            "predicate_slug": "grouped_in",
+            "subject_kind": "bug",
+            "limit": 25,
+        }
+    )
+
+    assert result["operation_receipt"]["operation_name"] == "semantic_assertions.list"
+    assert captured["operation_name"] == "semantic_assertions.list"
+    assert captured["payload"]["predicate_slug"] == "grouped_in"
+
+
+def test_mcp_semantic_assertions_record_uses_operation_catalog_gateway(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(operator, "_subs", object())
+
+    def _execute(subsystems, *, operation_name: str, payload):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"operation_receipt": {"operation_name": operation_name}}
+
+    monkeypatch.setattr(operator, "execute_operation_from_subsystems", _execute)
+
+    result = operator.tool_praxis_semantic_assertions(
+        {
+            "action": "record_assertion",
+            "predicate_slug": "grouped_in",
+            "subject_kind": "bug",
+            "subject_ref": "bug.checkout.1",
+            "object_kind": "functional_area",
+            "object_ref": "functional_area.checkout",
+            "source_kind": "operator",
+            "source_ref": "nate",
+        }
+    )
+
+    assert result["operation_receipt"]["operation_name"] == "semantic_assertions.record"
+    assert captured["operation_name"] == "semantic_assertions.record"
+    assert captured["payload"]["subject_ref"] == "bug.checkout.1"
+
+
+def test_mcp_maintenance_backfill_semantic_bridges_uses_operator_frontdoor(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _Frontdoor:
+        def backfill_semantic_bridges(self, **kwargs):
+            captured.update(kwargs)
+            return {"backfill": "semantic"}
+
+    monkeypatch.setattr(operator, "OperatorControlFrontdoor", _Frontdoor)
+
+    result = operator.tool_praxis_maintenance(
+        {
+            "action": "backfill_semantic_bridges",
+            "include_object_relations": False,
+            "include_operator_decisions": True,
+            "as_of": "2026-04-16T21:00:00+00:00",
+        }
+    )
+
+    assert result == {"backfill": "semantic"}
+    assert captured["include_object_relations"] is False
+    assert captured["include_operator_decisions"] is True
+    assert captured["as_of"] == datetime(2026, 4, 16, 21, 0, tzinfo=timezone.utc)
+
+
+def test_mcp_maintenance_refresh_semantic_projection_uses_cursor_consumer(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _consume(*, limit: int, as_of):
+        captured["limit"] = limit
+        captured["as_of"] = as_of
+        return {"refreshed": True, "ending_cursor": 9}
+
+    monkeypatch.setattr(operator, "consume_semantic_projection_events", _consume)
+
+    result = operator.tool_praxis_maintenance(
+        {
+            "action": "refresh_semantic_projection",
+            "limit": 25,
+            "as_of": "2026-04-16T21:05:00+00:00",
+        }
+    )
+
+    assert result == {
+        "semantic_projection_refresh": {
+            "refreshed": True,
+            "ending_cursor": 9,
+        }
+    }
+    assert captured["limit"] == 25
+    assert captured["as_of"] == datetime(2026, 4, 16, 21, 5, tzinfo=timezone.utc)

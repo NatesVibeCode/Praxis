@@ -16,6 +16,7 @@ from runtime.instance import (
     NativeInstanceResolutionError,
     resolve_native_instance,
 )
+import surfaces.api._smoke_service as smoke_service
 from surfaces.api import frontdoor, native_ops, operator_read
 
 _QUEUE_FILENAME = "PRAXIS_NATIVE_SELF_HOSTED_SMOKE.queue.json"
@@ -143,24 +144,25 @@ class _FakeFrontdoorService:
                 "workflow_id": "workflow.native-self-hosted-smoke",
                 "request_id": "request.native-self-hosted-smoke",
                 "workflow_definition_id": "workflow_definition.native_self_hosted_smoke.v1",
-                "current_state": "claim_accepted",
-                "terminal_reason_code": None,
+                "current_state": "succeeded",
+                "terminal_reason_code": "runtime.workflow_succeeded",
                 "run_idempotency_key": "request.native-self-hosted-smoke",
                 "context_bundle_id": f"context:{run_id}",
                 "authority_context_digest": "digest.native-self-hosted-smoke",
                 "admission_decision_id": f"admission:{run_id}",
                 "requested_at": datetime(2026, 4, 2, 12, 0, tzinfo=timezone.utc).isoformat(),
                 "admitted_at": datetime(2026, 4, 2, 12, 0, 1, tzinfo=timezone.utc).isoformat(),
-                "started_at": None,
-                "finished_at": None,
-                "last_event_id": "event:workflow.native-self-hosted-smoke:1",
+                "started_at": datetime(2026, 4, 2, 12, 0, 2, tzinfo=timezone.utc).isoformat(),
+                "finished_at": datetime(2026, 4, 2, 12, 0, 3, tzinfo=timezone.utc).isoformat(),
+                "last_event_id": "receipt:workflow.native-self-hosted-smoke:18",
             },
             "inspection": {
                 "run_id": run_id,
-                "current_state": "claim_accepted",
+                "current_state": "succeeded",
                 "terminal_reason": "runtime.workflow_succeeded",
                 "evidence_refs": [
                     "workflow_event:workflow.native-self-hosted-smoke:1",
+                    "receipt:workflow.native-self-hosted-smoke:18",
                 ],
             },
         }
@@ -194,10 +196,11 @@ def test_operator_flow_runs_one_repo_local_sequence_and_surfaces_run_inspection(
         status_calls=[],
         native_instance_contract=instance_contract,
     )
-    seen: dict[str, list[dict[str, str]]] = {
+    seen: dict[str, list[dict[str, str]] | list[dict[str, object]]] = {
         "show_instance_contract": [],
-        "db_bootstrap": [],
-        "db_health": [],
+        "frontdoor_health": [],
+        "execute": [],
+        "proof": [],
     }
 
     monkeypatch.setattr(
@@ -206,23 +209,75 @@ def test_operator_flow_runs_one_repo_local_sequence_and_surfaces_run_inspection(
         lambda *, env=None: seen["show_instance_contract"].append(dict(env or {})) or instance_contract,
     )
     monkeypatch.setattr(
-        native_ops,
-        "db_bootstrap",
-        lambda *, env=None: seen["db_bootstrap"].append(dict(env or {}))
+        frontdoor,
+        "health",
+        lambda *, env=None, bootstrap=False: seen["frontdoor_health"].append(
+            {
+                "env": dict(env or {}),
+                "bootstrap": bootstrap,
+            }
+        )
         or {
-            "database_reachable": True,
-            "schema_bootstrapped": True,
-            "database_url": env["WORKFLOW_DATABASE_URL"],
+            "database": {
+                "database_reachable": True,
+                "schema_bootstrapped": True,
+                "database_url": env["WORKFLOW_DATABASE_URL"],
+            }
         },
     )
     monkeypatch.setattr(
-        native_ops,
-        "db_health",
-        lambda *, env=None: seen["db_health"].append(dict(env or {}))
+        smoke_service,
+        "_execute_smoke_run",
+        lambda *, run_id, env: seen["execute"].append({"run_id": run_id, "env": dict(env)})
         or {
-            "database_reachable": True,
-            "schema_bootstrapped": True,
-            "database_url": env["WORKFLOW_DATABASE_URL"],
+            "current_state": "succeeded",
+            "terminal_reason": "runtime.workflow_succeeded",
+            "node_order": ["node_0", "node_1"],
+        },
+    )
+    monkeypatch.setattr(
+        smoke_service,
+        "_load_smoke_proof",
+        lambda *, run_id, env: seen["proof"].append({"run_id": run_id, "env": dict(env)})
+        or {
+            "inspection": {
+                "current_state": "succeeded",
+                "terminal_reason": "runtime.workflow_succeeded",
+                "node_order": ["node_0", "node_1"],
+                "node_timeline": [
+                    "node_0:running",
+                    "node_0:succeeded",
+                    "node_1:running",
+                    "node_1:succeeded",
+                ],
+                "evidence_refs": [
+                    "workflow_event:workflow.native-self-hosted-smoke:1",
+                    "receipt:workflow.native-self-hosted-smoke:18",
+                ],
+                "completeness": {
+                    "is_complete": True,
+                    "missing_evidence_refs": [],
+                },
+                "watermark": {
+                    "evidence_seq": 18,
+                    "source": "canonical_evidence",
+                },
+            },
+            "evidence": {
+                "count": 18,
+                "first_evidence_seq": 1,
+                "last_evidence_seq": 18,
+            },
+            "outbox": {
+                "row_count": 18,
+                "cursor_last_evidence_seq": 18,
+                "has_more": False,
+                "first_authority_table": "workflow_events",
+                "last_authority_table": "receipts",
+                "last_envelope_kind": "receipt",
+                "last_receipt_type": "workflow_completion_receipt",
+                "last_status": "succeeded",
+            },
         },
     )
 
@@ -238,11 +293,27 @@ def test_operator_flow_runs_one_repo_local_sequence_and_surfaces_run_inspection(
         "db_bootstrap",
         "db_health",
         "submit",
+        "execute",
         "status",
+        "proof",
     ]
     assert seen["show_instance_contract"] == [env]
-    assert seen["db_bootstrap"] == [env]
-    assert seen["db_health"] == [env]
+    assert seen["frontdoor_health"] == [
+        {"env": env, "bootstrap": True},
+        {"env": env, "bootstrap": False},
+    ]
+    assert seen["execute"] == [
+        {
+            "run_id": "run:workflow.native-self-hosted-smoke:operator-flow",
+            "env": env,
+        }
+    ]
+    assert seen["proof"] == [
+        {
+            "run_id": "run:workflow.native-self-hosted-smoke:operator-flow",
+            "env": env,
+        }
+    ]
     assert frontdoor_service.request_calls == [
         {
             "request_payload": request_payload,
@@ -258,6 +329,13 @@ def test_operator_flow_runs_one_repo_local_sequence_and_surfaces_run_inspection(
     assert result["native_instance"] == instance_contract
     assert result["bootstrap"]["schema_bootstrapped"] is True
     assert result["health"]["database_url"] == env["WORKFLOW_DATABASE_URL"]
+    assert result["execution"] == {
+        "current_state": "succeeded",
+        "terminal_reason": "runtime.workflow_succeeded",
+        "node_order": ["node_0", "node_1"],
+    }
+    assert result["proof"]["evidence"]["count"] == 18
+    assert result["proof"]["outbox"]["last_receipt_type"] == "workflow_completion_receipt"
     assert result["run"]["run_id"] == "run:workflow.native-self-hosted-smoke:operator-flow"
     assert result["run"]["admitted_definition_hash"] == request_payload["definition_hash"]
     assert result["run"]["admission_decision"] == {
@@ -266,6 +344,7 @@ def test_operator_flow_runs_one_repo_local_sequence_and_surfaces_run_inspection(
     assert result["run"]["inspection"]["terminal_reason"] == "runtime.workflow_succeeded"
     assert result["run"]["inspection"]["evidence_refs"] == [
         "workflow_event:workflow.native-self-hosted-smoke:1",
+        "receipt:workflow.native-self-hosted-smoke:18",
     ]
     assert "legacy-control" not in json.dumps(result, sort_keys=True)
 
@@ -303,7 +382,7 @@ def test_native_self_hosted_smoke_packages_the_checked_in_queue_contract(
         return {"status": "smoke_ok"}
 
     monkeypatch.setattr(
-        operator_read,
+        smoke_service,
         "load_native_self_hosted_smoke_contract",
         lambda: operator_read.NativeSelfHostedSmokeContract(
             queue_path="workflow_definitions:workflow_definition.native_self_hosted_smoke.v1",
@@ -311,8 +390,8 @@ def test_native_self_hosted_smoke_packages_the_checked_in_queue_contract(
             runtime_env=env,
         ),
     )
-    monkeypatch.setattr(operator_read, "_load_smoke_registry", _fake_load_smoke_registry)
-    monkeypatch.setattr(operator_read, "run_local_operator_flow", _fake_run_local_operator_flow)
+    monkeypatch.setattr(smoke_service, "_load_smoke_registry", _fake_load_smoke_registry)
+    monkeypatch.setattr(smoke_service, "run_local_operator_flow", _fake_run_local_operator_flow)
 
     result = operator_read.run_native_self_hosted_smoke()
 
@@ -349,21 +428,21 @@ def test_load_native_self_hosted_smoke_contract_fails_closed_on_missing_definiti
         seen["env"] = dict(env)
         return fake_conn
 
-    monkeypatch.setattr(operator_read, "connect_workflow_database", _connect_workflow_database)
+    monkeypatch.setattr(smoke_service, "connect_workflow_database", _connect_workflow_database)
 
     with pytest.raises(frontdoor.NativeFrontdoorError) as exc_info:
         operator_read.load_native_self_hosted_smoke_contract()
 
     assert exc_info.value.reason_code == "operator_flow.smoke_contract_missing"
     assert exc_info.value.details == {
-        "workflow_definition_id": operator_read._SMOKE_WORKFLOW_DEFINITION_ID,
+        "workflow_definition_id": smoke_service._SMOKE_WORKFLOW_DEFINITION_ID,
     }
     assert fake_conn.closed is True
     assert len(fake_conn.fetchrow_calls) == 1
     query, args = fake_conn.fetchrow_calls[0]
     assert query.count("workflow_definition_id = $1") == 1
     assert "workflow_id = $2" not in query
-    assert args == (operator_read._SMOKE_WORKFLOW_DEFINITION_ID,)
+    assert args == (smoke_service._SMOKE_WORKFLOW_DEFINITION_ID,)
     assert "env" in seen
     assert "WORKFLOW_DATABASE_URL" in seen["env"]
 
@@ -374,10 +453,10 @@ def test_load_native_self_hosted_smoke_contract_accepts_admitted_definition_row(
     queue_payload = _load_queue()
     smoke_contract = _native_smoke_contract(queue_payload)
     request_payload = _request_payload(smoke_contract)
-    runtime_env = operator_read._default_smoke_runtime_env()
+    runtime_env = smoke_service._default_smoke_runtime_env()
     fake_conn = _FakeSmokeDatabaseConnection(
         row={
-            "workflow_definition_id": operator_read._SMOKE_WORKFLOW_DEFINITION_ID,
+            "workflow_definition_id": smoke_service._SMOKE_WORKFLOW_DEFINITION_ID,
             "workflow_id": request_payload["workflow_id"],
             "request_envelope": json.dumps(request_payload),
         }
@@ -387,12 +466,12 @@ def test_load_native_self_hosted_smoke_contract_accepts_admitted_definition_row(
         assert env == runtime_env
         return fake_conn
 
-    monkeypatch.setattr(operator_read, "connect_workflow_database", _connect_workflow_database)
+    monkeypatch.setattr(smoke_service, "connect_workflow_database", _connect_workflow_database)
 
     contract = operator_read.load_native_self_hosted_smoke_contract()
 
     assert contract.queue_path == (
-        f"workflow_definitions:{operator_read._SMOKE_WORKFLOW_DEFINITION_ID}"
+        f"workflow_definitions:{smoke_service._SMOKE_WORKFLOW_DEFINITION_ID}"
     )
     assert contract.request_payload == request_payload
     assert contract.runtime_env == runtime_env
@@ -400,7 +479,7 @@ def test_load_native_self_hosted_smoke_contract_accepts_admitted_definition_row(
     assert len(fake_conn.fetchrow_calls) == 1
     query, args = fake_conn.fetchrow_calls[0]
     assert "status IN ('active', 'admitted')" in query
-    assert args == (operator_read._SMOKE_WORKFLOW_DEFINITION_ID,)
+    assert args == (smoke_service._SMOKE_WORKFLOW_DEFINITION_ID,)
 
 
 def test_operator_flow_requires_explicit_authority_env(
@@ -450,8 +529,7 @@ def test_operator_flow_fails_closed_when_native_instance_authority_is_missing(
         native_instance_contract=_native_instance_contract(env),
     )
     seen = {
-        "db_bootstrap": [],
-        "db_health": [],
+        "frontdoor_health": [],
     }
 
     def _missing_instance(*, env=None):
@@ -462,14 +540,11 @@ def test_operator_flow_fails_closed_when_native_instance_authority_is_missing(
 
     monkeypatch.setattr(native_ops, "show_instance_contract", _missing_instance)
     monkeypatch.setattr(
-        native_ops,
-        "db_bootstrap",
-        lambda *, env=None: seen["db_bootstrap"].append(dict(env or {})),
-    )
-    monkeypatch.setattr(
-        native_ops,
-        "db_health",
-        lambda *, env=None: seen["db_health"].append(dict(env or {})),
+        frontdoor,
+        "health",
+        lambda *, env=None, bootstrap=False: seen["frontdoor_health"].append(
+            {"env": dict(env or {}), "bootstrap": bootstrap}
+        ),
     )
 
     with pytest.raises(NativeInstanceResolutionError):
@@ -480,8 +555,7 @@ def test_operator_flow_fails_closed_when_native_instance_authority_is_missing(
             frontdoor_service=frontdoor_service,
         )
 
-    assert seen["db_bootstrap"] == []
-    assert seen["db_health"] == []
+    assert seen["frontdoor_health"] == []
     assert frontdoor_service.request_calls == []
     assert frontdoor_service.status_calls == []
 
@@ -500,10 +574,9 @@ def test_operator_flow_blocks_submit_when_bootstrap_does_not_prove_database_reac
         status_calls=[],
         native_instance_contract=instance_contract,
     )
-    seen: dict[str, list[dict[str, str]]] = {
+    seen: dict[str, list[dict[str, str]] | list[dict[str, object]]] = {
         "show_instance_contract": [],
-        "db_bootstrap": [],
-        "db_health": [],
+        "frontdoor_health": [],
     }
 
     monkeypatch.setattr(
@@ -512,23 +585,20 @@ def test_operator_flow_blocks_submit_when_bootstrap_does_not_prove_database_reac
         lambda *, env=None: seen["show_instance_contract"].append(dict(env or {})) or instance_contract,
     )
     monkeypatch.setattr(
-        native_ops,
-        "db_bootstrap",
-        lambda *, env=None: seen["db_bootstrap"].append(dict(env or {}))
+        frontdoor,
+        "health",
+        lambda *, env=None, bootstrap=False: seen["frontdoor_health"].append(
+            {
+                "env": dict(env or {}),
+                "bootstrap": bootstrap,
+            }
+        )
         or {
-            "database_url": env["WORKFLOW_DATABASE_URL"],
-            "database_reachable": False,
-            "schema_bootstrapped": False,
-        },
-    )
-    monkeypatch.setattr(
-        native_ops,
-        "db_health",
-        lambda *, env=None: seen["db_health"].append(dict(env or {}))
-        or {
-            "database_url": env["WORKFLOW_DATABASE_URL"],
-            "database_reachable": True,
-            "schema_bootstrapped": True,
+            "database": {
+                "database_url": env["WORKFLOW_DATABASE_URL"],
+                "database_reachable": not bootstrap,
+                "schema_bootstrapped": not bootstrap,
+            }
         },
     )
 
@@ -543,8 +613,10 @@ def test_operator_flow_blocks_submit_when_bootstrap_does_not_prove_database_reac
     assert exc_info.value.reason_code == "operator_flow.database_unreachable"
     assert exc_info.value.details["field"] == "bootstrap"
     assert seen["show_instance_contract"] == [env]
-    assert seen["db_bootstrap"] == [env]
-    assert seen["db_health"] == [env]
+    assert seen["frontdoor_health"] == [
+        {"env": env, "bootstrap": True},
+        {"env": env, "bootstrap": False},
+    ]
     assert frontdoor_service.request_calls == []
     assert frontdoor_service.status_calls == []
 
@@ -563,10 +635,9 @@ def test_operator_flow_blocks_submit_when_health_reports_schema_not_bootstrapped
         status_calls=[],
         native_instance_contract=instance_contract,
     )
-    seen: dict[str, list[dict[str, str]]] = {
+    seen: dict[str, list[dict[str, str]] | list[dict[str, object]]] = {
         "show_instance_contract": [],
-        "db_bootstrap": [],
-        "db_health": [],
+        "frontdoor_health": [],
     }
 
     monkeypatch.setattr(
@@ -575,23 +646,20 @@ def test_operator_flow_blocks_submit_when_health_reports_schema_not_bootstrapped
         lambda *, env=None: seen["show_instance_contract"].append(dict(env or {})) or instance_contract,
     )
     monkeypatch.setattr(
-        native_ops,
-        "db_bootstrap",
-        lambda *, env=None: seen["db_bootstrap"].append(dict(env or {}))
+        frontdoor,
+        "health",
+        lambda *, env=None, bootstrap=False: seen["frontdoor_health"].append(
+            {
+                "env": dict(env or {}),
+                "bootstrap": bootstrap,
+            }
+        )
         or {
-            "database_url": env["WORKFLOW_DATABASE_URL"],
-            "database_reachable": True,
-            "schema_bootstrapped": True,
-        },
-    )
-    monkeypatch.setattr(
-        native_ops,
-        "db_health",
-        lambda *, env=None: seen["db_health"].append(dict(env or {}))
-        or {
-            "database_url": env["WORKFLOW_DATABASE_URL"],
-            "database_reachable": True,
-            "schema_bootstrapped": False,
+            "database": {
+                "database_url": env["WORKFLOW_DATABASE_URL"],
+                "database_reachable": True,
+                "schema_bootstrapped": bootstrap,
+            }
         },
     )
 
@@ -606,7 +674,9 @@ def test_operator_flow_blocks_submit_when_health_reports_schema_not_bootstrapped
     assert exc_info.value.reason_code == "operator_flow.schema_not_bootstrapped"
     assert exc_info.value.details["field"] == "health"
     assert seen["show_instance_contract"] == [env]
-    assert seen["db_bootstrap"] == [env]
-    assert seen["db_health"] == [env]
+    assert seen["frontdoor_health"] == [
+        {"env": env, "bootstrap": True},
+        {"env": env, "bootstrap": False},
+    ]
     assert frontdoor_service.request_calls == []
     assert frontdoor_service.status_calls == []

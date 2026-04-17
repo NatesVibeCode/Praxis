@@ -1,0 +1,107 @@
+BEGIN;
+
+INSERT INTO operation_catalog_registry (
+    operation_ref,
+    operation_name,
+    source_kind,
+    operation_kind,
+    http_method,
+    http_path,
+    input_model_ref,
+    handler_ref,
+    authority_ref,
+    projection_ref,
+    posture,
+    idempotency_policy,
+    enabled,
+    binding_revision,
+    decision_ref
+)
+VALUES
+    (
+        'semantic-assertion-register-predicate',
+        'semantic_assertions.register_predicate',
+        'operation_command',
+        'command',
+        'POST',
+        '/api/semantic/predicate',
+        'runtime.operations.commands.semantic_assertions.RegisterSemanticPredicateCommand',
+        'runtime.operations.commands.semantic_assertions.handle_register_semantic_predicate',
+        'authority.semantic_predicates',
+        NULL,
+        NULL,
+        NULL,
+        TRUE,
+        'binding.operation_catalog_registry.semantic_assertions.20260416',
+        'decision.operation_catalog_registry.semantic_assertions.20260416'
+    ),
+    (
+        'semantic-assertion-record',
+        'semantic_assertions.record',
+        'operation_command',
+        'command',
+        'POST',
+        '/api/semantic/assertion',
+        'runtime.operations.commands.semantic_assertions.RecordSemanticAssertionCommand',
+        'runtime.operations.commands.semantic_assertions.handle_record_semantic_assertion',
+        'authority.semantic_assertions',
+        NULL,
+        NULL,
+        NULL,
+        TRUE,
+        'binding.operation_catalog_registry.semantic_assertions.20260416',
+        'decision.operation_catalog_registry.semantic_assertions.20260416'
+    ),
+    (
+        'semantic-assertion-retract',
+        'semantic_assertions.retract',
+        'operation_command',
+        'command',
+        'POST',
+        '/api/semantic/assertion/retract',
+        'runtime.operations.commands.semantic_assertions.RetractSemanticAssertionCommand',
+        'runtime.operations.commands.semantic_assertions.handle_retract_semantic_assertion',
+        'authority.semantic_assertions',
+        NULL,
+        NULL,
+        NULL,
+        TRUE,
+        'binding.operation_catalog_registry.semantic_assertions.20260416',
+        'decision.operation_catalog_registry.semantic_assertions.20260416'
+    ),
+    (
+        'semantic-assertion-list',
+        'semantic_assertions.list',
+        'operation_query',
+        'query',
+        'GET',
+        '/api/semantic/assertions',
+        'runtime.operations.queries.semantic_assertions.QuerySemanticAssertions',
+        'runtime.operations.queries.semantic_assertions.handle_query_semantic_assertions',
+        'authority.semantic_assertions',
+        'projection.semantic_current_assertions',
+        NULL,
+        NULL,
+        TRUE,
+        'binding.operation_catalog_registry.semantic_assertions.20260416',
+        'decision.operation_catalog_registry.semantic_assertions.20260416'
+    )
+ON CONFLICT (operation_ref) DO UPDATE
+SET
+    operation_name = EXCLUDED.operation_name,
+    source_kind = EXCLUDED.source_kind,
+    operation_kind = EXCLUDED.operation_kind,
+    http_method = EXCLUDED.http_method,
+    http_path = EXCLUDED.http_path,
+    input_model_ref = EXCLUDED.input_model_ref,
+    handler_ref = EXCLUDED.handler_ref,
+    authority_ref = EXCLUDED.authority_ref,
+    projection_ref = EXCLUDED.projection_ref,
+    posture = EXCLUDED.posture,
+    idempotency_policy = EXCLUDED.idempotency_policy,
+    enabled = EXCLUDED.enabled,
+    binding_revision = EXCLUDED.binding_revision,
+    decision_ref = EXCLUDED.decision_ref,
+    updated_at = now();
+
+COMMIT;

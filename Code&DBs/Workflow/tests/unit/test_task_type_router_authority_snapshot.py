@@ -93,7 +93,8 @@ class _CountingConn:
         raise AssertionError(sql)
 
 
-def test_router_reuses_static_authority_snapshot_across_construction() -> None:
+def test_router_reuses_static_authority_snapshot_across_construction(monkeypatch) -> None:
+    monkeypatch.setattr(_mod, "default_llm_adapter_type", lambda: "cli")
     TaskTypeRouter.invalidate_all_authority_snapshots()
     conn = _CountingConn()
 
@@ -109,7 +110,8 @@ def test_router_reuses_static_authority_snapshot_across_construction() -> None:
     }
 
 
-def test_router_authority_snapshot_invalidation_forces_reload() -> None:
+def test_router_authority_snapshot_invalidation_forces_reload(monkeypatch) -> None:
+    monkeypatch.setattr(_mod, "default_llm_adapter_type", lambda: "cli")
     TaskTypeRouter.invalidate_all_authority_snapshots()
     conn = _CountingConn()
 

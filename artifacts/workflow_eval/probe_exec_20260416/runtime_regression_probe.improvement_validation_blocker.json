@@ -1,24 +1,24 @@
 {
-  "proof_class": "observed_blocker",
+  "proof_class": "resolved_blocker",
   "scope": "post_review_validation_of_improved_probe_spec",
   "commands": [
     "praxis workflow validate /Users/nate/Praxis/artifacts/workflow_eval/probe_exec_20260416/runtime_regression_probe.queue.json",
     "praxis workflow tools call praxis_workflow --input-json '{\"action\":\"preview\",\"spec_path\":\"/Users/nate/Praxis/artifacts/workflow_eval/probe_exec_20260416/runtime_regression_probe.queue.json\"}' --yes"
   ],
-  "blocked": true,
-  "failure_summary": "The Praxis CLI now fails during import before validate/preview can load the spec because claim lifecycle transition authority initialization hits migration-policy drift.",
+  "blocked": false,
+  "failure_summary": "The migration-authority drift blocker no longer reproduces. Both front doors now reach runtime DB authority resolution and fail later because WORKFLOW_DATABASE_URL is not configured in /Users/nate/Praxis/.env.",
   "error_chain": [
-    "storage.migrations.WorkflowMigrationError: generated workflow migration policy drifted from on-disk numbered SQL files",
-    "runtime.domain.RuntimeBoundaryError: claim lifecycle transition authority migration is unavailable"
+    "storage.postgres.validators.PostgresConfigurationError: WORKFLOW_DATABASE_URL must be set in process env or declared in /Users/nate/Praxis/.env",
+    "postgres.config_missing"
   ],
   "bug_submission": {
-    "status": "blocked",
-    "reason": "The same CLI import failure prevents the canonical praxis_bugs filing surface from loading, so a real bug row could not be created through the front door in this session.",
+    "status": "not_needed",
+    "reason": "The original migration-drift blocker is resolved in the current tree. Any remaining failure on these commands is now an environment configuration issue, not the claim lifecycle migration authority seam.",
     "proposed_bug": {
       "title": "claim lifecycle migration policy drift blocks workflow validate and preview before spec load",
       "severity": "P1",
       "category": "RUNTIME",
-      "description": "After the probe cleanup landed, both `praxis workflow validate` and `praxis_workflow` preview failed before loading `/Users/nate/Praxis/artifacts/workflow_eval/probe_exec_20260416/runtime_regression_probe.queue.json`. The CLI import path dies while initializing `claim_state_machine` because `workflow_migrations_root()` reports `generated workflow migration policy drifted from on-disk numbered SQL files`, which is then raised as `RuntimeBoundaryError: claim lifecycle transition authority migration is unavailable`. Impact: the canonical read-side validation and preview front doors are blocked for all workflow specs until migration-policy authority is repaired."
+      "description": "Historical record only. On April 16, 2026 this blocker no longer reproduced: the claim lifecycle runtime loaded canonical migration statements successfully and the validate/preview front doors progressed past import-time migration authority checks. Current failures on those commands are caused by missing WORKFLOW_DATABASE_URL configuration, not migration-policy drift."
     }
   }
 }

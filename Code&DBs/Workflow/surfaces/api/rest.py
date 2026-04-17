@@ -16,7 +16,6 @@ The module-level ``app`` object is the canonical ASGI app.
 """
 
 from __future__ import annotations
-
 from collections import Counter
 from contextlib import asynccontextmanager
 import dataclasses
@@ -32,6 +31,7 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request, Security
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
@@ -41,10 +41,11 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError
 
 from adapters.provider_registry import default_llm_adapter_type, default_provider_slug
+from adapters.provider_transport import BUILTIN_PROVIDER_PROFILES, builtin_default_provider_slug
 from contracts.domain import validate_workflow_request
 from runtime.native_authority import default_native_authority_refs
 from runtime.operation_catalog_bindings import resolve_http_operation_binding
-from runtime.operation_catalog_gateway import execute_operation_binding
+from runtime.operation_catalog_gateway import aexecute_operation_binding
 from runtime.workflow._status import summarize_run_health
 from runtime.workflow_graph_compiler import compile_graph_workflow_request, spec_uses_graph_runtime
 from surfaces.api.catalog_authority import build_catalog_payload
@@ -407,10 +408,33 @@ def _boot_shared_subsystems(target_app: FastAPI) -> _Subsystems | None:
     return subsystems
 
 
+def _json_response_payload(value: Any) -> Any:
+    """Preserve repo-local UTC timestamp shape after generic JSON encoding."""
+    if isinstance(value, datetime):
+        text = value.isoformat()
+        return text[:-6] + "Z" if text.endswith("+00:00") else text
+    if isinstance(value, str) and value.endswith("+00:00") and "T" in value:
+        try:
+            datetime.fromisoformat(value)
+        except ValueError:
+            return value
+        return value[:-6] + "Z"
+    if isinstance(value, dict):
+        return {key: _json_response_payload(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_response_payload(item) for item in value]
+    if isinstance(value, tuple):
+        return [_json_response_payload(item) for item in value]
+    return value
+
+
 @asynccontextmanager
 async def _app_lifespan(target_app: FastAPI):
     _boot_shared_subsystems(target_app)
-    mount_capabilities(target_app)
+    try:
+        mount_capabilities(target_app)
+    except Exception:
+        logger.exception("capability mount failed during startup; API continues in degraded mode")
     yield
 
 
@@ -458,12 +482,12 @@ def _create_capability_endpoint(
             command_data.update(body)
 
         try:
-            result = execute_operation_binding(
+            result = await aexecute_operation_binding(
                 binding,
                 payload=command_data,
                 subsystems=subsystems,
             )
-            return JSONResponse(result)
+            return JSONResponse(_json_response_payload(jsonable_encoder(result)))
         except Exception as e:
             if isinstance(e, (RequestValidationError, ValidationError)):
                 return JSONResponse({"error": f"Validation Error: {e}"}, status_code=400)
@@ -715,7 +739,12 @@ def _default_runtime_profile_ref() -> str:
 
 
 def _default_workflow_provider_slug() -> str:
-    return default_provider_slug()
+    try:
+        return default_provider_slug()
+    except Exception:
+        return builtin_default_provider_slug(
+            {profile.provider_slug: profile for profile in BUILTIN_PROVIDER_PROFILES}
+        )
 
 
 def _default_workflow_adapter_type() -> str:
@@ -1256,7 +1285,10 @@ def _launcher_index_response() -> FileResponse | JSONResponse:
             content={
                 "ok": False,
                 "error": "launcher_build_missing",
-                "detail": "Launcher build missing. Run ./scripts/praxis launch",
+                "detail": (
+                    "Launcher build missing. Rebuild Code&DBs/Workflow/surfaces/app "
+                    "with `npm run build`."
+                ),
                 "launch_url": "http://127.0.0.1:8420/app",
             },
         )
@@ -2176,27 +2208,7 @@ async def files_path_get(request: Request, rest_of_path: str) -> Response:
 async def files_path_delete(request: Request, rest_of_path: str) -> Response:
     return await _route_to_handler(request)
 
-# -- Object types & objects --
-@app.get("/api/object-types")
-async def object_types_get(request: Request) -> Response:
-    return await _route_to_handler(request)
-
-@app.post("/api/object-types")
-async def object_types_post(request: Request) -> Response:
-    return await _route_to_handler(request)
-
-@app.get("/api/object-types/{rest_of_path:path}")
-async def object_types_path_get(request: Request, rest_of_path: str) -> Response:
-    return await _route_to_handler(request)
-
-@app.put("/api/object-types/{rest_of_path:path}")
-async def object_types_path_put(request: Request, rest_of_path: str) -> Response:
-    return await _route_to_handler(request)
-
-@app.delete("/api/object-types/{rest_of_path:path}")
-async def object_types_path_delete(request: Request, rest_of_path: str) -> Response:
-    return await _route_to_handler(request)
-
+# -- Objects --
 @app.get("/api/objects")
 async def objects_get(request: Request) -> Response:
     return await _route_to_handler(request)
@@ -3210,28 +3222,6 @@ async def catalog_review_decisions_post(request: Request) -> Response:
 @app.get("/", response_model=None)
 def root_redirect() -> Response:
     return RedirectResponse(url="/app")
-
-
-def _legacy_ui_redirect(path: str = "") -> Response:
-    normalized_path = path.strip("/")
-    target = f"/app/{normalized_path}" if normalized_path else "/app"
-    return RedirectResponse(url=target)
-
-
-@app.get("/ui", response_model=None)
-def legacy_ui_redirect_root() -> Response:
-    return _legacy_ui_redirect()
-
-
-@app.get("/ui/", response_model=None)
-def legacy_ui_redirect_root_slash() -> Response:
-    return _legacy_ui_redirect()
-
-
-@app.get("/ui/{path:path}", response_model=None)
-def legacy_ui_redirect_path(path: str = "") -> Response:
-    return _legacy_ui_redirect(path)
-
 
 @app.get("/app", response_model=None)
 def launcher_app_root() -> Any:

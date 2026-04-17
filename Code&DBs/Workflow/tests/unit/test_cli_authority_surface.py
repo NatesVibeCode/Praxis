@@ -77,12 +77,17 @@ def test_registry_upsert_requires_confirmation() -> None:
 
 
 def test_object_type_upsert_calls_runtime_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(authority_commands, "_sync_conn", lambda: object())
-    monkeypatch.setattr(
-        authority_commands,
-        "upsert_object_type",
-        lambda conn, **kwargs: {"type_id": kwargs["type_id"], "name": kwargs["name"]},
-    )
+    captured: dict[str, object] = {}
+
+    def _execute(*, env, operation_name: str, payload):
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {
+            "type": {"type_id": payload["type_id"], "name": payload["name"]},
+            "operation_receipt": {"operation_name": operation_name},
+        }
+
+    monkeypatch.setattr(authority_commands.operation_catalog_gateway, "execute_operation_from_env", _execute)
     stdout = StringIO()
 
     assert (
@@ -105,15 +110,23 @@ def test_object_type_upsert_calls_runtime_boundary(monkeypatch: pytest.MonkeyPat
     )
     payload = json.loads(stdout.getvalue())
     assert payload["type"]["type_id"] == "ticket"
+    assert captured["operation_name"] == "object_schema.type_upsert_by_id"
+    assert captured["payload"]["fields"] == []
 
 
 def test_object_field_upsert_calls_runtime_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(authority_commands, "_sync_conn", lambda: object())
-    monkeypatch.setattr(
-        authority_commands,
-        "upsert_object_field",
-        lambda conn, **kwargs: {"type_id": kwargs["type_id"], "field": {"name": kwargs["field_name"], "type": kwargs["field_kind"]}},
-    )
+    captured: dict[str, object] = {}
+
+    def _execute(*, env, operation_name: str, payload):
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {
+            "type_id": payload["type_id"],
+            "field": {"name": payload["field_name"], "type": payload["field_kind"]},
+            "operation_receipt": {"operation_name": operation_name},
+        }
+
+    monkeypatch.setattr(authority_commands.operation_catalog_gateway, "execute_operation_from_env", _execute)
     stdout = StringIO()
 
     assert (
@@ -138,6 +151,8 @@ def test_object_field_upsert_calls_runtime_boundary(monkeypatch: pytest.MonkeyPa
     )
     payload = json.loads(stdout.getvalue())
     assert payload["field"]["name"] == "status"
+    assert captured["operation_name"] == "object_schema.field_upsert"
+    assert captured["payload"]["options"] == ["open", "closed"]
 
 
 def test_object_upsert_routes_to_create_when_object_id_missing(monkeypatch: pytest.MonkeyPatch) -> None:

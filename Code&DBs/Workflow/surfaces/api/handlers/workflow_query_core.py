@@ -663,6 +663,33 @@ def handle_legacy_query(subs: Any, body: dict[str, Any]) -> dict | None:
             {"view": "status", "run_id": _extract_run_id(question) or body.get("run_id")},
         )
 
+    if _matches(question, ["operator graph", "semantic graph", "cross-domain graph"]):
+        return handle_operator_view(
+            subs,
+            {
+                "view": "operator_graph",
+                "as_of": body.get("as_of"),
+            },
+        )
+
+    if _matches(question, ["semantic assertions", "semantic assertion", "semantic links", "operator semantics"]):
+        return handle_operator_view(
+            subs,
+            {
+                "view": "semantics",
+                "predicate_slug": body.get("predicate_slug"),
+                "subject_kind": body.get("subject_kind"),
+                "subject_ref": body.get("subject_ref"),
+                "object_kind": body.get("object_kind"),
+                "object_ref": body.get("object_ref"),
+                "source_kind": body.get("source_kind"),
+                "source_ref": body.get("source_ref"),
+                "active_only": body.get("active_only", True),
+                "as_of": body.get("as_of"),
+                "limit": body.get("limit", 50),
+            },
+        )
+
     if _matches(question, ["scoreboard", "cutover"]):
         return handle_operator_view(
             subs,
@@ -1284,7 +1311,11 @@ def handle_operator_view(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
     if view == "replay_ready_bugs":
         bt = subs.get_bug_tracker()
         limit = max(1, int(body.get("limit", 50) or 50))
-        refresh_backfill = bool(body.get("refresh_backfill", True))
+        refresh_backfill = bool(body.get("refresh_backfill", False))
+        if refresh_backfill:
+            raise _ClientError(
+                "replay_ready_bugs is read-only; use praxis workflow bugs backfill_replay for provenance maintenance"
+            )
         def _parse_status(_mod: Any, raw: object):
             if raw is None:
                 return None
@@ -1312,14 +1343,6 @@ def handle_operator_view(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
                     "category must be one of SCOPE, VERIFY, IMPORT, WIRING, ARCHITECTURE, RUNTIME, TEST, OTHER"
                 )
             return category
-        maintenance = None
-        if refresh_backfill:
-            maintenance = _serialize(
-                bt.bulk_backfill_replay_provenance(
-                    open_only=True,
-                    receipt_limit=1,
-                )
-            )
         bugs_result = handle_bugs(
             subs,
             {
@@ -1339,16 +1362,99 @@ def handle_operator_view(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
                 "runtime": "sync_postgres",
                 "driver": "postgres",
             },
-            "maintenance": maintenance,
             "bugs": bugs_result.get("bugs", []),
             "count": bugs_result.get("count", 0),
             "returned_count": bugs_result.get("returned_count", 0),
             "limit": limit,
-            "refresh_backfill": refresh_backfill,
         }
+    if view == "semantics":
+        from runtime.operation_catalog_gateway import execute_operation_from_subsystems
+
+        limit = max(1, int(body.get("limit", 50) or 50))
+        raw_as_of = body.get("as_of")
+        as_of = _parse_datetime(raw_as_of)
+        if raw_as_of is not None and as_of is None:
+            raise _ClientError("as_of must be a valid ISO-8601 datetime when provided")
+        semantics_result = execute_operation_from_subsystems(
+            subs,
+            operation_name="semantic_assertions.list",
+            payload={
+                "predicate_slug": _optional_text(body.get("predicate_slug")),
+                "subject_kind": _optional_text(body.get("subject_kind")),
+                "subject_ref": _optional_text(body.get("subject_ref")),
+                "object_kind": _optional_text(body.get("object_kind")),
+                "object_ref": _optional_text(body.get("object_ref")),
+                "source_kind": _optional_text(body.get("source_kind")),
+                "source_ref": _optional_text(body.get("source_ref")),
+                "active_only": bool(body.get("active_only", True)),
+                "as_of": as_of,
+                "limit": limit,
+            },
+        )
+        rows = semantics_result.get("semantic_assertions")
+        returned_count = len(rows) if isinstance(rows, list) else 0
+        return {
+            "view": view,
+            "requires": {
+                "runtime": "sync_postgres",
+                "driver": "postgres",
+            },
+            "returned_count": returned_count,
+            **semantics_result,
+        }
+    if view == "operator_graph":
+        from observability.operator_topology import load_operator_graph_projection
+        from storage.postgres import connect_workflow_database
+        from surfaces.api._operator_helpers import _run_async
+
+        raw_as_of = body.get("as_of")
+        as_of = _parse_datetime(raw_as_of)
+        if raw_as_of is not None and as_of is None:
+            raise _ClientError("as_of must be a valid ISO-8601 datetime when provided")
+        if as_of is None:
+            as_of = datetime.now(timezone.utc)
+        postgres_env = getattr(subs, "_postgres_env", None)
+        workflow_env = None
+        if callable(postgres_env):
+            workflow_env = dict(postgres_env() or {})
+
+        async def _load_operator_graph() -> dict[str, Any]:
+            conn = await connect_workflow_database(env=workflow_env)
+            try:
+                read_model = await load_operator_graph_projection(conn, as_of=as_of)
+            finally:
+                await conn.close()
+            return {
+                "view": view,
+                "requires": {
+                    "runtime": "sync_postgres",
+                    "driver": "postgres",
+                },
+                "payload": _operator_view_payload(read_model),
+            }
+
+        return _run_async(_load_operator_graph())
     run_id = _optional_text(body.get("run_id"))
-    view_options = ("status", "scoreboard", "graph", "lineage", "replay_ready_bugs", "issue_backlog")
-    if view not in {"status", "scoreboard", "graph", "lineage", "replay_ready_bugs", "issue_backlog"}:
+    view_options = (
+        "status",
+        "scoreboard",
+        "graph",
+        "operator_graph",
+        "semantics",
+        "lineage",
+        "replay_ready_bugs",
+        "issue_backlog",
+    )
+    if view not in {
+        "status",
+        "scoreboard",
+        "graph",
+        "operator_graph",
+        "semantics",
+        "lineage",
+        "replay_ready_bugs",
+        "issue_backlog",
+    }:
         raise _ClientError(f"Unknown view: {view}. Options: {', '.join(view_options)}")
     if run_id is None:
         raise _ClientError(f"run_id is required for operator view '{view}'")

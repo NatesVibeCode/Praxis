@@ -447,6 +447,16 @@ def _missing_roadmap_embedding_column_error(error: BaseException) -> bool:
     return "does not exist" in message or "undefined column" in message
 
 
+def _missing_semantic_assertions_table_error(error: BaseException) -> bool:
+    sqlstate = str(getattr(error, "sqlstate", "") or "").strip()
+    if sqlstate and sqlstate != "42P01":
+        return False
+    message = str(error).lower()
+    return "semantic_assertions" in message and (
+        "does not exist" in message or "undefined table" in message
+    )
+
+
 def _workflow_run_failure_category(row: Mapping[str, Any]) -> str:
     pieces = [
         str(row.get("terminal_reason_code") or "").strip().lower(),
@@ -715,7 +725,7 @@ class OperatorRoadmapDependencyRecord:
 
 @dataclass(frozen=True, slots=True)
 class OperatorRoadmapSemanticNeighborRecord:
-    """Semantically close roadmap item discovered from embedding similarity."""
+    """Related roadmap item discovered from semantic authority or embedding fallback."""
 
     roadmap_item_id: str
     title: str
@@ -723,6 +733,7 @@ class OperatorRoadmapSemanticNeighborRecord:
     priority: str
     similarity: float
     match_kind: str = "embedding"
+    shared_signal_count: int = 0
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -732,6 +743,7 @@ class OperatorRoadmapSemanticNeighborRecord:
             "priority": self.priority,
             "similarity": round(self.similarity, 4),
             "match_kind": self.match_kind,
+            "shared_signal_count": self.shared_signal_count,
         }
 
 
@@ -1978,12 +1990,113 @@ class NativeOperatorQueryFrontdoor:
         self,
         *,
         conn: _Connection,
+        as_of: datetime,
         root_roadmap_item_id: str,
         subtree_roadmap_item_ids: tuple[str, ...],
         limit: int,
     ) -> tuple[tuple[OperatorRoadmapSemanticNeighborRecord, ...], str]:
         if limit <= 0:
             return (), "roadmap.semantic_neighbors.disabled"
+
+        try:
+            semantic_rows = await conn.fetch(
+                """
+                WITH subtree_assertions AS (
+                    SELECT
+                        predicate_slug,
+                        CASE
+                            WHEN subject_kind = 'roadmap_item' THEN object_kind
+                            ELSE subject_kind
+                        END AS shared_kind,
+                        CASE
+                            WHEN subject_kind = 'roadmap_item' THEN object_ref
+                            ELSE subject_ref
+                        END AS shared_ref
+                    FROM semantic_assertions
+                    WHERE valid_from <= $1
+                      AND (valid_to IS NULL OR valid_to > $1)
+                      AND assertion_status <> 'retracted'
+                      AND (
+                            (subject_kind = 'roadmap_item' AND subject_ref = ANY($2::text[]) AND object_kind <> 'roadmap_item')
+                         OR (object_kind = 'roadmap_item' AND object_ref = ANY($2::text[]) AND subject_kind <> 'roadmap_item')
+                      )
+                ),
+                candidate_assertions AS (
+                    SELECT
+                        CASE
+                            WHEN subject_kind = 'roadmap_item' THEN subject_ref
+                            ELSE object_ref
+                        END AS candidate_roadmap_item_id,
+                        predicate_slug,
+                        CASE
+                            WHEN subject_kind = 'roadmap_item' THEN object_kind
+                            ELSE subject_kind
+                        END AS shared_kind,
+                        CASE
+                            WHEN subject_kind = 'roadmap_item' THEN object_ref
+                            ELSE subject_ref
+                        END AS shared_ref
+                    FROM semantic_assertions
+                    WHERE valid_from <= $1
+                      AND (valid_to IS NULL OR valid_to > $1)
+                      AND assertion_status <> 'retracted'
+                      AND (
+                            (subject_kind = 'roadmap_item' AND NOT (subject_ref = ANY($2::text[])) AND object_kind <> 'roadmap_item')
+                         OR (object_kind = 'roadmap_item' AND NOT (object_ref = ANY($2::text[])) AND subject_kind <> 'roadmap_item')
+                      )
+                ),
+                semantic_matches AS (
+                    SELECT
+                        ca.candidate_roadmap_item_id AS roadmap_item_id,
+                        COUNT(*)::int AS shared_signal_count
+                    FROM candidate_assertions ca
+                    INNER JOIN subtree_assertions sa
+                        ON sa.predicate_slug = ca.predicate_slug
+                       AND sa.shared_kind = ca.shared_kind
+                       AND sa.shared_ref = ca.shared_ref
+                    GROUP BY ca.candidate_roadmap_item_id
+                )
+                SELECT
+                    ri.roadmap_item_id,
+                    ri.title,
+                    ri.status,
+                    ri.priority,
+                    semantic_matches.shared_signal_count
+                FROM semantic_matches
+                INNER JOIN roadmap_items ri
+                    ON ri.roadmap_item_id = semantic_matches.roadmap_item_id
+                WHERE (ri.status IS NULL OR lower(ri.status) NOT IN ('completed', 'done', 'closed'))
+                ORDER BY semantic_matches.shared_signal_count DESC, ri.updated_at DESC, ri.roadmap_item_id
+                LIMIT $3
+                """,
+                as_of,
+                list(subtree_roadmap_item_ids),
+                limit,
+            )
+        except asyncpg.PostgresError as exc:
+            if not _missing_semantic_assertions_table_error(exc):
+                raise NativeOperatorQueryError(
+                    "operator_query.read_failed",
+                    "failed to read roadmap semantic neighbors from semantic assertions",
+                    details={"sqlstate": getattr(exc, "sqlstate", None)},
+                ) from exc
+            semantic_rows = ()
+
+        semantic_neighbors = tuple(
+            OperatorRoadmapSemanticNeighborRecord(
+                roadmap_item_id=_require_text(row.get("roadmap_item_id"), field_name="roadmap_item_id"),
+                title=_require_text(row.get("title"), field_name="title"),
+                status=_require_text(row.get("status"), field_name="status"),
+                priority=_require_text(row.get("priority"), field_name="priority"),
+                similarity=1.0,
+                match_kind="semantic_assertion",
+                shared_signal_count=int(row.get("shared_signal_count") or 0),
+            )
+            for row in semantic_rows
+        )
+        if semantic_neighbors:
+            return semantic_neighbors, "roadmap.semantic_neighbors.semantic_assertions"
+
         try:
             rows = await conn.fetch(
                 """
@@ -2028,6 +2141,7 @@ class NativeOperatorQueryFrontdoor:
                 status=_require_text(row.get("status"), field_name="status"),
                 priority=_require_text(row.get("priority"), field_name="priority"),
                 similarity=float(row.get("similarity") or 0.0),
+                match_kind="embedding",
             )
             for row in rows
         )
@@ -2700,7 +2814,7 @@ class NativeOperatorQueryFrontdoor:
             )
             bugs = await self._fetch_bug_records(
                 conn=conn,
-                bug_ids=source_bug_ids or None,
+                bug_ids=source_bug_ids,
             )
             bug_evidence_links = await self._fetch_bug_evidence_links(
                 conn=conn,
@@ -2766,6 +2880,7 @@ class NativeOperatorQueryFrontdoor:
             semantic_neighbors, semantic_neighbors_reason_code = (
                 await self._fetch_roadmap_semantic_neighbors(
                     conn=conn,
+                    as_of=as_of,
                     root_roadmap_item_id=root_roadmap_item_id,
                     subtree_roadmap_item_ids=tuple(
                         record.roadmap_item_id for record in roadmap_items

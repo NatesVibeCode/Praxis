@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from surfaces.mcp.tools import runtime_context
 
 
-def test_dag_context_shard_summary_reads_current_workflow_session(monkeypatch) -> None:
+def test_praxis_context_shard_summary_reads_current_workflow_session(monkeypatch) -> None:
     monkeypatch.setattr(
         runtime_context,
         "get_current_workflow_mcp_context",
@@ -35,7 +35,7 @@ def test_dag_context_shard_summary_reads_current_workflow_session(monkeypatch) -
         },
     )
 
-    payload = runtime_context.tool_dag_context_shard({"view": "summary"})
+    payload = runtime_context.tool_praxis_context_shard({"view": "summary", "include_bundle": True})
 
     assert payload["run_id"] == "run.alpha"
     assert payload["job_label"] == "job-alpha"

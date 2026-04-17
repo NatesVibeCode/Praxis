@@ -33,6 +33,10 @@ from runtime.operator_object_relations import (
     OperatorObjectRelationRecord,
     load_operator_object_relation_authority,
 )
+from runtime.semantic_assertions import (
+    SemanticAssertionRecord,
+    project_semantic_assertion,
+)
 from runtime.work_item_workflow_bindings import WorkItemWorkflowBindingRecord
 
 from .graph_lineage import graph_lineage_run
@@ -277,6 +281,7 @@ class OperatorGraphEdge:
     target_ref: str
     target_node_id: str | None
     created_at: datetime | None = None
+    authority_source: str = "canonical"
 
 
 @dataclass(frozen=True, slots=True)
@@ -287,6 +292,8 @@ class OperatorGraphFreshness:
     latest_source_created_at: datetime | None
     latest_source_updated_at: datetime | None
     source_row_count: int
+    semantic_source_row_count: int = 0
+    compatibility_source_row_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -303,6 +310,9 @@ class OperatorGraphReadModel:
     cutover_gates: tuple[CutoverGateAuthorityRecord, ...]
     work_item_workflow_bindings: tuple[WorkItemWorkflowBindingRecord, ...]
     object_relations: tuple[OperatorGraphObjectRelationRecord, ...]
+    semantic_assertions: tuple[SemanticAssertionRecord, ...]
+    semantic_authority_state: str
+    semantic_authority_reason_code: str
     nodes: tuple[OperatorGraphNode, ...]
     edges: tuple[OperatorGraphEdge, ...]
 
@@ -554,6 +564,54 @@ async def _fetch_binding_records(
     return tuple(bindings)
 
 
+async def _fetch_semantic_assertion_records(
+    conn: asyncpg.Connection,
+    *,
+    as_of: datetime,
+) -> tuple[tuple[SemanticAssertionRecord, ...], str, str]:
+    try:
+        rows = await conn.fetch(
+            """
+            SELECT
+                semantic_assertion_id,
+                predicate_slug,
+                assertion_status,
+                subject_kind,
+                subject_ref,
+                object_kind,
+                object_ref,
+                qualifiers_json,
+                source_kind,
+                source_ref,
+                evidence_ref,
+                bound_decision_id,
+                valid_from,
+                valid_to,
+                created_at,
+                updated_at
+            FROM semantic_assertions
+            WHERE valid_from <= $1
+              AND (valid_to IS NULL OR valid_to > $1)
+              AND assertion_status <> 'retracted'
+            ORDER BY predicate_slug, valid_from DESC, created_at DESC, semantic_assertion_id
+            """,
+            as_of,
+        )
+    except asyncpg.PostgresError as exc:
+        if getattr(exc, "sqlstate", None) == "42P01":
+            return (), "unavailable", "semantic_assertions.schema_unavailable"
+        raise _fail(
+            "operator_graph.read_failed",
+            "failed to read semantic assertion rows",
+            details={"sqlstate": getattr(exc, "sqlstate", None)},
+        ) from exc
+    return (
+        tuple(project_semantic_assertion(cast(Mapping[str, object], row)) for row in rows),
+        "ready",
+        "semantic_assertions.active_window",
+    )
+
+
 def _build_nodes(
     *,
     as_of: datetime,
@@ -564,6 +622,7 @@ def _build_nodes(
     cutover_gates: tuple[CutoverGateAuthorityRecord, ...],
     work_item_workflow_bindings: tuple[WorkItemWorkflowBindingRecord, ...],
     object_relations: tuple[OperatorGraphObjectRelationRecord, ...],
+    semantic_assertions: tuple[SemanticAssertionRecord, ...],
 ) -> tuple[tuple[OperatorGraphNode, ...], dict[tuple[str, str], str]]:
     nodes: list[OperatorGraphNode] = []
     node_ids: set[str] = set()
@@ -594,6 +653,23 @@ def _build_nodes(
                 title=_reference_node_title(kind, ref),
                 status="reference",
                 summary=_reference_node_summary(kind, ref),
+                created_at=as_of,
+                updated_at=as_of,
+            )
+        )
+
+    def add_semantic_reference_node(*, kind: str, ref: str) -> None:
+        if (kind, ref) in node_lookup:
+            return
+        add_node(
+            OperatorGraphNode(
+                node_id=_node_id(kind, ref),
+                node_kind=kind,
+                canonical_ref=ref,
+                lookup_ref=ref,
+                title=ref,
+                status="semantic_reference",
+                summary=f"semantic reference: {kind}:{ref}",
                 created_at=as_of,
                 updated_at=as_of,
             )
@@ -688,6 +764,10 @@ def _build_nodes(
         add_reference_node(kind=record.source_kind, ref=record.source_ref)
         add_reference_node(kind=record.target_kind, ref=record.target_ref)
 
+    for record in semantic_assertions:
+        add_semantic_reference_node(kind=record.subject_kind, ref=record.subject_ref)
+        add_semantic_reference_node(kind=record.object_kind, ref=record.object_ref)
+
     return tuple(nodes), node_lookup
 
 
@@ -732,6 +812,7 @@ def _build_edges(
     cutover_gates: tuple[CutoverGateAuthorityRecord, ...],
     work_item_workflow_bindings: tuple[WorkItemWorkflowBindingRecord, ...],
     object_relations: tuple[OperatorGraphObjectRelationRecord, ...],
+    semantic_assertions: tuple[SemanticAssertionRecord, ...],
     node_lookup: Mapping[tuple[str, str], str],
 ) -> tuple[tuple[OperatorGraphEdge, ...], tuple[str, ...]]:
     edges: list[OperatorGraphEdge] = []
@@ -752,6 +833,7 @@ def _build_edges(
         target_node_id: str | None,
         created_at: datetime | None = None,
         missing_ref: str | None = None,
+        authority_source: str = "canonical",
     ) -> None:
         if target_node_id is None and missing_ref is not None:
             missing_refs.append(missing_ref)
@@ -770,8 +852,71 @@ def _build_edges(
                 target_ref=target_ref,
                 target_node_id=target_node_id,
                 created_at=created_at,
+                authority_source=authority_source,
             )
         )
+
+    semantic_edge_keys: set[tuple[str, str, str, str, str]] = set()
+    semantic_bound_decision_keys: set[tuple[str, str, str, str, str]] = set()
+
+    for record in semantic_assertions:
+        source_node_id = node_lookup.get((record.subject_kind, record.subject_ref))
+        if source_node_id is None:
+            missing_refs.append(
+                "operator_graph.semantic_assertion_subject_missing:"
+                f"{record.semantic_assertion_id}:{record.subject_kind}:{record.subject_ref}"
+            )
+            continue
+        target_node_id = node_lookup.get((record.object_kind, record.object_ref))
+        add_edge(
+            source_kind=record.subject_kind,
+            source_node_id=source_node_id,
+            edge_kind=record.predicate_slug,
+            target_kind=record.object_kind,
+            target_ref=record.object_ref,
+            target_node_id=target_node_id,
+            created_at=record.created_at,
+            missing_ref=(
+                "operator_graph.semantic_assertion_object_missing:"
+                f"{record.semantic_assertion_id}:{record.object_kind}:{record.object_ref}"
+                if target_node_id is None
+                else None
+            ),
+            authority_source="semantic_assertions",
+        )
+        semantic_edge_keys.add(
+            (
+                record.subject_kind,
+                record.subject_ref,
+                record.predicate_slug,
+                record.object_kind,
+                record.object_ref,
+            )
+        )
+        if record.bound_decision_id is not None:
+            semantic_bound_decision_keys.add(
+                (
+                    record.subject_kind,
+                    record.subject_ref,
+                    "bound_by_decision",
+                    "operator_decision",
+                    record.bound_decision_id,
+                )
+            )
+            add_edge(
+                source_kind=record.subject_kind,
+                source_node_id=source_node_id,
+                edge_kind="bound_by_decision",
+                target_kind="operator_decision",
+                target_ref=record.bound_decision_id,
+                target_node_id=decision_id_lookup.get(record.bound_decision_id),
+                created_at=record.created_at,
+                missing_ref=(
+                    "operator_graph.semantic_assertion_bound_decision_missing:"
+                    f"{record.semantic_assertion_id}:{record.bound_decision_id}"
+                ),
+                authority_source="semantic_assertions",
+            )
 
     for record in bugs:
         source_node_id = node_lookup.get(("bug", record.bug_id))
@@ -792,6 +937,7 @@ def _build_edges(
             target_node_id=target_node_id,
             created_at=record.created_at,
             missing_ref=f"operator_graph.decision_ref_missing:bug:{record.bug_id}:{record.decision_ref}",
+            authority_source="bugs",
         )
 
     for record in roadmap_items:
@@ -814,6 +960,7 @@ def _build_edges(
                     f"operator_graph.parent_roadmap_missing:"
                     f"{record.roadmap_item_id}:{record.parent_roadmap_item_id}"
                 ),
+                authority_source="roadmap_items",
             )
 
         if record.source_bug_id is not None:
@@ -830,6 +977,7 @@ def _build_edges(
                     f"operator_graph.source_bug_missing:"
                     f"{record.roadmap_item_id}:{record.source_bug_id}"
                 ),
+                authority_source="roadmap_items",
             )
 
         target_node_id = _resolve_decision_ref(
@@ -849,6 +997,7 @@ def _build_edges(
                 f"operator_graph.decision_ref_missing:roadmap_item:"
                 f"{record.roadmap_item_id}:{record.decision_ref}"
             ),
+            authority_source="roadmap_items",
         )
 
     for record in cutover_gates:
@@ -872,6 +1021,7 @@ def _build_edges(
                 if target_node_id is None
                 else None
             ),
+            authority_source="cutover_gates",
         )
 
         opened_by_node_id = decision_id_lookup.get(record.opened_by_decision_id)
@@ -887,6 +1037,7 @@ def _build_edges(
                 f"operator_graph.opened_by_decision_missing:"
                 f"{record.cutover_gate_id}:{record.opened_by_decision_id}"
             ),
+            authority_source="cutover_gates",
         )
 
         if record.closed_by_decision_id is not None:
@@ -903,6 +1054,7 @@ def _build_edges(
                     f"operator_graph.closed_by_decision_missing:"
                     f"{record.cutover_gate_id}:{record.closed_by_decision_id}"
                 ),
+                authority_source="cutover_gates",
             )
 
     for record in work_item_workflow_bindings:
@@ -930,6 +1082,7 @@ def _build_edges(
                     f"operator_graph.binding_decision_missing:"
                     f"{record.work_item_workflow_binding_id}:{record.bound_by_decision_id}"
                 ),
+                authority_source="work_item_workflow_bindings",
             )
 
         for target_kind, target_ref in record.target_refs.items():
@@ -946,9 +1099,18 @@ def _build_edges(
                     f"operator_graph.binding_target_missing:"
                     f"{record.work_item_workflow_binding_id}:{normalized_target_kind}:{target_ref}"
                 ),
+                authority_source="work_item_workflow_bindings",
             )
 
     for record in object_relations:
+        if (
+            record.source_kind,
+            record.source_ref,
+            record.relation_kind,
+            record.target_kind,
+            record.target_ref,
+        ) in semantic_edge_keys:
+            continue
         source_node_id = node_lookup.get((record.source_kind, record.source_ref))
         if source_node_id is None:
             missing_refs.append(
@@ -970,8 +1132,17 @@ def _build_edges(
                 f"operator_graph.object_relation_target_missing:"
                 f"{record.operator_object_relation_id}:{record.target_kind}:{record.target_ref}"
             ),
+            authority_source="operator_object_relations_compatibility",
         )
         if record.bound_by_decision_id is not None:
+            if (
+                record.source_kind,
+                record.source_ref,
+                "bound_by_decision",
+                "operator_decision",
+                record.bound_by_decision_id,
+            ) in semantic_bound_decision_keys:
+                continue
             add_edge(
                 source_kind=record.source_kind,
                 source_node_id=source_node_id,
@@ -984,6 +1155,7 @@ def _build_edges(
                     f"operator_graph.object_relation_decision_missing:"
                     f"{record.operator_object_relation_id}:{record.bound_by_decision_id}"
                 ),
+                authority_source="operator_object_relations_compatibility",
             )
 
     return tuple(edges), _dedupe(missing_refs)
@@ -998,6 +1170,7 @@ def _freshness_from_rows(
     cutover_gates: tuple[CutoverGateAuthorityRecord, ...],
     work_item_workflow_bindings: tuple[WorkItemWorkflowBindingRecord, ...],
     object_relations: tuple[OperatorGraphObjectRelationRecord, ...],
+    semantic_assertions: tuple[SemanticAssertionRecord, ...],
     as_of: datetime,
 ) -> OperatorGraphFreshness:
     latest_created_at: datetime | None = None
@@ -1020,6 +1193,9 @@ def _freshness_from_rows(
     for record in work_item_workflow_bindings:
         latest_created_at = _max_datetime(latest_created_at, record.created_at)
         latest_updated_at = _max_datetime(latest_updated_at, record.updated_at)
+    for record in semantic_assertions:
+        latest_created_at = _max_datetime(latest_created_at, record.created_at)
+        latest_updated_at = _max_datetime(latest_updated_at, record.updated_at)
     for record in object_relations:
         latest_created_at = _max_datetime(latest_created_at, record.created_at)
         latest_updated_at = _max_datetime(latest_updated_at, record.updated_at)
@@ -1034,8 +1210,10 @@ def _freshness_from_rows(
             + len(operator_decisions)
             + len(cutover_gates)
             + len(work_item_workflow_bindings)
-            + len(object_relations)
+            + len(semantic_assertions)
         ),
+        semantic_source_row_count=len(semantic_assertions),
+        compatibility_source_row_count=len(object_relations),
     )
 
 
@@ -1049,6 +1227,9 @@ def _build_operator_graph_projection(
     cutover_gates: tuple[CutoverGateAuthorityRecord, ...],
     work_item_workflow_bindings: tuple[WorkItemWorkflowBindingRecord, ...],
     object_relations: tuple[OperatorGraphObjectRelationRecord, ...],
+    semantic_assertions: tuple[SemanticAssertionRecord, ...],
+    semantic_authority_state: str,
+    semantic_authority_reason_code: str,
 ) -> OperatorGraphReadModel:
     nodes, node_lookup = _build_nodes(
         as_of=as_of,
@@ -1059,6 +1240,7 @@ def _build_operator_graph_projection(
         cutover_gates=cutover_gates,
         work_item_workflow_bindings=work_item_workflow_bindings,
         object_relations=object_relations,
+        semantic_assertions=semantic_assertions,
     )
     edges, missing_refs = _build_edges(
         bugs=bugs,
@@ -1067,6 +1249,7 @@ def _build_operator_graph_projection(
         cutover_gates=cutover_gates,
         work_item_workflow_bindings=work_item_workflow_bindings,
         object_relations=object_relations,
+        semantic_assertions=semantic_assertions,
         node_lookup=node_lookup,
     )
     freshness = _freshness_from_rows(
@@ -1077,6 +1260,7 @@ def _build_operator_graph_projection(
         cutover_gates=cutover_gates,
         work_item_workflow_bindings=work_item_workflow_bindings,
         object_relations=object_relations,
+        semantic_assertions=semantic_assertions,
         as_of=as_of,
     )
     return OperatorGraphReadModel(
@@ -1093,6 +1277,9 @@ def _build_operator_graph_projection(
         cutover_gates=cutover_gates,
         work_item_workflow_bindings=work_item_workflow_bindings,
         object_relations=object_relations,
+        semantic_assertions=semantic_assertions,
+        semantic_authority_state=semantic_authority_state,
+        semantic_authority_reason_code=semantic_authority_reason_code,
         nodes=nodes,
         edges=edges,
     )
@@ -1118,6 +1305,11 @@ async def load_operator_graph_projection(
             conn,
             as_of=normalized_as_of,
         )
+        (
+            semantic_assertions,
+            semantic_authority_state,
+            semantic_authority_reason_code,
+        ) = await _fetch_semantic_assertion_records(conn, as_of=normalized_as_of)
     return _build_operator_graph_projection(
         as_of=normalized_as_of,
         bugs=bugs,
@@ -1127,6 +1319,9 @@ async def load_operator_graph_projection(
         cutover_gates=authority.cutover_gates,
         work_item_workflow_bindings=work_item_workflow_bindings,
         object_relations=object_relation_authority.object_relations,
+        semantic_assertions=semantic_assertions,
+        semantic_authority_state=semantic_authority_state,
+        semantic_authority_reason_code=semantic_authority_reason_code,
     )
 
 

@@ -79,8 +79,8 @@ def test_normalize_market_row_extracts_common_fields() -> None:
         },
         source_config=_source_config(),
         prompt_options={"prompt_length": "medium"},
-        decision_ref="decision.market-model-sync.test",
-        synced_at=_mod._utc_now(),
+        dec_ref="decision.market-model-sync.test",
+        synced_at=_mod.utc_now(),
     )
 
     assert row["market_model_ref"] == "market_model.artificial_analysis.llm.model-123"
@@ -88,16 +88,38 @@ def test_normalize_market_row_extracts_common_fields() -> None:
     assert row["speed_metrics"]["median_output_tokens_per_second"] == 98.2
 
 
-def test_normalize_provider_slug_maps_google_deepmind_to_google() -> None:
-    assert _mod._normalize_provider_slug(
-        "google-deepmind",
-        aliases=dict(_source_config()["creator_slug_aliases"]),
-    ) == "google"
+def test_normalize_market_row_maps_google_deepmind_to_google() -> None:
+    row = _mod._normalize_market_row(
+        {
+            "id": "model-google-1",
+            "name": "Gemini 2.5",
+            "slug": "gemini-2-5",
+            "model_creator": {
+                "id": "creator-google",
+                "name": "Google DeepMind",
+                "slug": "google-deepmind",
+            },
+        },
+        source_config=_source_config(),
+        prompt_options={},
+        dec_ref="decision.market-model-sync.test",
+        synced_at=_mod.utc_now(),
+    )
+
+    assert row["creator_slug"] == "google"
 
 
 def test_common_metrics_selects_general_market_fields() -> None:
-    metrics = _mod._common_metrics(
+    market_row = _mod._normalize_market_row(
         {
+            "id": "model-metrics-1",
+            "name": "Metrics Model",
+            "slug": "metrics-model",
+            "model_creator": {
+                "id": "creator-openai",
+                "name": "OpenAI",
+                "slug": "openai",
+            },
             "evaluations": {
                 "artificial_analysis_intelligence_index": 71.0,
                 "artificial_analysis_coding_index": 60.5,
@@ -112,8 +134,16 @@ def test_common_metrics_selects_general_market_fields() -> None:
             "median_time_to_first_token_seconds": 0.8,
             "median_time_to_first_answer_token": 0.8,
         },
-        metric_paths=dict(_source_config()["common_metric_paths"]),
+        source_config=_source_config(),
+        prompt_options={},
+        dec_ref="decision.market-model-sync.test",
+        synced_at=_mod.utc_now(),
     )
+    metrics = _mod._benchmark_payload(
+        market_row=market_row,
+        source_config=_source_config(),
+        rule=_match_rule(),
+    )["common_metrics"]
 
     assert metrics["artificial_analysis_intelligence_index"] == 71.0
     assert metrics["price_1m_blended_3_to_1"] == 5.4
@@ -121,7 +151,7 @@ def test_common_metrics_selects_general_market_fields() -> None:
 
 
 def test_market_benchmark_payload_carries_binding_metadata() -> None:
-    synced_at = _mod._utc_now()
+    synced_at = _mod.utc_now()
     market_row = _mod._normalize_market_row(
         {
             "id": "model-123",
@@ -144,11 +174,11 @@ def test_market_benchmark_payload_carries_binding_metadata() -> None:
         },
         source_config=_source_config(),
         prompt_options={"prompt_length": "medium"},
-        decision_ref="decision.market-model-sync.test",
+        dec_ref="decision.market-model-sync.test",
         synced_at=synced_at,
     )
 
-    payload = _mod._market_benchmark_payload(
+    payload = _mod._benchmark_payload(
         market_row=market_row,
         source_config=_source_config(),
         rule=_match_rule(),
@@ -163,7 +193,7 @@ def test_market_benchmark_payload_carries_binding_metadata() -> None:
 
 
 def test_market_benchmark_gap_payload_marks_unavailable_rows() -> None:
-    payload = _mod._market_benchmark_gap_payload(
+    payload = _mod._benchmark_gap_payload(
         source_slug="artificial_analysis",
         rule=_match_rule(
             provider_model_market_match_rule_id="rule.test.google.gemini-live",
@@ -174,7 +204,7 @@ def test_market_benchmark_gap_payload_marks_unavailable_rows() -> None:
             binding_confidence=0.0,
             selection_metadata={"surface_gap": "live_native_audio"},
         ),
-        synced_at=_mod._utc_now(),
+        synced_at=_mod.utc_now(),
     )
 
     assert payload["coverage_status"] == "source_unavailable"
@@ -192,7 +222,7 @@ def test_validate_candidate_rule_coverage_rejects_missing_rows() -> None:
     }
 
     try:
-        _mod._validate_candidate_rule_coverage(
+        _mod._validate_coverage(
             candidate_lookup=candidate_lookup,
             match_rules=match_rules,
             source_slug="artificial_analysis",

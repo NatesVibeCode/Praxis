@@ -63,6 +63,7 @@ class TestDocumentIngest:
         result = router.ingest(_payload(
             kind=IngestKind.DOCUMENT,
             content=f"Design doc for feature {pfx}",
+            source=f"document:{pfx}",
             metadata={"title": f"Feature {pfx}"},
         ))
         assert result.accepted is True

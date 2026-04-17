@@ -76,6 +76,54 @@ class TransportSupportFrontdoor:
 _DEFAULT_TRANSPORT_SUPPORT_FRONTDOOR = TransportSupportFrontdoor()
 
 
+def build_provider_registry_summary(
+    transport_support_payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Project canonical transport support into the lightweight provider summary surfaces expect."""
+
+    providers_payload = transport_support_payload.get("providers")
+    provider_rows = (
+        providers_payload
+        if isinstance(providers_payload, Sequence) and not isinstance(providers_payload, (str, bytes, bytearray))
+        else ()
+    )
+    registered_providers: list[str] = []
+    providers: list[dict[str, Any]] = []
+    probe_targets: list[tuple[str, str]] = []
+    for raw_provider in provider_rows:
+        if not isinstance(raw_provider, Mapping):
+            continue
+        provider_slug = str(raw_provider.get("provider_slug") or "").strip()
+        if not provider_slug:
+            continue
+        transports = raw_provider.get("transports")
+        transport_rows = transports if isinstance(transports, Mapping) else {}
+        adapters: list[str] = []
+        for adapter_type, raw_support in transport_rows.items():
+            if not isinstance(raw_support, Mapping) or not bool(raw_support.get("supported")):
+                continue
+            normalized_adapter = str(adapter_type or "").strip()
+            if not normalized_adapter:
+                continue
+            adapters.append(normalized_adapter)
+            probe_targets.append((provider_slug, normalized_adapter))
+        registered_providers.append(provider_slug)
+        providers.append(
+            {
+                "provider_slug": provider_slug,
+                "adapters": adapters,
+            }
+        )
+    return {
+        "default_provider_slug": str(transport_support_payload.get("default_provider_slug") or "").strip(),
+        "default_adapter_type": str(transport_support_payload.get("default_adapter_type") or "").strip(),
+        "registered_providers": registered_providers,
+        "providers": providers,
+        "probe_targets": tuple(probe_targets),
+        "support_basis": str(transport_support_payload.get("support_basis") or "").strip() or None,
+    }
+
+
 def query_transport_support(
     *,
     health_mod: Any,
@@ -114,6 +162,7 @@ __all__ = [
     "OperatorWorkItemCloseoutRecommendationRecord",
     "load_native_self_hosted_smoke_contract",
     "TransportSupportFrontdoor",
+    "build_provider_registry_summary",
     "query_transport_support",
     "query_issue_backlog",
     "query_roadmap_tree",

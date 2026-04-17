@@ -3,6 +3,7 @@ from __future__ import annotations
 import _pg_test_conn as pg_test_conn
 import pytest
 
+import storage.postgres as storage_postgres
 import storage.postgres.connection as pg_connection
 from storage.postgres.validators import PostgresConfigurationError
 
@@ -20,6 +21,21 @@ def test_resolve_test_env_bootstraps_default_database_when_runtime_override_miss
     monkeypatch,
 ) -> None:
     monkeypatch.delenv("WORKFLOW_DATABASE_URL", raising=False)
+    monkeypatch.setattr(
+        pg_test_conn,
+        "ensure_test_database_ready",
+        lambda: "postgresql://postgres@localhost:5432/praxis_test",
+    )
+
+    env = pg_test_conn._resolve_test_env()
+
+    assert env["WORKFLOW_DATABASE_URL"] == "postgresql://postgres@localhost:5432/praxis_test"
+
+
+def test_resolve_test_env_bootstraps_default_database_when_runtime_override_blank(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("WORKFLOW_DATABASE_URL", "   ")
     monkeypatch.setattr(
         pg_test_conn,
         "ensure_test_database_ready",
@@ -59,3 +75,50 @@ def test_get_isolated_conn_skips_when_authority_unavailable(monkeypatch) -> None
 
     with pytest.raises(pytest.skip.Exception, match="repo-local Postgres authority unavailable"):
         pg_test_conn.get_isolated_conn()
+
+
+def test_get_test_conn_rebuilds_wrapper_when_cached_pool_is_closed(monkeypatch) -> None:
+    class _FakePool:
+        def __init__(self, closed: bool) -> None:
+            self._closed = closed
+
+    created: list[object] = []
+
+    class _FakeSyncConn:
+        def __init__(self, pool) -> None:
+            self._pool = pool
+            created.append(self)
+
+    stale = _FakeSyncConn(_FakePool(closed=True))
+    pg_test_conn._conn = stale
+
+    monkeypatch.setattr(pg_connection, "get_workflow_pool", lambda env=None: _FakePool(closed=False))
+    monkeypatch.setattr(storage_postgres, "SyncPostgresConnection", _FakeSyncConn)
+
+    try:
+        refreshed = pg_test_conn.get_test_conn()
+    finally:
+        pg_test_conn._conn = None
+
+    assert refreshed is created[-1]
+    assert refreshed is not stale
+    assert refreshed._pool._closed is False
+
+
+def test_get_pool_reopens_closed_cached_pool(monkeypatch) -> None:
+    class _FakePool:
+        def __init__(self, closed: bool) -> None:
+            self._closed = closed
+
+    closed_pool = _FakePool(closed=True)
+    fresh_pool = _FakePool(closed=False)
+    pg_test_conn._pool = closed_pool
+
+    monkeypatch.setattr(pg_connection, "get_workflow_pool", lambda env=None: fresh_pool)
+
+    try:
+        resolved = pg_test_conn._get_pool()
+    finally:
+        pg_test_conn._pool = None
+
+    assert resolved is fresh_pool

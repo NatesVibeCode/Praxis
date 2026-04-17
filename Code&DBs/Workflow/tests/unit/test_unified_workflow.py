@@ -2227,6 +2227,34 @@ def test_submit_workflow_rejects_when_queue_is_at_critical_threshold(monkeypatch
     assert not any("INSERT INTO workflow_jobs" in query for query, _ in conn.queries)
 
 
+def test_submit_workflow_uses_shared_queue_admission_gate(monkeypatch):
+    jobs = [
+        {"label": "build_a", "prompt": "create a", "agent": "auto/build"},
+    ]
+    spec = _make_spec(jobs)
+    monkeypatch.setattr(WorkflowSpec, "load", classmethod(lambda cls, path: spec))
+
+    captured: dict[str, object] = {}
+
+    class _FakeGate:
+        def __init__(self, *, critical_threshold: int = 1000, **_kwargs) -> None:
+            captured["critical_threshold"] = critical_threshold
+
+        def check_connection(self, conn, *, job_count: int = 1):
+            captured["conn"] = conn
+            captured["job_count"] = job_count
+            return SimpleNamespace(admitted=True, queue_depth=0, reason="ok")
+
+    monkeypatch.setattr(_admission_mod, "QueueAdmissionGate", _FakeGate)
+
+    conn = _FakeConn()
+    result = unified_workflow.submit_workflow(conn, "spec.queue.json", "/repo")
+
+    assert result["status"] == "queued"
+    assert captured["conn"] is conn
+    assert captured["job_count"] == 1
+
+
 def test_submit_workflow_routes_graph_specs_through_graph_runtime_submit(monkeypatch):
     jobs = [
         {"label": "seed", "agent": "openai/gpt-5.4-mini", "adapter_type": "deterministic_task", "expected_outputs": {"go": True}},
@@ -3280,6 +3308,41 @@ def test_retry_job_rejects_when_queue_is_at_critical_threshold():
         "UPDATE workflow_jobs" in query and "SET status = 'ready'" in query
         for query, _ in conn.queries
     )
+
+
+def test_retry_job_uses_shared_queue_admission_gate(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class _FakeGate:
+        def __init__(self, *, critical_threshold: int = 1000, **_kwargs) -> None:
+            captured["critical_threshold"] = critical_threshold
+
+        def check_connection(self, conn, *, job_count: int = 1):
+            captured["conn"] = conn
+            captured["job_count"] = job_count
+            return SimpleNamespace(admitted=True, queue_depth=0, reason="ok")
+
+    monkeypatch.setattr(_admission_mod, "QueueAdmissionGate", _FakeGate)
+
+    conn = _FakeConn(
+        existing_jobs={
+            ("dispatch_test", "build_a"): {
+                "id": 7,
+                "label": "build_a",
+                "prompt": "create a",
+                "agent_slug": "openai/gpt-5.4",
+                "resolved_agent": "openai/gpt-5.4",
+                "status": "failed",
+                "attempt": 2,
+            },
+        }
+    )
+
+    result = unified_workflow.retry_job(conn, "dispatch_test", "build_a")
+
+    assert result["status"] == "requeued"
+    assert captured["conn"] is conn
+    assert captured["job_count"] == 1
 
 
 def test_retry_job_reports_validated_packet_reuse_provenance() -> None:

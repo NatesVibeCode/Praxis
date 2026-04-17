@@ -390,11 +390,15 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             "actions": {
                 "reset_metrics": "write",
                 "backfill_bug_replay_provenance": "write",
+                "backfill_semantic_bridges": "write",
+                "refresh_semantic_projection": "write",
             },
         },
         examples=[
             _example("Reset metrics with confirmation", {"action": "reset_metrics", "confirm": True}),
             _example("Backfill replay provenance", {"action": "backfill_bug_replay_provenance", "open_only": True}),
+            _example("Backfill semantic bridges", {"action": "backfill_semantic_bridges"}),
+            _example("Refresh semantic projection", {"action": "refresh_semantic_projection"}),
         ],
     ),
     "praxis_manifest_generate": _tool(
@@ -434,7 +438,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         surface="operator",
         tier="advanced",
         recommended_alias=None,
-        when_to_use="Read roadmap and operator backlog views without mutating them.",
+        when_to_use="Read one roadmap subtree, its dependency edges, and semantic-first external neighbors without mutating roadmap authority.",
         when_not_to_use="Do not use it to commit roadmap changes.",
         risks={"default": "read"},
         examples=[
@@ -443,17 +447,26 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
                 "Read one roadmap subtree",
                 {"root_roadmap_item_id": "roadmap_item.authority.cleanup.unified.operator.write.validation.gate"},
             ),
+            _example(
+                "Read one roadmap subtree with more semantic neighbors",
+                {
+                    "root_roadmap_item_id": "roadmap_item.authority.cleanup.unified.operator.write.validation.gate",
+                    "semantic_neighbor_limit": 8,
+                },
+            ),
         ],
     ),
     "praxis_operator_view": _tool(
         surface="operator",
         tier="advanced",
         recommended_alias=None,
-        when_to_use="Discover native operator status, scoreboard, topology, issue backlog, or replay-ready bug views.",
+        when_to_use="Discover native operator status, cutover readiness, run-scoped workflow topology, cross-domain operator graph topology, semantic assertion, issue backlog, or replay-ready bug views.",
         when_not_to_use="Do not use it to mutate operator state.",
-        risks={"default": "read", "views": {"status": "read", "scoreboard": "read", "graph": "read", "lineage": "read", "issue_backlog": "read", "replay_ready_bugs": "read"}},
+        risks={"default": "read", "views": {"status": "read", "scoreboard": "read", "graph": "read", "operator_graph": "read", "semantics": "read", "lineage": "read", "issue_backlog": "read", "replay_ready_bugs": "read"}},
         examples=[
-            _example("Read graph topology", {"view": "graph", "run_id": "run_123"}),
+            _example("Read run-scoped workflow graph topology", {"view": "graph", "run_id": "run_123"}),
+            _example("Read cross-domain operator graph topology", {"view": "operator_graph"}),
+            _example("Read semantic assertions", {"view": "semantics", "predicate_slug": "grouped_in"}),
             _example("Read graph lineage", {"view": "lineage", "run_id": "run_123"}),
             _example("Read issue backlog", {"view": "issue_backlog", "limit": 25}),
             _example("Read replay-ready bugs", {"view": "replay_ready_bugs", "limit": 25}),
@@ -530,6 +543,51 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
                     "source_ref": "roadmap_item.checkout",
                     "target_kind": "functional_area",
                     "target_ref": "checkout",
+                },
+            ),
+        ],
+    ),
+    "praxis_semantic_assertions": _tool(
+        surface="operator",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Register semantic predicates, record or retract semantic assertions, or query the current semantic substrate when semantics need durable typed authority.",
+        when_not_to_use="Do not use it for generic roadmap authoring, issue triage, or workflow telemetry reads.",
+        risks={
+            "default": "read",
+            "actions": {
+                "list": "read",
+                "register_predicate": "write",
+                "record_assertion": "write",
+                "retract_assertion": "write",
+            },
+        },
+        examples=[
+            _example(
+                "List current semantic assertions for one predicate",
+                {"action": "list", "predicate_slug": "grouped_in"},
+            ),
+            _example(
+                "Register one semantic predicate",
+                {
+                    "action": "register_predicate",
+                    "predicate_slug": "grouped_in",
+                    "subject_kind_allowlist": ["bug"],
+                    "object_kind_allowlist": ["functional_area"],
+                    "cardinality_mode": "single_active_per_subject",
+                },
+            ),
+            _example(
+                "Record one semantic assertion",
+                {
+                    "action": "record_assertion",
+                    "predicate_slug": "grouped_in",
+                    "subject_kind": "bug",
+                    "subject_ref": "bug.checkout.1",
+                    "object_kind": "functional_area",
+                    "object_ref": "functional_area.checkout",
+                    "source_kind": "operator",
+                    "source_ref": "nate",
                 },
             ),
         ],

@@ -5,10 +5,25 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 WORKFLOW_DIR="$REPO_ROOT/Code&DBs/Workflow"
 PYTHON_BIN="${PYTHON_BIN:-$(command -v python3.14 || command -v python3.13 || command -v python3)}"
+COMMAND_NAME="${PRAXIS_COMMAND_NAME:-praxis}"
+SERVICE_MANAGER_PATH="${PRAXIS_SERVICE_MANAGER_PATH:-scripts/praxis}"
+COMPATIBILITY_ALIAS_PATH="${PRAXIS_COMPATIBILITY_ALIAS_PATH:-scripts/praxis-ctl}"
+PREFERRED_COMMAND_NAME="${PRAXIS_PREFERRED_COMMAND_NAME:-praxis}"
+LAUNCHER_STATE_DIR="${PRAXIS_LAUNCHER_STATE_DIR:-$REPO_ROOT/.cache/praxis-launcher}"
+LAUNCHER_STATE_FILE="$LAUNCHER_STATE_DIR/state.json"
+
+ensure_workflow_database_env() {
+    if [ -n "${WORKFLOW_DATABASE_URL:-}" ]; then
+        return 0
+    fi
+    # shellcheck disable=SC1090
+    source "$SCRIPT_DIR/_workflow_env.sh"
+    workflow_load_repo_env
+}
 
 docker_only_usage() {
-    cat <<'EOF'
-Usage: praxis <command> [service]
+    cat <<EOF
+Usage: ${COMMAND_NAME} <command> [service]
 
 Authoritative namespaces:
   workflow ...            Canonical execution, query, and operator authority
@@ -24,7 +39,10 @@ Authoritative namespaces:
   reconcile               Data reconcile authority
 
 Docker-only commands:
-  status                  Show Docker service state and active workflows
+  launch                  Start Docker services, probe launcher readiness, and optionally open /app
+  doctor --json           Emit semantic launcher readiness as JSON
+  repair-sync [run_id]    Re-run workflow sync for the latest degraded run or a specific run
+  status [--json]         Show Docker service state and active workflows
   start [service...]      Start Docker services (default: all)
   stop [service...]       Stop Docker services (default: all)
   restart [service...]    Restart Docker services (default: all)
@@ -41,7 +59,9 @@ Services:
   scheduler
 
 Notes:
-  - Native launchd control is disabled.
+  - Native launchd install/setup control has been removed.
+  - ${PREFERRED_COMMAND_NAME} is the preferred launcher front door.
+  - ${COMPATIBILITY_ALIAS_PATH} remains a compatibility alias.
 EOF
 }
 
@@ -151,17 +171,244 @@ docker_only_logs() {
     (cd "$REPO_ROOT" && docker compose logs "${options[@]}" "${services[@]}")
 }
 
-docker_only_status() {
+docker_compose_ps_json() {
     require_docker
 
-    local compose_json
-    if ! compose_json="$(cd "$REPO_ROOT" && docker compose ps --format json 2>/dev/null)"; then
+    if ! (cd "$REPO_ROOT" && docker compose ps --format json 2>/dev/null); then
         echo "Praxis Docker authority is unavailable. Run from the repo with Docker Compose available." >&2
-        exit 1
+        return 1
+    fi
+}
+
+run_local_alpha() {
+    mkdir -p "$LAUNCHER_STATE_DIR"
+    local subcommand="${1:-}"
+    shift || true
+
+    case "$subcommand" in
+        doctor)
+            local services_ready=""
+            local state_file=""
+            while [ "$#" -gt 0 ]; do
+                case "$1" in
+                    --services-ready)
+                        services_ready="${2:-}"
+                        shift 2
+                        ;;
+                    --state-file)
+                        state_file="${2:-}"
+                        shift 2
+                        ;;
+                    *)
+                        echo "Unsupported local-alpha doctor argument: $1" >&2
+                        return 1
+                        ;;
+                esac
+            done
+            ensure_workflow_database_env
+            PYTHONPATH="$SCRIPT_DIR:$WORKFLOW_DIR${PYTHONPATH:+:$PYTHONPATH}" \
+            WORKFLOW_DATABASE_URL="${WORKFLOW_DATABASE_URL}" \
+            PRAXIS_ALPHA_SERVICES_READY="$services_ready" \
+            PRAXIS_ALPHA_STATE_FILE="$state_file" \
+                "$PYTHON_BIN" - <<'PY'
+import os
+
+from praxis_ctl_local_alpha import cmd_doctor
+
+raise SystemExit(
+    cmd_doctor(
+        services_ready=os.environ["PRAXIS_ALPHA_SERVICES_READY"],
+        state_file=os.environ["PRAXIS_ALPHA_STATE_FILE"],
+    )
+)
+PY
+            ;;
+        repair-sync)
+            local run_id=""
+            while [ "$#" -gt 0 ]; do
+                case "$1" in
+                    --run-id)
+                        run_id="${2:-}"
+                        shift 2
+                        ;;
+                    *)
+                        echo "Unsupported local-alpha repair-sync argument: $1" >&2
+                        return 1
+                        ;;
+                esac
+            done
+            ensure_workflow_database_env
+            PYTHONPATH="$SCRIPT_DIR:$WORKFLOW_DIR${PYTHONPATH:+:$PYTHONPATH}" \
+            WORKFLOW_DATABASE_URL="${WORKFLOW_DATABASE_URL}" \
+            PRAXIS_ALPHA_RUN_ID="$run_id" \
+                "$PYTHON_BIN" - <<'PY'
+import os
+
+from praxis_ctl_local_alpha import cmd_repair_sync
+
+run_id = os.environ.get("PRAXIS_ALPHA_RUN_ID") or None
+raise SystemExit(cmd_repair_sync(run_id=run_id))
+PY
+            ;;
+        *)
+            echo "Unsupported local-alpha command: ${subcommand}" >&2
+            return 1
+            ;;
+    esac
+}
+
+docker_services_ready() {
+    local compose_json="${1:-}"
+    PRAXIS_COMPOSE_JSON="$compose_json" "$PYTHON_BIN" - <<'PY'
+import json
+import os
+import sys
+
+raw = os.environ.get("PRAXIS_COMPOSE_JSON", "").strip()
+services = []
+if raw:
+    try:
+        services = json.loads(raw)
+    except json.JSONDecodeError:
+        services = [json.loads(line) for line in raw.splitlines() if line.strip()]
+if isinstance(services, dict):
+    services = [services]
+
+required = {"postgres", "api-server", "workflow-worker"}
+states = {}
+for service in services:
+    name = str(service.get("Service") or service.get("Name") or "").strip()
+    state = str(service.get("State") or service.get("Status") or "").strip().lower()
+    if name:
+        states[name] = state
+
+ready = all(states.get(name) in {"running", "healthy"} for name in required)
+raise SystemExit(0 if ready else 1)
+PY
+}
+
+launcher_doctor_payload() {
+    local compose_json="${1:-}"
+    local services_ready="false"
+    if docker_services_ready "$compose_json"; then
+        services_ready="true"
+    fi
+    run_local_alpha doctor --services-ready "$services_ready" --state-file "$LAUNCHER_STATE_FILE"
+}
+
+doctor_field_is_true() {
+    local payload="${1:-}"
+    local field="${2:-}"
+    DOCTOR_JSON="$payload" DOCTOR_FIELD="$field" "$PYTHON_BIN" - <<'PY'
+import json
+import os
+import sys
+
+payload = json.loads(os.environ.get("DOCTOR_JSON") or "{}")
+field = os.environ.get("DOCTOR_FIELD", "")
+raise SystemExit(0 if bool(payload.get(field)) else 1)
+PY
+}
+
+doctor_ready() {
+    local payload="${1:-}"
+    doctor_field_is_true "$payload" "services_ready" \
+        && doctor_field_is_true "$payload" "database_reachable" \
+        && doctor_field_is_true "$payload" "schema_bootstrapped" \
+        && doctor_field_is_true "$payload" "api_server_ready" \
+        && doctor_field_is_true "$payload" "workflow_api_ready" \
+        && doctor_field_is_true "$payload" "mcp_bridge_ready" \
+        && doctor_field_is_true "$payload" "ui_ready"
+}
+
+launcher_status_json() {
+    local compose_json="${1:-}"
+    local doctor_json="${2:-}"
+    PRAXIS_COMPOSE_JSON="$compose_json" \
+    DOCTOR_JSON="$doctor_json" \
+    COMMAND_NAME="$COMMAND_NAME" \
+    SERVICE_MANAGER_PATH="$SERVICE_MANAGER_PATH" \
+    COMPATIBILITY_ALIAS_PATH="$COMPATIBILITY_ALIAS_PATH" \
+    "$PYTHON_BIN" - <<'PY'
+import json
+import os
+
+compose_raw = os.environ.get("PRAXIS_COMPOSE_JSON", "").strip()
+doctor = json.loads(os.environ.get("DOCTOR_JSON") or "{}")
+services = []
+if compose_raw:
+    try:
+        services = json.loads(compose_raw)
+    except json.JSONDecodeError:
+        services = [json.loads(line) for line in compose_raw.splitlines() if line.strip()]
+if isinstance(services, dict):
+    services = [services]
+
+normalized = []
+for service in services:
+    name = service.get("Service") or service.get("Name")
+    state = service.get("State") or service.get("Status")
+    health = service.get("Health")
+    ports = service.get("Publishers") or []
+    normalized.append(
+        {
+            "label": name,
+            "name": name,
+            "loaded": bool(name),
+            "running": str(state or "").strip().lower() in {"running", "healthy"},
+            "pid": None,
+            "exit_code": None,
+            "port": next((p.get("PublishedPort") for p in ports if p.get("PublishedPort")), None),
+            "log_file": None,
+            "state": state or "unknown",
+            "health": health or None,
+        }
+    )
+
+payload = {
+    "ok": True,
+    "brand": "Praxis Engine",
+    "service_manager": os.environ.get("SERVICE_MANAGER_PATH", "scripts/praxis"),
+    "compatibility_alias": os.environ.get("COMPATIBILITY_ALIAS_PATH", "scripts/praxis-ctl"),
+    "preferred_command": os.environ.get("COMMAND_NAME", "praxis"),
+    "services": normalized,
+    "doctor": doctor,
+    "dependency_truth": doctor.get("dependency_truth"),
+    "database_reachable": doctor.get("database_reachable"),
+    "schema_bootstrapped": doctor.get("schema_bootstrapped"),
+    "api_server_ready": doctor.get("api_server_ready"),
+    "workflow_api_ready": doctor.get("workflow_api_ready"),
+    "mcp_bridge_ready": doctor.get("mcp_bridge_ready"),
+    "ui_ready": doctor.get("ui_ready"),
+    "launch_url": doctor.get("launch_url"),
+    "dashboard_url": doctor.get("dashboard_url"),
+    "api_docs_url": doctor.get("api_docs_url"),
+}
+print(json.dumps(payload, indent=2, sort_keys=True))
+PY
+}
+
+docker_only_status() {
+    local as_json="false"
+    if [ "${1:-}" = "--json" ]; then
+        as_json="true"
+    elif [ "$#" -gt 0 ]; then
+        echo "Usage: ${COMMAND_NAME} status [--json]" >&2
+        return 1
+    fi
+
+    local compose_json
+    compose_json="$(docker_compose_ps_json)" || return 1
+    local doctor_json
+    doctor_json="$(launcher_doctor_payload "$compose_json")"
+
+    if [ "$as_json" = "true" ]; then
+        launcher_status_json "$compose_json" "$doctor_json"
+        return 0
     fi
 
     echo "Praxis mode: docker-only"
-    PRAXIS_COMPOSE_JSON="$compose_json" python3 - <<'PY'
+    PRAXIS_COMPOSE_JSON="$compose_json" "$PYTHON_BIN" - <<'PY'
 import json
 import os
 import sys
@@ -215,6 +462,127 @@ PY
     fi
 }
 
+open_in_browser() {
+    local target_url="${1:-}"
+    if [ -z "$target_url" ]; then
+        return 1
+    fi
+    if command -v open >/dev/null 2>&1; then
+        open "$target_url" >/dev/null 2>&1
+        return 0
+    fi
+    return 1
+}
+
+docker_only_launch() {
+    local as_json="false"
+    local no_open="false"
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --json) as_json="true" ;;
+            --no-open) no_open="true" ;;
+            *)
+                echo "Usage: ${COMMAND_NAME} launch [--json] [--no-open]" >&2
+                return 1
+                ;;
+        esac
+        shift
+    done
+
+    docker_only_start
+
+    local compose_json
+    compose_json="$(docker_compose_ps_json)" || return 1
+    local doctor_json
+    doctor_json="$(launcher_doctor_payload "$compose_json")"
+    local launch_url
+    launch_url="$(DOCTOR_JSON="$doctor_json" "$PYTHON_BIN" - <<'PY'
+import json
+import os
+
+payload = json.loads(os.environ.get("DOCTOR_JSON") or "{}")
+print(payload.get("launch_url") or "http://127.0.0.1:8420/app")
+PY
+)"
+
+    local opened="false"
+    if doctor_ready "$doctor_json" && [ "$no_open" != "true" ] && open_in_browser "$launch_url"; then
+        opened="true"
+    fi
+
+    if [ "$as_json" = "true" ]; then
+        DOCTOR_JSON="$doctor_json" OPENED="$opened" COMMAND_NAME="$COMMAND_NAME" "$PYTHON_BIN" - <<'PY'
+import json
+import os
+
+doctor = json.loads(os.environ.get("DOCTOR_JSON") or "{}")
+ok = all(
+    bool(doctor.get(field))
+    for field in (
+        "services_ready",
+        "database_reachable",
+        "schema_bootstrapped",
+        "api_server_ready",
+        "workflow_api_ready",
+        "mcp_bridge_ready",
+        "ui_ready",
+    )
+)
+payload = {
+    "ok": ok,
+    "brand": "Praxis Engine",
+    "command": f"{os.environ.get('COMMAND_NAME', 'praxis')} launch",
+    "opened": os.environ.get("OPENED") == "true",
+    "failure_reason": None if ok else "semantic_readiness_failed",
+    "doctor": doctor,
+    "launch_url": doctor.get("launch_url", "http://127.0.0.1:8420/app"),
+    "dashboard_url": doctor.get("dashboard_url", "http://127.0.0.1:8420/app"),
+    "api_docs_url": doctor.get("api_docs_url", "http://127.0.0.1:8420/docs"),
+}
+print(json.dumps(payload, indent=2, sort_keys=True))
+raise SystemExit(0 if ok else 1)
+PY
+        return $?
+    fi
+
+    if doctor_ready "$doctor_json"; then
+        echo "Praxis launcher ready: $launch_url"
+        return 0
+    fi
+
+    echo "Praxis launcher readiness checks failed. Run ${COMMAND_NAME} doctor --json for details." >&2
+    return 1
+}
+
+docker_only_doctor() {
+    if [ "${1:-}" != "--json" ] || [ "$#" -ne 1 ]; then
+        echo "Usage: ${COMMAND_NAME} doctor --json" >&2
+        return 1
+    fi
+    local compose_json
+    compose_json="$(docker_compose_ps_json)" || return 1
+    launcher_doctor_payload "$compose_json"
+}
+
+docker_only_repair_sync() {
+    if [ -n "${1:-}" ]; then
+        run_local_alpha repair-sync --run-id "$1"
+        return
+    fi
+    run_local_alpha repair-sync
+}
+
+unsupported_native_command() {
+    local command_name="${1:-}"
+    cat >&2 <<EOF
+${COMMAND_NAME} ${command_name} is no longer supported.
+Native install/setup launchd control has been removed.
+Use ${COMMAND_NAME} start|stop|restart|status|logs for Docker runtime control,
+${COMMAND_NAME} launch|doctor for launcher readiness, and ${COMMAND_NAME} workflow ... for operator authority.
+EOF
+    return 1
+}
+
 if [ "${1:-}" = "agent-run" ]; then
     export PYTHONPATH="$WORKFLOW_DIR${PYTHONPATH:+:$PYTHONPATH}"
     exec python3 -m runtime.praxis_supervisor --repo-root "$REPO_ROOT" run
@@ -255,9 +623,25 @@ case "${1:-}" in
         docker_only_usage
         exit 0
         ;;
+    launch)
+        shift
+        docker_only_launch "$@"
+        exit $?
+        ;;
+    doctor)
+        shift
+        docker_only_doctor "$@"
+        exit $?
+        ;;
+    repair-sync)
+        shift
+        docker_only_repair_sync "$@"
+        exit $?
+        ;;
     status)
-        docker_only_status
-        exit 0
+        shift
+        docker_only_status "$@"
+        exit $?
         ;;
     start)
         shift
@@ -279,10 +663,15 @@ case "${1:-}" in
         docker_only_logs "$@"
         exit 0
         ;;
+    install|uninstall|setup)
+        unsupported_native_command "${1:-}"
+        exit 1
+        ;;
+    "")
+        docker_only_usage
+        exit 1
+        ;;
 esac
 
-export PRAXIS_COMMAND_NAME="praxis"
-export PRAXIS_SERVICE_MANAGER_PATH="scripts/praxis"
-export PRAXIS_COMPATIBILITY_ALIAS_PATH="scripts/dag-ctl"
-
-exec "$SCRIPT_DIR/praxis-service-manager" "$@"
+echo "Unknown command: ${1:-} (try: ${COMMAND_NAME} help)" >&2
+exit 1

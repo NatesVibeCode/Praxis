@@ -2,7 +2,16 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import runtime.task_type_router as _ttr_mod
 from runtime.task_type_router import TaskTypeRouter
+
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _stub_router_provider_defaults(monkeypatch):
+    monkeypatch.setattr(_ttr_mod, "default_llm_adapter_type", lambda: "cli")
 
 
 def _as_of() -> datetime:

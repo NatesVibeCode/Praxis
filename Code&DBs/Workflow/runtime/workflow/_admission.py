@@ -78,6 +78,10 @@ from runtime.dynamic_timeout import (
     max_complexity_tier,
 )
 from runtime.compile_artifacts import CompileArtifactError, CompileArtifactStore
+from runtime.queue_admission import (
+    DEFAULT_QUEUE_CRITICAL_THRESHOLD,
+    QueueAdmissionGate,
+)
 from runtime.workflow.job_runtime_context import persist_workflow_job_runtime_contexts
 from runtime.workflow.submission_capture import WorkflowSubmissionServiceError
 from storage.postgres.validators import PostgresConfigurationError
@@ -110,58 +114,22 @@ class IdempotencyConflict(Exception):
         self.first_seen_at = first_seen_at
 
 
-_QUEUE_ADMISSION_CRITICAL_THRESHOLD = 1000
-
-
-def _queue_depth_from_workflow_jobs(conn: SyncPostgresConnection) -> int:
-    rows = conn.execute(
-        "SELECT COUNT(*) FROM workflow_jobs WHERE status IN ('pending', 'ready')"
-    )
-    if not rows:
-        return 0
-    row = rows[0]
-    keys = None
-    if isinstance(row, dict):
-        keys = row.keys()
-    else:
-        try:
-            keys = row.keys()
-        except Exception:
-            keys = None
-    if keys is not None:
-        try:
-            if "count" in keys:
-                return int(row["count"] or 0)
-            if "?column?" in keys:
-                return int(row["?column?"] or 0)
-        except Exception:
-            pass
-    if isinstance(row, (tuple, list)):
-        return int(row[0] or 0) if row else 0
-    try:
-        return int(row or 0)
-    except (TypeError, ValueError):
-        return 0
-
-
 def _enforce_queue_admission(
     conn: SyncPostgresConnection,
     *,
     job_count: int = 1,
-    critical_threshold: int = _QUEUE_ADMISSION_CRITICAL_THRESHOLD,
+    critical_threshold: int = DEFAULT_QUEUE_CRITICAL_THRESHOLD,
 ) -> int:
     """Fail closed when admitting more jobs would overflow the queue."""
-    queue_depth = _queue_depth_from_workflow_jobs(conn)
-    projected_depth = queue_depth + max(0, int(job_count))
-    if queue_depth >= critical_threshold or projected_depth > critical_threshold:
-        message = (
-            f"queue admission rejected: queue depth {queue_depth} "
-            f"with {max(0, int(job_count))} new job(s) would exceed critical threshold "
-            f"{critical_threshold}"
-        )
+    decision = QueueAdmissionGate(critical_threshold=critical_threshold).check_connection(
+        conn,
+        job_count=job_count,
+    )
+    if not decision.admitted:
+        message = f"queue admission rejected: {decision.reason}"
         logger.warning(message)
         raise RuntimeError(message)
-    return queue_depth
+    return decision.queue_depth
 
 
 def _default_workspace_ref() -> str:
@@ -421,7 +389,7 @@ def _execute_admitted_graph_run(
     try:
         execution_result, failure = execute_admitted_workflow_request(
             intake_outcome=intake_outcome,
-            adapter_registry=_graph_adapter_registry(),
+            adapter_registry=_graph_adapter_registry(request),
             evidence_writer=evidence_writer,
             context=context,
             timeout=_graph_runtime_timeout_seconds(conn, spec_dict={"name": request.workflow_id}),
@@ -459,17 +427,22 @@ def _graph_registry_for_request(request: WorkflowRequest) -> RegistryResolver:
     )
 
 
-def _graph_adapter_registry() -> AdapterRegistry:
+def _graph_adapter_registry(request: WorkflowRequest) -> AdapterRegistry:
+    adapter_types = {str(node.adapter_type).strip() for node in request.nodes if str(node.adapter_type).strip()}
     registry = AdapterRegistry(
-        api_task_adapter=APITaskAdapter(),
-        llm_task_adapter=LLMTaskAdapter(),
-        cli_llm_adapter=CLILLMAdapter(),
-        mcp_task_adapter=MCPTaskAdapter(),
+        api_task_adapter=APITaskAdapter() if "api_task" in adapter_types else None,
+        llm_task_adapter=LLMTaskAdapter() if "llm_task" in adapter_types else None,
+        cli_llm_adapter=CLILLMAdapter() if "cli_llm" in adapter_types else None,
+        mcp_task_adapter=MCPTaskAdapter() if "mcp_task" in adapter_types else None,
     )
-    registry.register("context_compiler", ContextCompilerAdapter(shadow_packet_config=None))
-    registry.register("output_parser", OutputParserAdapter())
-    registry.register("file_writer", FileWriterAdapter())
-    registry.register("verifier", VerifyAdapter())
+    if "context_compiler" in adapter_types:
+        registry.register("context_compiler", ContextCompilerAdapter(shadow_packet_config=None))
+    if "output_parser" in adapter_types:
+        registry.register("output_parser", OutputParserAdapter())
+    if "file_writer" in adapter_types:
+        registry.register("file_writer", FileWriterAdapter())
+    if "verifier" in adapter_types:
+        registry.register("verifier", VerifyAdapter())
     return registry
 
 
