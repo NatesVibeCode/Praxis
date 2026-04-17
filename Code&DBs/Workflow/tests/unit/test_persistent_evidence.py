@@ -150,6 +150,28 @@ def test_commit_submission_raises_when_run_row_is_missing_after_persist() -> Non
         writer._bridge.close()
 
 
+def test_persist_submission_async_uses_public_async_contract() -> None:
+    writer = PostgresEvidenceWriter(database_url="postgresql://unused")
+    expected = object()
+
+    async def _persist(**_kwargs):
+        return expected
+
+    try:
+        writer._persist_submission = _persist
+        result = asyncio.run(
+            writer.persist_submission_async(
+                route_identity=_route_identity("run-persist-async"),
+                admitted_definition_ref="workflow_definition.run-persist-async",
+                admitted_definition_hash="sha256:run-persist-async",
+                request_payload={"payload": "value"},
+            )
+        )
+        assert result is expected
+    finally:
+        writer._bridge.close()
+
+
 def test_commit_transition_raises_when_persistence_fails() -> None:
     writer = PostgresEvidenceWriter(database_url="postgresql://unused")
     route_identity = _route_identity("run-transition-fail")
@@ -189,6 +211,22 @@ def test_append_transition_proof_raises_when_persistence_fails() -> None:
     try:
         with pytest.raises(RuntimeBoundaryError, match="persistent evidence proof append failed"):
             writer.append_transition_proof(proof)
+    finally:
+        writer._bridge.close()
+
+
+def test_append_transition_proof_async_uses_public_async_contract() -> None:
+    writer = PostgresEvidenceWriter(database_url="postgresql://unused")
+    proof = _claim_received_proof("run-proof-async")
+    expected = object()
+
+    async def _persist(**_kwargs):
+        return expected
+
+    try:
+        writer._persist_proof = _persist
+        result = asyncio.run(writer.append_transition_proof_async(proof))
+        assert result is expected
     finally:
         writer._bridge.close()
 

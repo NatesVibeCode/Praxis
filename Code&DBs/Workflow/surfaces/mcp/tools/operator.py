@@ -147,6 +147,7 @@ def tool_praxis_maintenance(params: dict) -> dict:
         return OperatorControlFrontdoor().backfill_semantic_bridges(
             include_object_relations=bool(params.get("include_object_relations", True)),
             include_operator_decisions=bool(params.get("include_operator_decisions", True)),
+            include_roadmap_items=bool(params.get("include_roadmap_items", True)),
             as_of=(
                 _parse_iso_datetime(as_of, field_name="as_of")
                 if as_of is not None
@@ -290,28 +291,35 @@ def tool_praxis_operator_relations(params: dict) -> dict:
     """Record canonical functional areas and cross-object semantic relations."""
 
     action = str(params.get("action") or "").strip().lower()
-    control = OperatorControlFrontdoor()
     if action == "record_functional_area":
-        return control.record_functional_area(
-            area_slug=str(params.get("area_slug") or ""),
-            title=str(params.get("title") or ""),
-            summary=str(params.get("summary") or ""),
-            area_status=str(params.get("area_status") or "active"),
-            created_at=params.get("created_at"),
-            updated_at=params.get("updated_at"),
+        return execute_operation_from_subsystems(
+            _subs,
+            operation_name="operator.functional_area_record",
+            payload={
+                "area_slug": str(params.get("area_slug") or ""),
+                "title": str(params.get("title") or ""),
+                "summary": str(params.get("summary") or ""),
+                "area_status": str(params.get("area_status") or "active"),
+                "created_at": params.get("created_at"),
+                "updated_at": params.get("updated_at"),
+            },
         )
     if action == "record_relation":
-        return control.record_operator_object_relation(
-            relation_kind=str(params.get("relation_kind") or ""),
-            source_kind=str(params.get("source_kind") or ""),
-            source_ref=str(params.get("source_ref") or ""),
-            target_kind=str(params.get("target_kind") or ""),
-            target_ref=str(params.get("target_ref") or ""),
-            relation_status=str(params.get("relation_status") or "active"),
-            relation_metadata=params.get("relation_metadata"),
-            bound_by_decision_id=params.get("bound_by_decision_id"),
-            created_at=params.get("created_at"),
-            updated_at=params.get("updated_at"),
+        return execute_operation_from_subsystems(
+            _subs,
+            operation_name="operator.object_relation_record",
+            payload={
+                "relation_kind": str(params.get("relation_kind") or ""),
+                "source_kind": str(params.get("source_kind") or ""),
+                "source_ref": str(params.get("source_ref") or ""),
+                "target_kind": str(params.get("target_kind") or ""),
+                "target_ref": str(params.get("target_ref") or ""),
+                "relation_status": str(params.get("relation_status") or "active"),
+                "relation_metadata": params.get("relation_metadata"),
+                "bound_by_decision_id": params.get("bound_by_decision_id"),
+                "created_at": params.get("created_at"),
+                "updated_at": params.get("updated_at"),
+            },
         )
     return {
         "error": (
@@ -475,38 +483,42 @@ def tool_praxis_operator_architecture_policy(params: dict) -> dict:
     decided_at = params.get("decided_at")
     created_at = params.get("created_at")
     updated_at = params.get("updated_at")
-    return OperatorControlFrontdoor().record_architecture_policy_decision(
-        authority_domain=params.get("authority_domain", ""),
-        policy_slug=params.get("policy_slug", ""),
-        title=params.get("title", ""),
-        rationale=params.get("rationale", ""),
-        decided_by=params.get("decided_by", ""),
-        decision_source=params.get("decision_source", ""),
-        effective_from=(
-            _parse_iso_datetime(effective_from, field_name="effective_from")
-            if effective_from is not None
-            else None
-        ),
-        effective_to=(
-            _parse_iso_datetime(effective_to, field_name="effective_to")
-            if effective_to is not None
-            else None
-        ),
-        decided_at=(
-            _parse_iso_datetime(decided_at, field_name="decided_at")
-            if decided_at is not None
-            else None
-        ),
-        created_at=(
-            _parse_iso_datetime(created_at, field_name="created_at")
-            if created_at is not None
-            else None
-        ),
-        updated_at=(
-            _parse_iso_datetime(updated_at, field_name="updated_at")
-            if updated_at is not None
-            else None
-        ),
+    return execute_operation_from_subsystems(
+        _subs,
+        operation_name="operator.architecture_policy_record",
+        payload={
+            "authority_domain": params.get("authority_domain", ""),
+            "policy_slug": params.get("policy_slug", ""),
+            "title": params.get("title", ""),
+            "rationale": params.get("rationale", ""),
+            "decided_by": params.get("decided_by", ""),
+            "decision_source": params.get("decision_source", ""),
+            "effective_from": (
+                _parse_iso_datetime(effective_from, field_name="effective_from")
+                if effective_from is not None
+                else None
+            ),
+            "effective_to": (
+                _parse_iso_datetime(effective_to, field_name="effective_to")
+                if effective_to is not None
+                else None
+            ),
+            "decided_at": (
+                _parse_iso_datetime(decided_at, field_name="decided_at")
+                if decided_at is not None
+                else None
+            ),
+            "created_at": (
+                _parse_iso_datetime(created_at, field_name="created_at")
+                if created_at is not None
+                else None
+            ),
+            "updated_at": (
+                _parse_iso_datetime(updated_at, field_name="updated_at")
+                if updated_at is not None
+                else None
+            ),
+        },
     )
 
 
@@ -562,78 +574,22 @@ def tool_praxis_circuits(params: dict) -> dict:
 
     action = str(params.get("action") or "list").strip().lower()
     if action == "history":
-        provider_slug = str(params.get("provider_slug") or "").strip().lower()
-        rows = _subs.get_pg_conn().execute(
-            """
-            SELECT
-                operator_decision_id,
-                decision_key,
-                decision_kind,
-                decision_status,
-                rationale,
-                decided_by,
-                decision_source,
-                effective_from,
-                effective_to,
-                decided_at,
-                created_at,
-                updated_at,
-                decision_scope_kind,
-                decision_scope_ref
-            FROM operator_decisions
-            WHERE decision_scope_kind = 'provider'
-              AND decision_kind IN (
-                    'circuit_breaker_reset',
-                    'circuit_breaker_force_open',
-                    'circuit_breaker_force_closed'
-              )
-              AND ($1::text = '' OR decision_scope_ref = $1)
-            ORDER BY decided_at DESC, created_at DESC, operator_decision_id DESC
-            """,
-            provider_slug,
+        return execute_operation_from_subsystems(
+            _subs,
+            operation_name="operator.circuit_history",
+            payload={
+                "provider_slug": str(params.get("provider_slug") or "").strip().lower() or None,
+            },
         )
-        history: list[dict[str, object]] = []
-        for row in rows:
-            decision_key = str(row.get("decision_key") or "")
-            row_provider_slug = str(row.get("decision_scope_ref") or "").strip().lower()
-            history.append(
-                {
-                    "provider_slug": row_provider_slug,
-                    "operator_decision_id": str(row.get("operator_decision_id") or ""),
-                    "decision_key": decision_key,
-                    "decision_kind": str(row.get("decision_kind") or ""),
-                    "decision_status": str(row.get("decision_status") or ""),
-                    "rationale": str(row.get("rationale") or ""),
-                    "decided_by": str(row.get("decided_by") or ""),
-                    "decision_source": str(row.get("decision_source") or ""),
-                    "effective_from": row.get("effective_from").isoformat() if row.get("effective_from") is not None else None,
-                    "effective_to": row.get("effective_to").isoformat() if row.get("effective_to") is not None else None,
-                    "decided_at": row.get("decided_at").isoformat() if row.get("decided_at") is not None else None,
-                    "created_at": row.get("created_at").isoformat() if row.get("created_at") is not None else None,
-                    "updated_at": row.get("updated_at").isoformat() if row.get("updated_at") is not None else None,
-                    "decision_scope_kind": str(row.get("decision_scope_kind") or ""),
-                    "decision_scope_ref": row_provider_slug,
-                }
-            )
-        return {"history": history}
 
     if action == "list":
-        from runtime.circuit_breaker import get_circuit_breakers
-
-        try:
-            payload = get_circuit_breakers().all_states()
-        except Exception as exc:
-            return {"error": str(exc)}
-        provider_slug = str(params.get("provider_slug") or "").strip().lower()
-        if provider_slug:
-            return {
-                "circuits": (
-                    {provider_slug: payload[provider_slug]}
-                    if provider_slug in payload
-                    else {}
-                )
-            }
-        return {"circuits": payload}
+        return execute_operation_from_subsystems(
+            _subs,
+            operation_name="operator.circuit_states",
+            payload={
+                "provider_slug": str(params.get("provider_slug") or "").strip().lower() or None,
+            },
+        )
 
     provider_slug = str(params.get("provider_slug") or "").strip().lower()
     if not provider_slug:
@@ -644,27 +600,31 @@ def tool_praxis_circuits(params: dict) -> dict:
 
     effective_to = params.get("effective_to")
     effective_from = params.get("effective_from")
-    return OperatorControlFrontdoor().set_circuit_breaker_override(
-        provider_slug=provider_slug,
-        override_state={
-            "open": "open",
-            "close": "closed",
-            "reset": "reset",
-        }[action],
-        effective_to=(
-            _parse_iso_datetime(effective_to, field_name="effective_to")
-            if effective_to is not None
-            else None
-        ),
-        reason_code=str(params.get("reason_code") or "operator_control"),
-        rationale=params.get("rationale"),
-        effective_from=(
-            _parse_iso_datetime(effective_from, field_name="effective_from")
-            if effective_from is not None
-            else None
-        ),
-        decided_by=params.get("decided_by"),
-        decision_source=params.get("decision_source"),
+    return execute_operation_from_subsystems(
+        _subs,
+        operation_name="operator.circuit_override",
+        payload={
+            "provider_slug": provider_slug,
+            "override_state": {
+                "open": "open",
+                "close": "closed",
+                "reset": "reset",
+            }[action],
+            "effective_to": (
+                _parse_iso_datetime(effective_to, field_name="effective_to")
+                if effective_to is not None
+                else None
+            ),
+            "reason_code": str(params.get("reason_code") or "operator_control"),
+            "rationale": params.get("rationale"),
+            "effective_from": (
+                _parse_iso_datetime(effective_from, field_name="effective_from")
+                if effective_from is not None
+                else None
+            ),
+            "decided_by": params.get("decided_by"),
+            "decision_source": params.get("decision_source"),
+        },
     )
 
 
@@ -753,6 +713,11 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "include_operator_decisions": {
                         "type": "boolean",
                         "description": "When action='backfill_semantic_bridges', replay operator_decisions into semantic assertions.",
+                        "default": True,
+                    },
+                    "include_roadmap_items": {
+                        "type": "boolean",
+                        "description": "When action='backfill_semantic_bridges', replay roadmap_items semantic fields into semantic assertions.",
                         "default": True,
                     },
                 },
@@ -1294,7 +1259,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "root_roadmap_item_id": {"type": "string"},
                     "semantic_neighbor_limit": {
                         "type": "integer",
-                        "description": "How many external roadmap neighbors to include. Semantic-assertion matches are preferred; embedding similarity is a fallback when no canonical semantic neighbors exist.",
+                        "description": "How many external roadmap neighbors to include from canonical semantic assertions.",
                         "default": 5,
                         "minimum": 0,
                     },

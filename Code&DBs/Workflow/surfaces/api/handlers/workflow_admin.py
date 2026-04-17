@@ -118,6 +118,11 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         "/api/operator/provider-onboarding": "Seed a provider profile, model catalog rows, benchmark metadata, and verification in one wizard",
         "/api/operator/decision": "Record one canonical operator decision row through the operation catalog",
         "/api/operator/decisions": "List canonical operator decisions through the operation catalog",
+        "/api/operator/architecture-policy": "Record one architecture-policy operator decision through the operation catalog",
+        "/api/operator/functional-area": "Record one functional area row through the operation catalog",
+        "/api/operator/object-relation": "Record one operator object relation through the operation catalog",
+        "/api/circuits": "Read or override provider circuit breaker state through the operation catalog",
+        "/api/circuits/history": "Read durable provider circuit override history through the operation catalog",
     }
 
     health_payload = _handle_health(subs, {})

@@ -130,6 +130,7 @@ def test_should_use_cli_fast_path_only_when_no_http_lane_exists() -> None:
         provider_slug="openai",
         model_slug="gpt-5.4",
         adapter_type="cli_llm",
+        supports_tool_loop=False,
     )
     http_route = ResolvedChatRoute(
         provider_slug="openai",
@@ -137,6 +138,7 @@ def test_should_use_cli_fast_path_only_when_no_http_lane_exists() -> None:
         adapter_type="llm_task",
         endpoint_uri="https://api.openai.com/v1/chat/completions",
         api_key="openai-key",
+        supports_tool_loop=True,
     )
 
     assert _should_use_cli_fast_path([cli_route]) is True
@@ -150,6 +152,7 @@ def test_send_message_prefers_http_lane_when_cli_route_is_sticky(monkeypatch) ->
         provider_slug="openai",
         model_slug="gpt-5.4",
         adapter_type="cli_llm",
+        supports_tool_loop=False,
     )
     http_route = ResolvedChatRoute(
         provider_slug="openai",
@@ -157,6 +160,7 @@ def test_send_message_prefers_http_lane_when_cli_route_is_sticky(monkeypatch) ->
         adapter_type="llm_task",
         endpoint_uri="https://api.openai.com/v1/chat/completions",
         api_key="openai-key",
+        supports_tool_loop=True,
     )
 
     monkeypatch.setattr(orchestrator, "_resolve_route_chain", lambda: [cli_route, http_route])
@@ -197,6 +201,7 @@ def test_send_message_streaming_prefers_http_lane_when_cli_route_is_sticky(monke
         provider_slug="openai",
         model_slug="gpt-5.4",
         adapter_type="cli_llm",
+        supports_tool_loop=False,
     )
     http_route = ResolvedChatRoute(
         provider_slug="openai",
@@ -204,6 +209,7 @@ def test_send_message_streaming_prefers_http_lane_when_cli_route_is_sticky(monke
         adapter_type="llm_task",
         endpoint_uri="https://api.openai.com/v1/chat/completions",
         api_key="openai-key",
+        supports_tool_loop=True,
     )
 
     monkeypatch.setattr(orchestrator, "_resolve_route_chain", lambda: [cli_route, http_route])

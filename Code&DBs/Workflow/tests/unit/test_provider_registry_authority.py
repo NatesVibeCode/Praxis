@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 import adapters.provider_registry as provider_registry_mod
+from adapters.provider_types import ProviderCLIProfile
 from surfaces.mcp.tools import health as health_tool
 from surfaces.api.handlers import workflow_admin
 
@@ -99,6 +102,23 @@ def test_transport_support_report_delegates_to_canonical_authority(monkeypatch) 
     assert captured["runtime_profile_ref"] == "native"
     assert captured["jobs"] == [{"label": "verify", "agent": "auto/review"}]
     assert captured["provider_registry_mod"].__name__ == "registry.provider_execution_registry"
+
+
+def test_default_provider_slug_raises_without_configured_priority_provider(monkeypatch) -> None:
+    import registry.provider_execution_registry as execution_registry
+
+    monkeypatch.setattr(execution_registry, "_load_from_db", lambda: None)
+    monkeypatch.setattr(
+        execution_registry,
+        "_REGISTRY",
+        {
+            "localcli": ProviderCLIProfile(provider_slug="localcli", binary="localcli"),
+            "self_hosted": ProviderCLIProfile(provider_slug="self_hosted", binary="self-hosted"),
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="no configured default provider"):
+        execution_registry.default_provider_slug()
 
 
 def test_admin_health_uses_transport_support_frontdoor_for_provider_probes(monkeypatch) -> None:

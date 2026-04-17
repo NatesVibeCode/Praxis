@@ -266,6 +266,30 @@ def _make_module_id(path: str, kind: str, name: str) -> str:
     return hashlib.sha256(key.encode()).hexdigest()[:16]
 
 
+def _index_error_record(
+    *,
+    scope: str,
+    code: str,
+    error: BaseException,
+    module_path: str | None = None,
+    kind: str | None = None,
+    name: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "scope": scope,
+        "code": code,
+        "error_type": type(error).__name__,
+        "error_message": str(error),
+    }
+    if module_path:
+        payload["module_path"] = module_path
+    if kind:
+        payload["kind"] = kind
+    if name:
+        payload["name"] = name
+    return payload
+
+
 # ---------------------------------------------------------------------------
 # File walker and extractor
 # ---------------------------------------------------------------------------
@@ -737,7 +761,7 @@ class ModuleIndexer:
 
         # Upsert into Postgres
         indexed = 0
-        errors: list[str] = []
+        errors: list[dict[str, Any]] = []
         for unit, embedding in zip(to_index, embeddings):
             try:
                 if embedding is None:
@@ -781,7 +805,14 @@ class ModuleIndexer:
                 indexed += 1
             except Exception as exc:
                 errors.append(
-                    f"{unit.module_path}:{unit.kind}:{unit.name}:{type(exc).__name__}: {exc}"
+                    _index_error_record(
+                        scope="index_codebase",
+                        code="module_indexer.index_failed",
+                        error=exc,
+                        module_path=unit.module_path,
+                        kind=unit.kind,
+                        name=unit.name,
+                    )
                 )
                 # Keep stderr noise for operators, but do not pretend the batch was healthy.
                 import sys
@@ -937,5 +968,11 @@ class ModuleIndexer:
                 "total_indexed": 0,
                 "by_kind": {},
                 "observability_state": "degraded",
-                "errors": (f"{type(exc).__name__}: {exc}",),
+                "errors": (
+                    _index_error_record(
+                        scope="stats",
+                        code="module_indexer.stats_failed",
+                        error=exc,
+                    ),
+                ),
             }

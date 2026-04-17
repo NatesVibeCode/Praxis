@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -51,26 +50,11 @@ __all__ = [
 ]
 
 
-# ---------------------------------------------------------------------------
-# Monkeypatch-aware helpers
-# ---------------------------------------------------------------------------
-# Tests monkeypatch these names on `registry.provider_onboarding`.
-# The functions below resolve through the module at call time so that
-# monkeypatching the top-level names also affects calls within this module.
-
 def _find_binary(binary_name):
-    mod = sys.modules.get("registry.provider_onboarding")
-    fn = getattr(mod, "_find_binary", None) if mod is not None else None
-    if fn is not None and fn is not _find_binary:
-        return fn(binary_name)
     return _find_binary_default(binary_name)
 
 
 def _run_command(cmd, *, env, input_text=None, timeout_seconds):
-    mod = sys.modules.get("registry.provider_onboarding")
-    fn = getattr(mod, "_run_command", None) if mod is not None else None
-    if fn is not None and fn is not _run_command:
-        return fn(cmd, env=env, input_text=input_text, timeout_seconds=timeout_seconds)
     return _run_command_default(cmd, env=env, input_text=input_text, timeout_seconds=timeout_seconds)
 
 
@@ -80,10 +64,6 @@ def _http_get_json(
     headers: Mapping[str, str],
     timeout_seconds: int,
 ) -> dict[str, Any]:
-    mod = sys.modules.get("registry.provider_onboarding")
-    fn = getattr(mod, "_http_get_json", None) if mod is not None else None
-    if fn is not None and fn is not _http_get_json:
-        return fn(url, headers=headers, timeout_seconds=timeout_seconds)
     return _http_get_json_impl(url, headers=headers, timeout_seconds=timeout_seconds)
 
 
@@ -212,10 +192,6 @@ def _discover_api_models(
     env: Mapping[str, str],
     transport_details: Mapping[str, Any],
 ) -> tuple[str, ...]:
-    mod = sys.modules.get("registry.provider_onboarding")
-    fn = getattr(mod, "_discover_api_models", None) if mod is not None else None
-    if fn is not None and fn is not _discover_api_models:
-        return fn(spec, env=env, transport_details=transport_details)
     return _discover_api_models_impl(spec, env=env, transport_details=transport_details)
 
 

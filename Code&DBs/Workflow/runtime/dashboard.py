@@ -39,7 +39,9 @@ def build_dashboard() -> dict[str, Any]:
             - cost_summary: total_cost_usd, by_agent
             - circuit_states: per-provider state
             - route_health: consecutive failures per provider
+            - route_health_error: explicit route-health authority failure, if any
             - leaderboard: top 5 agents by pass rate
+            - leaderboard_error: explicit leaderboard authority failure, if any
             - recent_failures: last 5 failed dispatches
             - system_health: "healthy", "degraded", or "unhealthy"
     """
@@ -59,15 +61,19 @@ def build_dashboard() -> dict[str, Any]:
     # 4. Route health (consecutive failures)
     route_outcomes = get_route_outcomes()
     route_health: dict[str, int] = {}
+    route_health_error: str | None = None
     try:
         for provider_slug in route_outcomes.provider_slugs():
             route_health[provider_slug] = route_outcomes.consecutive_failures(
                 provider_slug
             )
-    except Exception:
+    except Exception as exc:
+        logger.warning("route health unavailable: %s", exc)
         route_health = {}
+        route_health_error = f"{type(exc).__name__}: {exc}"
 
     # 5. Leaderboard (top 5)
+    leaderboard_error: str | None = None
     try:
         all_scores = build_leaderboard()
         top_5_scores = all_scores[:5]
@@ -83,8 +89,10 @@ def build_dashboard() -> dict[str, Any]:
             }
             for s in top_5_scores
         ]
-    except Exception:
+    except Exception as exc:
+        logger.warning("leaderboard unavailable: %s", exc)
         leaderboard = []
+        leaderboard_error = f"{type(exc).__name__}: {exc}"
 
     # 6. Recent failures (last 5)
     recent_failures = []
@@ -147,7 +155,11 @@ def build_dashboard() -> dict[str, Any]:
         if state.get("state") == "HALF_OPEN"
     )
 
-    if pass_rate > 0.8 and open_circuits == 0:
+    observability_blocked = bool(route_health_error or leaderboard_error)
+
+    if observability_blocked:
+        system_health = "degraded"
+    elif pass_rate > 0.8 and open_circuits == 0:
         system_health = "healthy"
     elif pass_rate >= 0.5 and (open_circuits == 0 or half_open_circuits > 0):
         system_health = "degraded"
@@ -169,7 +181,9 @@ def build_dashboard() -> dict[str, Any]:
         },
         "circuit_states": circuit_states,
         "route_health": route_health,
+        "route_health_error": route_health_error,
         "leaderboard": leaderboard,
+        "leaderboard_error": leaderboard_error,
         "recent_failures": recent_failures,
         "observability": observability,
         "system_health": system_health,
@@ -193,6 +207,9 @@ def format_dashboard(data: dict[str, Any]) -> str:
     efficiency = observability.get("efficiency_summary", {})
     failure_categories = observability.get("failure_category_breakdown", [])
     latency_percentiles = observability.get("latency_percentiles", {})
+    route_health = data.get("route_health", {})
+    route_health_error = data.get("route_health_error")
+    leaderboard_error = data.get("leaderboard_error")
 
     # Summary line
     total_workflows = dispatch.get("total_workflows", 0)
@@ -237,6 +254,17 @@ def format_dashboard(data: dict[str, Any]) -> str:
     else:
         circuit_line += " none"
 
+    route_health_line = "route_health:"
+    if route_health:
+        route_health_line += " " + " ".join(
+            f"{provider_slug}={failures}"
+            for provider_slug, failures in sorted(route_health.items())
+        )
+    elif route_health_error:
+        route_health_line += f" unavailable error={route_health_error}"
+    else:
+        route_health_line += " none"
+
     leaderboard_lines = ["leaderboard_top:"]
     if leaderboard:
         for score in leaderboard:
@@ -249,6 +277,10 @@ def format_dashboard(data: dict[str, Any]) -> str:
                 f"  {provider}/{model} pass_rate_pct={pass_pct:.1f} "
                 f"avg_latency_ms={avg_latency} avg_cost_per_run_usd={cost_per_run:.4f}"
             )
+        if leaderboard_error:
+            leaderboard_lines.append(f"  warning error={leaderboard_error}")
+    elif leaderboard_error:
+        leaderboard_lines.append(f"  unavailable error={leaderboard_error}")
     else:
         leaderboard_lines.append("  none")
 
@@ -272,6 +304,7 @@ def format_dashboard(data: dict[str, Any]) -> str:
             observability_line,
             failure_line,
             circuit_line,
+            route_health_line,
             *leaderboard_lines,
             *failure_lines,
         ]

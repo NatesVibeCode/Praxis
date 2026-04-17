@@ -53,24 +53,6 @@ def test_workflow_run_packet_observability_rolls_up_sources_and_contract_drift()
         async def fetch(self, query: str, *args: object):
             workflow_run_ids = args[0]
             assert workflow_run_ids == ["run.derived", "run.missing"]
-            if "FROM run_operator_frames" in query:
-                return [
-                    {
-                        "run_id": "run.derived",
-                        "operator_frame_id": "operator_frame.derived.0",
-                        "node_id": "foreach",
-                        "operator_kind": "foreach",
-                        "frame_state": "running",
-                        "item_index": 0,
-                        "iteration_index": None,
-                        "source_snapshot": {"item": "alpha"},
-                        "aggregate_outputs": {},
-                        "active_count": 1,
-                        "stop_reason": None,
-                        "started_at": as_of,
-                        "finished_at": None,
-                    }
-                ]
             if "NULL::jsonb AS packet_inspection" not in query and "packet_inspection" in query:
                 raise _MissingColumnError("packet_inspection")
             return [
@@ -119,6 +101,22 @@ def test_workflow_run_packet_observability_rolls_up_sources_and_contract_drift()
                             "verify_refs": ["verify.smoke"],
                         }
                     ],
+                    "operator_frames": [
+                        {
+                            "operator_frame_id": "operator_frame.derived.0",
+                            "node_id": "foreach",
+                            "operator_kind": "foreach",
+                            "frame_state": "running",
+                            "item_index": 0,
+                            "iteration_index": None,
+                            "source_snapshot": {"item": "alpha"},
+                            "aggregate_outputs": {},
+                            "active_count": 1,
+                            "stop_reason": None,
+                            "started_at": as_of,
+                            "finished_at": None,
+                        }
+                    ],
                 },
                 {
                     "run_id": "run.missing",
@@ -141,6 +139,7 @@ def test_workflow_run_packet_observability_rolls_up_sources_and_contract_drift()
                     "finished_at": as_of,
                     "last_event_id": None,
                     "packets": [],
+                    "operator_frames": [],
                 },
             ]
 
@@ -386,6 +385,7 @@ def _assert_native_operator_query_surface_reads_canonical_rows_without_mutation(
         "confidence": 0.92,
         "reason_codes": [
             "architecture_changed",
+            "workflow_binding_present",
             "validating_fix_evidence_present",
         ],
         "bug_ids": [bug_id],

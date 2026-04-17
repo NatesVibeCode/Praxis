@@ -12,7 +12,10 @@ from runtime.work_item_workflow_bindings import (
     project_work_item_workflow_binding,
     work_item_workflow_binding_id,
 )
-from storage.migrations import workflow_migration_statements
+from storage.migrations import (
+    workflow_bootstrap_migration_statements,
+    workflow_migration_statements,
+)
 from storage.postgres import (
     PostgresConfigurationError,
     bootstrap_control_plane_schema,
@@ -31,6 +34,17 @@ def test_work_item_workflow_bindings_record_bug_to_workflow_class_binding_is_can
 async def _exercise_work_item_workflow_bindings_record_bug_to_workflow_class_binding_is_canonical_and_persisted() -> None:
     env = _workflow_env()
     as_of = datetime(2026, 4, 2, 20, 0, tzinfo=timezone.utc)
+    promoted_roadmap_item_id = "roadmap_item.auto_bug.bug.dispatch.binding.1"
+    binding_id = work_item_workflow_binding_id(
+        binding_kind="governed_by",
+        bug_id="bug.dispatch-binding.1",
+        workflow_class_id="workflow_class.review.binding",
+    )
+    roadmap_binding_id = work_item_workflow_binding_id(
+        binding_kind="governed_by",
+        roadmap_item_id=promoted_roadmap_item_id,
+        workflow_class_id="workflow_class.review.binding",
+    )
 
     conn = await connect_workflow_database(env=env)
     try:
@@ -38,13 +52,20 @@ async def _exercise_work_item_workflow_bindings_record_bug_to_workflow_class_bin
         await bootstrap_workflow_lane_catalog_schema(conn)
         await _bootstrap_workflow_migration(conn, "008_workflow_class_and_schedule_schema.sql")
         await _bootstrap_workflow_migration(conn, "009_bug_and_roadmap_authority.sql")
+        await _bootstrap_workflow_migration(conn, "082_event_log.sql")
         await _bootstrap_workflow_migration(conn, "010_operator_control_authority.sql")
         await _bootstrap_workflow_migration(conn, "132_issue_backlog_authority.sql")
+        await _bootstrap_workflow_migration(conn, "146_semantic_assertion_substrate.sql")
 
         await _seed_workflow_lane(conn, as_of=as_of)
         await _seed_workflow_class(conn, as_of=as_of)
         await _seed_bug(conn, as_of=as_of)
         await _seed_operator_decision(conn, as_of=as_of)
+        await _cleanup_promoted_roadmap_rows(
+            conn,
+            roadmap_item_id=promoted_roadmap_item_id,
+            binding_ids=(binding_id, roadmap_binding_id),
+        )
 
         binding_kwargs = {
             "binding_kind": "governed_by",
@@ -62,11 +83,6 @@ async def _exercise_work_item_workflow_bindings_record_bug_to_workflow_class_bin
         )
         second_payload = await operator_write.arecord_work_item_workflow_binding(
             **binding_kwargs,
-        )
-        binding_id = work_item_workflow_binding_id(
-            binding_kind=binding_kwargs["binding_kind"],
-            bug_id=binding_kwargs["bug_id"],
-            workflow_class_id=binding_kwargs["workflow_class_id"],
         )
 
         assert first_payload["binding"]["work_item_workflow_binding_id"] == binding_id
@@ -105,7 +121,7 @@ async def _exercise_work_item_workflow_bindings_record_bug_to_workflow_class_bin
             promoted_roadmap_item_id,
         )
         assert roadmap_row is not None
-        assert roadmap_row["roadmap_key"] == "roadmap.auto.bug.bug.dispatch.binding.1"
+        assert roadmap_row["roadmap_key"] == "roadmap.auto_bug.bug.dispatch.binding.1"
         assert roadmap_row["title"] == "Binding test bug"
         assert roadmap_row["item_kind"] == "capability"
         assert roadmap_row["status"] == "active"
@@ -115,6 +131,34 @@ async def _exercise_work_item_workflow_bindings_record_bug_to_workflow_class_bin
             "Auto-promoted from bug.dispatch-binding.1: "
             "Work item binding test bug"
         )
+        assert first_payload["auto_promoted_roadmap"]["semantic_bridge_summary"] == {
+            "processed": 1,
+            "recorded": 2,
+            "retracted": 0,
+        }
+        assert second_payload["auto_promoted_roadmap"]["semantic_bridge_summary"] == {
+            "processed": 1,
+            "recorded": 2,
+            "retracted": 0,
+        }
+
+        roadmap_semantic_rows = await conn.fetch(
+            """
+            SELECT predicate_slug, object_kind, object_ref
+            FROM semantic_assertions
+            WHERE source_kind = 'roadmap_item'
+              AND source_ref = $1
+            ORDER BY predicate_slug, object_ref
+            """,
+            promoted_roadmap_item_id,
+        )
+        assert [
+            (row["predicate_slug"], row["object_kind"], row["object_ref"])
+            for row in roadmap_semantic_rows
+        ] == [
+            ("governed_by_decision_ref", "decision_ref", "decision:bug:dispatch-binding.1"),
+            ("sourced_from_bug", "bug", "bug.dispatch-binding.1"),
+        ]
 
         roadmap_binding_id = work_item_workflow_binding_id(
             binding_kind=binding_kwargs["binding_kind"],
@@ -208,6 +252,25 @@ def test_work_item_workflow_bindings_issue_binding_auto_promotes_issue_to_bug_an
 async def _exercise_work_item_workflow_bindings_issue_binding_auto_promotes_issue_to_bug_and_roadmap() -> None:
     env = _workflow_env()
     as_of = datetime(2026, 4, 16, 17, 0, tzinfo=timezone.utc)
+    promoted_bug_id = "bug.auto_issue.issue.dispatch.gap.1"
+    promoted_roadmap_item_id = (
+        "roadmap_item.auto_bug.bug.auto.issue.issue.dispatch.gap.1"
+    )
+    issue_binding_id = work_item_workflow_binding_id(
+        binding_kind="governed_by",
+        issue_id="issue.dispatch-gap.1",
+        workflow_class_id="workflow_class.review.binding",
+    )
+    bug_binding_id = work_item_workflow_binding_id(
+        binding_kind="governed_by",
+        bug_id=promoted_bug_id,
+        workflow_class_id="workflow_class.review.binding",
+    )
+    roadmap_binding_id = work_item_workflow_binding_id(
+        binding_kind="governed_by",
+        roadmap_item_id=promoted_roadmap_item_id,
+        workflow_class_id="workflow_class.review.binding",
+    )
 
     conn = await connect_workflow_database(env=env)
     try:
@@ -215,13 +278,21 @@ async def _exercise_work_item_workflow_bindings_issue_binding_auto_promotes_issu
         await bootstrap_workflow_lane_catalog_schema(conn)
         await _bootstrap_workflow_migration(conn, "008_workflow_class_and_schedule_schema.sql")
         await _bootstrap_workflow_migration(conn, "009_bug_and_roadmap_authority.sql")
+        await _bootstrap_workflow_migration(conn, "082_event_log.sql")
         await _bootstrap_workflow_migration(conn, "010_operator_control_authority.sql")
         await _bootstrap_workflow_migration(conn, "132_issue_backlog_authority.sql")
+        await _bootstrap_workflow_migration(conn, "146_semantic_assertion_substrate.sql")
 
         await _seed_workflow_lane(conn, as_of=as_of)
         await _seed_workflow_class(conn, as_of=as_of)
         await _seed_operator_decision(conn, as_of=as_of)
         await _seed_issue(conn, as_of=as_of)
+        await _cleanup_promoted_roadmap_rows(
+            conn,
+            roadmap_item_id=promoted_roadmap_item_id,
+            binding_ids=(issue_binding_id, bug_binding_id, roadmap_binding_id),
+        )
+        await conn.execute("DELETE FROM bugs WHERE bug_id = $1", promoted_bug_id)
 
         payload = await operator_write.arecord_work_item_workflow_binding(
             binding_kind="governed_by",
@@ -234,11 +305,6 @@ async def _exercise_work_item_workflow_bindings_issue_binding_auto_promotes_issu
             env=env,
         )
 
-        issue_binding_id = work_item_workflow_binding_id(
-            binding_kind="governed_by",
-            issue_id="issue.dispatch-gap.1",
-            workflow_class_id="workflow_class.review.binding",
-        )
         promoted_bug = payload["auto_promoted_bug"]
         promoted_roadmap = payload["auto_promoted_roadmap"]
 
@@ -259,6 +325,11 @@ async def _exercise_work_item_workflow_bindings_issue_binding_auto_promotes_issu
         assert promoted_roadmap["roadmap_item_id"] == (
             "roadmap_item.auto_bug.bug.auto.issue.issue.dispatch.gap.1"
         )
+        assert promoted_roadmap["semantic_bridge_summary"] == {
+            "processed": 1,
+            "recorded": 2,
+            "retracted": 0,
+        }
 
         bug_row = await conn.fetchrow(
             """
@@ -283,11 +354,6 @@ async def _exercise_work_item_workflow_bindings_issue_binding_auto_promotes_issu
         assert bug_row["source_issue_id"] == "issue.dispatch-gap.1"
         assert bug_row["summary"] == "Auto-promoted from issue.dispatch-gap.1: Work started on upstream issue."
 
-        bug_binding_id = work_item_workflow_binding_id(
-            binding_kind="governed_by",
-            bug_id=promoted_bug["bug_id"],
-            workflow_class_id="workflow_class.review.binding",
-        )
         bug_binding_row = await conn.fetchrow(
             """
             SELECT
@@ -319,17 +385,79 @@ async def _exercise_work_item_workflow_bindings_issue_binding_auto_promotes_issu
         assert roadmap_row is not None
         assert roadmap_row["source_bug_id"] == promoted_bug["bug_id"]
         assert roadmap_row["status"] == "active"
+
+        roadmap_semantic_rows = await conn.fetch(
+            """
+            SELECT predicate_slug, object_kind, object_ref
+            FROM semantic_assertions
+            WHERE source_kind = 'roadmap_item'
+              AND source_ref = $1
+            ORDER BY predicate_slug, object_ref
+            """,
+            promoted_roadmap["roadmap_item_id"],
+        )
+        assert [
+            (row["predicate_slug"], row["object_kind"], row["object_ref"])
+            for row in roadmap_semantic_rows
+        ] == [
+            ("governed_by_decision_ref", "decision_ref", "decision:issue:dispatch-gap.1"),
+            ("sourced_from_bug", "bug", "bug.auto_issue.issue.dispatch.gap.1"),
+        ]
     finally:
         await conn.close()
 
 
+async def _cleanup_promoted_roadmap_rows(
+    conn,
+    *,
+    roadmap_item_id: str,
+    binding_ids: tuple[str, ...],
+) -> None:
+    await conn.execute(
+        """
+        DELETE FROM semantic_current_assertions
+        WHERE semantic_assertion_id IN (
+            SELECT semantic_assertion_id
+            FROM semantic_assertions
+            WHERE source_kind = 'roadmap_item'
+              AND source_ref = $1
+        )
+        """,
+        roadmap_item_id,
+    )
+    await conn.execute(
+        """
+        DELETE FROM semantic_assertions
+        WHERE source_kind = 'roadmap_item'
+          AND source_ref = $1
+        """,
+        roadmap_item_id,
+    )
+    await conn.execute(
+        """
+        DELETE FROM work_item_workflow_bindings
+        WHERE work_item_workflow_binding_id = ANY($1::text[])
+        """,
+        list(binding_ids),
+    )
+    await conn.execute(
+        "DELETE FROM roadmap_items WHERE roadmap_item_id = $1",
+        roadmap_item_id,
+    )
+
+
 async def _bootstrap_workflow_migration(conn, filename: str) -> None:
+    statements = (
+        workflow_bootstrap_migration_statements(filename)
+        if filename == "082_event_log.sql"
+        else workflow_migration_statements(filename)
+    )
     async with conn.transaction():
         await conn.execute(
             "SELECT pg_advisory_xact_lock($1::bigint)",
             _SCHEMA_BOOTSTRAP_LOCK_ID,
         )
-        for statement in workflow_migration_statements(filename):
+        for statement in statements:
             try:
                 async with conn.transaction():
                     await conn.execute(statement)

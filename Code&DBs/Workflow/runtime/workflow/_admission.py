@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 import concurrent.futures
-from dataclasses import replace
 import hashlib
 import json
 import logging
@@ -15,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from adapters import AdapterRegistry, CLILLMAdapter, LLMTaskAdapter, MCPTaskAdapter, build_transition_proof
+from adapters import AdapterRegistry, CLILLMAdapter, LLMTaskAdapter, MCPTaskAdapter
 from adapters.api_task import APITaskAdapter
 from adapters.context_adapter import ContextCompilerAdapter
 from adapters.file_writer_adapter import FileWriterAdapter
@@ -24,14 +23,12 @@ from adapters.verify_adapter import VerifyAdapter
 from contracts.domain import WorkflowEdgeContract, WorkflowNodeContract, WorkflowRequest
 from registry.domain import RegistryResolver, RuntimeProfileAuthorityRecord, WorkspaceAuthorityRecord
 from registry.native_runtime_profile_sync import resolve_native_runtime_profile_config
+from runtime.admission_evidence import (
+    AdmissionEvidenceRecord,
+    persist_admission_evidence,
+)
 from runtime.execution_strategy import StepCompiler
 from runtime.domain import RunState
-from runtime.execution.evidence import _decision_refs_for_admission, _event_id, _now, _receipt_id
-from runtime.execution.orchestrator import (
-    CLAIM_REJECTED_EVENT_TYPE,
-    CLAIM_VALIDATED_EVENT_TYPE,
-    CLAIM_VALIDATION_RECEIPT_TYPE,
-)
 from runtime.execution.request_building import _workflow_request_payload
 from runtime.idempotency import canonical_hash, check_idempotency, record_idempotency
 from runtime.intake import WorkflowIntakePlanner
@@ -285,66 +282,26 @@ def _persist_graph_submission_evidence(
     intake_outcome,
     request: WorkflowRequest,
 ) -> None:
-    submission_identity = replace(intake_outcome.route_identity, transition_seq=1)
-    admission_identity = replace(intake_outcome.route_identity, transition_seq=2)
-    submission_result = evidence_writer.commit_submission(
-        route_identity=submission_identity,
-        request_payload=_workflow_request_payload(request),
-        admitted_definition_ref=(
-            intake_outcome.admitted_definition_ref or request.workflow_definition_id
-        ),
-        admitted_definition_hash=(
-            intake_outcome.admitted_definition_hash or request.definition_hash
-        ),
-    )
-    admission_state = intake_outcome.current_state
-    if admission_state is RunState.CLAIM_REJECTED:
-        event_type = CLAIM_REJECTED_EVENT_TYPE
-    else:
-        event_type = CLAIM_VALIDATED_EVENT_TYPE
-    admission_reason_code = intake_outcome.admission_decision.reason_code
-    admission_proof = build_transition_proof(
-        route_identity=admission_identity,
-        transition_seq=2,
-        event_id=_event_id(
-            run_id=intake_outcome.run_id,
-            evidence_seq=submission_result.evidence_seq + 1,
-        ),
-        receipt_id=_receipt_id(
-            run_id=intake_outcome.run_id,
-            evidence_seq=submission_result.evidence_seq + 2,
-        ),
-        event_type=event_type,
-        receipt_type=CLAIM_VALIDATION_RECEIPT_TYPE,
-        reason_code=admission_reason_code,
-        evidence_seq=submission_result.evidence_seq + 1,
-        occurred_at=_now(),
-        started_at=intake_outcome.admission_decision.decided_at,
-        finished_at=intake_outcome.admission_decision.decided_at,
-        executor_type="runtime.intake",
-        status=admission_state.value,
-        payload={
-            "from_state": RunState.CLAIM_RECEIVED.value,
-            "to_state": admission_state.value,
-            "validation_result_ref": intake_outcome.validation_result.validation_result_ref,
-            "authority_context_ref": intake_outcome.admission_decision.authority_context_ref,
-            "admission_decision_id": intake_outcome.admission_decision.admission_decision_id,
-        },
-        inputs={
-            "validation_result_ref": intake_outcome.validation_result.validation_result_ref,
-            "request_digest": intake_outcome.request_digest,
-            "authority_context_ref": intake_outcome.admission_decision.authority_context_ref,
-        },
-        outputs={
-            "admission_decision_id": intake_outcome.admission_decision.admission_decision_id,
-            "to_state": admission_state.value,
-        },
-        decision_refs=_decision_refs_for_admission(intake_outcome),
-        failure_code=(
-            admission_reason_code if admission_state is RunState.CLAIM_REJECTED else None
+    persist_admission_evidence(
+        evidence_writer,
+        admission=AdmissionEvidenceRecord(
+            route_identity=intake_outcome.route_identity,
+            request_payload=_workflow_request_payload(request),
+            admitted_definition_ref=(
+                intake_outcome.admitted_definition_ref or request.workflow_definition_id
+            ),
+            admitted_definition_hash=(
+                intake_outcome.admitted_definition_hash or request.definition_hash
+            ),
+            current_state=RunState(intake_outcome.current_state.value),
+            reason_code=intake_outcome.admission_decision.reason_code,
+            decided_at=intake_outcome.admission_decision.decided_at,
+            validation_result_ref=intake_outcome.validation_result.validation_result_ref,
+            authority_context_ref=intake_outcome.admission_decision.authority_context_ref,
+            admission_decision_id=intake_outcome.admission_decision.admission_decision_id,
+            request_digest=intake_outcome.request_digest,
         ),
     )
-    evidence_writer.append_transition_proof(admission_proof)
 
 
 def _execute_admitted_graph_run(

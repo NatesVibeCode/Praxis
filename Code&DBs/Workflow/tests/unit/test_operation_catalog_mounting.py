@@ -379,6 +379,13 @@ def test_provider_onboarding_has_no_static_route_owner() -> None:
     )
 
 
+def test_circuits_has_no_static_route_owner() -> None:
+    assert not any(
+        isinstance(route, APIRoute) and route.path == "/api/circuits"
+        for route in rest.app.routes
+    )
+
+
 def test_mount_capabilities_json_encodes_datetime_results(monkeypatch) -> None:
     class ListObjectTypesQuery(BaseModel):
         pass
@@ -534,3 +541,99 @@ def test_mount_capabilities_accepts_raw_provider_onboarding_body(monkeypatch) ->
     assert response.json()["selected_transport"] == "api"
     assert response.json()["dry_run"] is True
     assert response.json()["operation_receipt"]["operation_name"] == "operator.provider_onboarding"
+
+
+def test_mount_capabilities_supports_circuit_query_params(monkeypatch) -> None:
+    from runtime.operations.queries.circuits import QueryCircuitStates
+
+    target_app = FastAPI()
+    monkeypatch.setattr(
+        rest,
+        "_ensure_shared_subsystems",
+        lambda _app: SimpleNamespace(get_pg_conn=lambda: object()),
+    )
+    monkeypatch.setattr(
+        rest,
+        "list_resolved_operation_definitions",
+        lambda _conn, include_disabled=False, limit=500: [
+            SimpleNamespace(
+                operation_name="operator.circuit_states",
+                http_method="GET",
+                http_path="/api/circuits",
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        rest,
+        "resolve_http_operation_binding",
+        lambda definition: _binding(
+            operation_name=definition.operation_name,
+            http_method=definition.http_method,
+            http_path=definition.http_path,
+            command_class=QueryCircuitStates,
+            handler=lambda command, _subs: {
+                "circuits": {"selected": command.provider_slug},
+            },
+        ),
+    )
+
+    rest.mount_capabilities(target_app)
+
+    client = TestClient(target_app)
+    response = client.get("/api/circuits", params={"provider_slug": "openai"})
+
+    assert response.status_code == 200
+    assert response.json()["circuits"]["selected"] == "openai"
+    assert response.json()["operation_receipt"]["operation_name"] == "operator.circuit_states"
+
+
+def test_mount_capabilities_supports_circuit_override_body(monkeypatch) -> None:
+    from runtime.operations.commands.operator_control import CircuitOverrideCommand
+
+    target_app = FastAPI()
+    monkeypatch.setattr(
+        rest,
+        "_ensure_shared_subsystems",
+        lambda _app: SimpleNamespace(get_pg_conn=lambda: object()),
+    )
+    monkeypatch.setattr(
+        rest,
+        "list_resolved_operation_definitions",
+        lambda _conn, include_disabled=False, limit=500: [
+            SimpleNamespace(
+                operation_name="operator.circuit_override",
+                http_method="POST",
+                http_path="/api/circuits",
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        rest,
+        "resolve_http_operation_binding",
+        lambda definition: _binding(
+            operation_name=definition.operation_name,
+            http_method=definition.http_method,
+            http_path=definition.http_path,
+            command_class=CircuitOverrideCommand,
+            handler=lambda command, _subs: {
+                "provider_slug": command.provider_slug,
+                "override_state": command.override_state,
+            },
+        ),
+    )
+
+    rest.mount_capabilities(target_app)
+
+    client = TestClient(target_app)
+    response = client.post(
+        "/api/circuits",
+        json={
+            "provider_slug": "openai",
+            "override_state": "open",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["provider_slug"] == "openai"
+    assert response.json()["override_state"] == "open"
+    assert response.json()["operation_receipt"]["operation_name"] == "operator.circuit_override"

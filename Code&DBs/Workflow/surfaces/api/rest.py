@@ -2570,14 +2570,6 @@ async def heartbeat_post(request: Request) -> Response:
 async def session_post(request: Request) -> Response:
     return await _dispatch_standard_route(request)
 
-@app.get("/api/circuits")
-def get_circuits() -> dict[str, Any]:
-    """Return per-provider circuit breaker states."""
-    from runtime.circuit_breaker import get_circuit_breakers
-
-    return get_circuit_breakers().all_states()
-
-
 @app.get("/api/trust")
 def get_trust() -> list[dict[str, Any]]:
     """Return ELO-based trust scores for all (provider, model) pairs."""

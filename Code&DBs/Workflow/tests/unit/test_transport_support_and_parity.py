@@ -404,8 +404,9 @@ def test_db_backed_provider_profile_inherits_http_contract_fields(monkeypatch) -
 def test_cursor_profile_is_registered_from_db_authority(monkeypatch) -> None:
     import adapters.provider_registry as provider_registry_mod
     import registry.provider_execution_registry as provider_registry_authority
+    from _pg_test_conn import get_test_env
 
-    monkeypatch.delenv("WORKFLOW_DATABASE_URL", raising=False)
+    monkeypatch.setenv("WORKFLOW_DATABASE_URL", get_test_env()["WORKFLOW_DATABASE_URL"])
     monkeypatch.setattr(provider_registry_authority, "_read_repo_env_file", lambda _path: {})
     provider_registry_authority.reload_from_db()
 

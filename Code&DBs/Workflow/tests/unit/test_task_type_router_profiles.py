@@ -23,9 +23,37 @@ from runtime.task_type_router import TaskTypeRouter
 from runtime.task_type_router import TaskRouteAuthorityError
 
 
+def _passthrough_economics(**kwargs):
+    return {
+        "adapter_type": kwargs.get("adapter_type") or "cli",
+        "billing_mode": "owned_compute",
+        "budget_bucket": "test",
+        "effective_marginal_cost": float(kwargs.get("raw_cost_per_m_tokens") or 0.0),
+        "spend_pressure": "low",
+        "budget_status": "",
+        "prefer_prepaid": True,
+        "allow_payg_fallback": True,
+    }
+
+
 @pytest.fixture(autouse=True)
 def _stub_router_provider_defaults(monkeypatch):
-    monkeypatch.setattr(_mod, "default_llm_adapter_type", lambda: "cli")
+    monkeypatch.setitem(TaskTypeRouter.__init__.__globals__, "default_llm_adapter_type", lambda: "cli")
+    monkeypatch.setitem(
+        TaskTypeRouter._build_profile_task_rows.__globals__,
+        "_resolve_route_economics",
+        _passthrough_economics,
+    )
+    monkeypatch.setitem(
+        TaskTypeRouter._resolve_profile_chain.__globals__,
+        "_resolve_route_economics",
+        _passthrough_economics,
+    )
+    monkeypatch.setitem(
+        TaskTypeRouter.resolve.__globals__,
+        "_resolve_route_economics",
+        _passthrough_economics,
+    )
 
 
 class _FakeConn:

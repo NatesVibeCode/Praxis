@@ -781,14 +781,18 @@ def main(
         stdout.write(_help_text() + "\n")
         return 0
     source = dict(os.environ if env is None else env)
-    if not str(source.get("WORKFLOW_DATABASE_URL") or "").strip():
-        repo_root = Path(__file__).resolve().parents[4]
-        source = workflow_database_env_for_repo(repo_root, env=source)
     try:
         command = _parse(args)
     except ValueError as exc:
         stdout.write(f"{exc}\n")
         return 2
+
+    def _db_source() -> Mapping[str, str]:
+        nonlocal source
+        if not str(source.get("WORKFLOW_DATABASE_URL") or "").strip():
+            repo_root = Path(__file__).resolve().parents[4]
+            source = workflow_database_env_for_repo(repo_root, env=source)
+        return source
 
     if isinstance(command, InstanceCommand):
         native_instance = resolve_native_instance(env=source)
@@ -807,7 +811,7 @@ def main(
         _emit_json(
             stdout,
             operation_catalog_gateway.execute_operation_from_env(
-                env=source,
+                env=_db_source(),
                 operation_name="operator.task_route_eligibility",
                 payload={
                     "provider_slug": command.provider_slug,
@@ -826,7 +830,7 @@ def main(
         _emit_json(
             stdout,
             operation_catalog_gateway.execute_operation_from_env(
-                env=source,
+                env=_db_source(),
                 operation_name="operator.roadmap_write",
                 payload={
                     "action": command.action,
@@ -854,7 +858,7 @@ def main(
         _emit_json(
             stdout,
             operation_catalog_gateway.execute_operation_from_env(
-                env=source,
+                env=_db_source(),
                 operation_name="operator.work_item_closeout",
                 payload={
                     "action": command.action,
@@ -866,7 +870,7 @@ def main(
         return 0
     if isinstance(command, RoadmapTreeCommand):
         payload = operation_catalog_gateway.execute_operation_from_env(
-            env=source,
+            env=_db_source(),
             operation_name="operator.roadmap_tree",
             payload={
                 "root_roadmap_item_id": command.root_roadmap_item_id,
@@ -883,7 +887,7 @@ def main(
             _emit_json(
                 stdout,
                 operation_catalog_gateway.execute_operation_from_env(
-                    env=source,
+                    env=_db_source(),
                     operation_name="operator.provider_onboarding",
                     payload={
                         "spec": asdict(spec),
@@ -899,7 +903,7 @@ def main(
         _emit_json(
             stdout,
             operation_catalog_gateway.execute_operation_from_env(
-                env=source,
+                env=_db_source(),
                 operation_name="operator.native_primary_cutover_gate",
                 payload={
                     "decided_by": command.decided_by,
@@ -924,7 +928,7 @@ def main(
         _emit_json(
             stdout,
             operation_catalog_gateway.execute_operation_from_env(
-                env=source,
+                env=_db_source(),
                 operation_name="operator.decision_record",
                 payload={
                     "decision_key": command.decision_key,
@@ -946,7 +950,7 @@ def main(
         _emit_json(
             stdout,
             operation_catalog_gateway.execute_operation_from_env(
-                env=source,
+                env=_db_source(),
                 operation_name="operator.decision_list",
                 payload={
                     "decision_kind": command.decision_kind,
@@ -963,24 +967,25 @@ def main(
             stdout,
             render_inspection(
                 RuntimeOrchestrator(
-                    evidence_reader=PostgresEvidenceReader(env=source),
+                    evidence_reader=PostgresEvidenceReader(env=_db_source()),
                 ).inspect_run(run_id=command.run_id)
             ),
         )
         return 0
     if isinstance(command, FrontdoorStatusCommand):
-        _emit_json(stdout, frontdoor.status(run_id=command.run_id, env=source))
+        _emit_json(stdout, frontdoor.status(run_id=command.run_id, env=_db_source()))
         return 0
     if isinstance(command, CockpitCommand):
         _emit_json(
             stdout,
             native_operator_surface.query_native_operator_surface(
                 run_id=command.run_id,
-                env=source,
+                env=_db_source(),
             ),
         )
         return 0
 
+    source = dict(_db_source())
     frontdoor.status(run_id=command.run_id, env=source)
     evidence_reader = PostgresEvidenceReader(env=source)
     canonical_evidence = evidence_reader.evidence_timeline(command.run_id)

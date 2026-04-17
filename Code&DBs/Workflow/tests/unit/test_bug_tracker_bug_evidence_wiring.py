@@ -113,7 +113,12 @@ def test_compare_write_sets_surfaces_query_failure() -> None:
         },
     )
 
-    assert result["error"] == "RuntimeError: receipt lane offline"
+    assert result["error"] == {
+        "scope": "write_set_diff",
+        "reason_code": "write_set_diff.query_failed",
+        "error_type": "RuntimeError",
+        "error_message": "receipt lane offline",
+    }
     assert result["note"] == "baseline receipt lookup failed"
 
 
@@ -128,7 +133,12 @@ def test_build_blast_radius_surfaces_query_failure() -> None:
         node_id="node-a",
     )
 
-    assert result["error"] == "RuntimeError: blast radius lane offline"
+    assert result["error"] == {
+        "scope": "blast_radius",
+        "reason_code": "blast_radius.query_failed",
+        "error_type": "RuntimeError",
+        "error_message": "blast radius lane offline",
+    }
     assert result["occurrence_count"] == 0
 
 

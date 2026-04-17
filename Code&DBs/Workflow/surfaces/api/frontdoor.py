@@ -11,53 +11,38 @@ This surface is intentionally narrow:
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime
 import json
 import os
 from typing import Any, Protocol
 
-from adapters import build_transition_proof
 from contracts.domain import WorkflowEdgeContract, WorkflowNodeContract, WorkflowRequest
 from observability.read_models import InspectionReadModel
 from observability.status_observability import build_frontdoor_observability
 from policy.domain import AdmissionDecisionRecord
 from registry.domain import RegistryResolver
-from runtime.domain import RouteIdentity, RunState
-from runtime.execution.evidence import (
-    ADMISSION_DECISION_SOURCE_TABLE,
-    _event_id,
-    _receipt_id,
-)
+from runtime.admission_repair import repair_or_seed_submission_evidence
 from runtime.execution import RuntimeOrchestrator
-from runtime.execution.orchestrator import (
-    CLAIM_REJECTED_EVENT_TYPE,
-    CLAIM_VALIDATED_EVENT_TYPE,
-    CLAIM_VALIDATION_RECEIPT_TYPE,
-)
 from runtime.instance import (
     NativeWorkflowInstance,
     resolve_native_instance,
 )
 from runtime.intake import WorkflowIntakeOutcome, WorkflowIntakePlanner
-from runtime.persistent_evidence import PostgresEvidenceWriter
 from storage.postgres import (
     PostgresEvidenceReader,
     WorkflowAdmissionDecisionWrite,
     WorkflowAdmissionSubmission,
     WorkflowAdmissionWriteResult,
     WorkflowRunWrite,
-    PostgresWriteError,
     bootstrap_control_plane_schema,
     connect_workflow_database,
-    persist_workflow_admission,
 )
 
 from . import _frontdoor_health as _health
 from . import _frontdoor_status as _status
 from . import _frontdoor_submit as _submit
 from ._frontdoor_serialize import (
-    _json_loads_maybe,
     _measured_summary,
     _serialize_decision,
     _serialize_inspection,
@@ -125,24 +110,6 @@ SELECT
     started_at,
     finished_at,
     last_event_id
-FROM workflow_runs
-WHERE run_id = $1
-"""
-
-_SubmitRunQuery = """
-SELECT
-    run_id,
-    workflow_id,
-    request_id,
-    request_digest,
-    workflow_definition_id,
-    admitted_definition_hash,
-    current_state,
-    run_idempotency_key,
-    context_bundle_id,
-    authority_context_digest,
-    admission_decision_id,
-    request_envelope
 FROM workflow_runs
 WHERE run_id = $1
 """
@@ -530,258 +497,6 @@ def _submission_from_outcome(
     return WorkflowAdmissionSubmission(decision=decision_write, run=run_write)
 
 
-def _route_identity_from_submission(
-    submission: WorkflowAdmissionSubmission,
-) -> RouteIdentity:
-    run = submission.run
-    return RouteIdentity(
-        workflow_id=run.workflow_id,
-        run_id=run.run_id,
-        request_id=run.request_id,
-        authority_context_ref=submission.decision.authority_context_ref,
-        authority_context_digest=run.authority_context_digest,
-        claim_id=f"claim:{run.run_id}",
-        lease_id=None,
-        proposal_id=None,
-        promotion_decision_id=None,
-        attempt_no=1,
-        transition_seq=0,
-    )
-
-
-def _submission_bootstrap_row(
-    submission: WorkflowAdmissionSubmission,
-) -> WorkflowAdmissionSubmission:
-    return WorkflowAdmissionSubmission(
-        decision=submission.decision,
-        run=replace(
-            submission.run,
-            current_state=RunState.CLAIM_RECEIVED.value,
-            terminal_reason_code=None,
-            started_at=None,
-            finished_at=None,
-            last_event_id=None,
-        ),
-    )
-
-
-def _row_request_envelope(row: Mapping[str, Any]) -> dict[str, Any]:
-    envelope = _json_loads_maybe(row.get("request_envelope"), {})
-    if not isinstance(envelope, Mapping):
-        return {}
-    return dict(envelope)
-
-
-def _run_row_matches_submission(
-    row: Mapping[str, Any],
-    submission: WorkflowAdmissionSubmission,
-    *,
-    expected_state: str,
-) -> bool:
-    run = submission.run
-    return (
-        row.get("run_id") == run.run_id
-        and row.get("workflow_id") == run.workflow_id
-        and row.get("request_id") == run.request_id
-        and row.get("request_digest") == run.request_digest
-        and row.get("workflow_definition_id") == run.workflow_definition_id
-        and row.get("admitted_definition_hash") == run.admitted_definition_hash
-        and row.get("run_idempotency_key") == run.run_idempotency_key
-        and row.get("context_bundle_id") == run.context_bundle_id
-        and row.get("authority_context_digest") == run.authority_context_digest
-        and row.get("admission_decision_id") == run.admission_decision_id
-        and row.get("current_state") == expected_state
-        and _row_request_envelope(row) == dict(run.request_envelope)
-    )
-
-
-def _timeline_state(timeline: Sequence[Any]) -> str | None:
-    if not timeline:
-        return None
-    last_row = timeline[-1]
-    record = getattr(last_row, "record", None)
-    status = getattr(record, "status", None)
-    if isinstance(status, str) and status:
-        return status
-    payload = getattr(record, "payload", None)
-    if isinstance(payload, Mapping):
-        to_state = payload.get("to_state")
-        if isinstance(to_state, str) and to_state:
-            return to_state
-    return None
-
-
-def _build_admission_proof(
-    *,
-    submission: WorkflowAdmissionSubmission,
-    submission_evidence_seq: int,
-) -> Any:
-    route_identity = replace(
-        _route_identity_from_submission(submission),
-        transition_seq=2,
-    )
-    final_state = submission.run.current_state
-    event_type = (
-        CLAIM_VALIDATED_EVENT_TYPE
-        if submission.decision.decision == "admit"
-        else CLAIM_REJECTED_EVENT_TYPE
-    )
-    reason_code = submission.decision.reason_code
-    return build_transition_proof(
-        route_identity=route_identity,
-        transition_seq=2,
-        event_id=_event_id(
-            run_id=submission.run.run_id,
-            evidence_seq=submission_evidence_seq + 1,
-        ),
-        receipt_id=_receipt_id(
-            run_id=submission.run.run_id,
-            evidence_seq=submission_evidence_seq + 2,
-        ),
-        event_type=event_type,
-        receipt_type=CLAIM_VALIDATION_RECEIPT_TYPE,
-        reason_code=reason_code,
-        evidence_seq=submission_evidence_seq + 1,
-        occurred_at=submission.decision.decided_at,
-        started_at=submission.decision.decided_at,
-        finished_at=submission.decision.decided_at,
-        executor_type="runtime.intake",
-        status=final_state,
-        payload={
-            "from_state": RunState.CLAIM_RECEIVED.value,
-            "to_state": final_state,
-            "validation_result_ref": submission.decision.validation_result_ref,
-            "authority_context_ref": submission.decision.authority_context_ref,
-            "admission_decision_id": submission.decision.admission_decision_id,
-        },
-        inputs={
-            "validation_result_ref": submission.decision.validation_result_ref,
-            "request_digest": submission.run.request_digest,
-            "authority_context_ref": submission.decision.authority_context_ref,
-        },
-        outputs={
-            "admission_decision_id": submission.decision.admission_decision_id,
-            "to_state": final_state,
-        },
-        decision_refs=(
-            {
-                "decision_type": "admission",
-                "decision_id": submission.decision.admission_decision_id,
-                "reason_code": reason_code,
-                "source_table": ADMISSION_DECISION_SOURCE_TABLE,
-            },
-        ),
-        failure_code=(
-            reason_code if final_state == RunState.CLAIM_REJECTED.value else None
-        ),
-    )
-
-
-async def _repair_or_seed_submission_evidence(
-    conn: _Connection,
-    *,
-    submission: WorkflowAdmissionSubmission,
-) -> WorkflowAdmissionWriteResult:
-    bootstrap_submission = _submission_bootstrap_row(submission)
-    writer = PostgresEvidenceWriter(conn=conn)
-    existing_row = await conn.fetchrow(_SubmitRunQuery, submission.run.run_id)
-    timeline = tuple(await writer._load_evidence_timeline(submission.run.run_id))
-
-    if existing_row is not None and timeline:
-        if (
-            _run_row_matches_submission(
-                existing_row,
-                submission,
-                expected_state=submission.run.current_state,
-            )
-            and _timeline_state(timeline) == submission.run.current_state
-        ):
-            return WorkflowAdmissionWriteResult(
-                admission_decision_id=submission.decision.admission_decision_id,
-                run_id=submission.run.run_id,
-            )
-        if _timeline_state(timeline) != RunState.CLAIM_RECEIVED.value:
-            raise PostgresWriteError(
-                "postgres.duplicate_submission_conflict",
-                "workflow run already exists with conflicting evidence state",
-                details={
-                    "run_id": submission.run.run_id,
-                    "current_state": existing_row.get("current_state"),
-                    "evidence_state": _timeline_state(timeline),
-                },
-            )
-
-    if existing_row is None:
-        await persist_workflow_admission(conn, submission=bootstrap_submission)
-    elif not (
-        _run_row_matches_submission(
-            existing_row,
-            submission,
-            expected_state=submission.run.current_state,
-        )
-        or _run_row_matches_submission(
-            existing_row,
-            bootstrap_submission,
-            expected_state=RunState.CLAIM_RECEIVED.value,
-        )
-    ):
-        raise PostgresWriteError(
-            "postgres.duplicate_submission_conflict",
-            "workflow run already exists with different canonical content",
-            details={"run_id": submission.run.run_id},
-        )
-
-    submission_evidence_seq: int
-    if not timeline:
-        await conn.execute(
-            """
-            UPDATE workflow_runs
-            SET current_state = $2,
-                terminal_reason_code = NULL,
-                started_at = NULL,
-                finished_at = NULL,
-                last_event_id = NULL
-            WHERE run_id = $1
-            """,
-            submission.run.run_id,
-            RunState.CLAIM_RECEIVED.value,
-        )
-        submission_result = await writer._persist_submission(
-            route_identity=replace(_route_identity_from_submission(submission), transition_seq=1),
-            admitted_definition_ref=submission.run.workflow_definition_id,
-            admitted_definition_hash=submission.run.admitted_definition_hash,
-            request_payload=dict(submission.run.request_envelope),
-        )
-        submission_evidence_seq = submission_result.evidence_seq
-    else:
-        submission_evidence_seq = timeline[-1].evidence_seq
-
-    if _timeline_state(timeline) != submission.run.current_state:
-        await conn.execute(
-            """
-            UPDATE workflow_runs
-            SET current_state = $2,
-                terminal_reason_code = NULL,
-                started_at = NULL,
-                finished_at = NULL
-            WHERE run_id = $1
-            """,
-            submission.run.run_id,
-            RunState.CLAIM_RECEIVED.value,
-        )
-        await writer._persist_proof(
-            proof=_build_admission_proof(
-                submission=submission,
-                submission_evidence_seq=submission_evidence_seq,
-            )
-        )
-
-    return WorkflowAdmissionWriteResult(
-        admission_decision_id=submission.decision.admission_decision_id,
-        run_id=submission.run.run_id,
-    )
-
-
 def _load_sync_status(
     run_id: str,
     *,
@@ -840,11 +555,7 @@ class NativeWorkflowFrontdoor:
         *,
         submission: WorkflowAdmissionSubmission,
     ) -> WorkflowAdmissionWriteResult:
-        async with conn.transaction():
-            return await _repair_or_seed_submission_evidence(
-                conn,
-                submission=submission,
-            )
+        return await repair_or_seed_submission_evidence(conn, submission=submission)
 
     def _require_registry(self) -> RegistryResolver:
         if self.registry is None:

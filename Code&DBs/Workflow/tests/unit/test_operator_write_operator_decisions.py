@@ -331,6 +331,7 @@ def test_backfill_semantic_bridges_replays_scoped_decisions_only() -> None:
     payload = frontdoor.backfill_semantic_bridges(
         include_object_relations=False,
         include_operator_decisions=True,
+        include_roadmap_items=False,
         as_of=as_of,
     )
 
@@ -345,6 +346,11 @@ def test_backfill_semantic_bridges_replays_scoped_decisions_only() -> None:
         "recorded": 0,
         "retracted": 0,
         "tombstoned": 0,
+    }
+    assert summary["roadmap_items"] == {
+        "processed": 0,
+        "recorded": 0,
+        "retracted": 0,
     }
     assert repository.as_of == as_of
     assert semantic_repository.upserted_predicates[0].predicate_slug == "architecture_policy"

@@ -28,6 +28,7 @@ from runtime.instance import (
     NativeInstanceResolutionError,
     native_instance_contract,
 )
+from storage.postgres import PostgresConfigurationError, resolve_workflow_database_url
 from surfaces.api import frontdoor as native_frontdoor
 from surfaces.cli import native_operator
 from surfaces.cli.main import main as workflow_cli_main
@@ -37,7 +38,15 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 
 
 def _repo_local_env() -> dict[str, str]:
+    try:
+        database_url = resolve_workflow_database_url()
+    except PostgresConfigurationError as exc:
+        pytest.skip(
+            "WORKFLOW_DATABASE_URL is required for native operator CLI integration tests: "
+            f"{exc.reason_code}"
+        )
     return {
+        "WORKFLOW_DATABASE_URL": database_url,
         PRAXIS_RUNTIME_PROFILES_CONFIG_ENV: str(REPO_ROOT / "config" / "runtime_profiles.json"),
         PRAXIS_RUNTIME_PROFILE_ENV: "praxis",
     }
@@ -326,7 +335,7 @@ def test_native_operator_cli_stays_repo_local_and_composes_existing_surfaces(
         (run_id, repo_local_env),
     ]
     assert evidence_reader_envs == [repo_local_env, repo_local_env, repo_local_env]
-    assert evidence_reader_runs == [run_id, run_id, run_id]
+    assert evidence_reader_runs == [run_id, run_id, run_id, run_id]
 
 
 @pytest.mark.parametrize(

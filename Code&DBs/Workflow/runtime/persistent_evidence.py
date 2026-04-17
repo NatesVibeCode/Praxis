@@ -464,6 +464,38 @@ class PostgresEvidenceWriter:
 
         return result
 
+    async def persist_submission_async(
+        self,
+        *,
+        route_identity: RouteIdentity,
+        admitted_definition_ref: str,
+        admitted_definition_hash: str,
+        request_payload: Mapping[str, Any],
+    ) -> EvidenceCommitResult:
+        """Persist the initial claim_received evidence bundle in an async caller."""
+
+        normalized_route_identity = _normalize_route_identity(route_identity)
+        if not isinstance(request_payload, Mapping):
+            raise EvidenceAppendError(
+                "evidence.invalid_shape",
+                "request_payload must be a mapping",
+                details={"field": "request_payload"},
+            )
+        try:
+            return await self._persist_submission(
+                route_identity=normalized_route_identity,
+                admitted_definition_ref=admitted_definition_ref,
+                admitted_definition_hash=admitted_definition_hash,
+                request_payload=request_payload,
+            )
+        except (EvidenceAppendError, RuntimeBoundaryError):
+            raise
+        except Exception as exc:
+            raise RuntimeBoundaryError(
+                "persistent evidence submission failed for run "
+                f"{normalized_route_identity.run_id}"
+            ) from exc
+
     async def _persist_submission(
         self,
         *,
@@ -865,6 +897,23 @@ class PostgresEvidenceWriter:
                 f"persistent evidence proof append failed for run {run_id}"
             ) from exc
 
+    async def append_transition_proof_async(
+        self,
+        proof: TransitionProofV1,
+    ) -> EvidenceCommitResult:
+        """Append one event/receipt transition proof in an async caller."""
+
+        normalized_proof = _normalize_proof(proof)
+        run_id = normalized_proof.route_identity.run_id
+        try:
+            return await self._persist_proof(proof=normalized_proof)
+        except (EvidenceAppendError, RuntimeBoundaryError):
+            raise
+        except Exception as exc:
+            raise RuntimeBoundaryError(
+                f"persistent evidence proof append failed for run {run_id}"
+            ) from exc
+
     async def _persist_proof(
         self,
         *,
@@ -1100,6 +1149,11 @@ class PostgresEvidenceWriter:
     def evidence_timeline(self, run_id: str) -> Sequence[EvidenceRow]:
         """Return evidence timeline from durable Postgres state."""
         return self._run(self._load_evidence_timeline(run_id))
+
+    async def evidence_timeline_async(self, run_id: str) -> tuple[EvidenceRow, ...]:
+        """Return evidence timeline from durable Postgres state in an async caller."""
+
+        return await self._load_evidence_timeline(run_id)
 
     async def _load_evidence_timeline(self, run_id: str) -> tuple[EvidenceRow, ...]:
         conn = await self._ensure_conn()

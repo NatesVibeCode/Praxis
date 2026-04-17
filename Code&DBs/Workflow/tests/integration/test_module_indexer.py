@@ -334,7 +334,15 @@ def test_index_codebase_skips_missing_embedding_without_writing_null(monkeypatch
     assert result["total"] == 1
     assert result["observability_state"] == "degraded"
     assert result["errors"] == (
-        "src/example.py:module:example:RuntimeError: embedding_missing",
+        {
+            "scope": "index_codebase",
+            "code": "module_indexer.index_failed",
+            "module_path": "src/example.py",
+            "kind": "module",
+            "name": "example",
+            "error_type": "RuntimeError",
+            "error_message": "embedding_missing",
+        },
     )
     assert "embedding_missing" in captured.err
     assert not any("INSERT INTO module_embeddings" in query for query, _ in conn.calls)
@@ -496,7 +504,14 @@ def test_stats_surfaces_backend_errors():
     assert stats["total_indexed"] == 0
     assert stats["by_kind"] == {}
     assert stats["observability_state"] == "degraded"
-    assert stats["errors"] == ("RuntimeError: index snapshot offline",)
+    assert stats["errors"] == (
+        {
+            "scope": "stats",
+            "code": "module_indexer.stats_failed",
+            "error_type": "RuntimeError",
+            "error_message": "index snapshot offline",
+        },
+    )
 
 
 def test_indexer_surfaces_write_failures(monkeypatch):
@@ -528,6 +543,22 @@ def test_indexer_surfaces_write_failures(monkeypatch):
     assert result["total"] == 2
     assert result["observability_state"] == "degraded"
     assert result["errors"] == (
-        "src/writer.py:module:writer:RuntimeError: write lane offline",
-        "src/writer.py:function:write_item:RuntimeError: write lane offline",
+        {
+            "scope": "index_codebase",
+            "code": "module_indexer.index_failed",
+            "module_path": "src/writer.py",
+            "kind": "module",
+            "name": "writer",
+            "error_type": "RuntimeError",
+            "error_message": "write lane offline",
+        },
+        {
+            "scope": "index_codebase",
+            "code": "module_indexer.index_failed",
+            "module_path": "src/writer.py",
+            "kind": "function",
+            "name": "write_item",
+            "error_type": "RuntimeError",
+            "error_message": "write lane offline",
+        },
     )

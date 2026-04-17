@@ -41,6 +41,25 @@ class RouteOutcome:
     run_id: str | None = None
 
 
+class RouteOutcomeAuthorityError(RuntimeError):
+    """Raised when durable route-outcome authority is unavailable."""
+
+    def __init__(
+        self,
+        *,
+        reason_code: str,
+        operation: str,
+        cause: BaseException,
+    ) -> None:
+        self.reason_code = reason_code
+        self.operation = operation
+        self.error_type = type(cause).__name__
+        self.error_message = str(cause)
+        super().__init__(
+            f"{operation} unavailable ({reason_code}): {self.error_type}: {self.error_message}"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Ring-buffer store
 # ---------------------------------------------------------------------------
@@ -291,19 +310,21 @@ class RouteOutcomeStore:
         )
         return tuple(ordered)
 
-    def _metrics_view(self) -> Any | None:
-        if self._metrics_view_factory is None:
-            try:
-                from .observability import get_workflow_metrics_view
-            except Exception:
-                return None
-            factory = get_workflow_metrics_view
-        else:
-            factory = self._metrics_view_factory
+    def _metrics_view(self) -> Any:
         try:
+            if self._metrics_view_factory is None:
+                from .observability import get_workflow_metrics_view
+
+                factory = get_workflow_metrics_view
+            else:
+                factory = self._metrics_view_factory
             return factory()
-        except Exception:
-            return None
+        except Exception as exc:
+            raise RouteOutcomeAuthorityError(
+                reason_code="route_outcomes.metrics_view_unavailable",
+                operation="metrics_view",
+                cause=exc,
+            ) from exc
 
     def _db_recent_outcomes(
         self,
@@ -314,8 +335,6 @@ class RouteOutcomeStore:
         limit: int,
     ) -> tuple[RouteOutcome, ...]:
         metrics_view = self._metrics_view()
-        if metrics_view is None:
-            return ()
         try:
             rows = metrics_view.recent_route_outcomes(
                 provider_slug=provider_slug,
@@ -323,8 +342,12 @@ class RouteOutcomeStore:
                 adapter_type=adapter_type,
                 limit=max(0, int(limit)),
             )
-        except Exception:
-            return ()
+        except Exception as exc:
+            raise RouteOutcomeAuthorityError(
+                reason_code="route_outcomes.recent_outcomes_unavailable",
+                operation="recent_route_outcomes",
+                cause=exc,
+            ) from exc
         outcomes: list[RouteOutcome] = []
         for row in rows:
             provider = str(row.get("provider_slug") or "").strip()
@@ -367,12 +390,14 @@ class RouteOutcomeStore:
 
     def _db_provider_slugs(self) -> tuple[str, ...]:
         metrics_view = self._metrics_view()
-        if metrics_view is None:
-            return ()
         try:
             slugs = metrics_view.provider_slugs()
-        except Exception:
-            return ()
+        except Exception as exc:
+            raise RouteOutcomeAuthorityError(
+                reason_code="route_outcomes.provider_slugs_unavailable",
+                operation="provider_slugs",
+                cause=exc,
+            ) from exc
         return tuple(
             slug
             for slug in (str(item).strip() for item in slugs)

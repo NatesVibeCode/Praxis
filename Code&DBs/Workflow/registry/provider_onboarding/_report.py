@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-import sys
 from dataclasses import replace
 from typing import Any
 
 import asyncpg
 
 from adapters import provider_registry as provider_registry_mod
+from . import _probe as provider_onboarding_probe
 from registry.provider_onboarding_repository import (
     _apply_benchmark_plan as _apply_benchmark_plan_impl,
     _query_model_profile_visibility,
@@ -37,11 +37,6 @@ from ._spec import (
     _skipped_step,
     _utc_now,
 )
-from ._probe import (
-    _probe_capacity as _probe_capacity_impl,
-    _probe_models as _probe_models_impl,
-    _probe_transport as _probe_transport_impl,
-)
 from ._benchmark import (
     _probe_benchmark as _probe_benchmark_impl,
 )
@@ -55,20 +50,6 @@ __all__ = [
     "_query_transport_admissions",
     "_query_transport_probe_receipts",
 ]
-
-
-def _facade():
-    """Return the facade module so monkeypatched names are resolved at call time."""
-    return sys.modules.get("registry.provider_onboarding")
-
-
-def _get(name, default):
-    """Resolve *name* from the facade if patched, else fall back to *default*."""
-    mod = _facade()
-    if mod is None:
-        return default
-    fn = getattr(mod, name, None)
-    return fn if fn is not None else default
 
 
 async def _verification_report(
@@ -161,7 +142,7 @@ async def _run_provider_onboarding(
                 or f"Lane not admitted for {resolved_spec.provider_slug}."
             )
         )
-        await _get("_upsert_provider_transport_admission", _upsert_provider_transport_admission_impl)(
+        await _upsert_provider_transport_admission_impl(
             conn,
             spec=resolved_spec,
             transport_template=transport_template,
@@ -175,7 +156,7 @@ async def _run_provider_onboarding(
             router_supported=router_supported,
         )
         if record_receipts:
-            await _get("_record_provider_transport_probe_receipts", _record_provider_transport_probe_receipts_impl)(
+            await _record_provider_transport_probe_receipts_impl(
                 conn,
                 spec=resolved_spec,
                 decision_ref=decision_ref,
@@ -206,7 +187,10 @@ async def _run_provider_onboarding(
         )
 
     try:
-        transport_step, transport_env = _get("_probe_transport", _probe_transport_impl)(resolved_spec, transport_template)
+        transport_step, transport_env = provider_onboarding_probe._probe_transport(
+            resolved_spec,
+            transport_template,
+        )
         steps.append(transport_step)
         if transport_step.status == "failed":
             steps.extend(
@@ -220,7 +204,7 @@ async def _run_provider_onboarding(
             )
             return await _finish()
 
-        model_step, resolved_models = _get("_probe_models", _probe_models_impl)(
+        model_step, resolved_models = provider_onboarding_probe._probe_models(
             resolved_spec,
             transport_template,
             env=transport_env,
@@ -247,7 +231,7 @@ async def _run_provider_onboarding(
         else:
             resolved_spec = replace(resolved_spec, models=resolved_models)
 
-        capacity_step = _get("_probe_capacity", _probe_capacity_impl)(
+        capacity_step = provider_onboarding_probe._probe_capacity(
             resolved_spec,
             transport_template,
             env=transport_env,
@@ -276,7 +260,7 @@ async def _run_provider_onboarding(
             )
             steps.append(benchmark_step)
         else:
-            benchmark_step, benchmark_report = await _get("_probe_benchmark", _probe_benchmark_impl)(
+            benchmark_step, benchmark_report = await _probe_benchmark_impl(
                 conn,
                 spec=resolved_spec,
                 models=resolved_models,
@@ -328,16 +312,16 @@ async def _run_provider_onboarding(
             return await _finish()
 
         async with conn.transaction():
-            await _get("_upsert_provider_cli_profile", _upsert_provider_cli_profile_impl)(conn, resolved_spec)
+            await _upsert_provider_cli_profile_impl(conn, resolved_spec)
             binding_reports: list[dict[str, Any]] = []
             profile_reports: list[dict[str, Any]] = []
             candidate_reports: list[dict[str, Any]] = []
             for model in resolved_models:
                 profile_reports.append(
-                    await _get("_upsert_model_profile", _upsert_model_profile_impl)(conn, spec=resolved_spec, model=model)
+                    await _upsert_model_profile_impl(conn, spec=resolved_spec, model=model)
                 )
                 candidate_reports.append(
-                    await _get("_upsert_provider_model_candidate", _upsert_provider_model_candidate_impl)(
+                    await _upsert_provider_model_candidate_impl(
                         conn,
                         spec=resolved_spec,
                         model=model,
@@ -345,12 +329,12 @@ async def _run_provider_onboarding(
                     )
                 )
                 binding_reports.append(
-                    await _get("_upsert_model_profile_binding", _upsert_model_profile_binding_impl)(conn, spec=resolved_spec, model=model)
+                    await _upsert_model_profile_binding_impl(conn, spec=resolved_spec, model=model)
                 )
             benchmark_rule_reports: list[dict[str, Any]] = []
             bound_market_models = 0
             if benchmark_step is not None and benchmark_step.status == "succeeded":
-                benchmark_rule_reports, bound_market_models = await _get("_apply_benchmark_plan", _apply_benchmark_plan_impl)(
+                benchmark_rule_reports, bound_market_models = await _apply_benchmark_plan_impl(
                     conn,
                     spec=resolved_spec,
                     benchmark_report=benchmark_report,
@@ -401,7 +385,7 @@ async def _run_provider_onboarding(
             record_receipts=True,
         )
 
-        verification = await _get("_verification_report", _verification_report)(conn=conn, spec=resolved_spec, decision_ref=decision_ref)
+        verification = await _verification_report(conn=conn, spec=resolved_spec, decision_ref=decision_ref)
         provider_report = dict(verification.get("provider_report") or {})
         selected_transport_supported = bool(verification.get("selected_transport_supported"))
         provider_report["selected_transport_supported"] = selected_transport_supported

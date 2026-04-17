@@ -1168,7 +1168,7 @@ class BugTracker:
         collected: list[dict[str, Any]] = []
         seen: set[str] = set()
         sources_tried: list[str] = []
-        errors: list[str] = []
+        errors: list[dict[str, Any]] = []
 
         def is_actionable(status_raw: object) -> bool:
             return self._normalize_status(status_raw) not in _RESOLVED_STATUSES
@@ -1215,7 +1215,14 @@ class BugTracker:
                             break
                         add_row(dict(r), via="embedding")
             except Exception as exc:
-                errors.append(f"embedding.query_failed:{type(exc).__name__}: {exc}")
+                errors.append(
+                    _bug_evidence.build_query_error(
+                        scope="semantic_neighbors",
+                        reason_code="semantic_neighbors.embedding.query_failed",
+                        component="embedding",
+                        error=exc,
+                    )
+                )
 
             if len(collected) < limit:
                 try:
@@ -1235,7 +1242,14 @@ class BugTracker:
                                 break
                             add_row(dict(r), via="text")
                 except Exception as exc:
-                    errors.append(f"text.query_failed:{type(exc).__name__}: {exc}")
+                    errors.append(
+                        _bug_evidence.build_query_error(
+                            scope="semantic_neighbors",
+                            reason_code="semantic_neighbors.text.query_failed",
+                            component="text",
+                            error=exc,
+                        )
+                    )
 
         if len(collected) < limit and bug.tags:
             tag_values = [
@@ -1267,7 +1281,14 @@ class BugTracker:
                             break
                         add_row(dict(r), via="tag_overlap")
                 except Exception as exc:
-                    errors.append(f"tags.query_failed:{type(exc).__name__}: {exc}")
+                    errors.append(
+                        _bug_evidence.build_query_error(
+                            scope="semantic_neighbors",
+                            reason_code="semantic_neighbors.tags.query_failed",
+                            component="tags",
+                            error=exc,
+                        )
+                    )
 
         items = tuple(collected[:limit])
         sources = tuple(dict.fromkeys(sources_tried))
@@ -1382,8 +1403,9 @@ class BugTracker:
         if bug.discovered_in_run_id:
             run_refs.add(bug.discovered_in_run_id)
 
-        query_errors: list[str] = []
+        query_errors: list[dict[str, Any]] = []
         rows: list[Any] = []
+        receipt_error: str | None = None
         clauses: list[str] = []
         params: list[object] = []
         idx = 1
@@ -1406,22 +1428,35 @@ class BugTracker:
                 ),
                 *params,
             )
-            if receipt_error:
-                query_errors.append(f"receipts.query_failed:{receipt_error}")
+        if receipt_error:
+            query_errors.append(
+                _bug_evidence.build_query_error(
+                    scope="receipts",
+                    reason_code="receipts.query_failed",
+                    error=receipt_error,
+                )
+            )
         explicit_receipts = [self._row_to_receipt_summary(row) for row in rows]
 
         failure_code = _extract_tag_value(bug.tags, "failure_code")
         node_id = _extract_tag_value(bug.tags, "node_id")
         job_label = _extract_tag_value(bug.tags, "job_label")
         fallback_receipts: list[dict[str, Any]] = []
+        fallback_error: str | None = None
         if not explicit_receipts:
             fallback_receipts, fallback_error = self._find_signature_receipts(
                 failure_code=failure_code,
                 node_id=node_id or job_label,
                 limit=receipt_limit,
             )
-            if fallback_error:
-                query_errors.append(f"fallback_receipts.query_failed:{fallback_error}")
+        if fallback_error:
+            query_errors.append(
+                _bug_evidence.build_query_error(
+                    scope="fallback_receipts",
+                    reason_code="fallback_receipts.query_failed",
+                    error=fallback_error,
+                )
+            )
 
         latest_receipt = explicit_receipts[0] if explicit_receipts else None
         inferred_receipt = fallback_receipts[0] if fallback_receipts else None
@@ -1484,14 +1519,26 @@ class BugTracker:
             tuple(sorted(verification_run_refs)),
         )
         if verification_error:
-            query_errors.append(f"verification_runs.query_failed:{verification_error}")
+            query_errors.append(
+                _bug_evidence.build_query_error(
+                    scope="verification_runs",
+                    reason_code="verification_runs.query_failed",
+                    error=verification_error,
+                )
+            )
         healing_rows, healing_error = self._load_verification_rows(
             "healing_runs",
             "healing_run_id",
             tuple(sorted(healing_run_refs)),
         )
         if healing_error:
-            query_errors.append(f"healing_runs.query_failed:{healing_error}")
+            query_errors.append(
+                _bug_evidence.build_query_error(
+                    scope="healing_runs",
+                    reason_code="healing_runs.query_failed",
+                    error=healing_error,
+                )
+            )
         validate_fix_links = [
             evidence
             for evidence in evidence_links
@@ -1650,14 +1697,21 @@ class BugTracker:
             ("write_set_diff", write_set_diff),
             ("blast_radius", blast_radius),
         ):
-            helper_error = str(payload.get("error") or "").strip()
-            if helper_error:
-                query_errors.append(f"{scope}.query_failed:{helper_error}")
+            helper_error = payload.get("error")
+            if isinstance(helper_error, dict):
+                query_errors.append(dict(helper_error))
+            elif helper_error:
+                query_errors.append(
+                    _bug_evidence.build_query_error(
+                        scope=scope,
+                        reason_code=f"{scope}.query_failed",
+                        error=str(helper_error),
+                    )
+                )
         semantic_neighbors = self._semantic_neighbor_bundle(bug)
         for helper_error in tuple(semantic_neighbors.get("errors") or ()):
-            helper_text = str(helper_error).strip()
-            if helper_text:
-                query_errors.append(f"semantic_neighbors.query_failed:{helper_text}")
+            if isinstance(helper_error, dict):
+                query_errors.append(dict(helper_error))
         return _bug_evidence.assemble_failure_packet(
             bug=bug,
             bug_status_fixed=BugStatus.FIXED,

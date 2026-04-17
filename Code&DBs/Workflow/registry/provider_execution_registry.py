@@ -624,12 +624,14 @@ def default_provider_slug() -> str:
     _load_from_db()
     if not _REGISTRY:
         raise RuntimeError("provider_registry has no authoritative provider profiles")
-    # Keep the default stable and explicit. Alphabetical fallback silently
-    # picked Anthropic first, which drifted from the operational default lane.
+    # Only explicit default-priority providers establish the runtime default.
+    # Registry insertion order is transport data, not authority.
     for provider_slug in _DEFAULT_PROVIDER_PRIORITY:
         if provider_slug in _REGISTRY:
             return provider_slug
-    return next(iter(_REGISTRY))
+    raise RuntimeError(
+        "provider_registry has no configured default provider; registry order is not authoritative"
+    )
 
 
 def default_llm_adapter_type() -> str:

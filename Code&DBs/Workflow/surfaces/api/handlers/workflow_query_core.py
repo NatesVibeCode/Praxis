@@ -21,6 +21,19 @@ from .workflow_admin import _handle_health
 
 
 _optional_text = coerce_optional_text
+_ISSUE_BACKLOG_KEYWORDS = frozenset(
+    {
+        "issue",
+        "issues",
+        "open issue",
+        "open issues",
+        "issue backlog",
+        "upstream issue",
+        "upstream issues",
+        "intake issue",
+        "intake issues",
+    }
+)
 
 
 def _build_workflow_bridge(subs: Any):
@@ -92,6 +105,11 @@ def _annotate_bug_dicts_with_replay_state(
     )
 
 
+def _has_issue_backlog_intent(question: str) -> bool:
+    normalized = " ".join(str(question or "").split()).lower()
+    return normalized in _ISSUE_BACKLOG_KEYWORDS
+
+
 def handle_query(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
     question = (body.get("question") or "").strip().lower()
     if not question:
@@ -128,7 +146,7 @@ def handle_query(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         snap = panel.snapshot()
         return {"routed_to": "operator_panel", "snapshot": _serialize(snap)}
 
-    if _matches(question, ["issue backlog", "upstream issue", "upstream issues", "intake issue", "intake issues"]):
+    if _has_issue_backlog_intent(question):
         backlog = NativeOperatorQueryFrontdoor().query_issue_backlog(
             limit=25,
             open_only=True,
@@ -136,7 +154,7 @@ def handle_query(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         backlog["routed_to"] = "issue_backlog"
         return backlog
 
-    if _matches(question, ["bug", "defect", "issue"]):
+    if _matches(question, ["bug", "defect"]):
         bt = subs.get_bug_tracker()
         bugs = bt.list_bugs(limit=20)
         bug_dicts = _annotate_bug_dicts_with_replay_state(bt, bugs, limit=20)
@@ -198,9 +216,9 @@ def handle_query(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
     if _matches(question, ["health", "preflight", "probe"]):
         return _handle_health(subs, {})
 
-    legacy_result = handle_legacy_query(subs, body)
-    if legacy_result is not None:
-        return legacy_result
+    specialized_result = handle_specialized_query(subs, body)
+    if specialized_result is not None:
+        return specialized_result
 
     try:
         kg = subs.get_knowledge_graph()
@@ -636,8 +654,8 @@ def _test_command_resolver(subs: Any, question: str) -> dict:
     return result
 
 
-def handle_legacy_query(subs: Any, body: dict[str, Any]) -> dict | None:
-    """Handle legacy natural-language phrases that remain part of the query surface."""
+def handle_specialized_query(subs: Any, body: dict[str, Any]) -> dict | None:
+    """Handle the supported specialized query intents that sit outside the base views."""
     question = (body.get("question") or "").strip().lower()
     if not question:
         return None

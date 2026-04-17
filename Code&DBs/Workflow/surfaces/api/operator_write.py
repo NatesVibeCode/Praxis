@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from collections.abc import AsyncIterator
@@ -110,6 +111,34 @@ _OBJECT_RELATION_SEMANTIC_CARDINALITY_MODE = "single_active_per_edge"
 _DECISION_SEMANTIC_SOURCE_KIND = "operator_decision"
 _DECISION_SEMANTIC_OBJECT_ALLOWLIST = ("operator_decision",)
 _DECISION_SEMANTIC_CARDINALITY_MODE = "many"
+_ROADMAP_SEMANTIC_SOURCE_KIND = "roadmap_item"
+_ROADMAP_SEMANTIC_SUBJECT_ALLOWLIST = ("roadmap_item",)
+_ROADMAP_SEMANTIC_PREDICATE_SPECS: dict[str, dict[str, object]] = {
+    "sourced_from_bug": {
+        "object_kind_allowlist": ("bug",),
+        "cardinality_mode": "single_active_per_subject",
+        "description": (
+            "Auto-registered bridge predicate mirroring roadmap_items.source_bug_id "
+            "onto scoped semantic edges."
+        ),
+    },
+    "governed_by_decision_ref": {
+        "object_kind_allowlist": ("decision_ref",),
+        "cardinality_mode": "single_active_per_subject",
+        "description": (
+            "Auto-registered bridge predicate mirroring roadmap_items.decision_ref "
+            "onto scoped semantic edges."
+        ),
+    },
+    "touches_repo_path": {
+        "object_kind_allowlist": ("repo_path",),
+        "cardinality_mode": "many",
+        "description": (
+            "Auto-registered bridge predicate mirroring roadmap_items.registry_paths "
+            "onto scoped semantic edges."
+        ),
+    },
+}
 _BUG_CLOSEOUT_EVIDENCE_ROLE = "validates_fix"
 _ROADMAP_COMPLETED_STATUS = "completed"
 _BUG_CLOSEOUT_VERIFICATION_SUCCESS_STATUSES = frozenset({"passed", "succeeded", "success", "ok"})
@@ -243,7 +272,32 @@ def _operator_decision_to_json(
 
 
 def _normalize_registry_paths(value: object) -> tuple[str, ...]:
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            parsed = value
+        value = parsed
     return coerce_text_sequence(value, field_name="registry_paths")
+
+
+def _normalize_datetime_like(
+    value: object,
+    *,
+    field_name: str,
+    reason_code: str,
+) -> datetime:
+    candidate = value
+    if isinstance(candidate, str):
+        try:
+            candidate = datetime.fromisoformat(candidate)
+        except ValueError:
+            pass
+    return _normalize_as_of(
+        candidate,
+        error_type=ValueError,
+        reason_code=reason_code,
+    )
 
 
 def _normalize_roadmap_action(value: object) -> str:
@@ -1661,6 +1715,294 @@ class OperatorControlFrontdoor:
         )
         return "recorded"
 
+    async def _ensure_semantic_bridge_predicate_for_roadmap_item(
+        self,
+        conn: _Connection,
+        *,
+        repository: SemanticAssertionRepository,
+        predicate_slug: str,
+        created_at: datetime,
+        updated_at: datetime,
+    ) -> SemanticPredicateRecord:
+        spec = _ROADMAP_SEMANTIC_PREDICATE_SPECS[predicate_slug]
+        expected_predicate = SemanticPredicateRecord(
+            predicate_slug=predicate_slug,
+            predicate_status="active",
+            subject_kind_allowlist=_ROADMAP_SEMANTIC_SUBJECT_ALLOWLIST,
+            object_kind_allowlist=cast(
+                tuple[str, ...],
+                spec["object_kind_allowlist"],
+            ),
+            cardinality_mode=cast(str, spec["cardinality_mode"]),
+            description=cast(str, spec["description"]),
+            created_at=created_at,
+            updated_at=updated_at,
+        )
+        existing_predicate = await repository.load_predicate(
+            predicate_slug=expected_predicate.predicate_slug,
+        )
+        needs_sync = (
+            existing_predicate is None
+            or existing_predicate.predicate_status != expected_predicate.predicate_status
+            or existing_predicate.subject_kind_allowlist
+            != expected_predicate.subject_kind_allowlist
+            or existing_predicate.object_kind_allowlist
+            != expected_predicate.object_kind_allowlist
+            or existing_predicate.cardinality_mode != expected_predicate.cardinality_mode
+            or existing_predicate.description != expected_predicate.description
+        )
+        if not needs_sync:
+            return existing_predicate
+        persisted_predicate = await repository.upsert_predicate(
+            predicate=expected_predicate,
+        )
+        await aemit(
+            conn,
+            channel=CHANNEL_SEMANTIC_ASSERTION,
+            event_type="semantic_predicate_registered",
+            entity_id=persisted_predicate.predicate_slug,
+            entity_kind="semantic_predicate",
+            payload={
+                "semantic_predicate": persisted_predicate.to_json(),
+                "bridge_source": "roadmap_items",
+            },
+            emitted_by="operator_write.roadmap_write",
+        )
+        return persisted_predicate
+
+    def _roadmap_semantic_bridge_assertions_for_item(
+        self,
+        *,
+        roadmap_item: Mapping[str, Any],
+    ) -> tuple[SemanticAssertionRecord, ...]:
+        roadmap_item_id = _require_text(
+            roadmap_item.get("roadmap_item_id"),
+            field_name="roadmap_item_id",
+        )
+        created_at = _normalize_datetime_like(
+            roadmap_item.get("created_at"),
+            field_name="created_at",
+            reason_code="operator_control.invalid_created_at",
+        )
+        updated_at = _normalize_datetime_like(
+            roadmap_item.get("updated_at") or created_at,
+            field_name="updated_at",
+            reason_code="operator_control.invalid_updated_at",
+        )
+        source_bug_id = _optional_text(
+            roadmap_item.get("source_bug_id"),
+            field_name="source_bug_id",
+        )
+        decision_ref = _optional_text(
+            roadmap_item.get("decision_ref"),
+            field_name="decision_ref",
+        )
+        registry_paths = _normalize_registry_paths(
+            roadmap_item.get("registry_paths") or (),
+        )
+        assertions: list[SemanticAssertionRecord] = []
+        if source_bug_id is not None:
+            assertions.append(
+                normalize_semantic_assertion_record(
+                    SemanticAssertionRecord(
+                        semantic_assertion_id="",
+                        predicate_slug="sourced_from_bug",
+                        assertion_status="active",
+                        subject_kind="roadmap_item",
+                        subject_ref=roadmap_item_id,
+                        object_kind="bug",
+                        object_ref=source_bug_id,
+                        qualifiers_json={
+                            "bridge_source": "roadmap_items",
+                            "source_field": "source_bug_id",
+                        },
+                        source_kind=_ROADMAP_SEMANTIC_SOURCE_KIND,
+                        source_ref=roadmap_item_id,
+                        evidence_ref=None,
+                        bound_decision_id=None,
+                        valid_from=created_at,
+                        valid_to=None,
+                        created_at=created_at,
+                        updated_at=updated_at,
+                    )
+                )
+            )
+        if decision_ref is not None:
+            assertions.append(
+                normalize_semantic_assertion_record(
+                    SemanticAssertionRecord(
+                        semantic_assertion_id="",
+                        predicate_slug="governed_by_decision_ref",
+                        assertion_status="active",
+                        subject_kind="roadmap_item",
+                        subject_ref=roadmap_item_id,
+                        object_kind="decision_ref",
+                        object_ref=decision_ref,
+                        qualifiers_json={
+                            "bridge_source": "roadmap_items",
+                            "source_field": "decision_ref",
+                        },
+                        source_kind=_ROADMAP_SEMANTIC_SOURCE_KIND,
+                        source_ref=roadmap_item_id,
+                        evidence_ref=None,
+                        bound_decision_id=None,
+                        valid_from=created_at,
+                        valid_to=None,
+                        created_at=created_at,
+                        updated_at=updated_at,
+                    )
+                )
+            )
+        for repo_path in registry_paths:
+            assertions.append(
+                normalize_semantic_assertion_record(
+                    SemanticAssertionRecord(
+                        semantic_assertion_id="",
+                        predicate_slug="touches_repo_path",
+                        assertion_status="active",
+                        subject_kind="roadmap_item",
+                        subject_ref=roadmap_item_id,
+                        object_kind="repo_path",
+                        object_ref=repo_path,
+                        qualifiers_json={
+                            "bridge_source": "roadmap_items",
+                            "source_field": "registry_paths",
+                        },
+                        source_kind=_ROADMAP_SEMANTIC_SOURCE_KIND,
+                        source_ref=roadmap_item_id,
+                        evidence_ref=None,
+                        bound_decision_id=None,
+                        valid_from=created_at,
+                        valid_to=None,
+                        created_at=created_at,
+                        updated_at=updated_at,
+                    )
+                )
+            )
+        return tuple(assertions)
+
+    async def _sync_semantic_bridges_for_roadmap_item(
+        self,
+        conn: _Connection,
+        *,
+        roadmap_item: Mapping[str, Any],
+        emitted_by: str,
+    ) -> dict[str, int]:
+        assert self.semantic_assertion_repository_factory is not None
+        repository = self.semantic_assertion_repository_factory(conn)
+        roadmap_item_id = _require_text(
+            roadmap_item.get("roadmap_item_id"),
+            field_name="roadmap_item_id",
+        )
+        updated_at = _normalize_datetime_like(
+            roadmap_item.get("updated_at"),
+            field_name="updated_at",
+            reason_code="operator_control.invalid_updated_at",
+        )
+        desired_assertions = self._roadmap_semantic_bridge_assertions_for_item(
+            roadmap_item=roadmap_item,
+        )
+        summary = {
+            "processed": 1,
+            "recorded": 0,
+            "retracted": 0,
+        }
+        desired_ids = {
+            assertion.semantic_assertion_id for assertion in desired_assertions
+        }
+        for desired_assertion in desired_assertions:
+            predicate = await self._ensure_semantic_bridge_predicate_for_roadmap_item(
+                conn,
+                repository=repository,
+                predicate_slug=desired_assertion.predicate_slug,
+                created_at=desired_assertion.created_at,
+                updated_at=desired_assertion.updated_at,
+            )
+            persisted_assertion, superseded_assertions = await repository.record_assertion(
+                assertion=desired_assertion,
+                cardinality_mode=predicate.cardinality_mode,
+                as_of=desired_assertion.updated_at,
+            )
+            await aemit(
+                conn,
+                channel=CHANNEL_SEMANTIC_ASSERTION,
+                event_type="semantic_assertion_recorded",
+                entity_id=persisted_assertion.semantic_assertion_id,
+                entity_kind="semantic_assertion",
+                payload={
+                    "semantic_assertion": persisted_assertion.to_json(),
+                    "superseded_assertion_ids": [
+                        item.semantic_assertion_id for item in superseded_assertions
+                    ],
+                    "bridge_source": "roadmap_items",
+                    "roadmap_item_id": roadmap_item_id,
+                },
+                emitted_by=emitted_by,
+            )
+            summary["recorded"] += 1
+
+        active_assertions = await repository.list_assertions(
+            subject_kind="roadmap_item",
+            subject_ref=roadmap_item_id,
+            source_kind=_ROADMAP_SEMANTIC_SOURCE_KIND,
+            source_ref=roadmap_item_id,
+            active_at=updated_at,
+            active_only=True,
+            limit=1000,
+        )
+        for existing_assertion in active_assertions:
+            if (
+                existing_assertion.predicate_slug
+                not in _ROADMAP_SEMANTIC_PREDICATE_SPECS
+                or existing_assertion.semantic_assertion_id in desired_ids
+            ):
+                continue
+            retracted_assertion = await repository.retract_assertion(
+                semantic_assertion_id=existing_assertion.semantic_assertion_id,
+                retracted_at=updated_at,
+                updated_at=updated_at,
+            )
+            await aemit(
+                conn,
+                channel=CHANNEL_SEMANTIC_ASSERTION,
+                event_type="semantic_assertion_retracted",
+                entity_id=retracted_assertion.semantic_assertion_id,
+                entity_kind="semantic_assertion",
+                payload={
+                    "semantic_assertion": retracted_assertion.to_json(),
+                    "bridge_source": "roadmap_items",
+                    "bridge_state": "stale_removed",
+                    "roadmap_item_id": roadmap_item_id,
+                },
+                emitted_by=emitted_by,
+            )
+            summary["retracted"] += 1
+        return summary
+
+    async def _fetch_roadmap_items_for_semantic_bridge(
+        self,
+        conn: _Connection,
+        *,
+        as_of: datetime | None,
+    ) -> tuple[Mapping[str, Any], ...]:
+        rows = await conn.fetch(
+            """
+            SELECT
+                roadmap_item_id,
+                source_bug_id,
+                registry_paths,
+                decision_ref,
+                created_at,
+                updated_at
+            FROM roadmap_items
+            WHERE ($1::timestamptz IS NULL OR created_at <= $1)
+              AND ($1::timestamptz IS NULL OR updated_at <= $1)
+            ORDER BY created_at, updated_at, roadmap_item_id
+            """,
+            as_of,
+        )
+        return tuple(cast(Mapping[str, Any], row) for row in rows)
+
     async def _record_work_item_workflow_binding(
         self,
         *,
@@ -2448,6 +2790,7 @@ class OperatorControlFrontdoor:
             source_bug_id=bug_id,
         )
         roadmap_item_id: str
+        roadmap_item_payload: Mapping[str, Any] | None = None
         created = False
         now = _now()
         if existing_item is None:
@@ -2502,29 +2845,30 @@ class OperatorControlFrontdoor:
             )
             assert self.roadmap_repository_factory is not None
             repository = self.roadmap_repository_factory(conn)
+            roadmap_item_payload = _roadmap_item_payload(
+                roadmap_item_id=roadmap_item_id,
+                roadmap_key=_roadmap_key_from_item_id(roadmap_item_id),
+                title=title,
+                item_kind="capability",
+                status="active",
+                priority=_auto_promoted_bug_priority(
+                    _optional_text(
+                        bug_row.get("severity"),
+                        field_name="bug.severity",
+                    )
+                ),
+                parent_roadmap_item_id=None,
+                source_bug_id=bug_id,
+                registry_paths=(),
+                summary=f"Auto-promoted from {bug_id}: {summary}",
+                acceptance_criteria=acceptance,
+                decision_ref=decision_ref,
+                created_at=created_at_value,
+                updated_at=updated_at_value,
+            )
             await repository.record_roadmap_package(
                 roadmap_items=[
-                    _roadmap_item_payload(
-                        roadmap_item_id=roadmap_item_id,
-                        roadmap_key=_roadmap_key_from_item_id(roadmap_item_id),
-                        title=title,
-                        item_kind="capability",
-                        status="active",
-                        priority=_auto_promoted_bug_priority(
-                            _optional_text(
-                                bug_row.get("severity"),
-                                field_name="bug.severity",
-                            )
-                        ),
-                        parent_roadmap_item_id=None,
-                        source_bug_id=bug_id,
-                        registry_paths=(),
-                        summary=f"Auto-promoted from {bug_id}: {summary}",
-                        acceptance_criteria=acceptance,
-                        decision_ref=decision_ref,
-                        created_at=created_at_value,
-                        updated_at=updated_at_value,
-                    )
+                    roadmap_item_payload
                 ],
                 roadmap_item_dependencies=[],
             )
@@ -2534,6 +2878,23 @@ class OperatorControlFrontdoor:
                 existing_item.get("roadmap_item_id"),
                 field_name="roadmap_item_id",
             )
+            roadmap_item_payload = await self._fetch_roadmap_item(
+                conn,
+                roadmap_item_id=roadmap_item_id,
+            )
+
+        if roadmap_item_payload is not None:
+            semantic_bridge_summary = await self._sync_semantic_bridges_for_roadmap_item(
+                conn,
+                roadmap_item=roadmap_item_payload,
+                emitted_by="operator_write.record_work_item_workflow_binding",
+            )
+        else:
+            semantic_bridge_summary = {
+                "processed": 0,
+                "recorded": 0,
+                "retracted": 0,
+            }
 
         roadmap_binding = await runtime.record_binding(
             binding_kind=binding_kind,
@@ -2550,6 +2911,7 @@ class OperatorControlFrontdoor:
             "roadmap_item_id": roadmap_item_id,
             "created": created,
             "binding": roadmap_binding.to_json(),
+            "semantic_bridge_summary": semantic_bridge_summary,
         }
 
     async def _roadmap_sibling_phase_orders(
@@ -2903,13 +3265,31 @@ class OperatorControlFrontdoor:
 
             assert self.roadmap_repository_factory is not None
             repository = self.roadmap_repository_factory(conn)
-            commit_summary = await repository.record_roadmap_package(
-                roadmap_items=preview["preview"]["roadmap_items"],
-                roadmap_item_dependencies=preview["preview"]["roadmap_item_dependencies"],
-            )
+            async with conn.transaction():
+                commit_summary = await repository.record_roadmap_package(
+                    roadmap_items=preview["preview"]["roadmap_items"],
+                    roadmap_item_dependencies=preview["preview"]["roadmap_item_dependencies"],
+                )
+                semantic_bridge_summary = {
+                    "processed": 0,
+                    "recorded": 0,
+                    "retracted": 0,
+                }
+                for roadmap_item in preview["preview"]["roadmap_items"]:
+                    item_summary = await self._sync_semantic_bridges_for_roadmap_item(
+                        conn,
+                        roadmap_item=_require_mapping(
+                            roadmap_item,
+                            field_name="preview.roadmap_item",
+                        ),
+                        emitted_by="operator_write.roadmap_write",
+                    )
+                    for key in semantic_bridge_summary:
+                        semantic_bridge_summary[key] += item_summary[key]
 
             preview["committed"] = True
             preview["commit_summary"] = commit_summary
+            preview["semantic_bridge_summary"] = semantic_bridge_summary
             return preview
         finally:
             await conn.close()
@@ -3809,13 +4189,18 @@ class OperatorControlFrontdoor:
         *,
         include_object_relations: bool = True,
         include_operator_decisions: bool = True,
+        include_roadmap_items: bool = True,
         as_of: datetime | None = None,
         env: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
-        if not include_object_relations and not include_operator_decisions:
+        if (
+            not include_object_relations
+            and not include_operator_decisions
+            and not include_roadmap_items
+        ):
             raise ValueError(
                 "backfill_semantic_bridges requires include_object_relations or "
-                "include_operator_decisions"
+                "include_operator_decisions or include_roadmap_items"
             )
         normalized_as_of = (
             None
@@ -3838,6 +4223,11 @@ class OperatorControlFrontdoor:
                 "processed": 0,
                 "recorded": 0,
                 "skipped_unscoped": 0,
+            }
+            roadmap_summary = {
+                "processed": 0,
+                "recorded": 0,
+                "retracted": 0,
             }
             projection_as_of = normalized_as_of or _now()
             async with conn.transaction():
@@ -3883,6 +4273,19 @@ class OperatorControlFrontdoor:
                             emitted_by="operator_write.backfill_semantic_bridges",
                         )
                         decision_summary[outcome] += 1
+                if include_roadmap_items:
+                    roadmap_rows = await self._fetch_roadmap_items_for_semantic_bridge(
+                        conn,
+                        as_of=normalized_as_of,
+                    )
+                    for roadmap_item in roadmap_rows:
+                        item_summary = await self._sync_semantic_bridges_for_roadmap_item(
+                            conn,
+                            roadmap_item=roadmap_item,
+                            emitted_by="operator_write.backfill_semantic_bridges",
+                        )
+                        for key in roadmap_summary:
+                            roadmap_summary[key] += item_summary[key]
                 assert self.semantic_assertion_repository_factory is not None
                 semantic_repository = self.semantic_assertion_repository_factory(conn)
                 await semantic_repository.rebuild_current_assertions(
@@ -3903,6 +4306,7 @@ class OperatorControlFrontdoor:
                         ),
                         "object_relations": dict(relation_summary),
                         "operator_decisions": dict(decision_summary),
+                        "roadmap_items": dict(roadmap_summary),
                     },
                     emitted_by="operator_write.backfill_semantic_bridges",
                 )
@@ -3913,6 +4317,7 @@ class OperatorControlFrontdoor:
                 "as_of": None if normalized_as_of is None else normalized_as_of.isoformat(),
                 "object_relations": relation_summary,
                 "operator_decisions": decision_summary,
+                "roadmap_items": roadmap_summary,
             }
         }
 
@@ -4061,6 +4466,7 @@ class OperatorControlFrontdoor:
         *,
         include_object_relations: bool = True,
         include_operator_decisions: bool = True,
+        include_roadmap_items: bool = True,
         as_of: datetime | None = None,
         env: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
@@ -4068,6 +4474,7 @@ class OperatorControlFrontdoor:
             self.backfill_semantic_bridges_async(
                 include_object_relations=include_object_relations,
                 include_operator_decisions=include_operator_decisions,
+                include_roadmap_items=include_roadmap_items,
                 as_of=as_of,
                 env=env,
             ),
@@ -4862,6 +5269,7 @@ def backfill_semantic_bridges(
     *,
     include_object_relations: bool = True,
     include_operator_decisions: bool = True,
+    include_roadmap_items: bool = True,
     as_of: datetime | None = None,
     env: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
@@ -4870,6 +5278,7 @@ def backfill_semantic_bridges(
     return OperatorControlFrontdoor().backfill_semantic_bridges(
         include_object_relations=include_object_relations,
         include_operator_decisions=include_operator_decisions,
+        include_roadmap_items=include_roadmap_items,
         as_of=as_of,
         env=env,
     )
@@ -4879,6 +5288,7 @@ async def abackfill_semantic_bridges(
     *,
     include_object_relations: bool = True,
     include_operator_decisions: bool = True,
+    include_roadmap_items: bool = True,
     as_of: datetime | None = None,
     env: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
@@ -4887,6 +5297,7 @@ async def abackfill_semantic_bridges(
     return await OperatorControlFrontdoor().backfill_semantic_bridges_async(
         include_object_relations=include_object_relations,
         include_operator_decisions=include_operator_decisions,
+        include_roadmap_items=include_roadmap_items,
         as_of=as_of,
         env=env,
     )

@@ -25,6 +25,25 @@ def _json_object(value: Any) -> dict[str, Any]:
         return {}
 
 
+def build_query_error(
+    *,
+    scope: str,
+    reason_code: str,
+    error: BaseException | str,
+    component: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "scope": str(scope or "").strip(),
+        "reason_code": str(reason_code or "").strip(),
+        "error_message": str(error or "").strip(),
+    }
+    if isinstance(error, BaseException):
+        payload["error_type"] = type(error).__name__
+    if component:
+        payload["component"] = str(component).strip()
+    return payload
+
+
 _BUG_BLAST_RADIUS_WINDOW_SQL = "7 days"
 _ALLOWED_EVIDENCE_KINDS = frozenset({"receipt", "run", "verification_run", "healing_run"})
 _ALLOWED_EVIDENCE_ROLES = frozenset({"observed_in", "attempted_fix", "validates_fix"})
@@ -526,7 +545,11 @@ def compare_write_sets(conn: Any, latest_receipt: dict[str, Any] | None) -> dict
         )
     except Exception as exc:
         row = None
-        query_error = f"{type(exc).__name__}: {exc}"
+        query_error = build_query_error(
+            scope="write_set_diff",
+            reason_code="write_set_diff.query_failed",
+            error=exc,
+        )
     baseline_receipt = row_to_receipt_summary(row) if row else None
     current_paths = set(latest_receipt.get("write_paths") or ())
     baseline_paths = set(
@@ -726,7 +749,11 @@ def build_blast_radius(
         ) or {}
     except Exception as exc:
         row = {}
-        query_error = f"{type(exc).__name__}: {exc}"
+        query_error = build_query_error(
+            scope="blast_radius",
+            reason_code="blast_radius.query_failed",
+            error=exc,
+        )
     return {
         "window": _BUG_BLAST_RADIUS_WINDOW_SQL,
         "occurrence_count": int(row.get("occurrence_count") or 0),
@@ -750,7 +777,7 @@ def assemble_failure_packet(
     healing_rows: dict[str, dict[str, Any]],
     verification_run_refs: set[str],
     healing_run_refs: set[str],
-    query_errors: list[str],
+    query_errors: list[dict[str, Any]],
     signature: dict[str, Any],
     failure_code: str | None,
     node_id: str | None,
@@ -938,7 +965,7 @@ def assemble_failure_packet(
         "write_set_diff": write_set_diff,
         "observability_state": observability_state,
         "observability_gaps": tuple(observability_gaps),
-        "errors": tuple(query_errors),
+        "errors": tuple(dict(item) for item in query_errors),
         "fix_verification": {
             "fix_verified": bool(verified_validation_rows),
             "linked_validation_count": len(validate_fix_links),

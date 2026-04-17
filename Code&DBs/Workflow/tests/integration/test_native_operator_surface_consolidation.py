@@ -28,6 +28,32 @@ async def _fake_load_persona_activation(self, *, env, run_id, as_of):
     }
 
 
+def _patch_default_surface_run_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakeConnection:
+        async def fetchrow(self, query: str, *args: object):
+            del args
+            if "FROM workflow_runs" in query:
+                return {
+                    "workspace_ref": "workspace.test",
+                    "runtime_profile_ref": "runtime_profile.test",
+                }
+            if "FROM workflow_claim_lease_proposal_runtime" in query:
+                return None
+            raise AssertionError(f"unexpected fetchrow query: {query}")
+
+        async def close(self) -> None:
+            return None
+
+    async def _fake_connect_database(_env):
+        return _FakeConnection()
+
+    monkeypatch.setattr(
+        native_operator_surface._DEFAULT_NATIVE_OPERATOR_SURFACE_FRONTDOOR,
+        "connect_database",
+        _fake_connect_database,
+    )
+
+
 def test_native_operator_surface_scopes_run_context_and_database_handle_per_request(
     monkeypatch,
 ) -> None:
@@ -87,6 +113,7 @@ def test_native_operator_surface_scopes_run_context_and_database_handle_per_requ
                 work_item_workflow_binding_id="binding.1",
                 binding_kind="governed_by",
                 binding_status="active",
+                issue_id=None,
                 roadmap_item_id=None,
                 bug_id=None,
                 cutover_gate_id="gate.1",
@@ -110,7 +137,7 @@ def test_native_operator_surface_scopes_run_context_and_database_handle_per_requ
                     "persona_profile_id": "persona.alpha",
                     "persona_name": "Operator",
                     "persona_kind": "native_operator",
-                    "instruction_contract": {"kind": "instruction_contract"},
+                    "instruction_contract": "instruction.alpha",
                     "effective_from": as_of,
                     "effective_to": None,
                     "decision_ref": "decision.alpha",
@@ -445,6 +472,7 @@ def test_native_operator_surface_query_payload_reuses_request_connection_and_pre
         work_item_workflow_binding_id="binding.1",
         binding_kind="governed_by",
         binding_status="active",
+        issue_id=None,
         roadmap_item_id=None,
         bug_id=None,
         cutover_gate_id="gate.1",
@@ -817,6 +845,7 @@ def test_native_operator_surface_consolidates_query_and_cockpit_truth(monkeypatc
                 work_item_workflow_binding_id="binding.1",
                 binding_kind="governed_by",
                 binding_status="active",
+                issue_id=None,
                 roadmap_item_id=None,
                 bug_id=None,
                 cutover_gate_id="gate.1",
@@ -876,6 +905,7 @@ def test_native_operator_surface_consolidates_query_and_cockpit_truth(monkeypatc
         "_load_smoke_freshness",
         _fake_load_smoke_freshness,
     )
+    _patch_default_surface_run_context(monkeypatch)
 
     payload = native_operator_surface.query_native_operator_surface(
         run_id="run.1",
@@ -1139,6 +1169,7 @@ def test_native_operator_surface_fails_closed_on_nested_query_native_instance_mi
         "_load_persona_activation",
         _fake_load_persona_activation,
     )
+    _patch_default_surface_run_context(monkeypatch)
 
     try:
         native_operator_surface.query_native_operator_surface(
@@ -1167,6 +1198,7 @@ def test_native_operator_surface_fails_closed_on_query_binding_echo_mismatch(
                 work_item_workflow_binding_id="binding.1",
                 binding_kind="governed_by",
                 binding_status="active",
+                issue_id=None,
                 roadmap_item_id=None,
                 bug_id=None,
                 cutover_gate_id="gate.1",
@@ -1230,6 +1262,7 @@ def test_native_operator_surface_fails_closed_on_query_binding_echo_mismatch(
         "_load_persona_activation",
         _fake_load_persona_activation,
     )
+    _patch_default_surface_run_context(monkeypatch)
 
     with pytest.raises(native_operator_surface.NativeOperatorSurfaceError) as exc_info:
         native_operator_surface.query_native_operator_surface(
@@ -1256,6 +1289,7 @@ def test_native_operator_surface_fails_closed_on_duplicate_query_binding_echo(
                 work_item_workflow_binding_id="binding.1",
                 binding_kind="governed_by",
                 binding_status="active",
+                issue_id=None,
                 roadmap_item_id=None,
                 bug_id=None,
                 cutover_gate_id="gate.1",
@@ -1321,6 +1355,7 @@ def test_native_operator_surface_fails_closed_on_duplicate_query_binding_echo(
         "_load_persona_activation",
         _fake_load_persona_activation,
     )
+    _patch_default_surface_run_context(monkeypatch)
 
     with pytest.raises(native_operator_surface.NativeOperatorSurfaceError) as exc_info:
         native_operator_surface.query_native_operator_surface(
@@ -1383,6 +1418,7 @@ def test_native_operator_surface_fails_closed_on_nested_query_as_of_mismatch(mon
         "_load_persona_activation",
         _fake_load_persona_activation,
     )
+    _patch_default_surface_run_context(monkeypatch)
 
     try:
         native_operator_surface.query_native_operator_surface(

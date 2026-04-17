@@ -819,8 +819,16 @@ class TestEvidencePackets:
         packet = tracker.failure_packet(bug.bug_id)
         assert packet is not None
         assert packet["observability_state"] == "degraded"
-        assert "write_set_diff.query_failed:RuntimeError: receipt lane offline" in packet["errors"]
-        assert "blast_radius.query_failed:RuntimeError: blast radius lane offline" in packet["errors"]
+        assert {
+            "scope": "write_set_diff",
+            "reason_code": "write_set_diff.query_failed",
+            "error_message": "RuntimeError: receipt lane offline",
+        } in packet["errors"]
+        assert {
+            "scope": "blast_radius",
+            "reason_code": "blast_radius.query_failed",
+            "error_message": "RuntimeError: blast radius lane offline",
+        } in packet["errors"]
 
     def test_failure_packet_keeps_fallback_receipts_non_replayable(
         self,
@@ -1486,11 +1494,29 @@ class TestSemanticNeighborCluster:
         packet = tracker.failure_packet(bug.bug_id)
         assert packet is not None
         assert packet["observability_state"] == "degraded"
-        assert "semantic_neighbors.query_failed:embedding.query_failed:RuntimeError: embedding lane offline" in packet["errors"]
+        assert {
+            "scope": "semantic_neighbors",
+            "reason_code": "semantic_neighbors.embedding.query_failed",
+            "component": "embedding",
+            "error_type": "RuntimeError",
+            "error_message": "embedding lane offline",
+        } in packet["errors"]
         sn = packet["semantic_neighbors"]
         assert sn["reason_code"] == "bug.semantic_neighbors.query_failed"
-        assert "embedding.query_failed:RuntimeError: embedding lane offline" in sn["errors"]
-        assert "tags.query_failed:RuntimeError: tag lane offline" in sn["errors"]
+        assert {
+            "scope": "semantic_neighbors",
+            "reason_code": "semantic_neighbors.embedding.query_failed",
+            "component": "embedding",
+            "error_type": "RuntimeError",
+            "error_message": "embedding lane offline",
+        } in sn["errors"]
+        assert {
+            "scope": "semantic_neighbors",
+            "reason_code": "semantic_neighbors.tags.query_failed",
+            "component": "tags",
+            "error_type": "RuntimeError",
+            "error_message": "tag lane offline",
+        } in sn["errors"]
 
 
 class TestResumeContext:

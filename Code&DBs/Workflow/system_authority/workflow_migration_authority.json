@@ -78,7 +78,8 @@
     "147_operation_catalog_semantic_assertions.sql",
     "148_drop_workflow_notifications.sql",
     "149_native_self_hosted_smoke_definition.sql",
-    "150_native_self_hosted_smoke_execution_identity.sql"
+    "150_native_self_hosted_smoke_execution_identity.sql",
+    "151_operation_catalog_operator_finish.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -2242,6 +2243,32 @@
         "object_type": "row",
         "object_name": "workflow_definition_nodes.workflow_definition.native_self_hosted_smoke.v1:node_1"
       }
+    ],
+    "151_operation_catalog_operator_finish.sql": [
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.operator.architecture_policy_record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.operator.functional_area_record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.operator.object_relation_record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.operator.circuit_states"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.operator.circuit_history"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.operator.circuit_override"
+      }
     ]
   },
   "policy_buckets": {
@@ -2324,7 +2351,8 @@
       "147_operation_catalog_semantic_assertions.sql",
       "148_drop_workflow_notifications.sql",
       "149_native_self_hosted_smoke_definition.sql",
-      "150_native_self_hosted_smoke_execution_identity.sql"
+      "150_native_self_hosted_smoke_execution_identity.sql",
+      "151_operation_catalog_operator_finish.sql"
     ],
     "bootstrap_only": [
       "012_execution_leases.sql",

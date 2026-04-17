@@ -173,6 +173,158 @@ def test_mcp_operator_decisions_list_uses_operation_catalog_gateway(monkeypatch)
     assert captured["payload"]["decision_scope_ref"] == "provider_onboarding"
 
 
+def test_mcp_operator_relations_functional_area_uses_operation_catalog_gateway(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(operator, "_subs", object())
+
+    def _execute(subsystems, *, operation_name: str, payload):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"operation_receipt": {"operation_name": operation_name}}
+
+    monkeypatch.setattr(operator, "execute_operation_from_subsystems", _execute)
+
+    result = operator.tool_praxis_operator_relations(
+        {
+            "action": "record_functional_area",
+            "area_slug": "checkout",
+            "title": "Checkout",
+            "summary": "Shared checkout semantics",
+        }
+    )
+
+    assert result["operation_receipt"]["operation_name"] == "operator.functional_area_record"
+    assert captured["operation_name"] == "operator.functional_area_record"
+    assert captured["payload"]["area_slug"] == "checkout"
+
+
+def test_mcp_operator_relations_record_relation_uses_operation_catalog_gateway(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(operator, "_subs", object())
+
+    def _execute(subsystems, *, operation_name: str, payload):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"operation_receipt": {"operation_name": operation_name}}
+
+    monkeypatch.setattr(operator, "execute_operation_from_subsystems", _execute)
+
+    result = operator.tool_praxis_operator_relations(
+        {
+            "action": "record_relation",
+            "relation_kind": "grouped_in",
+            "source_kind": "roadmap_item",
+            "source_ref": "roadmap_item.checkout",
+            "target_kind": "functional_area",
+            "target_ref": "functional_area.checkout",
+        }
+    )
+
+    assert result["operation_receipt"]["operation_name"] == "operator.object_relation_record"
+    assert captured["operation_name"] == "operator.object_relation_record"
+    assert captured["payload"]["target_ref"] == "functional_area.checkout"
+
+
+def test_mcp_operator_architecture_policy_uses_operation_catalog_gateway(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(operator, "_subs", object())
+
+    def _execute(subsystems, *, operation_name: str, payload):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"operation_receipt": {"operation_name": operation_name}}
+
+    monkeypatch.setattr(operator, "execute_operation_from_subsystems", _execute)
+
+    result = operator.tool_praxis_operator_architecture_policy(
+        {
+            "authority_domain": "decision_tables",
+            "policy_slug": "db-native-authority",
+            "title": "Decision tables are DB-native authority",
+            "rationale": "Keep authority in Postgres.",
+            "decided_by": "nate",
+            "decision_source": "cto.guidance",
+        }
+    )
+
+    assert result["operation_receipt"]["operation_name"] == "operator.architecture_policy_record"
+    assert captured["operation_name"] == "operator.architecture_policy_record"
+    assert captured["payload"]["authority_domain"] == "decision_tables"
+
+
+def test_mcp_circuits_list_uses_operation_catalog_gateway(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(operator, "_subs", object())
+
+    def _execute(subsystems, *, operation_name: str, payload):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"operation_receipt": {"operation_name": operation_name}}
+
+    monkeypatch.setattr(operator, "execute_operation_from_subsystems", _execute)
+
+    result = operator.tool_praxis_circuits({"action": "list", "provider_slug": "openai"})
+
+    assert result["operation_receipt"]["operation_name"] == "operator.circuit_states"
+    assert captured["operation_name"] == "operator.circuit_states"
+    assert captured["payload"]["provider_slug"] == "openai"
+
+
+def test_mcp_circuits_history_uses_operation_catalog_gateway(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(operator, "_subs", object())
+
+    def _execute(subsystems, *, operation_name: str, payload):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"operation_receipt": {"operation_name": operation_name}}
+
+    monkeypatch.setattr(operator, "execute_operation_from_subsystems", _execute)
+
+    result = operator.tool_praxis_circuits({"action": "history", "provider_slug": "openai"})
+
+    assert result["operation_receipt"]["operation_name"] == "operator.circuit_history"
+    assert captured["operation_name"] == "operator.circuit_history"
+    assert captured["payload"]["provider_slug"] == "openai"
+
+
+def test_mcp_circuits_override_uses_operation_catalog_gateway(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(operator, "_subs", object())
+
+    def _execute(subsystems, *, operation_name: str, payload):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"operation_receipt": {"operation_name": operation_name}}
+
+    monkeypatch.setattr(operator, "execute_operation_from_subsystems", _execute)
+
+    result = operator.tool_praxis_circuits(
+        {
+            "action": "open",
+            "provider_slug": "openai",
+            "reason_code": "provider_outage",
+            "rationale": "Provider outage",
+        }
+    )
+
+    assert result["operation_receipt"]["operation_name"] == "operator.circuit_override"
+    assert captured["operation_name"] == "operator.circuit_override"
+    assert captured["payload"]["override_state"] == "open"
+
+
 def test_mcp_semantic_assertions_list_uses_operation_catalog_gateway(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
@@ -253,6 +405,7 @@ def test_mcp_maintenance_backfill_semantic_bridges_uses_operator_frontdoor(monke
     assert result == {"backfill": "semantic"}
     assert captured["include_object_relations"] is False
     assert captured["include_operator_decisions"] is True
+    assert captured["include_roadmap_items"] is True
     assert captured["as_of"] == datetime(2026, 4, 16, 21, 0, tzinfo=timezone.utc)
 
 

@@ -210,6 +210,30 @@ async def _exercise_backfill_semantic_bridges_replays_legacy_operator_rows() -> 
         target_kind="functional_area",
         target_ref="functional_area.payments",
     )
+    roadmap_bug_id = "bug.legacy.roadmap"
+    roadmap_item_id = "roadmap_item.legacy.semantic_graph"
+    roadmap_registry_paths = (
+        "Code&DBs/Workflow/surfaces/api/operator_write.py",
+        "docs/MCP.md",
+    )
+    first_roadmap_path_assertion_id = semantic_assertion_id(
+        predicate_slug="touches_repo_path",
+        subject_kind="roadmap_item",
+        subject_ref=roadmap_item_id,
+        object_kind="repo_path",
+        object_ref=roadmap_registry_paths[0],
+        source_kind="roadmap_item",
+        source_ref=roadmap_item_id,
+    )
+    second_roadmap_path_assertion_id = semantic_assertion_id(
+        predicate_slug="touches_repo_path",
+        subject_kind="roadmap_item",
+        subject_ref=roadmap_item_id,
+        object_kind="repo_path",
+        object_ref=roadmap_registry_paths[1],
+        source_kind="roadmap_item",
+        source_ref=roadmap_item_id,
+    )
     scoped_assertion_id = semantic_assertion_id(
         predicate_slug="architecture_policy",
         subject_kind="authority_domain",
@@ -237,11 +261,35 @@ async def _exercise_backfill_semantic_bridges_replays_legacy_operator_rows() -> 
         source_kind="operator_object_relation",
         source_ref=inactive_relation_id,
     )
+    roadmap_bug_assertion_id = semantic_assertion_id(
+        predicate_slug="sourced_from_bug",
+        subject_kind="roadmap_item",
+        subject_ref=roadmap_item_id,
+        object_kind="bug",
+        object_ref=roadmap_bug_id,
+        source_kind="roadmap_item",
+        source_ref=roadmap_item_id,
+    )
+    roadmap_decision_assertion_id = semantic_assertion_id(
+        predicate_slug="governed_by_decision_ref",
+        subject_kind="roadmap_item",
+        subject_ref=roadmap_item_id,
+        object_kind="decision_ref",
+        object_ref=scoped_decision_id,
+        source_kind="roadmap_item",
+        source_ref=roadmap_item_id,
+    )
+    roadmap_path_assertion_ids = {
+        first_roadmap_path_assertion_id,
+        second_roadmap_path_assertion_id,
+    }
 
     conn = await connect_workflow_database(env=env)
     try:
         await bootstrap_control_plane_schema(conn)
         for filename in (
+            "009_bug_and_roadmap_authority.sql",
+            "042_roadmap_item_registry_paths.sql",
             "010_operator_control_authority.sql",
             "082_event_log.sql",
             "124_operator_decision_scope_authority.sql",
@@ -317,6 +365,14 @@ async def _exercise_backfill_semantic_bridges_replays_legacy_operator_rows() -> 
             decision_scope_kind=None,
             decision_scope_ref=None,
         )
+        await _seed_bug(
+            conn,
+            bug_id=roadmap_bug_id,
+            bug_key="bug-legacy-roadmap",
+            title="Legacy roadmap semantic source bug",
+            summary="Legacy roadmap row should replay into canonical semantic assertions.",
+            as_of=created_at,
+        )
         await _seed_operator_object_relation(
             conn,
             operator_object_relation_id=active_relation_id,
@@ -345,10 +401,21 @@ async def _exercise_backfill_semantic_bridges_replays_legacy_operator_rows() -> 
             created_at=created_at,
             updated_at=updated_at,
         )
+        await _seed_roadmap_item(
+            conn,
+            roadmap_item_id=roadmap_item_id,
+            roadmap_key="roadmap.legacy.semantic-graph",
+            title="Legacy semantic graph roadmap item",
+            source_bug_id=roadmap_bug_id,
+            decision_ref=scoped_decision_id,
+            registry_paths=roadmap_registry_paths,
+            as_of=created_at,
+        )
 
         payload = await operator_write.abackfill_semantic_bridges(
             include_object_relations=True,
             include_operator_decisions=True,
+            include_roadmap_items=True,
             as_of=as_of,
             env=env,
         )
@@ -365,6 +432,11 @@ async def _exercise_backfill_semantic_bridges_replays_legacy_operator_rows() -> 
                 "processed": 2,
                 "recorded": 1,
                 "skipped_unscoped": 1,
+            },
+            "roadmap_items": {
+                "processed": 1,
+                "recorded": 4,
+                "retracted": 0,
             },
         }
 
@@ -428,6 +500,9 @@ async def _exercise_backfill_semantic_bridges_replays_legacy_operator_rows() -> 
         assert {row["semantic_assertion_id"] for row in current_rows} == {
             active_relation_assertion_id,
             scoped_assertion_id,
+            roadmap_bug_assertion_id,
+            roadmap_decision_assertion_id,
+            *roadmap_path_assertion_ids,
         }
 
         semantic_events = await conn.fetch(
@@ -447,6 +522,13 @@ async def _exercise_backfill_semantic_bridges_replays_legacy_operator_rows() -> 
             ("semantic_assertion_recorded", inactive_relation_assertion_id),
             ("semantic_predicate_registered", "architecture_policy"),
             ("semantic_assertion_recorded", scoped_assertion_id),
+            ("semantic_predicate_registered", "sourced_from_bug"),
+            ("semantic_assertion_recorded", roadmap_bug_assertion_id),
+            ("semantic_predicate_registered", "governed_by_decision_ref"),
+            ("semantic_assertion_recorded", roadmap_decision_assertion_id),
+            ("semantic_predicate_registered", "touches_repo_path"),
+            ("semantic_assertion_recorded", first_roadmap_path_assertion_id),
+            ("semantic_assertion_recorded", second_roadmap_path_assertion_id),
             ("semantic_bridge_backfilled", "operator_control"),
         ]
     finally:
@@ -503,6 +585,132 @@ async def _seed_functional_area(
         area_slug,
         title,
         summary,
+        as_of,
+        as_of,
+    )
+
+
+async def _seed_bug(
+    conn,
+    *,
+    bug_id: str,
+    bug_key: str,
+    title: str,
+    summary: str,
+    as_of: datetime,
+) -> None:
+    await conn.execute(
+        """
+        INSERT INTO bugs (
+            bug_id,
+            bug_key,
+            title,
+            status,
+            severity,
+            priority,
+            summary,
+            source_kind,
+            decision_ref,
+            opened_at,
+            resolved_at,
+            created_at,
+            updated_at
+        ) VALUES (
+            $1, $2, $3, 'open', 'major', 'p2', $4, 'legacy_replay', $5, $6, NULL, $7, $8
+        )
+        ON CONFLICT (bug_id) DO UPDATE SET
+            bug_key = EXCLUDED.bug_key,
+            title = EXCLUDED.title,
+            status = EXCLUDED.status,
+            severity = EXCLUDED.severity,
+            priority = EXCLUDED.priority,
+            summary = EXCLUDED.summary,
+            source_kind = EXCLUDED.source_kind,
+            opened_at = EXCLUDED.opened_at,
+            updated_at = EXCLUDED.updated_at
+        """,
+        bug_id,
+        bug_key,
+        title,
+        summary,
+        f"decision.{bug_id}",
+        as_of,
+        as_of,
+        as_of,
+    )
+
+
+async def _seed_roadmap_item(
+    conn,
+    *,
+    roadmap_item_id: str,
+    roadmap_key: str,
+    title: str,
+    source_bug_id: str,
+    decision_ref: str,
+    registry_paths: tuple[str, ...],
+    as_of: datetime,
+) -> None:
+    await conn.execute(
+        """
+        INSERT INTO roadmap_items (
+            roadmap_item_id,
+            roadmap_key,
+            title,
+            item_kind,
+            status,
+            priority,
+            parent_roadmap_item_id,
+            source_bug_id,
+            registry_paths,
+            summary,
+            acceptance_criteria,
+            decision_ref,
+            target_start_at,
+            target_end_at,
+            completed_at,
+            created_at,
+            updated_at
+        ) VALUES (
+            $1,
+            $2,
+            $3,
+            'capability',
+            'active',
+            'p1',
+            NULL,
+            $4,
+            $5::jsonb,
+            $6,
+            $7::jsonb,
+            $8,
+            NULL,
+            NULL,
+            NULL,
+            $9,
+            $10
+        )
+        ON CONFLICT (roadmap_item_id) DO UPDATE SET
+            roadmap_key = EXCLUDED.roadmap_key,
+            title = EXCLUDED.title,
+            item_kind = EXCLUDED.item_kind,
+            status = EXCLUDED.status,
+            priority = EXCLUDED.priority,
+            source_bug_id = EXCLUDED.source_bug_id,
+            registry_paths = EXCLUDED.registry_paths,
+            summary = EXCLUDED.summary,
+            acceptance_criteria = EXCLUDED.acceptance_criteria,
+            decision_ref = EXCLUDED.decision_ref,
+            updated_at = EXCLUDED.updated_at
+        """,
+        roadmap_item_id,
+        roadmap_key,
+        title,
+        source_bug_id,
+        json.dumps(list(registry_paths)),
+        "Legacy roadmap item for semantic bridge replay coverage.",
+        json.dumps({"phase_order": "1", "approval_tag": "legacy-replay"}, sort_keys=True),
+        decision_ref,
         as_of,
         as_of,
     )

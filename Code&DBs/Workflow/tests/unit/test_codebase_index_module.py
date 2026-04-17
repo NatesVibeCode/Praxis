@@ -61,7 +61,17 @@ def test_run_fails_when_indexer_reports_degraded_observability(monkeypatch) -> N
                 "skipped": 0,
                 "total": 2,
                 "observability_state": "degraded",
-                "errors": ("src/writer.py:module:writer:RuntimeError: write lane offline",),
+                "errors": (
+                    {
+                        "scope": "index_codebase",
+                        "code": "module_indexer.index_failed",
+                        "module_path": "src/writer.py",
+                        "kind": "module",
+                        "name": "writer",
+                        "error_type": "RuntimeError",
+                        "error_message": "write lane offline",
+                    },
+                ),
             }
 
     monkeypatch.setattr("runtime.module_indexer.ModuleIndexer", _FakeIndexer)
@@ -70,9 +80,7 @@ def test_run_fails_when_indexer_reports_degraded_observability(monkeypatch) -> N
     result = module.run()
 
     assert result.ok is False
-    assert result.error == (
-        "discovery index degraded: src/writer.py:module:writer:RuntimeError: write lane offline"
-    )
+    assert result.error == "discovery index degraded: src/writer.py/module/writer: write lane offline"
 
 
 class _ProgressEmitter:
@@ -98,7 +106,17 @@ def test_discover_reindex_reports_degraded_progress_when_indexer_has_partial_fai
                 "skipped": 0,
                 "total": 2,
                 "observability_state": "degraded",
-                "errors": ("src/writer.py:module:writer:RuntimeError: write lane offline",),
+                "errors": (
+                    {
+                        "scope": "index_codebase",
+                        "code": "module_indexer.index_failed",
+                        "module_path": "src/writer.py",
+                        "kind": "module",
+                        "name": "writer",
+                        "error_type": "RuntimeError",
+                        "error_message": "write lane offline",
+                    },
+                ),
             }
 
     monkeypatch.setattr(

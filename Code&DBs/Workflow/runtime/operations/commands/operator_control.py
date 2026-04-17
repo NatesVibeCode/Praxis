@@ -62,6 +62,53 @@ class NativePrimaryCutoverGateCommand(BaseModel):
     updated_at: datetime | None = None
 
 
+class FunctionalAreaRecordCommand(BaseModel):
+    area_slug: str
+    title: str
+    summary: str | None = None
+    area_status: str = "active"
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class OperatorObjectRelationRecordCommand(BaseModel):
+    relation_kind: str
+    source_kind: str
+    source_ref: str
+    target_kind: str
+    target_ref: str
+    relation_status: str = "active"
+    relation_metadata: dict[str, Any] | None = None
+    bound_by_decision_id: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class ArchitecturePolicyRecordCommand(BaseModel):
+    authority_domain: str
+    policy_slug: str
+    title: str
+    rationale: str
+    decided_by: str
+    decision_source: str
+    effective_from: datetime | None = None
+    effective_to: datetime | None = None
+    decided_at: datetime | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class CircuitOverrideCommand(BaseModel):
+    provider_slug: str
+    override_state: str
+    effective_to: datetime | None = None
+    reason_code: str = "operator_control"
+    rationale: str | None = None
+    effective_from: datetime | None = None
+    decided_by: str | None = None
+    decision_source: str | None = None
+
+
 class OperatorDecisionRecordCommand(BaseModel):
     decision_key: str
     decision_kind: str
@@ -169,6 +216,85 @@ def handle_native_primary_cutover_gate(
     )
 
 
+def handle_functional_area_record(
+    command: FunctionalAreaRecordCommand,
+    subsystems: Any,
+) -> dict[str, Any]:
+    from surfaces.api.operator_write import OperatorControlFrontdoor
+
+    return OperatorControlFrontdoor().record_functional_area(
+        area_slug=command.area_slug,
+        title=command.title,
+        summary=command.summary,
+        area_status=command.area_status,
+        created_at=command.created_at,
+        updated_at=command.updated_at,
+        env=_resolved_env(subsystems),
+    )
+
+
+def handle_operator_object_relation_record(
+    command: OperatorObjectRelationRecordCommand,
+    subsystems: Any,
+) -> dict[str, Any]:
+    from surfaces.api.operator_write import OperatorControlFrontdoor
+
+    return OperatorControlFrontdoor().record_operator_object_relation(
+        relation_kind=command.relation_kind,
+        source_kind=command.source_kind,
+        source_ref=command.source_ref,
+        target_kind=command.target_kind,
+        target_ref=command.target_ref,
+        relation_status=command.relation_status,
+        relation_metadata=command.relation_metadata,
+        bound_by_decision_id=command.bound_by_decision_id,
+        created_at=command.created_at,
+        updated_at=command.updated_at,
+        env=_resolved_env(subsystems),
+    )
+
+
+def handle_architecture_policy_record(
+    command: ArchitecturePolicyRecordCommand,
+    subsystems: Any,
+) -> dict[str, Any]:
+    from surfaces.api.operator_write import OperatorControlFrontdoor
+
+    return OperatorControlFrontdoor().record_architecture_policy_decision(
+        authority_domain=command.authority_domain,
+        policy_slug=command.policy_slug,
+        title=command.title,
+        rationale=command.rationale,
+        decided_by=command.decided_by,
+        decision_source=command.decision_source,
+        effective_from=command.effective_from,
+        effective_to=command.effective_to,
+        decided_at=command.decided_at,
+        created_at=command.created_at,
+        updated_at=command.updated_at,
+        env=_resolved_env(subsystems),
+    )
+
+
+def handle_circuit_override(
+    command: CircuitOverrideCommand,
+    subsystems: Any,
+) -> dict[str, Any]:
+    from surfaces.api.operator_write import OperatorControlFrontdoor
+
+    return OperatorControlFrontdoor().set_circuit_breaker_override(
+        provider_slug=command.provider_slug,
+        override_state=command.override_state,
+        effective_to=command.effective_to,
+        reason_code=command.reason_code,
+        rationale=command.rationale,
+        effective_from=command.effective_from,
+        decided_by=command.decided_by,
+        decision_source=command.decision_source,
+        env=_resolved_env(subsystems),
+    )
+
+
 def handle_operator_decision_record(
     command: OperatorDecisionRecordCommand,
     subsystems: Any,
@@ -192,13 +318,21 @@ def handle_operator_decision_record(
 
 
 __all__ = [
+    "ArchitecturePolicyRecordCommand",
+    "CircuitOverrideCommand",
+    "FunctionalAreaRecordCommand",
     "NativePrimaryCutoverGateCommand",
     "OperatorDecisionRecordCommand",
+    "OperatorObjectRelationRecordCommand",
     "RoadmapWriteCommand",
     "TaskRouteEligibilityCommand",
     "WorkItemCloseoutCommand",
+    "handle_architecture_policy_record",
+    "handle_circuit_override",
+    "handle_functional_area_record",
     "handle_native_primary_cutover_gate",
     "handle_operator_decision_record",
+    "handle_operator_object_relation_record",
     "handle_operator_roadmap_write",
     "handle_task_route_eligibility",
     "handle_work_item_closeout",

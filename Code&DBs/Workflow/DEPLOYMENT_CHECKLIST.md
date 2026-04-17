@@ -4,7 +4,7 @@
 
 - [x] `scripts/mcp-server.sh` launches `python3 -m surfaces.mcp`
 - [x] `surfaces/mcp/protocol.py` accepts framed MCP traffic and JSONL smoke-test traffic
-- [x] `surfaces/mcp/registry.py` auto-discovers tool modules
+- [x] `surfaces/mcp/catalog.py` provides the shared MCP tool catalog authority
 - [x] `praxis_workflow` is documented and enforced as async kickoff only
 - [x] `praxis_workflow(action='status')` exposes health heuristics and optional `kill_if_idle`
 - [x] `docs/MCP.md` and `MCP_SERVER_INDEX.md` document the separate stream/status channels

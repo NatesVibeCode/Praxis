@@ -437,16 +437,6 @@ def _missing_run_operator_frames_table_error(error: BaseException) -> bool:
     )
 
 
-def _missing_roadmap_embedding_column_error(error: BaseException) -> bool:
-    sqlstate = str(getattr(error, "sqlstate", "") or "").strip()
-    if sqlstate and sqlstate != "42703":
-        return False
-    message = str(error).lower()
-    if "embedding" not in message or "roadmap_items" not in message:
-        return False
-    return "does not exist" in message or "undefined column" in message
-
-
 def _missing_semantic_assertions_table_error(error: BaseException) -> bool:
     sqlstate = str(getattr(error, "sqlstate", "") or "").strip()
     if sqlstate and sqlstate != "42P01":
@@ -725,14 +715,14 @@ class OperatorRoadmapDependencyRecord:
 
 @dataclass(frozen=True, slots=True)
 class OperatorRoadmapSemanticNeighborRecord:
-    """Related roadmap item discovered from semantic authority or embedding fallback."""
+    """Related roadmap item discovered from canonical semantic authority."""
 
     roadmap_item_id: str
     title: str
     status: str
     priority: str
     similarity: float
-    match_kind: str = "embedding"
+    match_kind: str = "semantic_assertion"
     shared_signal_count: int = 0
 
     def to_json(self) -> dict[str, Any]:
@@ -2096,57 +2086,6 @@ class NativeOperatorQueryFrontdoor:
         )
         if semantic_neighbors:
             return semantic_neighbors, "roadmap.semantic_neighbors.semantic_assertions"
-
-        try:
-            rows = await conn.fetch(
-                """
-                WITH anchor AS (
-                    SELECT embedding
-                    FROM roadmap_items
-                    WHERE roadmap_item_id = $1
-                      AND embedding IS NOT NULL
-                    LIMIT 1
-                )
-                SELECT
-                    ri.roadmap_item_id,
-                    ri.title,
-                    ri.status,
-                    ri.priority,
-                    1 - (ri.embedding <=> anchor.embedding) AS similarity
-                FROM roadmap_items ri
-                CROSS JOIN anchor
-                WHERE ri.roadmap_item_id <> $1
-                  AND ri.embedding IS NOT NULL
-                  AND (ri.status IS NULL OR lower(ri.status) NOT IN ('completed', 'done', 'closed'))
-                  AND NOT (ri.roadmap_item_id = ANY($2::text[]))
-                ORDER BY ri.embedding <=> anchor.embedding ASC, ri.updated_at DESC, ri.roadmap_item_id
-                LIMIT $3
-                """,
-                root_roadmap_item_id,
-                list(subtree_roadmap_item_ids),
-                limit,
-            )
-        except asyncpg.PostgresError as exc:
-            if _missing_roadmap_embedding_column_error(exc):
-                return (), "roadmap.semantic_neighbors.schema_unavailable"
-            raise NativeOperatorQueryError(
-                "operator_query.read_failed",
-                "failed to read roadmap semantic neighbors",
-                details={"sqlstate": getattr(exc, "sqlstate", None)},
-            ) from exc
-        neighbors = tuple(
-            OperatorRoadmapSemanticNeighborRecord(
-                roadmap_item_id=_require_text(row.get("roadmap_item_id"), field_name="roadmap_item_id"),
-                title=_require_text(row.get("title"), field_name="title"),
-                status=_require_text(row.get("status"), field_name="status"),
-                priority=_require_text(row.get("priority"), field_name="priority"),
-                similarity=float(row.get("similarity") or 0.0),
-                match_kind="embedding",
-            )
-            for row in rows
-        )
-        if neighbors:
-            return neighbors, "roadmap.semantic_neighbors.found"
         return (), "roadmap.semantic_neighbors.none"
 
     async def _fetch_cutover_gate_records(

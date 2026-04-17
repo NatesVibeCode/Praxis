@@ -89,6 +89,7 @@ class ResolvedChatRoute:
     adapter_type: str
     endpoint_uri: str | None = None
     api_key: str | None = None
+    supports_tool_loop: bool = False
 
 
 class ChatOrchestrator:
@@ -490,18 +491,17 @@ class ChatOrchestrator:
         TaskTypeRouter = router_mod.TaskTypeRouter
 
         router = TaskTypeRouter(self._pg)
-        if hasattr(router, "resolve_failover_chain"):
-            raw_decisions = router.resolve_failover_chain("auto/chat")
-        else:
-            raw_decisions = router.resolve("auto/chat")
-
+        raw_decisions = router.resolve_failover_chain("auto/chat")
+        if not isinstance(raw_decisions, list):
+            raise RuntimeError(
+                "task type routing must return a failover chain list for auto/chat"
+            )
         if not raw_decisions:
             raise RuntimeError("task type routing returned no decisions for auto/chat")
 
         now = time.monotonic()
-        decisions = raw_decisions if isinstance(raw_decisions, list) else [raw_decisions]
         routes: list[ResolvedChatRoute] = []
-        for decision in decisions:
+        for decision in raw_decisions:
             provider = str(decision.provider_slug)
             model = str(decision.model_slug)
             route_key = (provider, model)
@@ -522,6 +522,7 @@ class ChatOrchestrator:
                         provider_slug=provider,
                         model_slug=model,
                         adapter_type=adapter_type,
+                        supports_tool_loop=False,
                     )
                 )
                 continue
@@ -536,6 +537,7 @@ class ChatOrchestrator:
                         adapter_type=adapter_type,
                         endpoint_uri=endpoint,
                         api_key=api_key,
+                        supports_tool_loop=True,
                     )
                 )
 
@@ -547,7 +549,7 @@ class ChatOrchestrator:
     def _resolve_model(self) -> tuple[str, str, str, str]:
         """Resolve the first HTTP-capable chat model route."""
         for route in self._resolve_route_chain():
-            if route.adapter_type == "llm_task" and route.endpoint_uri and route.api_key:
+            if route.supports_tool_loop and route.endpoint_uri and route.api_key:
                 return (
                     route.provider_slug,
                     route.model_slug,
@@ -611,10 +613,7 @@ def _prioritize_last_good_cli_route(routes: list[ResolvedChatRoute]) -> list[Res
 def _should_use_cli_fast_path(routes: list[ResolvedChatRoute]) -> bool:
     if not routes or routes[0].adapter_type != "cli_llm":
         return False
-    return not any(
-        route.adapter_type == "llm_task" and route.endpoint_uri and route.api_key
-        for route in routes
-    )
+    return not any(route.supports_tool_loop for route in routes)
 
 
 def _record_last_good_cli_route(route: ResolvedChatRoute) -> None:

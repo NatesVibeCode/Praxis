@@ -117,12 +117,30 @@ def test_failure_packet_surfaces_semantic_lookup_failures(monkeypatch) -> None:
     packet = tracker.failure_packet(bug.bug_id)
     assert packet is not None
     assert packet["observability_state"] == "degraded"
-    assert "semantic_neighbors.query_failed:embedding.query_failed:RuntimeError: embedding lane offline" in packet["errors"]
+    assert {
+        "scope": "semantic_neighbors",
+        "reason_code": "semantic_neighbors.embedding.query_failed",
+        "component": "embedding",
+        "error_type": "RuntimeError",
+        "error_message": "embedding lane offline",
+    } in packet["errors"]
 
     semantic = packet["semantic_neighbors"]
     assert semantic["reason_code"] == "bug.semantic_neighbors.query_failed"
-    assert "embedding.query_failed:RuntimeError: embedding lane offline" in semantic["errors"]
-    assert "tags.query_failed:RuntimeError: tag lane offline" in semantic["errors"]
+    assert {
+        "scope": "semantic_neighbors",
+        "reason_code": "semantic_neighbors.embedding.query_failed",
+        "component": "embedding",
+        "error_type": "RuntimeError",
+        "error_message": "embedding lane offline",
+    } in semantic["errors"]
+    assert {
+        "scope": "semantic_neighbors",
+        "reason_code": "semantic_neighbors.tags.query_failed",
+        "component": "tags",
+        "error_type": "RuntimeError",
+        "error_message": "tag lane offline",
+    } in semantic["errors"]
 
 
 def test_failure_packet_surfaces_helper_query_failures(monkeypatch) -> None:
@@ -159,7 +177,11 @@ def test_failure_packet_surfaces_helper_query_failures(monkeypatch) -> None:
             "current_write_count": 0,
             "baseline_write_count": 0,
             "note": "baseline receipt lookup failed",
-            "error": "RuntimeError: receipt lane offline",
+            "error": {
+                "scope": "write_set_diff",
+                "reason_code": "write_set_diff.query_failed",
+                "error_message": "RuntimeError: receipt lane offline",
+            },
         },
     )
     monkeypatch.setattr(
@@ -173,7 +195,11 @@ def test_failure_packet_surfaces_helper_query_failures(monkeypatch) -> None:
             "distinct_nodes": 0,
             "distinct_requests": 0,
             "distinct_agents": 0,
-            "error": "RuntimeError: blast radius lane offline",
+            "error": {
+                "scope": "blast_radius",
+                "reason_code": "blast_radius.query_failed",
+                "error_message": "RuntimeError: blast radius lane offline",
+            },
         },
     )
     monkeypatch.setattr(
@@ -202,5 +228,13 @@ def test_failure_packet_surfaces_helper_query_failures(monkeypatch) -> None:
     packet = tracker.failure_packet(bug.bug_id)
     assert packet is not None
     assert packet["observability_state"] == "degraded"
-    assert "write_set_diff.query_failed:RuntimeError: receipt lane offline" in packet["errors"]
-    assert "blast_radius.query_failed:RuntimeError: blast radius lane offline" in packet["errors"]
+    assert {
+        "scope": "write_set_diff",
+        "reason_code": "write_set_diff.query_failed",
+        "error_message": "RuntimeError: receipt lane offline",
+    } in packet["errors"]
+    assert {
+        "scope": "blast_radius",
+        "reason_code": "blast_radius.query_failed",
+        "error_message": "RuntimeError: blast radius lane offline",
+    } in packet["errors"]

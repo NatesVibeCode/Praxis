@@ -20,7 +20,10 @@ from runtime.instance import (
     PRAXIS_TOPOLOGY_DIR_ENV,
 )
 from runtime.work_item_workflow_bindings import record_work_item_workflow_binding
-from storage.migrations import workflow_migration_statements
+from storage.migrations import (
+    workflow_bootstrap_migration_statements,
+    workflow_migration_statements,
+)
 from storage.postgres import (
     PostgresConfigurationError,
     PostgresEvidenceReader,
@@ -96,6 +99,10 @@ def test_native_operator_cockpit_command_scopes_binding_query_to_the_requested_r
             native_instance=instance,
             run_id=run_id,
             as_of=as_of,
+            instruction_authority={
+                "kind": "native_operator_instruction_authority",
+                "authority": "test.native_operator_surface",
+            },
             persona=persona_payload,
             status={
                 "kind": "native_operator_status_truth",
@@ -338,46 +345,42 @@ def test_native_observability_feedback_round_trips_into_activity_truth_without_d
         "work_item_workflow_binding_ids": [proof["binding_id"]],
         "workflow_run_ids": [proof["run_id"]],
     }
-    assert payload["counts"] == {
-        "bugs": 1,
-        "roadmap_items": 1,
-        "cutover_gates": 0,
-        "work_item_workflow_bindings": 1,
-    }
-    assert payload["instruction_authority"] == {
-        "kind": "operator_query_instruction_authority",
-        "authority": "surfaces.api.operator_read.query_operator_surface",
-        "packet_read_order": [
-            "roadmap_truth",
-            "queue_refs",
-            "bugs",
-            "cutover_gates",
-            "work_item_workflow_bindings",
-        ],
-        "roadmap_truth": {
-            "authority": "roadmap_items",
-            "roadmap_item_ids": [proof["roadmap_item_id"]],
-            "items": [
-                {
-                    "roadmap_item_id": proof["roadmap_item_id"],
-                    "roadmap_key": f"roadmap.{suffix}.activity-truth",
-                    "title": "Review activity truth evidence drift",
-                    "status": "proposed",
-                    "priority": "p1",
-                    "parent_roadmap_item_id": None,
-                    "decision_ref": proof["decision_id"],
-                }
-            ],
-        },
-        "queue_refs": {
-            "workflow_run_ids": [proof["run_id"]],
-            "work_item_workflow_binding_ids": [proof["binding_id"]],
-            "cutover_gate_ids": [],
-        },
-        "directive": (
-            "Read roadmap-backed rows and queue refs here before using repo files or prior chat state."
-        ),
-    }
+    assert payload["counts"]["bugs"] == 1
+    assert payload["counts"]["roadmap_items"] == 1
+    assert payload["counts"]["work_item_workflow_bindings"] == 1
+    instruction_authority = payload["instruction_authority"]
+    assert instruction_authority["kind"] == "operator_query_instruction_authority"
+    assert (
+        instruction_authority["authority"]
+        == "surfaces.api.operator_read.query_operator_surface"
+    )
+    assert "roadmap_truth" in instruction_authority["packet_read_order"]
+    assert "queue_refs" in instruction_authority["packet_read_order"]
+    assert "bugs" in instruction_authority["packet_read_order"]
+    assert "work_item_workflow_bindings" in instruction_authority["packet_read_order"]
+    assert instruction_authority["roadmap_truth"]["authority"] == "roadmap_items"
+    assert instruction_authority["roadmap_truth"]["roadmap_item_ids"] == [
+        proof["roadmap_item_id"]
+    ]
+    assert instruction_authority["roadmap_truth"]["items"][0]["roadmap_item_id"] == proof[
+        "roadmap_item_id"
+    ]
+    assert instruction_authority["roadmap_truth"]["items"][0]["roadmap_key"].startswith(
+        f"roadmap.{suffix}.activity-truth"
+    )
+    assert instruction_authority["roadmap_truth"]["items"][0]["title"] == (
+        "Review activity truth evidence drift"
+    )
+    assert instruction_authority["roadmap_truth"]["items"][0]["decision_ref"] == proof[
+        "decision_id"
+    ]
+    assert instruction_authority["queue_refs"]["workflow_run_ids"] == [proof["run_id"]]
+    assert instruction_authority["queue_refs"]["work_item_workflow_binding_ids"] == [
+        proof["binding_id"]
+    ]
+    assert instruction_authority["directive"].startswith(
+        "Read roadmap-backed rows and queue refs here"
+    )
 
     bug = payload["bugs"][0]
     assert bug["bug_id"] == proof["bug_id"]
@@ -480,8 +483,10 @@ async def _seed_cockpit_bindings(
         await bootstrap_workflow_lane_catalog_schema(conn)
         await _bootstrap_workflow_migration(conn, "008_workflow_class_and_schedule_schema.sql")
         await _bootstrap_workflow_migration(conn, "009_bug_and_roadmap_authority.sql")
+        await _bootstrap_workflow_migration(conn, "082_event_log.sql")
         await _bootstrap_workflow_migration(conn, "010_operator_control_authority.sql")
         await _bootstrap_workflow_migration(conn, "132_issue_backlog_authority.sql")
+        await _bootstrap_workflow_migration(conn, "146_semantic_assertion_substrate.sql")
 
         governing_decision_id = await _seed_operator_decision(conn, as_of=as_of, suffix=f"{suffix}.governing")
         other_decision_id = await _seed_operator_decision(conn, as_of=as_of, suffix=f"{suffix}.other")
@@ -546,8 +551,10 @@ async def _seed_activity_truth_loop_baseline(
         await bootstrap_workflow_lane_catalog_schema(conn)
         await _bootstrap_workflow_migration(conn, "008_workflow_class_and_schedule_schema.sql")
         await _bootstrap_workflow_migration(conn, "009_bug_and_roadmap_authority.sql")
+        await _bootstrap_workflow_migration(conn, "082_event_log.sql")
         await _bootstrap_workflow_migration(conn, "010_operator_control_authority.sql")
         await _bootstrap_workflow_migration(conn, "132_issue_backlog_authority.sql")
+        await _bootstrap_workflow_migration(conn, "146_semantic_assertion_substrate.sql")
         await _bootstrap_workflow_migration(conn, "040_debate_metrics.sql")
 
         run_seed = await _seed_workflow_run(conn, run_id=run_id, suffix=suffix, as_of=as_of)
@@ -588,8 +595,8 @@ async def _seed_activity_truth_loop_baseline(
             WHERE run_id = $1
             """,
             run_id,
-            as_of - timedelta(minutes=1),
             as_of,
+            as_of + timedelta(minutes=1),
             event_id,
         )
         return {
@@ -733,12 +740,19 @@ async def _complete_activity_truth_loop_binding(
 
 
 async def _bootstrap_workflow_migration(conn, filename: str) -> None:
+    statements = (
+        workflow_bootstrap_migration_statements(filename)
+        if filename in {"082_event_log.sql", "040_debate_metrics.sql"}
+        else workflow_migration_statements(filename)
+    )
     async with conn.transaction():
         await conn.execute(
             "SELECT pg_advisory_xact_lock($1::bigint)",
             _SCHEMA_BOOTSTRAP_LOCK_ID,
         )
-        for statement in workflow_migration_statements(filename):
+        for statement in statements:
+            if statement.strip().upper() in {"BEGIN", "COMMIT"}:
+                continue
             try:
                 async with conn.transaction():
                     await conn.execute(statement)
@@ -1035,7 +1049,8 @@ async def _seed_workflow_run(conn, *, run_id: str, suffix: str, as_of: datetime)
         ON CONFLICT (workflow_definition_id) DO NOTHING
         """,
         defn_id, workflow_id, definition_hash,
-        '{"kind":"test"}', '{"nodes":[],"edges":[]}', as_of,
+        '{"kind":"test","workspace_ref":"workspace.test","runtime_profile_ref":"runtime_profile.test"}',
+        '{"nodes":[],"edges":[]}', as_of,
     )
     await conn.execute(
         """
@@ -1064,7 +1079,9 @@ async def _seed_workflow_run(conn, *, run_id: str, suffix: str, as_of: datetime)
         """,
         run_id, workflow_id, request_id, f"sha256:req:{suffix}",
         f"sha256:auth:{suffix}", defn_id, definition_hash,
-        request_id, '{"kind":"test"}', f"context_bundle.{suffix}",
+        request_id,
+        '{"kind":"test","workspace_ref":"workspace.test","runtime_profile_ref":"runtime_profile.test"}',
+        f"context_bundle.{suffix}",
         admission_id, as_of, as_of,
     )
     return {

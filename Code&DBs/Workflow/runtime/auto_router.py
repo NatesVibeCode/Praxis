@@ -188,7 +188,7 @@ def resolve_route(
 
     If tier is "auto", tries mid → frontier → economy.
     Within a tier, picks the highest-priority healthy candidate.
-    If route_outcomes is provided, skips unhealthy providers.
+    If route_outcomes is provided, skips unhealthy routes.
     """
 
     tiers_to_try = _AUTO_TIER_FALLBACK_ORDER if tier == "auto" else (tier,)
@@ -228,20 +228,10 @@ def resolve_route(
                 decided_at=_utc_now(),
             )
 
-    # All tiers exhausted
-    # Last resort: pick first candidate from requested tier ignoring health
-    fallback_tier = tier if tier != "auto" else "mid"
-    fallback_candidates = candidates_for_tier(fallback_tier)
-    if fallback_candidates:
-        picked = fallback_candidates[0]
-        return RouteDecision(
-            provider_slug=picked.provider_slug,
-            model_slug=picked.model_slug,
-            tier=fallback_tier,
-            reason=f"all candidates unhealthy, forced fallback to {picked.provider_slug}/{picked.model_slug}",
-            candidates_considered=all_considered,
-            candidates_healthy=0,
-            decided_at=_utc_now(),
+    if all_considered:
+        raise RuntimeError(
+            f"no healthy candidates available for tier={tier!r} "
+            f"(considered={all_considered}, max_consecutive_failures={max_consecutive_failures})"
         )
 
     raise RuntimeError(f"no candidates available for tier={tier!r}")

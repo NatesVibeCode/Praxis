@@ -10,7 +10,10 @@ import asyncpg
 import pytest
 
 from runtime.semantic_assertions import semantic_assertion_id
-from storage.migrations import workflow_migration_statements
+from storage.migrations import (
+    workflow_bootstrap_migration_statements,
+    workflow_migration_statements,
+)
 from storage.postgres import PostgresConfigurationError, connect_workflow_database
 from surfaces.api import operator_read, operator_write
 from surfaces.api._operator_repository import _render_roadmap_tree_markdown
@@ -43,12 +46,17 @@ def _assert_mapping_contains(actual: dict[str, object], expected: dict[str, obje
 
 
 async def _bootstrap_migration(conn, filename: str) -> None:
+    statements = (
+        workflow_bootstrap_migration_statements(filename)
+        if filename == "082_event_log.sql"
+        else workflow_migration_statements(filename)
+    )
     async with conn.transaction():
         await conn.execute(
             "SELECT pg_advisory_xact_lock($1::bigint)",
             _SCHEMA_BOOTSTRAP_LOCK_ID,
         )
-        for statement in workflow_migration_statements(filename):
+        for statement in statements:
             try:
                 async with conn.transaction():
                     await conn.execute(statement)
@@ -525,6 +533,8 @@ async def _exercise_roadmap_write_preview_parity() -> None:
     blocker_id = f"roadmap_item.test.tree.write.blocker.{suffix}"
     try:
         await _bootstrap_migration(conn, "009_bug_and_roadmap_authority.sql")
+        await _bootstrap_migration(conn, "082_event_log.sql")
+        await _bootstrap_migration(conn, "146_semantic_assertion_substrate.sql")
         await _seed_roadmap_item(
             conn,
             roadmap_item_id=parent_id,
@@ -634,6 +644,8 @@ async def _exercise_roadmap_write_transaction_rollback() -> None:
     blocker_id = f"roadmap_item.test.tree.rollback.blocker.{suffix}"
     try:
         await _bootstrap_migration(conn, "009_bug_and_roadmap_authority.sql")
+        await _bootstrap_migration(conn, "082_event_log.sql")
+        await _bootstrap_migration(conn, "146_semantic_assertion_substrate.sql")
         await _seed_roadmap_item(
             conn,
             roadmap_item_id=parent_id,

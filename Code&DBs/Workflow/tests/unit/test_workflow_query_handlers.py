@@ -4292,11 +4292,14 @@ def test_handle_query_quality_rollup_missing_is_structured() -> None:
     assert result["rollup"] is None
 
 
-def test_handle_query_routes_issue_backlog(monkeypatch) -> None:
+@pytest.mark.parametrize("question", ["issue", "issues", "open issues", "issue backlog"])
+def test_handle_query_routes_issue_backlog(monkeypatch, question: str) -> None:
+    captured: dict[str, Any] = {}
+
     monkeypatch.setattr(
         workflow_query_core.NativeOperatorQueryFrontdoor,
         "query_issue_backlog",
-        lambda self, **kwargs: {
+        lambda self, **kwargs: captured.update(kwargs) or {
             "kind": "issue_backlog",
             "count": 1,
             "issues": [{"issue_id": "issue.alpha"}],
@@ -4304,11 +4307,66 @@ def test_handle_query_routes_issue_backlog(monkeypatch) -> None:
         },
     )
 
-    result = workflow_query_core.handle_query(SimpleNamespace(), {"question": "issue backlog"})
+    result = workflow_query_core.handle_query(
+        SimpleNamespace(
+            get_bug_tracker=lambda: pytest.fail(
+                "bug tracker should not be consulted for issue backlog intent"
+            )
+        ),
+        {"question": question},
+    )
 
     assert result["routed_to"] == "issue_backlog"
     assert result["kind"] == "issue_backlog"
     assert result["issues"][0]["issue_id"] == "issue.alpha"
+    assert captured == {"limit": 25, "open_only": True}
+
+
+def test_handle_query_keeps_failure_questions_out_of_issue_backlog() -> None:
+    class _ReceiptIngester:
+        def load_recent(self, *, since_hours: int):
+            assert since_hours == 24
+            return [{"failure_code": "runtime_failed"}]
+
+        def top_failure_codes(self, receipts):
+            assert receipts == [{"failure_code": "runtime_failed"}]
+            return [{"failure_code": "runtime_failed", "count": 1}]
+
+    result = workflow_query_core.handle_query(
+        SimpleNamespace(get_receipt_ingester=lambda: _ReceiptIngester()),
+        {"question": "what issue caused this failure"},
+    )
+
+    assert result["routed_to"] == "failures"
+    assert result["top_failure_codes"] == [{"failure_code": "runtime_failed", "count": 1}]
+    assert result["total_receipts_checked"] == 1
+
+
+def test_handle_query_routes_bug_questions_to_bug_tracker(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    class _BugTracker:
+        def list_bugs(self, *, limit: int):
+            captured["limit"] = limit
+            return [SimpleNamespace(bug_id="BUG-001")]
+
+    monkeypatch.setattr(
+        workflow_query_core,
+        "_annotate_bug_dicts_with_replay_state",
+        lambda bt, bugs, **kwargs: [{"bug_id": "BUG-001", "replay_ready": False}],
+    )
+
+    result = workflow_query_core.handle_query(
+        SimpleNamespace(get_bug_tracker=lambda: _BugTracker()),
+        {"question": "bug"},
+    )
+
+    assert captured == {"limit": 20}
+    assert result == {
+        "routed_to": "bug_tracker",
+        "bugs": [{"bug_id": "BUG-001", "replay_ready": False}],
+        "count": 1,
+    }
 
 
 def test_handle_query_routes_operator_graph_view(monkeypatch) -> None:

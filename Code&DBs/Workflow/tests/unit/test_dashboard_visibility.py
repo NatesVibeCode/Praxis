@@ -85,6 +85,14 @@ class _FakeMetricsView:
         return [{"capability": "ops", "count": 2}]
 
 
+class _ExplodingRoutes:
+    def consecutive_failures(self, provider_slug: str) -> int:  # noqa: ARG002
+        raise AssertionError("unreachable")
+
+    def provider_slugs(self) -> tuple[str, ...]:
+        raise RuntimeError("route metrics offline")
+
+
 def test_build_dashboard_surfaces_observability_block(monkeypatch):
     monkeypatch.setattr(dashboard_mod, "get_workflow_history", lambda: _FakeHistory())
     monkeypatch.setattr(dashboard_mod, "get_cost_tracker", lambda: _FakeCostTracker())
@@ -104,6 +112,7 @@ def test_build_dashboard_surfaces_observability_block(monkeypatch):
     assert "dashboard_summary:" in rendered
     assert "observability_digest:" in rendered
     assert "failure_mix:" in rendered
+    assert "route_health:" in rendered
     assert "leaderboard_top:" in rendered
 
 
@@ -118,3 +127,44 @@ def test_metrics_command_prints_observability_sections(monkeypatch):
     assert "metrics_summary:" in output
     assert "observability_digest:" in output
     assert "failure_mix:" in output
+
+
+def test_build_dashboard_surfaces_route_health_failures_explicitly(monkeypatch):
+    monkeypatch.setattr(dashboard_mod, "get_workflow_history", lambda: _FakeHistory())
+    monkeypatch.setattr(dashboard_mod, "get_cost_tracker", lambda: _FakeCostTracker())
+    monkeypatch.setattr(dashboard_mod, "get_circuit_breakers", lambda: _FakeCircuits())
+    monkeypatch.setattr(dashboard_mod, "get_route_outcomes", lambda: _ExplodingRoutes())
+    monkeypatch.setattr(dashboard_mod, "build_leaderboard", lambda: [])
+    monkeypatch.setattr(dashboard_mod, "get_workflow_metrics_view", lambda: _FakeMetricsView())
+
+    data = dashboard_mod.build_dashboard()
+
+    assert data["route_health"] == {}
+    assert data["route_health_error"] == "RuntimeError: route metrics offline"
+    assert data["system_health"] == "degraded"
+
+    rendered = dashboard_mod.format_dashboard(data)
+    assert "route_health: unavailable error=RuntimeError: route metrics offline" in rendered
+
+
+def test_build_dashboard_surfaces_leaderboard_failures_explicitly(monkeypatch):
+    monkeypatch.setattr(dashboard_mod, "get_workflow_history", lambda: _FakeHistory())
+    monkeypatch.setattr(dashboard_mod, "get_cost_tracker", lambda: _FakeCostTracker())
+    monkeypatch.setattr(dashboard_mod, "get_circuit_breakers", lambda: _FakeCircuits())
+    monkeypatch.setattr(dashboard_mod, "get_route_outcomes", lambda: _FakeRoutes())
+    monkeypatch.setattr(
+        dashboard_mod,
+        "build_leaderboard",
+        lambda: (_ for _ in ()).throw(RuntimeError("receipt authority offline")),
+    )
+    monkeypatch.setattr(dashboard_mod, "get_workflow_metrics_view", lambda: _FakeMetricsView())
+
+    data = dashboard_mod.build_dashboard()
+
+    assert data["leaderboard"] == []
+    assert data["leaderboard_error"] == "RuntimeError: receipt authority offline"
+    assert data["system_health"] == "degraded"
+
+    rendered = dashboard_mod.format_dashboard(data)
+    assert "leaderboard_top:" in rendered
+    assert "unavailable error=RuntimeError: receipt authority offline" in rendered

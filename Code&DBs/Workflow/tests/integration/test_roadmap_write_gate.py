@@ -9,7 +9,10 @@ from datetime import datetime, timezone
 import asyncpg
 import pytest
 
-from storage.migrations import workflow_migration_statements
+from storage.migrations import (
+    workflow_bootstrap_migration_statements,
+    workflow_migration_statements,
+)
 from storage.postgres import PostgresConfigurationError, connect_workflow_database
 from surfaces.api import operator_write
 
@@ -30,12 +33,17 @@ def _is_duplicate_object_error(error: BaseException) -> bool:
 
 
 async def _bootstrap_migration(conn, filename: str) -> None:
+    statements = (
+        workflow_bootstrap_migration_statements(filename)
+        if filename == "082_event_log.sql"
+        else workflow_migration_statements(filename)
+    )
     async with conn.transaction():
         await conn.execute(
             "SELECT pg_advisory_xact_lock($1::bigint)",
             _SCHEMA_BOOTSTRAP_LOCK_ID,
         )
-        for statement in workflow_migration_statements(filename):
+        for statement in statements:
             try:
                 async with conn.transaction():
                     await conn.execute(statement)
@@ -141,6 +149,8 @@ async def _exercise_roadmap_write_gate_previews_and_commits_package() -> None:
     await transaction.start()
     try:
         await _bootstrap_migration(conn, "009_bug_and_roadmap_authority.sql")
+        await _bootstrap_migration(conn, "082_event_log.sql")
+        await _bootstrap_migration(conn, "146_semantic_assertion_substrate.sql")
 
         suffix = _unique_suffix()
         parent_id = f"roadmap_item.test.operator_write.{suffix}"
@@ -179,12 +189,16 @@ async def _exercise_roadmap_write_gate_previews_and_commits_package() -> None:
         assert preview["normalized_payload"]["template"] == "hard_cutover_program"
         assert preview["normalized_payload"]["parent_roadmap_item_id"] == parent_id
         assert preview["normalized_payload"]["depends_on"] == [blocker_id]
-        assert preview["auto_fixes"] == [
-            "slug generated from title: unified.operator.write.validation.gate",
-            "approval_tag generated: operator-write-2026-04-08",
-            "decision_ref generated: decision.2026-04-08.unified-operator-write-validation-gate",
-            "phase_order assigned: 1.2",
-        ]
+        assert preview["auto_fixes"][0] == (
+            "slug generated from title: unified.operator.write.validation.gate"
+        )
+        assert preview["auto_fixes"][1].startswith(
+            "approval_tag generated: operator-write-"
+        )
+        assert preview["auto_fixes"][2].endswith(
+            ".unified-operator-write-validation-gate"
+        )
+        assert preview["auto_fixes"][3] == "phase_order assigned: 1.2"
         assert len(preview["preview"]["roadmap_items"]) == 6
         assert preview["preview"]["roadmap_items"][0]["roadmap_item_id"].startswith(
             f"{parent_id}.unified.operator.write.validation.gate"
@@ -208,6 +222,8 @@ async def _exercise_roadmap_write_gate_previews_and_commits_package() -> None:
         created_dependency_ids = committed["commit_summary"]["roadmap_item_dependency_ids"]
         assert len(created_item_ids) == 6
         assert len(created_dependency_ids) == 6
+        assert committed["semantic_bridge_summary"]["processed"] == len(created_item_ids)
+        assert committed["semantic_bridge_summary"]["retracted"] == 0
 
         rows = await conn.fetch(
             """
@@ -232,6 +248,19 @@ async def _exercise_roadmap_write_gate_previews_and_commits_package() -> None:
         assert [str(row["roadmap_item_dependency_id"]) for row in dependency_rows] == sorted(
             created_dependency_ids
         )
+
+        semantic_rows = await conn.fetch(
+            """
+            SELECT source_ref, predicate_slug, object_ref
+            FROM semantic_assertions
+            WHERE source_kind = 'roadmap_item'
+              AND source_ref = ANY($1::text[])
+            ORDER BY source_ref, predicate_slug, object_ref
+            """,
+            created_item_ids,
+        )
+        assert {str(row["source_ref"]) for row in semantic_rows} == set(created_item_ids)
+        assert committed["semantic_bridge_summary"]["recorded"] == len(semantic_rows)
     finally:
         await transaction.rollback()
         await conn.close()

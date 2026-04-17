@@ -79,7 +79,8 @@ def test_workflow_migration_manifest_includes_provider_route_health_budget_migra
     assert "146_semantic_assertion_substrate.sql" in filenames
     assert "147_operation_catalog_semantic_assertions.sql" in filenames
     assert "148_drop_workflow_notifications.sql" in filenames
-    assert filenames[-1] == "148_drop_workflow_notifications.sql"
+    assert "151_operation_catalog_operator_finish.sql" in filenames
+    assert filenames[-1] == "151_operation_catalog_operator_finish.sql"
 
 
 def test_every_manifest_migration_has_expected_object_contract() -> None:
@@ -314,6 +315,19 @@ def test_drop_workflow_notifications_expected_objects_are_registered() -> None:
     objects = workflow_migration_expected_objects("148_drop_workflow_notifications.sql")
     names = {(item.object_type, item.object_name) for item in objects}
     assert names == {("absent_table", "workflow_notifications")}
+
+
+def test_operation_catalog_operator_finish_expected_objects_are_registered() -> None:
+    objects = workflow_migration_expected_objects("151_operation_catalog_operator_finish.sql")
+    names = {item.object_name for item in objects}
+    assert names == {
+        "operation_catalog_registry.operator.architecture_policy_record",
+        "operation_catalog_registry.operator.functional_area_record",
+        "operation_catalog_registry.operator.object_relation_record",
+        "operation_catalog_registry.operator.circuit_states",
+        "operation_catalog_registry.operator.circuit_history",
+        "operation_catalog_registry.operator.circuit_override",
+    }
 
 
 def test_operator_decision_scope_policy_expected_objects_are_registered() -> None:

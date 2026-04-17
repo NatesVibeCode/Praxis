@@ -410,6 +410,7 @@ def test_backfill_semantic_bridges_replays_object_relation_rows() -> None:
     payload = frontdoor.backfill_semantic_bridges(
         include_object_relations=True,
         include_operator_decisions=False,
+        include_roadmap_items=False,
         as_of=as_of,
     )
 
@@ -424,6 +425,11 @@ def test_backfill_semantic_bridges_replays_object_relation_rows() -> None:
         "processed": 0,
         "recorded": 0,
         "skipped_unscoped": 0,
+    }
+    assert summary["roadmap_items"] == {
+        "processed": 0,
+        "recorded": 0,
+        "retracted": 0,
     }
     assert repository.as_of == as_of
     assert len(semantic_repository.recorded_assertions) == 2

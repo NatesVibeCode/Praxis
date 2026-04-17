@@ -10,6 +10,7 @@ from adapters.provider_types import ProviderCLIProfile
 from registry import provider_onboarding
 import registry.provider_onboarding._execute as provider_onboarding_execute
 import registry.provider_onboarding._probe as provider_onboarding_probe
+import registry.provider_onboarding._report as provider_onboarding_report
 import surfaces.mcp.tools.provider_onboard as provider_onboard_tool
 from surfaces.cli import native_operator
 from surfaces.mcp.tools.provider_onboard import tool_praxis_provider_onboard
@@ -189,12 +190,12 @@ def _provider_registry_seed_fixture(monkeypatch):
 
 def _install_cli_probe_stubs(monkeypatch) -> None:
     monkeypatch.setattr(
-        provider_onboarding,
+        provider_onboarding_probe,
         "_find_binary",
         lambda _binary_name: "/usr/local/bin/codex",
     )
     monkeypatch.setattr(
-        provider_onboarding,
+        provider_onboarding_probe,
         "_run_command",
         lambda *args, **kwargs: SimpleNamespace(
             returncode=0,
@@ -258,9 +259,9 @@ def test_provider_onboarding_service_probes_openai_cli_and_writes_registry_rows(
     monkeypatch.setattr(provider_onboarding.asyncpg, "connect", _fake_connect)
     monkeypatch.setattr(provider_onboarding.provider_registry_mod, "reload_from_db", lambda: None)
     _install_cli_probe_stubs(monkeypatch)
-    monkeypatch.setattr(provider_onboarding, "_probe_benchmark", _fake_probe_benchmark)
-    monkeypatch.setattr(provider_onboarding, "_apply_benchmark_plan", _fake_apply_benchmark_plan)
-    monkeypatch.setattr(provider_onboarding, "_verification_report", _fake_verification_report)
+    monkeypatch.setattr(provider_onboarding_report, "_probe_benchmark_impl", _fake_probe_benchmark)
+    monkeypatch.setattr(provider_onboarding_report, "_apply_benchmark_plan_impl", _fake_apply_benchmark_plan)
+    monkeypatch.setattr(provider_onboarding_report, "_verification_report", _fake_verification_report)
 
     result = provider_onboarding.run_provider_onboarding(
         database_url="postgresql://example.test/workflow",
@@ -505,7 +506,7 @@ def test_provider_onboarding_warns_when_benchmark_key_is_missing(monkeypatch) ->
     monkeypatch.setattr(provider_onboarding.provider_registry_mod, "reload_from_db", lambda: None)
     monkeypatch.delenv("ARTIFICIAL_ANALYSIS_API_KEY", raising=False)
     _install_cli_probe_stubs(monkeypatch)
-    monkeypatch.setattr(provider_onboarding, "_verification_report", _fake_verification_report)
+    monkeypatch.setattr(provider_onboarding_report, "_verification_report", _fake_verification_report)
 
     result = provider_onboarding.run_provider_onboarding(
         database_url="postgresql://example.test/workflow",
@@ -575,7 +576,7 @@ def test_provider_onboarding_service_probes_openai_api_and_writes_registry_rows(
     monkeypatch.setattr(provider_onboarding.provider_registry_mod, "reload_from_db", lambda: None)
     monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
     monkeypatch.setattr(
-        provider_onboarding,
+        provider_onboarding_probe,
         "_discover_api_models",
         lambda spec, *, env, transport_details: ("gpt-4.1", "gpt-4.1-mini"),
     )
@@ -592,9 +593,9 @@ def test_provider_onboarding_service_probes_openai_api_and_writes_registry_rows(
             status_code=200,
         ),
     )
-    monkeypatch.setattr(provider_onboarding, "_probe_benchmark", _fake_probe_benchmark)
-    monkeypatch.setattr(provider_onboarding, "_apply_benchmark_plan", _fake_apply_benchmark_plan)
-    monkeypatch.setattr(provider_onboarding, "_verification_report", _fake_verification_report)
+    monkeypatch.setattr(provider_onboarding_report, "_probe_benchmark_impl", _fake_probe_benchmark)
+    monkeypatch.setattr(provider_onboarding_report, "_apply_benchmark_plan_impl", _fake_apply_benchmark_plan)
+    monkeypatch.setattr(provider_onboarding_report, "_verification_report", _fake_verification_report)
 
     result = provider_onboarding.run_provider_onboarding(
         database_url="postgresql://example.test/workflow",
@@ -682,14 +683,14 @@ def test_provider_onboarding_falls_back_to_argv_prompt_mode_when_stdin_probe_fai
     monkeypatch.setattr(provider_onboarding.asyncpg, "connect", _fake_connect)
     monkeypatch.setattr(provider_onboarding.provider_registry_mod, "reload_from_db", lambda: None)
     monkeypatch.setattr(
-        provider_onboarding,
+        provider_onboarding_probe,
         "_find_binary",
         lambda _binary_name: "/usr/local/bin/codex",
     )
-    monkeypatch.setattr(provider_onboarding, "_run_command", _fake_run_command)
-    monkeypatch.setattr(provider_onboarding, "_probe_benchmark", _fake_probe_benchmark)
-    monkeypatch.setattr(provider_onboarding, "_apply_benchmark_plan", _fake_apply_benchmark_plan)
-    monkeypatch.setattr(provider_onboarding, "_verification_report", _fake_verification_report)
+    monkeypatch.setattr(provider_onboarding_probe, "_run_command", _fake_run_command)
+    monkeypatch.setattr(provider_onboarding_report, "_probe_benchmark_impl", _fake_probe_benchmark)
+    monkeypatch.setattr(provider_onboarding_report, "_apply_benchmark_plan_impl", _fake_apply_benchmark_plan)
+    monkeypatch.setattr(provider_onboarding_report, "_verification_report", _fake_verification_report)
 
     result = provider_onboarding.run_provider_onboarding(
         database_url="postgresql://example.test/workflow",
@@ -794,15 +795,15 @@ def test_provider_onboarding_provisions_cli_registry_rows_when_capacity_probe_fa
 
     monkeypatch.setattr(provider_onboarding.asyncpg, "connect", _fake_connect)
     monkeypatch.setattr(provider_onboarding.provider_registry_mod, "reload_from_db", lambda: None)
-    monkeypatch.setattr(provider_onboarding, "_probe_transport", _fake_probe_transport)
-    monkeypatch.setattr(provider_onboarding, "_probe_models", _fake_probe_models)
-    monkeypatch.setattr(provider_onboarding, "_probe_capacity", _fake_probe_capacity)
+    monkeypatch.setattr(provider_onboarding_probe, "_probe_transport", _fake_probe_transport)
+    monkeypatch.setattr(provider_onboarding_probe, "_probe_models", _fake_probe_models)
+    monkeypatch.setattr(provider_onboarding_probe, "_probe_capacity", _fake_probe_capacity)
     monkeypatch.setattr(
-        provider_onboarding,
-        "_probe_benchmark",
+        provider_onboarding_report,
+        "_probe_benchmark_impl",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("benchmark should stay skipped")),
     )
-    monkeypatch.setattr(provider_onboarding, "_verification_report", _fake_verification_report)
+    monkeypatch.setattr(provider_onboarding_report, "_verification_report", _fake_verification_report)
 
     result = provider_onboarding.run_provider_onboarding(
         database_url="postgresql://example.test/workflow",
@@ -928,7 +929,7 @@ def test_native_operator_provider_onboard_cli_uses_operation_gateway(monkeypatch
 
 def test_discover_api_models_parses_openai_model_ids(monkeypatch) -> None:
     monkeypatch.setattr(
-        provider_onboarding,
+        provider_onboarding_probe,
         "_http_get_json",
         lambda url, *, headers, timeout_seconds: {
             "data": [
@@ -946,7 +947,7 @@ def test_discover_api_models_parses_openai_model_ids(monkeypatch) -> None:
         default_timeout=30,
     )
 
-    models = provider_onboarding._discover_api_models(
+    models = provider_onboarding_probe._discover_api_models(
         spec,
         env={"OPENAI_API_KEY": "test-key"},
         transport_details={"discovery_strategy": "openai_models_list"},
@@ -957,7 +958,7 @@ def test_discover_api_models_parses_openai_model_ids(monkeypatch) -> None:
 
 def test_discover_api_models_filters_google_generate_content_models(monkeypatch) -> None:
     monkeypatch.setattr(
-        provider_onboarding,
+        provider_onboarding_probe,
         "_http_get_json",
         lambda url, *, headers, timeout_seconds: {
             "models": [
@@ -983,7 +984,7 @@ def test_discover_api_models_filters_google_generate_content_models(monkeypatch)
         default_timeout=30,
     )
 
-    models = provider_onboarding._discover_api_models(
+    models = provider_onboarding_probe._discover_api_models(
         spec,
         env={"GEMINI_API_KEY": "test-key"},
         transport_details={"discovery_strategy": "google_models_list"},
@@ -994,7 +995,7 @@ def test_discover_api_models_filters_google_generate_content_models(monkeypatch)
 
 def test_discover_api_models_lists_cursor_background_agent_models(monkeypatch) -> None:
     monkeypatch.setattr(
-        provider_onboarding,
+        provider_onboarding_probe,
         "_http_get_json",
         lambda url, *, headers, timeout_seconds: {
             "models": ["claude-4-sonnet-thinking", "o3", "claude-4-opus-thinking"]
@@ -1009,7 +1010,7 @@ def test_discover_api_models_lists_cursor_background_agent_models(monkeypatch) -
         default_timeout=30,
     )
 
-    models = provider_onboarding._discover_api_models(
+    models = provider_onboarding_probe._discover_api_models(
         spec,
         env={"CURSOR_API_KEY": "test-key"},
         transport_details={"discovery_strategy": "cursor_models_list"},

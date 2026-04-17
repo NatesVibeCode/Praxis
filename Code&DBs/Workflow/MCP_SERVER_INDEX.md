@@ -10,7 +10,7 @@ Key files:
 - `scripts/mcp-server.sh` — stdio launcher
 - `surfaces/mcp/__main__.py` — `python -m surfaces.mcp` entrypoint
 - `surfaces/mcp/protocol.py` — JSON-RPC transport and MCP notifications
-- `surfaces/mcp/registry.py` — auto-discovers tools from `surfaces/mcp/tools/`
+- `surfaces/mcp/catalog.py` — shared MCP tool catalog authority for `surfaces/mcp/tools/`
 - `surfaces/mcp/tools/workflow.py` — async workflow contract
 - `docs/MCP.md` — generated tool reference from the shared catalog metadata
 - `surfaces/cli/main.py` — canonical CLI frontdoor for `workflow ...`

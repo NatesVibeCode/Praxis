@@ -131,6 +131,29 @@ def _content_hash(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()[:16]
 
 
+def _summarize_index_errors(errors: object, *, limit: int = 3) -> str:
+    if not isinstance(errors, (list, tuple)):
+        return ""
+    parts: list[str] = []
+    for item in errors[:limit]:
+        if not isinstance(item, dict):
+            continue
+        location = "/".join(
+            part
+            for part in (
+                str(item.get("module_path") or "").strip(),
+                str(item.get("kind") or "").strip(),
+                str(item.get("name") or "").strip(),
+            )
+            if part
+        )
+        label = location or str(item.get("scope") or "index").strip() or "index"
+        message = str(item.get("error_message") or "").strip()
+        if message:
+            parts.append(f"{label}: {message}")
+    return "; ".join(parts)
+
+
 # ---------------------------------------------------------------------------
 # Heartbeat module
 # ---------------------------------------------------------------------------
@@ -178,7 +201,7 @@ class CodebaseIndexModule(HeartbeatModule):
             indexer = ModuleIndexer(conn=conn, repo_root=self._repo_root)
             index_result = indexer.index_codebase()
             if str(index_result.get("observability_state") or "complete") != "complete":
-                detail = "; ".join(str(item) for item in tuple(index_result.get("errors") or ())[:3])
+                detail = _summarize_index_errors(index_result.get("errors"))
                 if not detail:
                     detail = "partial indexing failure"
                 errors.append(f"discovery index degraded: {detail}")
