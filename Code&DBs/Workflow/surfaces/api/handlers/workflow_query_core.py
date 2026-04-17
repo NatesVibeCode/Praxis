@@ -858,19 +858,25 @@ def handle_recall(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
     entity_type = body.get("entity_type") or None
 
     try:
-        kg = subs.get_knowledge_graph()
-        results = kg.search(query, entity_type=entity_type, limit=20)
+        from surfaces._recall import search_recall_results
+
+        results = search_recall_results(
+            subs,
+            query=query,
+            entity_type=entity_type,
+            limit=20,
+        )
         return {
             "results": [
                 {
-                    "entity_id": result.entity.id,
-                    "name": result.entity.name,
-                    "type": result.entity.entity_type.value,
-                    "score": round(result.score, 4),
-                    "content_preview": result.entity.content[:300],
-                    "source": result.entity.source,
-                    "found_via": result.found_via,
-                    "provenance": result.provenance,
+                    "entity_id": result["entity_id"],
+                    "name": result["name"],
+                    "type": result["type"],
+                    "score": round(float(result["score"]), 4),
+                    "content_preview": str(result.get("content") or "")[:300],
+                    "source": result.get("source"),
+                    "found_via": result.get("found_via"),
+                    "provenance": result.get("provenance"),
                 }
                 for result in results
             ],

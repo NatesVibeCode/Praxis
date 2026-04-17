@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import runtime.post_workflow_sync as post_workflow_sync
 from runtime._helpers import _json_compatible
-from runtime.command_signatures import _json_dumps
+from runtime.system_events import emit_system_event
 
 if TYPE_CHECKING:
     from storage.postgres.connection import SyncPostgresConnection
@@ -70,13 +70,14 @@ def _emit_system_event(
     previous_status: str | None = None,
     extra: Mapping[str, Any] | None = None,
 ) -> None:
-    conn.execute(
-        """INSERT INTO system_events (event_type, source_id, source_type, payload)
-           VALUES ($1, $2, $3, $4::jsonb)""",
-        event_type,
-        command.command_id,
-        _SYSTEM_EVENT_SOURCE_TYPE,
-        _json_dumps(_event_payload(command, previous_status=previous_status, extra=extra)),
+    emit_system_event(
+        conn,
+        event_type=event_type,
+        source_id=command.command_id,
+        source_type=_SYSTEM_EVENT_SOURCE_TYPE,
+        payload=_json_compatible(
+            _event_payload(command, previous_status=previous_status, extra=extra)
+        ),
     )
 
 

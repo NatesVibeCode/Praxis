@@ -71,7 +71,9 @@ def test_workflow_migration_manifest_includes_provider_route_health_budget_migra
     assert "136_operation_catalog_authority.sql" in filenames
     assert "139_operation_catalog_operator_control_bindings.sql" in filenames
     assert "140_operation_catalog_surface_cleanup.sql" in filenames
-    assert filenames[-1] == "140_operation_catalog_surface_cleanup.sql"
+    assert "141_operation_catalog_provider_onboarding.sql" in filenames
+    assert "142_operation_catalog_operator_decision_bindings.sql" in filenames
+    assert filenames[-1] == "142_operation_catalog_operator_decision_bindings.sql"
 
 
 def test_every_manifest_migration_has_expected_object_contract() -> None:

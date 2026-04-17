@@ -74,7 +74,9 @@ WORKFLOW_MIGRATION_SEQUENCE = ('001_v1_control_plane.sql',
  '137_workflow_trigger_source_id.sql',
  '138_operation_catalog_route_uniqueness.sql',
  '139_operation_catalog_operator_control_bindings.sql',
- '140_operation_catalog_surface_cleanup.sql')
+ '140_operation_catalog_surface_cleanup.sql',
+ '141_operation_catalog_provider_onboarding.sql',
+ '142_operation_catalog_operator_decision_bindings.sql')
 
 WORKFLOW_FULL_BOOTSTRAP_SEQUENCE = ('001_v1_control_plane.sql',
  '002_registry_authority.sql',
@@ -241,7 +243,9 @@ WORKFLOW_FULL_BOOTSTRAP_SEQUENCE = ('001_v1_control_plane.sql',
  '137_workflow_trigger_source_id.sql',
  '138_operation_catalog_route_uniqueness.sql',
  '139_operation_catalog_operator_control_bindings.sql',
- '140_operation_catalog_surface_cleanup.sql')
+ '140_operation_catalog_surface_cleanup.sql',
+ '141_operation_catalog_provider_onboarding.sql',
+ '142_operation_catalog_operator_decision_bindings.sql')
 
 WORKFLOW_POLICY_BUCKETS = {'canonical': ('001_v1_control_plane.sql',
                '002_registry_authority.sql',
@@ -311,7 +315,9 @@ WORKFLOW_POLICY_BUCKETS = {'canonical': ('001_v1_control_plane.sql',
                '137_workflow_trigger_source_id.sql',
                '138_operation_catalog_route_uniqueness.sql',
                '139_operation_catalog_operator_control_bindings.sql',
-               '140_operation_catalog_surface_cleanup.sql'),
+               '140_operation_catalog_surface_cleanup.sql',
+               '141_operation_catalog_provider_onboarding.sql',
+               '142_operation_catalog_operator_decision_bindings.sql'),
  'bootstrap_only': ('012_execution_leases.sql',
                     '012_task_type_route_eligibility.sql',
                     '013_dispatch_control_tables.sql',
@@ -481,6 +487,8 @@ WORKFLOW_MIGRATION_POLICIES = {'001_v1_control_plane.sql': 'canonical',
  '138_operation_catalog_route_uniqueness.sql': 'canonical',
  '139_operation_catalog_operator_control_bindings.sql': 'canonical',
  '140_operation_catalog_surface_cleanup.sql': 'canonical',
+ '141_operation_catalog_provider_onboarding.sql': 'canonical',
+ '142_operation_catalog_operator_decision_bindings.sql': 'canonical',
  '012_execution_leases.sql': 'bootstrap_only',
  '012_task_type_route_eligibility.sql': 'bootstrap_only',
  '013_dispatch_control_tables.sql': 'bootstrap_only',
@@ -1319,7 +1327,13 @@ WORKFLOW_MIGRATION_EXPECTED_OBJECTS = {'001_v1_control_plane.sql': (('table', 'w
                                                ('row',
                                                 'operation_catalog_registry.operator.native_primary_cutover_gate'),
                                                ('row',
-                                                'operation_catalog_registry.operator.transport_support'))}
+                                                'operation_catalog_registry.operator.transport_support')),
+ '141_operation_catalog_provider_onboarding.sql': (('row',
+                                                    'operation_catalog_registry.operator.provider_onboarding'),),
+ '142_operation_catalog_operator_decision_bindings.sql': (('row',
+                                                           'operation_catalog_registry.operator.decision_record'),
+                                                          ('row',
+                                                           'operation_catalog_registry.operator.decision_list'))}
 
 WORKFLOW_SCHEMA_READINESS_SEQUENCE = (('001_v1_control_plane.sql',
   (('table', 'workflow_definitions'),
@@ -1873,5 +1887,10 @@ WORKFLOW_SCHEMA_READINESS_SEQUENCE = (('001_v1_control_plane.sql',
     'operation_catalog_source_policy_registry.operation_catalog_source_policy_registry_source_kind_check'),
    ('row', 'operation_catalog_registry.operator.task_route_eligibility'),
    ('row', 'operation_catalog_registry.operator.native_primary_cutover_gate'),
-   ('row', 'operation_catalog_registry.operator.transport_support'))))
+   ('row', 'operation_catalog_registry.operator.transport_support'))),
+ ('141_operation_catalog_provider_onboarding.sql',
+  (('row', 'operation_catalog_registry.operator.provider_onboarding'),)),
+ ('142_operation_catalog_operator_decision_bindings.sql',
+  (('row', 'operation_catalog_registry.operator.decision_record'),
+   ('row', 'operation_catalog_registry.operator.decision_list'))))
 

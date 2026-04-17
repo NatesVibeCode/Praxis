@@ -11,10 +11,44 @@ interface BuildDefinitionRequest {
   compiled_spec?: Record<string, unknown> | null;
 }
 
+interface RequestOptions {
+  timeoutMs?: number;
+}
+
 async function _json(resp: Response): Promise<any> {
-  const body = await resp.json();
+  let body: any = null;
+  try {
+    body = await resp.json();
+  } catch {
+    body = null;
+  }
   if (!resp.ok) throw new Error(body?.error || body?.detail || `HTTP ${resp.status}`);
   return body;
+}
+
+async function _fetchJson(
+  input: string,
+  init?: RequestInit,
+  options?: RequestOptions,
+): Promise<any> {
+  const timeoutMs = options?.timeoutMs ?? 15000;
+  const controller = new AbortController();
+  const timeout = globalThis.setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(input, {
+      ...init,
+      signal: controller.signal,
+    });
+    return await _json(response);
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error(`Request timed out after ${Math.ceil(timeoutMs / 1000)}s`);
+    }
+    throw error;
+  } finally {
+    globalThis.clearTimeout(timeout);
+  }
 }
 
 export interface CatalogReviewDecisionRequest {
@@ -30,19 +64,19 @@ export interface CatalogReviewDecisionRequest {
 }
 
 export async function loadWorkflowDefinition(workflowId: string): Promise<any> {
-  return _json(await fetch(`/api/workflows/${workflowId}`));
+  return _fetchJson(`/api/workflows/${workflowId}`);
 }
 
 export async function loadWorkflowBuild(workflowId: string): Promise<BuildPayload> {
-  return _json(await fetch(`/api/workflows/${workflowId}/build`));
+  return _fetchJson(`/api/workflows/${workflowId}/build`);
 }
 
 export async function saveWorkflowDefinition(workflowId: string, definition: any): Promise<any> {
-  return _json(await fetch(`/api/workflows/${workflowId}`, {
+  return _fetchJson(`/api/workflows/${workflowId}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(definition),
-  }));
+  }, { timeoutMs: 20000 });
 }
 
 async function _ensureWorkflowId(
@@ -87,7 +121,7 @@ export async function commitDefinition(
   workflowId: string,
   opts?: BuildDefinitionRequest,
 ): Promise<any> {
-  return _json(await fetch(`/api/workflows/${workflowId}`, {
+  return _fetchJson(`/api/workflows/${workflowId}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -96,11 +130,11 @@ export async function commitDefinition(
       build_graph: opts?.buildGraph,
       compiled_spec: opts?.compiled_spec,
     }),
-  }));
+  }, { timeoutMs: 20000 });
 }
 
 export async function fetchCatalogEnvelope(): Promise<any> {
-  return _json(await fetch('/api/catalog'));
+  return _fetchJson('/api/catalog', undefined, { timeoutMs: 10000 });
 }
 
 export async function fetchCatalog(): Promise<any[]> {
@@ -117,22 +151,22 @@ export async function fetchCatalogReviewDecisions(params?: {
   if (params?.target_kind) search.set('target_kind', params.target_kind);
   if (params?.target_ref) search.set('target_ref', params.target_ref);
   const query = search.toString();
-  return _json(await fetch(`/api/catalog/review-decisions${query ? `?${query}` : ''}`));
+  return _fetchJson(`/api/catalog/review-decisions${query ? `?${query}` : ''}`);
 }
 
 export async function postCatalogReviewDecision(body: CatalogReviewDecisionRequest): Promise<any> {
-  return _json(await fetch('/api/catalog/review-decisions', {
+  return _fetchJson('/api/catalog/review-decisions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  }));
+  }, { timeoutMs: 15000 });
 }
 
 export async function createWorkflow(
   name: string,
   opts?: Omit<BuildDefinitionRequest, 'workflowId' | 'title'>,
 ): Promise<{ id: string; workflow_id?: string }> {
-  const data = await _json(await fetch('/api/workflows', {
+  const data = await _fetchJson('/api/workflows', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -141,7 +175,7 @@ export async function createWorkflow(
       build_graph: opts?.buildGraph,
       compiled_spec: opts?.compiled_spec,
     }),
-  }));
+  }, { timeoutMs: 15000 });
   // API returns { workflow: { id, name, ... } }
   return data.workflow || data;
 }
@@ -159,19 +193,19 @@ export async function planDefinition(opts?: Omit<BuildDefinitionRequest, 'compil
 }
 
 export async function triggerWorkflow(workflowId: string): Promise<{ run_id: string; status: string }> {
-  return _json(await fetch(`/api/trigger/${workflowId}`, {
+  return _fetchJson(`/api/trigger/${workflowId}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({}),
-  }));
+  }, { timeoutMs: 15000 });
 }
 
 export async function suggestNextSteps(workflowId: string, nodeId: string, buildGraph: Record<string, unknown>): Promise<{ likely_next_steps: any[], possible_next_steps: any[] }> {
-  return _json(await fetch(`/api/workflows/${workflowId}/build/suggest-next`, {
+  return _fetchJson(`/api/workflows/${workflowId}/build/suggest-next`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ node_id: nodeId, build_graph: buildGraph }),
-  }));
+  }, { timeoutMs: 20000 });
 }
 
 export async function postBuildMutation(
@@ -179,9 +213,9 @@ export async function postBuildMutation(
   subpath: string,
   body: Record<string, unknown>,
 ): Promise<BuildPayload> {
-  return _json(await fetch(`/api/workflows/${workflowId}/build/${subpath}`, {
+  return _fetchJson(`/api/workflows/${workflowId}/build/${subpath}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  }));
+  }, { timeoutMs: subpath === 'bootstrap' ? 45000 : 25000 });
 }

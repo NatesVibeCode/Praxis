@@ -2451,11 +2451,6 @@ async def platform_overview_get(request: Request) -> Response:
 async def workflow_templates_get(request: Request) -> Response:
     return await _route_to_handler(request)
 
-# -- Operator --
-@app.post("/api/operator/provider-onboarding")
-async def operator_onboarding_post(request: Request) -> Response:
-    return await _dispatch_standard_route(request)
-
 # -- MCP JSON-RPC bridge --
 @app.post("/mcp")
 async def mcp_bridge(request: Request) -> Response:

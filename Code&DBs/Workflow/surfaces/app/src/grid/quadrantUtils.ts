@@ -1,6 +1,8 @@
 const ROWS = ['A', 'B', 'C', 'D'] as const;
 const COLS = ['1', '2', '3', '4'] as const;
 
+type QuadrantCellDef = { span?: string };
+
 export const ALL_CELLS: string[] = ROWS.flatMap(r => COLS.map(c => `${r}${c}`));
 
 export function parseQuadrantId(id: string): { row: number; col: number } {
@@ -21,19 +23,63 @@ export function cellIdFromRowCol(row: number, col: number): string | null {
   return `${ROWS[row]}${COLS[col]}`;
 }
 
+export function collectQuadrantFootprint(quadrantId: string, span?: string): string[] {
+  const { row, col } = parseQuadrantId(quadrantId);
+  const { cols, rows } = span ? parseSpan(span) : { cols: 1, rows: 1 };
+  const cells: string[] = [];
+
+  for (let currentRow = row; currentRow < row + rows && currentRow < 4; currentRow++) {
+    for (let currentCol = col; currentCol < col + cols && currentCol < 4; currentCol++) {
+      const cellId = cellIdFromRowCol(currentRow, currentCol);
+      if (cellId) cells.push(cellId);
+    }
+  }
+
+  return cells;
+}
+
+export function canQuadrantOccupySpan(
+  quadrants: Record<string, QuadrantCellDef>,
+  quadrantId: string,
+  span: string,
+  ignoreQuadrantId: string | null = quadrantId,
+): boolean {
+  const { row, col } = parseQuadrantId(quadrantId);
+  const { cols, rows } = parseSpan(span);
+
+  if (row < 0 || row + rows > 4 || col < 0 || col + cols > 4) {
+    return false;
+  }
+
+  const nextFootprint = new Set(collectQuadrantFootprint(quadrantId, span));
+
+  for (const [otherQuadrantId, def] of Object.entries(quadrants)) {
+    if (ignoreQuadrantId && otherQuadrantId === ignoreQuadrantId) continue;
+    const otherFootprint = collectQuadrantFootprint(otherQuadrantId, def.span);
+    if (otherFootprint.some((cellId) => nextFootprint.has(cellId))) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+export function availableSpansForQuadrant(
+  quadrants: Record<string, QuadrantCellDef>,
+  quadrantId: string,
+  spanOptions: readonly string[],
+): string[] {
+  return spanOptions.filter((span) => canQuadrantOccupySpan(quadrants, quadrantId, span, quadrantId));
+}
+
 export function getOccupiedCells(
-  quadrants: Record<string, { span?: string }>,
+  quadrants: Record<string, QuadrantCellDef>,
 ): Set<string> {
   const occupied = new Set<string>();
   for (const [id, def] of Object.entries(quadrants)) {
-    const { row, col } = parseQuadrantId(id);
-    const { cols, rows } = def.span ? parseSpan(def.span) : { cols: 1, rows: 1 };
-    for (let r = row; r < row + rows && r < 4; r++) {
-      for (let c = col; c < col + cols && c < 4; c++) {
-        const cellId = `${ROWS[r]}${COLS[c]}`;
-        if (cellId !== id) {
-          occupied.add(cellId);
-        }
+    for (const cellId of collectQuadrantFootprint(id, def.span)) {
+      if (cellId !== id) {
+        occupied.add(cellId);
       }
     }
   }

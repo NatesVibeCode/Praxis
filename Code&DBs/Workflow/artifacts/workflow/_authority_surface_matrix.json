@@ -1,0 +1,267 @@
+{
+  "artifact": "authority_surface_matrix",
+  "topic": "workflow authority and truth-source boundaries",
+  "ground_truth": {
+    "repo_root": "/Users/nate/Praxis/Code&DBs/Workflow",
+    "cli_probes": [
+      {
+        "command": "./workflow discover \"handoff artifact publication consumption lineage checkpoints subscriptions evidence\"",
+        "status": "ok",
+        "result": "no results found"
+      },
+      {
+        "command": "./workflow recall \"handoff artifacts cqrs authority subscriptions receipts outbox run_nodes graph\"",
+        "status": "unavailable",
+        "reason_code": "knowledge_graph.unavailable",
+        "error_type": "PostgresConfigurationError",
+        "error_message": "WORKFLOW_DATABASE_URL must be set in process env or declared in /Users/nate/Praxis/.env"
+      },
+      {
+        "command": "./workflow query \"What are the authoritative surfaces today for handoff, receipts, outbox, system events, workflow notifications, event log, and run_nodes?\"",
+        "status": "unavailable",
+        "reason_code": "mcp.handler_error",
+        "error_type": "PostgresConfigurationError",
+        "error_message": "WORKFLOW_DATABASE_URL must be set in process env or declared in /Users/nate/Praxis/.env"
+      }
+    ],
+    "note": "Database-backed recall and query authority were unavailable in this shell, so the matrix is grounded in source files rather than live DB memory."
+  },
+  "matrix_legend": {
+    "keep": "Keep as a first-class surface. Tighten adoption, not existence.",
+    "contain": "Keep the surface but narrow its authority so it cannot sprawl into a competing truth source.",
+    "collapse": "Replace the surface with a projection or narrower seam; do not preserve it as a standalone durable authority."
+  },
+  "current_state": [
+    "The repo already has real authority seams for workflow control, receipts, compile artifacts, subscriptions, and run/job execution.",
+    "The handoff seam now exists as a durable CQRS-style publish/bind/consume surface over compile artifacts plus subscription checkpoints.",
+    "The highest architectural risk is overlapping evidence and event surfaces, not missing capability."
+  ],
+  "must_do": [
+    "Finish adopting the existing handoff authority as the only sanctioned cross-step durable transfer path.",
+    "Assign one explicit truth role to each event and evidence surface so operators and future agents stop guessing.",
+    "Fence run_nodes as an internal operating-model substrate instead of letting it grow into a second workflow primitive."
+  ],
+  "should_do": [
+    "Centralize system_events writes through one authority helper instead of scattering inserts across runtime modules.",
+    "Either rebuild workflow_notifications as a projection over outbox and subscriptions or prove it is purely operator UX and nothing else.",
+    "Keep graph and AI harness layers narrow: retrieval, traversal, context building, invocation, verification, and tool gating only."
+  ],
+  "remove_simplify_change": [
+    "Do not add a new graph authority.",
+    "Do not add a new event bus.",
+    "Do not add a parallel artifact registry.",
+    "Do not let event_log, system_events, workflow_outbox, workflow_notifications, and receipts masquerade as the same truth source."
+  ],
+  "surface_rows": [
+    {
+      "surface": "workflow.core_lane",
+      "recommendation": "keep",
+      "kind": "execution_authority",
+      "current_role": "Canonical workflow run and job lifecycle lane.",
+      "truth_boundary": "Owns workflow submission, claim, execute, complete, retry, cancel, and run-state recomputation for the main workflow model.",
+      "source_files": [
+        "runtime/workflow/unified.py",
+        "runtime/workflow/_workflow_state.py",
+        "runtime/workflow/_claiming.py",
+        "runtime/workflow/_execution_core.py"
+      ],
+      "allowed_to_own": [
+        "workflow run lifecycle",
+        "job lifecycle",
+        "dependency release and blocking",
+        "run-state recomputation"
+      ],
+      "must_change": "Stay the single first-class workflow lane. Do not let operating-model card execution become a peer workflow model.",
+      "why": "This surface already exists, already owns the core execution lifecycle, and already exposes the right operational verbs."
+    },
+    {
+      "surface": "handoff.compile_artifacts",
+      "recommendation": "keep",
+      "kind": "artifact_authority",
+      "current_role": "Durable handoff authority for definition, plan, and packet lineage artifacts.",
+      "truth_boundary": "Owns publish, bind, consume, reusable lookup, lineage, and stale or ambiguous reuse rejection through compile artifacts plus subscription checkpoints.",
+      "source_files": [
+        "runtime/compile_artifacts.py",
+        "runtime/operations/commands/handoff.py",
+        "runtime/operations/queries/handoff.py",
+        "storage/postgres/compile_artifact_repository.py",
+        "storage/postgres/subscription_repository.py"
+      ],
+      "allowed_to_own": [
+        "artifact publication",
+        "artifact lineage",
+        "artifact reuse decisions",
+        "consumer binding and watermark capture"
+      ],
+      "must_change": "Standardize all durable cross-step handoff on this seam. Do not create a parallel artifact registry or ad hoc handoff blob format.",
+      "why": "This was the real missing primitive. It now exists and should become the canonical handoff path."
+    },
+    {
+      "surface": "receipts",
+      "recommendation": "keep",
+      "kind": "execution_evidence_authority",
+      "current_role": "Canonical workflow execution evidence store.",
+      "truth_boundary": "All receipt reads and writes go through the receipts table; legacy receipt index tables are not runtime authority.",
+      "source_files": [
+        "runtime/receipt_store.py",
+        "storage/postgres/receipt_repository.py",
+        "runtime/persistent_evidence.py"
+      ],
+      "allowed_to_own": [
+        "workflow evidence",
+        "receipt search",
+        "receipt stats",
+        "receipt provenance backfill"
+      ],
+      "must_change": "Remain the authoritative evidence surface. Outbox, notifications, and event streams may project from it but must not replace it.",
+      "why": "The repo already treats receipts as canonical evidence, and the implementation says so explicitly."
+    },
+    {
+      "surface": "workflow_outbox",
+      "recommendation": "keep",
+      "kind": "committed_replay_projection",
+      "current_role": "Read contract over committed workflow evidence for subscribers.",
+      "truth_boundary": "Copies committed authority rows into a replayable run-scoped feed ordered by evidence_seq; does not mutate lifecycle truth.",
+      "source_files": [
+        "runtime/outbox.py"
+      ],
+      "allowed_to_own": [
+        "subscriber replay feed",
+        "run-scoped evidence delivery order"
+      ],
+      "must_change": "Stay read-only and derived. Do not let transport or notification concerns leak back into lifecycle truth.",
+      "why": "The module is already explicit that it is a narrow read contract over committed evidence."
+    },
+    {
+      "surface": "subscriptions.checkpoints",
+      "recommendation": "keep",
+      "kind": "consumer_watermark_authority",
+      "current_role": "Subscription definitions and acknowledgement checkpoints for consumers of committed outbox facts.",
+      "truth_boundary": "Owns subscription compatibility, last_authority_id, and last_evidence_seq watermarks without mutating runtime lifecycle truth.",
+      "source_files": [
+        "runtime/subscriptions.py",
+        "storage/postgres/subscription_repository.py"
+      ],
+      "allowed_to_own": [
+        "subscriber definitions",
+        "acknowledgement watermarks",
+        "consumer checkpoint metadata"
+      ],
+      "must_change": "Keep this as the only place that advances consumer cursors for committed handoff and outbox consumption.",
+      "why": "The repo already models checkpoints as explicit consumer acknowledgements rather than hidden queue state."
+    },
+    {
+      "surface": "system_events",
+      "recommendation": "contain",
+      "kind": "control_plane_facts",
+      "current_role": "Control-plane lifecycle facts and compatibility events.",
+      "truth_boundary": "Should own command and workflow lifecycle fact emission only; should not become a generic event sink or audit replacement.",
+      "source_files": [
+        "runtime/control_commands.py",
+        "runtime/command_handlers.py",
+        "runtime/workflow/_workflow_state.py"
+      ],
+      "allowed_to_own": [
+        "control command state transitions",
+        "workflow completion and failure lifecycle facts"
+      ],
+      "must_change": "Centralize writes through one authority emitter. Today multiple runtime modules insert system_events directly.",
+      "why": "The surface is useful, but its write boundary is too loose and easy to confuse with broader event or evidence truth."
+    },
+    {
+      "surface": "event_log",
+      "recommendation": "contain",
+      "kind": "durable_transport_stream",
+      "current_role": "Channel-scoped event stream with cursor reads and LISTEN/NOTIFY wakeups.",
+      "truth_boundary": "Owns stream delivery and UI or service wakeups; must not become canonical workflow state or evidence truth.",
+      "source_files": [
+        "runtime/event_log.py"
+      ],
+      "allowed_to_own": [
+        "channel event transport",
+        "subscriber cursors",
+        "wakeup notifications"
+      ],
+      "must_change": "Use it as transport and responsiveness only. Do not use it to answer authoritative questions about workflow lifecycle or evidence.",
+      "why": "The module itself says cursor reads are authoritative for this stream, but not for business truth outside the stream."
+    },
+    {
+      "surface": "workflow_notifications",
+      "recommendation": "collapse",
+      "kind": "operator_inbox_projection",
+      "current_role": "Delivered and undelivered workflow job notifications for polling consumers.",
+      "truth_boundary": "At most this should be an operator inbox view; it should not remain a standalone durable truth source beside receipts and outbox.",
+      "source_files": [
+        "runtime/workflow_notifications.py",
+        "storage/postgres/workflow_orchestration_repository.py",
+        "runtime/workflow/worker.py"
+      ],
+      "allowed_to_own": [
+        "operator-facing inbox delivery semantics"
+      ],
+      "must_change": "Collapse into a projection over committed outbox facts and subscription checkpoints, or keep it only as an explicitly derived UX surface.",
+      "why": "This is the most obvious overlap candidate: durable notifications sit beside receipts and outbox while describing the same workflow outcomes."
+    },
+    {
+      "surface": "run_nodes",
+      "recommendation": "contain",
+      "kind": "operating_model_execution_substrate",
+      "current_role": "Internal card-execution substrate for operating-model flows.",
+      "truth_boundary": "May own run-node state transitions for card execution, but must not become a second general-purpose workflow model.",
+      "source_files": [
+        "runtime/workflow/worker.py",
+        "storage/postgres/workflow_orchestration_repository.py"
+      ],
+      "allowed_to_own": [
+        "card node claim and terminal transitions",
+        "internal operating-model execution support"
+      ],
+      "must_change": "Fence it from API, MCP, and operator surfaces unless a caller is explicitly using the operating-model lane.",
+      "why": "The worker file already warns against resurrecting a second legacy workflow path. Believe it."
+    },
+    {
+      "surface": "graph.memory",
+      "recommendation": "contain",
+      "kind": "graph_mutation_plus_reasoning_substrate",
+      "current_role": "Canonical memory-graph mutation owner plus traversal and ranking substrate.",
+      "truth_boundary": "Mutation authority belongs to the memory repository; traversal, ranking, and blast-radius logic belong to graph reasoning and read-side projection.",
+      "source_files": [
+        "memory/repository.py",
+        "storage/postgres/memory_graph_repository.py",
+        "memory/graph.py"
+      ],
+      "allowed_to_own": [
+        "memory graph mutations",
+        "graph traversal",
+        "graph ranking",
+        "context projection"
+      ],
+      "must_change": "Do not promote graph reasoning code into a new cross-cutting write authority. Keep graph writes scoped to memory ownership only.",
+      "why": "The repo already has a clean split available here. The mistake would be widening the graph into everybody's source of truth."
+    },
+    {
+      "surface": "ai.runtime_harness",
+      "recommendation": "contain",
+      "kind": "execution_support_layer",
+      "current_role": "Context building, packet assembly, prompt authority resolution, execution dispatch, verification, and receipt writing support for workflow jobs.",
+      "truth_boundary": "Supports execution; does not own workflow control truth, artifact truth, or event truth.",
+      "source_files": [
+        "runtime/workflow/_context_building.py",
+        "runtime/workflow/_execution_core.py"
+      ],
+      "allowed_to_own": [
+        "context assembly",
+        "model and tool invocation",
+        "verification coordination",
+        "execution packet shaping"
+      ],
+      "must_change": "Keep it narrow. Do not invent a generic execution primitive above or beside workflow control and handoff authority.",
+      "why": "These modules are harness glue around the real authorities. Making them their own top-level authority family would increase ambiguity."
+    }
+  ],
+  "why_these_survived": [
+    "The repo's durable advantage is explicit authority plus inspectable state, not a larger number of primitives.",
+    "Handoff was the real missing seam, and it now exists; the remaining work is adoption and de-overlap.",
+    "Most other debates are boundary questions: which existing surface is truth, which surface is projection, and which surface should be narrowed or removed."
+  ]
+}

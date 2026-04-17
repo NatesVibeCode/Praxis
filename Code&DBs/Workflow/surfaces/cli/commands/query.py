@@ -1081,7 +1081,8 @@ def _recall_command(args: list[str], *, stdout: TextIO) -> int:
         stdout.write(
             "usage: workflow recall <query> [--type T] [--limit N] [--json]\n"
             "\n"
-            "  Search the knowledge graph by ranked text match, graph traversal, and vector similarity.\n"
+            "  Search the knowledge graph plus durable operator decisions by ranked text match,\n"
+            "  graph traversal, vector similarity, and authority-backed decision scans.\n"
             "  Types: task, fact, document, decision, constraint, topic,\n"
             "         table, code_unit, pattern, metric, module, person\n"
             "\n"

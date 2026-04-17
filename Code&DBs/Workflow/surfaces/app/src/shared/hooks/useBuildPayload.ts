@@ -3,6 +3,11 @@ import type { BuildPayload } from '../types';
 import { loadWorkflowBuild, postBuildMutation } from '../buildController';
 import { useBuildEvents } from './useBuildEvents';
 
+function isRetryableBuildError(message: string | null): boolean {
+  if (!message) return false;
+  return !/\b(400|401|403|404)\b|not found/i.test(message);
+}
+
 export function useBuildPayload(workflowId: string | null) {
   const [payload, setPayload] = useState<BuildPayload | null>(null);
   const [loading, setLoading] = useState(false);
@@ -32,6 +37,14 @@ export function useBuildPayload(workflowId: string | null) {
   useEffect(() => {
     if (latestEvent) load();
   }, [latestEvent, load]);
+
+  useEffect(() => {
+    if (!workflowId || !error || !isRetryableBuildError(error)) return undefined;
+    const timer = window.setTimeout(() => {
+      void load();
+    }, 2500);
+    return () => window.clearTimeout(timer);
+  }, [error, load, workflowId]);
 
   const mutate = useCallback(async (subpath: string, body: Record<string, unknown>) => {
     if (!workflowId) return;

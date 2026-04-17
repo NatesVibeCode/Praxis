@@ -7,6 +7,8 @@ import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
+from runtime.system_events import emit_system_event
+
 from ._shared import (
     _ACTIVE_JOB_STATUSES,
     _BLOCKING_PARENT_STATUSES,
@@ -331,20 +333,19 @@ def _recompute_workflow_run_state(conn: SyncPostgresConnection, run_id: str) -> 
         }
         lifecycle_event_type = "workflow.completed" if new_state == "succeeded" else "workflow.failed"
         compatibility_event_type = "run.succeeded" if new_state == "succeeded" else "run.failed"
-        event_payload = json.dumps(payload, default=str)
-        conn.execute(
-            """INSERT INTO system_events (event_type, source_id, source_type, payload)
-               VALUES ($1, $2, 'workflow_run', $3::jsonb)""",
-            lifecycle_event_type,
-            run_id,
-            event_payload,
+        emit_system_event(
+            conn,
+            event_type=lifecycle_event_type,
+            source_id=run_id,
+            source_type="workflow_run",
+            payload=payload,
         )
-        conn.execute(
-            """INSERT INTO system_events (event_type, source_id, source_type, payload)
-               VALUES ($1, $2, 'workflow_run', $3::jsonb)""",
-            compatibility_event_type,
-            run_id,
-            event_payload,
+        emit_system_event(
+            conn,
+            event_type=compatibility_event_type,
+            source_id=run_id,
+            source_type="workflow_run",
+            payload=payload,
         )
         conn.execute("SELECT pg_notify('run_complete', $1)", run_id)
     return new_state

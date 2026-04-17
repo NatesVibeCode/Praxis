@@ -176,4 +176,16 @@ describe('MoonBuildPage edge dismiss', () => {
 
     expect(screen.getByRole('button', { name: 'Edit gate' })).toBeInTheDocument();
   });
+
+  test('clicking the desktop detail toggle keeps the selected gate card open', () => {
+    render(<MoonBuildPage workflowId="wf-123" />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Select gate between Webhook and Next step' }));
+
+    const detailToggle = screen.getByRole('button', { name: 'Open Detail dock' });
+    fireEvent.mouseDown(detailToggle);
+    fireEvent.click(detailToggle);
+
+    expect(screen.getByRole('button', { name: 'Edit gate' })).toBeInTheDocument();
+  });
 });

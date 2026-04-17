@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-import json
 import logging
 from typing import TYPE_CHECKING
+
+from runtime.system_events import emit_system_event
 
 try:
     from croniter import croniter as _croniter
@@ -120,20 +121,16 @@ class CronScheduler:
                     ):
                         continue
 
-                    payload = json.dumps(
-                        {
+                    emit_system_event(
+                        self._conn,
+                        event_type="schedule.fired",
+                        source_id=str(trigger_id),
+                        source_type="workflow_trigger",
+                        payload={
                             "trigger_id": trigger_id,
                             "workflow_id": workflow_id,
                             "cron_expression": cron_expression,
-                        }
-                    )
-                    self._conn.execute(
-                        "INSERT INTO system_events (event_type, source_id, source_type, payload) "
-                        "VALUES ($1, $2, $3, $4::jsonb)",
-                        "schedule.fired",
-                        str(trigger_id),
-                        "workflow_trigger",
-                        payload,
+                        },
                     )
                     self._conn.execute(
                         "UPDATE workflow_triggers "

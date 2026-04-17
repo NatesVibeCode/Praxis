@@ -1,5 +1,33 @@
 BEGIN;
 
+ALTER TABLE operation_catalog_registry
+    DROP CONSTRAINT IF EXISTS operation_catalog_registry_source_kind_check;
+
+ALTER TABLE operation_catalog_registry
+    ADD CONSTRAINT operation_catalog_registry_source_kind_check
+    CHECK (
+        source_kind IN (
+            'cqrs_command',
+            'cqrs_query',
+            'operation_command',
+            'operation_query'
+        )
+    );
+
+ALTER TABLE operation_catalog_source_policy_registry
+    DROP CONSTRAINT IF EXISTS operation_catalog_source_policy_registry_source_kind_check;
+
+ALTER TABLE operation_catalog_source_policy_registry
+    ADD CONSTRAINT operation_catalog_source_policy_registry_source_kind_check
+    CHECK (
+        source_kind IN (
+            'cqrs_command',
+            'cqrs_query',
+            'operation_command',
+            'operation_query'
+        )
+    );
+
 INSERT INTO operation_catalog_registry (
     operation_ref,
     operation_name,

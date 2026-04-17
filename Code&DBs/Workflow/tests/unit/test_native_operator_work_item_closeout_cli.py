@@ -15,6 +15,10 @@ class _FakeInstance:
         return {"repo_root": "/tmp/repo", "workdir": "/tmp/repo"}
 
 
+def _env() -> dict[str, str]:
+    return {"WORKFLOW_DATABASE_URL": "postgresql://localhost:5432/praxis_test"}
+
+
 def test_native_operator_work_item_closeout_uses_shared_gate(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
@@ -28,7 +32,7 @@ def test_native_operator_work_item_closeout_uses_shared_gate(monkeypatch) -> Non
                 "bug_requires_evidence_role": "validates_fix",
                 "roadmap_requires_source_bug_fix_proof": True,
             },
-            "command_receipt": {
+            "operation_receipt": {
                 "operation_name": operation_name,
                 "operation_kind": "command",
             },
@@ -61,7 +65,7 @@ def test_native_operator_work_item_closeout_uses_shared_gate(monkeypatch) -> Non
                 "roadmap_item.closeout.1",
                 "--commit",
             ],
-            env={},
+            env=_env(),
             stdout=stdout,
         )
         == 0
@@ -73,7 +77,7 @@ def test_native_operator_work_item_closeout_uses_shared_gate(monkeypatch) -> Non
     assert captured["payload"]["bug_ids"] == ("bug.closeout.1",)
     assert captured["payload"]["roadmap_item_ids"] == ("roadmap_item.closeout.1",)
     assert payload["committed"] is True
-    assert payload["command_receipt"]["operation_name"] == "operator.work_item_closeout"
+    assert payload["operation_receipt"]["operation_name"] == "operator.work_item_closeout"
     assert payload["proof_threshold"]["bug_requires_evidence_role"] == "validates_fix"
 
 
@@ -89,7 +93,7 @@ def test_native_operator_work_item_closeout_preview_commits_also_use_shared_gate
                 "bug_requires_evidence_role": "validates_fix",
                 "roadmap_requires_source_bug_fix_proof": True,
             },
-            "command_receipt": {
+            "operation_receipt": {
                 "operation_name": "operator.work_item_closeout",
                 "operation_kind": "command",
             },
@@ -121,7 +125,7 @@ def test_native_operator_work_item_closeout_preview_commits_also_use_shared_gate
                 "--roadmap-item-id",
                 "roadmap_item.closeout.2",
             ],
-            env={},
+            env=_env(),
             stdout=stdout,
         )
         == 0
@@ -140,7 +144,7 @@ def test_native_operator_work_item_closeout_preview_commits_also_use_shared_gate
                 "roadmap_item.closeout.2",
                 "--commit",
             ],
-            env={},
+            env=_env(),
             stdout=stdout,
         )
         == 0

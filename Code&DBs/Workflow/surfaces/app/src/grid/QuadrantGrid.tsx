@@ -1,7 +1,14 @@
 import React, { Suspense, useCallback, useEffect, useState } from 'react';
 import type { PraxisSurfaceBundleV4 } from '../praxis/manifest';
 import { resolveModule } from '../modules/moduleRegistry';
-import { ALL_CELLS, cellIdFromRowCol, getOccupiedCells, parseQuadrantId, parseSpan } from './quadrantUtils';
+import {
+  ALL_CELLS,
+  availableSpansForQuadrant,
+  canQuadrantOccupySpan,
+  getOccupiedCells,
+  parseQuadrantId,
+  parseSpan,
+} from './quadrantUtils';
 import { ConfigEditorPanel } from './ConfigEditorPanel';
 import { useManifestOverlay } from '../hooks/useManifestOverlay';
 import { world } from '../world';
@@ -14,7 +21,7 @@ import { ModuleActionMenu } from './ModuleActionMenu';
 import { UiActionFeed } from '../control/UiActionFeed';
 import type { UiActionTarget } from '../control/uiActionLedger';
 import { runUiAction, undoUiAction } from '../control/uiActionLedger';
-import { gridFieldLabel } from './moduleConfigMetadata';
+import { GRID_SPAN_OPTIONS, gridFieldLabel, gridSpanLabel } from './moduleConfigMetadata';
 import './QuadrantGrid.css';
 
 const GRID_UNDO_SCOPE = 'grid.layout';
@@ -116,6 +123,19 @@ function summarizeConfigChanges(
   return Array.from(changedKeys).map(gridFieldLabel).slice(0, 3);
 }
 
+function summarizeModuleChanges(
+  previousConfig: Record<string, unknown> | undefined,
+  nextConfig: Record<string, unknown>,
+  previousSpan: string,
+  nextSpan: string,
+): string[] {
+  const summary = summarizeConfigChanges(previousConfig, nextConfig);
+  if (previousSpan !== nextSpan) {
+    summary.unshift(`Size ${gridSpanLabel(nextSpan)}`);
+  }
+  return summary.slice(0, 3);
+}
+
 export function QuadrantGrid({
   manifest: initialManifest,
   saveTarget,
@@ -212,6 +232,7 @@ export function QuadrantGrid({
   ) => {
     const current = manifest.quadrants[quadrantId];
     if (!current) return;
+    const currentSpan = current.span || '1x1';
     applyQuadrantMutation({
       label: meta?.label ?? 'Update module config',
       reason: meta?.reason ?? `Update settings for quadrant ${quadrantId}.`,
@@ -220,13 +241,90 @@ export function QuadrantGrid({
         ...manifest.quadrants,
         [quadrantId]: {
           ...current,
+          span: currentSpan,
           config: nextConfig,
         },
       },
       target: meta?.target ?? quadrantTarget(quadrantId, current.module),
-      changeSummary: meta?.changeSummary ?? summarizeConfigChanges(current.config, nextConfig),
+      changeSummary: meta?.changeSummary ?? summarizeModuleChanges(current.config, nextConfig, currentSpan, currentSpan),
     });
   }, [applyQuadrantMutation, manifest.quadrants]);
+
+  const saveQuadrantSpan = useCallback((
+    quadrantId: string,
+    nextSpan: string,
+    meta?: {
+      label: string;
+      reason: string;
+      outcome: string;
+      target?: UiActionTarget | null;
+      changeSummary?: string[];
+    },
+  ) => {
+    const current = manifest.quadrants[quadrantId];
+    if (!current) return;
+
+    const currentSpan = current.span || '1x1';
+    if (currentSpan === nextSpan) return;
+
+    if (!canQuadrantOccupySpan(manifest.quadrants, quadrantId, nextSpan, quadrantId)) {
+      show(`Size ${gridSpanLabel(nextSpan)} does not fit at ${quadrantId}.`, 'error');
+      return;
+    }
+
+    applyQuadrantMutation({
+      label: meta?.label ?? 'Resize module',
+      reason: meta?.reason ?? `Resize quadrant ${quadrantId} to ${gridSpanLabel(nextSpan)}.`,
+      outcome: meta?.outcome ?? `Quadrant ${quadrantId} now occupies ${gridSpanLabel(nextSpan)} in the grid.`,
+      nextQuadrants: {
+        ...manifest.quadrants,
+        [quadrantId]: {
+          ...current,
+          span: nextSpan,
+        },
+      },
+      target: meta?.target ?? quadrantTarget(quadrantId, current.module),
+      changeSummary: meta?.changeSummary ?? [`Size ${gridSpanLabel(nextSpan)}`],
+    });
+  }, [applyQuadrantMutation, manifest.quadrants, show]);
+
+  const saveQuadrantSettings = useCallback((
+    quadrantId: string,
+    nextConfig: Record<string, unknown>,
+    nextSpan: string,
+    meta?: {
+      label: string;
+      reason: string;
+      outcome: string;
+      target?: UiActionTarget | null;
+      changeSummary?: string[];
+    },
+  ) => {
+    const current = manifest.quadrants[quadrantId];
+    if (!current) return;
+
+    const currentSpan = current.span || '1x1';
+    if (!canQuadrantOccupySpan(manifest.quadrants, quadrantId, nextSpan, quadrantId)) {
+      show(`Size ${gridSpanLabel(nextSpan)} does not fit at ${quadrantId}.`, 'error');
+      return;
+    }
+
+    applyQuadrantMutation({
+      label: meta?.label ?? 'Save module settings',
+      reason: meta?.reason ?? `Commit manual settings changes for quadrant ${quadrantId}.`,
+      outcome: meta?.outcome ?? `Quadrant ${quadrantId} now reflects the edited settings.`,
+      nextQuadrants: {
+        ...manifest.quadrants,
+        [quadrantId]: {
+          ...current,
+          span: nextSpan,
+          config: nextConfig,
+        },
+      },
+      target: meta?.target ?? quadrantTarget(quadrantId, current.module),
+      changeSummary: meta?.changeSummary ?? summarizeModuleChanges(current.config, nextConfig, currentSpan, nextSpan),
+    });
+  }, [applyQuadrantMutation, manifest.quadrants, show]);
 
   const removeQuadrant = useCallback((quadrantId: string) => {
     const existing = manifest.quadrants[quadrantId];
@@ -250,40 +348,9 @@ export function QuadrantGrid({
   // Span-aware validation: checks if a payload's span fits at the target cell
   const validateDrop: GridDragValidator = useCallback((payload, targetCellId) => {
     const spanStr = (payload.data.span as string) || '1x1';
-    const { cols, rows } = parseSpan(spanStr);
-    const { row: targetRow, col: targetCol } = parseQuadrantId(targetCellId);
-
-    // Check bounds
-    if (targetRow + rows > 4 || targetCol + cols > 4) return false;
-
-    // For cell moves, the source cell's footprint is allowed
     const sourceCellId = payload.kind === 'cell' ? (payload.data.cellId as string) : null;
-    const sourceFootprint = new Set<string>();
-    if (sourceCellId && manifest.quadrants[sourceCellId]) {
-      const srcSpan = manifest.quadrants[sourceCellId].span || '1x1';
-      const { cols: sc, rows: sr } = parseSpan(srcSpan);
-      const { row: sRow, col: sCol } = parseQuadrantId(sourceCellId);
-      for (let r = sRow; r < sRow + sr; r++) {
-        for (let c = sCol; c < sCol + sc; c++) {
-          const id = cellIdFromRowCol(r, c);
-          if (id) sourceFootprint.add(id);
-        }
-      }
-    }
-
-    // Check each cell the new span would cover
-    for (let r = targetRow; r < targetRow + rows; r++) {
-      for (let c = targetCol; c < targetCol + cols; c++) {
-        const id = cellIdFromRowCol(r, c);
-        if (!id) return false;
-        if (id === targetCellId) continue;
-        if (sourceFootprint.has(id)) continue;
-        if (occupied.has(id)) return false;
-        if (manifest.quadrants[id]) return false;
-      }
-    }
-    return true;
-  }, [manifest.quadrants, occupied]);
+    return canQuadrantOccupySpan(manifest.quadrants, targetCellId, spanStr, sourceCellId);
+  }, [manifest.quadrants]);
 
   const handleDrop = useCallback((payload: GridDragPayload, targetId: string) => {
     if (payload.kind === 'preset') {
@@ -497,6 +564,8 @@ export function QuadrantGrid({
           const { cols, rows } = def.span
             ? parseSpan(def.span)
             : { cols: 1, rows: 1 };
+          const currentSpan = def.span || '1x1';
+          const allowedSpans = availableSpansForQuadrant(manifest.quadrants, cellId, GRID_SPAN_OPTIONS);
 
           const moduleDef = resolveModule(def.module);
           const Module = moduleDef?.component;
@@ -575,13 +644,15 @@ export function QuadrantGrid({
                   <ConfigEditorPanel
                     quadrantId={cellId}
                     moduleId={def.module}
+                    span={currentSpan}
+                    availableSpans={allowedSpans}
                     config={def.config || {}}
                     focusKey={editingQuadrant.focusKey}
-                    onSave={(newConfig) => {
-                      saveQuadrantConfig(cellId, newConfig, {
-                        label: 'Save module config',
-                        reason: `Commit the config editor changes for quadrant ${cellId}.`,
-                        outcome: `Quadrant ${cellId} now reflects the edited settings.`,
+                    onSave={({ config: nextConfig, span: nextSpan }) => {
+                      saveQuadrantSettings(cellId, nextConfig, nextSpan, {
+                        label: 'Save module settings',
+                        reason: `Commit the manual settings changes for quadrant ${cellId}.`,
+                        outcome: `Quadrant ${cellId} now reflects the edited settings and size.`,
                       });
                       setEditingQuadrant(null);
                     }}
@@ -632,6 +703,8 @@ export function QuadrantGrid({
           quadrantId={actionMenu.quadrantId}
           moduleId={actionMenu.moduleId}
           moduleType={actionMenu.moduleType}
+          span={manifest.quadrants[actionMenu.quadrantId]?.span || '1x1'}
+          availableSpans={availableSpansForQuadrant(manifest.quadrants, actionMenu.quadrantId, GRID_SPAN_OPTIONS)}
           config={manifest.quadrants[actionMenu.quadrantId]?.config || {}}
           onClose={() => setActionMenu(null)}
           onOpenConfig={(focusKey) => {
@@ -640,6 +713,9 @@ export function QuadrantGrid({
           }}
           onUpdateConfig={(nextConfig, meta) => {
             saveQuadrantConfig(actionMenu.quadrantId, nextConfig, meta);
+          }}
+          onUpdateSpan={(nextSpan, meta) => {
+            saveQuadrantSpan(actionMenu.quadrantId, nextSpan, meta);
           }}
           onRemoveModule={() => removeQuadrant(actionMenu.quadrantId)}
         />

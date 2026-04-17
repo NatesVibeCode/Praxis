@@ -6,39 +6,14 @@ from memory.multimodal_ingest import (
     ingest_multimodal_to_knowledge_graph,
 )
 from typing import Any
+from surfaces._recall import search_recall_results
 
 from ..subsystems import _subs
 from ..helpers import _serialize
 
 
-def _readable_name(entity) -> str:
-    """Derive a human-readable name from entity data."""
-    name = entity.name or ""
-    # doc:hexhash names are useless — derive from source or content
-    if name.startswith("doc:"):
-        # Use source as title: "catalog/runtime" -> "Runtime Catalog"
-        if entity.source and entity.source.startswith("catalog/"):
-            parts = entity.source.replace("catalog/", "").replace("_", " ").title()
-            return f"{parts} Catalog"
-        # Fall back to first line of content
-        if entity.content:
-            first_line = entity.content.split("\n")[0].strip().lstrip("# ")
-            if first_line:
-                return first_line[:80]
-    return name
-
-
-def _readable_type(entity) -> str:
-    """Return a clear type label, using metadata.kind when available."""
-    meta = entity.metadata or {}
-    kind = meta.get("kind") or meta.get("object_kind")
-    if kind:
-        return kind  # "table", "postgres_table", etc.
-    return entity.entity_type.value
-
-
 def tool_praxis_recall(params: dict) -> dict:
-    """Search the knowledge graph."""
+    """Search the knowledge graph plus durable operator decisions."""
     query = params.get("query", "")
     if not query:
         return {"error": "query is required"}
@@ -46,15 +21,19 @@ def tool_praxis_recall(params: dict) -> dict:
     limit = max(1, int(params.get("limit", 20) or 20))
 
     try:
-        kg = _subs.get_knowledge_graph()
-        results = kg.search(query, entity_type=entity_type, limit=limit)
+        results = search_recall_results(
+            _subs,
+            query=query,
+            entity_type=entity_type,
+            limit=limit,
+        )
 
         # Build clean results — no internal scoring, no empty fields, readable names
         clean = []
         for r in results:
-            name = _readable_name(r.entity)
-            rtype = _readable_type(r.entity)
-            content = (r.entity.content or "").strip()
+            name = str(r.get("name") or "").strip()
+            rtype = str(r.get("type") or "").strip()
+            content = str(r.get("content") or "").strip()
 
             entry: dict = {"name": name}
 
@@ -62,26 +41,27 @@ def tool_praxis_recall(params: dict) -> dict:
             if rtype and rtype not in ("document",):
                 entry["type"] = rtype
 
-            entry["score"] = round(r.score, 2)
+            entry["score"] = round(float(r.get("score") or 0.0), 2)
 
             # Content preview — skip if empty or same as name
             if content and content != name:
                 entry["content"] = content[:300]
 
             # Source — only if it adds context
-            source = r.entity.source or ""
+            source = str(r.get("source") or "").strip()
             if source and source not in ("mining", "audit"):
                 entry["source"] = source
 
             # found_via — simplified
-            if r.found_via and r.found_via != "text":
-                entry["found_via"] = r.found_via
+            found_via = str(r.get("found_via") or "").strip()
+            if found_via and found_via != "text":
+                entry["found_via"] = found_via
 
             # entity_id — only needed for praxis_graph follow-up
-            entry["id"] = r.entity.id
+            entry["id"] = r["entity_id"]
 
             # Include structured metadata for tables
-            meta = r.entity.metadata or {}
+            meta = r.get("provenance") or {}
             if meta.get("kind") == "table":
                 details: dict = {}
                 if meta.get("triggers"):

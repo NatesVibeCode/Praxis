@@ -25,6 +25,7 @@ from runtime.control_commands import (
     submit_workflow_chain_command,
     submit_workflow_command,
 )
+from runtime.system_events import emit_system_event
 
 
 logger = logging.getLogger(__name__)
@@ -258,13 +259,12 @@ def _emit_schedule_fired_event(
         "last_run_at": last_run_at.isoformat() if last_run_at is not None else None,
         "fired_at": now.isoformat(),
     }
-    conn.execute(
-        "INSERT INTO system_events (event_type, source_id, source_type, payload) "
-        "VALUES ($1, $2, $3, $4::jsonb)",
-        "schedule.fired",
-        job.name,
-        "scheduler_state",
-        json.dumps(payload),
+    emit_system_event(
+        conn,
+        event_type="schedule.fired",
+        source_id=job.name,
+        source_type="scheduler_state",
+        payload=payload,
     )
 
 

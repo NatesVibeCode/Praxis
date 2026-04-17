@@ -1,21 +1,13 @@
-import React, { useState, useCallback } from 'react';
+import React from 'react';
 import { APP_CONFIG } from '../config';
 import { emitPraxisOpenTab } from '../praxis/events';
 import { ManifestEditor } from './ManifestEditor';
-import { RefinementBar } from './RefinementBar';
 
 interface ManifestEditorPageProps {
   manifestId: string;
 }
 
 export function ManifestEditorPage({ manifestId }: ManifestEditorPageProps) {
-  const [refreshKey, setRefreshKey] = useState(0);
-
-  const handleRefined = useCallback(() => {
-    // Force ManifestEditor to re-fetch after refinement
-    setRefreshKey(k => k + 1);
-  }, []);
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       {/* Nav */}
@@ -40,11 +32,8 @@ export function ManifestEditorPage({ manifestId }: ManifestEditorPageProps) {
 
       {/* Editor body */}
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
-        <ManifestEditor key={refreshKey} manifestId={manifestId} />
+        <ManifestEditor manifestId={manifestId} />
       </div>
-
-      {/* Refinement bar at the bottom */}
-      <RefinementBar manifestId={manifestId} onRefined={handleRefined} />
     </div>
   );
 }

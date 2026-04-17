@@ -1,8 +1,9 @@
-"""Durable workflow notification consumer.
+"""Workflow notification projection over canonical receipts.
 
-Reads undelivered notifications from workflow_notifications table,
-marks them delivered, and returns them. Session-independent: the
-notifications exist in Postgres regardless of which process reads them.
+Canonical workflow job completion notifications come from receipts joined
+to current workflow_jobs state. The legacy workflow_notifications table is
+kept only as a narrow compatibility bridge for the run_nodes lane and
+awaiting-human prompts that do not yet emit canonical receipts.
 """
 from __future__ import annotations
 
@@ -12,6 +13,8 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING
+
+from storage.postgres.receipt_repository import PostgresReceiptRepository
 
 if TYPE_CHECKING:
     from storage.postgres.connection import SyncPostgresConnection
@@ -58,21 +61,54 @@ class WorkflowNotification:
 
 
 class WorkflowNotificationConsumer:
-    """Reads and acknowledges workflow notifications from Postgres via polling.
-
-    Session-independent: notifications persist in the DB until consumed.
-    Multiple consumers are safe — each poll() atomically marks rows delivered.
-    """
+    """Reads canonical workflow notifications and drains legacy compatibility rows."""
 
     def __init__(self, conn: SyncPostgresConnection) -> None:
         self._conn = conn
+        self._receipt_repository = PostgresReceiptRepository(conn)
+        self._last_seen_evidence_seq = 0
 
-    def poll(self, limit: int = 50) -> list[WorkflowNotification]:
-        """Read undelivered notifications and mark them delivered.
+    def _canonical_notifications(
+        self,
+        *,
+        limit: int | None,
+        run_id: str | None = None,
+        descending: bool = False,
+    ) -> list[WorkflowNotification]:
+        rows = self._receipt_repository.list_workflow_notification_projection(
+            since_evidence_seq=self._last_seen_evidence_seq,
+            limit=limit,
+            run_id=run_id,
+            descending=descending,
+        )
+        notifications = [
+            WorkflowNotification(
+                id=int(row["id"]),
+                run_id=str(row["run_id"] or ""),
+                job_label=str(row["job_label"] or ""),
+                spec_name=str(row["spec_name"] or ""),
+                agent_slug=str(row["agent_slug"] or ""),
+                status=str(row["status"] or ""),
+                failure_code=str(row["failure_code"] or ""),
+                duration_seconds=float(row["duration_seconds"] or 0),
+                created_at=row["created_at"],
+                cpu_percent=row["cpu_percent"],
+                mem_bytes=row["mem_bytes"],
+            )
+            for row in rows
+        ]
+        return notifications
 
-        Returns newest-first. Safe to call from any session — uses
-        UPDATE ... RETURNING to atomically claim rows.
-        """
+    def _advance_canonical_cursor(self, notifications: list[WorkflowNotification]) -> None:
+        if notifications:
+            self._last_seen_evidence_seq = max(
+                self._last_seen_evidence_seq,
+                max(notification.id for notification in notifications if notification.id > 0),
+            )
+
+    def _legacy_poll(self, *, limit: int) -> list[WorkflowNotification]:
+        if limit <= 0:
+            return []
         rows = self._conn.execute(
             """UPDATE workflow_notifications
                SET delivered = true
@@ -87,60 +123,146 @@ class WorkflowNotificationConsumer:
                          cpu_percent, mem_bytes, created_at""",
             limit,
         )
-
         return [
             WorkflowNotification(
-                id=r["id"],
-                run_id=r["run_id"],
-                job_label=r["job_label"] or "",
-                spec_name=r["spec_name"] or "",
-                agent_slug=r["agent_slug"] or "",
-                status=r["status"] or "",
-                failure_code=r["failure_code"] or "",
-                duration_seconds=float(r["duration_seconds"] or 0),
-                created_at=r["created_at"],
-                cpu_percent=r["cpu_percent"],
-                mem_bytes=r["mem_bytes"],
+                id=-int(row["id"]),
+                run_id=str(row["run_id"] or ""),
+                job_label=str(row["job_label"] or ""),
+                spec_name=str(row["spec_name"] or ""),
+                agent_slug=str(row["agent_slug"] or ""),
+                status=str(row["status"] or ""),
+                failure_code=str(row["failure_code"] or ""),
+                duration_seconds=float(row["duration_seconds"] or 0),
+                created_at=row["created_at"],
+                cpu_percent=row["cpu_percent"],
+                mem_bytes=row["mem_bytes"],
             )
-            for r in rows
+            for row in rows or ()
         ]
 
-    def peek(self, limit: int = 50) -> list[WorkflowNotification]:
-        """Read undelivered notifications WITHOUT marking them delivered."""
+    def _legacy_peek(self, *, limit: int | None) -> list[WorkflowNotification]:
+        params: list[object] = []
+        limit_sql = ""
+        if limit is not None:
+            params.append(limit)
+            limit_sql = " LIMIT $1"
         rows = self._conn.execute(
-            """SELECT id, run_id, job_label, spec_name, agent_slug,
-                      status, failure_code, duration_seconds,
-                      cpu_percent, mem_bytes, created_at
-               FROM workflow_notifications
-               WHERE delivered = false
-               ORDER BY created_at ASC
-               LIMIT $1""",
-            limit,
+            f"""SELECT id, run_id, job_label, spec_name, agent_slug,
+                       status, failure_code, duration_seconds,
+                       cpu_percent, mem_bytes, created_at
+                FROM workflow_notifications
+                WHERE delivered = false
+                ORDER BY created_at ASC{limit_sql}""",
+            *params,
         )
-
         return [
             WorkflowNotification(
-                id=r["id"],
-                run_id=r["run_id"],
-                job_label=r["job_label"] or "",
-                spec_name=r["spec_name"] or "",
-                agent_slug=r["agent_slug"] or "",
-                status=r["status"] or "",
-                failure_code=r["failure_code"] or "",
-                duration_seconds=float(r["duration_seconds"] or 0),
-                created_at=r["created_at"],
-                cpu_percent=r["cpu_percent"],
-                mem_bytes=r["mem_bytes"],
+                id=-int(row["id"]),
+                run_id=str(row["run_id"] or ""),
+                job_label=str(row["job_label"] or ""),
+                spec_name=str(row["spec_name"] or ""),
+                agent_slug=str(row["agent_slug"] or ""),
+                status=str(row["status"] or ""),
+                failure_code=str(row["failure_code"] or ""),
+                duration_seconds=float(row["duration_seconds"] or 0),
+                created_at=row["created_at"],
+                cpu_percent=row["cpu_percent"],
+                mem_bytes=row["mem_bytes"],
             )
-            for r in rows
+            for row in rows or ()
         ]
 
-    def pending_count(self) -> int:
-        """Count of undelivered notifications."""
+    def _legacy_recent(self, *, limit: int | None) -> list[WorkflowNotification]:
+        params: list[object] = []
+        limit_sql = ""
+        if limit is not None:
+            params.append(limit)
+            limit_sql = " LIMIT $1"
+        rows = self._conn.execute(
+            f"""SELECT id, run_id, job_label, spec_name, agent_slug,
+                       status, failure_code, duration_seconds,
+                       cpu_percent, mem_bytes, created_at
+                FROM workflow_notifications
+                ORDER BY created_at DESC, id DESC{limit_sql}""",
+            *params,
+        )
+        return [
+            WorkflowNotification(
+                id=-int(row["id"]),
+                run_id=str(row["run_id"] or ""),
+                job_label=str(row["job_label"] or ""),
+                spec_name=str(row["spec_name"] or ""),
+                agent_slug=str(row["agent_slug"] or ""),
+                status=str(row["status"] or ""),
+                failure_code=str(row["failure_code"] or ""),
+                duration_seconds=float(row["duration_seconds"] or 0),
+                created_at=row["created_at"],
+                cpu_percent=row["cpu_percent"],
+                mem_bytes=row["mem_bytes"],
+            )
+            for row in rows or ()
+        ]
+
+    def _legacy_pending_count(self) -> int:
         rows = self._conn.execute(
             "SELECT count(*) AS c FROM workflow_notifications WHERE delivered = false"
         )
-        return rows[0]["c"] if rows else 0
+        return int(rows[0]["c"] or 0) if rows else 0
+
+    def poll(self, limit: int = 50) -> list[WorkflowNotification]:
+        """Read new canonical notifications and drain any legacy compatibility rows."""
+        canonical = self._canonical_notifications(limit=limit)
+        self._advance_canonical_cursor(canonical)
+        remaining = max(limit - len(canonical), 0)
+        legacy = self._legacy_poll(limit=remaining) if remaining else []
+        notifications = canonical + legacy
+        notifications.sort(key=lambda item: (item.created_at, item.id))
+        return notifications
+
+    def peek(self, limit: int = 50) -> list[WorkflowNotification]:
+        """Read notifications without mutating local cursor or legacy delivery flags."""
+        canonical = self._canonical_notifications(limit=limit)
+        remaining = max(limit - len(canonical), 0)
+        legacy = self._legacy_peek(limit=remaining) if remaining else []
+        notifications = canonical + legacy
+        notifications.sort(key=lambda item: (item.created_at, item.id))
+        return notifications
+
+    def recent(self, limit: int | None = 50) -> list[WorkflowNotification]:
+        """Return the most recent notifications for operator inspection."""
+        canonical = self._receipt_repository.list_workflow_notification_projection(
+            since_evidence_seq=0,
+            limit=limit,
+            descending=True,
+        )
+        notifications = [
+            WorkflowNotification(
+                id=int(row["id"]),
+                run_id=str(row["run_id"] or ""),
+                job_label=str(row["job_label"] or ""),
+                spec_name=str(row["spec_name"] or ""),
+                agent_slug=str(row["agent_slug"] or ""),
+                status=str(row["status"] or ""),
+                failure_code=str(row["failure_code"] or ""),
+                duration_seconds=float(row["duration_seconds"] or 0),
+                created_at=row["created_at"],
+                cpu_percent=row["cpu_percent"],
+                mem_bytes=row["mem_bytes"],
+            )
+            for row in canonical
+        ]
+        notifications.extend(self._legacy_recent(limit=limit))
+        notifications.sort(key=lambda item: (item.created_at, item.id), reverse=True)
+        if limit is not None:
+            notifications = notifications[:limit]
+        notifications.sort(key=lambda item: (item.created_at, item.id))
+        return notifications
+
+    def pending_count(self) -> int:
+        """Count of unread canonical notifications plus legacy compatibility rows."""
+        return self._receipt_repository.count_workflow_notification_projection(
+            since_evidence_seq=self._last_seen_evidence_seq,
+        ) + self._legacy_pending_count()
 
     def wait_for_run(
         self,
@@ -153,18 +275,45 @@ class WorkflowNotificationConsumer:
 
         If timeout_seconds is None, block indefinitely.
 
-        Reads workflow_notifications for the given run_id. Returns all
-        notifications once total_jobs are collected, or whatever we have
-        at timeout. This is the blocking primitive that replaces manual
-        wait loops.
+        Reads canonical workflow job receipts for the given run_id and includes
+        any legacy compatibility rows for the same run. Returns all notifications
+        once total_jobs are collected, or whatever we have at timeout.
         """
         use_timeout = timeout_seconds is not None
         deadline = time.monotonic() + timeout_seconds if use_timeout else None
         collected: list[WorkflowNotification] = []
-        seen_ids: set[int] = set()
+        seen_canonical_ids: set[int] = set()
+        seen_legacy_ids: set[int] = set()
+        run_cursor = self._last_seen_evidence_seq
 
         while not use_timeout or time.monotonic() < (deadline or 0):
-            rows = self._conn.execute(
+            rows = self._receipt_repository.list_workflow_notification_projection(
+                since_evidence_seq=run_cursor,
+                run_id=run_id,
+            )
+            for row in rows:
+                nid = int(row["id"])
+                if nid in seen_canonical_ids:
+                    continue
+                seen_canonical_ids.add(nid)
+                run_cursor = max(run_cursor, nid)
+                collected.append(
+                    WorkflowNotification(
+                        id=nid,
+                        run_id=str(row["run_id"] or ""),
+                        job_label=str(row["job_label"] or ""),
+                        spec_name=str(row["spec_name"] or ""),
+                        agent_slug=str(row["agent_slug"] or ""),
+                        status=str(row["status"] or ""),
+                        failure_code=str(row["failure_code"] or ""),
+                        duration_seconds=float(row["duration_seconds"] or 0),
+                        created_at=row["created_at"],
+                        cpu_percent=row["cpu_percent"],
+                        mem_bytes=row["mem_bytes"],
+                    )
+                )
+
+            legacy_rows = self._conn.execute(
                 """SELECT id, run_id, job_label, spec_name, agent_slug,
                           status, failure_code, duration_seconds,
                           cpu_percent, mem_bytes, created_at
@@ -173,38 +322,41 @@ class WorkflowNotificationConsumer:
                        SELECT unnest($2::int[])
                    )
                    ORDER BY created_at ASC""",
-                run_id, list(seen_ids) if seen_ids else [0],
+                run_id,
+                list(seen_legacy_ids) if seen_legacy_ids else [0],
             )
-
-            for r in rows:
-                nid = r["id"]
-                if nid not in seen_ids:
-                    seen_ids.add(nid)
-                    collected.append(WorkflowNotification(
-                        id=nid,
-                        run_id=r["run_id"] or "",
-                        job_label=r["job_label"] or "",
-                        spec_name=r["spec_name"] or "",
-                        agent_slug=r["agent_slug"] or "",
-                        status=r["status"] or "",
-                        failure_code=r["failure_code"] or "",
-                        duration_seconds=float(r["duration_seconds"] or 0),
-                        created_at=r["created_at"],
-                        cpu_percent=r["cpu_percent"],
-                        mem_bytes=r["mem_bytes"],
-                    ))
+            for row in legacy_rows or ():
+                legacy_id = int(row["id"])
+                if legacy_id in seen_legacy_ids:
+                    continue
+                seen_legacy_ids.add(legacy_id)
+                collected.append(
+                    WorkflowNotification(
+                        id=-legacy_id,
+                        run_id=str(row["run_id"] or ""),
+                        job_label=str(row["job_label"] or ""),
+                        spec_name=str(row["spec_name"] or ""),
+                        agent_slug=str(row["agent_slug"] or ""),
+                        status=str(row["status"] or ""),
+                        failure_code=str(row["failure_code"] or ""),
+                        duration_seconds=float(row["duration_seconds"] or 0),
+                        created_at=row["created_at"],
+                        cpu_percent=row["cpu_percent"],
+                        mem_bytes=row["mem_bytes"],
+                    )
+                )
 
             if len(collected) >= total_jobs:
                 break
 
             time.sleep(poll_interval)
 
-        # Mark collected as delivered
-        if seen_ids:
+        self._last_seen_evidence_seq = max(self._last_seen_evidence_seq, run_cursor)
+        if seen_legacy_ids:
             self._conn.execute(
                 """UPDATE workflow_notifications SET delivered = true
                    WHERE id = ANY($1::int[])""",
-                list(seen_ids),
+                list(seen_legacy_ids),
             )
 
         return collected
@@ -230,12 +382,39 @@ class WorkflowNotificationConsumer:
         """
         use_timeout = timeout_seconds is not None
         deadline = time.monotonic() + timeout_seconds if use_timeout else None
-        seen_ids: set[int] = set()
+        seen_canonical_ids: set[int] = set()
+        seen_legacy_ids: set[int] = set()
+        run_cursor = self._last_seen_evidence_seq
         count = 0
 
         try:
             while count < total_jobs and (not use_timeout or time.monotonic() < (deadline or 0)):
-                rows = self._conn.execute(
+                rows = self._receipt_repository.list_workflow_notification_projection(
+                    since_evidence_seq=run_cursor,
+                    run_id=run_id,
+                )
+                for row in rows:
+                    nid = int(row["id"])
+                    if nid in seen_canonical_ids:
+                        continue
+                    seen_canonical_ids.add(nid)
+                    run_cursor = max(run_cursor, nid)
+                    count += 1
+                    yield WorkflowNotification(
+                        id=nid,
+                        run_id=str(row["run_id"] or ""),
+                        job_label=str(row["job_label"] or ""),
+                        spec_name=str(row["spec_name"] or ""),
+                        agent_slug=str(row["agent_slug"] or ""),
+                        status=str(row["status"] or ""),
+                        failure_code=str(row["failure_code"] or ""),
+                        duration_seconds=float(row["duration_seconds"] or 0),
+                        created_at=row["created_at"],
+                        cpu_percent=row["cpu_percent"],
+                        mem_bytes=row["mem_bytes"],
+                    )
+
+                legacy_rows = self._conn.execute(
                     """SELECT id, run_id, job_label, spec_name, agent_slug,
                               status, failure_code, duration_seconds,
                               cpu_percent, mem_bytes, created_at
@@ -244,27 +423,28 @@ class WorkflowNotificationConsumer:
                            SELECT unnest($2::int[])
                        )
                        ORDER BY created_at ASC""",
-                    run_id, list(seen_ids) if seen_ids else [0],
+                    run_id,
+                    list(seen_legacy_ids) if seen_legacy_ids else [0],
                 )
-
-                for r in rows:
-                    nid = r["id"]
-                    if nid not in seen_ids:
-                        seen_ids.add(nid)
-                        count += 1
-                        yield WorkflowNotification(
-                            id=nid,
-                            run_id=r["run_id"] or "",
-                            job_label=r["job_label"] or "",
-                            spec_name=r["spec_name"] or "",
-                            agent_slug=r["agent_slug"] or "",
-                            status=r["status"] or "",
-                            failure_code=r["failure_code"] or "",
-                            duration_seconds=float(r["duration_seconds"] or 0),
-                            created_at=r["created_at"],
-                            cpu_percent=r["cpu_percent"],
-                            mem_bytes=r["mem_bytes"],
-                        )
+                for row in legacy_rows or ():
+                    legacy_id = int(row["id"])
+                    if legacy_id in seen_legacy_ids:
+                        continue
+                    seen_legacy_ids.add(legacy_id)
+                    count += 1
+                    yield WorkflowNotification(
+                        id=-legacy_id,
+                        run_id=str(row["run_id"] or ""),
+                        job_label=str(row["job_label"] or ""),
+                        spec_name=str(row["spec_name"] or ""),
+                        agent_slug=str(row["agent_slug"] or ""),
+                        status=str(row["status"] or ""),
+                        failure_code=str(row["failure_code"] or ""),
+                        duration_seconds=float(row["duration_seconds"] or 0),
+                        created_at=row["created_at"],
+                        cpu_percent=row["cpu_percent"],
+                        mem_bytes=row["mem_bytes"],
+                    )
 
                 if count < total_jobs:
                     if wakeup_event is not None:
@@ -273,12 +453,12 @@ class WorkflowNotificationConsumer:
                     else:
                         time.sleep(poll_interval)
         finally:
-            # Mark all yielded notifications as delivered
-            if seen_ids:
+            self._last_seen_evidence_seq = max(self._last_seen_evidence_seq, run_cursor)
+            if seen_legacy_ids:
                 self._conn.execute(
                     """UPDATE workflow_notifications SET delivered = true
                        WHERE id = ANY($1::int[])""",
-                    list(seen_ids),
+                    list(seen_legacy_ids),
                 )
 
     def format_batch(self, notifications: list[WorkflowNotification]) -> str:

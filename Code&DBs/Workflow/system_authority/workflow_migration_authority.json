@@ -68,7 +68,9 @@
     "137_workflow_trigger_source_id.sql",
     "138_operation_catalog_route_uniqueness.sql",
     "139_operation_catalog_operator_control_bindings.sql",
-    "140_operation_catalog_surface_cleanup.sql"
+    "140_operation_catalog_surface_cleanup.sql",
+    "141_operation_catalog_provider_onboarding.sql",
+    "142_operation_catalog_operator_decision_bindings.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -2072,6 +2074,22 @@
         "object_type": "row",
         "object_name": "operation_catalog_registry.operator.transport_support"
       }
+    ],
+    "141_operation_catalog_provider_onboarding.sql": [
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.operator.provider_onboarding"
+      }
+    ],
+    "142_operation_catalog_operator_decision_bindings.sql": [
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.operator.decision_record"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.operator.decision_list"
+      }
     ]
   },
   "policy_buckets": {
@@ -2144,7 +2162,9 @@
       "137_workflow_trigger_source_id.sql",
       "138_operation_catalog_route_uniqueness.sql",
       "139_operation_catalog_operator_control_bindings.sql",
-      "140_operation_catalog_surface_cleanup.sql"
+      "140_operation_catalog_surface_cleanup.sql",
+      "141_operation_catalog_provider_onboarding.sql",
+      "142_operation_catalog_operator_decision_bindings.sql"
     ],
     "bootstrap_only": [
       "012_execution_leases.sql",

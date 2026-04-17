@@ -199,44 +199,51 @@ def tool_praxis_operator_decisions(params: dict) -> dict:
     """Record or list canonical operator decisions through operator_decisions."""
 
     action = str(params.get("action") or "list").strip().lower()
-    control = OperatorControlFrontdoor()
     if action == "list":
         as_of = params.get("as_of")
-        return control.list_operator_decisions(
-            decision_kind=params.get("decision_kind"),
-            decision_scope_kind=params.get("decision_scope_kind"),
-            decision_scope_ref=params.get("decision_scope_ref"),
-            as_of=(
-                _parse_iso_datetime(as_of, field_name="as_of")
-                if as_of is not None
-                else None
-            ),
-            limit=int(params.get("limit", 100) or 100),
+        return execute_operation_from_subsystems(
+            _subs,
+            operation_name="operator.decision_list",
+            payload={
+                "decision_kind": params.get("decision_kind"),
+                "decision_scope_kind": params.get("decision_scope_kind"),
+                "decision_scope_ref": params.get("decision_scope_ref"),
+                "as_of": (
+                    _parse_iso_datetime(as_of, field_name="as_of")
+                    if as_of is not None
+                    else None
+                ),
+                "limit": int(params.get("limit", 100) or 100),
+            },
         )
     if action != "record":
         return {"error": "Unknown action. Supported actions: list, record"}
     effective_from = params.get("effective_from")
     effective_to = params.get("effective_to")
-    return control.record_operator_decision(
-        decision_key=str(params.get("decision_key") or ""),
-        decision_kind=str(params.get("decision_kind") or ""),
-        decision_status=str(params.get("decision_status") or "decided"),
-        title=str(params.get("title") or ""),
-        rationale=str(params.get("rationale") or ""),
-        decided_by=str(params.get("decided_by") or ""),
-        decision_source=str(params.get("decision_source") or ""),
-        decision_scope_kind=params.get("decision_scope_kind"),
-        decision_scope_ref=params.get("decision_scope_ref"),
-        effective_from=(
-            _parse_iso_datetime(effective_from, field_name="effective_from")
-            if effective_from is not None
-            else None
-        ),
-        effective_to=(
-            _parse_iso_datetime(effective_to, field_name="effective_to")
-            if effective_to is not None
-            else None
-        ),
+    return execute_operation_from_subsystems(
+        _subs,
+        operation_name="operator.decision_record",
+        payload={
+            "decision_key": str(params.get("decision_key") or ""),
+            "decision_kind": str(params.get("decision_kind") or ""),
+            "decision_status": str(params.get("decision_status") or "decided"),
+            "title": str(params.get("title") or ""),
+            "rationale": str(params.get("rationale") or ""),
+            "decided_by": str(params.get("decided_by") or ""),
+            "decision_source": str(params.get("decision_source") or ""),
+            "decision_scope_kind": params.get("decision_scope_kind"),
+            "decision_scope_ref": params.get("decision_scope_ref"),
+            "effective_from": (
+                _parse_iso_datetime(effective_from, field_name="effective_from")
+                if effective_from is not None
+                else None
+            ),
+            "effective_to": (
+                _parse_iso_datetime(effective_to, field_name="effective_to")
+                if effective_to is not None
+                else None
+            ),
+        },
     )
 
 

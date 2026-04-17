@@ -16,6 +16,7 @@ from registry.provider_onboarding_repository import (
 )
 
 from ._benchmark import _probe_benchmark
+from ._execute import execute_provider_onboarding
 from ._probe import (
     _discover_api_models,
     _http_get_json,
@@ -48,6 +49,7 @@ __all__ = [
     "ProviderTransportAuthorityTemplate",
     "_apply_benchmark_plan",
     "_discover_api_models",
+    "execute_provider_onboarding",
     "_find_binary",
     "_http_get_json",
     "_probe_benchmark",

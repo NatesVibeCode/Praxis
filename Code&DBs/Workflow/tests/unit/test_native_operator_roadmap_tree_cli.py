@@ -11,7 +11,11 @@ class _FakeInstance:
         return {"repo_root": "/tmp/repo", "workdir": "/tmp/repo"}
 
 
-def test_native_operator_roadmap_view_renders_markdown(monkeypatch) -> None:
+def _env() -> dict[str, str]:
+    return {"WORKFLOW_DATABASE_URL": "postgresql://localhost:5432/praxis_test"}
+
+
+def test_native_operator_roadmap_tree_renders_markdown(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
     def _execute_operation_from_env(*, env, operation_name: str, payload):
@@ -35,10 +39,10 @@ def test_native_operator_roadmap_view_renders_markdown(monkeypatch) -> None:
         workflow_cli_main(
             [
                 "native-operator",
-                "roadmap-view",
+                "roadmap-tree",
                 "roadmap_item.authority.cleanup.unified.operator.write.validation.gate",
             ],
-            env={},
+            env=_env(),
             stdout=stdout,
         )
         == 0

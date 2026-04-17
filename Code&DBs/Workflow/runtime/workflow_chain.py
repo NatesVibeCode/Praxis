@@ -9,6 +9,7 @@ from pathlib import Path
 import uuid
 from typing import Any
 
+from runtime.system_events import emit_system_event
 from storage.migrations import WorkflowMigrationError, workflow_migration_statements
 
 _SCHEMA_FILENAMES = (
@@ -362,13 +363,12 @@ def _normalized_definition(program: WorkflowChainProgram) -> dict[str, Any]:
 
 
 def _emit_chain_event(conn: Any, *, event_type: str, chain_id: str, payload: dict[str, Any]) -> None:
-    event_payload = json.dumps(payload, default=str)
-    conn.execute(
-        """INSERT INTO system_events (event_type, source_id, source_type, payload)
-           VALUES ($1, $2, 'workflow_chain', $3::jsonb)""",
-        event_type,
-        chain_id,
-        event_payload,
+    emit_system_event(
+        conn,
+        event_type=event_type,
+        source_id=chain_id,
+        source_type="workflow_chain",
+        payload=payload,
     )
     conn.execute("SELECT pg_notify('system_event', $1)", chain_id)
 

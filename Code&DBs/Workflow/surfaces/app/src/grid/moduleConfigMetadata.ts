@@ -1,5 +1,23 @@
 export const GRID_CHART_TYPES = ['bar', 'line', 'pie'] as const;
 export const GRID_ACTION_VARIANTS = ['primary', 'secondary', 'danger', 'ghost'] as const;
+export const GRID_SPAN_OPTIONS = [
+  '1x1',
+  '2x1',
+  '1x2',
+  '2x2',
+  '3x1',
+  '1x3',
+  '3x2',
+  '2x3',
+  '4x1',
+  '1x4',
+  '3x3',
+  '4x2',
+  '2x4',
+  '4x3',
+  '3x4',
+  '4x4',
+] as const;
 
 export const GRID_TEXT_KEYS = new Set([
   'objectType',
@@ -47,7 +65,7 @@ const FIELD_LABELS: Record<string, string> = {
   chartType: 'Chart type',
   columns: 'Columns',
   content: 'Content',
-  endpoint: 'Data source',
+  endpoint: 'Endpoint',
   label: 'Label',
   objectType: 'Object type',
   onSubmitEndpoint: 'Submit endpoint',
@@ -57,6 +75,7 @@ const FIELD_LABELS: Record<string, string> = {
   scope: 'Upload scope',
   refreshInterval: 'Refresh interval',
   subscribeSelection: 'Subscribe selection',
+  span: 'Size',
   description: 'Description',
   stepId: 'Step ID',
   title: 'Title',
@@ -70,6 +89,20 @@ const FIELD_LABELS: Record<string, string> = {
 
 export function gridFieldLabel(key: string): string {
   return FIELD_LABELS[key] || key.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, (char) => char.toUpperCase());
+}
+
+export function normalizeGridEndpoint(value: string): string {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return '';
+  return trimmed
+    .replace(/^https?:\/\/[^/]+/i, '')
+    .replace(/^\/?api\/?/i, '')
+    .replace(/^\//, '');
+}
+
+export function gridSpanLabel(span: string): string {
+  const [cols = '1', rows = '1'] = span.split('x');
+  return `${cols} × ${rows}`;
 }
 
 export function defaultConfigValueForKey(key: string): unknown {

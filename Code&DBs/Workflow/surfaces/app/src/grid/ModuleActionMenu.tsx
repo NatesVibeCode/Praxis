@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { MenuPanel, type MenuSection } from '../menu';
 import { resolveModule } from '../modules/moduleRegistry';
-import { GRID_CHART_TYPES, GRID_DATA_SOURCES, gridFieldLabel } from './moduleConfigMetadata';
+import { GRID_CHART_TYPES, gridFieldLabel, gridSpanLabel } from './moduleConfigMetadata';
 import type { UiActionTarget } from '../control/uiActionLedger';
 
 interface ModuleActionMenuProps {
@@ -10,11 +10,23 @@ interface ModuleActionMenuProps {
   quadrantId: string;
   moduleId: string;
   moduleType: string;
+  span: string;
+  availableSpans: string[];
   config: Record<string, unknown>;
   onClose: () => void;
   onOpenConfig: (focusKey?: string | null) => void;
   onUpdateConfig: (
     nextConfig: Record<string, unknown>,
+    meta: {
+      label: string;
+      reason: string;
+      outcome: string;
+      target?: UiActionTarget | null;
+      changeSummary?: string[];
+    },
+  ) => void;
+  onUpdateSpan: (
+    nextSpan: string,
     meta: {
       label: string;
       reason: string;
@@ -38,10 +50,13 @@ export function ModuleActionMenu({
   quadrantId,
   moduleId,
   moduleType,
+  span,
+  availableSpans,
   config,
   onClose,
   onOpenConfig,
   onUpdateConfig,
+  onUpdateSpan,
   onRemoveModule,
 }: ModuleActionMenuProps) {
   const moduleDef = resolveModule(moduleId);
@@ -109,14 +124,34 @@ export function ModuleActionMenu({
 
     if (hasEndpoint) {
       quickItems.push({
-        id: 'custom-endpoint',
-        label: 'Custom data source',
-        description: 'Open advanced config on the endpoint field.',
+        id: 'edit-endpoint',
+        label: 'Edit endpoint',
+        description: 'Open the endpoint field with live route suggestions and raw path input.',
         keywords: ['endpoint', 'source', 'api', 'data'],
         meta: gridFieldLabel('endpoint'),
         onSelect: () => onOpenConfig('endpoint'),
       });
     }
+
+    if (hasEndpoint || 'path' in config) {
+      quickItems.push({
+        id: 'edit-path',
+        label: 'Edit path',
+        description: 'Update the value path extracted from the endpoint response.',
+        keywords: ['path', 'json', 'selection'],
+        meta: gridFieldLabel('path'),
+        onSelect: () => onOpenConfig('path'),
+      });
+    }
+
+    quickItems.push({
+      id: 'resize-module',
+      label: 'Resize module',
+      description: 'Open the size control in the manual settings panel.',
+      keywords: ['resize', 'size', 'span', 'layout'],
+      meta: gridSpanLabel(span),
+      onSelect: () => onOpenConfig('span'),
+    });
 
     quickItems.push({
       id: 'advanced-config',
@@ -133,28 +168,30 @@ export function ModuleActionMenu({
       items: quickItems,
     });
 
-    if (hasEndpoint) {
+    if (availableSpans.length > 0) {
       nextSections.push({
-        id: 'data-sources',
-        title: 'Data Source',
-        items: GRID_DATA_SOURCES.map((source) => ({
-          id: `endpoint:${source.value}`,
-          label: source.label,
-          description: source.value,
-          keywords: ['endpoint', 'source', 'data', source.value],
-          selected: String(config.endpoint ?? '') === source.value,
-          onSelect: () => onUpdateConfig(
-            { ...config, endpoint: source.value },
+        id: 'size',
+        title: 'Size',
+        items: availableSpans.map((spanOption) => ({
+          id: `span:${spanOption}`,
+          label: gridSpanLabel(spanOption),
+          description: spanOption === span
+            ? 'Current module footprint.'
+            : `Resize this module to ${gridSpanLabel(spanOption)}.`,
+          keywords: ['size', 'span', 'layout', spanOption],
+          selected: span === spanOption,
+          onSelect: () => onUpdateSpan(
+            spanOption,
             {
-              label: 'Change data source',
-              reason: `Point quadrant ${quadrantId} at ${source.label}.`,
-              outcome: `The module now reads from ${source.value}.`,
+              label: 'Resize module',
+              reason: `Resize quadrant ${quadrantId} to ${gridSpanLabel(spanOption)}.`,
+              outcome: `The module now occupies ${gridSpanLabel(spanOption)} in the grid.`,
               target: {
                 kind: 'quadrant',
                 label: `${quadrantId} · ${moduleDef?.name ?? moduleId}`,
                 id: quadrantId,
               },
-              changeSummary: ['Data source', source.label],
+              changeSummary: [`Size ${gridSpanLabel(spanOption)}`],
             },
           ),
         })),
@@ -205,7 +242,7 @@ export function ModuleActionMenu({
     });
 
     return nextSections;
-  }, [config, moduleId, moduleType, onOpenConfig, onRemoveModule, onUpdateConfig, quadrantId]);
+  }, [availableSpans, config, moduleId, moduleType, onOpenConfig, onRemoveModule, onUpdateConfig, onUpdateSpan, quadrantId, span]);
 
   return (
     <MenuPanel

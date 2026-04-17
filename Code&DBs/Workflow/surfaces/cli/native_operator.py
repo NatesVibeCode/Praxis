@@ -25,7 +25,7 @@ from observability import graph_lineage_run, graph_topology_run
 from runtime import operation_catalog_gateway
 from runtime.execution.orchestrator import RuntimeOrchestrator
 from runtime.instance import resolve_native_instance
-from registry.provider_onboarding import load_provider_onboarding_spec_from_file, run_provider_onboarding
+from registry.provider_onboarding import load_provider_onboarding_spec_from_file
 from storage.postgres import PostgresEvidenceReader
 from surfaces.api import frontdoor
 from surfaces.api import native_operator_surface
@@ -138,7 +138,7 @@ class WorkItemCloseoutCommand:
 
 
 @dataclass(frozen=True, slots=True)
-class RoadmapViewCommand:
+class RoadmapTreeCommand:
     """Render one roadmap subtree from DB-backed authority."""
 
     root_roadmap_item_id: str
@@ -206,7 +206,7 @@ def _usage() -> str:
         "usage: workflow native-operator "
         "<instance|health|db-health|bootstrap|db-bootstrap|smoke|inspect|"
         "status|graph-topology|graph-lineage|cockpit|route-disable|roadmap-write|"
-        "work-item-closeout|roadmap-view|provider-onboard|native-primary-cutover-gate|"
+        "work-item-closeout|roadmap-tree|provider-onboard|native-primary-cutover-gate|"
         "operator-decision> [args]"
     )
 
@@ -225,7 +225,7 @@ def _help_text() -> str:
             "Command groups:",
             "  workflow native-operator instance|health|db-health|bootstrap|db-bootstrap|smoke",
             "  workflow native-operator inspect|status|graph-topology|graph-lineage|cockpit",
-            "  workflow native-operator route-disable|roadmap-write|work-item-closeout|roadmap-view",
+            "  workflow native-operator route-disable|roadmap-write|work-item-closeout|roadmap-tree",
             "  workflow native-operator provider-onboard|native-primary-cutover-gate|operator-decision",
             "",
             "Decision examples:",
@@ -403,10 +403,10 @@ def _parse_roadmap_write(args: list[str]) -> RoadmapWriteCommand:
     )
 
 
-def _parse_roadmap_view(args: list[str]) -> RoadmapViewCommand:
+def _parse_roadmap_tree(args: list[str]) -> RoadmapTreeCommand:
     if len(args) < 2:
         raise ValueError(
-            "usage: workflow native-operator roadmap-view <root_roadmap_item_id> [--json]"
+            "usage: workflow native-operator roadmap-tree <root_roadmap_item_id> [--json]"
         )
     root_roadmap_item_id = args[1]
     as_json = False
@@ -418,7 +418,7 @@ def _parse_roadmap_view(args: list[str]) -> RoadmapViewCommand:
             index += 1
             continue
         raise ValueError(_usage())
-    return RoadmapViewCommand(
+    return RoadmapTreeCommand(
         root_roadmap_item_id=root_roadmap_item_id,
         as_json=as_json,
     )
@@ -710,7 +710,7 @@ def _parse(argv: Sequence[str]) -> (
     | RouteDisableCommand
     | RoadmapWriteCommand
     | WorkItemCloseoutCommand
-    | RoadmapViewCommand
+    | RoadmapTreeCommand
     | ProviderOnboardingCommand
     | NativePrimaryCutoverGateCommand
     | OperatorDecisionRecordCommand
@@ -747,8 +747,8 @@ def _parse(argv: Sequence[str]) -> (
         return _parse_roadmap_write(args)
     if command_name == "work-item-closeout":
         return _parse_work_item_closeout(args)
-    if command_name == "roadmap-view":
-        return _parse_roadmap_view(args)
+    if command_name == "roadmap-tree":
+        return _parse_roadmap_tree(args)
     if command_name == "provider-onboard":
         return _parse_provider_onboard(args)
     if command_name == "native-primary-cutover-gate":
@@ -864,7 +864,7 @@ def main(
             ),
         )
         return 0
-    if isinstance(command, RoadmapViewCommand):
+    if isinstance(command, RoadmapTreeCommand):
         payload = operation_catalog_gateway.execute_operation_from_env(
             env=source,
             operation_name="operator.roadmap_tree",
@@ -880,17 +880,15 @@ def main(
     if isinstance(command, ProviderOnboardingCommand):
         try:
             spec = load_provider_onboarding_spec_from_file(command.spec_path)
-            database_url = str(source.get("WORKFLOW_DATABASE_URL") or "").strip()
-            if not database_url:
-                raise RuntimeError("WORKFLOW_DATABASE_URL is required for provider onboarding")
             _emit_json(
                 stdout,
-                asdict(
-                    run_provider_onboarding(
-                        database_url=database_url,
-                        spec=spec,
-                        dry_run=command.dry_run,
-                    )
+                operation_catalog_gateway.execute_operation_from_env(
+                    env=source,
+                    operation_name="operator.provider_onboarding",
+                    payload={
+                        "spec": asdict(spec),
+                        "dry_run": command.dry_run,
+                    },
                 ),
             )
             return 0
@@ -925,32 +923,38 @@ def main(
     if isinstance(command, OperatorDecisionRecordCommand):
         _emit_json(
             stdout,
-            operator_control.record_operator_decision(
-                decision_key=command.decision_key,
-                decision_kind=command.decision_kind,
-                decision_status=command.decision_status,
-                title=command.title,
-                rationale=command.rationale,
-                decided_by=command.decided_by,
-                decision_source=command.decision_source,
-                decision_scope_kind=command.decision_scope_kind,
-                decision_scope_ref=command.decision_scope_ref,
-                effective_from=command.effective_from,
-                effective_to=command.effective_to,
+            operation_catalog_gateway.execute_operation_from_env(
                 env=source,
+                operation_name="operator.decision_record",
+                payload={
+                    "decision_key": command.decision_key,
+                    "decision_kind": command.decision_kind,
+                    "decision_status": command.decision_status,
+                    "title": command.title,
+                    "rationale": command.rationale,
+                    "decided_by": command.decided_by,
+                    "decision_source": command.decision_source,
+                    "decision_scope_kind": command.decision_scope_kind,
+                    "decision_scope_ref": command.decision_scope_ref,
+                    "effective_from": command.effective_from,
+                    "effective_to": command.effective_to,
+                },
             ),
         )
         return 0
     if isinstance(command, OperatorDecisionListCommand):
         _emit_json(
             stdout,
-            operator_control.list_operator_decisions(
-                decision_kind=command.decision_kind,
-                decision_scope_kind=command.decision_scope_kind,
-                decision_scope_ref=command.decision_scope_ref,
-                as_of=command.as_of,
-                limit=command.limit,
+            operation_catalog_gateway.execute_operation_from_env(
                 env=source,
+                operation_name="operator.decision_list",
+                payload={
+                    "decision_kind": command.decision_kind,
+                    "decision_scope_kind": command.decision_scope_kind,
+                    "decision_scope_ref": command.decision_scope_ref,
+                    "as_of": command.as_of,
+                    "limit": command.limit,
+                },
             ),
         )
         return 0

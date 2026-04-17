@@ -62,6 +62,20 @@ class NativePrimaryCutoverGateCommand(BaseModel):
     updated_at: datetime | None = None
 
 
+class OperatorDecisionRecordCommand(BaseModel):
+    decision_key: str
+    decision_kind: str
+    title: str
+    rationale: str
+    decided_by: str
+    decision_source: str
+    decision_status: str = "decided"
+    effective_from: datetime | None = None
+    effective_to: datetime | None = None
+    decision_scope_kind: str | None = None
+    decision_scope_ref: str | None = None
+
+
 def _resolved_env(subsystems: Any) -> dict[str, str] | None:
     env = getattr(subsystems, "_postgres_env", None)
     return env() if callable(env) else None
@@ -155,12 +169,36 @@ def handle_native_primary_cutover_gate(
     )
 
 
+def handle_operator_decision_record(
+    command: OperatorDecisionRecordCommand,
+    subsystems: Any,
+) -> dict[str, Any]:
+    from surfaces.api.operator_write import OperatorControlFrontdoor
+
+    return OperatorControlFrontdoor().record_operator_decision(
+        decision_key=command.decision_key,
+        decision_kind=command.decision_kind,
+        title=command.title,
+        rationale=command.rationale,
+        decided_by=command.decided_by,
+        decision_source=command.decision_source,
+        decision_status=command.decision_status,
+        effective_from=command.effective_from,
+        effective_to=command.effective_to,
+        decision_scope_kind=command.decision_scope_kind,
+        decision_scope_ref=command.decision_scope_ref,
+        env=_resolved_env(subsystems),
+    )
+
+
 __all__ = [
     "NativePrimaryCutoverGateCommand",
+    "OperatorDecisionRecordCommand",
     "RoadmapWriteCommand",
     "TaskRouteEligibilityCommand",
     "WorkItemCloseoutCommand",
     "handle_native_primary_cutover_gate",
+    "handle_operator_decision_record",
     "handle_operator_roadmap_write",
     "handle_task_route_eligibility",
     "handle_work_item_closeout",

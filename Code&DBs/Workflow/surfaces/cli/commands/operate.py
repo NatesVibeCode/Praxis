@@ -359,46 +359,29 @@ def _notifications_command(args: list[str], *, stdout: TextIO) -> int:
         return 0
 
     conn = cli_sync_conn()
+    from runtime.workflow_notifications import WorkflowNotificationConsumer
+
+    consumer = WorkflowNotificationConsumer(conn)
     if show_tail:
-        rows = conn.execute(
-            """
-            SELECT *
-            FROM (
-                SELECT
-                    id,
-                    run_id,
-                    job_label,
-                    spec_name,
-                    agent_slug,
-                    status,
-                    failure_code,
-                    duration_seconds,
-                    created_at
-                FROM workflow_notifications
-                ORDER BY created_at DESC
-                LIMIT $1
-            ) AS recent
-            ORDER BY created_at ASC, id ASC
-            """,
-            max(tail_count, 0),
-        )
+        rows = [
+            notification.to_dict() | {
+                "id": notification.id,
+                "run_id": notification.run_id,
+            }
+            for notification in (
+                []
+                if tail_count <= 0
+                else consumer.recent(limit=tail_count)
+            )
+        ]
     else:
-        rows = conn.execute(
-            """
-            SELECT
-                id,
-                run_id,
-                job_label,
-                spec_name,
-                agent_slug,
-                status,
-                failure_code,
-                duration_seconds,
-                created_at
-            FROM workflow_notifications
-            ORDER BY created_at ASC, id ASC
-            """
-        )
+        rows = [
+            notification.to_dict() | {
+                "id": notification.id,
+                "run_id": notification.run_id,
+            }
+            for notification in consumer.recent(limit=None)
+        ]
 
     if not rows:
         stdout.write("no notifications found\n")

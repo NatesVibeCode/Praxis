@@ -469,18 +469,6 @@ def write_job_receipt(
         conn=conn,
     )
 
-    repository.insert_workflow_notification_if_absent(
-        run_id=run_id,
-        job_label=label,
-        spec_name="",
-        agent_slug=agent_slug,
-        status=status,
-        failure_code=error_code or None,
-        duration_seconds=duration_ms / 1000.0,
-        cpu_percent=result.get("container_cpu_percent"),
-        mem_bytes=result.get("container_mem_bytes"),
-        created_at=finished_at,
-    )
     repository.notify_job_completed(run_id=run_id)
 
     # Mine constraints from failures — fire-and-forget so it never blocks receipts

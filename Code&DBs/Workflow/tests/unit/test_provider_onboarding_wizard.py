@@ -8,8 +8,8 @@ import pytest
 from adapters.provider_types import ProviderCLIProfile
 
 from registry import provider_onboarding
+import registry.provider_onboarding._execute as provider_onboarding_execute
 import registry.provider_onboarding._probe as provider_onboarding_probe
-from surfaces.api.handlers import workflow_admin
 import surfaces.mcp.tools.provider_onboard as provider_onboard_tool
 from surfaces.cli import native_operator
 from surfaces.mcp.tools.provider_onboard import tool_praxis_provider_onboard
@@ -316,7 +316,7 @@ def test_provider_onboarding_service_probes_openai_cli_and_writes_registry_rows(
     assert task_affinities["avoid"] == []
 
 
-def test_provider_onboarding_handler_serializes_result(monkeypatch) -> None:
+def test_execute_provider_onboarding_serializes_result(monkeypatch) -> None:
     expected = provider_onboarding.ProviderOnboardingResult(
         ok=True,
         provider_slug="openai",
@@ -334,121 +334,81 @@ def test_provider_onboarding_handler_serializes_result(monkeypatch) -> None:
     )
 
     monkeypatch.setattr(
-        provider_onboarding,
+        provider_onboarding_execute,
         "normalize_provider_onboarding_spec",
         lambda raw: _openai_cli_spec(),
     )
     monkeypatch.setattr(
-        provider_onboarding,
+        provider_onboarding_execute,
         "run_provider_onboarding",
         lambda **kwargs: expected,
     )
     monkeypatch.setattr(
-        workflow_admin,
-        "_workflow_env",
-        lambda _subs: {"WORKFLOW_DATABASE_URL": "postgresql://example.test/workflow", "PATH": ""},
+        provider_onboarding_execute,
+        "_post_onboarding_sync",
+        lambda **kwargs: {"native_runtime_profiles": True},
     )
 
-    payload = workflow_admin._handle_provider_onboarding_post(
-        SimpleNamespace(),
-        {
-            "spec": {
-                "provider": {
-                    "provider_slug": "openai",
-                    "selected_transport": "cli",
-                }
-            },
-            "dry_run": False,
+    payload = provider_onboarding_execute.execute_provider_onboarding(
+        database_url="postgresql://example.test/workflow",
+        spec={
+            "provider": {
+                "provider_slug": "openai",
+                "selected_transport": "cli",
+            }
         },
+        dry_run=False,
     )
 
     assert payload["provider_slug"] == "openai"
     assert payload["steps"][0]["summary"] == "ok"
     assert payload["steps"][0]["details"]["binary_found"] is True
+    assert payload["post_onboarding"]["native_runtime_profiles"] is True
 
 
-def test_provider_onboarding_mcp_tool_serializes_slots_dataclass(monkeypatch) -> None:
-    expected = provider_onboarding.ProviderOnboardingResult(
-        ok=True,
-        provider_slug="openai",
-        provider_name="Openai",
-        decision_ref="decision.provider-onboarding.openai.20260409T120000Z",
-        dry_run=True,
-        steps=(
-            provider_onboarding.ProviderOnboardingStepResult(
-                step="verification",
-                status="succeeded",
-                summary="ok",
-                details={"binary_found": True},
-            ),
-        ),
-    )
+def test_provider_onboarding_mcp_tool_uses_operation_gateway(monkeypatch) -> None:
+    captured: dict[str, object] = {}
 
     monkeypatch.setattr(
-        provider_onboarding,
-        "normalize_provider_onboarding_spec",
-        lambda raw: _openai_api_spec(),
-    )
-    monkeypatch.setattr(
-        provider_onboarding,
-        "run_provider_onboarding",
-        lambda **kwargs: expected,
-    )
-    monkeypatch.setattr(
-        "surfaces.mcp.tools.provider_onboard.workflow_database_url_for_repo",
-        lambda repo_root, env=None: "postgresql://example.test/workflow",
-    )
-    monkeypatch.setattr(
-        "surfaces.mcp.tools.provider_onboard.workflow_database_env",
+        provider_onboard_tool,
+        "workflow_database_env",
         lambda: {"WORKFLOW_DATABASE_URL": "postgresql://example.test/workflow", "PATH": ""},
     )
 
-    payload = tool_praxis_provider_onboard(
-        {
-            "action": "probe",
-            "provider_slug": "openai",
-            "transport": "api",
-        }
-    )
+    def _execute(*, env, operation_name: str, payload):
+        captured["env"] = env
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"ok": True, "provider_slug": "openai"}
 
-    assert payload["provider_slug"] == "openai"
-    assert payload["steps"][0]["summary"] == "ok"
-    assert payload["steps"][0]["details"]["binary_found"] is True
+    monkeypatch.setattr(provider_onboard_tool, "execute_operation_from_env", _execute)
+
+    payload = tool_praxis_provider_onboard({"action": "probe", "provider_slug": "openai", "transport": "api"})
+
+    assert payload == {"ok": True, "provider_slug": "openai"}
+    assert captured["operation_name"] == "operator.provider_onboarding"
+    assert captured["payload"] == {
+        "provider_slug": "openai",
+        "dry_run": True,
+        "transport": "api",
+    }
 
 
 def test_provider_onboarding_mcp_tool_does_not_force_cli_transport(monkeypatch) -> None:
     captured: dict[str, object] = {}
-    expected = provider_onboarding.ProviderOnboardingResult(
-        ok=True,
-        provider_slug="cursor",
-        provider_name="Cursor",
-        decision_ref="decision.provider-onboarding.cursor.20260415T120000Z",
-        dry_run=True,
-        steps=(),
-    )
-
-    def _capture_spec(raw):
-        captured["raw_spec"] = raw
-        return provider_onboarding.ProviderOnboardingSpec(provider_slug="cursor")
-
     monkeypatch.setattr(
-        provider_onboarding,
-        "normalize_provider_onboarding_spec",
-        _capture_spec,
-    )
-    monkeypatch.setattr(
-        provider_onboarding,
-        "run_provider_onboarding",
-        lambda **kwargs: expected,
-    )
-    monkeypatch.setattr(
-        "surfaces.mcp.tools.provider_onboard.workflow_database_url_for_repo",
-        lambda repo_root, env=None: "postgresql://example.test/workflow",
-    )
-    monkeypatch.setattr(
-        "surfaces.mcp.tools.provider_onboard.workflow_database_env",
+        provider_onboard_tool,
+        "workflow_database_env",
         lambda: {"WORKFLOW_DATABASE_URL": "postgresql://example.test/workflow", "PATH": ""},
     )
+
+    def _execute(*, env, operation_name: str, payload):
+        captured["env"] = env
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"ok": True}
+
+    monkeypatch.setattr(provider_onboard_tool, "execute_operation_from_env", _execute)
 
     tool_praxis_provider_onboard(
         {
@@ -457,7 +417,7 @@ def test_provider_onboarding_mcp_tool_does_not_force_cli_transport(monkeypatch) 
         }
     )
 
-    assert captured["raw_spec"] == {"provider_slug": "cursor"}
+    assert captured["payload"] == {"provider_slug": "cursor", "dry_run": True}
 
 
 def test_provider_onboarding_resolve_spec_infers_single_declared_api_transport(monkeypatch) -> None:
@@ -510,8 +470,8 @@ def test_post_onboarding_sync_updates_native_runtime_allowed_models(monkeypatch)
         lambda env=None: object(),
     )
 
-    result = provider_onboard_tool._post_onboarding_sync(
-        db_url="postgresql://example.test/workflow",
+    result = provider_onboarding_execute._post_onboarding_sync(
+        database_url="postgresql://example.test/workflow",
         provider_slug="openai",
         model_reports=({"model_slug": "gpt-5.4-mini"},),
     )
@@ -930,32 +890,24 @@ def test_provider_template_can_be_derived_from_explicit_cli_payload(monkeypatch)
     assert "api" not in template.transports
 
 
-def test_native_operator_provider_onboard_cli_uses_shared_wizard(monkeypatch) -> None:
-    expected = provider_onboarding.ProviderOnboardingResult(
-        ok=True,
-        provider_slug="openai",
-        provider_name="Openai",
-        decision_ref="decision.provider-onboarding.openai.20260409T120000Z",
-        dry_run=True,
-        steps=(
-            provider_onboarding.ProviderOnboardingStepResult(
-                step="verification",
-                status="planned",
-                summary="planned",
-                details={},
-            ),
-        ),
-    )
-
+def test_native_operator_provider_onboard_cli_uses_operation_gateway(monkeypatch) -> None:
+    captured: dict[str, object] = {}
     monkeypatch.setattr(
         native_operator,
         "load_provider_onboarding_spec_from_file",
         lambda _path: _openai_cli_spec(),
     )
+
+    def _execute(*, env, operation_name: str, payload):
+        captured["env"] = env
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"provider_slug": "openai", "dry_run": True, "steps": [{"status": "planned"}]}
+
     monkeypatch.setattr(
-        native_operator,
-        "run_provider_onboarding",
-        lambda **kwargs: expected,
+        native_operator.operation_catalog_gateway,
+        "execute_operation_from_env",
+        _execute,
     )
 
     stdout = StringIO()
@@ -970,6 +922,8 @@ def test_native_operator_provider_onboard_cli_uses_shared_wizard(monkeypatch) ->
     assert payload["provider_slug"] == "openai"
     assert payload["dry_run"] is True
     assert payload["steps"][0]["status"] == "planned"
+    assert captured["operation_name"] == "operator.provider_onboarding"
+    assert captured["payload"]["spec"]["provider_slug"] == "openai"
 
 
 def test_discover_api_models_parses_openai_model_ids(monkeypatch) -> None:

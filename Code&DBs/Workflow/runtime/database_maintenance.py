@@ -20,6 +20,7 @@ from runtime.embedding_service import (
     EmbeddingService,
     resolve_embedding_runtime_authority,
 )
+from runtime.system_events import emit_system_event
 from storage.postgres.memory_graph_repository import PostgresMemoryGraphRepository
 from storage.postgres.vector_store import PostgresVectorStore, VectorFilter
 
@@ -1713,15 +1714,12 @@ class DatabaseMaintenanceProcessor:
         payload: dict[str, Any],
     ) -> None:
         try:
-            self._conn.execute(
-                """
-                INSERT INTO system_events (event_type, source_id, source_type, payload)
-                VALUES ($1, $2, $3, $4::jsonb)
-                """,
-                event_type,
-                source_id,
-                source_type,
-                json.dumps(payload or {}),
+            emit_system_event(
+                self._conn,
+                event_type=event_type,
+                source_id=source_id,
+                source_type=source_type,
+                payload=payload or {},
             )
         except Exception:
             return

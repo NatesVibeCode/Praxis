@@ -545,6 +545,122 @@ class PostgresReceiptRepository:
         )
         return None if row is None else dict(row)
 
+    def list_workflow_notification_projection(
+        self,
+        *,
+        since_evidence_seq: int = 0,
+        limit: int | None = None,
+        run_id: str | None = None,
+        descending: bool = False,
+    ) -> list[dict[str, Any]]:
+        clauses = [
+            "r.receipt_type = 'workflow_job'",
+            "r.evidence_seq > $1",
+        ]
+        params: list[Any] = [
+            _require_nonnegative_int(
+                since_evidence_seq,
+                field_name="since_evidence_seq",
+            )
+        ]
+        idx = 2
+        if run_id:
+            clauses.append(f"r.run_id = ${idx}")
+            params.append(_require_text(run_id, field_name="run_id"))
+            idx += 1
+        order = "DESC" if descending else "ASC"
+        limit_sql = ""
+        if limit is not None:
+            params.append(_require_positive_int(limit, field_name="limit"))
+            limit_sql = f" LIMIT ${idx}"
+
+        rows = self._conn.execute(
+            f"""
+            SELECT
+                r.evidence_seq AS id,
+                r.run_id,
+                COALESCE(j.label, r.inputs->>'job_label', r.node_id, '') AS job_label,
+                COALESCE(
+                    wr.request_envelope->>'name',
+                    wr.request_envelope->>'workflow_label',
+                    r.workflow_id,
+                    ''
+                ) AS spec_name,
+                COALESCE(
+                    NULLIF(j.resolved_agent, ''),
+                    NULLIF(j.agent_slug, ''),
+                    NULLIF(r.inputs->>'agent_slug', ''),
+                    NULLIF(r.inputs->>'agent', ''),
+                    NULLIF(r.outputs->>'author_model', ''),
+                    r.executor_type,
+                    ''
+                ) AS agent_slug,
+                COALESCE(j.status, r.status, '') AS status,
+                COALESCE(NULLIF(j.last_error_code, ''), r.failure_code, '') AS failure_code,
+                COALESCE(
+                    NULLIF(j.duration_ms, 0)::double precision / 1000.0,
+                    NULLIF(r.outputs->>'duration_ms', '')::double precision / 1000.0,
+                    GREATEST(
+                        EXTRACT(
+                            EPOCH FROM (
+                                COALESCE(r.finished_at, r.started_at) - r.started_at
+                            )
+                        ),
+                        0
+                    )
+                ) AS duration_seconds,
+                NULLIF(r.outputs->>'cpu_percent', '')::double precision AS cpu_percent,
+                NULLIF(r.outputs->>'mem_bytes', '')::bigint AS mem_bytes,
+                COALESCE(r.finished_at, r.started_at) AS created_at
+            FROM receipts AS r
+            JOIN workflow_jobs AS j
+              ON j.receipt_id = r.receipt_id
+             AND j.run_id = r.run_id
+            LEFT JOIN workflow_runs AS wr
+              ON wr.run_id = r.run_id
+            WHERE {' AND '.join(clauses)}
+            ORDER BY r.evidence_seq {order}
+            {limit_sql}
+            """,
+            *params,
+        )
+        return [dict(row) for row in rows or ()]
+
+    def count_workflow_notification_projection(
+        self,
+        *,
+        since_evidence_seq: int = 0,
+        run_id: str | None = None,
+    ) -> int:
+        clauses = [
+            "r.receipt_type = 'workflow_job'",
+            "r.evidence_seq > $1",
+        ]
+        params: list[Any] = [
+            _require_nonnegative_int(
+                since_evidence_seq,
+                field_name="since_evidence_seq",
+            )
+        ]
+        if run_id:
+            clauses.append("r.run_id = $2")
+            params.append(_require_text(run_id, field_name="run_id"))
+
+        rows = self._conn.execute(
+            f"""
+            SELECT COUNT(*) AS c
+            FROM receipts AS r
+            JOIN workflow_jobs AS j
+              ON j.receipt_id = r.receipt_id
+             AND j.run_id = r.run_id
+            WHERE {' AND '.join(clauses)}
+            """,
+            *params,
+        )
+        if not rows:
+            return 0
+        return int(rows[0]["c"] or 0)
+
     def list_receipts(
         self,
         *,

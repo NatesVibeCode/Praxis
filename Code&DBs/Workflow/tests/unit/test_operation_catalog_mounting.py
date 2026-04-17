@@ -369,4 +369,66 @@ def test_mount_capabilities_flattens_post_body_for_models_without_body_field(mon
     assert response.json()["title"] == "One gateway"
     assert response.json()["intent_brief"] == "No nested body wrapper"
     assert response.json()["action"] == "preview"
-    assert response.json()["command_receipt"]["operation_name"] == "operator.roadmap_write"
+    assert response.json()["operation_receipt"]["operation_name"] == "operator.roadmap_write"
+
+
+def test_provider_onboarding_has_no_static_route_owner() -> None:
+    assert not any(
+        isinstance(route, APIRoute) and route.path == "/api/operator/provider-onboarding"
+        for route in rest.app.routes
+    )
+
+
+def test_mount_capabilities_accepts_raw_provider_onboarding_body(monkeypatch) -> None:
+    from runtime.operations.commands.provider_onboarding import ProviderOnboardingCommand
+
+    target_app = FastAPI()
+    monkeypatch.setattr(
+        rest,
+        "_ensure_shared_subsystems",
+        lambda _app: SimpleNamespace(get_pg_conn=lambda: object()),
+    )
+    monkeypatch.setattr(
+        rest,
+        "list_resolved_operation_definitions",
+        lambda _conn, include_disabled=False, limit=500: [
+            SimpleNamespace(
+                operation_name="operator.provider_onboarding",
+                http_method="POST",
+                http_path="/api/operator/provider-onboarding",
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        rest,
+        "resolve_http_operation_binding",
+        lambda definition: _binding(
+            operation_name=definition.operation_name,
+            http_method=definition.http_method,
+            http_path=definition.http_path,
+            command_class=ProviderOnboardingCommand,
+            handler=lambda command, _subs: {
+                "provider_slug": command.provider_slug,
+                "selected_transport": command.model_extra["selected_transport"],
+                "dry_run": command.dry_run,
+            },
+        ),
+    )
+
+    rest.mount_capabilities(target_app)
+
+    client = TestClient(target_app)
+    response = client.post(
+        "/api/operator/provider-onboarding",
+        json={
+            "provider_slug": "openai",
+            "selected_transport": "api",
+            "dry_run": True,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["provider_slug"] == "openai"
+    assert response.json()["selected_transport"] == "api"
+    assert response.json()["dry_run"] is True
+    assert response.json()["operation_receipt"]["operation_name"] == "operator.provider_onboarding"

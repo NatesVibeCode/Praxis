@@ -12,6 +12,10 @@ class _FakeInstance:
         return {"repo_root": "/tmp/repo", "workdir": "/tmp/repo"}
 
 
+def _env() -> dict[str, str]:
+    return {"WORKFLOW_DATABASE_URL": "postgresql://localhost:5432/praxis_test"}
+
+
 def test_native_operator_route_disable_records_timed_provider_window(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
@@ -34,7 +38,7 @@ def test_native_operator_route_disable_records_timed_provider_window(monkeypatch
                 "created_at": "2026-04-08T16:00:00+00:00",
             },
             "superseded_task_route_eligibility_ids": [],
-            "command_receipt": {
+            "operation_receipt": {
                 "operation_name": operation_name,
                 "operation_kind": "command",
             },
@@ -64,7 +68,7 @@ def test_native_operator_route_disable_records_timed_provider_window(monkeypatch
                 "--rationale",
                 "Anthropic off until Friday morning",
             ],
-            env={},
+            env=_env(),
             stdout=stdout,
         )
         == 0
@@ -80,4 +84,4 @@ def test_native_operator_route_disable_records_timed_provider_window(monkeypatch
     assert captured["payload"]["rationale"] == "Anthropic off until Friday morning"
     assert payload["task_route_eligibility"]["provider_slug"] == "anthropic"
     assert payload["task_route_eligibility"]["effective_to"] == "2026-04-10T09:00:00-07:00"
-    assert payload["command_receipt"]["operation_name"] == "operator.task_route_eligibility"
+    assert payload["operation_receipt"]["operation_name"] == "operator.task_route_eligibility"

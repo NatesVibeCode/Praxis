@@ -45,7 +45,7 @@ def build_operation_command(
     return binding.command_class(**command_data)
 
 
-def _command_receipt(
+def _operation_receipt(
     binding: ResolvedHttpOperationBinding,
     *,
     result: Mapping[str, Any] | None,
@@ -67,19 +67,17 @@ def _command_receipt(
     }
 
 
-def _with_command_receipt(
+def _with_operation_receipt(
     binding: ResolvedHttpOperationBinding,
     result: Any,
 ) -> Any:
-    if binding.operation_kind != "command":
-        return result
     if isinstance(result, Mapping):
         payload = dict(result)
-        payload["command_receipt"] = _command_receipt(binding, result=payload)
+        payload["operation_receipt"] = _operation_receipt(binding, result=payload)
         return payload
     return {
         "result": result,
-        "command_receipt": _command_receipt(binding, result=None),
+        "operation_receipt": _operation_receipt(binding, result=None),
     }
 
 
@@ -91,7 +89,7 @@ def execute_operation_binding(
 ) -> Any:
     command = build_operation_command(binding, payload=payload)
     result = binding.handler(command, subsystems)
-    return _with_command_receipt(binding, result)
+    return _with_operation_receipt(binding, result)
 
 
 def execute_operation_from_subsystems(

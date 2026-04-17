@@ -2,7 +2,9 @@
   position: absolute;
   top: 0;
   right: 0;
-  width: min(380px, calc(100vw - 24px));
+  width: min(460px, calc(100vw - 24px));
+  min-width: min(360px, calc(100vw - 24px));
+  max-width: min(720px, calc(100vw - 24px));
   max-height: min(84vh, 860px);
   overflow: hidden;
   z-index: 100;
@@ -16,6 +18,7 @@
   flex-direction: column;
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
+  resize: horizontal;
 }
 
 .config-editor-header {
@@ -121,6 +124,19 @@
   border-color: rgba(243, 238, 228, 0.3);
   box-shadow: var(--focus-ring);
   background: rgba(255, 255, 255, 0.05);
+}
+
+.config-editor-field select:disabled,
+.config-editor-field input:disabled,
+.config-editor-field textarea:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.config-editor-field__hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.45;
 }
 
 .config-editor-array-item {
@@ -234,7 +250,10 @@
 @media (max-width: 640px) {
   .config-editor-panel {
     width: calc(100vw - 20px);
+    min-width: calc(100vw - 20px);
+    max-width: calc(100vw - 20px);
     max-height: calc(100vh - 20px);
+    resize: none;
   }
 
   .config-editor-body {

@@ -93,7 +93,7 @@ def test_mcp_operator_native_primary_cutover_gate_uses_operation_catalog_gateway
         captured["subsystems"] = subsystems
         captured["operation_name"] = operation_name
         captured["payload"] = payload
-        return {"command_receipt": {"operation_name": operation_name}}
+        return {"operation_receipt": {"operation_name": operation_name}}
 
     monkeypatch.setattr(operator, "execute_operation_from_subsystems", _execute)
 
@@ -106,6 +106,66 @@ def test_mcp_operator_native_primary_cutover_gate_uses_operation_catalog_gateway
         }
     )
 
-    assert result["command_receipt"]["operation_name"] == "operator.native_primary_cutover_gate"
+    assert result["operation_receipt"]["operation_name"] == "operator.native_primary_cutover_gate"
     assert captured["operation_name"] == "operator.native_primary_cutover_gate"
     assert captured["payload"]["workflow_class_id"] == "workflow_class.runtime_probe"
+
+
+def test_mcp_operator_decisions_record_uses_operation_catalog_gateway(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(operator, "_subs", object())
+
+    def _execute(subsystems, *, operation_name: str, payload):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"operation_receipt": {"operation_name": operation_name}}
+
+    monkeypatch.setattr(operator, "execute_operation_from_subsystems", _execute)
+
+    result = operator.tool_praxis_operator_decisions(
+        {
+            "action": "record",
+            "decision_key": "architecture-policy::provider-onboarding::registry-owned-catalog-exposed",
+            "decision_kind": "architecture_policy",
+            "title": "Provider onboarding stays registry-owned and catalog-exposed",
+            "rationale": "Canonical onboarding includes post-onboarding sync.",
+            "decided_by": "codex",
+            "decision_source": "implementation",
+            "decision_scope_kind": "authority_domain",
+            "decision_scope_ref": "provider_onboarding",
+        }
+    )
+
+    assert result["operation_receipt"]["operation_name"] == "operator.decision_record"
+    assert captured["operation_name"] == "operator.decision_record"
+    assert captured["payload"]["decision_kind"] == "architecture_policy"
+
+
+def test_mcp_operator_decisions_list_uses_operation_catalog_gateway(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(operator, "_subs", object())
+
+    def _execute(subsystems, *, operation_name: str, payload):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"operation_receipt": {"operation_name": operation_name}}
+
+    monkeypatch.setattr(operator, "execute_operation_from_subsystems", _execute)
+
+    result = operator.tool_praxis_operator_decisions(
+        {
+            "action": "list",
+            "decision_kind": "architecture_policy",
+            "decision_scope_kind": "authority_domain",
+            "decision_scope_ref": "provider_onboarding",
+            "limit": 50,
+        }
+    )
+
+    assert result["operation_receipt"]["operation_name"] == "operator.decision_list"
+    assert captured["operation_name"] == "operator.decision_list"
+    assert captured["payload"]["decision_scope_ref"] == "provider_onboarding"

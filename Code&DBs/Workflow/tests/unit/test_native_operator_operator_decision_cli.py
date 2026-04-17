@@ -12,36 +12,46 @@ class _FakeInstance:
         return {"repo_root": "/tmp/repo", "workdir": "/tmp/repo"}
 
 
+def _env() -> dict[str, str]:
+    return {"WORKFLOW_DATABASE_URL": "postgresql://localhost:5432/praxis_test"}
+
+
 def test_native_operator_operator_decision_record_uses_shared_gate(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    def _record_operator_decision(**kwargs):
-        captured.update(kwargs)
+    def _execute_operation_from_env(*, env, operation_name: str, payload):
+        captured["env"] = env
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
         return {
             "operator_decision": {
                 "operator_decision_id": "operator_decision.architecture_policy.decision_tables.db_native_authority",
-                "decision_key": kwargs["decision_key"],
-                "decision_kind": kwargs["decision_kind"],
-                "decision_status": kwargs["decision_status"],
-                "title": kwargs["title"],
-                "rationale": kwargs["rationale"],
-                "decided_by": kwargs["decided_by"],
-                "decision_source": kwargs["decision_source"],
-                "decision_scope_kind": kwargs["decision_scope_kind"],
-                "decision_scope_ref": kwargs["decision_scope_ref"],
+                "decision_key": payload["decision_key"],
+                "decision_kind": payload["decision_kind"],
+                "decision_status": payload["decision_status"],
+                "title": payload["title"],
+                "rationale": payload["rationale"],
+                "decided_by": payload["decided_by"],
+                "decision_source": payload["decision_source"],
+                "decision_scope_kind": payload["decision_scope_kind"],
+                "decision_scope_ref": payload["decision_scope_ref"],
                 "effective_from": "2026-04-15T00:00:00+00:00",
                 "effective_to": None,
                 "decided_at": "2026-04-15T00:00:00+00:00",
                 "created_at": "2026-04-15T00:00:00+00:00",
                 "updated_at": "2026-04-15T00:00:00+00:00",
-            }
+            },
+            "operation_receipt": {
+                "operation_name": operation_name,
+                "operation_kind": "command",
+            },
         }
 
     monkeypatch.setattr(native_operator, "resolve_native_instance", lambda env=None: _FakeInstance())
     monkeypatch.setattr(
-        native_operator.operator_write,
-        "record_operator_decision",
-        _record_operator_decision,
+        native_operator.operation_catalog_gateway,
+        "execute_operation_from_env",
+        _execute_operation_from_env,
     )
 
     stdout = StringIO()
@@ -68,27 +78,31 @@ def test_native_operator_operator_decision_record_uses_shared_gate(monkeypatch) 
                 "--scope-ref",
                 "decision_tables",
             ],
-            env={},
+            env=_env(),
             stdout=stdout,
         )
         == 0
     )
 
     payload = json.loads(stdout.getvalue())
-    assert captured["decision_kind"] == "architecture_policy"
-    assert captured["decision_scope_kind"] == "authority_domain"
-    assert captured["decision_scope_ref"] == "decision_tables"
+    assert captured["operation_name"] == "operator.decision_record"
+    assert captured["payload"]["decision_kind"] == "architecture_policy"
+    assert captured["payload"]["decision_scope_kind"] == "authority_domain"
+    assert captured["payload"]["decision_scope_ref"] == "decision_tables"
     assert (
         payload["operator_decision"]["operator_decision_id"]
         == "operator_decision.architecture_policy.decision_tables.db_native_authority"
     )
+    assert payload["operation_receipt"]["operation_name"] == "operator.decision_record"
 
 
 def test_native_operator_operator_decision_list_uses_shared_gate(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    def _list_operator_decisions(**kwargs):
-        captured.update(kwargs)
+    def _execute_operation_from_env(*, env, operation_name: str, payload):
+        captured["env"] = env
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
         return {
             "operator_decisions": [
                 {
@@ -110,13 +124,17 @@ def test_native_operator_operator_decision_list_uses_shared_gate(monkeypatch) ->
                 }
             ],
             "as_of": "2026-04-15T00:00:00+00:00",
+            "operation_receipt": {
+                "operation_name": operation_name,
+                "operation_kind": "query",
+            },
         }
 
     monkeypatch.setattr(native_operator, "resolve_native_instance", lambda env=None: _FakeInstance())
     monkeypatch.setattr(
-        native_operator.operator_write,
-        "list_operator_decisions",
-        _list_operator_decisions,
+        native_operator.operation_catalog_gateway,
+        "execute_operation_from_env",
+        _execute_operation_from_env,
     )
 
     stdout = StringIO()
@@ -133,13 +151,15 @@ def test_native_operator_operator_decision_list_uses_shared_gate(monkeypatch) ->
                 "--scope-ref",
                 "decision_tables",
             ],
-            env={},
+            env=_env(),
             stdout=stdout,
         )
         == 0
     )
 
     payload = json.loads(stdout.getvalue())
-    assert captured["decision_kind"] == "architecture_policy"
-    assert captured["decision_scope_kind"] == "authority_domain"
+    assert captured["operation_name"] == "operator.decision_list"
+    assert captured["payload"]["decision_kind"] == "architecture_policy"
+    assert captured["payload"]["decision_scope_kind"] == "authority_domain"
     assert payload["operator_decisions"][0]["decision_scope_ref"] == "decision_tables"
+    assert payload["operation_receipt"]["operation_name"] == "operator.decision_list"

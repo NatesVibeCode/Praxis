@@ -112,6 +112,8 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         "/api/operator/work-item-closeout": "Preview or commit proof-backed bug and roadmap closeout through one shared reconciliation gate",
         "/api/operator/roadmap/tree/{root_roadmap_item_id}": "Read one roadmap subtree and its dependency edges from DB-backed authority",
         "/api/operator/provider-onboarding": "Seed a provider profile, model catalog rows, benchmark metadata, and verification in one wizard",
+        "/api/operator/decision": "Record one canonical operator decision row through the operation catalog",
+        "/api/operator/decisions": "List canonical operator decisions through the operation catalog",
     }
 
     health_payload = _handle_health(subs, {})
@@ -212,6 +214,7 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
             "research",
             "operator_view",
             "provider_onboarding",
+            "operator_decisions",
         ],
         "endpoints": endpoints,
         "status": health_payload.get("operator_snapshot"),
@@ -422,24 +425,6 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
             "notes": "scripts/praxis is the preferred launcher entrypoint; scripts/praxis-ctl remains a compatibility alias. launchd only sees the single com.praxis.engine background item, while Praxis supervises postgres, api-server, workflow-worker, and scheduler internally. The launcher front door is http://127.0.0.1:8420/app and the always-on MCP bridge is served from the API surface.",
         },
 }
-
-
-def _handle_provider_onboarding_post(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
-    from registry.provider_onboarding import normalize_provider_onboarding_spec, run_provider_onboarding
-
-    raw_spec = body.get("spec") if isinstance(body.get("spec"), dict) else body
-    try:
-        spec = normalize_provider_onboarding_spec(raw_spec)
-    except Exception as exc:
-        raise _ClientError(str(exc)) from exc
-
-    env = _workflow_env(subs)
-    result = run_provider_onboarding(
-        database_url=env["WORKFLOW_DATABASE_URL"],
-        spec=spec,
-        dry_run=bool(body.get("dry_run", False)),
-    )
-    return _serialize(result)
 
 
 def _handle_health(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
@@ -755,7 +740,6 @@ ADMIN_ROUTES: dict[str, object] = {
     "/orient": _handle_orient,
     "/health": _handle_health,
     "/governance": _handle_governance,
-    "/api/operator/provider-onboarding": _handle_provider_onboarding_post,
 }
 
 

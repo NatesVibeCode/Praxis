@@ -52,7 +52,7 @@ def test_execute_operation_from_subsystems_resolves_and_invokes_binding(monkeypa
     )
 
     assert result["value"] == "authoritative"
-    assert result["command_receipt"] == {
+    assert result["operation_receipt"] == {
         "operation_ref": "operator.example",
         "operation_name": "operator.example",
         "operation_kind": "command",
@@ -97,3 +97,40 @@ def test_execute_operation_from_env_builds_env_backed_subsystems(monkeypatch) ->
     assert captured["operation_name"] == "operator.example"
     assert captured["payload"] == {"value": "gateway"}
     assert captured["subsystems"].get_pg_conn().__class__ is _FakeConn
+
+
+def test_execute_query_operation_also_attaches_operation_receipt(monkeypatch) -> None:
+    binding = SimpleNamespace(
+        operation_ref="operator.query_example",
+        operation_name="operator.query_example",
+        source_kind="operation_query",
+        operation_kind="query",
+        command_class=_ExampleCommand,
+        handler=lambda command, _subsystems: {"value": command.value},
+        authority_ref="authority.example_query",
+        projection_ref="projection.example_query",
+        posture="observe",
+        idempotency_policy="read_only",
+        binding_revision="binding.operation.query_example.20260416",
+        decision_ref="decision.operation.query_example.20260416",
+    )
+
+    class _Subsystems:
+        def get_pg_conn(self) -> object:
+            return object()
+
+    monkeypatch.setattr(
+        gateway,
+        "resolve_named_operation_binding",
+        lambda conn, operation_name: binding,
+    )
+
+    result = gateway.execute_operation_from_subsystems(
+        _Subsystems(),
+        operation_name="operator.query_example",
+        payload={"value": "query"},
+    )
+
+    assert result["value"] == "query"
+    assert result["operation_receipt"]["operation_name"] == "operator.query_example"
+    assert result["operation_receipt"]["result_status"] is None

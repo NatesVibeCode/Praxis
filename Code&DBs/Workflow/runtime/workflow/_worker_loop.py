@@ -390,7 +390,11 @@ def run_worker_loop(
                 graph_slots = max_local_concurrent - _count_active("local") - len(_active_graph_runs())
                 if graph_slots > 0:
                     now = time.monotonic()
-                    for run_row in _list_ready_graph_runs(conn, limit=min(graph_slots, 10)):
+                    scheduled_graph_runs = 0
+                    scan_limit = max(graph_slots * 10, 10)
+                    for run_row in _list_ready_graph_runs(conn, limit=scan_limit):
+                        if scheduled_graph_runs >= graph_slots:
+                            break
                         run_id = str(run_row.get("run_id") or "").strip()
                         if not run_id or run_id in _active_graph_runs():
                             continue
@@ -405,6 +409,7 @@ def run_worker_loop(
                             "label": run_id,
                             "_transport_lane": "graph_local",
                         }
+                        scheduled_graph_runs += 1
                         logger.info(
                             "Dispatched graph run %s to local pool [active: remote=%d local=%d graph=%d]",
                             run_id,

@@ -8,6 +8,7 @@ import type { BuildPayload } from '../shared/types';
 const moonBuildPageMocks = vi.hoisted(() => ({
   getCatalog: vi.fn(),
   loadCatalog: vi.fn(),
+  compileDefinition: vi.fn(),
   mutate: vi.fn(),
   payload: null as BuildPayload | null,
   registerUndoExecutor: vi.fn(() => () => undefined),
@@ -45,6 +46,10 @@ vi.mock('../dashboard/useLiveRunSnapshot', () => ({
 vi.mock('./catalog', () => ({
   getCatalog: moonBuildPageMocks.getCatalog,
   loadCatalog: moonBuildPageMocks.loadCatalog,
+}));
+
+vi.mock('../shared/buildController', () => ({
+  compileDefinition: moonBuildPageMocks.compileDefinition,
 }));
 
 vi.mock('../menu', () => ({
@@ -136,6 +141,14 @@ describe('MoonBuildPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     moonBuildPageMocks.payload = null;
+    moonBuildPageMocks.compileDefinition.mockResolvedValue({
+      definition: {},
+      build_graph: {
+        nodes: [],
+        edges: [],
+      },
+      workflow: { id: 'wf-created' },
+    });
     const triggerCatalog = [
       {
         id: 'trigger-manual',
@@ -259,5 +272,23 @@ describe('MoonBuildPage', () => {
     );
 
     expect(await screen.findByLabelText('Choose a trigger')).toHaveAttribute('data-width', '400');
+  });
+
+  test('surfaces compile errors inside the compose panel instead of leaving the UI silent', async () => {
+    moonBuildPageMocks.compileDefinition.mockRejectedValueOnce(new Error('Request timed out after 45s'));
+
+    render(
+      <MoonBuildPage
+        workflowId={null}
+        initialMode="compose"
+      />,
+    );
+
+    fireEvent.change(screen.getByRole('textbox'), {
+      target: { value: 'Build a workflow from this prompt' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /build from prompt/i }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Request timed out after 45s');
   });
 });

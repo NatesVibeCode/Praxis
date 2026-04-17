@@ -30,6 +30,13 @@ def test_runtime_tree_does_not_own_provider_onboarding_authority_writes() -> Non
         assert not any(statement in source for statement in _ONBOARDING_WRITE_SQL), path
 
 
-def test_runtime_provider_onboarding_is_only_a_registry_shim() -> None:
-    source = (_WORKFLOW_ROOT / "runtime" / "provider_onboarding.py").read_text(encoding="utf-8")
+def test_runtime_provider_onboarding_compatibility_facade_is_removed() -> None:
+    assert not (_WORKFLOW_ROOT / "runtime" / "provider_onboarding.py").exists()
+
+
+def test_runtime_provider_onboarding_operation_delegates_to_registry_executor() -> None:
+    source = (
+        _WORKFLOW_ROOT / "runtime" / "operations" / "commands" / "provider_onboarding.py"
+    ).read_text(encoding="utf-8")
+    assert "execute_provider_onboarding" in source
     assert "registry.provider_onboarding" in source

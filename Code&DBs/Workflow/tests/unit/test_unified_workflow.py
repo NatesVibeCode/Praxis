@@ -3639,12 +3639,13 @@ def test_write_job_receipt_writes_authority_receipt_and_notification():
     assert receipt_id == "receipt:workflow_test:17:2"
     query_texts = [query for query, _ in conn.queries]
     receipts_idx = next(i for i, query in enumerate(query_texts) if "INSERT INTO receipts" in query)
-    notification_idx = next(i for i, query in enumerate(query_texts) if "INSERT INTO workflow_notifications" in query)
     receipt_insert_query = query_texts[receipts_idx]
     receipt_insert_args = conn.queries[receipts_idx][1]
     receipt_inputs = json.loads(receipt_insert_args[15])
     receipt_outputs = json.loads(receipt_insert_args[16])
     assert "'{transition_seq}'" in receipt_insert_query
+    assert not any("INSERT INTO workflow_notifications" in query for query in query_texts)
+    assert any("SELECT pg_notify('job_completed'" in query for query in query_texts)
     assert receipt_inputs["workspace_root"] == "/repo"
     assert receipt_inputs["workspace_ref"] == "workspace://praxis"
     assert receipt_inputs["runtime_profile_ref"] == "runtime://praxis"
@@ -3666,7 +3667,8 @@ def test_write_job_receipt_writes_authority_receipt_and_notification():
     assert receipt_outputs["mutation_provenance"]["write_paths"] == ["runtime/example.py"]
     assert receipt_insert_args[11] == datetime(2026, 4, 8, 18, 0, tzinfo=timezone.utc)
     assert receipt_insert_args[12] == datetime(2026, 4, 8, 18, 0, 5, tzinfo=timezone.utc)
-    assert notification_idx > receipts_idx
+    notify_idx = next(i for i, query in enumerate(query_texts) if "SELECT pg_notify('job_completed'" in query)
+    assert notify_idx > receipts_idx
 
 
 def test_complete_job_requeues_rate_limit_failures_to_next_agent(monkeypatch):
@@ -4569,6 +4571,151 @@ def test_run_worker_loop_backoffs_failing_graph_runs(monkeypatch):
     _wloop_mod.run_worker_loop(_Conn(), "/repo", poll_interval=0.0, max_local_concurrent=1)
 
     assert executed_runs == ["run.graph"]
+    assert listener_actions == ["start", "stop"]
+
+
+def test_run_worker_loop_does_not_starve_runnable_graph_runs_behind_backoffed_run(
+    monkeypatch,
+):
+    executed_runs: list[str] = []
+    listener_actions: list[str] = []
+
+    class _Conn:
+        def __init__(self) -> None:
+            self._graph_queries = 0
+
+        def execute(self, query: str, *args):
+            normalized = " ".join(query.split())
+            if "FROM workflow_runs" in normalized and "current_state = 'claim_accepted'" in normalized:
+                self._graph_queries += 1
+                if self._graph_queries <= 2:
+                    return [
+                        {
+                            "run_id": "run.old",
+                            "workflow_id": "workflow.old",
+                            "requested_at": datetime.now(timezone.utc),
+                        },
+                        {
+                            "run_id": "run.new",
+                            "workflow_id": "workflow.new",
+                            "requested_at": datetime.now(timezone.utc),
+                        },
+                    ]
+                return []
+            return []
+
+    class _ThreadConn:
+        def execute(self, query: str, *args):
+            normalized = " ".join(query.split())
+            if normalized.startswith("SELECT pg_try_advisory_lock"):
+                return [{"locked": True}]
+            if normalized.startswith("SELECT pg_advisory_unlock"):
+                return [{"released": True}]
+            return []
+
+    class _FakeListener:
+        def __init__(
+            self,
+            database_url: str,
+            channels: tuple[str, ...],
+            wakeup_event,
+            reconnect_delay: float = 5.0,
+        ) -> None:
+            self.database_url = database_url
+            self.channels = channels
+            self.wakeup_event = wakeup_event
+            self.reconnect_delay = reconnect_delay
+
+        def start(self) -> None:
+            listener_actions.append("start")
+
+        def stop(self) -> None:
+            listener_actions.append("stop")
+
+    class _FakeEvent:
+        def __init__(self) -> None:
+            self._calls = 0
+            self._set = False
+
+        def wait(self, timeout: float) -> bool:
+            self._calls += 1
+            return self._set or self._calls > 2
+
+        def set(self) -> None:
+            self._set = True
+
+        def is_set(self) -> bool:
+            return self._set
+
+    class _ImmediateFuture:
+        def __init__(self, exc: Exception | None = None) -> None:
+            self._exc = exc
+
+        def done(self) -> bool:
+            return True
+
+        def result(self):
+            if self._exc is not None:
+                raise self._exc
+            return None
+
+    class _ImmediateExecutor:
+        def __init__(self, *args, **kwargs) -> None:
+            self.shutdown_called = False
+
+        def submit(self, fn, *args, **kwargs):
+            try:
+                fn(*args, **kwargs)
+            except Exception as exc:  # pragma: no cover - exercised via future.result()
+                return _ImmediateFuture(exc)
+            return _ImmediateFuture()
+
+        def shutdown(self, wait: bool = True) -> None:
+            self.shutdown_called = True
+
+    claim_calls = {"count": 0}
+
+    def _claim_one(*_args, **_kwargs):
+        claim_calls["count"] += 1
+        if claim_calls["count"] >= 3:
+            raise KeyboardInterrupt()
+        return None
+
+    monotonic_values = iter([
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.2,
+        0.2,
+        0.2,
+        0.2,
+    ])
+
+    def _run_graph(_conn, run_id):
+        executed_runs.append(run_id)
+        if run_id == "run.old":
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(_wloop_mod.time, "monotonic", lambda: next(monotonic_values, 0.2))
+    monkeypatch.setattr(_wloop_mod, "_WorkerNotificationListener", _FakeListener)
+    monkeypatch.setattr(_wloop_mod, "_execute_admitted_graph_run", _run_graph)
+    monkeypatch.setattr(_wloop_mod, "claim_one", _claim_one)
+    monkeypatch.setattr(_wloop_mod, "reap_stale_claims", lambda _conn: 0)
+    monkeypatch.setattr(_wloop_mod, "reap_stale_runs", lambda _conn: 0)
+    monkeypatch.setenv("WORKFLOW_DATABASE_URL", "postgresql://example.test/workflow")
+    monkeypatch.setattr(_wloop_mod.threading, "Event", _FakeEvent)
+    monkeypatch.setattr(concurrent.futures, "ThreadPoolExecutor", _ImmediateExecutor)
+    monkeypatch.setattr(pg_connection, "get_workflow_pool", lambda: object())
+    monkeypatch.setattr(pg_connection, "SyncPostgresConnection", lambda pool: _ThreadConn())
+
+    _wloop_mod.run_worker_loop(_Conn(), "/repo", poll_interval=0.0, max_local_concurrent=1)
+
+    assert executed_runs == ["run.old", "run.new"]
     assert listener_actions == ["start", "stop"]
 
 

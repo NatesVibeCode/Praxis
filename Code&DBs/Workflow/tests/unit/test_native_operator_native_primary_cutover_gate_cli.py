@@ -12,6 +12,10 @@ class _FakeInstance:
         return {"repo_root": "/tmp/repo", "workdir": "/tmp/repo"}
 
 
+def _env() -> dict[str, str]:
+    return {"WORKFLOW_DATABASE_URL": "postgresql://localhost:5432/praxis_test"}
+
+
 def test_native_operator_native_primary_cutover_gate_uses_shared_gate(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
@@ -24,7 +28,7 @@ def test_native_operator_native_primary_cutover_gate_uses_shared_gate(monkeypatc
                 "workflow_class_id": payload["workflow_class_id"],
                 "decision_source": payload["decision_source"],
             },
-            "command_receipt": {
+            "operation_receipt": {
                 "operation_name": operation_name,
                 "operation_kind": "command",
             },
@@ -52,7 +56,7 @@ def test_native_operator_native_primary_cutover_gate_uses_shared_gate(monkeypatc
                 "--workflow-class-id",
                 "workflow_class.runtime_probe",
             ],
-            env={},
+            env=_env(),
             stdout=stdout,
         )
         == 0
@@ -62,4 +66,4 @@ def test_native_operator_native_primary_cutover_gate_uses_shared_gate(monkeypatc
     assert captured["operation_name"] == "operator.native_primary_cutover_gate"
     assert captured["payload"]["workflow_class_id"] == "workflow_class.runtime_probe"
     assert payload["native_primary_cutover"]["decision_source"] == "operator"
-    assert payload["command_receipt"]["operation_name"] == "operator.native_primary_cutover_gate"
+    assert payload["operation_receipt"]["operation_name"] == "operator.native_primary_cutover_gate"

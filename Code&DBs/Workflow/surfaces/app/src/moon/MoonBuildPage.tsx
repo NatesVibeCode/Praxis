@@ -102,6 +102,7 @@ function DockToggleButton({
     <button
       type="button"
       className={`moon-center__dock-btn${active ? ' moon-center__dock-btn--active' : ''}`}
+      data-keep-edge-menu-open="true"
       aria-label={`Open ${label} dock`}
       aria-pressed={active}
       onClick={onClick}
@@ -290,7 +291,7 @@ function shouldKeepEdgeMenusOpen(target: EventTarget | null): boolean {
     target.closest('.moon-graph-gate')
     || target.closest('.moon-dock-overlay')
     || target.closest('.moon-dock-side')
-    || target.closest('.moon-halfmoon--right')
+    || target.closest('[data-keep-edge-menu-open="true"]')
     || target.closest('.menu-panel'),
   );
 }
@@ -327,8 +328,43 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
     };
   }, [payload, persistedWorkflowId, state.compileProse, state.selectedTrigger]);
 
-  // Load live catalog from backend on mount
-  useEffect(() => { loadCatalog().then(setCatalog); }, []);
+  // Load live catalog from backend on mount.
+  useEffect(() => {
+    let cancelled = false;
+    loadCatalog().then((items) => {
+      if (!cancelled) setCatalog(items);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Self-heal the current tab after a transient catalog miss instead of
+  // leaving the trigger picker stranded on an empty cache.
+  useEffect(() => {
+    if (catalog.length > 0) return undefined;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      loadCatalog().then((items) => {
+        if (!cancelled && items.length > 0) setCatalog(items);
+      });
+    }, 2500);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [catalog.length]);
+
+  useEffect(() => {
+    if (state.emptyMode !== 'trigger-picker' || catalog.length > 0) return undefined;
+    let cancelled = false;
+    loadCatalog().then((items) => {
+      if (!cancelled && items.length > 0) setCatalog(items);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [catalog.length, state.emptyMode]);
 
   useEffect(() => {
     const syncProfile = () => setMoonGlowProfile(readMoonGlowProfile());
@@ -355,6 +391,11 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
     const t = setTimeout(() => setMutationError(null), 5000);
     return () => clearTimeout(t);
   }, [mutationError]);
+
+  useEffect(() => {
+    if (!error) return;
+    setMutationError((current) => current ?? error);
+  }, [error]);
 
   // Live run snapshot — active when a dispatch has produced a run
   const { run: activeRun } = useLiveRunSnapshot(state.activeRunId);
@@ -1281,6 +1322,11 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
                         {compiling ? 'Building...' : 'Build from prompt'}
                       </button>
                     </div>
+                    {state.compileError && (
+                      <div className="moon-compose__error" role="alert">
+                        {state.compileError}
+                      </div>
+                    )}
                     <div className="moon-compose__shortcut">Press Ctrl/Cmd+Enter to build.</div>
                     <div className="moon-compose__examples" aria-label="Example prompts">
                       {EXAMPLE_PROMPTS.map((prompt) => (
@@ -1535,6 +1581,7 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
           anchorRect={triggerAnchorRef.current?.getBoundingClientRect() ?? null}
           title="Choose a trigger"
           subtitle="Start from an event, a schedule, or a manual run."
+          emptyLabel={catalog.length === 0 ? 'Loading available triggers…' : 'No matching triggers'}
           searchPlaceholder="Search triggers…"
           sections={triggerMenuSections}
           onClose={() => dispatch({ type: 'EMPTY_RESET' })}

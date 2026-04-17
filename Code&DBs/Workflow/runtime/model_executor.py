@@ -20,6 +20,9 @@ from typing import Any
 
 from runtime.native_authority import default_native_runtime_profile_ref_required
 from runtime.execution_transport import resolve_execution_transport
+from storage.postgres.workflow_orchestration_repository import (
+    PostgresWorkflowNotificationRepository,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -270,12 +273,16 @@ def _execute_decision(conn, run_id: str, run_node_row: dict, card: dict) -> dict
                WHERE run_node_id = $1""",
             run_node_row['run_node_id'],
         )
-        # Write notification so frontend can detect it
-        conn.execute(
-            """INSERT INTO workflow_notifications
-               (run_id, job_label, spec_name, agent_slug, status, failure_code, duration_seconds)
-               VALUES ($1, $2, 'model_run', 'human', 'awaiting_human', '', 0)""",
-            run_id, card['id'],
+        # Legacy run_nodes still use the workflow_notifications bridge until
+        # they emit canonical receipts of their own.
+        PostgresWorkflowNotificationRepository(conn).emit_notification(
+            run_id=run_id,
+            job_label=card['id'],
+            spec_name='model_run',
+            agent_slug='human',
+            status='awaiting_human',
+            failure_code='',
+            duration_seconds=0.0,
         )
         return {"status": "awaiting_human", "outputs": {}}
 

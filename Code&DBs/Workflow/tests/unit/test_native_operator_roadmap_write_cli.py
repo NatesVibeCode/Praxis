@@ -12,6 +12,10 @@ class _FakeInstance:
         return {"repo_root": "/tmp/repo", "workdir": "/tmp/repo"}
 
 
+def _env() -> dict[str, str]:
+    return {"WORKFLOW_DATABASE_URL": "postgresql://localhost:5432/praxis_test"}
+
+
 def test_native_operator_roadmap_write_uses_shared_gate(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
@@ -29,7 +33,7 @@ def test_native_operator_roadmap_write_uses_shared_gate(monkeypatch) -> None:
             "auto_fixes": [],
             "warnings": [],
             "blocking_errors": [],
-            "command_receipt": {
+            "operation_receipt": {
                 "operation_name": operation_name,
                 "operation_kind": "command",
             },
@@ -72,7 +76,7 @@ def test_native_operator_roadmap_write_uses_shared_gate(monkeypatch) -> None:
                 "--phase-ready",
                 "--commit",
             ],
-            env={},
+            env=_env(),
             stdout=stdout,
         )
         == 0
@@ -91,5 +95,5 @@ def test_native_operator_roadmap_write_uses_shared_gate(monkeypatch) -> None:
     )
     assert captured["payload"]["phase_ready"] is True
     assert payload["committed"] is True
-    assert payload["command_receipt"]["operation_name"] == "operator.roadmap_write"
+    assert payload["operation_receipt"]["operation_name"] == "operator.roadmap_write"
     assert payload["normalized_payload"]["template"] == "hard_cutover_program"

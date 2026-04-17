@@ -1,20 +1,25 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useId, useMemo, useState } from 'react';
 import './ConfigEditorPanel.css';
 import {
   defaultConfigValueForKey,
   GRID_ACTION_VARIANTS,
   GRID_CHART_TYPE_KEYS,
   GRID_CHART_TYPES,
-  GRID_DATA_SOURCES,
   GRID_TEXT_KEYS,
+  gridFieldLabel,
+  gridSpanLabel,
+  normalizeGridEndpoint,
 } from './moduleConfigMetadata';
+import { useEndpointOptions } from './useEndpointOptions';
 
 interface ConfigEditorPanelProps {
   quadrantId: string;
   moduleId: string;
+  span: string;
+  availableSpans: string[];
   config: Record<string, unknown>;
   focusKey?: string | null;
-  onSave: (newConfig: Record<string, unknown>) => void;
+  onSave: (result: { config: Record<string, unknown>; span: string }) => void;
   onClose: () => void;
 }
 
@@ -68,7 +73,7 @@ function ColumnsEditor({ columns, onChange }: { columns: ColumnDef[]; onChange: 
 
   return (
     <div className="config-editor-field">
-      <label>columns</label>
+      <label>{gridFieldLabel('columns')}</label>
       {columns.map((col, i) => (
         <div key={i} className="config-editor-array-item">
           <input placeholder="key" value={col.key} onChange={e => update(i, { key: e.target.value })} />
@@ -103,7 +108,7 @@ function ActionsEditor({ actions, onChange }: { actions: ActionDef[]; onChange: 
 
   return (
     <div className="config-editor-field">
-      <label>actions</label>
+      <label>{gridFieldLabel('actions')}</label>
       {actions.map((action, i) => (
         <div key={i} className="config-editor-array-item">
           <input placeholder="label" value={action.label} onChange={e => update(i, { label: e.target.value })} />
@@ -152,67 +157,132 @@ function RawJsonEditor({ label, value, onChange }: { label: string; value: unkno
   );
 }
 
-function DataSourceDropdown({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const isCustom = value !== '' && !GRID_DATA_SOURCES.some(ds => ds.value === value);
-  const [showCustom, setShowCustom] = useState(isCustom);
+function EndpointInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const listId = useId();
+  const { options, loading, error } = useEndpointOptions();
+  const [inputValue, setInputValue] = useState(value);
 
-  if (showCustom) {
-    return (
-      <div className="config-editor-field">
-        <label>endpoint</label>
-        <div style={{ display: 'flex', gap: 4 }}>
-          <input
-            type="text"
-            value={value}
-            onChange={e => onChange(e.target.value)}
-            placeholder="custom endpoint path"
-            style={{ flex: 1 }}
-          />
-          <button
-            type="button"
-            className="config-editor-array-remove"
-            onClick={() => setShowCustom(false)}
-            title="Switch to dropdown"
-          >
-            ↩
-          </button>
-        </div>
-      </div>
-    );
-  }
+  useEffect(() => {
+    setInputValue(value);
+  }, [value]);
 
   return (
     <div className="config-editor-field">
-      <label>endpoint</label>
-      <select
-        value={GRID_DATA_SOURCES.some(ds => ds.value === value) ? value : ''}
+      <label>{gridFieldLabel('endpoint')}</label>
+      <input
+        type="text"
+        list={listId}
+        value={inputValue}
         onChange={e => {
-          if (e.target.value === '__custom__') {
-            setShowCustom(true);
-          } else {
-            onChange(e.target.value);
-          }
+          const rawValue = e.target.value;
+          setInputValue(rawValue);
+          onChange(normalizeGridEndpoint(rawValue));
         }}
-      >
-        <option value="" disabled>Select data source...</option>
-        {GRID_DATA_SOURCES.map(ds => (
-          <option key={ds.value} value={ds.value}>{ds.label}</option>
+        onBlur={() => {
+          const normalized = normalizeGridEndpoint(inputValue);
+          setInputValue(normalized);
+          onChange(normalized);
+        }}
+        placeholder="/api/platform-overview"
+        spellCheck={false}
+      />
+      <datalist id={listId}>
+        {options.map((option) => (
+          <option
+            key={option.value}
+            value={option.value}
+            label={option.description ? `${option.label} — ${option.description}` : option.label}
+          />
         ))}
-        <option value="__custom__">Custom endpoint...</option>
-      </select>
+      </datalist>
+      <div className="config-editor-field__hint">
+        {error
+          ? 'Route suggestions are unavailable right now. You can still enter any readable /api path manually.'
+          : loading
+            ? 'Loading live GET endpoints from the route catalog…'
+            : 'Suggestions come from the live route catalog. You can also type any readable /api path manually.'}
+      </div>
     </div>
   );
 }
 
-export function ConfigEditorPanel({ quadrantId, moduleId, config, focusKey, onSave, onClose }: ConfigEditorPanelProps) {
+function SpanInput({
+  value,
+  options,
+  onChange,
+}: {
+  value: string;
+  options: string[];
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="config-editor-field">
+      <label>{gridFieldLabel('span')}</label>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        disabled={options.length === 0}
+      >
+        {options.map((spanOption) => (
+          <option key={spanOption} value={spanOption}>
+            {gridSpanLabel(spanOption)}
+          </option>
+        ))}
+      </select>
+      <div className="config-editor-field__hint">
+        Resize the module footprint directly from the editor. Only sizes that fit the current grid position are shown.
+      </div>
+    </div>
+  );
+}
+
+function orderConfigKeys(keys: string[]): string[] {
+  const priority = [
+    'title',
+    'label',
+    'placeholder',
+    'subscribeSelection',
+    'publishSelection',
+    'endpoint',
+    'path',
+    'refreshInterval',
+    'columns',
+    'actions',
+  ];
+
+  return [...keys].sort((left, right) => {
+    const leftRank = priority.indexOf(left);
+    const rightRank = priority.indexOf(right);
+    if (leftRank >= 0 || rightRank >= 0) {
+      if (leftRank < 0) return 1;
+      if (rightRank < 0) return -1;
+      return leftRank - rightRank;
+    }
+    return left.localeCompare(right);
+  });
+}
+
+export function ConfigEditorPanel({
+  quadrantId,
+  moduleId,
+  span,
+  availableSpans,
+  config,
+  focusKey,
+  onSave,
+  onClose,
+}: ConfigEditorPanelProps) {
   const [draft, setDraft] = useState<Record<string, unknown>>(() => structuredClone(config));
+  const [draftSpan, setDraftSpan] = useState(span);
 
   useEffect(() => {
     setDraft(structuredClone(config));
-  }, [config, moduleId, quadrantId]);
+    setDraftSpan(span);
+  }, [config, moduleId, quadrantId, span]);
 
   useEffect(() => {
     if (!focusKey) return;
+    if (focusKey === 'span') return;
     setDraft((prev) => {
       if (focusKey in prev) return prev;
       return {
@@ -226,7 +296,7 @@ export function ConfigEditorPanel({ quadrantId, moduleId, config, focusKey, onSa
     setDraft(prev => ({ ...prev, [key]: value }));
   };
 
-  const keys = Object.keys(draft);
+  const keys = useMemo(() => orderConfigKeys(Object.keys(draft)), [draft]);
 
   useEffect(() => {
     if (!focusKey) return;
@@ -238,7 +308,7 @@ export function ConfigEditorPanel({ quadrantId, moduleId, config, focusKey, onSa
       target?.focus();
     }, 40);
     return () => window.clearTimeout(timer);
-  }, [draft, focusKey]);
+  }, [draft, draftSpan, focusKey]);
 
   return (
     <div className="config-editor-panel">
@@ -250,11 +320,18 @@ export function ConfigEditorPanel({ quadrantId, moduleId, config, focusKey, onSa
       </div>
 
       <div className="config-editor-body">
+        <div data-config-key="span">
+          <SpanInput
+            value={draftSpan}
+            options={availableSpans.length > 0 ? availableSpans : [draftSpan]}
+            onChange={setDraftSpan}
+          />
+        </div>
         {keys.map(key => {
           if (key === 'endpoint') {
             return (
               <div key={key} data-config-key={key}>
-                <DataSourceDropdown value={String(draft[key] ?? '')} onChange={v => set(key, v)} />
+                <EndpointInput value={String(draft[key] ?? '')} onChange={v => set(key, v)} />
               </div>
             );
           }
@@ -262,21 +339,21 @@ export function ConfigEditorPanel({ quadrantId, moduleId, config, focusKey, onSa
           if (GRID_TEXT_KEYS.has(key)) {
             return (
               <div key={key} data-config-key={key}>
-                <TextInput label={key} value={String(draft[key] ?? '')} onChange={v => set(key, v)} />
+                <TextInput label={gridFieldLabel(key)} value={String(draft[key] ?? '')} onChange={v => set(key, v)} />
               </div>
             );
           }
           if (GRID_CHART_TYPE_KEYS.has(key)) {
             return (
               <div key={key} data-config-key={key}>
-                <DropdownInput label={key} value={String(draft[key] ?? 'bar')} options={[...GRID_CHART_TYPES]} onChange={v => set(key, v)} />
+                <DropdownInput label={gridFieldLabel(key)} value={String(draft[key] ?? 'bar')} options={[...GRID_CHART_TYPES]} onChange={v => set(key, v)} />
               </div>
             );
           }
           if (key === 'refreshInterval') {
             return (
               <div key={key} data-config-key={key}>
-                <NumberInput label={key} value={Number(draft[key] ?? 0)} onChange={v => set(key, v)} />
+                <NumberInput label={gridFieldLabel(key)} value={Number(draft[key] ?? 0)} onChange={v => set(key, v)} />
               </div>
             );
           }
@@ -298,14 +375,18 @@ export function ConfigEditorPanel({ quadrantId, moduleId, config, focusKey, onSa
           }
           return (
             <div key={key} data-config-key={key}>
-              <RawJsonEditor label={key} value={draft[key]} onChange={v => set(key, v)} />
+              <RawJsonEditor label={gridFieldLabel(key)} value={draft[key]} onChange={v => set(key, v)} />
             </div>
           );
         })}
       </div>
 
       <div className="config-editor-footer">
-        <button type="button" className="config-editor-save" onClick={() => onSave(draft)}>
+        <button
+          type="button"
+          className="config-editor-save"
+          onClick={() => onSave({ config: draft, span: draftSpan })}
+        >
           Save changes
         </button>
       </div>
