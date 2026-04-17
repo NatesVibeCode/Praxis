@@ -189,4 +189,22 @@ describe('MoonBuildPage', () => {
       },
     ]);
   });
+
+  test('explains that free text is enough and offers example prompts in compose mode', async () => {
+    render(
+      <MoonBuildPage
+        workflowId={null}
+        initialMode="compose"
+      />,
+    );
+
+    expect(await screen.findByText(/free text is enough/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /research competitor pricing/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /research competitor pricing/i }));
+
+    expect(screen.getByRole('textbox')).toHaveValue(
+      'Research competitor pricing, classify by tier, draft a comparison report, notify the team on Slack',
+    );
+  });
 });

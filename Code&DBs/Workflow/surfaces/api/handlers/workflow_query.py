@@ -438,6 +438,7 @@ def _trigger_to_dict(row: dict[str, Any]) -> dict[str, Any]:
         "id": row["id"],
         "workflow_id": row["workflow_id"],
         "workflow_name": row.get("workflow_name"),
+        "source_trigger_id": row.get("source_trigger_id"),
         "event_type": row["event_type"],
         "filter": _parse_json_field(row.get("filter")) or {},
         "enabled": bool(row.get("enabled", True)),

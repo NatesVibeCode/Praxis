@@ -459,6 +459,7 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
   }>>([]);
   const [nodeSaveLoading, setNodeSaveLoading] = useState(false);
   const [nodeSaveError, setNodeSaveError] = useState<string | null>(null);
+  const [showAdvancedContractFields, setShowAdvancedContractFields] = useState(false);
 
   const buildNode = node
     ? (buildGraph?.nodes || []).find(graphNode => graphNode.node_id === node.id) || null
@@ -548,6 +549,10 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
   }, [buildEdge, buildGraph, isConditionalEdge]);
   const failureSourceLabel = edgeFromLabel || selectedEdge?.from || 'upstream step';
   const failureTargetLabel = edgeToLabel || selectedEdge?.to || 'failure step';
+
+  useEffect(() => {
+    setShowAdvancedContractFields(false);
+  }, [buildNode?.node_id, selectedEdge?.id]);
 
   const primitiveContractSuggestions = useMemo(
     () =>
@@ -1626,9 +1631,12 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
           {showPrimitiveEditor && (
             <>
               <div className="moon-dock__sep" />
-              <div className="moon-dock__section-label">Block properties</div>
+              <div className="moon-dock__section-label">Step details</div>
               <div className="moon-dock__item-desc" style={{ marginBottom: 8 }}>
                 Route: {triggerRoute || 'Unassigned'}
+              </div>
+              <div className="moon-dock__item-desc" style={{ marginBottom: 10 }}>
+                Write the step in plain English. The prompt is free text; the builder infers the graph shape from your description.
               </div>
               <input
                 className="moon-dock-form__input"
@@ -1648,11 +1656,12 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
 
               {!isTriggerNode && (
                 <>
+                  <div className="moon-dock__section-label" style={{ marginTop: 12 }}>Prompt</div>
                   <textarea
                     className="moon-dock-form__input"
                     value={nodePrompt}
                     onChange={e => setNodePrompt(e.target.value)}
-                    placeholder="System instructions or prompt for the model"
+                    placeholder="Describe what this step should do. Plain English is fine."
                     rows={6}
                     style={{ minHeight: 132, resize: 'vertical' }}
                   />
@@ -1666,33 +1675,53 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
                 </>
               )}
 
-              <div className="moon-dock__section-label" style={{ marginTop: 12 }}>Required inputs</div>
-              <MoonContractStringListField
-                fieldId="moon-node-required-inputs"
-                ariaLabel="Required inputs"
-                inputPlaceholder="e.g. customer_id"
-                suggestions={primitiveContractSuggestions}
-                rows={requiredInputRows}
-                onChange={setRequiredInputRows}
-              />
-              <div className="moon-dock__section-label" style={{ marginTop: 12 }}>Outputs</div>
-              <MoonContractStringListField
-                fieldId="moon-node-outputs"
-                ariaLabel="Outputs"
-                inputPlaceholder="e.g. summary"
-                suggestions={primitiveContractSuggestions}
-                rows={outputRows}
-                onChange={setOutputRows}
-              />
-              <div className="moon-dock__section-label" style={{ marginTop: 12 }}>Persistence targets</div>
-              <MoonContractStringListField
-                fieldId="moon-node-persistence-targets"
-                ariaLabel="Persistence targets"
-                inputPlaceholder="e.g. crm.notes"
-                suggestions={primitiveContractSuggestions}
-                rows={persistenceTargetRows}
-                onChange={setPersistenceTargetRows}
-              />
+              <div className="moon-node-advanced">
+                <button
+                  type="button"
+                  className="moon-node-advanced__toggle"
+                  onClick={() => setShowAdvancedContractFields((current) => !current)}
+                  aria-expanded={showAdvancedContractFields}
+                  aria-controls="moon-node-advanced-contracts"
+                >
+                  <span className="moon-node-advanced__toggle-title">
+                    {showAdvancedContractFields ? 'Hide advanced contract fields' : 'Show advanced contract fields'}
+                  </span>
+                  <span className="moon-node-advanced__toggle-copy">
+                    Required inputs, outputs, and persistence targets stay tucked away unless you need exact control.
+                  </span>
+                </button>
+                {showAdvancedContractFields && (
+                  <div id="moon-node-advanced-contracts" className="moon-node-advanced__body">
+                    <div className="moon-dock__section-label" style={{ marginTop: 0 }}>Required inputs</div>
+                    <MoonContractStringListField
+                      fieldId="moon-node-required-inputs"
+                      ariaLabel="Required inputs"
+                      inputPlaceholder="e.g. customer_id"
+                      suggestions={primitiveContractSuggestions}
+                      rows={requiredInputRows}
+                      onChange={setRequiredInputRows}
+                    />
+                    <div className="moon-dock__section-label" style={{ marginTop: 12 }}>Outputs</div>
+                    <MoonContractStringListField
+                      fieldId="moon-node-outputs"
+                      ariaLabel="Outputs"
+                      inputPlaceholder="e.g. summary"
+                      suggestions={primitiveContractSuggestions}
+                      rows={outputRows}
+                      onChange={setOutputRows}
+                    />
+                    <div className="moon-dock__section-label" style={{ marginTop: 12 }}>Persistence targets</div>
+                    <MoonContractStringListField
+                      fieldId="moon-node-persistence-targets"
+                      ariaLabel="Persistence targets"
+                      inputPlaceholder="e.g. crm.notes"
+                      suggestions={primitiveContractSuggestions}
+                      rows={persistenceTargetRows}
+                      onChange={setPersistenceTargetRows}
+                    />
+                  </div>
+                )}
+              </div>
 
               {isNotificationRoute && (
                 <>
@@ -1861,7 +1890,7 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
                 onClick={handleSaveNodePrimitive}
                 disabled={nodeSaveLoading || !buildGraph || !canCommitGraph}
               >
-                {nodeSaveLoading ? <><span className="moon-spinner" /> Saving...</> : 'Save block properties'}
+                {nodeSaveLoading ? <><span className="moon-spinner" /> Saving...</> : 'Save step'}
               </button>
               {nodeSaveError && <div className="moon-dock-form__error">{nodeSaveError}</div>}
             </>

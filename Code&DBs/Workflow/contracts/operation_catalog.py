@@ -9,7 +9,7 @@ from typing import Any
 OPERATION_CATALOG_CONTRACT_VERSION = 1
 OPERATION_CATALOG_QUERY_PATH = "/api/catalog/operations"
 OPERATION_KINDS = frozenset({"command", "query"})
-OPERATION_SOURCE_KINDS = frozenset({"cqrs_command", "cqrs_query"})
+OPERATION_SOURCE_KINDS = frozenset({"operation_command", "operation_query"})
 OPERATION_POSTURES = frozenset({"observe", "operate", "build"})
 OPERATION_IDEMPOTENCY_POLICIES = frozenset({"non_idempotent", "idempotent", "read_only"})
 

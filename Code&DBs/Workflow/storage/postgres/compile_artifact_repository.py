@@ -346,3 +346,137 @@ class PostgresCompileArtifactRepository:
             _require_text(packet_revision, field_name="packet_revision"),
         )
         return [dict(row) for row in rows or ()]
+
+    def load_compile_artifact_by_revision(
+        self,
+        *,
+        artifact_kind: str,
+        revision_ref: str,
+    ) -> dict[str, Any] | None:
+        rows = self._conn.execute(
+            """
+            SELECT
+                compile_artifact_id,
+                artifact_kind,
+                artifact_ref,
+                revision_ref,
+                parent_artifact_ref,
+                input_fingerprint,
+                content_hash,
+                authority_refs,
+                payload,
+                decision_ref,
+                created_at
+            FROM compile_artifacts
+            WHERE artifact_kind = $1
+              AND revision_ref = $2
+            ORDER BY created_at DESC, compile_artifact_id DESC
+            LIMIT 1
+            """,
+            _require_text(artifact_kind, field_name="artifact_kind"),
+            _require_text(revision_ref, field_name="revision_ref"),
+        )
+        rows = list(rows or ())
+        return dict(rows[0]) if rows else None
+
+    def load_compile_artifact_history(
+        self,
+        *,
+        artifact_kind: str,
+        artifact_ref: str | None = None,
+        input_fingerprint: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        clauses = ["artifact_kind = $1"]
+        params: list[Any] = [_require_text(artifact_kind, field_name="artifact_kind")]
+        if artifact_ref is not None:
+            params.append(_require_text(artifact_ref, field_name="artifact_ref"))
+            clauses.append(f"artifact_ref = ${len(params)}")
+        if input_fingerprint is not None:
+            params.append(_require_text(input_fingerprint, field_name="input_fingerprint"))
+            clauses.append(f"input_fingerprint = ${len(params)}")
+        params.append(_require_positive_int(limit, field_name="limit"))
+        rows = self._conn.execute(
+            f"""
+            SELECT
+                compile_artifact_id,
+                artifact_kind,
+                artifact_ref,
+                revision_ref,
+                parent_artifact_ref,
+                input_fingerprint,
+                content_hash,
+                authority_refs,
+                payload,
+                decision_ref,
+                created_at
+            FROM compile_artifacts
+            WHERE {" AND ".join(clauses)}
+            ORDER BY created_at DESC, compile_artifact_id DESC
+            LIMIT ${len(params)}
+            """,
+            *params,
+        )
+        return [dict(row) for row in rows or ()]
+
+    def load_compile_artifact_lineage(
+        self,
+        *,
+        artifact_kind: str,
+        revision_ref: str,
+    ) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            """
+            WITH RECURSIVE lineage AS (
+                SELECT
+                compile_artifact_id,
+                artifact_kind,
+                artifact_ref,
+                revision_ref,
+                parent_artifact_ref,
+                input_fingerprint,
+                content_hash,
+                authority_refs,
+                payload,
+                decision_ref,
+                created_at
+            FROM compile_artifacts
+            WHERE artifact_kind = $1
+              AND revision_ref = $2
+            UNION ALL
+            SELECT
+                parent.compile_artifact_id,
+                parent.artifact_kind,
+                parent.artifact_ref,
+                parent.revision_ref,
+                parent.parent_artifact_ref,
+                parent.input_fingerprint,
+                parent.content_hash,
+                parent.authority_refs,
+                parent.payload,
+                parent.decision_ref,
+                parent.created_at
+            FROM compile_artifacts parent
+            JOIN lineage child
+              ON parent.artifact_kind = child.artifact_kind
+             AND parent.artifact_ref = child.parent_artifact_ref
+            )
+            SELECT
+                compile_artifact_id,
+                artifact_kind,
+                artifact_ref,
+                revision_ref,
+                parent_artifact_ref,
+                input_fingerprint,
+                content_hash,
+                authority_refs,
+                payload,
+                decision_ref,
+                created_at
+            FROM lineage
+            ORDER BY created_at ASC, compile_artifact_id ASC
+            """,
+            _require_text(artifact_kind, field_name="artifact_kind"),
+            _require_text(revision_ref, field_name="revision_ref"),
+        )
+        return [dict(row) for row in rows or ()]

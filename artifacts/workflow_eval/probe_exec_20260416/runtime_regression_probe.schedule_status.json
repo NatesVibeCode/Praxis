@@ -1,7 +1,7 @@
 {
   "review_type": "probe_schedule_status",
   "reviewed_at": "2026-04-16T22:39:37.386403+00:00",
-  "probe_id": "agent_handoff_search_db_probe",
+  "probe_id": "runtime_regression_probe",
   "regular_outputs_enabled": false,
   "regular_outputs_proven": false,
   "scheduler_config_candidates": [

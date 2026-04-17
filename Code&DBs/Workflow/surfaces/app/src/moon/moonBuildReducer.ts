@@ -78,10 +78,10 @@ export function moonBuildReducer(state: MoonBuildState, action: MoonBuildAction)
         ...state,
         selectedNodeId: action.nodeId,
         selectedEdgeId: null,
-        popoutOpen: action.nodeId !== null,
+        popoutOpen: action.nodeId !== null && state.openDock === null && !state.releaseOpen,
       };
     case 'SELECT_EDGE':
-      return { ...state, selectedEdgeId: action.edgeId, selectedNodeId: null, popoutOpen: action.edgeId !== null };
+      return { ...state, selectedEdgeId: action.edgeId, selectedNodeId: null, popoutOpen: false };
     case 'SET_ACTIVE':
       return { ...state, activeNodeId: action.nodeId, advanceQueued: false };
     case 'ADVANCE_ACTIVE':
@@ -90,15 +90,15 @@ export function moonBuildReducer(state: MoonBuildState, action: MoonBuildAction)
         activeNodeId: action.nextUnresolvedId,
         selectedNodeId: action.nextUnresolvedId,
         selectedEdgeId: null,
-        popoutOpen: action.nextUnresolvedId !== null,
+        popoutOpen: action.nextUnresolvedId !== null && state.openDock === null && !state.releaseOpen,
         advanceQueued: false,
       };
     case 'OPEN_DOCK':
-      return { ...state, openDock: action.dock, releaseOpen: false };
+      return { ...state, openDock: action.dock, releaseOpen: false, popoutOpen: false };
     case 'CLOSE_DOCK':
       return { ...state, openDock: null };
     case 'TOGGLE_RELEASE':
-      return { ...state, releaseOpen: !state.releaseOpen, openDock: null };
+      return { ...state, releaseOpen: !state.releaseOpen, openDock: null, popoutOpen: false };
     case 'OPEN_POPOUT':
       return { ...state, popoutOpen: true };
     case 'CLOSE_POPOUT':

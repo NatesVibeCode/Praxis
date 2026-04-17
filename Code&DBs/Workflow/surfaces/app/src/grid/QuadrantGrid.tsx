@@ -127,6 +127,7 @@ export function QuadrantGrid({
   const occupied = getOccupiedCells(manifest.quadrants);
   const [editingQuadrant, setEditingQuadrant] = useState<{ quadrantId: string; focusKey?: string | null } | null>(null);
   const [showPalette, setShowPalette] = useState(false);
+  const [showAuditLog, setShowAuditLog] = useState(false);
   const [justPlaced, setJustPlaced] = useState<string | null>(null);
   const [actionMenu, setActionMenu] = useState<{
     anchorRect: DOMRect | null;
@@ -135,6 +136,15 @@ export function QuadrantGrid({
     moduleType: string;
   } | null>(null);
   const { show } = useToast();
+
+  useEffect(() => {
+    if (!showAuditLog) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setShowAuditLog(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showAuditLog]);
 
   const applyQuadrantMutation = useCallback((details: {
     label: string;
@@ -414,36 +424,40 @@ export function QuadrantGrid({
             {manifest.title}
           </h1>
         )}
-        <button
-          type="button"
-          onClick={() => setShowPalette(true)}
-          style={{
-            background: 'var(--accent)',
-            color: 'var(--text-inverse)',
-            border: 'none',
-            borderRadius: '50%',
-            width: 28,
-            height: 28,
-            fontSize: 20,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'pointer',
-            padding: 0,
-            lineHeight: 1
-          }}
-          title="Add Module"
-        >
-          +
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
+          <button
+            type="button"
+            onClick={() => setShowAuditLog(true)}
+            className="grid-audit-trigger"
+          >
+            Audit log
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowPalette(true)}
+            style={{
+              background: 'var(--accent)',
+              color: 'var(--text-inverse)',
+              border: 'none',
+              borderRadius: '50%',
+              width: 28,
+              height: 28,
+              fontSize: 20,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              padding: 0,
+              lineHeight: 1,
+            }}
+            title="Add Module"
+          >
+            +
+          </button>
+        </div>
       </div>
 
       <SaveLayoutBar manifest={initialManifest} saveTarget={saveTarget} />
-      <UiActionFeed
-        surface="grid"
-        scope={GRID_UNDO_SCOPE}
-        subtitle="Latest grid actions with their authority, reason, outcome, and recovery status."
-      />
 
       <ModulePalette isOpen={showPalette} onClose={() => setShowPalette(false)} startDrag={startDrag} />
 
@@ -629,6 +643,46 @@ export function QuadrantGrid({
           }}
           onRemoveModule={() => removeQuadrant(actionMenu.quadrantId)}
         />
+      )}
+      {showAuditLog && (
+        <div
+          className="grid-audit-overlay"
+          role="presentation"
+          onClick={() => setShowAuditLog(false)}
+        >
+          <div
+            className="grid-audit-drawer"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Audit log"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="grid-audit-drawer__header">
+              <div>
+                <div className="grid-audit-drawer__kicker">Audit log</div>
+                <div className="grid-audit-drawer__title">Recent control actions</div>
+              </div>
+              <button
+                type="button"
+                className="grid-audit-drawer__close"
+                onClick={() => setShowAuditLog(false)}
+              >
+                Close
+              </button>
+            </div>
+            <div className="grid-audit-drawer__body">
+              <UiActionFeed
+                surface="grid"
+                scope={GRID_UNDO_SCOPE}
+                title="Audit log"
+                subtitle="Captured control actions, outcomes, and undo state."
+                variant="compact"
+                maxVisibleEntries={5}
+                maxHeight="100%"
+              />
+            </div>
+          </div>
+        </div>
       )}
       <Toast />
       <DetailSlidePanel />

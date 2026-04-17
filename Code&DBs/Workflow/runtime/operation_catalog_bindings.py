@@ -18,11 +18,20 @@ class OperationBindingResolutionError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class ResolvedHttpOperationBinding:
+    operation_ref: str
     operation_name: str
+    source_kind: str
+    operation_kind: str
     http_method: str
     http_path: str
     command_class: type[BaseModel]
     handler: Callable[..., Any]
+    authority_ref: str
+    projection_ref: str | None
+    posture: str
+    idempotency_policy: str
+    binding_revision: str
+    decision_ref: str
     summary: str
 
 
@@ -93,11 +102,20 @@ def resolve_http_operation_binding(
     definition: ResolvedOperationDefinition,
 ) -> ResolvedHttpOperationBinding:
     return ResolvedHttpOperationBinding(
+        operation_ref=definition.operation_ref,
         operation_name=definition.operation_name,
+        source_kind=definition.source_kind,
+        operation_kind=definition.operation_kind,
         http_method=definition.http_method,
         http_path=definition.http_path,
         command_class=_resolve_command_class(definition.input_model_ref),
         handler=_resolve_handler(definition.handler_ref),
+        authority_ref=definition.authority_ref,
+        projection_ref=definition.projection_ref,
+        posture=definition.posture,
+        idempotency_policy=definition.idempotency_policy,
+        binding_revision=definition.binding_revision,
+        decision_ref=definition.decision_ref,
         summary=definition.operation_name,
     )
 

@@ -43,87 +43,93 @@ export function DataTable({ columns, data, onRowClick, selectedIndex }: DataTabl
   }
 
   return (
-    <table style={{
-      width: '100%', borderCollapse: 'collapse', fontSize: 13,
-      color: 'var(--text, #e6edf3)',
-    }}>
-      <thead>
-        <tr>
-          {columns.map((col) => (
-            <th
-              key={col.key}
-              onClick={col.sortable !== false ? () => handleSort(col.key) : undefined}
-              style={{
-                padding: '8px 12px',
-                textAlign: 'left',
-                fontWeight: 600,
-                fontSize: 12,
-                color: 'var(--text-muted, #8b949e)',
-                borderBottom: '1px solid var(--border, #30363d)',
-                cursor: col.sortable !== false ? 'pointer' : 'default',
-                userSelect: 'none',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {col.label ?? col.key}
-              {sortKey === col.key && (
-                <span style={{ marginLeft: 4 }}>{sortDir === 'asc' ? '↑' : '↓'}</span>
-              )}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {sorted.length === 0 ? (
+    <div style={{ width: '100%', overflowX: 'auto', boxSizing: 'border-box' }}>
+      <table style={{
+        width: '100%',
+        tableLayout: 'fixed',
+        borderCollapse: 'collapse',
+        fontSize: 13,
+        color: 'var(--text, #e6edf3)',
+      }}>
+        <thead>
           <tr>
-            <td
-              colSpan={columns.length}
-              style={{ padding: '16px 12px', color: 'var(--text-muted, #8b949e)', textAlign: 'center' }}
-            >
-              No data
-            </td>
+            {columns.map((col) => (
+              <th
+                key={col.key}
+                onClick={col.sortable !== false ? () => handleSort(col.key) : undefined}
+                style={{
+                  padding: '8px 12px',
+                  textAlign: 'left',
+                  fontWeight: 600,
+                  fontSize: 12,
+                  color: 'var(--text-muted, #8b949e)',
+                  borderBottom: '1px solid var(--border, #30363d)',
+                  cursor: col.sortable !== false ? 'pointer' : 'default',
+                  userSelect: 'none',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+              >
+                {col.label ?? col.key}
+                {sortKey === col.key && (
+                  <span style={{ marginLeft: 4 }}>{sortDir === 'asc' ? '↑' : '↓'}</span>
+                )}
+              </th>
+            ))}
           </tr>
-        ) : (
-          sorted.map((row, i) => (
-            <tr
-              key={i}
-              onClick={() => onRowClick?.(row, i)}
-              style={{
-                background: selectedIndex === i
-                  ? 'var(--bg-selected, rgba(88,166,255,0.1))'
-                  : 'transparent',
-                cursor: onRowClick ? 'pointer' : 'default',
-                borderBottom: '1px solid var(--border, #21262d)',
-              }}
-              onMouseEnter={(e) => {
-                if (selectedIndex !== i) {
-                  (e.currentTarget as HTMLTableRowElement).style.background = 'var(--bg-hover, rgba(255,255,255,0.04))';
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (selectedIndex !== i) {
-                  (e.currentTarget as HTMLTableRowElement).style.background = 'transparent';
-                }
-              }}
-            >
-              {columns.map((col) => (
-                <td
-                  key={col.key}
-                  style={{
-                    padding: '8px 12px',
-                    maxWidth: 240,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {String(row[col.key] ?? '')}
-                </td>
-              ))}
+        </thead>
+        <tbody>
+          {sorted.length === 0 ? (
+            <tr>
+              <td
+                colSpan={columns.length}
+                style={{ padding: '16px 12px', color: 'var(--text-muted, #8b949e)', textAlign: 'center' }}
+              >
+                No data
+              </td>
             </tr>
-          ))
-        )}
-      </tbody>
-    </table>
+          ) : (
+            sorted.map((row, i) => (
+              <tr
+                key={i}
+                onClick={() => onRowClick?.(row, i)}
+                style={{
+                  background: selectedIndex === i
+                    ? 'var(--bg-selected, rgba(88,166,255,0.1))'
+                    : 'transparent',
+                  cursor: onRowClick ? 'pointer' : 'default',
+                  borderBottom: '1px solid var(--border, #21262d)',
+                }}
+                onMouseEnter={(e) => {
+                  if (selectedIndex !== i) {
+                    (e.currentTarget as HTMLTableRowElement).style.background = 'var(--bg-hover, rgba(255,255,255,0.04))';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (selectedIndex !== i) {
+                    (e.currentTarget as HTMLTableRowElement).style.background = 'transparent';
+                  }
+                }}
+              >
+                {columns.map((col) => (
+                  <td
+                    key={col.key}
+                    style={{
+                      padding: '8px 12px',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {String(row[col.key] ?? '')}
+                  </td>
+                ))}
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
+    </div>
   );
 }

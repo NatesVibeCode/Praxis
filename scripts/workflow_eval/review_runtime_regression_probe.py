@@ -232,7 +232,7 @@ def build_reviews(contract_path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Deterministically review the agent handoff probe outputs.",
+        description="Deterministically review the runtime regression probe outputs.",
     )
     parser.add_argument(
         "--contract",

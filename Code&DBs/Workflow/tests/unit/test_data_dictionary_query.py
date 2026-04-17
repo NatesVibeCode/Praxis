@@ -3,8 +3,10 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from runtime.cqrs import CommandBus
-from runtime.cqrs.queries.data_dictionary import QueryDataDictionary
+from runtime.operations.queries.data_dictionary import (
+    QueryDataDictionary,
+    handle_query_data_dictionary,
+)
 
 
 class _MockConn:
@@ -62,7 +64,7 @@ def _table_row(
     }
 
 
-def test_cqrs_query_data_dictionary_dispatch_returns_versioned_contract() -> None:
+def test_operation_query_data_dictionary_dispatch_returns_versioned_contract() -> None:
     conn = _MockConn(
         entity_rows=[
             _table_row(
@@ -87,9 +89,10 @@ def test_cqrs_query_data_dictionary_dispatch_returns_versioned_contract() -> Non
             }
         ],
     )
-    bus = CommandBus(_MockSubsystems(conn))
-
-    result = bus.dispatch(QueryDataDictionary(table_name="orders"))
+    result = handle_query_data_dictionary(
+        QueryDataDictionary(table_name="orders"),
+        _MockSubsystems(conn),
+    )
 
     assert result["routed_to"] == "data_dictionary"
     assert result["contract_version"] == 1
@@ -129,9 +132,10 @@ def test_query_data_dictionary_missing_match_keeps_contract_and_projection_fresh
         ],
         edge_rows=[],
     )
-    bus = CommandBus(_MockSubsystems(conn))
-
-    result = bus.dispatch(QueryDataDictionary(table_name="payments"))
+    result = handle_query_data_dictionary(
+        QueryDataDictionary(table_name="payments"),
+        _MockSubsystems(conn),
+    )
 
     assert result["scope"] == "missing"
     assert result["contract_version"] == 1

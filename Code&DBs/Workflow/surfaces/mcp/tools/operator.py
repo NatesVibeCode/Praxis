@@ -4,10 +4,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from surfaces.api import operator_read, operator_write
+from runtime.operation_catalog_gateway import execute_operation_from_subsystems
 from surfaces.api.handlers import workflow_query_core
-from runtime.cqrs import CommandBus
-from runtime.cqrs.queries.roadmap_tree import QueryRoadmapTree
 from storage.postgres.workflow_runtime_repository import reset_observability_metrics
 
 from ..subsystems import _subs
@@ -172,24 +170,28 @@ def tool_praxis_operator_view(params: dict) -> dict:
 def tool_praxis_operator_write(params: dict) -> dict:
     """Preview, validate, or commit roadmap rows through the shared operator-write gate."""
 
-    return operator_write.roadmap_write(
-        action=params.get("action", "preview"),
-        title=params.get("title", ""),
-        intent_brief=params.get("intent_brief", ""),
-        template=params.get("template", "single_capability"),
-        priority=params.get("priority", "p2"),
-        parent_roadmap_item_id=params.get("parent_roadmap_item_id"),
-        slug=params.get("slug"),
-        depends_on=params.get("depends_on"),
-        source_bug_id=params.get("source_bug_id"),
-        registry_paths=params.get("registry_paths"),
-        decision_ref=params.get("decision_ref"),
-        item_kind=params.get("item_kind"),
-        tier=params.get("tier"),
-        phase_ready=params.get("phase_ready"),
-        approval_tag=params.get("approval_tag"),
-        reference_doc=params.get("reference_doc"),
-        outcome_gate=params.get("outcome_gate"),
+    return execute_operation_from_subsystems(
+        _subs,
+        operation_name="operator.roadmap_write",
+        payload={
+            "action": params.get("action", "preview"),
+            "title": params.get("title", ""),
+            "intent_brief": params.get("intent_brief", ""),
+            "template": params.get("template", "single_capability"),
+            "priority": params.get("priority", "p2"),
+            "parent_roadmap_item_id": params.get("parent_roadmap_item_id"),
+            "slug": params.get("slug"),
+            "depends_on": params.get("depends_on"),
+            "source_bug_id": params.get("source_bug_id"),
+            "registry_paths": params.get("registry_paths"),
+            "decision_ref": params.get("decision_ref"),
+            "item_kind": params.get("item_kind"),
+            "tier": params.get("tier"),
+            "phase_ready": params.get("phase_ready"),
+            "approval_tag": params.get("approval_tag"),
+            "reference_doc": params.get("reference_doc"),
+            "outcome_gate": params.get("outcome_gate"),
+        },
     )
 
 
@@ -197,9 +199,10 @@ def tool_praxis_operator_decisions(params: dict) -> dict:
     """Record or list canonical operator decisions through operator_decisions."""
 
     action = str(params.get("action") or "list").strip().lower()
+    control = OperatorControlFrontdoor()
     if action == "list":
         as_of = params.get("as_of")
-        return operator_write.list_operator_decisions(
+        return control.list_operator_decisions(
             decision_kind=params.get("decision_kind"),
             decision_scope_kind=params.get("decision_scope_kind"),
             decision_scope_ref=params.get("decision_scope_ref"),
@@ -214,7 +217,7 @@ def tool_praxis_operator_decisions(params: dict) -> dict:
         return {"error": "Unknown action. Supported actions: list, record"}
     effective_from = params.get("effective_from")
     effective_to = params.get("effective_to")
-    return operator_write.record_operator_decision(
+    return control.record_operator_decision(
         decision_key=str(params.get("decision_key") or ""),
         decision_kind=str(params.get("decision_kind") or ""),
         decision_status=str(params.get("decision_status") or "decided"),
@@ -241,8 +244,9 @@ def tool_praxis_operator_relations(params: dict) -> dict:
     """Record canonical functional areas and cross-object semantic relations."""
 
     action = str(params.get("action") or "").strip().lower()
+    control = OperatorControlFrontdoor()
     if action == "record_functional_area":
-        return operator_write.record_functional_area(
+        return control.record_functional_area(
             area_slug=str(params.get("area_slug") or ""),
             title=str(params.get("title") or ""),
             summary=str(params.get("summary") or ""),
@@ -251,7 +255,7 @@ def tool_praxis_operator_relations(params: dict) -> dict:
             updated_at=params.get("updated_at"),
         )
     if action == "record_relation":
-        return operator_write.record_operator_object_relation(
+        return control.record_operator_object_relation(
             relation_kind=str(params.get("relation_kind") or ""),
             source_kind=str(params.get("source_kind") or ""),
             source_ref=str(params.get("source_ref") or ""),
@@ -273,21 +277,25 @@ def tool_praxis_operator_relations(params: dict) -> dict:
 def tool_praxis_operator_native_primary_cutover_gate(params: dict) -> dict:
     """Admit one native primary cutover gate through operator-control persistence."""
 
-    return operator_write.admit_native_primary_cutover_gate(
-        decided_by=params.get("decided_by", ""),
-        decision_source=params.get("decision_source", ""),
-        rationale=params.get("rationale", ""),
-        roadmap_item_id=params.get("roadmap_item_id"),
-        workflow_class_id=params.get("workflow_class_id"),
-        schedule_definition_id=params.get("schedule_definition_id"),
-        title=params.get("title"),
-        gate_name=params.get("gate_name"),
-        gate_policy=params.get("gate_policy"),
-        required_evidence=params.get("required_evidence"),
-        decided_at=params.get("decided_at"),
-        opened_at=params.get("opened_at"),
-        created_at=params.get("created_at"),
-        updated_at=params.get("updated_at"),
+    return execute_operation_from_subsystems(
+        _subs,
+        operation_name="operator.native_primary_cutover_gate",
+        payload={
+            "decided_by": params.get("decided_by", ""),
+            "decision_source": params.get("decision_source", ""),
+            "rationale": params.get("rationale", ""),
+            "roadmap_item_id": params.get("roadmap_item_id"),
+            "workflow_class_id": params.get("workflow_class_id"),
+            "schedule_definition_id": params.get("schedule_definition_id"),
+            "title": params.get("title"),
+            "gate_name": params.get("gate_name"),
+            "gate_policy": params.get("gate_policy"),
+            "required_evidence": params.get("required_evidence"),
+            "decided_at": params.get("decided_at"),
+            "opened_at": params.get("opened_at"),
+            "created_at": params.get("created_at"),
+            "updated_at": params.get("updated_at"),
+        },
     )
 
 
@@ -299,7 +307,7 @@ def tool_praxis_operator_architecture_policy(params: dict) -> dict:
     decided_at = params.get("decided_at")
     created_at = params.get("created_at")
     updated_at = params.get("updated_at")
-    return operator_write.record_architecture_policy_decision(
+    return OperatorControlFrontdoor().record_architecture_policy_decision(
         authority_domain=params.get("authority_domain", ""),
         policy_slug=params.get("policy_slug", ""),
         title=params.get("title", ""),
@@ -337,10 +345,14 @@ def tool_praxis_operator_architecture_policy(params: dict) -> dict:
 def tool_praxis_operator_closeout(params: dict) -> dict:
     """Preview or commit proof-backed bug and roadmap closeout through the shared gate."""
 
-    return operator_write.reconcile_work_item_closeout(
-        action=params.get("action", "preview"),
-        bug_ids=params.get("bug_ids"),
-        roadmap_item_ids=params.get("roadmap_item_ids"),
+    return execute_operation_from_subsystems(
+        _subs,
+        operation_name="operator.work_item_closeout",
+        payload={
+            "action": params.get("action", "preview"),
+            "bug_ids": params.get("bug_ids"),
+            "roadmap_item_ids": params.get("roadmap_item_ids"),
+        },
     )
 
 
@@ -364,15 +376,17 @@ def tool_praxis_operator_roadmap_view(params: dict) -> dict:
         if not rows:
             return {"error": "root_roadmap_item_id is required and no roadmap roots were found"}
         root_roadmap_item_id = str(rows[0].get("roadmap_item_id") or "").strip()
-        if not root_roadmap_item_id:
-            return {"error": "failed to resolve a default roadmap root"}
+    if not root_roadmap_item_id:
+        return {"error": "failed to resolve a default roadmap root"}
 
-    semantic_neighbor_limit = params.get("semantic_neighbor_limit", 5)
-    command = QueryRoadmapTree(
-        root_roadmap_item_id=root_roadmap_item_id,
-        semantic_neighbor_limit=semantic_neighbor_limit,
+    return execute_operation_from_subsystems(
+        _subs,
+        operation_name="operator.roadmap_tree",
+        payload={
+            "root_roadmap_item_id": root_roadmap_item_id,
+            "semantic_neighbor_limit": int(params.get("semantic_neighbor_limit", 5) or 5),
+        },
     )
-    return CommandBus(_subs).dispatch(command)
 
 
 def tool_praxis_circuits(params: dict) -> dict:
@@ -462,7 +476,7 @@ def tool_praxis_circuits(params: dict) -> dict:
 
     effective_to = params.get("effective_to")
     effective_from = params.get("effective_from")
-    return operator_write.set_circuit_breaker_override(
+    return OperatorControlFrontdoor().set_circuit_breaker_override(
         provider_slug=provider_slug,
         override_state={
             "open": "open",

@@ -59,6 +59,8 @@ class PostgresUploadedFileRepository:
         scope: str | None = None,
         workflow_id: str | None = None,
         step_id: str | None = None,
+        query: str | None = None,
+        limit: int = 100,
     ) -> list[dict[str, Any]]:
         conditions: list[str] = []
         params: list[Any] = []
@@ -76,16 +78,24 @@ class PostgresUploadedFileRepository:
             conditions.append(f"step_id = ${index}")
             params.append(_require_text(step_id, field_name="step_id"))
             index += 1
+        if query:
+            conditions.append(
+                f"(filename ILIKE ${index} OR COALESCE(description, '') ILIKE ${index})"
+            )
+            params.append(f"%{_require_text(query, field_name='query')}%")
+            index += 1
 
         where = " AND ".join(conditions) if conditions else "1=1"
+        limit_value = int(limit) if int(limit) > 0 else 100
         rows = self._conn.execute(
             f"""SELECT id, filename, content_type, size_bytes, scope, workflow_id,
                       step_id, description, created_at
                FROM uploaded_files
                WHERE {where}
                ORDER BY created_at DESC
-               LIMIT 100""",
+               LIMIT ${index}""",
             *params,
+            limit_value,
         )
         result: list[dict[str, Any]] = []
         for row in rows or []:
@@ -97,10 +107,18 @@ class PostgresUploadedFileRepository:
 
     def load_uploaded_file(self, *, file_id: str) -> dict[str, Any] | None:
         row = self._fetchrow_compat(
-            "SELECT storage_path, content_type, filename FROM uploaded_files WHERE id = $1",
+            """SELECT id, filename, content_type, size_bytes, storage_path,
+                      scope, workflow_id, step_id, description, created_at
+               FROM uploaded_files
+               WHERE id = $1""",
             _require_text(file_id, field_name="file_id"),
         )
-        return _row_dict(row)
+        item = _row_dict(row)
+        if item is None:
+            return None
+        if item.get("created_at") is not None:
+            item["created_at"] = item["created_at"].isoformat()
+        return item
 
     def delete_uploaded_file(self, *, file_id: str) -> dict[str, Any] | None:
         row = self._fetchrow_compat(

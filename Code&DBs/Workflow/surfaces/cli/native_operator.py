@@ -22,14 +22,13 @@ from pathlib import Path
 from typing import TextIO
 
 from observability import graph_lineage_run, graph_topology_run
+from runtime import operation_catalog_gateway
 from runtime.execution.orchestrator import RuntimeOrchestrator
 from runtime.instance import resolve_native_instance
 from registry.provider_onboarding import load_provider_onboarding_spec_from_file, run_provider_onboarding
 from storage.postgres import PostgresEvidenceReader
 from surfaces.api import frontdoor
 from surfaces.api import native_operator_surface
-from surfaces.api import operator_read
-from surfaces.api import operator_write
 from surfaces.api.operator_read import run_native_self_hosted_smoke
 from surfaces._workflow_database import workflow_database_env_for_repo
 
@@ -807,59 +806,71 @@ def main(
     if isinstance(command, RouteDisableCommand):
         _emit_json(
             stdout,
-            operator_write.set_task_route_eligibility_window(
-                provider_slug=command.provider_slug,
-                eligibility_status="rejected",
-                effective_to=command.effective_to,
-                task_type=command.task_type,
-                model_slug=command.model_slug,
-                reason_code=command.reason_code,
-                rationale=command.rationale,
-                decision_ref=command.decision_ref,
+            operation_catalog_gateway.execute_operation_from_env(
                 env=source,
+                operation_name="operator.task_route_eligibility",
+                payload={
+                    "provider_slug": command.provider_slug,
+                    "eligibility_status": "rejected",
+                    "effective_to": command.effective_to,
+                    "task_type": command.task_type,
+                    "model_slug": command.model_slug,
+                    "reason_code": command.reason_code,
+                    "rationale": command.rationale,
+                    "decision_ref": command.decision_ref,
+                },
             ),
         )
         return 0
     if isinstance(command, RoadmapWriteCommand):
         _emit_json(
             stdout,
-            operator_write.roadmap_write(
-                action=command.action,
-                title=command.title,
-                intent_brief=command.intent_brief,
-                template=command.template,
-                priority=command.priority,
-                parent_roadmap_item_id=command.parent_roadmap_item_id,
-                slug=command.slug,
-                depends_on=command.depends_on,
-                source_bug_id=command.source_bug_id,
-                registry_paths=command.registry_paths,
-                decision_ref=command.decision_ref,
-                item_kind=command.item_kind,
-                tier=command.tier,
-                phase_ready=command.phase_ready,
-                approval_tag=command.approval_tag,
-                reference_doc=command.reference_doc,
-                outcome_gate=command.outcome_gate,
+            operation_catalog_gateway.execute_operation_from_env(
                 env=source,
+                operation_name="operator.roadmap_write",
+                payload={
+                    "action": command.action,
+                    "title": command.title,
+                    "intent_brief": command.intent_brief,
+                    "template": command.template,
+                    "priority": command.priority,
+                    "parent_roadmap_item_id": command.parent_roadmap_item_id,
+                    "slug": command.slug,
+                    "depends_on": command.depends_on,
+                    "source_bug_id": command.source_bug_id,
+                    "registry_paths": command.registry_paths,
+                    "decision_ref": command.decision_ref,
+                    "item_kind": command.item_kind,
+                    "tier": command.tier,
+                    "phase_ready": command.phase_ready,
+                    "approval_tag": command.approval_tag,
+                    "reference_doc": command.reference_doc,
+                    "outcome_gate": command.outcome_gate,
+                },
             ),
         )
         return 0
     if isinstance(command, WorkItemCloseoutCommand):
         _emit_json(
             stdout,
-            operator_write.reconcile_work_item_closeout(
-                action=command.action,
-                bug_ids=command.bug_ids,
-                roadmap_item_ids=command.roadmap_item_ids,
+            operation_catalog_gateway.execute_operation_from_env(
                 env=source,
+                operation_name="operator.work_item_closeout",
+                payload={
+                    "action": command.action,
+                    "bug_ids": command.bug_ids,
+                    "roadmap_item_ids": command.roadmap_item_ids,
+                },
             ),
         )
         return 0
     if isinstance(command, RoadmapViewCommand):
-        payload = operator_read.query_roadmap_tree(
-            root_roadmap_item_id=command.root_roadmap_item_id,
+        payload = operation_catalog_gateway.execute_operation_from_env(
             env=source,
+            operation_name="operator.roadmap_tree",
+            payload={
+                "root_roadmap_item_id": command.root_roadmap_item_id,
+            },
         )
         if command.as_json:
             _emit_json(stdout, payload)
@@ -889,29 +900,32 @@ def main(
     if isinstance(command, NativePrimaryCutoverGateCommand):
         _emit_json(
             stdout,
-            operator_write.admit_native_primary_cutover_gate(
-                decided_by=command.decided_by,
-                decision_source=command.decision_source,
-                rationale=command.rationale,
-                roadmap_item_id=command.roadmap_item_id,
-                workflow_class_id=command.workflow_class_id,
-                schedule_definition_id=command.schedule_definition_id,
-                title=command.title,
-                gate_name=command.gate_name,
-                gate_policy=command.gate_policy,
-                required_evidence=command.required_evidence,
-                decided_at=command.decided_at,
-                opened_at=command.opened_at,
-                created_at=command.created_at,
-                updated_at=command.updated_at,
+            operation_catalog_gateway.execute_operation_from_env(
                 env=source,
+                operation_name="operator.native_primary_cutover_gate",
+                payload={
+                    "decided_by": command.decided_by,
+                    "decision_source": command.decision_source,
+                    "rationale": command.rationale,
+                    "roadmap_item_id": command.roadmap_item_id,
+                    "workflow_class_id": command.workflow_class_id,
+                    "schedule_definition_id": command.schedule_definition_id,
+                    "title": command.title,
+                    "gate_name": command.gate_name,
+                    "gate_policy": command.gate_policy,
+                    "required_evidence": command.required_evidence,
+                    "decided_at": command.decided_at,
+                    "opened_at": command.opened_at,
+                    "created_at": command.created_at,
+                    "updated_at": command.updated_at,
+                },
             ),
         )
         return 0
     if isinstance(command, OperatorDecisionRecordCommand):
         _emit_json(
             stdout,
-            operator_write.record_operator_decision(
+            operator_control.record_operator_decision(
                 decision_key=command.decision_key,
                 decision_kind=command.decision_kind,
                 decision_status=command.decision_status,
@@ -930,7 +944,7 @@ def main(
     if isinstance(command, OperatorDecisionListCommand):
         _emit_json(
             stdout,
-            operator_write.list_operator_decisions(
+            operator_control.list_operator_decisions(
                 decision_kind=command.decision_kind,
                 decision_scope_kind=command.decision_scope_kind,
                 decision_scope_ref=command.decision_scope_ref,

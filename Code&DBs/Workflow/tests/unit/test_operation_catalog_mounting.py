@@ -6,8 +6,36 @@ from fastapi.testclient import TestClient
 from pydantic import BaseModel
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
+import pytest
 
 import surfaces.api.rest as rest
+
+
+def _binding(
+    *,
+    operation_name: str,
+    http_method: str,
+    http_path: str,
+    command_class,
+    handler,
+):
+    return SimpleNamespace(
+        operation_ref=operation_name,
+        operation_name=operation_name,
+        source_kind="operation_command",
+        operation_kind="command",
+        http_method=http_method,
+        http_path=http_path,
+        command_class=command_class,
+        handler=handler,
+        authority_ref="authority.test",
+        projection_ref=None,
+        posture="operate",
+        idempotency_policy="non_idempotent",
+        binding_revision="binding.test.20260416",
+        decision_ref="decision.test.20260416",
+        summary=operation_name,
+    )
 
 
 def test_mount_capabilities_uses_operation_catalog_when_available(monkeypatch) -> None:
@@ -31,13 +59,12 @@ def test_mount_capabilities_uses_operation_catalog_when_available(monkeypatch) -
     monkeypatch.setattr(
         rest,
         "resolve_http_operation_binding",
-        lambda definition: SimpleNamespace(
+        lambda definition: _binding(
             operation_name=definition.operation_name,
             http_method=definition.http_method,
             http_path=definition.http_path,
             command_class=object,
             handler=lambda *_args, **_kwargs: {"ok": True},
-            summary=definition.operation_name,
         ),
     )
 
@@ -54,7 +81,7 @@ def test_mount_capabilities_uses_operation_catalog_when_available(monkeypatch) -
     assert target_app.state.capabilities_mounted is True
 
 
-def test_mount_capabilities_falls_back_to_registry_when_catalog_load_fails(monkeypatch) -> None:
+def test_mount_capabilities_raises_when_catalog_load_fails(monkeypatch) -> None:
     target_app = FastAPI()
     monkeypatch.setattr(
         rest,
@@ -69,15 +96,12 @@ def test_mount_capabilities_falls_back_to_registry_when_catalog_load_fails(monke
         ),
     )
 
-    rest.mount_capabilities(target_app)
-
-    mounted = [
-        route
-        for route in target_app.routes
-        if isinstance(route, APIRoute) and route.path == "/api/workflows/{workflow_id}/build/{subpath:path}"
-    ]
-    assert len(mounted) == 1
-    assert mounted[0].openapi_extra["x-praxis-binding-source"] == "registry_fallback"
+    try:
+        rest.mount_capabilities(target_app)
+    except RuntimeError as exc:
+        assert str(exc) == "db unavailable"
+    else:  # pragma: no cover - defensive
+        raise AssertionError("mount_capabilities should fail when the operation catalog cannot load")
 
 
 def test_mount_capabilities_sorts_specific_routes_ahead_of_catchalls(monkeypatch) -> None:
@@ -115,21 +139,19 @@ def test_mount_capabilities_sorts_specific_routes_ahead_of_catchalls(monkeypatch
 
     def _resolve(definition):
         if definition.operation_name == "workflow_build.mutate":
-            return SimpleNamespace(
+            return _binding(
                 operation_name=definition.operation_name,
                 http_method=definition.http_method,
                 http_path=definition.http_path,
                 command_class=GenericBuildCommand,
                 handler=lambda *_args, **_kwargs: {"route": "generic"},
-                summary=definition.operation_name,
             )
-        return SimpleNamespace(
+        return _binding(
             operation_name=definition.operation_name,
             http_method=definition.http_method,
             http_path=definition.http_path,
             command_class=SuggestNextCommand,
             handler=lambda *_args, **_kwargs: {"route": "suggest-next"},
-            summary=definition.operation_name,
         )
 
     monkeypatch.setattr(rest, "resolve_http_operation_binding", _resolve)
@@ -143,7 +165,7 @@ def test_mount_capabilities_sorts_specific_routes_ahead_of_catchalls(monkeypatch
     )
 
     assert response.status_code == 200
-    assert response.json() == {"route": "suggest-next"}
+    assert response.json()["route"] == "suggest-next"
 
 
 def test_mount_capabilities_promotes_routes_ahead_of_legacy_rest_of_path_catchalls(monkeypatch) -> None:
@@ -186,21 +208,19 @@ def test_mount_capabilities_promotes_routes_ahead_of_legacy_rest_of_path_catchal
 
     def _resolve(definition):
         if definition.operation_name == "workflow_build.mutate":
-            return SimpleNamespace(
+            return _binding(
                 operation_name=definition.operation_name,
                 http_method=definition.http_method,
                 http_path=definition.http_path,
                 command_class=GenericBuildCommand,
                 handler=lambda *_args, **_kwargs: {"route": "generic"},
-                summary=definition.operation_name,
             )
-        return SimpleNamespace(
+        return _binding(
             operation_name=definition.operation_name,
             http_method=definition.http_method,
             http_path=definition.http_path,
             command_class=SuggestNextCommand,
             handler=lambda *_args, **_kwargs: {"route": "suggest-next"},
-            summary=definition.operation_name,
         )
 
     monkeypatch.setattr(rest, "resolve_http_operation_binding", _resolve)
@@ -214,4 +234,139 @@ def test_mount_capabilities_promotes_routes_ahead_of_legacy_rest_of_path_catchal
     )
 
     assert response.status_code == 200
-    assert response.json() == {"route": "suggest-next"}
+    assert response.json()["route"] == "suggest-next"
+
+
+def test_mount_capabilities_raises_on_duplicate_operation_route_bindings(monkeypatch) -> None:
+    target_app = FastAPI()
+    monkeypatch.setattr(
+        rest,
+        "_ensure_shared_subsystems",
+        lambda _app: SimpleNamespace(get_pg_conn=lambda: object()),
+    )
+    monkeypatch.setattr(
+        rest,
+        "list_resolved_operation_definitions",
+        lambda _conn, include_disabled=False, limit=500: [
+            SimpleNamespace(
+                operation_name="workflow_build.mutate",
+                http_method="POST",
+                http_path="/api/workflows/{workflow_id}/build/suggest-next",
+            ),
+            SimpleNamespace(
+                operation_name="workflow_build.suggest_next",
+                http_method="POST",
+                http_path="/api/workflows/{workflow_id}/build/suggest-next",
+            ),
+        ],
+    )
+    monkeypatch.setattr(
+        rest,
+        "resolve_http_operation_binding",
+        lambda definition: _binding(
+            operation_name=definition.operation_name,
+            http_method=definition.http_method,
+            http_path=definition.http_path,
+            command_class=object,
+            handler=lambda *_args, **_kwargs: {"ok": True},
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="duplicate operation-catalog route binding"):
+        rest.mount_capabilities(target_app)
+
+
+def test_mount_capabilities_raises_when_existing_route_owns_binding(monkeypatch) -> None:
+    target_app = FastAPI()
+
+    @target_app.post("/api/workflows/{workflow_id}/build/suggest-next")
+    async def _legacy_build_route(workflow_id: str):
+        return {"route": "legacy", "workflow_id": workflow_id}
+
+    monkeypatch.setattr(
+        rest,
+        "_ensure_shared_subsystems",
+        lambda _app: SimpleNamespace(get_pg_conn=lambda: object()),
+    )
+    monkeypatch.setattr(
+        rest,
+        "list_resolved_operation_definitions",
+        lambda _conn, include_disabled=False, limit=500: [
+            SimpleNamespace(
+                operation_name="workflow_build.suggest_next",
+                http_method="POST",
+                http_path="/api/workflows/{workflow_id}/build/suggest-next",
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        rest,
+        "resolve_http_operation_binding",
+        lambda definition: _binding(
+            operation_name=definition.operation_name,
+            http_method=definition.http_method,
+            http_path=definition.http_path,
+            command_class=object,
+            handler=lambda *_args, **_kwargs: {"ok": True},
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="capability route conflict"):
+        rest.mount_capabilities(target_app)
+
+
+def test_mount_capabilities_flattens_post_body_for_models_without_body_field(monkeypatch) -> None:
+    class RoadmapWriteCommand(BaseModel):
+        title: str
+        intent_brief: str
+        action: str = "preview"
+
+    target_app = FastAPI()
+    monkeypatch.setattr(
+        rest,
+        "_ensure_shared_subsystems",
+        lambda _app: SimpleNamespace(get_pg_conn=lambda: object()),
+    )
+    monkeypatch.setattr(
+        rest,
+        "list_resolved_operation_definitions",
+        lambda _conn, include_disabled=False, limit=500: [
+            SimpleNamespace(
+                operation_name="operator.roadmap_write",
+                http_method="POST",
+                http_path="/api/operator/roadmap-write",
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        rest,
+        "resolve_http_operation_binding",
+        lambda definition: _binding(
+            operation_name=definition.operation_name,
+            http_method=definition.http_method,
+            http_path=definition.http_path,
+            command_class=RoadmapWriteCommand,
+            handler=lambda command, _subs: {
+                "title": command.title,
+                "intent_brief": command.intent_brief,
+                "action": command.action,
+            },
+        ),
+    )
+
+    rest.mount_capabilities(target_app)
+
+    client = TestClient(target_app)
+    response = client.post(
+        "/api/operator/roadmap-write",
+        json={
+            "title": "One gateway",
+            "intent_brief": "No nested body wrapper",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["title"] == "One gateway"
+    assert response.json()["intent_brief"] == "No nested body wrapper"
+    assert response.json()["action"] == "preview"
+    assert response.json()["command_receipt"]["operation_name"] == "operator.roadmap_write"

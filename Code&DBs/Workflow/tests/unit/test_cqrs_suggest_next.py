@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 from typing import Any
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 # Ensure paths are set up correctly
 _WORKFLOW_ROOT = Path(__file__).resolve().parents[2]
@@ -18,6 +19,9 @@ def test_cqrs_suggest_next(monkeypatch: Any) -> None:
     class MockConn:
         def execute(self, *args, **kwargs):
             return []
+
+        def fetch(self, *args, **kwargs):
+            return []
             
     class MockSubsystems:
         def get_pg_conn(self):
@@ -28,12 +32,48 @@ def test_cqrs_suggest_next(monkeypatch: Any) -> None:
 
     # Stub the capability catalog load
     from runtime import capability_catalog
+    from runtime.operations.commands.suggest_next import (
+        SuggestNextNodesCommand,
+        handle_suggest_next_nodes,
+    )
     mock_catalog = [
         {"capability_kind": "task", "capability_slug": "task/analyze", "title": "Analyze Data"},
         {"capability_kind": "task", "capability_slug": "task/draft", "title": "Draft Email"},
         {"capability_kind": "integration", "capability_slug": "tool/github/create_issue", "title": "Create GitHub Issue"},
     ]
     monkeypatch.setattr(capability_catalog, "load_capability_catalog", lambda conn: mock_catalog)
+    monkeypatch.setattr(
+        rest,
+        "list_resolved_operation_definitions",
+        lambda _conn, include_disabled=False, limit=500: [
+            SimpleNamespace(
+                operation_name="workflow_build.suggest_next",
+                http_method="POST",
+                http_path="/api/workflows/{workflow_id}/build/suggest-next",
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        rest,
+        "resolve_http_operation_binding",
+        lambda definition: SimpleNamespace(
+            operation_ref="workflow_build.suggest_next",
+            operation_name=definition.operation_name,
+            source_kind="operation_query",
+            operation_kind="query",
+            http_method=definition.http_method,
+            http_path=definition.http_path,
+            command_class=SuggestNextNodesCommand,
+            handler=handle_suggest_next_nodes,
+            authority_ref="authority.capability_catalog",
+            projection_ref="projection.capability_catalog",
+            posture="observe",
+            idempotency_policy="read_only",
+            binding_revision="binding.test.20260416",
+            decision_ref="decision.test.20260416",
+            summary=definition.operation_name,
+        ),
+    )
 
     with TestClient(rest.app) as client:
         # 1. Simulate finding something: Should boost analysis/drafting

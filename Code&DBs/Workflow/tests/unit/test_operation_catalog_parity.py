@@ -1,19 +1,19 @@
 from __future__ import annotations
 
-from runtime.cqrs import bootstrap_registry, registry
 import runtime.operation_catalog as operation_catalog
+from runtime.operation_catalog_bindings import resolve_http_operation_binding
 
 
 _SEEDED_OPERATION_ROWS = [
     {
         "operation_ref": "workflow-build-mutate",
         "operation_name": "workflow_build.mutate",
-        "source_kind": "cqrs_command",
+        "source_kind": "operation_command",
         "operation_kind": "command",
         "http_method": "POST",
         "http_path": "/api/workflows/{workflow_id}/build/{subpath:path}",
-        "input_model_ref": "runtime.cqrs.commands.workflow_build.MutateWorkflowBuildCommand",
-        "handler_ref": "runtime.cqrs.commands.workflow_build.handle_mutate_workflow_build",
+        "input_model_ref": "runtime.operations.commands.workflow_build.MutateWorkflowBuildCommand",
+        "handler_ref": "runtime.operations.commands.workflow_build.handle_mutate_workflow_build",
         "authority_ref": "authority.workflow_build",
         "projection_ref": None,
         "posture": None,
@@ -25,12 +25,12 @@ _SEEDED_OPERATION_ROWS = [
     {
         "operation_ref": "workflow-build-suggest-next",
         "operation_name": "workflow_build.suggest_next",
-        "source_kind": "cqrs_query",
+        "source_kind": "operation_query",
         "operation_kind": "query",
         "http_method": "POST",
         "http_path": "/api/workflows/{workflow_id}/build/suggest-next",
-        "input_model_ref": "runtime.cqrs.commands.suggest_next.SuggestNextNodesCommand",
-        "handler_ref": "runtime.cqrs.commands.suggest_next.handle_suggest_next_nodes",
+        "input_model_ref": "runtime.operations.commands.suggest_next.SuggestNextNodesCommand",
+        "handler_ref": "runtime.operations.commands.suggest_next.handle_suggest_next_nodes",
         "authority_ref": "authority.capability_catalog",
         "projection_ref": "projection.capability_catalog",
         "posture": None,
@@ -42,12 +42,12 @@ _SEEDED_OPERATION_ROWS = [
     {
         "operation_ref": "operator-roadmap-tree",
         "operation_name": "operator.roadmap_tree",
-        "source_kind": "cqrs_query",
+        "source_kind": "operation_query",
         "operation_kind": "query",
         "http_method": "GET",
         "http_path": "/api/operator/roadmap/tree/{root_roadmap_item_id}",
-        "input_model_ref": "runtime.cqrs.queries.roadmap_tree.QueryRoadmapTree",
-        "handler_ref": "runtime.cqrs.queries.roadmap_tree.handle_query_roadmap_tree",
+        "input_model_ref": "runtime.operations.queries.roadmap_tree.QueryRoadmapTree",
+        "handler_ref": "runtime.operations.queries.roadmap_tree.handle_query_roadmap_tree",
         "authority_ref": "authority.roadmap_items",
         "projection_ref": "projection.roadmap_tree",
         "posture": None,
@@ -59,12 +59,12 @@ _SEEDED_OPERATION_ROWS = [
     {
         "operation_ref": "operator-data-dictionary",
         "operation_name": "operator.data_dictionary",
-        "source_kind": "cqrs_query",
+        "source_kind": "operation_query",
         "operation_kind": "query",
         "http_method": "GET",
         "http_path": "/api/operator/data-dictionary",
-        "input_model_ref": "runtime.cqrs.queries.data_dictionary.QueryDataDictionary",
-        "handler_ref": "runtime.cqrs.queries.data_dictionary.handle_query_data_dictionary",
+        "input_model_ref": "runtime.operations.queries.data_dictionary.QueryDataDictionary",
+        "handler_ref": "runtime.operations.queries.data_dictionary.handle_query_data_dictionary",
         "authority_ref": "authority.memory_entities",
         "projection_ref": "projection.memory_entities",
         "posture": None,
@@ -73,12 +73,97 @@ _SEEDED_OPERATION_ROWS = [
         "binding_revision": "binding.operation_catalog_registry.bootstrap.20260416",
         "decision_ref": "decision.operation_catalog_registry.bootstrap.20260416",
     },
+    {
+        "operation_ref": "operator-roadmap-write",
+        "operation_name": "operator.roadmap_write",
+        "source_kind": "operation_command",
+        "operation_kind": "command",
+        "http_method": "POST",
+        "http_path": "/api/operator/roadmap-write",
+        "input_model_ref": "runtime.operations.commands.operator_control.RoadmapWriteCommand",
+        "handler_ref": "runtime.operations.commands.operator_control.handle_operator_roadmap_write",
+        "authority_ref": "authority.roadmap_items",
+        "projection_ref": None,
+        "posture": None,
+        "idempotency_policy": None,
+        "enabled": True,
+        "binding_revision": "binding.operation_catalog_registry.operator_control_bindings.20260416",
+        "decision_ref": "decision.operation_catalog_registry.operator_control_bindings.20260416",
+    },
+    {
+        "operation_ref": "operator-work-item-closeout",
+        "operation_name": "operator.work_item_closeout",
+        "source_kind": "operation_command",
+        "operation_kind": "command",
+        "http_method": "POST",
+        "http_path": "/api/operator/work-item-closeout",
+        "input_model_ref": "runtime.operations.commands.operator_control.WorkItemCloseoutCommand",
+        "handler_ref": "runtime.operations.commands.operator_control.handle_work_item_closeout",
+        "authority_ref": "authority.work_item_closeout",
+        "projection_ref": None,
+        "posture": None,
+        "idempotency_policy": None,
+        "enabled": True,
+        "binding_revision": "binding.operation_catalog_registry.operator_control_bindings.20260416",
+        "decision_ref": "decision.operation_catalog_registry.operator_control_bindings.20260416",
+    },
+    {
+        "operation_ref": "operator-task-route-eligibility",
+        "operation_name": "operator.task_route_eligibility",
+        "source_kind": "operation_command",
+        "operation_kind": "command",
+        "http_method": "POST",
+        "http_path": "/api/operator/task-route-eligibility",
+        "input_model_ref": "runtime.operations.commands.operator_control.TaskRouteEligibilityCommand",
+        "handler_ref": "runtime.operations.commands.operator_control.handle_task_route_eligibility",
+        "authority_ref": "authority.task_route_eligibility",
+        "projection_ref": None,
+        "posture": None,
+        "idempotency_policy": None,
+        "enabled": True,
+        "binding_revision": "binding.operation_catalog_registry.surface_cleanup.20260416",
+        "decision_ref": "decision.operation_catalog_registry.surface_cleanup.20260416",
+    },
+    {
+        "operation_ref": "operator-native-primary-cutover-gate",
+        "operation_name": "operator.native_primary_cutover_gate",
+        "source_kind": "operation_command",
+        "operation_kind": "command",
+        "http_method": "POST",
+        "http_path": "/api/operator/native-primary-cutover-gate",
+        "input_model_ref": "runtime.operations.commands.operator_control.NativePrimaryCutoverGateCommand",
+        "handler_ref": "runtime.operations.commands.operator_control.handle_native_primary_cutover_gate",
+        "authority_ref": "authority.native_primary_cutover_gate",
+        "projection_ref": None,
+        "posture": None,
+        "idempotency_policy": None,
+        "enabled": True,
+        "binding_revision": "binding.operation_catalog_registry.surface_cleanup.20260416",
+        "decision_ref": "decision.operation_catalog_registry.surface_cleanup.20260416",
+    },
+    {
+        "operation_ref": "operator-transport-support",
+        "operation_name": "operator.transport_support",
+        "source_kind": "operation_query",
+        "operation_kind": "query",
+        "http_method": "POST",
+        "http_path": "/api/operator/transport-support",
+        "input_model_ref": "runtime.operations.queries.operator_support.QueryTransportSupport",
+        "handler_ref": "runtime.operations.queries.operator_support.handle_query_transport_support",
+        "authority_ref": "authority.transport_eligibility",
+        "projection_ref": "projection.transport_eligibility",
+        "posture": None,
+        "idempotency_policy": None,
+        "enabled": True,
+        "binding_revision": "binding.operation_catalog_registry.surface_cleanup.20260416",
+        "decision_ref": "decision.operation_catalog_registry.surface_cleanup.20260416",
+    },
 ]
 
 _SEEDED_SOURCE_POLICIES = [
     {
-        "policy_ref": "cqrs-command",
-        "source_kind": "cqrs_command",
+        "policy_ref": "operation-command",
+        "source_kind": "operation_command",
         "posture": "operate",
         "idempotency_policy": "non_idempotent",
         "enabled": True,
@@ -86,8 +171,8 @@ _SEEDED_SOURCE_POLICIES = [
         "decision_ref": "decision.operation_catalog_source_policy_registry.bootstrap.20260416",
     },
     {
-        "policy_ref": "cqrs-query",
-        "source_kind": "cqrs_query",
+        "policy_ref": "operation-query",
+        "source_kind": "operation_query",
         "posture": "observe",
         "idempotency_policy": "read_only",
         "enabled": True,
@@ -97,8 +182,7 @@ _SEEDED_SOURCE_POLICIES = [
 ]
 
 
-def test_seeded_operation_catalog_matches_live_cqrs_registry(monkeypatch) -> None:
-    bootstrap_registry()
+def test_seeded_operation_catalog_rows_resolve_to_live_bindings(monkeypatch) -> None:
     monkeypatch.setattr(
         operation_catalog,
         "_list_operation_catalog_records",
@@ -119,20 +203,24 @@ def test_seeded_operation_catalog_matches_live_cqrs_registry(monkeypatch) -> Non
             include_disabled=True,
         )
     }
-    live = {
-        binding["operation_name"]: binding
-        for binding in registry.list_operation_bindings()
+
+    assert set(seeded) == {
+        "workflow_build.mutate",
+        "workflow_build.suggest_next",
+        "operator.roadmap_tree",
+        "operator.data_dictionary",
+        "operator.roadmap_write",
+        "operator.work_item_closeout",
+        "operator.task_route_eligibility",
+        "operator.native_primary_cutover_gate",
+        "operator.transport_support",
     }
 
-    assert set(seeded) == set(live)
+    signatures: set[tuple[str, str]] = set()
+    for resolved in seeded.values():
+        binding = resolve_http_operation_binding(resolved)
+        assert binding.operation_name == resolved.operation_name
+        assert callable(binding.handler)
+        signatures.add((binding.http_method, binding.http_path))
 
-    for operation_name, resolved in seeded.items():
-        binding = live[operation_name]
-        assert binding["operation_kind"] == resolved.operation_kind
-        assert binding["source_kind"] == resolved.source_kind
-        assert binding["http_method"] == resolved.http_method
-        assert binding["http_path"] == resolved.http_path
-        assert binding["input_model_ref"] == resolved.input_model_ref
-        assert binding["handler_ref"] == resolved.handler_ref
-        assert binding["authority_ref"] == resolved.authority_ref
-        assert binding["projection_ref"] == resolved.projection_ref
+    assert len(signatures) == len(seeded)

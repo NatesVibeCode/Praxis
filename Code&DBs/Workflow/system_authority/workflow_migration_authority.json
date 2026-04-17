@@ -64,7 +64,11 @@
     "133_fork_worktree_binding_materialization.sql",
     "134_operator_object_relations.sql",
     "135_claim_lifecycle_transition_authority.sql",
-    "136_operation_catalog_authority.sql"
+    "136_operation_catalog_authority.sql",
+    "137_workflow_trigger_source_id.sql",
+    "138_operation_catalog_route_uniqueness.sql",
+    "139_operation_catalog_operator_control_bindings.sql",
+    "140_operation_catalog_surface_cleanup.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -1898,7 +1902,7 @@
       },
       {
         "object_type": "constraint",
-        "object_name": "work_item_workflow_bindings.work_item_workflow_bindings_unique_edge"
+        "object_name": "work_item_workflow_bindings_unique_edge"
       },
       {
         "object_type": "index",
@@ -2020,6 +2024,54 @@
         "object_type": "index",
         "object_name": "operation_catalog_source_policy_registry_enabled_idx"
       }
+    ],
+    "137_workflow_trigger_source_id.sql": [
+      {
+        "object_type": "column",
+        "object_name": "workflow_triggers.source_trigger_id"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_workflow_triggers_source_trigger_id"
+      }
+    ],
+    "138_operation_catalog_route_uniqueness.sql": [
+      {
+        "object_type": "constraint",
+        "object_name": "operation_catalog_registry.operation_catalog_registry_method_path_unique"
+      }
+    ],
+    "139_operation_catalog_operator_control_bindings.sql": [
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.operator.roadmap_write"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.operator.work_item_closeout"
+      }
+    ],
+    "140_operation_catalog_surface_cleanup.sql": [
+      {
+        "object_type": "constraint",
+        "object_name": "operation_catalog_registry.operation_catalog_registry_source_kind_check"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "operation_catalog_source_policy_registry.operation_catalog_source_policy_registry_source_kind_check"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.operator.task_route_eligibility"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.operator.native_primary_cutover_gate"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.operator.transport_support"
+      }
     ]
   },
   "policy_buckets": {
@@ -2088,7 +2140,11 @@
       "133_fork_worktree_binding_materialization.sql",
       "134_operator_object_relations.sql",
       "135_claim_lifecycle_transition_authority.sql",
-      "136_operation_catalog_authority.sql"
+      "136_operation_catalog_authority.sql",
+      "137_workflow_trigger_source_id.sql",
+      "138_operation_catalog_route_uniqueness.sql",
+      "139_operation_catalog_operator_control_bindings.sql",
+      "140_operation_catalog_surface_cleanup.sql"
     ],
     "bootstrap_only": [
       "012_execution_leases.sql",

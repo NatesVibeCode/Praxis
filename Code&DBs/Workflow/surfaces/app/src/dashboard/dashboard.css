@@ -1199,6 +1199,7 @@
 .om-review-stat__value { font-size: 22px; font-weight: 700; color: var(--text); }
 .om-review-stat__label { margin-top: 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
 .om-review { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(320px, 0.95fr); gap: 20px; align-items: start; margin-top: 24px; }
+.om-review > .om-panel { min-width: 0; }
 .om-panel { padding: 20px; border-radius: 14px; border: 1px solid var(--border); background: linear-gradient(180deg, rgba(255,255,255,0.025), rgba(255,255,255,0.012)); box-shadow: 0 18px 38px rgba(0,0,0,0.18); }
 .om-panel--sidebar { position: sticky; top: 24px; }
 .om-panel--flow { margin-top: 24px; }

@@ -11,8 +11,6 @@ from contracts.data_dictionary import (
 )
 from pydantic import BaseModel
 
-from ..registry import registry
-
 
 _TABLE_PREFIX = "table:"
 
@@ -243,20 +241,3 @@ def handle_query_data_dictionary(
         )
         response["matches"] = ambiguous
     return response
-
-
-registry.register(
-    path="/api/operator/data-dictionary",
-    method="GET",
-    command_class=QueryDataDictionary,
-    handler=handle_query_data_dictionary,
-    description=(
-        "Read DB-backed table projections from memory_entities, including columns, "
-        "indexes, triggers, valid values, and FK relationships."
-    ),
-    operation_name="operator.data_dictionary",
-    operation_kind="query",
-    source_kind="cqrs_query",
-    authority_ref="authority.memory_entities",
-    projection_ref="projection.memory_entities",
-)

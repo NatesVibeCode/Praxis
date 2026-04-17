@@ -1,32 +1,32 @@
 {
   "review_type": "deterministic_probe_review",
   "reviewed_at": "2026-04-16T22:39:37.386403+00:00",
-  "probe_id": "agent_handoff_search_db_probe",
+  "probe_id": "runtime_regression_probe",
   "current_outputs": {
     "observed_files": [
       {
-        "path": "/Users/nate/Praxis/artifacts/workflow_eval/probe_exec_20260416/agent_handoff_search_db_probe.report.json",
+        "path": "/Users/nate/Praxis/artifacts/workflow_eval/probe_exec_20260416/runtime_regression_probe.report.json",
         "exists": true,
         "proof_class": "observed"
       },
       {
-        "path": "/Users/nate/Praxis/artifacts/workflow_eval/probe_exec_20260416/agent_handoff_search_db_probe.continuation_packet.json",
+        "path": "/Users/nate/Praxis/artifacts/workflow_eval/probe_exec_20260416/runtime_regression_probe.continuation_packet.json",
         "exists": true,
         "proof_class": "simulated_continuation"
       },
       {
-        "path": "/Users/nate/Praxis/artifacts/workflow_eval/probe_exec_20260416/agent_handoff_search_db_probe.improvement_validation_blocker.json",
+        "path": "/Users/nate/Praxis/artifacts/workflow_eval/probe_exec_20260416/runtime_regression_probe.improvement_validation_blocker.json",
         "exists": true,
         "proof_class": "observed_blocker"
       }
     ],
     "planned_live_workflow_files": [
       {
-        "path": "/Users/nate/Praxis/artifacts/workflow_eval/probe_exec_20260416/agent_handoff_search_db_probe.handoff.md",
+        "path": "/Users/nate/Praxis/artifacts/workflow_eval/probe_exec_20260416/runtime_regression_probe.handoff.md",
         "exists": true
       },
       {
-        "path": "/Users/nate/Praxis/artifacts/workflow_eval/probe_exec_20260416/agent_handoff_search_db_probe.review.json",
+        "path": "/Users/nate/Praxis/artifacts/workflow_eval/probe_exec_20260416/runtime_regression_probe.review.json",
         "exists": true
       }
     ]

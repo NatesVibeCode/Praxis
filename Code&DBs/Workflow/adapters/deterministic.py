@@ -108,7 +108,7 @@ def _deterministic_builder_outputs(input_payload: Mapping[str, Any]) -> dict[str
     if not module_name or not function_name:
         raise ValueError(
             "input_payload.deterministic_builder must be a dotted module path like "
-            "'runtime.workflow_eval.build_agent_handoff_probe_review'"
+            "'runtime.workflow_eval.build_runtime_regression_probe_review'"
         )
     module = importlib.import_module(module_name)
     builder = getattr(module, function_name, None)

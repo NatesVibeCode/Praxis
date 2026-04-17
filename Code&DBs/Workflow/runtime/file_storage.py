@@ -75,13 +75,25 @@ def list_files(
     scope: str | None = None,
     workflow_id: str | None = None,
     step_id: str | None = None,
+    query: str | None = None,
+    limit: int = 100,
 ) -> list[dict[str, Any]]:
     """List files filtered by scope."""
     return PostgresUploadedFileRepository(pg).list_uploaded_files(
         scope=scope,
         workflow_id=workflow_id,
         step_id=step_id,
+        query=query,
+        limit=limit,
     )
+
+
+def get_file_record(pg: Any, file_id: str) -> dict[str, Any] | None:
+    """Read one uploaded file metadata row."""
+    row = PostgresUploadedFileRepository(pg).load_uploaded_file(file_id=file_id)
+    if row is None:
+        return None
+    return dict(row)
 
 
 def delete_file(pg: Any, repo_root: str, file_id: str) -> bool:
@@ -107,7 +119,7 @@ def get_file_content(
     file_id: str,
 ) -> tuple[bytes, str, str] | None:
     """Read file content and metadata."""
-    row = PostgresUploadedFileRepository(pg).load_uploaded_file(file_id=file_id)
+    row = get_file_record(pg, file_id)
     if row is None:
         return None
 

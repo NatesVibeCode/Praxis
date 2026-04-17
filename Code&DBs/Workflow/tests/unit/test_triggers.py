@@ -425,17 +425,17 @@ def test_hourly_trigger_tick_leads_to_schedule_fired_event_and_workflow_submissi
     conn.workflow_triggers = [
         {
             "id": "trig-hourly",
-            "workflow_id": "agent_handoff_search_db_probe",
+            "workflow_id": "runtime_regression_probe",
             "event_type": "schedule",
             "enabled": True,
             "filter": {},
             "cron_expression": "@hourly",
             "last_fired_at": None,
-            "definition": {"definition_revision": "def-agent-handoff-probe"},
+            "definition": {"definition_revision": "def-runtime-regression-probe"},
             "compiled_spec": {
-                "definition_revision": "def-agent-handoff-probe",
-                "name": "Agent Handoff Search DB Probe",
-                "workflow_id": "agent_handoff_search_db_probe",
+                "definition_revision": "def-runtime-regression-probe",
+                "name": "Runtime Regression Probe",
+                "workflow_id": "runtime_regression_probe",
                 "phase": "test",
                 "jobs": [
                     {
@@ -446,7 +446,7 @@ def test_hourly_trigger_tick_leads_to_schedule_fired_event_and_workflow_submissi
                 ],
                 "triggers": [],
             },
-            "workflow_name": "Agent Handoff Search DB Probe",
+            "workflow_name": "Runtime Regression Probe",
         }
     ]
     submitted: list[dict[str, object]] = []
@@ -472,8 +472,8 @@ def test_hourly_trigger_tick_leads_to_schedule_fired_event_and_workflow_submissi
     assert submitted[0]["parent_run_id"] == "trig-hourly"
     assert submitted[0]["trigger_depth"] == 1
     submitted_spec = submitted[0]["spec"]
-    assert submitted_spec["definition_revision"] == "def-agent-handoff-probe"
-    assert submitted_spec["workflow_id"] == "agent_handoff_search_db_probe"
+    assert submitted_spec["definition_revision"] == "def-runtime-regression-probe"
+    assert submitted_spec["workflow_id"] == "runtime_regression_probe"
     assert submitted_spec["phase"] == "test"
     assert submitted_spec["triggers"] == []
     assert submitted_spec["jobs"][0]["label"] == "seed_contract"
@@ -487,7 +487,7 @@ def test_hourly_trigger_tick_leads_to_schedule_fired_event_and_workflow_submissi
     assert len(emitted_events) == 1
     assert emitted_events[0]["payload"] == {
         "trigger_id": "trig-hourly",
-        "workflow_id": "agent_handoff_search_db_probe",
+        "workflow_id": "runtime_regression_probe",
         "cron_expression": "@hourly",
     }
 

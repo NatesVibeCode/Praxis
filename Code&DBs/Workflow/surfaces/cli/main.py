@@ -30,6 +30,8 @@ from .commands.authority import (
     _reload_command,
     _schema_command,
 )
+from .commands.files import _files_command
+from .commands.handoff import _handoff_command
 from .commands.data import _data_command
 from .commands.operate import (
     _api_command,
@@ -89,7 +91,8 @@ from .commands.workflow import (
     _spawn_command,
     _status_command,
     _triggers_command,
-    _workflows_command,
+    _deprecated_workflow_records_alias_command,
+    _records_command,
     _verify_command,
     _verify_platform_command,
     _work_command,
@@ -269,6 +272,8 @@ def _workflow_arg_commands() -> dict[str, ArgsCommandHandler]:
         "chain": _chain_command,
         "query": _query_command,
         "data": _data_command,
+        "files": _files_command,
+        "handoff": _handoff_command,
         "schema": _schema_command,
         "registry": _registry_command,
         "object-type": _object_type_command,
@@ -331,7 +336,8 @@ def _workflow_arg_commands() -> dict[str, ArgsCommandHandler]:
             stdout=stdout,
         ),
         "triggers": _triggers_command,
-        "workflows": _workflows_command,
+        "records": _records_command,
+        "defs": lambda args, *, stdout: _deprecated_workflow_records_alias_command("defs", stdout=stdout),
         "repair": _repair_command,
         "work": _work_command,
         "roadmap": _roadmap_command,
@@ -382,7 +388,11 @@ def _help_topic_candidates() -> list[str]:
             "help",
             "index",
             "native-operator",
-            *(_known_root_commands()),
+            *(
+                command
+                for command in _known_root_commands()
+                if command not in {"defs", "workflows"}
+            ),
         }
     )
 
@@ -420,7 +430,7 @@ def _commands_index_text() -> str:
             "  workflow run <spec.json>                        Submit a workflow spec",
             "  workflow spawn <parent_run_id> <spec.json>      Spawn a child workflow with explicit parent lineage",
             "  workflow validate <spec.json>                   Validate a spec without running",
-            "  workflow workflows <create|update>              Persist canonical workflow records",
+            "  workflow records <create|update|rename>         Persist canonical workflow records",
             "  workflow status [--since-hours N]               Show recent workflow status",
             "  workflow active                                 Show active workflow runs",
             "  workflow stream <run_id>                       Stream one workflow run",
@@ -430,8 +440,9 @@ def _commands_index_text() -> str:
             "  workflow work <claim|acknowledge>             Claim or acknowledge worker work",
             "  workflow tools [list|search|describe|call]     Discover and call catalog-backed MCP tools",
             "  workflow data <action>                         Deterministic data cleanup, validation, and workflow launch",
-            "  workflow schema|registry|object-type|object|catalog|reload|reconcile",
-            "                                                  Direct database and registry authority frontdoors",
+            "  workflow schema|registry|object-type|object|catalog|files|reload|reconcile",
+            "                                                  Direct database, file, and registry authority frontdoors",
+            "  workflow handoff <latest|lineage|status|history> CQRS handoff inspection surface",
             "  workflow query|recall|discover|architecture|artifacts|bugs|costs|leaderboard|trust|fitness|trends|scope|risk|reviews|receipts",
             "                                                  Derived search, analysis, and bug-tracker surfaces",
             "  workflow inspect|replay|graph-topology|graph-lineage|topology|lineage",
@@ -470,6 +481,8 @@ def _help_text() -> str:
             "  workflow help api",
             "  workflow query <question>",
             "  workflow data profile artifacts/data/users.csv",
+            "  workflow files list --scope instance",
+            "  workflow handoff latest --artifact-kind packet_lineage --revision-ref <ref>",
             "  workflow schema status",
             "  workflow object list --type-id ticket",
             "  workflow work claim --subscription-id <id> --run-id <run_id>",
@@ -482,7 +495,9 @@ def _help_text() -> str:
             "Command groups:",
             "  workflow tools [list|search|describe|call]",
             "  workflow data <action>",
-            "  workflow schema|registry|object-type|object|catalog|reload|reconcile",
+            "  workflow files <list|get|content|upload|delete>",
+            "  workflow handoff <latest|lineage|status|history>",
+            "  workflow schema|registry|object-type|object|catalog|files|reload|reconcile",
             "  workflow query|recall|discover|architecture|artifacts|bugs|costs|leaderboard|trust|fitness|trends|scope|risk|reviews|receipts",
             "  workflow run|run-status|status|active|scheduler|fan-out|debate|runs|manifest|triggers|retry|cancel|repair|heal|verify|verify-platform|pipeline|proof|queue|diagnose|inspect-job",
             "  workflow inspect|replay|graph-topology|graph-lineage|topology|lineage",

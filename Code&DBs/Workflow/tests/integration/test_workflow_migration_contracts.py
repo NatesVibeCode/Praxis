@@ -69,7 +69,9 @@ def test_workflow_migration_manifest_includes_provider_route_health_budget_migra
     assert "132_issue_backlog_authority.sql" in filenames
     assert "135_claim_lifecycle_transition_authority.sql" in filenames
     assert "136_operation_catalog_authority.sql" in filenames
-    assert filenames[-1] == "136_operation_catalog_authority.sql"
+    assert "139_operation_catalog_operator_control_bindings.sql" in filenames
+    assert "140_operation_catalog_surface_cleanup.sql" in filenames
+    assert filenames[-1] == "140_operation_catalog_surface_cleanup.sql"
 
 
 def test_every_manifest_migration_has_expected_object_contract() -> None:
@@ -196,6 +198,50 @@ def test_operation_catalog_authority_expected_objects_are_registered() -> None:
             "operation_catalog_registry_method_path_idx",
             "operation_catalog_source_policy_registry",
             "operation_catalog_source_policy_registry_enabled_idx",
+        }
+    )
+
+
+def test_operation_catalog_route_uniqueness_expected_objects_are_registered() -> None:
+    objects = workflow_migration_expected_objects("138_operation_catalog_route_uniqueness.sql")
+    names = {item.object_name for item in objects}
+    assert "operation_catalog_registry.operation_catalog_registry_method_path_unique" in names
+
+
+def test_workflow_trigger_source_id_expected_objects_are_registered() -> None:
+    objects = workflow_migration_expected_objects("137_workflow_trigger_source_id.sql")
+    names = {item.object_name for item in objects}
+    assert names.issuperset(
+        {
+            "workflow_triggers.source_trigger_id",
+            "idx_workflow_triggers_source_trigger_id",
+        }
+    )
+
+
+def test_operation_catalog_operator_control_bindings_expected_objects_are_registered() -> None:
+    objects = workflow_migration_expected_objects(
+        "139_operation_catalog_operator_control_bindings.sql"
+    )
+    names = {item.object_name for item in objects}
+    assert names.issuperset(
+        {
+            "operation_catalog_registry.operator.roadmap_write",
+            "operation_catalog_registry.operator.work_item_closeout",
+        }
+    )
+
+
+def test_operation_catalog_surface_cleanup_expected_objects_are_registered() -> None:
+    objects = workflow_migration_expected_objects("140_operation_catalog_surface_cleanup.sql")
+    names = {item.object_name for item in objects}
+    assert names.issuperset(
+        {
+            "operation_catalog_registry.operation_catalog_registry_source_kind_check",
+            "operation_catalog_source_policy_registry.operation_catalog_source_policy_registry_source_kind_check",
+            "operation_catalog_registry.operator.task_route_eligibility",
+            "operation_catalog_registry.operator.native_primary_cutover_gate",
+            "operation_catalog_registry.operator.transport_support",
         }
     )
 

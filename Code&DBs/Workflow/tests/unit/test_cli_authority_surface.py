@@ -17,7 +17,8 @@ def test_top_level_help_mentions_authority_frontdoors() -> None:
 
     assert workflow_cli_main(["--help"], stdout=stdout) == 0
     rendered = stdout.getvalue()
-    assert "workflow schema|registry|object-type|object|catalog|reload|reconcile" in rendered
+    assert "workflow schema|registry|object-type|object|catalog|files|reload|reconcile" in rendered
+    assert "workflow handoff <latest|lineage|status|history>" in rendered
 
 
 def test_schema_help_is_available() -> None:

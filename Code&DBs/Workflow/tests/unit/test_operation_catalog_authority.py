@@ -26,26 +26,26 @@ def test_build_operation_catalog_payload_returns_versioned_contract(monkeypatch)
     resolved = runtime_operation_catalog.ResolvedOperationDefinition(
         operation_ref="workflow-build-suggest-next",
         operation_name="workflow_build.suggest_next",
-        source_kind="cqrs_query",
+        source_kind="operation_query",
         operation_kind="query",
         http_method="POST",
         http_path="/api/workflows/{workflow_id}/build/suggest-next",
-        input_model_ref="runtime.cqrs.commands.suggest_next.SuggestNextNodesCommand",
-        handler_ref="runtime.cqrs.commands.suggest_next.handle_suggest_next_nodes",
+        input_model_ref="runtime.operations.commands.suggest_next.SuggestNextNodesCommand",
+        handler_ref="runtime.operations.commands.suggest_next.handle_suggest_next_nodes",
         authority_ref="authority.capability_catalog",
         projection_ref="projection.capability_catalog",
         posture="observe",
         idempotency_policy="read_only",
         enabled=True,
         operation_enabled=True,
-        source_policy_ref="cqrs-query",
+        source_policy_ref="operation-query",
         source_policy_enabled=True,
         binding_revision="binding.operation_catalog_registry.bootstrap.20260416",
         decision_ref="decision.operation_catalog_registry.bootstrap.20260416",
     )
     source_policy = runtime_operation_catalog.OperationSourcePolicyRecord(
-        policy_ref="cqrs-query",
-        source_kind="cqrs_query",
+        policy_ref="operation-query",
+        source_kind="operation_query",
         posture="observe",
         idempotency_policy="read_only",
         enabled=True,
@@ -98,6 +98,7 @@ def test_rest_operation_catalog_endpoint_uses_shared_authority(monkeypatch) -> N
     }
     monkeypatch.setattr(rest, "_shared_pg_conn", lambda: object())
     monkeypatch.setattr(rest, "build_operation_catalog_payload", lambda _pg: expected)
+    monkeypatch.setattr(rest, "mount_capabilities", lambda _app: None)
 
     with TestClient(rest.app) as client:
         response = client.get("/api/catalog/operations")

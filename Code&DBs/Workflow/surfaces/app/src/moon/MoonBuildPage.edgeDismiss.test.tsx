@@ -99,7 +99,7 @@ vi.mock('./MoonActionDock', () => ({
 }));
 
 vi.mock('./MoonNodeDetail', () => ({
-  MoonNodeDetail: () => null,
+  MoonNodeDetail: () => <div data-testid="node-detail">Node detail</div>,
 }));
 
 vi.mock('./MoonReleaseTray', () => ({
@@ -162,5 +162,18 @@ describe('MoonBuildPage edge dismiss', () => {
     fireEvent.mouseDown(document.body);
 
     expect(screen.queryByRole('button', { name: 'Edit gate' })).not.toBeInTheDocument();
+  });
+
+  test('clicking inside the detail dock keeps the selected gate card open', () => {
+    render(<MoonBuildPage workflowId="wf-123" />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Select gate between Webhook and Next step' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit gate' }));
+
+    expect(screen.getByTestId('node-detail')).toBeInTheDocument();
+
+    fireEvent.mouseDown(screen.getByTestId('node-detail'));
+
+    expect(screen.getByRole('button', { name: 'Edit gate' })).toBeInTheDocument();
   });
 });

@@ -178,6 +178,8 @@ describe('MoonNodeDetail', () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole('button', { name: /show advanced contract fields/i }));
+
     expect(screen.getByLabelText('Required inputs')).toBeInTheDocument();
     expect(screen.getByLabelText('Outputs')).toBeInTheDocument();
     expect(screen.getByLabelText('Persistence targets')).toBeInTheDocument();
@@ -236,6 +238,7 @@ describe('MoonNodeDetail', () => {
     );
 
     expect(screen.getByText('Trigger config')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /show advanced contract fields/i }));
     expect(screen.getByLabelText('Required inputs')).toBeInTheDocument();
     expect(screen.getByLabelText('Outputs')).toBeInTheDocument();
     expect(screen.getByLabelText('Persistence targets')).toBeInTheDocument();

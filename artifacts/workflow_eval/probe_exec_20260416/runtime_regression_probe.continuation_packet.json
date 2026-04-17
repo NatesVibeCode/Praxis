@@ -1,6 +1,6 @@
 {
   "proof_class": "simulated_continuation",
-  "based_on_observed_proof": "/Users/nate/Praxis/artifacts/workflow_eval/probe_exec_20260416/agent_handoff_search_db_probe.report.json",
+  "based_on_observed_proof": "/Users/nate/Praxis/artifacts/workflow_eval/probe_exec_20260416/runtime_regression_probe.report.json",
   "agent_synthesis": {
     "job": "agent_synthesis",
     "spoofed": true,
@@ -10,8 +10,8 @@
     "failure_stage": "launch",
     "failure_reason": "DB authority drifted to role postgres and aborted before durable submission.",
     "seed_contract": {
-      "probe_id": "agent_handoff_search_db_probe",
-      "search_query": "workflow spec with agents handoff deterministic tooling search db action",
+      "probe_id": "runtime_regression_probe",
+      "search_query": "workflow spec with runtime regression deterministic tooling search db action",
       "db_action": "praxis_bugs.stats"
     },
     "discover_matches": [

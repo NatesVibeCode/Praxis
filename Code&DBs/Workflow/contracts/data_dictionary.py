@@ -8,8 +8,8 @@ from typing import Any
 
 DATA_DICTIONARY_CONTRACT_VERSION = 1
 DATA_DICTIONARY_QUERY_PATH = "/api/operator/data-dictionary"
-DATA_DICTIONARY_AUTHORITY = "runtime.cqrs.queries.data_dictionary.handle_query_data_dictionary"
-DATA_DICTIONARY_QUERY_MODEL = "runtime.cqrs.queries.data_dictionary.QueryDataDictionary"
+DATA_DICTIONARY_AUTHORITY = "runtime.operations.queries.data_dictionary.handle_query_data_dictionary"
+DATA_DICTIONARY_QUERY_MODEL = "runtime.operations.queries.data_dictionary.QueryDataDictionary"
 DATA_DICTIONARY_TABLE_PROJECTION = "memory_entities"
 DATA_DICTIONARY_RELATIONSHIP_PROJECTION = "memory_edges"
 _RELATIONSHIP_KEYS = ("depends_on", "referenced_by")

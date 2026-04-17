@@ -456,13 +456,17 @@ class _RecordingPg:
             self.executed.append((query, params))
             return updated
         if stripped.startswith("INSERT INTO workflow_triggers"):
+            source_trigger_id = None
+            if len(params) == 7:
+                source_trigger_id = params[2]
             row = {
                 "id": params[0],
                 "workflow_id": params[1],
-                "event_type": params[2],
-                "filter": json.loads(params[3]),
-                "enabled": params[4],
-                "cron_expression": params[5],
+                "source_trigger_id": source_trigger_id,
+                "event_type": params[3] if len(params) == 7 else params[2],
+                "filter": json.loads(params[4] if len(params) == 7 else params[3]),
+                "enabled": params[5] if len(params) == 7 else params[4],
+                "cron_expression": params[6] if len(params) == 7 else params[5],
             }
             self.trigger_rows.append(row)
             self.executed.append((query, params))
@@ -502,6 +506,9 @@ class _RecordingPg:
             param_index = 1
             if "workflow_id =" in query:
                 updated["workflow_id"] = params[param_index]
+                param_index += 1
+            if "source_trigger_id =" in query:
+                updated["source_trigger_id"] = params[param_index]
                 param_index += 1
             if "event_type =" in query:
                 updated["event_type"] = params[param_index]
@@ -595,14 +602,18 @@ class _MutableWorkflowPg(_RecordingPg):
             self.trigger_rows = [row for row in self.trigger_rows if str(row.get("workflow_id")) != str(params[0])]
             return []
         if query.strip().startswith("INSERT INTO workflow_triggers"):
+            source_trigger_id = None
+            if len(params) == 7:
+                source_trigger_id = params[2]
             self.trigger_rows.append(
                 {
                     "id": params[0],
                     "workflow_id": params[1],
-                    "event_type": params[2],
-                    "filter": json.loads(params[3]),
-                    "cron_expression": params[4],
-                    "enabled": True,
+                    "source_trigger_id": source_trigger_id,
+                    "event_type": params[3] if len(params) == 7 else params[2],
+                    "filter": json.loads(params[4] if len(params) == 7 else params[3]),
+                    "cron_expression": params[6] if len(params) == 7 else params[5],
+                    "enabled": params[5] if len(params) == 7 else params[4],
                 }
             )
             return []
@@ -2620,6 +2631,7 @@ def test_handle_workflow_triggers_post_delegates_to_runtime_owner() -> None:
             "id": "trg_123",
             "workflow_id": "wf_123",
             "workflow_name": "Inbox Triage",
+            "source_trigger_id": None,
             "event_type": "manual",
             "filter": {},
             "enabled": True,
@@ -2655,6 +2667,7 @@ def test_handle_workflow_trigger_update_delegates_to_runtime_owner() -> None:
             "id": "trg_123",
             "workflow_id": "wf_123",
             "workflow_name": "Inbox Triage",
+            "source_trigger_id": None,
             "event_type": "email.received",
             "filter": {},
             "enabled": False,
@@ -2674,6 +2687,7 @@ def test_handle_workflow_trigger_update_delegates_to_runtime_owner() -> None:
                 "id": "trg_123",
                 "workflow_id": "wf_123",
                 "workflow_name": "Inbox Triage",
+                "source_trigger_id": None,
                 "event_type": "email.received",
                 "filter": {},
                 "enabled": False,
@@ -4176,8 +4190,14 @@ def test_handle_query_quality_rollup_missing_is_structured() -> None:
 
 def test_handle_query_routes_issue_backlog(monkeypatch) -> None:
     monkeypatch.setattr(
-        "surfaces.api.operator_read.query_issue_backlog",
-        lambda **kwargs: {"kind": "issue_backlog", "count": 1, "issues": [{"issue_id": "issue.alpha"}], **kwargs},
+        workflow_query_core.NativeOperatorQueryFrontdoor,
+        "query_issue_backlog",
+        lambda self, **kwargs: {
+            "kind": "issue_backlog",
+            "count": 1,
+            "issues": [{"issue_id": "issue.alpha"}],
+            **kwargs,
+        },
     )
 
     result = workflow_query_core.handle_query(SimpleNamespace(), {"question": "issue backlog"})
@@ -4552,7 +4572,7 @@ def test_handle_bugs_list_uses_injected_parser_contract() -> None:
 def test_handle_operator_view_issue_backlog_returns_direct_payload(monkeypatch) -> None:
     captured: dict[str, Any] = {}
 
-    def _query_issue_backlog(**kwargs: Any) -> dict[str, Any]:
+    def _query_issue_backlog(self: Any, **kwargs: Any) -> dict[str, Any]:
         captured.update(kwargs)
         return {
             "kind": "issue_backlog",
@@ -4562,7 +4582,11 @@ def test_handle_operator_view_issue_backlog_returns_direct_payload(monkeypatch) 
             "counts": {"by_status": {"open": 1}, "by_severity": {"P2": 1}},
         }
 
-    monkeypatch.setattr("surfaces.api.operator_read.query_issue_backlog", _query_issue_backlog)
+    monkeypatch.setattr(
+        workflow_query_core.NativeOperatorQueryFrontdoor,
+        "query_issue_backlog",
+        _query_issue_backlog,
+    )
 
     result = workflow_query_core.handle_operator_view(
         SimpleNamespace(),

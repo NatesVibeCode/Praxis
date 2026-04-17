@@ -388,9 +388,9 @@ def _registry_command(args: list[str], *, stdout: TextIO) -> int:
             continue
         stdout.write(f"unexpected argument: {token}\n")
         return 2
-    conn = _sync_conn()
     try:
         if action == "list":
+            conn = _sync_conn()
             payload = {
                 "manifests": list_app_manifests(
                     conn,
@@ -403,10 +403,12 @@ def _registry_command(args: list[str], *, stdout: TextIO) -> int:
                 )
             }
         elif action == "get":
+            conn = _sync_conn()
             payload = {"manifest": get_app_manifest(conn, manifest_id=manifest_id)}
         elif action == "upsert":
             if not confirmed:
                 return _render_confirmation(stdout=stdout)
+            conn = _sync_conn()
             payload = {
                 "manifest": upsert_registry_manifest(
                     conn,
@@ -427,6 +429,7 @@ def _registry_command(args: list[str], *, stdout: TextIO) -> int:
         elif action == "retire":
             if not confirmed:
                 return _render_confirmation(stdout=stdout)
+            conn = _sync_conn()
             payload = {
                 "manifest": retire_app_manifest(
                     conn,
@@ -538,15 +541,17 @@ def _object_type_command(args: list[str], *, stdout: TextIO) -> int:
             continue
         stdout.write(f"unexpected argument: {token}\n")
         return 2
-    conn = _sync_conn()
     try:
         if action == "list":
+            conn = _sync_conn()
             payload = list_object_types(conn, query=query, limit=limit)
         elif action == "get":
+            conn = _sync_conn()
             payload = {"type": get_object_type(conn, type_id=type_id)}
         elif action == "upsert":
             if not confirmed:
                 return _render_confirmation(stdout=stdout)
+            conn = _sync_conn()
             property_definitions = (
                 _load_json_value(
                     file_path=defs_file,
@@ -658,15 +663,17 @@ def _object_command(args: list[str], *, stdout: TextIO) -> int:
             continue
         stdout.write(f"unexpected argument: {token}\n")
         return 2
-    conn = _sync_conn()
     try:
         if action == "list":
+            conn = _sync_conn()
             payload = list_objects(conn, type_id=type_id, status=status, query=query, limit=limit)
         elif action == "get":
+            conn = _sync_conn()
             payload = {"object": get_object(conn, object_id=object_id)}
         elif action == "upsert":
             if not confirmed:
                 return _render_confirmation(stdout=stdout)
+            conn = _sync_conn()
             properties = _load_json_input(
                 file_path=props_file,
                 inline_json=props_json,
@@ -679,6 +686,7 @@ def _object_command(args: list[str], *, stdout: TextIO) -> int:
         elif action == "delete":
             if not confirmed:
                 return _render_confirmation(stdout=stdout)
+            conn = _sync_conn()
             payload = delete_object(conn, object_id=object_id)
         else:
             stdout.write(_object_help_text() + "\n")
@@ -766,9 +774,9 @@ def _catalog_command(args: list[str], *, stdout: TextIO) -> int:
             continue
         stdout.write(f"unexpected argument: {token}\n")
         return 2
-    conn = _sync_conn()
     try:
         if action == "list":
+            conn = _sync_conn()
             payload = {
                 "items": list_surface_catalog_items(
                     conn,
@@ -778,10 +786,12 @@ def _catalog_command(args: list[str], *, stdout: TextIO) -> int:
                 )
             }
         elif action == "get":
+            conn = _sync_conn()
             payload = {"item": get_surface_catalog_item(conn, catalog_item_id=catalog_item_id)}
         elif action == "upsert":
             if not confirmed:
                 return _render_confirmation(stdout=stdout)
+            conn = _sync_conn()
             payload = {
                 "item": upsert_surface_catalog_item(
                     conn,
@@ -795,6 +805,7 @@ def _catalog_command(args: list[str], *, stdout: TextIO) -> int:
         elif action == "retire":
             if not confirmed:
                 return _render_confirmation(stdout=stdout)
+            conn = _sync_conn()
             payload = {"item": retire_surface_catalog_item(conn, catalog_item_id=catalog_item_id)}
         else:
             stdout.write(_catalog_help_text() + "\n")

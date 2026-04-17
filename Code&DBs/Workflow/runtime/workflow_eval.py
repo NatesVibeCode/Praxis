@@ -42,8 +42,8 @@ def _has_required_handoff_shape(handoff_text: str) -> bool:
     return all(heading in handoff_text for heading in _REQUIRED_HANDOFF_HEADINGS)
 
 
-def build_agent_handoff_probe_review(payload: dict[str, Any]) -> dict[str, Any]:
-    """Build the deterministic review payload for the agent handoff probe."""
+def build_runtime_regression_probe_review(payload: dict[str, Any]) -> dict[str, Any]:
+    """Build the deterministic review payload for the runtime regression probe."""
 
     workspace_root = Path(str(payload.get("workspace_root") or ".")).resolve()
     handoff_path = workspace_root / str(payload.get("handoff_path") or "").strip()
@@ -88,14 +88,14 @@ def build_agent_handoff_probe_review(payload: dict[str, Any]) -> dict[str, Any]:
         )
     else:
         agents_exercised = (
-            "No authoritative agent handoff was captured because the expected handoff file "
+            "No authoritative handoff was captured because the expected handoff file "
             "was not present when review executed."
         )
 
     if handoff_exists and handoff_has_shape:
         information_handoff_proven = (
             "Yes: the workflow exercised file-based handoff through "
-            "`agent_handoff_search_db_probe.handoff.md`."
+            "`runtime_regression_probe.handoff.md`."
         )
     else:
         information_handoff_proven = (
@@ -164,4 +164,4 @@ def build_agent_handoff_probe_review(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-__all__ = ["build_agent_handoff_probe_review"]
+__all__ = ["build_runtime_regression_probe_review"]

@@ -17,7 +17,7 @@ def _definition(
     return ResolvedOperationDefinition(
         operation_ref="workflow-build-mutate",
         operation_name="workflow_build.mutate",
-        source_kind="cqrs_command",
+        source_kind="operation_command",
         operation_kind="command",
         http_method="POST",
         http_path="/api/workflows/{workflow_id}/build/{subpath:path}",
@@ -29,7 +29,7 @@ def _definition(
         idempotency_policy="non_idempotent",
         enabled=True,
         operation_enabled=True,
-        source_policy_ref="cqrs-command",
+        source_policy_ref="operation-command",
         source_policy_enabled=True,
         binding_revision="binding.operation_catalog_registry.bootstrap.20260416",
         decision_ref="decision.operation_catalog_registry.bootstrap.20260416",
@@ -39,8 +39,8 @@ def _definition(
 def test_resolve_http_operation_binding_loads_model_and_handler() -> None:
     binding = resolve_http_operation_binding(
         _definition(
-            input_model_ref="runtime.cqrs.commands.workflow_build.MutateWorkflowBuildCommand",
-            handler_ref="runtime.cqrs.commands.workflow_build.handle_mutate_workflow_build",
+            input_model_ref="runtime.operations.commands.workflow_build.MutateWorkflowBuildCommand",
+            handler_ref="runtime.operations.commands.workflow_build.handle_mutate_workflow_build",
         )
     )
 
@@ -54,8 +54,8 @@ def test_resolve_http_operation_binding_rejects_non_model_reference() -> None:
     with pytest.raises(OperationBindingResolutionError) as exc_info:
         resolve_http_operation_binding(
             _definition(
-                input_model_ref="runtime.cqrs.commands.workflow_build.handle_mutate_workflow_build",
-                handler_ref="runtime.cqrs.commands.workflow_build.handle_mutate_workflow_build",
+                input_model_ref="runtime.operations.commands.workflow_build.handle_mutate_workflow_build",
+                handler_ref="runtime.operations.commands.workflow_build.handle_mutate_workflow_build",
             )
         )
 
@@ -66,8 +66,8 @@ def test_resolve_http_operation_binding_rejects_missing_reference() -> None:
     with pytest.raises(OperationBindingResolutionError) as exc_info:
         resolve_http_operation_binding(
             _definition(
-                input_model_ref="runtime.cqrs.commands.workflow_build.MutateWorkflowBuildCommand",
-                handler_ref="runtime.cqrs.commands.workflow_build.missing_handler",
+                input_model_ref="runtime.operations.commands.workflow_build.MutateWorkflowBuildCommand",
+                handler_ref="runtime.operations.commands.workflow_build.missing_handler",
             )
         )
 

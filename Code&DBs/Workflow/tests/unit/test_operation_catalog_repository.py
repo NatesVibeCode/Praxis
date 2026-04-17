@@ -15,12 +15,12 @@ from storage.postgres.validators import PostgresWriteError
 _VALID_OPERATION_ROW = {
     "operation_ref": "workflow-build-suggest-next",
     "operation_name": "workflow_build.suggest_next",
-    "source_kind": "cqrs_query",
+    "source_kind": "operation_query",
     "operation_kind": "query",
     "http_method": "POST",
     "http_path": "/api/workflows/{workflow_id}/build/suggest-next",
-    "input_model_ref": "runtime.cqrs.commands.suggest_next.SuggestNextNodesCommand",
-    "handler_ref": "runtime.cqrs.commands.suggest_next.handle_suggest_next_nodes",
+    "input_model_ref": "runtime.operations.commands.suggest_next.SuggestNextNodesCommand",
+    "handler_ref": "runtime.operations.commands.suggest_next.handle_suggest_next_nodes",
     "authority_ref": "authority.capability_catalog",
     "projection_ref": "projection.capability_catalog",
     "posture": None,
@@ -31,8 +31,8 @@ _VALID_OPERATION_ROW = {
 }
 
 _VALID_SOURCE_POLICY_ROW = {
-    "policy_ref": "cqrs-query",
-    "source_kind": "cqrs_query",
+    "policy_ref": "operation-query",
+    "source_kind": "operation_query",
     "posture": "observe",
     "idempotency_policy": "read_only",
     "enabled": True,
@@ -86,14 +86,14 @@ def test_list_operation_catalog_records_filters_and_normalizes() -> None:
                 **_VALID_OPERATION_ROW,
                 "operation_ref": "workflow-build-mutate",
                 "operation_name": "workflow_build.mutate",
-                "source_kind": "cqrs_command",
+                "source_kind": "operation_command",
                 "operation_kind": "command",
                 "enabled": False,
             },
         ]
     )
 
-    rows = list_operation_catalog_records(conn, source_kind="cqrs_query", limit=10)
+    rows = list_operation_catalog_records(conn, source_kind="operation_query", limit=10)
 
     assert rows == [dict(_VALID_OPERATION_ROW)]
 

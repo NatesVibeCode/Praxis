@@ -15,18 +15,24 @@ class _FakeInstance:
 def test_native_operator_roadmap_write_uses_shared_gate(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    def _roadmap_write(**kwargs):
-        captured.update(kwargs)
+    def _execute_operation_from_env(*, env, operation_name: str, payload):
+        captured["env"] = env
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
         return {
-            "action": kwargs["action"],
+            "action": payload["action"],
             "normalized_payload": {
-                "title": kwargs["title"],
-                "template": kwargs["template"],
-                "parent_roadmap_item_id": kwargs["parent_roadmap_item_id"],
+                "title": payload["title"],
+                "template": payload["template"],
+                "parent_roadmap_item_id": payload["parent_roadmap_item_id"],
             },
             "auto_fixes": [],
             "warnings": [],
             "blocking_errors": [],
+            "command_receipt": {
+                "operation_name": operation_name,
+                "operation_kind": "command",
+            },
             "preview": {
                 "roadmap_items": [
                     {
@@ -39,7 +45,11 @@ def test_native_operator_roadmap_write_uses_shared_gate(monkeypatch) -> None:
         }
 
     monkeypatch.setattr(native_operator, "resolve_native_instance", lambda env=None: _FakeInstance())
-    monkeypatch.setattr(native_operator.operator_write, "roadmap_write", _roadmap_write)
+    monkeypatch.setattr(
+        native_operator.operation_catalog_gateway,
+        "execute_operation_from_env",
+        _execute_operation_from_env,
+    )
 
     stdout = StringIO()
     assert (
@@ -69,15 +79,17 @@ def test_native_operator_roadmap_write_uses_shared_gate(monkeypatch) -> None:
     )
 
     payload = json.loads(stdout.getvalue())
-    assert captured["action"] == "commit"
-    assert captured["title"] == "Unified operator write gate"
-    assert captured["intent_brief"] == "Single validation gate for roadmap authoring"
-    assert captured["template"] == "hard_cutover_program"
-    assert captured["parent_roadmap_item_id"] == "roadmap_item.authority.cleanup"
-    assert captured["priority"] == "p1"
-    assert captured["depends_on"] == (
+    assert captured["operation_name"] == "operator.roadmap_write"
+    assert captured["payload"]["action"] == "commit"
+    assert captured["payload"]["title"] == "Unified operator write gate"
+    assert captured["payload"]["intent_brief"] == "Single validation gate for roadmap authoring"
+    assert captured["payload"]["template"] == "hard_cutover_program"
+    assert captured["payload"]["parent_roadmap_item_id"] == "roadmap_item.authority.cleanup"
+    assert captured["payload"]["priority"] == "p1"
+    assert captured["payload"]["depends_on"] == (
         "roadmap_item.authority.cleanup.validation_review",
     )
-    assert captured["phase_ready"] is True
+    assert captured["payload"]["phase_ready"] is True
     assert payload["committed"] is True
+    assert payload["command_receipt"]["operation_name"] == "operator.roadmap_write"
     assert payload["normalized_payload"]["template"] == "hard_cutover_program"

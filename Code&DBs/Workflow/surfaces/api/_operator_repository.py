@@ -1886,7 +1886,7 @@ class NativeOperatorQueryFrontdoor:
         include_completed_nodes: bool = True,
     ) -> tuple[OperatorRoadmapItemRecord, ...]:
         # DECISION: completed-node visibility is controlled explicitly by caller contract.
-        # SEE: runtime.cqrs.queries.roadmap_tree for the public surface that binds this
+        # SEE: runtime.operations.queries.roadmap_tree for the public surface that binds this
         #      behavior to a query parameter instead of implicit filtering.
         completed_filter = ""
         args = [root_roadmap_item_id, f"{root_roadmap_item_id}.%"]

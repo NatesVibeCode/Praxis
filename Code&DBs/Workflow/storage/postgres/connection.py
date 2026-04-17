@@ -225,7 +225,7 @@ def shutdown_workflow_pool() -> None:
 class SyncPostgresConnection:
     """Sync wrapper around an asyncpg pool for subsystem access.
 
-    Provides execute/fetchrow/fetchval that subsystems can call
+    Provides fetch/execute/fetchrow/fetchval that subsystems can call
     without knowing about async. Replaces ad hoc sync DB handles in
     subsystem constructors.
     """
@@ -238,6 +238,12 @@ class SyncPostgresConnection:
         self._authority_cache_key = self._authority_scope.cache_key
 
     def execute(self, query: str, *args) -> list:
+        async def _do():
+            async with self._pool.acquire() as conn:
+                return await conn.fetch(query, *args)
+        return _run_sync(_do())
+
+    def fetch(self, query: str, *args) -> list:
         async def _do():
             async with self._pool.acquire() as conn:
                 return await conn.fetch(query, *args)
@@ -320,6 +326,14 @@ class _PinnedSyncPostgresConnection:
             raise RuntimeError("workflow transaction connection is closed")
 
     def execute(self, query: str, *args) -> list:
+        self._ensure_open()
+
+        async def _do():
+            return await self._conn.fetch(query, *args)
+
+        return _run_sync(_do())
+
+    def fetch(self, query: str, *args) -> list:
         self._ensure_open()
 
         async def _do():

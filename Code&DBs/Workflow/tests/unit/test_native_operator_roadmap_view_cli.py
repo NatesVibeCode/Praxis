@@ -14,15 +14,21 @@ class _FakeInstance:
 def test_native_operator_roadmap_view_renders_markdown(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    def _query_roadmap_tree(**kwargs):
-        captured.update(kwargs)
+    def _execute_operation_from_env(*, env, operation_name: str, payload):
+        captured["env"] = env
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
         return {
-            "root_roadmap_item_id": kwargs["root_roadmap_item_id"],
+            "root_roadmap_item_id": payload["root_roadmap_item_id"],
             "rendered_markdown": "# Unified operator write validation gate\n\n- Shared validation and normalization gate [6.7.2]",
         }
 
     monkeypatch.setattr(native_operator, "resolve_native_instance", lambda env=None: _FakeInstance())
-    monkeypatch.setattr(native_operator.operator_read, "query_roadmap_tree", _query_roadmap_tree)
+    monkeypatch.setattr(
+        native_operator.operation_catalog_gateway,
+        "execute_operation_from_env",
+        _execute_operation_from_env,
+    )
 
     stdout = StringIO()
     assert (
@@ -38,7 +44,8 @@ def test_native_operator_roadmap_view_renders_markdown(monkeypatch) -> None:
         == 0
     )
 
-    assert captured["root_roadmap_item_id"] == (
+    assert captured["operation_name"] == "operator.roadmap_tree"
+    assert captured["payload"]["root_roadmap_item_id"] == (
         "roadmap_item.authority.cleanup.unified.operator.write.validation.gate"
     )
     assert "# Unified operator write validation gate" in stdout.getvalue()

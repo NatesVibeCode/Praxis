@@ -103,6 +103,8 @@ def test_top_level_help_mentions_routes_alias() -> None:
     assert workflow_cli_main(["--help"], stdout=stdout) == 0
     rendered = stdout.getvalue()
     assert "workflow routes" in rendered
+    assert "workflow records" not in rendered
+    assert "workflow defs <create|update>" not in rendered
 
 
 def test_commands_index_mentions_routes_alias() -> None:
@@ -112,6 +114,8 @@ def test_commands_index_mentions_routes_alias() -> None:
     rendered = stdout.getvalue()
     assert "workflow routes" in rendered
     assert "Alias for workflow API route discovery" in rendered
+    assert "workflow records <create|update|rename>" in rendered
+    assert "workflow defs <create|update>" not in rendered
 
 
 def test_api_help_mentions_route_discovery() -> None:
@@ -760,7 +764,7 @@ def test_triggers_frontdoor_supports_list_and_create(monkeypatch: pytest.MonkeyP
     assert created["trigger"]["workflow_id"] == "wf_1"
 
 
-def test_workflows_frontdoor_supports_create_and_update(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_records_frontdoor_supports_create_update_and_rename(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_query_mod = SimpleNamespace(
         _validate_workflow_body=lambda body, **_kwargs: None,
         _workflow_to_dict=lambda row, include_definition=False: {
@@ -784,39 +788,50 @@ def test_workflows_frontdoor_supports_create_and_update(monkeypatch: pytest.Monk
             "compiled_spec": body.get("compiled_spec"),
         },
     )
+    monkeypatch.setattr(
+        canonical_workflows,
+        "rename_workflow",
+        lambda _conn, *, workflow_id, new_workflow_id, name=None, operator_surface="workflow records": {
+            "id": new_workflow_id,
+            "name": name or "Runtime Regression Probe",
+            "definition": {"definition_revision": "def_runtime_regression_probe"},
+            "compiled_spec": {"definition_revision": "def_runtime_regression_probe"},
+            "workflow_id": workflow_id,
+        },
+    )
 
     create_payload = {
-        "id": "agent_handoff_search_db_probe",
-        "name": "Agent Handoff Search DB Probe",
-        "definition": {"definition_revision": "def_agent_handoff_search_db_probe"},
+        "id": "runtime_regression_probe",
+        "name": "Runtime Regression Probe",
+        "definition": {"definition_revision": "def_runtime_regression_probe"},
         "compiled_spec": {
-            "definition_revision": "def_agent_handoff_search_db_probe",
+            "definition_revision": "def_runtime_regression_probe",
             "jobs": [{"label": "seed_contract"}],
         },
     }
     stdout = StringIO()
     assert (
         workflow_cli_main(
-            ["workflows", "create", "--input-json", json.dumps(create_payload)],
+            ["records", "create", "--input-json", json.dumps(create_payload)],
             stdout=stdout,
         )
         == 0
     )
     created = json.loads(stdout.getvalue())
-    assert created["workflow"]["id"] == "agent_handoff_search_db_probe"
+    assert created["workflow"]["id"] == "runtime_regression_probe"
     assert created["workflow"]["compiled_spec"]["jobs"][0]["label"] == "seed_contract"
 
     update_payload = {
-        "name": "Agent Handoff Search DB Probe v2",
-        "definition": {"definition_revision": "def_agent_handoff_search_db_probe_v2"},
+        "name": "Runtime Regression Probe v2",
+        "definition": {"definition_revision": "def_runtime_regression_probe_v2"},
     }
     stdout = StringIO()
     assert (
         workflow_cli_main(
             [
-                "workflows",
+                "records",
                 "update",
-                "agent_handoff_search_db_probe",
+                "runtime_regression_probe",
                 "--input-json",
                 json.dumps(update_payload),
             ],
@@ -825,8 +840,44 @@ def test_workflows_frontdoor_supports_create_and_update(monkeypatch: pytest.Monk
         == 0
     )
     updated = json.loads(stdout.getvalue())
-    assert updated["workflow"]["id"] == "agent_handoff_search_db_probe"
-    assert updated["workflow"]["name"] == "Agent Handoff Search DB Probe v2"
+    assert updated["workflow"]["id"] == "runtime_regression_probe"
+    assert updated["workflow"]["name"] == "Runtime Regression Probe v2"
+
+    stdout = StringIO()
+    assert (
+        workflow_cli_main(
+            [
+                "records",
+                "rename",
+                "runtime_regression_probe",
+                "--to",
+                "runtime_regression_probe_v2",
+                "--name",
+                "Runtime Regression Probe v2",
+            ],
+            stdout=stdout,
+        )
+        == 0
+    )
+    renamed = json.loads(stdout.getvalue())
+    assert renamed["workflow"]["id"] == "runtime_regression_probe_v2"
+    assert renamed["workflow"]["name"] == "Runtime Regression Probe v2"
+
+
+def test_legacy_defs_and_workflows_aliases_fail_fast_with_rename_hint() -> None:
+    stdout = StringIO()
+    assert (
+        workflow_cli_main(["defs", "create", "--input-json", "{}"], stdout=stdout)
+        == 2
+    )
+    assert "workflow records" in stdout.getvalue()
+
+    stdout = StringIO()
+    assert (
+        workflow_cli_main(["workflows", "create", "--input-json", "{}"], stdout=stdout)
+        == 2
+    )
+    assert "unknown command: workflows" in stdout.getvalue()
 
 
 def test_manifest_frontdoor_supports_generate_and_save_as(

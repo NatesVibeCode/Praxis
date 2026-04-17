@@ -266,6 +266,7 @@ function shouldKeepEdgeMenusOpen(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
   return Boolean(
     target.closest('.moon-graph-gate')
+    || target.closest('.moon-dock-overlay')
     || target.closest('.moon-dock-side')
     || target.closest('.moon-halfmoon--right')
     || target.closest('.menu-panel'),
@@ -1204,24 +1205,29 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
                   <div className="moon-selection-window">
                     <button
                       type="button"
-                      className="moon-selection-btn"
+                      className="moon-selection-card"
                       onClick={() => dispatch({ type: 'EMPTY_PICK_TRIGGER' })}
                     >
-                      Build
+                      <span className="moon-selection-card__title">Pick a trigger</span>
+                      <span className="moon-selection-card__desc">Choose a route first if you already know how this workflow starts.</span>
                     </button>
-                    <div className="moon-selection-sep" />
                     <button
                       type="button"
-                      className="moon-selection-btn"
+                      className="moon-selection-card"
                       onClick={() => dispatch({ type: 'EMPTY_PICK_COMPOSE' })}
                     >
-                      Prompt
+                      <span className="moon-selection-card__title">Describe it</span>
+                      <span className="moon-selection-card__desc">Type plain English. The builder will best-guess the steps, inputs, and outputs.</span>
                     </button>
                   </div>
                 )}
 
                 {showComposePanel && (
-                  <div className="moon-compose" style={{ marginTop: 32 }}>
+                  <div className="moon-compose moon-compose--intro" style={{ marginTop: 32 }}>
+                    <div className="moon-compose__title">Describe the workflow</div>
+                    <div className="moon-compose__hint">
+                      Free text is enough. The builder will infer the graph shape, then you can tighten it up in the canvas.
+                    </div>
                     <textarea
                       value={state.compileProse}
                       onChange={(e) => dispatch({ type: 'SET_PROSE', prose: e.target.value })}
@@ -1233,7 +1239,7 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
                           }
                         }
                       }}
-                      placeholder="Describe the workflow you want to build..."
+                      placeholder="Example: Scrape Gmail, summarize applications, then route each one to the right reviewer."
                       rows={4}
                       disabled={compiling}
                       autoFocus
@@ -1242,6 +1248,19 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
                       <button className="moon-compose__btn" onClick={handleCompile} disabled={compiling || !state.compileProse.trim()}>
                         {compiling ? 'Building...' : 'Build from prompt'}
                       </button>
+                    </div>
+                    <div className="moon-compose__shortcut">Press Ctrl/Cmd+Enter to build.</div>
+                    <div className="moon-compose__examples" aria-label="Example prompts">
+                      {EXAMPLE_PROMPTS.map((prompt) => (
+                        <button
+                          key={prompt}
+                          type="button"
+                          className="moon-compose__chip"
+                          onClick={() => dispatch({ type: 'SET_PROSE', prose: prompt })}
+                        >
+                          {prompt}
+                        </button>
+                      ))}
                     </div>
                   </div>
                 )}

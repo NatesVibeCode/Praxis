@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any, Mapping
+from typing import Any
 
 from runtime.dependency_contract import dependency_truth_report
 from runtime.engineering_observability import (
@@ -12,7 +11,6 @@ from runtime.engineering_observability import (
     build_platform_observability,
 )
 from surfaces._boot import resolve_surface_env, workflow_database_status
-from surfaces.api import operator_read, operator_write
 from surfaces.api.handlers import workflow_launcher
 from surfaces.mcp.catalog import get_tool_catalog
 
@@ -112,7 +110,7 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         "/api/operator/native-primary-cutover-gate": "Admit a native-primary cutover gate through operator control",
         "/api/operator/roadmap-write": "Preview, validate, or commit roadmap rows through one shared validation gate",
         "/api/operator/work-item-closeout": "Preview or commit proof-backed bug and roadmap closeout through one shared reconciliation gate",
-        "/api/operator/roadmap-view": "Read one roadmap subtree and its dependency edges from DB-backed authority",
+        "/api/operator/roadmap/tree/{root_roadmap_item_id}": "Read one roadmap subtree and its dependency edges from DB-backed authority",
         "/api/operator/provider-onboarding": "Seed a provider profile, model catalog rows, benchmark metadata, and verification in one wizard",
     }
 
@@ -179,7 +177,7 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
                 "recent_activity",
             ],
             "downstream_truth_surfaces": {
-                "roadmap_truth": "/api/operator/roadmap-view",
+                "roadmap_truth": "/api/operator/roadmap/tree/{root_roadmap_item_id}",
                 "queue_refs_and_current_state_notes": (
                     "surfaces.api.native_operator_surface.query_native_operator_surface"
                 ),
@@ -423,275 +421,7 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
             ],
             "notes": "scripts/praxis is the preferred launcher entrypoint; scripts/praxis-ctl remains a compatibility alias. launchd only sees the single com.praxis.engine background item, while Praxis supervises postgres, api-server, workflow-worker, and scheduler internally. The launcher front door is http://127.0.0.1:8420/app and the always-on MCP bridge is served from the API surface.",
         },
-    }
-
-
-def _parse_optional_iso_datetime(value: object, *, field_name: str) -> datetime | None:
-    if value is None:
-        return None
-    if not isinstance(value, str) or not value.strip():
-        raise _ClientError(f"{field_name} must be an ISO-8601 datetime string")
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError as exc:
-        raise _ClientError(f"{field_name} must be an ISO-8601 datetime string") from exc
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise _ClientError(f"{field_name} must include a timezone offset")
-    return parsed
-
-
-def _handle_task_route_eligibility_post(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
-    provider_slug = body.get("provider_slug")
-    if not isinstance(provider_slug, str) or not provider_slug.strip():
-        raise _ClientError("provider_slug is required")
-
-    task_type = body.get("task_type")
-    if task_type is not None and (not isinstance(task_type, str) or not task_type.strip()):
-        raise _ClientError("task_type must be a non-empty string when provided")
-
-    model_slug = body.get("model_slug")
-    if model_slug is not None and (not isinstance(model_slug, str) or not model_slug.strip()):
-        raise _ClientError("model_slug must be a non-empty string when provided")
-
-    reason_code = body.get("reason_code", "operator_control")
-    if not isinstance(reason_code, str) or not reason_code.strip():
-        raise _ClientError("reason_code must be a non-empty string")
-
-    rationale = body.get("rationale")
-    if rationale is not None and (not isinstance(rationale, str) or not rationale.strip()):
-        raise _ClientError("rationale must be a non-empty string when provided")
-
-    decision_ref = body.get("decision_ref")
-    if decision_ref is not None and (
-        not isinstance(decision_ref, str) or not decision_ref.strip()
-    ):
-        raise _ClientError("decision_ref must be a non-empty string when provided")
-
-    env = _workflow_env(subs)
-    return operator_write.set_task_route_eligibility_window(
-        provider_slug=provider_slug,
-        eligibility_status=body.get("eligibility_status", "rejected"),
-        effective_to=_parse_optional_iso_datetime(
-            body.get("effective_to"),
-            field_name="effective_to",
-        ),
-        task_type=task_type,
-        model_slug=model_slug,
-        reason_code=reason_code,
-        rationale=rationale,
-        effective_from=_parse_optional_iso_datetime(
-            body.get("effective_from"),
-            field_name="effective_from",
-        ),
-        decision_ref=decision_ref,
-        env=env,
-    )
-
-
-def _parse_optional_mapping(value: object, *, field_name: str) -> Mapping[str, Any] | None:
-    if value is None:
-        return None
-    if not isinstance(value, Mapping):
-        raise _ClientError(f"{field_name} must be an object")
-    return value
-
-
-def _parse_optional_text(value: object, *, field_name: str) -> str | None:
-    if value is None:
-        return None
-    if not isinstance(value, str) or not value.strip():
-        raise _ClientError(f"{field_name} must be a non-empty string when provided")
-    return value.strip()
-
-
-def _handle_native_primary_cutover_gate_post(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
-    decided_by = body.get("decided_by")
-    if not isinstance(decided_by, str) or not decided_by.strip():
-        raise _ClientError("decided_by is required")
-
-    decision_source = body.get("decision_source")
-    if not isinstance(decision_source, str) or not decision_source.strip():
-        raise _ClientError("decision_source is required")
-
-    rationale = body.get("rationale")
-    if not isinstance(rationale, str) or not rationale.strip():
-        raise _ClientError("rationale is required")
-
-    roadmap_item_id = _parse_optional_text(
-        body.get("roadmap_item_id"),
-        field_name="roadmap_item_id",
-    )
-    workflow_class_id = _parse_optional_text(
-        body.get("workflow_class_id"),
-        field_name="workflow_class_id",
-    )
-    schedule_definition_id = _parse_optional_text(
-        body.get("schedule_definition_id"),
-        field_name="schedule_definition_id",
-    )
-    if sum(1 for value in (roadmap_item_id, workflow_class_id, schedule_definition_id) if value) != 1:
-        raise _ClientError("exactly one of roadmap_item_id, workflow_class_id, or schedule_definition_id is required")
-
-    title = _parse_optional_text(body.get("title"), field_name="title")
-    gate_name = _parse_optional_text(body.get("gate_name"), field_name="gate_name")
-    gate_policy = _parse_optional_mapping(body.get("gate_policy"), field_name="gate_policy")
-    required_evidence = _parse_optional_mapping(
-        body.get("required_evidence"),
-        field_name="required_evidence",
-    )
-
-    env = _workflow_env(subs)
-    return operator_write.admit_native_primary_cutover_gate(
-        decided_by=decided_by.strip(),
-        decision_source=decision_source.strip(),
-        rationale=rationale.strip(),
-        roadmap_item_id=roadmap_item_id,
-        workflow_class_id=workflow_class_id,
-        schedule_definition_id=schedule_definition_id,
-        title=title,
-        gate_name=gate_name,
-        gate_policy=gate_policy,
-        required_evidence=required_evidence,
-        decided_at=_parse_optional_iso_datetime(
-            body.get("decided_at"),
-            field_name="decided_at",
-        ),
-        opened_at=_parse_optional_iso_datetime(
-            body.get("opened_at"),
-            field_name="opened_at",
-        ),
-        created_at=_parse_optional_iso_datetime(
-            body.get("created_at"),
-            field_name="created_at",
-        ),
-        updated_at=_parse_optional_iso_datetime(
-            body.get("updated_at"),
-            field_name="updated_at",
-        ),
-        env=env,
-    )
-
-
-def _handle_transport_support(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
-    # --- input validation (handler responsibility) ---
-    provider_filter = body.get("provider_slug")
-    if provider_filter is not None and (not isinstance(provider_filter, str) or not provider_filter.strip()):
-        raise _ClientError("provider_slug must be a non-empty string when provided")
-    model_filter = body.get("model_slug")
-    if model_filter is not None and (not isinstance(model_filter, str) or not model_filter.strip()):
-        raise _ClientError("model_slug must be a non-empty string when provided")
-    raw_jobs = body.get("jobs")
-    if raw_jobs is not None and not isinstance(raw_jobs, list):
-        raise _ClientError("jobs must be a list when provided")
-    if isinstance(raw_jobs, list):
-        for index, raw_job in enumerate(raw_jobs):
-            if not isinstance(raw_job, dict):
-                raise _ClientError(f"jobs[{index}] must be an object")
-
-    runtime_profile_ref = (
-        body.get("runtime_profile_ref").strip()
-        if isinstance(body.get("runtime_profile_ref"), str) and body.get("runtime_profile_ref").strip()
-        else "praxis"
-    )
-
-    return operator_read.query_transport_support(
-        health_mod=subs.get_health_mod(),
-        pg=subs.get_pg_conn(),
-        provider_filter=provider_filter.strip() if isinstance(provider_filter, str) else None,
-        model_filter=model_filter.strip() if isinstance(model_filter, str) else None,
-        runtime_profile_ref=runtime_profile_ref,
-        jobs=raw_jobs if isinstance(raw_jobs, list) else None,
-    )
-
-
-def _parse_optional_string_list(value: object, *, field_name: str) -> list[str] | None:
-    if value is None:
-        return None
-    if not isinstance(value, list):
-        raise _ClientError(f"{field_name} must be a list of non-empty strings")
-    normalized: list[str] = []
-    for index, item in enumerate(value):
-        if not isinstance(item, str) or not item.strip():
-            raise _ClientError(f"{field_name}[{index}] must be a non-empty string")
-        normalized.append(item.strip())
-    return normalized
-
-
-def _parse_optional_bool(value: object, *, field_name: str) -> bool | None:
-    if value is None:
-        return None
-    if not isinstance(value, bool):
-        raise _ClientError(f"{field_name} must be a boolean when provided")
-    return value
-
-
-def _handle_roadmap_write_post(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
-    title = body.get("title")
-    if not isinstance(title, str) or not title.strip():
-        raise _ClientError("title is required")
-
-    intent_brief = body.get("intent_brief")
-    if not isinstance(intent_brief, str) or not intent_brief.strip():
-        raise _ClientError("intent_brief is required")
-
-    env = _workflow_env(subs)
-    return operator_write.roadmap_write(
-        action=body.get("action", "preview"),
-        title=title,
-        intent_brief=intent_brief,
-        template=body.get("template", "single_capability"),
-        priority=body.get("priority", "p2"),
-        parent_roadmap_item_id=body.get("parent_roadmap_item_id"),
-        slug=body.get("slug"),
-        depends_on=_parse_optional_string_list(
-            body.get("depends_on"),
-            field_name="depends_on",
-        ),
-        source_bug_id=body.get("source_bug_id"),
-        registry_paths=_parse_optional_string_list(
-            body.get("registry_paths"),
-            field_name="registry_paths",
-        ),
-        decision_ref=body.get("decision_ref"),
-        item_kind=body.get("item_kind"),
-        tier=body.get("tier"),
-        phase_ready=_parse_optional_bool(
-            body.get("phase_ready"),
-            field_name="phase_ready",
-        ),
-        approval_tag=body.get("approval_tag"),
-        reference_doc=body.get("reference_doc"),
-        outcome_gate=body.get("outcome_gate"),
-        env=env,
-    )
-
-
-def _handle_roadmap_view_post(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
-    root_roadmap_item_id = body.get("root_roadmap_item_id")
-    if not isinstance(root_roadmap_item_id, str) or not root_roadmap_item_id.strip():
-        raise _ClientError("root_roadmap_item_id is required")
-
-    env = _workflow_env(subs)
-    return operator_read.query_roadmap_tree(
-        root_roadmap_item_id=root_roadmap_item_id,
-        env=env,
-    )
-
-
-def _handle_work_item_closeout_post(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
-    env = _workflow_env(subs)
-    return operator_write.reconcile_work_item_closeout(
-        action=body.get("action", "preview"),
-        bug_ids=_parse_optional_string_list(
-            body.get("bug_ids"),
-            field_name="bug_ids",
-        ),
-        roadmap_item_ids=_parse_optional_string_list(
-            body.get("roadmap_item_ids"),
-            field_name="roadmap_item_ids",
-        ),
-        env=env,
-    )
+}
 
 
 def _handle_provider_onboarding_post(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
@@ -1025,12 +755,6 @@ ADMIN_ROUTES: dict[str, object] = {
     "/orient": _handle_orient,
     "/health": _handle_health,
     "/governance": _handle_governance,
-    "/api/operator/task-route-eligibility": _handle_task_route_eligibility_post,
-    "/api/operator/native-primary-cutover-gate": _handle_native_primary_cutover_gate_post,
-    "/api/operator/transport-support": _handle_transport_support,
-    "/api/operator/roadmap-write": _handle_roadmap_write_post,
-    "/api/operator/work-item-closeout": _handle_work_item_closeout_post,
-    "/api/operator/roadmap-view": _handle_roadmap_view_post,
     "/api/operator/provider-onboarding": _handle_provider_onboarding_post,
 }
 

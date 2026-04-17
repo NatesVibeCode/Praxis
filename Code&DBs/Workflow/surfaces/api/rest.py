@@ -38,12 +38,13 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.routing import APIRoute
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from adapters.provider_registry import default_llm_adapter_type, default_provider_slug
 from contracts.domain import validate_workflow_request
 from runtime.native_authority import default_native_authority_refs
 from runtime.operation_catalog_bindings import resolve_http_operation_binding
+from runtime.operation_catalog_gateway import execute_operation_binding
 from runtime.workflow._status import summarize_run_health
 from runtime.workflow_graph_compiler import compile_graph_workflow_request, spec_uses_graph_runtime
 from surfaces.api.catalog_authority import build_catalog_payload
@@ -433,8 +434,7 @@ from runtime.operation_catalog import list_resolved_operation_definitions
 
 def _create_capability_endpoint(
     target_app: FastAPI,
-    command_class: type[BaseModel],
-    handler: Callable[..., Any],
+    binding: Any,
 ):
     async def endpoint(request: Request):
         subsystems = _ensure_shared_subsystems(target_app)
@@ -451,17 +451,22 @@ def _create_capability_endpoint(
 
         path_params = request.path_params
         query_params = dict(request.query_params)
-        command_data = {**query_params, **path_params, "body": body}
+        command_data = {**query_params, **path_params}
+        if "body" in binding.command_class.model_fields:
+            command_data["body"] = body
+        else:
+            command_data.update(body)
 
         try:
-            command = command_class(**command_data)
-        except Exception as e:
-            return JSONResponse({"error": f"Validation Error: {e}"}, status_code=400)
-
-        try:
-            result = handler(command, subsystems)
+            result = execute_operation_binding(
+                binding,
+                payload=command_data,
+                subsystems=subsystems,
+            )
             return JSONResponse(result)
         except Exception as e:
+            if isinstance(e, (RequestValidationError, ValidationError)):
+                return JSONResponse({"error": f"Validation Error: {e}"}, status_code=400)
             logger.error("Command failure: %s", e, exc_info=True)
             return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -481,31 +486,33 @@ def _capability_route_exists(target_app: FastAPI, *, path: str, method: str) -> 
     return False
 
 
-def _capability_routes_from_registry() -> list[tuple[Any, str]]:
-    from runtime.cqrs import bootstrap_registry, registry
-
-    bootstrap_registry()
-
-    mounted: list[tuple[Any, str]] = []
-    for route in registry.routes:
-        handler = registry.get_handler(route.command_class)
-        if handler is None:
-            logger.warning("registry fallback route missing handler: %s", route.command_class.__name__)
-            continue
-        mounted.append(
-            (
-                SimpleNamespace(
-                    operation_name=route.operation_name or route.command_class.__name__,
-                    http_method=route.method,
-                    http_path=route.path,
-                    command_class=route.command_class,
-                    handler=handler,
-                    summary=route.description or route.command_class.__name__,
-                ),
-                "registry_fallback",
+def _assert_unique_capability_route_specs(route_specs: list[tuple[Any, str]]) -> None:
+    seen: dict[tuple[str, str], str] = {}
+    for binding, _mount_source in route_specs:
+        signature = (str(binding.http_method).upper(), binding.http_path)
+        existing_owner = seen.get(signature)
+        if existing_owner is not None:
+            method, path = signature
+            raise RuntimeError(
+                "duplicate operation-catalog route binding for "
+                f"{method} {path}: {existing_owner} and {binding.operation_name}"
             )
+        seen[signature] = binding.operation_name
+
+
+def _assert_capability_routes_do_not_conflict_with_app(
+    target_app: FastAPI,
+    route_specs: list[tuple[Any, str]],
+) -> None:
+    for binding, _mount_source in route_specs:
+        route_path = binding.http_path
+        route_method = str(binding.http_method).upper()
+        if not _capability_route_exists(target_app, path=route_path, method=route_method):
+            continue
+        raise RuntimeError(
+            "capability route conflict for "
+            f"{route_method} {route_path}; an existing route already owns this binding"
         )
-    return mounted
 
 
 def _capability_routes_from_operation_catalog(target_app: FastAPI) -> list[tuple[Any, str]]:
@@ -566,33 +573,25 @@ def _promote_last_capability_route(target_app: FastAPI) -> None:
 
 
 def mount_capabilities(target_app: FastAPI) -> None:
-    """Mount CQRS endpoints from the DB-backed operation catalog when available."""
+    """Mount operation-catalog endpoints from the DB-backed operation catalog."""
     if getattr(target_app.state, "capabilities_mounted", False):
         return
 
-    try:
-        route_specs = _capability_routes_from_operation_catalog(target_app)
-    except Exception:
-        logger.exception("operation catalog mount failed; falling back to registry routes")
-        route_specs = _capability_routes_from_registry()
+    route_specs = _capability_routes_from_operation_catalog(target_app)
+    _assert_unique_capability_route_specs(route_specs)
+    _assert_capability_routes_do_not_conflict_with_app(target_app, route_specs)
 
     for binding, mount_source in _sort_capability_route_specs(route_specs):
         route_path = binding.http_path
         route_method = str(binding.http_method).upper()
         route_name = binding.operation_name
-        if _capability_route_exists(target_app, path=route_path, method=route_method):
-            continue
-        endpoint_func = _create_capability_endpoint(
-            target_app,
-            binding.command_class,
-            binding.handler,
-        )
+        endpoint_func = _create_capability_endpoint(target_app, binding)
         target_app.add_api_route(
             route_path,
             endpoint_func,
             methods=[route_method],
             summary=binding.summary,
-            tags=["cqrs"],
+            tags=["operations"],
             name=route_name,
             openapi_extra={
                 "x-praxis-binding-source": mount_source,
@@ -2433,30 +2432,6 @@ async def workflow_templates_get(request: Request) -> Response:
     return await _route_to_handler(request)
 
 # -- Operator --
-@app.post("/api/operator/task-route-eligibility")
-async def operator_task_route_post(request: Request) -> Response:
-    return await _dispatch_standard_route(request)
-
-@app.post("/api/operator/native-primary-cutover-gate")
-async def operator_native_primary_cutover_gate_post(request: Request) -> Response:
-    return await _dispatch_standard_route(request)
-
-@app.post("/api/operator/transport-support")
-async def operator_transport_post(request: Request) -> Response:
-    return await _dispatch_standard_route(request)
-
-@app.post("/api/operator/roadmap-write")
-async def operator_roadmap_write_post(request: Request) -> Response:
-    return await _dispatch_standard_route(request)
-
-@app.post("/api/operator/work-item-closeout")
-async def operator_closeout_post(request: Request) -> Response:
-    return await _dispatch_standard_route(request)
-
-@app.post("/api/operator/roadmap-view")
-async def operator_roadmap_view_post(request: Request) -> Response:
-    return await _dispatch_standard_route(request)
-
 @app.post("/api/operator/provider-onboarding")
 async def operator_onboarding_post(request: Request) -> Response:
     return await _dispatch_standard_route(request)

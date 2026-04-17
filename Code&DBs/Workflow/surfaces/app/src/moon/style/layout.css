@@ -280,4 +280,50 @@
   writing-mode: vertical-rl;
 }
 
+@media (max-width: 900px) {
+  .moon-dock-overlay {
+    top: 10px;
+    bottom: 10px;
+    width: min(calc(100vw - 28px), 420px);
+    min-width: 0;
+    max-width: calc(100vw - 20px);
+    padding: 52px 18px 24px;
+  }
+
+  .moon-dock-overlay--left {
+    left: 10px;
+    transform: translateX(calc(-100% - 20px));
+    border-radius: 24px;
+  }
+
+  .moon-dock-overlay--right {
+    right: 10px;
+    transform: translateX(calc(100% + 20px));
+    border-radius: 24px;
+  }
+}
+
+@media (max-width: 760px) {
+  .moon-dock-overlay {
+    left: 8px !important;
+    right: 8px !important;
+    top: 8px;
+    bottom: 8px;
+    width: auto;
+    max-width: none;
+    min-width: 0;
+    padding: 48px 16px 20px;
+  }
+
+  .moon-dock-overlay--left,
+  .moon-dock-overlay--right {
+    transform: translateY(16px);
+    border-radius: 22px;
+  }
+
+  .moon-dock-overlay--open {
+    transform: translateY(0);
+  }
+}
+
 }

@@ -81,6 +81,43 @@ def _normalize_json_mapping(
     return dict(mapping)
 
 
+def _rewrite_workflow_identity_fields(
+    value: Any,
+    *,
+    old_workflow_id: str,
+    new_workflow_id: str,
+) -> Any:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        return [
+            _rewrite_workflow_identity_fields(
+                item,
+                old_workflow_id=old_workflow_id,
+                new_workflow_id=new_workflow_id,
+            )
+            for item in value
+        ]
+    if isinstance(value, dict):
+        return {
+            key: (
+                new_workflow_id
+                if (
+                    isinstance(item, str)
+                    and (key == "workflow_id" or key.endswith("_workflow_id"))
+                    and item == old_workflow_id
+                )
+                else _rewrite_workflow_identity_fields(
+                    item,
+                    old_workflow_id=old_workflow_id,
+                    new_workflow_id=new_workflow_id,
+                )
+            )
+            for key, item in value.items()
+        }
+    return value
+
+
 def _normalize_string_list(
     value: object | None,
     *,
@@ -122,6 +159,17 @@ def _normalize_optional_bool(
             details={"field": field_name},
         )
     return value
+
+
+def _trigger_filter_signature(value: object) -> str:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, json.JSONDecodeError):
+            value = {}
+    if not isinstance(value, dict):
+        value = {}
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 def create_app_manifest(
     conn: Any,
@@ -813,36 +861,85 @@ def reconcile_workflow_triggers(
     compiled_spec: dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
     normalized_workflow_id = _require_text(workflow_id, field_name="workflow_id")
-    conn.execute("DELETE FROM workflow_triggers WHERE workflow_id = $1", normalized_workflow_id)
-
     trigger_specs = compiled_spec.get("triggers", []) if isinstance(compiled_spec, dict) else []
+    existing_rows = conn.execute(
+        "SELECT id, workflow_id, event_type, filter, cron_expression, enabled, source_trigger_id "
+        "FROM workflow_triggers WHERE workflow_id = $1",
+        normalized_workflow_id,
+    ) or []
+    existing_by_source_id: dict[str, dict[str, Any]] = {}
+    existing_by_signature: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for row in existing_rows:
+        if not isinstance(row, dict):
+            continue
+        row_source_trigger_id = _optional_text(row.get("source_trigger_id"), field_name="source_trigger_id")
+        if row_source_trigger_id:
+            existing_by_source_id[row_source_trigger_id] = row
+        signature = (
+            str(row.get("event_type") or "").strip() or "manual",
+            _trigger_filter_signature(row.get("filter")),
+            str(row.get("cron_expression") or "").strip(),
+        )
+        existing_by_signature.setdefault(signature, []).append(row)
+
     persisted_rows: list[dict[str, Any]] = []
+    desired_source_trigger_ids: set[str] = set()
+    managed_row_ids: set[str] = set()
     for raw_trigger in trigger_specs:
         if not isinstance(raw_trigger, dict):
             continue
         event_type = str(raw_trigger.get("event_type") or "").strip() or "manual"
         trigger_filter = raw_trigger.get("filter") if isinstance(raw_trigger.get("filter"), dict) else {}
         cron_expression = _optional_text(raw_trigger.get("cron_expression"), field_name="cron_expression")
-        trigger_id = "trg_" + uuid.uuid4().hex[:12]
-        conn.execute(
-            """INSERT INTO workflow_triggers (id, workflow_id, event_type, filter, cron_expression, enabled)
-               VALUES ($1, $2, $3, $4::jsonb, $5, true)""",
-            trigger_id,
-            normalized_workflow_id,
+        source_trigger_id = _optional_text(raw_trigger.get("source_trigger_id"), field_name="source_trigger_id")
+        if not source_trigger_id:
+            source_trigger_id = _optional_text(raw_trigger.get("id"), field_name="id")
+        if source_trigger_id:
+            desired_source_trigger_ids.add(source_trigger_id)
+
+        signature = (
             event_type,
-            _encode_jsonb(trigger_filter, field_name="filter"),
-            cron_expression,
+            _trigger_filter_signature(trigger_filter),
+            str(cron_expression or "").strip(),
         )
-        persisted_rows.append(
-            {
-                "id": trigger_id,
-                "workflow_id": normalized_workflow_id,
-                "event_type": event_type,
-                "filter": trigger_filter,
-                "cron_expression": cron_expression,
-                "enabled": True,
-            }
+        existing_row = existing_by_source_id.get(source_trigger_id or "") if source_trigger_id else None
+        if existing_row is None:
+            candidates = existing_by_signature.get(signature, [])
+            if len(candidates) == 1:
+                candidate = candidates[0]
+                if not _optional_text(candidate.get("source_trigger_id"), field_name="source_trigger_id"):
+                    existing_row = candidate
+
+        trigger_id = str(existing_row.get("id") or "").strip() if existing_row is not None else ""
+        if not trigger_id:
+            trigger_id = source_trigger_id or ("trg_" + uuid.uuid4().hex[:12])
+
+        row = upsert_workflow_trigger_record(
+            conn,
+            trigger_id=trigger_id,
+            workflow_id=normalized_workflow_id,
+            event_type=event_type,
+            trigger_filter=trigger_filter,
+            cron_expression=cron_expression,
+            enabled=True,
+            source_trigger_id=source_trigger_id,
         )
+        persisted_rows.append(row)
+        managed_row_ids.add(str(row.get("id") or "").strip())
+
+    for row in existing_rows:
+        if not isinstance(row, dict):
+            continue
+        row_source_trigger_id = _optional_text(row.get("source_trigger_id"), field_name="source_trigger_id")
+        row_id = str(row.get("id") or "").strip()
+        if not row_source_trigger_id:
+            continue
+        if row_source_trigger_id in desired_source_trigger_ids:
+            continue
+        if row_id in managed_row_ids:
+            continue
+        conn.execute("DELETE FROM workflow_triggers WHERE id = $1", row_id)
+
     return persisted_rows
 
 
@@ -855,6 +952,7 @@ def upsert_workflow_trigger_record(
     trigger_filter: dict[str, Any] | None = None,
     cron_expression: str | None = None,
     enabled: bool = True,
+    source_trigger_id: object = _UNSET,
 ) -> dict[str, Any]:
     normalized_trigger_id = _require_text(trigger_id, field_name="trigger_id")
     normalized_workflow_id = _require_text(workflow_id, field_name="workflow_id")
@@ -863,36 +961,45 @@ def upsert_workflow_trigger_record(
     normalized_enabled = _normalize_optional_bool(enabled, field_name="enabled")
     assert normalized_enabled is not None
     normalized_cron_expression = _optional_text(cron_expression, field_name="cron_expression")
+    normalized_source_trigger_id = (
+        _optional_text(source_trigger_id, field_name="source_trigger_id")
+        if source_trigger_id is not _UNSET
+        else None
+    )
 
     existing = conn.fetchval(
         "SELECT 1 FROM workflow_triggers WHERE id = $1",
         normalized_trigger_id,
     )
     if existing:
+        assignments = [
+            "workflow_id = $2",
+        ]
+        params: list[Any] = [normalized_trigger_id, normalized_workflow_id]
+        if source_trigger_id is not _UNSET:
+            params.append(normalized_source_trigger_id)
+            assignments.append(f"source_trigger_id = ${len(params)}")
+        params.append(normalized_event_type)
+        assignments.append(f"event_type = ${len(params)}")
+        params.append(_encode_jsonb(normalized_filter, field_name="filter"))
+        assignments.append(f"filter = ${len(params)}::jsonb")
+        params.append(normalized_cron_expression)
+        assignments.append(f"cron_expression = ${len(params)}")
+        params.append(normalized_enabled)
+        assignments.append(f"enabled = ${len(params)}")
         row = conn.fetchrow(
-            """UPDATE workflow_triggers
-               SET workflow_id = $2,
-                   event_type = $3,
-                   filter = $4::jsonb,
-                   cron_expression = $5,
-                   enabled = $6
-               WHERE id = $1
-               RETURNING *""",
-            normalized_trigger_id,
-            normalized_workflow_id,
-            normalized_event_type,
-            _encode_jsonb(normalized_filter, field_name="filter"),
-            normalized_cron_expression,
-            normalized_enabled,
+            f"UPDATE workflow_triggers SET {', '.join(assignments)} WHERE id = $1 RETURNING *",
+            *params,
         )
     else:
         row = conn.fetchrow(
             """INSERT INTO workflow_triggers
-                  (id, workflow_id, event_type, filter, enabled, cron_expression)
-               VALUES ($1, $2, $3, $4::jsonb, $5, $6)
+                  (id, workflow_id, source_trigger_id, event_type, filter, enabled, cron_expression)
+               VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)
                RETURNING *""",
             normalized_trigger_id,
             normalized_workflow_id,
+            normalized_source_trigger_id,
             normalized_event_type,
             _encode_jsonb(normalized_filter, field_name="filter"),
             normalized_enabled,
@@ -912,6 +1019,7 @@ def update_workflow_trigger_record(
     *,
     trigger_id: str,
     workflow_id: object = _UNSET,
+    source_trigger_id: object = _UNSET,
     event_type: object = _UNSET,
     trigger_filter: object = _UNSET,
     cron_expression: object = _UNSET,
@@ -924,6 +1032,9 @@ def update_workflow_trigger_record(
     if workflow_id is not _UNSET:
         params.append(_require_text(workflow_id, field_name="workflow_id"))
         assignments.append(f"workflow_id = ${len(params)}")
+    if source_trigger_id is not _UNSET:
+        params.append(_optional_text(source_trigger_id, field_name="source_trigger_id"))
+        assignments.append(f"source_trigger_id = ${len(params)}")
     if event_type is not _UNSET:
         params.append(_require_text(event_type, field_name="event_type"))
         assignments.append(f"event_type = ${len(params)}")
@@ -964,6 +1075,163 @@ def delete_workflow_record(
     conn.execute("DELETE FROM public.workflow_triggers WHERE workflow_id = $1", normalized_workflow_id)
     conn.execute("DELETE FROM public.workflows WHERE id = $1", normalized_workflow_id)
     return True
+
+
+def rename_workflow_record(
+    conn: Any,
+    *,
+    workflow_id: str,
+    new_workflow_id: str,
+    name: str | None = None,
+) -> dict[str, Any]:
+    normalized_old_workflow_id = _require_text(workflow_id, field_name="workflow_id")
+    normalized_new_workflow_id = _require_text(new_workflow_id, field_name="new_workflow_id")
+    if normalized_old_workflow_id == normalized_new_workflow_id:
+        raise PostgresWriteError(
+            "workflow_runtime.invalid_submission",
+            "new_workflow_id must be different from workflow_id",
+            details={"workflow_id": normalized_old_workflow_id},
+        )
+
+    existing = load_workflow_record(conn, workflow_id=normalized_old_workflow_id)
+    if existing is None:
+        raise PostgresWriteError(
+            "workflow_runtime.not_found",
+            "workflow not found",
+            details={"workflow_id": normalized_old_workflow_id},
+        )
+    if workflow_exists(conn, workflow_id=normalized_new_workflow_id):
+        raise PostgresWriteError(
+            "workflow_runtime.conflict",
+            "target workflow id already exists",
+            details={"workflow_id": normalized_new_workflow_id},
+        )
+
+    rewritten_definition = _rewrite_workflow_identity_fields(
+        _normalize_json_mapping(existing.get("definition"), field_name="definition") or {},
+        old_workflow_id=normalized_old_workflow_id,
+        new_workflow_id=normalized_new_workflow_id,
+    )
+    rewritten_compiled_spec = _rewrite_workflow_identity_fields(
+        _normalize_json_mapping(existing.get("compiled_spec"), field_name="compiled_spec", allow_none=True),
+        old_workflow_id=normalized_old_workflow_id,
+        new_workflow_id=normalized_new_workflow_id,
+    )
+    normalized_name = _require_text(name, field_name="name") if name is not None else _require_text(existing.get("name"), field_name="name")
+
+    row = conn.fetchrow(
+        """
+        INSERT INTO public.workflows (
+            id,
+            name,
+            description,
+            definition,
+            compiled_spec,
+            tags,
+            created_at,
+            updated_at,
+            version,
+            is_template,
+            invocation_count,
+            last_invoked_at
+        )
+        SELECT
+            $2,
+            $3,
+            description,
+            $4::jsonb,
+            $5::jsonb,
+            tags,
+            created_at,
+            now(),
+            version,
+            is_template,
+            invocation_count,
+            last_invoked_at
+        FROM public.workflows
+        WHERE id = $1
+        RETURNING *
+        """,
+        normalized_old_workflow_id,
+        normalized_new_workflow_id,
+        normalized_name,
+        _encode_jsonb(rewritten_definition, field_name="definition"),
+        _encode_jsonb(rewritten_compiled_spec, field_name="compiled_spec")
+        if rewritten_compiled_spec is not None
+        else None,
+    )
+    if row is None:
+        raise PostgresWriteError(
+            "workflow_runtime.write_failed",
+            "renaming workflow returned no row",
+            details={"workflow_id": normalized_old_workflow_id, "new_workflow_id": normalized_new_workflow_id},
+        )
+
+    version_rows = conn.execute(
+        "SELECT id, definition FROM workflow_versions WHERE workflow_id = $1",
+        normalized_old_workflow_id,
+    )
+    for version_row in version_rows or []:
+        rewritten_version_definition = _rewrite_workflow_identity_fields(
+            _normalize_json_mapping(version_row.get("definition"), field_name="definition") or {},
+            old_workflow_id=normalized_old_workflow_id,
+            new_workflow_id=normalized_new_workflow_id,
+        )
+        conn.execute(
+            """UPDATE workflow_versions
+               SET workflow_id = $2,
+                   definition = $3::jsonb
+               WHERE id = $1""",
+            version_row["id"],
+            normalized_new_workflow_id,
+            _encode_jsonb(rewritten_version_definition, field_name="definition"),
+        )
+
+    execution_manifest_rows = conn.execute(
+        "SELECT execution_manifest_ref, compiled_spec_json FROM workflow_build_execution_manifests WHERE workflow_id = $1",
+        normalized_old_workflow_id,
+    )
+    for execution_manifest_row in execution_manifest_rows or []:
+        rewritten_compiled_spec_json = _rewrite_workflow_identity_fields(
+            _normalize_json_mapping(
+                execution_manifest_row.get("compiled_spec_json"),
+                field_name="compiled_spec_json",
+            ),
+            old_workflow_id=normalized_old_workflow_id,
+            new_workflow_id=normalized_new_workflow_id,
+        )
+        conn.execute(
+            """UPDATE workflow_build_execution_manifests
+               SET workflow_id = $2,
+                   compiled_spec_json = $3::jsonb
+               WHERE execution_manifest_ref = $1""",
+            execution_manifest_row["execution_manifest_ref"],
+            normalized_new_workflow_id,
+            _encode_jsonb(rewritten_compiled_spec_json, field_name="compiled_spec_json"),
+        )
+
+    dependent_tables = (
+        "workflow_triggers",
+        "uploaded_files",
+        "workflow_build_review_decisions",
+        "workflow_build_intents",
+        "workflow_build_candidate_manifests",
+        "workflow_build_candidate_slots",
+        "workflow_build_candidates",
+        "workflow_build_review_sessions",
+    )
+    for table_name in dependent_tables:
+        conn.execute(
+            f"UPDATE {table_name} SET workflow_id = $2 WHERE workflow_id = $1",
+            normalized_old_workflow_id,
+            normalized_new_workflow_id,
+        )
+
+    conn.execute(
+        "DELETE FROM public.workflows WHERE id = $1",
+        normalized_old_workflow_id,
+    )
+    return dict(row)
 
 
 def record_system_event(
@@ -1008,6 +1276,7 @@ __all__ = [
     "load_workflow_record",
     "persist_workflow_build_record",
     "persist_workflow_record",
+    "rename_workflow_record",
     "reconcile_workflow_triggers",
     "record_app_manifest_history",
     "record_system_event",

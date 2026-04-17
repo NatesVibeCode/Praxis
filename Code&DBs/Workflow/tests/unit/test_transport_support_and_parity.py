@@ -444,32 +444,33 @@ def test_transport_support_handler_returns_provider_and_model_support(monkeypatc
         "WORKFLOW_DATABASE_URL",
         "postgresql://test@localhost:5432/praxis_test",
     )
-    import surfaces.api.handlers.workflow_admin as workflow_admin
+    import runtime.operations.queries.operator_support as operator_support
+    from runtime.operations.queries.operator_support import (
+        QueryTransportSupport,
+        handle_query_transport_support,
+    )
 
     captured: dict[str, object] = {}
     fake_health_mod = object()
     fake_pg = object()
 
-    def _fake_query_transport_support(**kwargs):
-        captured.update(kwargs)
-        return {
-            "default_provider_slug": "openai",
-            "default_adapter_type": "cli_llm",
-            "providers": [{"provider_slug": "openai"}],
-            "models": [{"provider_slug": "openai", "model_slug": "gpt-4.1"}],
-            "route_preflight": {
-                "runtime_profile_ref": kwargs["runtime_profile_ref"],
-                "overall": "ready",
-                "jobs": list(kwargs["jobs"] or ()),
-            },
-            "count": {"providers": 1, "models": 1},
-        }
+    class _FakeFrontdoor:
+        def query_transport_support(self, **kwargs):
+            captured.update(kwargs)
+            return {
+                "default_provider_slug": "openai",
+                "default_adapter_type": "cli_llm",
+                "providers": [{"provider_slug": "openai"}],
+                "models": [{"provider_slug": "openai", "model_slug": "gpt-4.1"}],
+                "route_preflight": {
+                    "runtime_profile_ref": kwargs["runtime_profile_ref"],
+                    "overall": "ready",
+                    "jobs": list(kwargs["jobs"] or ()),
+                },
+                "count": {"providers": 1, "models": 1},
+            }
 
-    monkeypatch.setattr(
-        workflow_admin.operator_read,
-        "query_transport_support",
-        _fake_query_transport_support,
-    )
+    monkeypatch.setattr(operator_support, "TransportSupportFrontdoor", _FakeFrontdoor)
 
     class _FakeSubs:
         def get_health_mod(self):
@@ -478,14 +479,14 @@ def test_transport_support_handler_returns_provider_and_model_support(monkeypatc
         def get_pg_conn(self):
             return fake_pg
 
-    payload = workflow_admin._handle_transport_support(
+    payload = handle_query_transport_support(
+        QueryTransportSupport(
+            provider_slug="openai",
+            model_slug="gpt-4.1",
+            runtime_profile_ref="native",
+            jobs=[{"label": "build", "agent": "auto/build"}],
+        ),
         _FakeSubs(),
-        {
-            "provider_slug": " openai ",
-            "model_slug": " gpt-4.1 ",
-            "runtime_profile_ref": " native ",
-            "jobs": [{"label": "build", "agent": "auto/build"}],
-        },
     )
 
     assert payload["default_provider_slug"] == "openai"
@@ -544,6 +545,57 @@ def test_query_transport_support_uses_authority_and_repository(monkeypatch) -> N
     )
 
     assert payload == {"status": "ready", "count": {"providers": 1, "models": 2}}
+    assert captured["repository_conn"] is fake_pg
+    assert captured["repository"].__class__ is _FakeRepository
+    assert captured["health_mod"] is fake_health_mod
+    assert captured["pg"] is fake_pg
+    assert captured["provider_filter"] == "openai"
+    assert captured["model_filter"] == "gpt-5.4"
+    assert captured["runtime_profile_ref"] == "native"
+    assert captured["jobs"] == [{"label": "verify", "agent": "auto/review"}]
+
+
+def test_transport_support_frontdoor_allows_repository_injection(monkeypatch) -> None:
+    monkeypatch.setenv(
+        "WORKFLOW_DATABASE_URL",
+        "postgresql://test@localhost:5432/praxis_test",
+    )
+    import surfaces.api.operator_read as operator_read
+
+    captured: dict[str, object] = {}
+    fake_pg = object()
+    fake_health_mod = object()
+
+    class _FakeRepository:
+        def __init__(self, conn) -> None:
+            captured["repository_conn"] = conn
+
+    class _FakeAuthority:
+        def to_json(self) -> dict[str, object]:
+            return {"status": "ready", "count": {"providers": 2, "models": 3}}
+
+    def _fake_load_transport_eligibility_authority(**kwargs):
+        captured.update(kwargs)
+        return _FakeAuthority()
+
+    monkeypatch.setattr(
+        operator_read,
+        "load_transport_eligibility_authority",
+        _fake_load_transport_eligibility_authority,
+    )
+
+    payload = operator_read.TransportSupportFrontdoor(
+        repository_factory=_FakeRepository,
+    ).query_transport_support(
+        health_mod=fake_health_mod,
+        pg=fake_pg,
+        provider_filter="openai",
+        model_filter="gpt-5.4",
+        runtime_profile_ref="native",
+        jobs=[{"label": "verify", "agent": "auto/review"}],
+    )
+
+    assert payload == {"status": "ready", "count": {"providers": 2, "models": 3}}
     assert captured["repository_conn"] is fake_pg
     assert captured["repository"].__class__ is _FakeRepository
     assert captured["health_mod"] is fake_health_mod

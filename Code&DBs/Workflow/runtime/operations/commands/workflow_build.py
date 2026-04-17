@@ -1,8 +1,6 @@
 from typing import Any
 from pydantic import BaseModel
 
-from ..registry import registry
-
 class MutateWorkflowBuildCommand(BaseModel):
     workflow_id: str
     subpath: str
@@ -33,16 +31,3 @@ def handle_mutate_workflow_build(command: MutateWorkflowBuildCommand, subsystems
         undo_receipt=result.get("undo_receipt"),
         mutation_event_id=result.get("mutation_event_id"),
     )
-
-# Register the capability
-registry.register(
-    path="/api/workflows/{workflow_id}/build/{subpath:path}",
-    method="POST",
-    command_class=MutateWorkflowBuildCommand,
-    handler=handle_mutate_workflow_build,
-    description="Mutate a workflow build definition or graph.",
-    operation_name="workflow_build.mutate",
-    operation_kind="command",
-    source_kind="cqrs_command",
-    authority_ref="authority.workflow_build",
-)

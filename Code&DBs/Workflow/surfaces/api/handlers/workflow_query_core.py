@@ -13,6 +13,7 @@ from typing import Any
 from storage.postgres.validators import PostgresConfigurationError
 
 from surfaces._workflow_database import workflow_database_url_for_repo
+from surfaces.api.operator_read import NativeOperatorQueryFrontdoor
 from .._payload_contract import coerce_optional_text
 from . import _bug_surface_contract as _bug_contract
 from ._shared import _ClientError, _bug_to_dict, _matches, _serialize
@@ -128,9 +129,7 @@ def handle_query(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         return {"routed_to": "operator_panel", "snapshot": _serialize(snap)}
 
     if _matches(question, ["issue backlog", "upstream issue", "upstream issues", "intake issue", "intake issues"]):
-        from surfaces.api import operator_read
-
-        backlog = operator_read.query_issue_backlog(
+        backlog = NativeOperatorQueryFrontdoor().query_issue_backlog(
             limit=25,
             open_only=True,
         )
@@ -531,15 +530,16 @@ def _extract_data_dictionary_table(question: str) -> str | None:
 
 def _data_dictionary(subs: Any, question: str) -> dict:
     """Return browsable data dictionary from CQRS-backed table projections."""
-    from runtime.cqrs import CommandBus
-    from runtime.cqrs.queries.data_dictionary import QueryDataDictionary
+    from runtime.operation_catalog_gateway import execute_operation_from_subsystems
 
     table_name = _extract_data_dictionary_table(question)
-    return CommandBus(subs).dispatch(
-        QueryDataDictionary(
-            table_name=table_name,
-            include_relationships=True,
-        )
+    return execute_operation_from_subsystems(
+        subs,
+        operation_name="operator.data_dictionary",
+        payload={
+            "table_name": table_name,
+            "include_relationships": True,
+        },
     )
 
 
@@ -1257,12 +1257,10 @@ def handle_research(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
 def handle_operator_view(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
     view = body.get("view", "status")
     if view == "issue_backlog":
-        from surfaces.api import operator_read
-
         limit = max(1, int(body.get("limit", 50) or 50))
         open_only = bool(body.get("open_only", True))
         status = _optional_text(body.get("status"))
-        backlog = operator_read.query_issue_backlog(
+        backlog = NativeOperatorQueryFrontdoor().query_issue_backlog(
             limit=limit,
             open_only=open_only,
             status=status,

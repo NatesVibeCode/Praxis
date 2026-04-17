@@ -8,12 +8,12 @@ import runtime.operation_catalog as operation_catalog
 _QUERY_ROW = {
     "operation_ref": "workflow-build-suggest-next",
     "operation_name": "workflow_build.suggest_next",
-    "source_kind": "cqrs_query",
+    "source_kind": "operation_query",
     "operation_kind": "query",
     "http_method": "POST",
     "http_path": "/api/workflows/{workflow_id}/build/suggest-next",
-    "input_model_ref": "runtime.cqrs.commands.suggest_next.SuggestNextNodesCommand",
-    "handler_ref": "runtime.cqrs.commands.suggest_next.handle_suggest_next_nodes",
+    "input_model_ref": "runtime.operations.commands.suggest_next.SuggestNextNodesCommand",
+    "handler_ref": "runtime.operations.commands.suggest_next.handle_suggest_next_nodes",
     "authority_ref": "authority.capability_catalog",
     "projection_ref": "projection.capability_catalog",
     "posture": None,
@@ -24,8 +24,8 @@ _QUERY_ROW = {
 }
 
 _QUERY_POLICY = {
-    "policy_ref": "cqrs-query",
-    "source_kind": "cqrs_query",
+    "policy_ref": "operation-query",
+    "source_kind": "operation_query",
     "posture": "observe",
     "idempotency_policy": "read_only",
     "enabled": True,
@@ -60,7 +60,7 @@ def test_get_resolved_operation_definition_applies_source_policy_defaults(monkey
     assert resolved.posture == "observe"
     assert resolved.idempotency_policy == "read_only"
     assert resolved.enabled is True
-    assert resolved.source_policy_ref == "cqrs-query"
+    assert resolved.source_policy_ref == "operation-query"
 
 
 def test_list_resolved_operation_definitions_preserves_operation_overrides(monkeypatch) -> None:
@@ -72,7 +72,7 @@ def test_list_resolved_operation_definitions_preserves_operation_overrides(monke
                 **_QUERY_ROW,
                 "operation_ref": "workflow-build-mutate",
                 "operation_name": "workflow_build.mutate",
-                "source_kind": "cqrs_command",
+                "source_kind": "operation_command",
                 "operation_kind": "command",
                 "posture": "build",
                 "idempotency_policy": "idempotent",
@@ -85,8 +85,8 @@ def test_list_resolved_operation_definitions_preserves_operation_overrides(monke
         lambda conn, include_disabled=False, limit=100: [
             {
                 **_QUERY_POLICY,
-                "policy_ref": "cqrs-command",
-                "source_kind": "cqrs_command",
+                "policy_ref": "operation-command",
+                "source_kind": "operation_command",
                 "posture": "operate",
                 "idempotency_policy": "non_idempotent",
                 "enabled": False,

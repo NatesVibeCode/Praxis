@@ -244,9 +244,101 @@ class PostgresSubscriptionRepository:
             raise PostgresWriteError(
                 "postgres.write_failed",
                 "insert_system_event returned an invalid event id",
-                details={"event_id_type": type(event_id).__name__},
-            )
+            details={"event_id_type": type(event_id).__name__},
+        )
         return event_id
+
+    def load_event_subscription(
+        self,
+        *,
+        subscription_id: str,
+    ) -> dict[str, Any] | None:
+        row = self._conn.fetchrow(
+            """
+            SELECT
+                subscription_id,
+                subscription_name,
+                consumer_kind,
+                envelope_kind,
+                workflow_id,
+                run_id,
+                cursor_scope,
+                status,
+                delivery_policy,
+                filter_policy,
+                created_at
+            FROM public.event_subscriptions
+            WHERE subscription_id = $1
+            LIMIT 1
+            """,
+            _require_text(subscription_id, field_name="subscription_id"),
+        )
+        return _row_dict(row, operation="load_event_subscription") if row is not None else None
+
+    def load_subscription_checkpoint(
+        self,
+        *,
+        subscription_id: str,
+        run_id: str,
+    ) -> dict[str, Any] | None:
+        row = self._conn.fetchrow(
+            """
+            SELECT
+                checkpoint_id,
+                subscription_id,
+                run_id,
+                last_evidence_seq,
+                last_authority_id,
+                checkpoint_status,
+                checkpointed_at,
+                metadata
+            FROM public.subscription_checkpoints
+            WHERE subscription_id = $1
+              AND run_id = $2
+            ORDER BY checkpointed_at DESC, checkpoint_id DESC
+            LIMIT 1
+            """,
+            _require_text(subscription_id, field_name="subscription_id"),
+            _require_text(run_id, field_name="run_id"),
+        )
+        return _row_dict(row, operation="load_subscription_checkpoint") if row is not None else None
+
+    def list_subscription_checkpoints(
+        self,
+        *,
+        subscription_id: str | None = None,
+        run_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if subscription_id is not None:
+            params.append(_require_text(subscription_id, field_name="subscription_id"))
+            clauses.append(f"subscription_id = ${len(params)}")
+        if run_id is not None:
+            params.append(_require_text(run_id, field_name="run_id"))
+            clauses.append(f"run_id = ${len(params)}")
+        params.append(_require_nonnegative_int(limit, field_name="limit"))
+        where_clause = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = self._conn.execute(
+            f"""
+            SELECT
+                checkpoint_id,
+                subscription_id,
+                run_id,
+                last_evidence_seq,
+                last_authority_id,
+                checkpoint_status,
+                checkpointed_at,
+                metadata
+            FROM public.subscription_checkpoints
+            {where_clause}
+            ORDER BY checkpointed_at DESC, checkpoint_id DESC
+            LIMIT ${len(params)}
+            """,
+            *params,
+        )
+        return [dict(row) for row in rows or ()]
 
 
 async def upsert_event_subscription_record(

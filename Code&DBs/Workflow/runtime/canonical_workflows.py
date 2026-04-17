@@ -14,6 +14,7 @@ from storage.postgres.workflow_runtime_repository import (
     load_workflow_record,
     persist_workflow_build_record,
     persist_workflow_record,
+    rename_workflow_record,
     reconcile_workflow_triggers,
     record_system_event,
     record_workflow_invocation,
@@ -514,6 +515,42 @@ def save_workflow(
     return row
 
 
+def rename_workflow(
+    conn: Any,
+    *,
+    workflow_id: str,
+    new_workflow_id: str,
+    name: str | None = None,
+    operator_surface: str = "workflow records",
+) -> dict[str, Any]:
+    normalized_old_workflow_id = _text(workflow_id)
+    normalized_new_workflow_id = _text(new_workflow_id)
+    if not normalized_old_workflow_id:
+        raise WorkflowRuntimeBoundaryError("workflow_id is required")
+    if not normalized_new_workflow_id:
+        raise WorkflowRuntimeBoundaryError("new_workflow_id is required")
+
+    with conn.transaction() as tx_conn:
+        row = rename_workflow_record(
+            tx_conn,
+            workflow_id=normalized_old_workflow_id,
+            new_workflow_id=normalized_new_workflow_id,
+            name=name,
+        )
+        record_system_event(
+            tx_conn,
+            event_type="workflow.renamed",
+            source_id=normalized_new_workflow_id,
+            source_type="workflow",
+            payload={
+                "old_workflow_id": normalized_old_workflow_id,
+                "new_workflow_id": normalized_new_workflow_id,
+                "operator_surface": operator_surface,
+            },
+        )
+        return row
+
+
 def save_workflow_trigger(
     conn: Any,
     *,
@@ -530,15 +567,18 @@ def save_workflow_trigger(
     if workflow_row is None:
         raise WorkflowRuntimeBoundaryError(f"Workflow not found: {normalized_workflow_id}", status_code=404)
 
-    row = upsert_workflow_trigger_record(
-        conn,
-        trigger_id=_text(body.get("id")) or ("trg_" + uuid.uuid4().hex[:12]),
-        workflow_id=normalized_workflow_id,
-        event_type=normalized_event_type,
-        trigger_filter=body.get("filter", {}),
-        cron_expression=body.get("cron_expression"),
-        enabled=body.get("enabled", True),
-    )
+    trigger_kwargs: dict[str, Any] = {
+        "trigger_id": _text(body.get("id")) or ("trg_" + uuid.uuid4().hex[:12]),
+        "workflow_id": normalized_workflow_id,
+        "event_type": normalized_event_type,
+        "trigger_filter": body.get("filter", {}),
+        "cron_expression": body.get("cron_expression"),
+        "enabled": body.get("enabled", True),
+    }
+    if "source_trigger_id" in body:
+        trigger_kwargs["source_trigger_id"] = body.get("source_trigger_id")
+
+    row = upsert_workflow_trigger_record(conn, **trigger_kwargs)
     row["workflow_name"] = workflow_row.get("name")
     return row
 
@@ -577,6 +617,8 @@ def update_workflow_trigger(
         update_kwargs["cron_expression"] = body.get("cron_expression")
     if "enabled" in body:
         update_kwargs["enabled"] = body["enabled"]
+    if "source_trigger_id" in body:
+        update_kwargs["source_trigger_id"] = body.get("source_trigger_id")
 
     row = update_workflow_trigger_record(
         conn,
@@ -1154,6 +1196,7 @@ __all__ = [
     "commit_workflow",
     "delete_workflow",
     "mutate_workflow_build",
+    "rename_workflow",
     "save_workflow",
     "save_workflow_trigger",
     "trigger_workflow_manually",

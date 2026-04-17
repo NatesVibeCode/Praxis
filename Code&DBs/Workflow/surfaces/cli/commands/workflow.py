@@ -1621,13 +1621,25 @@ def _triggers_command(args: list[str], *, stdout: TextIO) -> int:
     return 2
 
 
-def _workflows_command(args: list[str], *, stdout: TextIO) -> int:
-    """Handle workflow record create/update through the CLI."""
+def _deprecated_workflow_records_alias_command(
+    alias: str,
+    *,
+    stdout: TextIO,
+) -> int:
+    stdout.write(
+        f"error: workflow {alias} is deprecated; use workflow records create|update|rename instead\n"
+    )
+    return 2
+
+
+def _records_command(args: list[str], *, stdout: TextIO) -> int:
+    """Handle workflow record create/update/rename through the CLI."""
 
     if not args or args[0] in {"-h", "--help"}:
         stdout.write(
-            "usage: workflow workflows create (--input-json <json> | --input-file <path>)\n"
-            "       workflow workflows update <workflow_id> (--input-json <json> | --input-file <path>)\n"
+            "usage: workflow records create (--input-json <json> | --input-file <path>)\n"
+            "       workflow records update <workflow_id> (--input-json <json> | --input-file <path>)\n"
+            "       workflow records rename <workflow_id> --to <new_workflow_id> [--name <display_name>]\n"
         )
         return 2
 
@@ -1640,6 +1652,8 @@ def _workflows_command(args: list[str], *, stdout: TextIO) -> int:
         input_json = None
         input_file = None
         workflow_id = None
+        new_workflow_id = None
+        rename_name = None
         i = 0
         while i < len(tail):
             if tail[i] == "--input-json" and i + 1 < len(tail):
@@ -1648,12 +1662,43 @@ def _workflows_command(args: list[str], *, stdout: TextIO) -> int:
             elif tail[i] == "--input-file" and i + 1 < len(tail):
                 input_file = tail[i + 1]
                 i += 2
+            elif tail[i] == "--to" and i + 1 < len(tail):
+                new_workflow_id = tail[i + 1]
+                i += 2
+            elif tail[i] == "--name" and i + 1 < len(tail):
+                rename_name = tail[i + 1]
+                i += 2
             elif subcommand == "update" and workflow_id is None:
+                workflow_id = tail[i].strip()
+                i += 1
+            elif subcommand == "rename" and workflow_id is None:
                 workflow_id = tail[i].strip()
                 i += 1
             else:
                 stdout.write(f"unknown argument: {tail[i]}\n")
                 return 2
+
+        if subcommand == "rename":
+            if input_json is not None or input_file is not None:
+                stdout.write("error: rename does not accept input-json or input-file\n")
+                return 2
+            if not workflow_id or not new_workflow_id:
+                stdout.write(
+                    "usage: workflow records rename <workflow_id> --to <new_workflow_id> "
+                    "[--name <display_name>]\n"
+                )
+                return 2
+            from runtime.canonical_workflows import rename_workflow
+
+            row = rename_workflow(
+                conn,
+                workflow_id=workflow_id,
+                new_workflow_id=new_workflow_id,
+                name=rename_name,
+                operator_surface="workflow records",
+            )
+            print_json(stdout, {"workflow": query_mod._workflow_to_dict(dict(row), include_definition=True)})
+            return 0
 
         payload = _load_input_payload(input_json=input_json, input_file=input_file)
 
@@ -1675,7 +1720,7 @@ def _workflows_command(args: list[str], *, stdout: TextIO) -> int:
         if subcommand == "update":
             if not workflow_id:
                 stdout.write(
-                    "usage: workflow workflows update <workflow_id> "
+                    "usage: workflow records update <workflow_id> "
                     "(--input-json <json> | --input-file <path>)\n"
                 )
                 return 2
@@ -1702,7 +1747,7 @@ def _workflows_command(args: list[str], *, stdout: TextIO) -> int:
         print_json(stdout, {"error": str(exc)})
         return 1
 
-    stdout.write(f"unknown workflows subcommand: {subcommand}\n")
+    stdout.write(f"unknown records subcommand: {subcommand}\n")
     return 2
 
 

@@ -3,10 +3,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from runtime.workflow_eval import build_agent_handoff_probe_review
+from runtime.workflow_eval import build_runtime_regression_probe_review
 
 
-def test_build_agent_handoff_probe_review_writes_authoritative_review_contract(tmp_path: Path) -> None:
+def test_build_runtime_regression_probe_review_writes_authoritative_review_contract(tmp_path: Path) -> None:
     workspace_root = tmp_path / "workspace"
     handoff_path = workspace_root / "artifacts" / "probe.handoff.md"
     handoff_path.parent.mkdir(parents=True, exist_ok=True)
@@ -25,7 +25,7 @@ def test_build_agent_handoff_probe_review_writes_authoritative_review_contract(t
         encoding="utf-8",
     )
 
-    result = build_agent_handoff_probe_review(
+    result = build_runtime_regression_probe_review(
         {
             "workspace_root": str(workspace_root),
             "handoff_path": str(handoff_path.relative_to(workspace_root)),
@@ -48,12 +48,12 @@ def test_build_agent_handoff_probe_review_writes_authoritative_review_contract(t
     assert json.loads(code_block["content"]) == review_payload
 
 
-def test_build_agent_handoff_probe_review_marks_missing_handoff_non_authoritative(
+def test_build_runtime_regression_probe_review_marks_missing_handoff_non_authoritative(
     tmp_path: Path,
 ) -> None:
     workspace_root = tmp_path / "workspace"
 
-    result = build_agent_handoff_probe_review(
+    result = build_runtime_regression_probe_review(
         {
             "workspace_root": str(workspace_root),
             "handoff_path": "artifacts/missing.handoff.md",

@@ -1,8 +1,6 @@
 from typing import Any
 from pydantic import BaseModel
 
-from ..registry import registry
-
 class SuggestNextNodesCommand(BaseModel):
     workflow_id: str
     body: dict[str, Any]
@@ -77,17 +75,3 @@ def handle_suggest_next_nodes(command: SuggestNextNodesCommand, subsystems: Any)
         "likely_next_steps": likely,
         "possible_next_steps": possible
     }
-
-# Register the capability
-registry.register(
-    path="/api/workflows/{workflow_id}/build/suggest-next",
-    method="POST",
-    command_class=SuggestNextNodesCommand,
-    handler=handle_suggest_next_nodes,
-    description="Context-aware graph autocomplete: suggests the most logical next steps for a given node.",
-    operation_name="workflow_build.suggest_next",
-    operation_kind="query",
-    source_kind="cqrs_query",
-    authority_ref="authority.capability_catalog",
-    projection_ref="projection.capability_catalog",
-)

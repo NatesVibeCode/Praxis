@@ -1,0 +1,147 @@
+{
+  "id": "runtime_regression_probe",
+  "name": "Runtime Regression Probe",
+  "description": "Scheduled probe that exercises deterministic tooling, MCP search, one runtime regression, and a DB-backed action while preserving an explicit CQRS split assessment.",
+  "definition": {
+    "definition_revision": "def_runtime_regression_probe_20260416",
+    "source_prose": "Exercise one workflow path that uses deterministic tooling, MCP-backed search, runtime regression, and a DB-backed action while surfacing breakage instead of hiding it.",
+    "trigger_intent": [
+      {
+        "event_type": "schedule",
+        "cron_expression": "@hourly",
+        "filter": {
+          "text": "Exercise one workflow path that uses deterministic tooling, MCP-backed search, runtime regression, and a DB-backed action while surfacing breakage instead of hiding it."
+        }
+      }
+    ]
+  },
+  "compiled_spec": {
+    "definition_revision": "def_runtime_regression_probe_20260416",
+      "name": "Runtime Regression Probe",
+    "workflow_id": "runtime_regression_probe",
+    "phase": "execute",
+    "workdir": "/Users/nate/Praxis",
+    "outcome_goal": "Exercise one workflow path that uses deterministic tooling, MCP-backed search, runtime regression, and a DB-backed action while surfacing breakage instead of hiding it.",
+    "jobs": [
+      {
+        "label": "seed_contract",
+        "adapter_type": "deterministic_task",
+        "inputs": {
+          "task_name": "seed_contract",
+          "input_payload": {
+            "probe": "runtime_regression_probe",
+            "contract": {
+              "must_exercise": [
+                "deterministic tooling",
+                "search",
+                "agents",
+                "information handoff",
+                "db action"
+              ],
+              "must_expose": [
+                "blocked step details",
+                "non-authoritative outcomes"
+              ]
+            }
+          }
+        },
+        "expected_outputs": {
+          "probe_id": "runtime_regression_probe",
+          "search_query": "workflow spec with runtime regression deterministic tooling search db action",
+          "db_action": "praxis_bugs.stats"
+        }
+      },
+      {
+        "label": "discover_local_code",
+        "adapter_type": "mcp_task",
+        "depends_on": [
+          "seed_contract"
+        ],
+        "inputs": {
+          "task_name": "discover_local_code",
+          "server_command": "env PRAXIS_MCP_STDIO_TRANSPORT=jsonl /Users/nate/Praxis/Code&DBs/Workflow/scripts/mcp-server.sh",
+          "tool_name": "praxis_discover",
+          "arguments": {
+            "action": "search",
+            "query": "workflow spec with runtime regression deterministic tooling search db action",
+            "limit": 5
+          },
+          "timeout": 45
+        }
+      },
+      {
+        "label": "query_bug_db",
+        "adapter_type": "mcp_task",
+        "depends_on": [
+          "seed_contract"
+        ],
+        "inputs": {
+          "task_name": "query_bug_db",
+          "server_command": "env PRAXIS_MCP_STDIO_TRANSPORT=jsonl /Users/nate/Praxis/Code&DBs/Workflow/scripts/mcp-server.sh",
+          "tool_name": "praxis_bugs",
+          "arguments": {
+            "action": "stats"
+          },
+          "timeout": 45
+        }
+      },
+      {
+        "label": "agent_synthesis",
+        "agent": "openai/gpt-5.4-mini",
+        "workdir": "/Users/nate/Praxis",
+        "depends_on": [
+          "discover_local_code",
+          "query_bug_db"
+        ],
+        "prompt": "Use the prior workflow outputs to create `artifacts/workflow_eval/probe_exec_20260416/runtime_regression_probe.handoff.md`. The file must contain exactly these markdown headings: `# Search Proof`, `# Authority Gaps`, and `# Next Verification`. Base the content only on upstream workflow outputs. If any upstream step failed or is missing, say so plainly and mark the handoff as non-authoritative. After writing the file, reply with exactly one JSON object on stdout: {\"step\":\"agent_synthesis\",\"status\":\"ok\",\"file\":\"artifacts/workflow_eval/probe_exec_20260416/runtime_regression_probe.handoff.md\"}.",
+        "write_scope": [
+          "artifacts/workflow_eval/probe_exec_20260416/runtime_regression_probe.handoff.md"
+        ]
+      },
+      {
+        "label": "probe_review_contract",
+        "adapter_type": "deterministic_task",
+        "depends_on": [
+          "discover_local_code",
+          "query_bug_db",
+          "agent_synthesis"
+        ],
+        "inputs": {
+          "task_name": "probe_review_contract",
+          "input_payload": {
+            "deterministic_builder": "runtime.workflow_eval.build_runtime_regression_probe_review",
+            "workspace_root": "/Users/nate/Praxis",
+            "handoff_path": "artifacts/workflow_eval/probe_exec_20260416/runtime_regression_probe.handoff.md",
+            "review_path": "artifacts/workflow_eval/probe_exec_20260416/runtime_regression_probe.review.json",
+            "write_side_bug_anchor": "BUG-AE2B9669"
+          }
+        },
+        "expected_outputs": {}
+      },
+      {
+        "label": "write_review_artifact",
+        "adapter_type": "file_writer",
+        "depends_on": [
+          "probe_review_contract"
+        ],
+        "inputs": {
+          "task_name": "write_review_artifact",
+          "input_payload": {
+            "workspace_root": "/Users/nate/Praxis"
+          }
+        },
+        "expected_outputs": {}
+      }
+    ],
+    "triggers": [
+      {
+        "event_type": "schedule",
+        "cron_expression": "@hourly",
+        "filter": {
+          "text": "Exercise one workflow path that uses deterministic tooling, MCP-backed search, runtime regression, and a DB-backed action while surfacing breakage instead of hiding it."
+        },
+        "source_trigger_id": null
+      }
+    ]
+  }
+}

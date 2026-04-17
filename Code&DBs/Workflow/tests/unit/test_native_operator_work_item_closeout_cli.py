@@ -17,19 +17,24 @@ class _FakeInstance:
 
 def test_native_operator_work_item_closeout_uses_shared_gate(monkeypatch) -> None:
     captured: dict[str, object] = {}
-    legacy_bridge_called: dict[str, bool] = {"value": False}
 
-    def _reconcile_work_item_closeout(**kwargs):
-        captured.update(kwargs)
+    def _execute_operation_from_env(*, env, operation_name: str, payload):
+        captured["env"] = env
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
         return {
-            "action": kwargs["action"],
+            "action": payload["action"],
             "proof_threshold": {
                 "bug_requires_evidence_role": "validates_fix",
                 "roadmap_requires_source_bug_fix_proof": True,
             },
+            "command_receipt": {
+                "operation_name": operation_name,
+                "operation_kind": "command",
+            },
             "evaluated": {
-                "bug_ids": list(kwargs["bug_ids"]),
-                "roadmap_item_ids": list(kwargs["roadmap_item_ids"]),
+                "bug_ids": list(payload["bug_ids"]),
+                "roadmap_item_ids": list(payload["roadmap_item_ids"]),
             },
             "candidates": {"bugs": [], "roadmap_items": []},
             "skipped": {"bugs": [], "roadmap_items": []},
@@ -37,21 +42,11 @@ def test_native_operator_work_item_closeout_uses_shared_gate(monkeypatch) -> Non
             "applied": {"bugs": [], "roadmap_items": []},
         }
 
-    def _legacy_bridge(**kwargs):
-        del kwargs
-        legacy_bridge_called["value"] = True
-        raise AssertionError("legacy reconcile path must not run for native CLI closeout")
-
     monkeypatch.setattr(native_operator, "resolve_native_instance", lambda env=None: _FakeInstance())
     monkeypatch.setattr(
-        native_operator.operator_write,
-        "reconcile_work_item_closeout",
-        _reconcile_work_item_closeout,
-    )
-    monkeypatch.setattr(
-        native_operator.operator_write,
-        "areconcile_work_item_closeout",
-        _legacy_bridge,
+        native_operator.operation_catalog_gateway,
+        "execute_operation_from_env",
+        _execute_operation_from_env,
     )
 
     stdout = StringIO()
@@ -73,51 +68,46 @@ def test_native_operator_work_item_closeout_uses_shared_gate(monkeypatch) -> Non
     )
 
     payload = json.loads(stdout.getvalue())
-    assert captured["action"] == "commit"
-    assert captured["bug_ids"] == ("bug.closeout.1",)
-    assert captured["roadmap_item_ids"] == ("roadmap_item.closeout.1",)
+    assert captured["operation_name"] == "operator.work_item_closeout"
+    assert captured["payload"]["action"] == "commit"
+    assert captured["payload"]["bug_ids"] == ("bug.closeout.1",)
+    assert captured["payload"]["roadmap_item_ids"] == ("roadmap_item.closeout.1",)
     assert payload["committed"] is True
+    assert payload["command_receipt"]["operation_name"] == "operator.work_item_closeout"
     assert payload["proof_threshold"]["bug_requires_evidence_role"] == "validates_fix"
-    assert legacy_bridge_called["value"] is False
 
 
 def test_native_operator_work_item_closeout_preview_commits_also_use_shared_gate(monkeypatch) -> None:
     captured: list[str] = []
-    legacy_bridge_called: dict[str, bool] = {"value": False}
 
-    def _reconcile_work_item_closeout(**kwargs):
-        captured.append(kwargs["action"])
+    def _execute_operation_from_env(*, env, operation_name: str, payload):
+        del env, operation_name
+        captured.append(payload["action"])
         return {
-            "action": kwargs["action"],
+            "action": payload["action"],
             "proof_threshold": {
                 "bug_requires_evidence_role": "validates_fix",
                 "roadmap_requires_source_bug_fix_proof": True,
             },
+            "command_receipt": {
+                "operation_name": "operator.work_item_closeout",
+                "operation_kind": "command",
+            },
             "evaluated": {
-                "bug_ids": list(kwargs["bug_ids"]),
-                "roadmap_item_ids": list(kwargs["roadmap_item_ids"]),
+                "bug_ids": list(payload["bug_ids"]),
+                "roadmap_item_ids": list(payload["roadmap_item_ids"]),
             },
             "candidates": {"bugs": [], "roadmap_items": []},
             "skipped": {"bugs": [], "roadmap_items": []},
-            "committed": kwargs["action"] == "commit",
+            "committed": payload["action"] == "commit",
             "applied": {"bugs": [], "roadmap_items": []},
         }
 
-    def _legacy_bridge(**kwargs):
-        del kwargs
-        legacy_bridge_called["value"] = True
-        raise AssertionError("legacy reconcile path must not run for native CLI closeout")
-
     monkeypatch.setattr(native_operator, "resolve_native_instance", lambda env=None: _FakeInstance())
     monkeypatch.setattr(
-        native_operator.operator_write,
-        "reconcile_work_item_closeout",
-        _reconcile_work_item_closeout,
-    )
-    monkeypatch.setattr(
-        native_operator.operator_write,
-        "areconcile_work_item_closeout",
-        _legacy_bridge,
+        native_operator.operation_catalog_gateway,
+        "execute_operation_from_env",
+        _execute_operation_from_env,
     )
 
     stdout = StringIO()
@@ -157,7 +147,6 @@ def test_native_operator_work_item_closeout_preview_commits_also_use_shared_gate
     )
     assert "\"committed\": true" in stdout.getvalue()
     assert captured == ["preview", "commit"]
-    assert legacy_bridge_called["value"] is False
 
 
 class _NoSqlConnectionProxy:
