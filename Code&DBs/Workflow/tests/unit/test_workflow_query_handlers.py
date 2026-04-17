@@ -664,8 +664,20 @@ class _QueueStatusSubsystems:
         return self._ingester
 
 
-def test_handle_status_get_includes_queue_depth_snapshot() -> None:
+def test_handle_status_get_uses_operation_catalog_gateway(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
     request = _RequestStub(subsystems=_QueueStatusSubsystems())
+
+    def _execute(subsystems, *, operation_name: str, payload: dict[str, Any]):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"total_workflows": 2, "queue_depth": 550}
+
+    monkeypatch.setattr(
+        "runtime.operation_catalog_gateway.execute_operation_from_subsystems",
+        _execute,
+    )
 
     workflow_query._handle_status_get(request, "/api/status")
 
@@ -673,15 +685,9 @@ def test_handle_status_get_includes_queue_depth_snapshot() -> None:
     status, payload = request.sent
     assert status == 200
     assert payload["total_workflows"] == 2
-    assert payload["pass_rate"] == 0.75
     assert payload["queue_depth"] == 550
-    assert payload["queue_depth_status"] == "warning"
-    assert payload["queue_depth_pending"] == 300
-    assert payload["queue_depth_ready"] == 250
-    assert payload["queue_depth_claimed"] == 12
-    assert payload["queue_depth_running"] == 8
-    assert payload["queue_depth_utilization_pct"] == 55.0
-    assert payload["queue_depth_error"] is None
+    assert captured["operation_name"] == "operator.status_snapshot"
+    assert captured["payload"] == {"since_hours": 24}
 
 
 class _CriticalQueueStatusPg:
@@ -706,17 +712,23 @@ class _CriticalQueueStatusSubsystems:
         return self._ingester
 
 
-def test_handle_status_get_marks_queue_critical_at_shared_threshold() -> None:
+def test_handle_status_get_surfaces_gateway_errors(monkeypatch) -> None:
     request = _RequestStub(subsystems=_CriticalQueueStatusSubsystems())
+
+    def _execute(*_args, **_kwargs):
+        raise RuntimeError("status unavailable")
+
+    monkeypatch.setattr(
+        "runtime.operation_catalog_gateway.execute_operation_from_subsystems",
+        _execute,
+    )
 
     workflow_query._handle_status_get(request, "/api/status")
 
     assert request.sent is not None
     status, payload = request.sent
-    assert status == 200
-    assert payload["queue_depth"] == 1000
-    assert payload["queue_depth_status"] == "critical"
-    assert payload["queue_depth_utilization_pct"] == 100.0
+    assert status == 500
+    assert payload == {"error": "status unavailable"}
 
 
 class _DashboardPg:
@@ -4296,15 +4308,19 @@ def test_handle_query_quality_rollup_missing_is_structured() -> None:
 def test_handle_query_routes_issue_backlog(monkeypatch, question: str) -> None:
     captured: dict[str, Any] = {}
 
-    monkeypatch.setattr(
-        workflow_query_core.NativeOperatorQueryFrontdoor,
-        "query_issue_backlog",
-        lambda self, **kwargs: captured.update(kwargs) or {
+    def _execute(subsystems, *, operation_name: str, payload: dict[str, Any]):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {
             "kind": "issue_backlog",
             "count": 1,
             "issues": [{"issue_id": "issue.alpha"}],
-            **kwargs,
-        },
+        }
+
+    monkeypatch.setattr(
+        "runtime.operation_catalog_gateway.execute_operation_from_subsystems",
+        _execute,
     )
 
     result = workflow_query_core.handle_query(
@@ -4319,7 +4335,8 @@ def test_handle_query_routes_issue_backlog(monkeypatch, question: str) -> None:
     assert result["routed_to"] == "issue_backlog"
     assert result["kind"] == "issue_backlog"
     assert result["issues"][0]["issue_id"] == "issue.alpha"
-    assert captured == {"limit": 25, "open_only": True}
+    assert captured["operation_name"] == "operator.issue_backlog"
+    assert captured["payload"] == {"limit": 25, "open_only": True}
 
 
 def test_handle_query_keeps_failure_questions_out_of_issue_backlog() -> None:
@@ -4444,26 +4461,18 @@ def test_handle_query_routes_semantic_assertions_view(monkeypatch) -> None:
     assert result["returned_count"] == 1
 
 
-def test_handle_query_routes_diagnose() -> None:
-    from runtime import workflow_diagnose
-
+def test_handle_query_rejects_diagnose_query_alias() -> None:
     subs = SimpleNamespace(
         get_knowledge_graph=lambda: SimpleNamespace(search=lambda *_args, **_kwargs: []),
     )
 
-    # Patch the runtime helper directly so the shared query core can resolve the run
-    # without touching the database in unit tests.
-    original = workflow_diagnose.diagnose_run
-    workflow_diagnose.diagnose_run = lambda run_id: {"run_id": run_id, "receipt_found": True}
-    try:
-        result = workflow_query_core.handle_query(subs, {"question": "diagnose run run_abc123"})
-    finally:
-        workflow_diagnose.diagnose_run = original
+    result = workflow_query_core.handle_query(subs, {"question": "diagnose run run_abc123"})
 
     assert result["routed_to"] == "workflow_diagnose"
+    assert result["status"] == "unsupported_query_alias"
+    assert result["reason_code"] == "workflow_query.diagnose_alias_removed"
     assert result["run_id"] == "run_abc123"
-    assert result["diagnosis"]["run_id"] == "run_abc123"
-    assert result["diagnosis"]["receipt_found"] is True
+    assert "praxis_diagnose" in result["message"]
 
 
 def test_handle_query_knowledge_graph_error_is_structured() -> None:
@@ -4556,174 +4565,57 @@ def test_handle_operator_view_requires_run_id_for_run_scoped_views() -> None:
 
 
 def test_handle_operator_view_status_returns_direct_payload(monkeypatch) -> None:
-    class _Reader:
-        def evidence_timeline(self, run_id: str):
-            assert run_id == "run_123"
-            return ("evidence",)
+    captured: dict[str, Any] = {}
 
-    class _Orchestrator:
-        def __init__(self, *, evidence_reader: Any):
-            self._reader = evidence_reader
+    def _execute(subsystems, *, operation_name: str, payload: dict[str, Any]):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"view": "status", "run_id": payload["run_id"]}
 
-        def inspect_run(self, *, run_id: str):
-            assert run_id == "run_123"
-            return SimpleNamespace(operator_frame_source="db", operator_frames=[{"frame": 1}])
-
-    monkeypatch.setattr("storage.postgres.PostgresEvidenceReader", _Reader)
-    monkeypatch.setattr("runtime.execution.RuntimeOrchestrator", _Orchestrator)
     monkeypatch.setattr(
-        "surfaces.api._operator_helpers._run_async",
-        lambda awaitable, **_kwargs: {"outbox_depth": 2},
-    )
-    monkeypatch.setattr(
-        "observability.load_native_operator_support",
-        lambda *, run_id: {"run_id": run_id},
-    )
-    monkeypatch.setattr(
-        "observability.operator_status_run",
-        lambda **kwargs: {"kind": "status", "run_id": kwargs["run_id"], "support": kwargs["support"]},
-    )
-    monkeypatch.setattr(
-        "observability.render_operator_status",
-        lambda view: f"status:{view['run_id']}",
-    )
-
-    result = workflow_query_core.handle_operator_view(None, {"view": "status", "run_id": "run_123"})
-
-    assert result == {
-        "view": "status",
-        "run_id": "run_123",
-        "requires": {
-            "runtime": "sync_postgres",
-            "driver": "postgres",
-        },
-        "payload": {
-            "kind": "status",
-            "run_id": "run_123",
-            "support": {"outbox_depth": 2},
-        },
-        "rendered": "status:run_123",
-    }
-
-
-def test_handle_operator_view_replay_ready_bugs_returns_direct_payload() -> None:
-    class _BugTracker:
-        def __init__(self) -> None:
-            self.bulk_backfill_called = False
-
-        def count_bugs(self, **_kwargs):
-            return 1
-
-        def list_bugs(self, *, limit: int, **_kwargs):
-            assert limit == 10
-            return [
-                SimpleNamespace(
-                    bug_id="BUG-001",
-                    bug_key="bug_001",
-                    title="Replay-ready bug",
-                    status="OPEN",
-                    severity="P2",
-                    priority="P2",
-                    category="RUNTIME",
-                    description="ready",
-                    summary="ready",
-                    filed_at="2026-04-10T00:00:00+00:00",
-                    created_at="2026-04-10T00:00:00+00:00",
-                    updated_at="2026-04-10T00:00:00+00:00",
-                    resolved_at=None,
-                    filed_by="test",
-                    assigned_to=None,
-                    tags=(),
-                    source_kind="manual",
-                    discovered_in_run_id=None,
-                    discovered_in_receipt_id=None,
-                    owner_ref=None,
-                    decision_ref="",
-                    resolution_summary=None,
-                )
-            ]
-
-        def replay_hint(self, bug_id: str, *, receipt_limit: int, allow_backfill: bool):
-            assert bug_id == "BUG-001"
-            assert receipt_limit == 1
-            assert allow_backfill is False
-            return {
-                "available": True,
-                "reason_code": "bug.replay_ready",
-                "run_id": "run-123",
-                "receipt_id": "receipt-123",
-            }
-
-    class _BugTrackerMod:
-        class BugStatus:
-            FIXED = "FIXED"
-            WONT_FIX = "WONT_FIX"
-            DEFERRED = "DEFERRED"
-
-        class BugTracker:
-            @staticmethod
-            def _normalize_status(raw, default=None):
-                return default
-
-            @staticmethod
-            def _normalize_severity(raw, default=None):
-                return default
-
-            @staticmethod
-            def _normalize_category(raw, default=None):
-                return default
-
-    subs = SimpleNamespace(
-        get_bug_tracker=lambda: _BugTracker(),
-        get_bug_tracker_mod=lambda: _BugTrackerMod(),
+        "runtime.operation_catalog_gateway.execute_operation_from_subsystems",
+        _execute,
     )
 
     result = workflow_query_core.handle_operator_view(
-        subs,
+        SimpleNamespace(),
+        {"view": "status", "run_id": "run_123"},
+    )
+
+    assert result == {"view": "status", "run_id": "run_123"}
+    assert captured["operation_name"] == "operator.run_status"
+    assert captured["payload"] == {"run_id": "run_123"}
+
+
+def test_handle_operator_view_replay_ready_bugs_returns_direct_payload(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def _execute(subsystems, *, operation_name: str, payload: dict[str, Any]):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"view": "replay_ready_bugs", "bugs": [], "returned_count": 0}
+
+    monkeypatch.setattr(
+        "runtime.operation_catalog_gateway.execute_operation_from_subsystems",
+        _execute,
+    )
+
+    result = workflow_query_core.handle_operator_view(
+        SimpleNamespace(),
         {"view": "replay_ready_bugs", "limit": 10},
     )
 
     assert result["view"] == "replay_ready_bugs"
-    assert result["bugs"][0]["replay_ready"] is True
-    assert result["returned_count"] == 1
-    assert "maintenance" not in result
+    assert captured["operation_name"] == "operator.replay_ready_bugs"
+    assert captured["payload"] == {"limit": 10}
 
 
 def test_handle_operator_view_replay_ready_bugs_rejects_refresh_backfill() -> None:
-    class _BugTracker:
-        def count_bugs(self, **_kwargs):
-            return 0
-
-        def list_bugs(self, **_kwargs):
-            return []
-
-    class _BugTrackerMod:
-        class BugStatus:
-            FIXED = "FIXED"
-            WONT_FIX = "WONT_FIX"
-            DEFERRED = "DEFERRED"
-
-        class BugTracker:
-            @staticmethod
-            def _normalize_status(raw, default=None):
-                return default
-
-            @staticmethod
-            def _normalize_severity(raw, default=None):
-                return default
-
-            @staticmethod
-            def _normalize_category(raw, default=None):
-                return default
-
-    subs = SimpleNamespace(
-        get_bug_tracker=lambda: _BugTracker(),
-        get_bug_tracker_mod=lambda: _BugTrackerMod(),
-    )
-
     with pytest.raises(workflow_query_core._ClientError, match="read-only"):
         workflow_query_core.handle_operator_view(
-            subs,
+            SimpleNamespace(),
             {"view": "replay_ready_bugs", "limit": 10, "refresh_backfill": True},
         )
 
@@ -4775,8 +4667,7 @@ def test_handle_operator_view_semantics_uses_unified_semantic_substrate(monkeypa
     assert captured["payload"]["subject_kind"] == "bug"
     assert captured["payload"]["limit"] == 7
     assert captured["payload"]["as_of"].isoformat() == "2026-04-16T20:05:00+00:00"
-    assert result["view"] == "semantics"
-    assert result["returned_count"] == 1
+    assert len(result["semantic_assertions"]) == 1
     assert result["projection_source"] == "semantic_current_assertions"
     assert result["semantic_assertions"][0]["subject"]["ref"] == "bug.semantic.checkout"
 
@@ -4784,64 +4675,31 @@ def test_handle_operator_view_semantics_uses_unified_semantic_substrate(monkeypa
 def test_handle_operator_view_operator_graph_uses_semantic_projection(monkeypatch) -> None:
     captured: dict[str, Any] = {}
 
-    class _Conn:
-        def __init__(self) -> None:
-            self.closed = False
-
-        async def close(self) -> None:
-            self.closed = True
-
-    async def _connect_database(env=None):
-        captured["env"] = dict(env or {})
-        conn = _Conn()
-        captured["conn"] = conn
-        return conn
-
-    async def _load_operator_graph(conn, *, as_of):
-        captured["load_conn"] = conn
-        captured["as_of"] = as_of
+    def _execute(subsystems, *, operation_name: str, payload: dict[str, Any]):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
         return {
-            "kind": "operator_graph",
-            "semantic_authority_state": "ready",
-            "semantic_authority_reason_code": "semantic_assertions.active_window",
-            "nodes": [{"node_id": "authority_domain:authority_domain.checkout"}],
+            "view": "operator_graph",
+            "payload": {"semantic_authority_state": "ready"},
         }
 
-    monkeypatch.setattr("storage.postgres.connect_workflow_database", _connect_database)
     monkeypatch.setattr(
-        "observability.operator_topology.load_operator_graph_projection",
-        _load_operator_graph,
+        "runtime.operation_catalog_gateway.execute_operation_from_subsystems",
+        _execute,
     )
 
     result = workflow_query_core.handle_operator_view(
-        SimpleNamespace(
-            _postgres_env=lambda: {
-                "WORKFLOW_DATABASE_URL": "postgresql://example/operator_graph"
-            }
-        ),
+        SimpleNamespace(),
         {
             "view": "operator_graph",
             "as_of": "2026-04-16T20:05:00+00:00",
         },
     )
 
-    assert captured["env"]["WORKFLOW_DATABASE_URL"] == "postgresql://example/operator_graph"
-    assert captured["load_conn"] is captured["conn"]
-    assert captured["as_of"].isoformat() == "2026-04-16T20:05:00+00:00"
-    assert captured["conn"].closed is True
-    assert result == {
-        "view": "operator_graph",
-        "requires": {
-            "runtime": "sync_postgres",
-            "driver": "postgres",
-        },
-        "payload": {
-            "kind": "operator_graph",
-            "semantic_authority_state": "ready",
-            "semantic_authority_reason_code": "semantic_assertions.active_window",
-            "nodes": [{"node_id": "authority_domain:authority_domain.checkout"}],
-        },
-    }
+    assert captured["operation_name"] == "operator.graph_projection"
+    assert captured["payload"]["as_of"].isoformat() == "2026-04-16T20:05:00+00:00"
+    assert result["view"] == "operator_graph"
 
 
 def test_handle_bugs_resolve_fixed_requires_validates_fix_evidence() -> None:
@@ -5046,20 +4904,19 @@ def test_handle_bugs_search_include_replay_state_uses_read_only_hint() -> None:
 def test_handle_operator_view_issue_backlog_returns_direct_payload(monkeypatch) -> None:
     captured: dict[str, Any] = {}
 
-    def _query_issue_backlog(self: Any, **kwargs: Any) -> dict[str, Any]:
-        captured.update(kwargs)
+    def _execute(subsystems, *, operation_name: str, payload: dict[str, Any]):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
         return {
-            "kind": "issue_backlog",
+            "view": "issue_backlog",
             "count": 1,
-            "total_issues": 2,
             "issues": [{"issue_id": "issue.alpha", "status": "open"}],
-            "counts": {"by_status": {"open": 1}, "by_severity": {"P2": 1}},
         }
 
     monkeypatch.setattr(
-        workflow_query_core.NativeOperatorQueryFrontdoor,
-        "query_issue_backlog",
-        _query_issue_backlog,
+        "runtime.operation_catalog_gateway.execute_operation_from_subsystems",
+        _execute,
     )
 
     result = workflow_query_core.handle_operator_view(
@@ -5068,13 +4925,10 @@ def test_handle_operator_view_issue_backlog_returns_direct_payload(monkeypatch) 
     )
 
     assert result["view"] == "issue_backlog"
-    assert result["requires"] == {
-        "runtime": "sync_postgres",
-        "driver": "postgres",
-    }
     assert result["count"] == 1
     assert result["issues"][0]["issue_id"] == "issue.alpha"
-    assert captured == {"limit": 7, "open_only": False, "status": "open"}
+    assert captured["operation_name"] == "operator.issue_backlog"
+    assert captured["payload"] == {"limit": 7, "open_only": False, "status": "open"}
 
 
 def test_handle_friction_empty_stats_is_machine_first() -> None:

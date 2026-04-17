@@ -2522,10 +2522,6 @@ async def decompose_post(request: Request) -> Response:
 async def research_post(request: Request) -> Response:
     return await _dispatch_standard_route(request)
 
-@app.post("/operator_view")
-async def operator_view_post(request: Request) -> Response:
-    return await _dispatch_standard_route(request)
-
 @app.post("/health")
 async def health_post(request: Request) -> Response:
     return await _dispatch_standard_route(request)

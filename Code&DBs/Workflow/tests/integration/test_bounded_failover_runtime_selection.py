@@ -130,9 +130,9 @@ async def _seed_route_catalog(
         f"decision:provider-policy:{suffix}",
     )
 
-    for candidate_ref, model_slug, priority in (
-        (primary_candidate_ref, "gpt-5.4", 5),
-        (fallback_candidate_ref, "gpt-5.4-mini", 10),
+    for candidate_ref, model_slug, priority, route_tier, route_tier_rank, latency_class, latency_rank in (
+        (primary_candidate_ref, "gpt-5.4", 5, "high", 1, "reasoning", 2),
+        (fallback_candidate_ref, "gpt-5.4-mini", 10, "medium", 2, "instant", 1),
     ):
         await conn.execute(
             """
@@ -146,12 +146,43 @@ async def _seed_route_catalog(
                 priority,
                 balance_weight,
                 capability_tags,
+                cli_config,
+                route_tier,
+                route_tier_rank,
+                latency_class,
+                latency_rank,
+                reasoning_control,
+                task_affinities,
+                benchmark_profile,
                 default_parameters,
                 effective_from,
                 effective_to,
                 decision_ref,
                 created_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11, $12, $13, $14)
+            ) VALUES (
+                $1,
+                $2,
+                $3,
+                $4,
+                $5,
+                $6,
+                $7,
+                $8,
+                $9::jsonb,
+                $10::jsonb,
+                $11,
+                $12,
+                $13,
+                $14,
+                $15::jsonb,
+                $16::jsonb,
+                $17::jsonb,
+                $18::jsonb,
+                $19,
+                $20,
+                $21,
+                $22
+            )
             """,
             candidate_ref,
             "provider.openai",
@@ -162,6 +193,14 @@ async def _seed_route_catalog(
             priority,
             1,
             _jsonb(["bounded", "failover-runtime"]),
+            _jsonb({}),
+            route_tier,
+            route_tier_rank,
+            latency_class,
+            latency_rank,
+            _jsonb({"default": "medium", "kind": "openai_reasoning_effort"}),
+            _jsonb({"primary": ["build"], "secondary": ["review"], "avoid": []}),
+            _jsonb({"positioning": "bounded failover runtime seed", "source_refs": ["integration_test"]}),
             _jsonb({"temperature": 0}),
             as_of - timedelta(hours=1),
             None,

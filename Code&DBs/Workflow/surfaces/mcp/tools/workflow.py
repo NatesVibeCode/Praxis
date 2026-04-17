@@ -1118,6 +1118,14 @@ def tool_praxis_workflow(params: dict, _progress_emitter=None) -> dict:
     """
     action = params.get("action", "run")
 
+    if action == "wait":
+        return {
+            "error": (
+                "action='wait' is no longer supported; use action='status' for run snapshots "
+                "and notifications/progress for inline streaming."
+            )
+        }
+
     # --- Poll for status of a workflow ---
     if action == "status":
         run_id = params.get("run_id", "")
@@ -1579,6 +1587,16 @@ def tool_praxis_workflow_validate(params: dict) -> dict:
         return {
             "valid": False,
             "error": str(e),
+        }
+    except FileNotFoundError as exc:
+        return {
+            "valid": False,
+            "error": str(exc),
+        }
+    except Exception as exc:
+        return {
+            "valid": False,
+            "error": f"{type(exc).__name__}: {exc}",
         }
 
 

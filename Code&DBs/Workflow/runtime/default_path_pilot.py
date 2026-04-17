@@ -565,7 +565,7 @@ class DefaultPathPilotResolution:
                 "work_kind": self.dispatch.work_kind,
                 "queue_shape": dict(self.dispatch.queue_shape),
                 "throttle_policy": dict(self.dispatch.throttle_policy),
-                "review_required": self.workflow.review_required,
+                "review_required": self.dispatch.review_required,
                 "decision_ref": self.dispatch.decision_ref,
             },
             "schedule": {

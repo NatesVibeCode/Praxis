@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 import json
+import os
 import threading
 import time
 from typing import Any
@@ -39,7 +40,12 @@ from storage.postgres import (
     persist_workflow_admission,
 )
 
-_TEST_ENV = {"WORKFLOW_DATABASE_URL": "postgresql://postgres@localhost:5432/praxis_test"}
+_TEST_ENV = {
+    "WORKFLOW_DATABASE_URL": os.environ.get(
+        "WORKFLOW_DATABASE_URL",
+        "postgresql://127.0.0.1/postgres",
+    )
+}
 
 
 def _unique_suffix() -> str:

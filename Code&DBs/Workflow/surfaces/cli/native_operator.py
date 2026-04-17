@@ -27,7 +27,7 @@ from runtime.execution.orchestrator import RuntimeOrchestrator
 from runtime.instance import resolve_native_instance
 from registry.provider_onboarding import load_provider_onboarding_spec_from_file
 from storage.postgres import PostgresEvidenceReader
-from surfaces.api import frontdoor
+from surfaces.api import frontdoor, native_ops
 from surfaces.api import native_operator_surface
 from surfaces.api.operator_read import run_native_self_hosted_smoke
 from surfaces._workflow_database import workflow_database_env_for_repo
@@ -795,8 +795,7 @@ def main(
         return source
 
     if isinstance(command, InstanceCommand):
-        native_instance = resolve_native_instance(env=source)
-        _emit_json(stdout, native_instance.to_contract())
+        _emit_json(stdout, native_ops.show_instance_contract(env=source))
         return 0
     if isinstance(command, DbHealthCommand):
         _emit_json(stdout, frontdoor.health(env=source))

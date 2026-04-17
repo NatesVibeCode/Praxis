@@ -13,7 +13,6 @@ from typing import Any
 from storage.postgres.validators import PostgresConfigurationError
 
 from surfaces._workflow_database import workflow_database_url_for_repo
-from surfaces.api.operator_read import NativeOperatorQueryFrontdoor
 from .._payload_contract import coerce_optional_text
 from . import _bug_surface_contract as _bug_contract
 from ._shared import _ClientError, _bug_to_dict, _matches, _serialize
@@ -147,9 +146,15 @@ def handle_query(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         return {"routed_to": "operator_panel", "snapshot": _serialize(snap)}
 
     if _has_issue_backlog_intent(question):
-        backlog = NativeOperatorQueryFrontdoor().query_issue_backlog(
-            limit=25,
-            open_only=True,
+        from runtime.operation_catalog_gateway import execute_operation_from_subsystems
+
+        backlog = execute_operation_from_subsystems(
+            subs,
+            operation_name="operator.issue_backlog",
+            payload={
+                "limit": 25,
+                "open_only": True,
+            },
         )
         backlog["routed_to"] = "issue_backlog"
         return backlog
@@ -661,18 +666,12 @@ def handle_specialized_query(subs: Any, body: dict[str, Any]) -> dict | None:
         return None
 
     if _matches(question, ["diagnose", "diagnosis", "troubleshoot", "why did", "run id"]):
-        run_id = _extract_run_id(question)
-        if not run_id:
-            return {
-                "routed_to": "workflow_diagnose",
-                "message": "Provide a run_id to diagnose a specific workflow run.",
-            }
-        from runtime.workflow_diagnose import diagnose_run
-
         return {
             "routed_to": "workflow_diagnose",
-            "run_id": run_id,
-            "diagnosis": diagnose_run(run_id),
+            "status": "unsupported_query_alias",
+            "reason_code": "workflow_query.diagnose_alias_removed",
+            "run_id": _extract_run_id(question),
+            "message": "Use praxis_diagnose or `praxis workflow diagnose <run_id>` directly.",
         }
 
     if _matches(question, ["operator status", "operator view", "cockpit"]):
@@ -1308,151 +1307,24 @@ def handle_research(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
 
 
 def handle_operator_view(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
-    view = body.get("view", "status")
-    if view == "issue_backlog":
-        limit = max(1, int(body.get("limit", 50) or 50))
-        open_only = bool(body.get("open_only", True))
-        status = _optional_text(body.get("status"))
-        backlog = NativeOperatorQueryFrontdoor().query_issue_backlog(
-            limit=limit,
-            open_only=open_only,
-            status=status,
-        )
-        return {
-            "view": view,
-            "requires": {
-                "runtime": "sync_postgres",
-                "driver": "postgres",
-            },
-            **backlog,
-        }
-    if view == "replay_ready_bugs":
-        bt = subs.get_bug_tracker()
-        limit = max(1, int(body.get("limit", 50) or 50))
-        refresh_backfill = bool(body.get("refresh_backfill", False))
-        if refresh_backfill:
-            raise _ClientError(
-                "replay_ready_bugs is read-only; use praxis workflow bugs backfill_replay for provenance maintenance"
-            )
-        def _parse_status(_mod: Any, raw: object):
-            if raw is None:
-                return None
-            status = _mod.BugTracker._normalize_status(raw, default=None)
-            if status is None:
-                raise _ClientError(
-                    "status must be one of OPEN, IN_PROGRESS, FIXED, WONT_FIX, DEFERRED"
-                )
-            return status
+    from runtime.operation_catalog_gateway import execute_operation_from_subsystems
 
-        def _parse_severity(_mod: Any, raw: object):
-            if raw is None:
-                return None
-            severity = _mod.BugTracker._normalize_severity(raw, default=None)
-            if severity is None:
-                raise _ClientError("severity must be one of P0, P1, P2, P3")
-            return severity
+    view = str(body.get("view") or "status").strip().lower()
+    raw_as_of = body.get("as_of")
+    as_of = _parse_datetime(raw_as_of)
+    if raw_as_of is not None and as_of is None:
+        raise _ClientError("as_of must be a valid ISO-8601 datetime when provided")
 
-        def _parse_category(_mod: Any, raw: object):
-            if raw is None:
-                return None
-            category = _mod.BugTracker._normalize_category(raw, default=None)
-            if category is None:
-                raise _ClientError(
-                    "category must be one of SCOPE, VERIFY, IMPORT, WIRING, ARCHITECTURE, RUNTIME, TEST, OTHER"
-                )
-            return category
-        bugs_result = handle_bugs(
-            subs,
-            {
-                "action": "list",
-                "open_only": True,
-                "replay_ready_only": True,
-                "include_replay_state": True,
-                "limit": limit,
-            },
-            parse_bug_status=_parse_status,
-            parse_bug_severity=_parse_severity,
-            parse_bug_category=_parse_category,
-        )
-        return {
-            "view": view,
-            "requires": {
-                "runtime": "sync_postgres",
-                "driver": "postgres",
-            },
-            "bugs": bugs_result.get("bugs", []),
-            "count": bugs_result.get("count", 0),
-            "returned_count": bugs_result.get("returned_count", 0),
-            "limit": limit,
-        }
-    if view == "semantics":
-        from runtime.operation_catalog_gateway import execute_operation_from_subsystems
-
-        limit = max(1, int(body.get("limit", 50) or 50))
-        raw_as_of = body.get("as_of")
-        as_of = _parse_datetime(raw_as_of)
-        if raw_as_of is not None and as_of is None:
-            raise _ClientError("as_of must be a valid ISO-8601 datetime when provided")
-        semantics_result = execute_operation_from_subsystems(
-            subs,
-            operation_name="semantic_assertions.list",
-            payload={
-                "predicate_slug": _optional_text(body.get("predicate_slug")),
-                "subject_kind": _optional_text(body.get("subject_kind")),
-                "subject_ref": _optional_text(body.get("subject_ref")),
-                "object_kind": _optional_text(body.get("object_kind")),
-                "object_ref": _optional_text(body.get("object_ref")),
-                "source_kind": _optional_text(body.get("source_kind")),
-                "source_ref": _optional_text(body.get("source_ref")),
-                "active_only": bool(body.get("active_only", True)),
-                "as_of": as_of,
-                "limit": limit,
-            },
-        )
-        rows = semantics_result.get("semantic_assertions")
-        returned_count = len(rows) if isinstance(rows, list) else 0
-        return {
-            "view": view,
-            "requires": {
-                "runtime": "sync_postgres",
-                "driver": "postgres",
-            },
-            "returned_count": returned_count,
-            **semantics_result,
-        }
-    if view == "operator_graph":
-        from observability.operator_topology import load_operator_graph_projection
-        from storage.postgres import connect_workflow_database
-        from surfaces.api._operator_helpers import _run_async
-
-        raw_as_of = body.get("as_of")
-        as_of = _parse_datetime(raw_as_of)
-        if raw_as_of is not None and as_of is None:
-            raise _ClientError("as_of must be a valid ISO-8601 datetime when provided")
-        if as_of is None:
-            as_of = datetime.now(timezone.utc)
-        postgres_env = getattr(subs, "_postgres_env", None)
-        workflow_env = None
-        if callable(postgres_env):
-            workflow_env = dict(postgres_env() or {})
-
-        async def _load_operator_graph() -> dict[str, Any]:
-            conn = await connect_workflow_database(env=workflow_env)
-            try:
-                read_model = await load_operator_graph_projection(conn, as_of=as_of)
-            finally:
-                await conn.close()
-            return {
-                "view": view,
-                "requires": {
-                    "runtime": "sync_postgres",
-                    "driver": "postgres",
-                },
-                "payload": _operator_view_payload(read_model),
-            }
-
-        return _run_async(_load_operator_graph())
-    run_id = _optional_text(body.get("run_id"))
+    operation_name = {
+        "status": "operator.run_status",
+        "scoreboard": "operator.run_scoreboard",
+        "graph": "operator.run_graph",
+        "operator_graph": "operator.graph_projection",
+        "semantics": "semantic_assertions.list",
+        "lineage": "operator.run_lineage",
+        "issue_backlog": "operator.issue_backlog",
+        "replay_ready_bugs": "operator.replay_ready_bugs",
+    }.get(view)
     view_options = (
         "status",
         "scoreboard",
@@ -1463,106 +1335,46 @@ def handle_operator_view(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         "replay_ready_bugs",
         "issue_backlog",
     )
-    if view not in {
-        "status",
-        "scoreboard",
-        "graph",
-        "operator_graph",
-        "semantics",
-        "lineage",
-        "replay_ready_bugs",
-        "issue_backlog",
-    }:
+    if operation_name is None:
         raise _ClientError(f"Unknown view: {view}. Options: {', '.join(view_options)}")
-    if run_id is None:
-        raise _ClientError(f"run_id is required for operator view '{view}'")
 
-    from observability import (
-        cutover_scoreboard_run,
-        graph_lineage_run,
-        graph_topology_run,
-        load_native_operator_support,
-        operator_status_run,
-        render_cutover_scoreboard,
-        render_operator_status,
+    payload: dict[str, Any]
+    if view in {"status", "scoreboard", "graph", "lineage"}:
+        run_id = _optional_text(body.get("run_id"))
+        if run_id is None:
+            raise _ClientError(f"run_id is required for operator view '{view}'")
+        payload = {"run_id": run_id}
+    elif view == "operator_graph":
+        payload = {"as_of": as_of}
+    elif view == "semantics":
+        payload = {
+            "predicate_slug": _optional_text(body.get("predicate_slug")),
+            "subject_kind": _optional_text(body.get("subject_kind")),
+            "subject_ref": _optional_text(body.get("subject_ref")),
+            "object_kind": _optional_text(body.get("object_kind")),
+            "object_ref": _optional_text(body.get("object_ref")),
+            "source_kind": _optional_text(body.get("source_kind")),
+            "source_ref": _optional_text(body.get("source_ref")),
+            "active_only": bool(body.get("active_only", True)),
+            "as_of": as_of,
+            "limit": max(1, int(body.get("limit", 50) or 50)),
+        }
+    elif view == "issue_backlog":
+        payload = {
+            "limit": max(1, int(body.get("limit", 50) or 50)),
+            "open_only": bool(body.get("open_only", True)),
+            "status": _optional_text(body.get("status")),
+        }
+    else:
+        if bool(body.get("refresh_backfill", False)):
+            raise _ClientError(
+                "replay_ready_bugs is read-only; use praxis workflow bugs backfill_replay for provenance maintenance"
+            )
+        payload = {
+            "limit": max(1, int(body.get("limit", 50) or 50)),
+        }
+    return execute_operation_from_subsystems(
+        subs,
+        operation_name=operation_name,
+        payload=payload,
     )
-    from runtime.execution import RuntimeOrchestrator
-    from surfaces.cli.render import render_graph_lineage, render_graph_topology
-    from surfaces.api._operator_helpers import _run_async
-    from storage.postgres import PostgresEvidenceReader
-
-    evidence_reader = PostgresEvidenceReader()
-    canonical_evidence = evidence_reader.evidence_timeline(run_id)
-    inspection = RuntimeOrchestrator(evidence_reader=evidence_reader).inspect_run(run_id=run_id)
-    support = _run_async(load_native_operator_support(run_id=run_id))
-
-    if view == "status":
-        read_model = operator_status_run(
-            run_id=run_id,
-            canonical_evidence=canonical_evidence,
-            support=support,
-        )
-        return {
-            "view": view,
-            "run_id": run_id,
-            "requires": {
-                "runtime": "sync_postgres",
-                "driver": "postgres",
-            },
-            "payload": _operator_view_payload(read_model),
-            "rendered": render_operator_status(read_model),
-        }
-
-    if view == "graph":
-        read_model = graph_topology_run(
-            run_id=run_id,
-            canonical_evidence=canonical_evidence,
-        )
-        return {
-            "view": view,
-            "run_id": run_id,
-            "requires": {
-                "runtime": "sync_postgres",
-                "driver": "postgres",
-            },
-            "payload": _operator_view_payload(read_model),
-            "rendered": render_graph_topology(read_model),
-        }
-
-    if view == "lineage":
-        read_model = graph_lineage_run(
-            run_id=run_id,
-            canonical_evidence=canonical_evidence,
-            operator_frame_source=inspection.operator_frame_source,
-            operator_frames=inspection.operator_frames,
-        )
-        return {
-            "view": view,
-            "run_id": run_id,
-            "requires": {
-                "runtime": "sync_postgres",
-                "driver": "postgres",
-            },
-            "payload": _operator_view_payload(read_model),
-            "rendered": render_graph_lineage(read_model),
-        }
-
-    from surfaces.api import frontdoor
-
-    status_payload = frontdoor.status(run_id=run_id)
-    read_model = cutover_scoreboard_run(
-        run_id=run_id,
-        canonical_evidence=canonical_evidence,
-        status_snapshot=status_payload.get("run"),
-        support=support,
-    )
-    return {
-        "view": view,
-        "run_id": run_id,
-        "requires": {
-            "runtime": "sync_postgres",
-            "driver": "postgres",
-        },
-        "payload": _operator_view_payload(read_model),
-        "rendered": render_cutover_scoreboard(read_model),
-    }

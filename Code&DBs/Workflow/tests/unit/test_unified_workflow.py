@@ -2521,7 +2521,9 @@ def test_persist_graph_submission_evidence_advances_route_identity_from_intake(m
 
 
 def test_graph_adapter_registry_prefers_docker_for_cli_llm() -> None:
-    registry = _admission_mod._graph_adapter_registry()
+    registry = _admission_mod._graph_adapter_registry(
+        SimpleNamespace(nodes=[SimpleNamespace(adapter_type="cli_llm")])
+    )
     cli_adapter = registry._registry["cli_llm"]
 
     assert getattr(cli_adapter, "_prefer_docker", None) is True
@@ -5018,7 +5020,8 @@ def test_run_worker_loop_logs_trigger_failures_without_stopping_scheduler(
     monkeypatch.setattr(_wloop_mod, "claim_one", _claim_one)
     monkeypatch.setattr(_wloop_mod, "reap_stale_claims", lambda _conn: 0)
     monkeypatch.setattr(
-        "runtime.triggers.evaluate_triggers",
+        _wloop_mod,
+        "_evaluate_workflow_triggers",
         lambda _conn: (_ for _ in ()).throw(RuntimeError("trigger boom")),
     )
     monkeypatch.setenv("WORKFLOW_DATABASE_URL", "postgresql://example.test/workflow")
@@ -5060,7 +5063,7 @@ def test_run_worker_loop_schedules_embedding_prewarm_once(monkeypatch):
     monkeypatch.setattr(_wloop_mod, "_start_embedding_prewarm_for_worker", lambda: prewarm_actions.append("scheduled"))
     monkeypatch.setattr(_wloop_mod, "claim_one", _claim_one)
     monkeypatch.setattr(_wloop_mod, "reap_stale_claims", lambda _conn: 0)
-    monkeypatch.setattr("runtime.triggers.evaluate_triggers", lambda _conn: 0)
+    monkeypatch.setattr(_wloop_mod, "_evaluate_workflow_triggers", lambda _conn: 0)
     monkeypatch.setenv("WORKFLOW_DATABASE_URL", "postgresql://example.test/workflow")
 
     _wloop_mod.run_worker_loop(_FakeConn(), "/repo", poll_interval=0.0, max_local_concurrent=1)

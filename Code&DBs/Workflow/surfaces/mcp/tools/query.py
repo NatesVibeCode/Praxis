@@ -9,7 +9,10 @@ from surfaces.api.handlers import workflow_query_core
 
 def tool_praxis_query(params: dict) -> dict:
     """Natural language query surface — routes to the shared query core."""
-    return workflow_query_core.handle_query(_subs, dict(params))
+    try:
+        return workflow_query_core.handle_query(_subs, dict(params))
+    except Exception as exc:
+        return {"error": str(exc)}
 
 
 TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {

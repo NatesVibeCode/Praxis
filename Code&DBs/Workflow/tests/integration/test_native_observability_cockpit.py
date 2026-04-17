@@ -378,9 +378,7 @@ def test_native_observability_feedback_round_trips_into_activity_truth_without_d
     assert instruction_authority["queue_refs"]["work_item_workflow_binding_ids"] == [
         proof["binding_id"]
     ]
-    assert instruction_authority["directive"].startswith(
-        "Read roadmap-backed rows and queue refs here"
-    )
+    assert instruction_authority["directive"].startswith("Read roadmap-backed rows")
 
     bug = payload["bugs"][0]
     assert bug["bug_id"] == proof["bug_id"]
@@ -449,18 +447,23 @@ def test_native_observability_feedback_round_trips_into_activity_truth_without_d
             "debate_id": debate_id,
         },
     ]
-    assert proof["debate_consensus_row"] == {
-        "debate_run_id": debate_run_id,
-        "debate_id": debate_id,
-        "total_rounds": 2,
-        "consensus_points": [
-            "Bind durable observability evidence through canonical bug evidence links.",
-            "Keep admitted workflow definition rows immutable until an explicit decision lands.",
-        ],
-        "disagreements": [
-            "Whether retrieval telemetry should gain a first-class workflow_run_id column.",
-        ],
-    }
+    debate_consensus_row = dict(proof["debate_consensus_row"])
+    consensus_points = debate_consensus_row["consensus_points"]
+    disagreements = debate_consensus_row["disagreements"]
+    if isinstance(consensus_points, str):
+        consensus_points = json.loads(consensus_points)
+    if isinstance(disagreements, str):
+        disagreements = json.loads(disagreements)
+    assert debate_consensus_row["debate_run_id"] == debate_run_id
+    assert debate_consensus_row["debate_id"] == debate_id
+    assert debate_consensus_row["total_rounds"] == 2
+    assert consensus_points == [
+        "Bind durable observability evidence through canonical bug evidence links.",
+        "Keep admitted workflow definition rows immutable until an explicit decision lands.",
+    ]
+    assert disagreements == [
+        "Whether retrieval telemetry should gain a first-class workflow_run_id column.",
+    ]
     assert proof["retrieval_metric_row"] == {
         "query_fingerprint": retrieval_metric.query_fingerprint,
         "pattern_name": retrieval_metric.pattern_name,

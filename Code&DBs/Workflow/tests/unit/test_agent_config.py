@@ -4,21 +4,8 @@ from __future__ import annotations
 
 import json
 import tempfile
-from pathlib import Path
 
 import pytest
-
-import sys, importlib
-
-# Import agent_config directly to avoid pulling in the full registry
-# __init__.py which depends on modules needing Python 3.10+.
-_spec = importlib.util.spec_from_file_location(
-    "registry.agent_config",
-    Path(__file__).resolve().parents[2] / "registry" / "agent_config.py",
-)
-_mod = importlib.util.module_from_spec(_spec)  # type: ignore[arg-type]
-sys.modules["registry.agent_config"] = _mod
-_spec.loader.exec_module(_mod)  # type: ignore[union-attr]
 
 from registry.agent_config import (  # noqa: E402
     AgentConfig,

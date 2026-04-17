@@ -20,7 +20,7 @@ class _FakeRouter:
     def __init__(self, _pg) -> None:
         self._pg = _pg
 
-    def resolve(self, _agent_slug: str):
+    def resolve_failover_chain(self, _agent_slug: str):
         return self.result
 
 
@@ -59,7 +59,7 @@ class _FakeChatStore:
         self.updated = True
 
 
-def test_resolve_model_accepts_single_route_decision(monkeypatch) -> None:
+def test_resolve_model_accepts_single_route_chain_entry(monkeypatch) -> None:
     monkeypatch.setattr(
         chat_orchestrator_mod.importlib,
         "import_module",
@@ -69,7 +69,7 @@ def test_resolve_model_accepts_single_route_decision(monkeypatch) -> None:
         "runtime.chat_orchestrator._resolve_api_key",
         lambda provider, *, required=True: f"{provider}-key",
     )
-    _FakeRouter.result = SimpleNamespace(provider_slug="openai", model_slug="gpt-5.4")
+    _FakeRouter.result = [SimpleNamespace(provider_slug="openai", model_slug="gpt-5.4")]
 
     orchestrator = ChatOrchestrator(object(), _REPO_ROOT)
 
@@ -79,28 +79,6 @@ def test_resolve_model_accepts_single_route_decision(monkeypatch) -> None:
     assert model == "gpt-5.4"
     assert endpoint == "https://api.openai.com/v1/chat/completions"
     assert api_key == "openai-key"
-
-
-def test_resolve_model_accepts_legacy_decision_list(monkeypatch) -> None:
-    monkeypatch.setattr(
-        chat_orchestrator_mod.importlib,
-        "import_module",
-        lambda _name: SimpleNamespace(TaskTypeRouter=_FakeRouter),
-    )
-    monkeypatch.setattr(
-        "runtime.chat_orchestrator._resolve_api_key",
-        lambda provider, *, required=True: f"{provider}-key",
-    )
-    _FakeRouter.result = [SimpleNamespace(provider_slug="anthropic", model_slug="claude-sonnet-4-5")]
-
-    orchestrator = ChatOrchestrator(object(), _REPO_ROOT)
-
-    provider, model, endpoint, api_key = orchestrator._resolve_model()
-
-    assert provider == "anthropic"
-    assert model == "claude-sonnet-4-5"
-    assert endpoint == "https://api.anthropic.com/v1/messages"
-    assert api_key == "anthropic-key"
 
 
 def test_extract_cli_chat_text_reads_codex_ndjson_agent_message() -> None:

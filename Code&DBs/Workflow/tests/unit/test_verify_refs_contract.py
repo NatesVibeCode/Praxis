@@ -538,7 +538,7 @@ def test_plan_definition_materializes_legacy_projections_from_definition_graph()
 
 
 def test_plan_definition_blocks_when_explicit_build_authority_state_is_present() -> None:
-    with pytest.raises(PlanningBlockedError, match="Resolve @gmail/search"):
+    with pytest.raises(PlanningBlockedError, match="Reviewed planning artifacts are required"):
         plan_definition(
             {
                 "type": "operating_model",

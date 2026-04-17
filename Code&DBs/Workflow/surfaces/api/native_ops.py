@@ -11,20 +11,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
-from pathlib import Path
 from typing import Any, Mapping
 
 from runtime.instance import (
-    PRAXIS_INSTANCE_NAME_ENV,
-    PRAXIS_RECEIPTS_DIR_ENV,
-    PRAXIS_RUNTIME_PROFILE_ENV,
-    PRAXIS_RUNTIME_PROFILES_CONFIG_ENV,
-    PRAXIS_TOPOLOGY_DIR_ENV,
-    NativeInstanceResolutionError,
-    NativeWorkflowInstance,
-    resolve_native_instance,
+    native_instance_contract,
 )
 from storage.dev_postgres import (
     local_postgres_bootstrap,
@@ -32,37 +23,8 @@ from storage.dev_postgres import (
     local_postgres_restart,
 )
 
-
-def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[4]
-
-
 def _instance_contract(env: Mapping[str, str] | None = None) -> dict[str, Any]:
-    source = env if env is not None else os.environ
-    try:
-        return resolve_native_instance(env=source).to_contract()
-    except NativeInstanceResolutionError as exc:
-        if exc.reason_code != "native_instance.authority_unavailable":
-            raise
-        repo_root = _repo_root().resolve()
-        return NativeWorkflowInstance(
-            instance_name=str(source.get(PRAXIS_INSTANCE_NAME_ENV) or "praxis"),
-            runtime_profile_ref=str(source.get(PRAXIS_RUNTIME_PROFILE_ENV) or "praxis"),
-            repo_root=str(repo_root),
-            workdir=str(repo_root),
-            receipts_dir=str(
-                Path(source.get(PRAXIS_RECEIPTS_DIR_ENV) or repo_root / "artifacts" / "runtime_receipts").resolve()
-            ),
-            topology_dir=str(
-                Path(source.get(PRAXIS_TOPOLOGY_DIR_ENV) or repo_root / "artifacts" / "runtime_topology").resolve()
-            ),
-            runtime_profiles_config=str(
-                Path(
-                    source.get(PRAXIS_RUNTIME_PROFILES_CONFIG_ENV)
-                    or repo_root / "config" / "runtime_profiles.json"
-                ).resolve()
-            ),
-        ).to_contract()
+    return native_instance_contract(env=env)
 
 
 def _emit(payload: Mapping[str, Any]) -> int:

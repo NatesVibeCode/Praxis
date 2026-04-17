@@ -1,5 +1,6 @@
 """Registry authority package."""
 
+from . import agent_config
 from .domain import (
     RuntimeProfileAuthorityRecord,
     ContextBundle,
@@ -37,6 +38,7 @@ from .endpoint_failover import (
 __all__ = [
     "RuntimeProfileAuthorityRecord",
     "ContextBundle",
+    "agent_config",
     "ContextBundleAnchorRecord",
     "ContextBundleRepositoryError",
     "ContextBundleSnapshot",

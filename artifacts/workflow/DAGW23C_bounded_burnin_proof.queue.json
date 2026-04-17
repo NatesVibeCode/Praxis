@@ -1,0 +1,24 @@
+{
+  "phase": "DAGW23C",
+  "workflow_id": "dag_wave23c_bounded_burnin_proof",
+  "packet_id": "bounded_burnin_proof",
+  "anti_requirements": [
+    "no broad cutover",
+    "no hosted dashboard",
+    "no synthetic fake metrics"
+  ],
+  "jobs": [
+    {
+      "label": "DAGW23C.1_build_bounded_burnin_proof",
+      "prompt": "OBJECTIVE:\nBuild one bounded burn-in proof.\n\nRepeat the bounded native-default deterministic path three times and prove each run stays ready, complete, and receipt-reconciled without broad cutover work."
+    }
+  ],
+  "verify": [
+    {
+      "command": "PYTHONPATH='/Users/nate/Praxis/Code&DBs/Workflow' python3 -m pytest -q '/Users/nate/Praxis/Code&DBs/Workflow/tests/integration/test_bounded_burnin_proof.py'"
+    },
+    {
+      "command": "cd '/Users/nate/Praxis' && ./scripts/validate-queue.sh'/Users/nate/Praxis/artifacts/workflow/DAGW23C_bounded_burnin_proof.queue.json'"
+    }
+  ]
+}

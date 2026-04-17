@@ -80,7 +80,8 @@ def test_workflow_migration_manifest_includes_provider_route_health_budget_migra
     assert "147_operation_catalog_semantic_assertions.sql" in filenames
     assert "148_drop_workflow_notifications.sql" in filenames
     assert "151_operation_catalog_operator_finish.sql" in filenames
-    assert filenames[-1] == "151_operation_catalog_operator_finish.sql"
+    assert "152_operation_catalog_observability_finish.sql" in filenames
+    assert filenames[-1] == "152_operation_catalog_observability_finish.sql"
 
 
 def test_every_manifest_migration_has_expected_object_contract() -> None:
@@ -327,6 +328,25 @@ def test_operation_catalog_operator_finish_expected_objects_are_registered() -> 
         "operation_catalog_registry.operator.circuit_states",
         "operation_catalog_registry.operator.circuit_history",
         "operation_catalog_registry.operator.circuit_override",
+    }
+
+
+def test_operation_catalog_observability_finish_expected_objects_are_registered() -> None:
+    objects = workflow_migration_expected_objects("152_operation_catalog_observability_finish.sql")
+    names = {item.object_name for item in objects}
+    assert names == {
+        "operation_catalog_registry.operator.status_snapshot",
+        "operation_catalog_registry.operator.issue_backlog",
+        "operation_catalog_registry.operator.replay_ready_bugs",
+        "operation_catalog_registry.operator.graph_projection",
+        "operation_catalog_registry.operator.run_status",
+        "operation_catalog_registry.operator.run_scoreboard",
+        "operation_catalog_registry.operator.run_graph",
+        "operation_catalog_registry.operator.run_lineage",
+        "operation_catalog_registry.operator.metrics_reset",
+        "operation_catalog_registry.operator.bug_replay_provenance_backfill",
+        "operation_catalog_registry.operator.semantic_bridges_backfill",
+        "operation_catalog_registry.operator.semantic_projection_refresh",
     }
 
 

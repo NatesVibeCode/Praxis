@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-import os
 from types import SimpleNamespace
 
-os.environ.setdefault("WORKFLOW_DATABASE_URL", "postgresql://localhost:5432/praxis")
-
-from surfaces.mcp.tools import operator
+from runtime.operations.queries import operator_observability
 
 
 class _FakeConn:
@@ -36,14 +33,14 @@ def _receipt_record(*, status: str, failure_code: str = "", failure_category: st
     )
 
 
-def test_praxis_status_uses_zone_authority_for_adjusted_pass_rate(monkeypatch) -> None:
-    monkeypatch.setattr(
-        operator._subs,
-        "get_pg_conn",
-        lambda: _FakeConn(zone_rows=[{"category": "provider_timeout", "zone": "external"}]),
+def test_operator_status_snapshot_uses_zone_authority_for_adjusted_pass_rate(monkeypatch) -> None:
+    subsystems = SimpleNamespace(
+        get_pg_conn=lambda: _FakeConn(
+            zone_rows=[{"category": "provider_timeout", "zone": "external"}]
+        )
     )
     monkeypatch.setattr(
-        "runtime.receipt_store.list_receipts",
+        "runtime.operations.queries.operator_observability.list_receipts",
         lambda **_kwargs: [
             _receipt_record(status="succeeded"),
             _receipt_record(
@@ -54,11 +51,14 @@ def test_praxis_status_uses_zone_authority_for_adjusted_pass_rate(monkeypatch) -
         ],
     )
     monkeypatch.setattr(
-        "runtime.receipt_store.receipt_stats",
+        "runtime.operations.queries.operator_observability.receipt_stats",
         lambda **_kwargs: {"totals": {"receipts": 2}},
     )
 
-    result = operator.tool_praxis_status({"since_hours": 24})
+    result = operator_observability.handle_query_operator_status_snapshot(
+        operator_observability.QueryOperatorStatusSnapshot(since_hours=24),
+        subsystems,
+    )
 
     assert result["observability_state"] == "ready"
     assert result["zone_authority_ready"] is True
@@ -66,14 +66,12 @@ def test_praxis_status_uses_zone_authority_for_adjusted_pass_rate(monkeypatch) -
     assert result["adjusted_pass_rate"] == 1.0
 
 
-def test_praxis_status_reports_degraded_when_zone_lookup_fails(monkeypatch) -> None:
-    monkeypatch.setattr(
-        operator._subs,
-        "get_pg_conn",
-        lambda: _FakeConn(fail_zone_lookup=True),
+def test_operator_status_snapshot_reports_degraded_when_zone_lookup_fails(monkeypatch) -> None:
+    subsystems = SimpleNamespace(
+        get_pg_conn=lambda: _FakeConn(fail_zone_lookup=True)
     )
     monkeypatch.setattr(
-        "runtime.receipt_store.list_receipts",
+        "runtime.operations.queries.operator_observability.list_receipts",
         lambda **_kwargs: [
             _receipt_record(
                 status="failed",
@@ -83,11 +81,14 @@ def test_praxis_status_reports_degraded_when_zone_lookup_fails(monkeypatch) -> N
         ],
     )
     monkeypatch.setattr(
-        "runtime.receipt_store.receipt_stats",
+        "runtime.operations.queries.operator_observability.receipt_stats",
         lambda **_kwargs: {"totals": {"receipts": 1}},
     )
 
-    result = operator.tool_praxis_status({"since_hours": 24})
+    result = operator_observability.handle_query_operator_status_snapshot(
+        operator_observability.QueryOperatorStatusSnapshot(since_hours=24),
+        subsystems,
+    )
 
     assert result["observability_state"] == "degraded"
     assert result["zone_authority_ready"] is False
@@ -95,16 +96,15 @@ def test_praxis_status_reports_degraded_when_zone_lookup_fails(monkeypatch) -> N
     assert result["errors"][0]["code"] == "failure_category_zones_lookup_failed"
 
 
-def test_praxis_status_scans_the_full_receipt_window(monkeypatch) -> None:
+def test_operator_status_snapshot_scans_the_full_receipt_window(monkeypatch) -> None:
     captured: dict[str, int] = {}
-
-    monkeypatch.setattr(
-        operator._subs,
-        "get_pg_conn",
-        lambda: _FakeConn(zone_rows=[{"category": "provider_timeout", "zone": "external"}]),
+    subsystems = SimpleNamespace(
+        get_pg_conn=lambda: _FakeConn(
+            zone_rows=[{"category": "provider_timeout", "zone": "external"}]
+        )
     )
     monkeypatch.setattr(
-        "runtime.receipt_store.receipt_stats",
+        "runtime.operations.queries.operator_observability.receipt_stats",
         lambda **_kwargs: {"totals": {"receipts": 6001}},
     )
 
@@ -113,9 +113,32 @@ def test_praxis_status_scans_the_full_receipt_window(monkeypatch) -> None:
         captured["since_hours"] = since_hours
         return []
 
-    monkeypatch.setattr("runtime.receipt_store.list_receipts", _fake_list_receipts)
+    monkeypatch.setattr(
+        "runtime.operations.queries.operator_observability.list_receipts",
+        _fake_list_receipts,
+    )
 
-    result = operator.tool_praxis_status({"since_hours": 24})
+    result = operator_observability.handle_query_operator_status_snapshot(
+        operator_observability.QueryOperatorStatusSnapshot(since_hours=24),
+        subsystems,
+    )
 
     assert captured == {"limit": 6001, "since_hours": 24}
     assert result["total_workflows"] == 0
+
+
+def test_replay_ready_bugs_rejects_refresh_backfill() -> None:
+    subsystems = SimpleNamespace()
+
+    try:
+        operator_observability.handle_query_replay_ready_bugs(
+            operator_observability.QueryReplayReadyBugs(
+                limit=10,
+                refresh_backfill=True,
+            ),
+            subsystems,
+        )
+    except ValueError as exc:
+        assert "read-only" in str(exc)
+    else:  # pragma: no cover - defensive
+        raise AssertionError("expected refresh_backfill to fail closed")

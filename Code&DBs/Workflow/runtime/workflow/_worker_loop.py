@@ -34,6 +34,18 @@ __all__ = ["run_worker_loop"]
 _GRAPH_FAILURE_BACKOFF_SECONDS = 30.0
 
 
+def _evaluate_workflow_triggers(conn: "SyncPostgresConnection") -> int:
+    from runtime.triggers import evaluate_triggers
+
+    return evaluate_triggers(conn)
+
+
+def _advance_background_workflow_chains(conn: "SyncPostgresConnection") -> int:
+    from runtime.workflow_chain import advance_workflow_chains
+
+    return advance_workflow_chains(conn)
+
+
 def _graph_run_lock_key(run_id: str) -> int:
     digest = hashlib.sha256(f"workflow_graph_run:{run_id}".encode("utf-8")).digest()
     return int.from_bytes(digest[:8], "big", signed=True)
@@ -233,18 +245,14 @@ def run_worker_loop(
 
     def _evaluate_background_consumers() -> None:
         try:
-            from runtime.triggers import evaluate_triggers
-
-            fired = evaluate_triggers(conn)
+            fired = _evaluate_workflow_triggers(conn)
             if fired:
                 logger.info("Trigger evaluator fired %d workflow(s)", fired)
         except Exception as exc:
             logger.warning("Trigger evaluation failed: %s", exc, exc_info=True)
 
         try:
-            from runtime.workflow_chain import advance_workflow_chains
-
-            advanced = advance_workflow_chains(conn)
+            advanced = _advance_background_workflow_chains(conn)
             if advanced:
                 logger.info("Workflow-chain evaluator advanced %d action(s)", advanced)
         except Exception as exc:

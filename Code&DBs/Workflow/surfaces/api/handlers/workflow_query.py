@@ -2899,17 +2899,16 @@ def _queue_depth_snapshot(pg: Any) -> dict[str, Any]:
 def _handle_status_get(request: Any, path: str) -> None:
     """GET /api/status — workflow summary stats."""
     try:
-        subs = request.subsystems
-        receipt_rollup = _load_receipt_rollup(subs, since_hours=24)
-        queue_conn = subs.get_pg_conn() if hasattr(subs, "get_pg_conn") else None
-        queue_snapshot = _queue_depth_snapshot(queue_conn)
-        request._send_json(200, {
-            "total_workflows": receipt_rollup["total_runs"],
-            "pass_rate": receipt_rollup["pass_rate"],
-            "top_failure_codes": receipt_rollup["top_failure_codes"],
-            "since_hours": receipt_rollup["since_hours"],
-            **queue_snapshot,
-        })
+        from runtime.operation_catalog_gateway import execute_operation_from_subsystems
+
+        request._send_json(
+            200,
+            execute_operation_from_subsystems(
+                request.subsystems,
+                operation_name="operator.status_snapshot",
+                payload={"since_hours": 24},
+            ),
+        )
     except Exception as exc:
         request._send_json(500, {"error": str(exc)})
 

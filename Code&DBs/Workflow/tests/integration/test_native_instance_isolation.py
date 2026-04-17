@@ -10,6 +10,7 @@ from runtime.instance import (
     PRAXIS_RUNTIME_PROFILE_ENV,
     PRAXIS_RUNTIME_PROFILES_CONFIG_ENV,
     NativeInstanceResolutionError,
+    native_instance_contract,
     resolve_native_instance,
 )
 
@@ -89,3 +90,18 @@ def test_native_instance_resolves_contract_from_db_authority(monkeypatch) -> Non
     assert instance.runtime_profile_ref == "praxis"
     assert instance.instance_name == "praxis"
     assert instance.runtime_profiles_config.endswith("/config/runtime_profiles.json")
+
+
+def test_native_instance_contract_falls_back_to_repo_local_defaults_without_db_authority() -> None:
+    contract = native_instance_contract(
+        env={
+            PRAXIS_RUNTIME_PROFILES_CONFIG_ENV: str(Path(__file__).resolve().parents[4] / "config" / "runtime_profiles.json"),
+            PRAXIS_RUNTIME_PROFILE_ENV: "praxis",
+        }
+    )
+
+    assert contract["praxis_runtime_profile"] == "praxis"
+    assert contract["praxis_instance_name"] == "praxis"
+    assert contract["runtime_profiles_config"].endswith("/config/runtime_profiles.json")
+    assert contract["repo_root"].endswith("/Praxis")
+    assert contract["workdir"].endswith("/Praxis")

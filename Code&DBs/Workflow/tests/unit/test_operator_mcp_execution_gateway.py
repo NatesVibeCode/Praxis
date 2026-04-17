@@ -383,15 +383,36 @@ def test_mcp_semantic_assertions_record_uses_operation_catalog_gateway(monkeypat
     assert captured["payload"]["subject_ref"] == "bug.checkout.1"
 
 
-def test_mcp_maintenance_backfill_semantic_bridges_uses_operator_frontdoor(monkeypatch) -> None:
+def test_mcp_status_uses_operation_catalog_gateway(monkeypatch) -> None:
     captured: dict[str, object] = {}
+    monkeypatch.setattr(operator, "_subs", object())
 
-    class _Frontdoor:
-        def backfill_semantic_bridges(self, **kwargs):
-            captured.update(kwargs)
-            return {"backfill": "semantic"}
+    def _execute(subsystems, *, operation_name: str, payload):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"operation_receipt": {"operation_name": operation_name}}
 
-    monkeypatch.setattr(operator, "OperatorControlFrontdoor", _Frontdoor)
+    monkeypatch.setattr(operator, "execute_operation_from_subsystems", _execute)
+
+    result = operator.tool_praxis_status({"since_hours": 24})
+
+    assert result["operation_receipt"]["operation_name"] == "operator.status_snapshot"
+    assert captured["operation_name"] == "operator.status_snapshot"
+    assert captured["payload"] == {"since_hours": 24}
+
+
+def test_mcp_maintenance_backfill_semantic_bridges_uses_operation_catalog_gateway(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(operator, "_subs", object())
+
+    def _execute(subsystems, *, operation_name: str, payload):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"operation_receipt": {"operation_name": operation_name}}
+
+    monkeypatch.setattr(operator, "execute_operation_from_subsystems", _execute)
 
     result = operator.tool_praxis_maintenance(
         {
@@ -402,22 +423,25 @@ def test_mcp_maintenance_backfill_semantic_bridges_uses_operator_frontdoor(monke
         }
     )
 
-    assert result == {"backfill": "semantic"}
-    assert captured["include_object_relations"] is False
-    assert captured["include_operator_decisions"] is True
-    assert captured["include_roadmap_items"] is True
-    assert captured["as_of"] == datetime(2026, 4, 16, 21, 0, tzinfo=timezone.utc)
+    assert result["operation_receipt"]["operation_name"] == "operator.semantic_bridges_backfill"
+    assert captured["operation_name"] == "operator.semantic_bridges_backfill"
+    assert captured["payload"]["include_object_relations"] is False
+    assert captured["payload"]["include_operator_decisions"] is True
+    assert captured["payload"]["include_roadmap_items"] is True
+    assert captured["payload"]["as_of"] == datetime(2026, 4, 16, 21, 0, tzinfo=timezone.utc)
 
 
-def test_mcp_maintenance_refresh_semantic_projection_uses_cursor_consumer(monkeypatch) -> None:
+def test_mcp_maintenance_refresh_semantic_projection_uses_operation_catalog_gateway(monkeypatch) -> None:
     captured: dict[str, object] = {}
+    monkeypatch.setattr(operator, "_subs", object())
 
-    def _consume(*, limit: int, as_of):
-        captured["limit"] = limit
-        captured["as_of"] = as_of
-        return {"refreshed": True, "ending_cursor": 9}
+    def _execute(subsystems, *, operation_name: str, payload):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"operation_receipt": {"operation_name": operation_name}}
 
-    monkeypatch.setattr(operator, "consume_semantic_projection_events", _consume)
+    monkeypatch.setattr(operator, "execute_operation_from_subsystems", _execute)
 
     result = operator.tool_praxis_maintenance(
         {
@@ -427,11 +451,47 @@ def test_mcp_maintenance_refresh_semantic_projection_uses_cursor_consumer(monkey
         }
     )
 
-    assert result == {
-        "semantic_projection_refresh": {
-            "refreshed": True,
-            "ending_cursor": 9,
-        }
-    }
-    assert captured["limit"] == 25
-    assert captured["as_of"] == datetime(2026, 4, 16, 21, 5, tzinfo=timezone.utc)
+    assert result["operation_receipt"]["operation_name"] == "operator.semantic_projection_refresh"
+    assert captured["operation_name"] == "operator.semantic_projection_refresh"
+    assert captured["payload"]["limit"] == 25
+    assert captured["payload"]["as_of"] == datetime(2026, 4, 16, 21, 5, tzinfo=timezone.utc)
+
+
+def test_mcp_operator_view_status_uses_operation_catalog_gateway(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(operator, "_subs", object())
+
+    def _execute(subsystems, *, operation_name: str, payload):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"operation_receipt": {"operation_name": operation_name}}
+
+    monkeypatch.setattr(operator, "execute_operation_from_subsystems", _execute)
+
+    result = operator.tool_praxis_operator_view({"view": "status", "run_id": "run_123"})
+
+    assert result["operation_receipt"]["operation_name"] == "operator.run_status"
+    assert captured["operation_name"] == "operator.run_status"
+    assert captured["payload"] == {"run_id": "run_123"}
+
+
+def test_mcp_operator_view_issue_backlog_uses_operation_catalog_gateway(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(operator, "_subs", object())
+
+    def _execute(subsystems, *, operation_name: str, payload):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"operation_receipt": {"operation_name": operation_name}}
+
+    monkeypatch.setattr(operator, "execute_operation_from_subsystems", _execute)
+
+    result = operator.tool_praxis_operator_view(
+        {"view": "issue_backlog", "limit": 12, "open_only": False, "status": "open"}
+    )
+
+    assert result["operation_receipt"]["operation_name"] == "operator.issue_backlog"
+    assert captured["operation_name"] == "operator.issue_backlog"
+    assert captured["payload"] == {"limit": 12, "open_only": False, "status": "open"}

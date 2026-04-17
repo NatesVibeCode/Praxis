@@ -79,7 +79,8 @@
     "148_drop_workflow_notifications.sql",
     "149_native_self_hosted_smoke_definition.sql",
     "150_native_self_hosted_smoke_execution_identity.sql",
-    "151_operation_catalog_operator_finish.sql"
+    "151_operation_catalog_operator_finish.sql",
+    "152_operation_catalog_observability_finish.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -2269,6 +2270,56 @@
         "object_type": "row",
         "object_name": "operation_catalog_registry.operator.circuit_override"
       }
+    ],
+    "152_operation_catalog_observability_finish.sql": [
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.operator.status_snapshot"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.operator.issue_backlog"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.operator.replay_ready_bugs"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.operator.graph_projection"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.operator.run_status"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.operator.run_scoreboard"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.operator.run_graph"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.operator.run_lineage"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.operator.metrics_reset"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.operator.bug_replay_provenance_backfill"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.operator.semantic_bridges_backfill"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operation_catalog_registry.operator.semantic_projection_refresh"
+      }
     ]
   },
   "policy_buckets": {
@@ -2352,7 +2403,8 @@
       "148_drop_workflow_notifications.sql",
       "149_native_self_hosted_smoke_definition.sql",
       "150_native_self_hosted_smoke_execution_identity.sql",
-      "151_operation_catalog_operator_finish.sql"
+      "151_operation_catalog_operator_finish.sql",
+      "152_operation_catalog_observability_finish.sql"
     ],
     "bootstrap_only": [
       "012_execution_leases.sql",

@@ -353,8 +353,8 @@ def test_submit_surfaces_converge_on_request_control_command_authority(tmp_path,
         "name": "Queue Report",
         "workflow_id": "workflow.api.queue.report",
         "phase": "build",
-        "workspace_ref": rest._DEFAULT_WORKSPACE_REF,
-        "runtime_profile_ref": rest._DEFAULT_RUNTIME_PROFILE_REF,
+        "workspace_ref": rest._default_workspace_ref(),
+        "runtime_profile_ref": rest._default_runtime_profile_ref(),
         "jobs": [
             {
                 "label": "Queue Report",

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from runtime import workflow_diagnose
 from surfaces.mcp.catalog import get_tool_catalog
 from surfaces.mcp.tools import query as query_mod
 
@@ -14,19 +13,14 @@ def test_praxis_diagnose_is_catalogued() -> None:
     assert definition.example_input() == {"run_id": "run_abc123"}
 
 
-def test_praxis_query_routes_diagnose_requests(monkeypatch) -> None:
-    monkeypatch.setattr(
-        workflow_diagnose,
-        "diagnose_run",
-        lambda run_id: {"run_id": run_id, "receipt_found": True},
-    )
-
+def test_praxis_query_redirects_diagnose_requests_to_explicit_tool() -> None:
     result = query_mod.tool_praxis_query({"question": "diagnose run run_abc123"})
 
     assert result["routed_to"] == "workflow_diagnose"
+    assert result["status"] == "unsupported_query_alias"
+    assert result["reason_code"] == "workflow_query.diagnose_alias_removed"
     assert result["run_id"] == "run_abc123"
-    assert result["diagnosis"]["run_id"] == "run_abc123"
-    assert result["diagnosis"]["receipt_found"] is True
+    assert "praxis_diagnose" in result["message"]
 
 
 def test_praxis_query_delegates_to_shared_query_core(monkeypatch) -> None:

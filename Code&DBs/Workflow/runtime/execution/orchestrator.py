@@ -1034,7 +1034,7 @@ class RuntimeOrchestrator(RuntimeOrchestratorContract):
                 )
             )
             if current_run_state == RunState.CANCELLED.value:
-                self._cancel_open_operator_frames(
+                _cancel_open_operator_frames(
                     operator_frame_repository=operator_frame_repository,
                     run_id=intake_outcome.run_id,
                     stop_reason="workflow_cancelled",

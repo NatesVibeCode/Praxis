@@ -348,18 +348,13 @@ def _handle_validate(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
 
 
 def _handle_status(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
-    since_hours = body.get("since_hours", 24)
-    ingester = subs.get_receipt_ingester()
-    receipts = ingester.load_recent(since_hours=since_hours)
-    pass_rate = ingester.compute_pass_rate(receipts)
-    top_failures = ingester.top_failure_codes(receipts)
+    from runtime.operation_catalog_gateway import execute_operation_from_subsystems
 
-    return {
-        "total_workflows": len(receipts),
-        "pass_rate": round(pass_rate, 4),
-        "top_failure_codes": top_failures,
-        "since_hours": since_hours,
-    }
+    return execute_operation_from_subsystems(
+        subs,
+        operation_name="operator.status_snapshot",
+        payload={"since_hours": body.get("since_hours", 24)},
+    )
 
 
 def _handle_wave(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
@@ -1515,7 +1510,6 @@ RUN_GET_ROUTES: list[RouteEntry] = [
     (_prefix("/api/checkpoints/"), _handle_checkpoints_get),
     (_prefix("/api/manifests/"), _handle_manifest_get_api),
     (_exact("/api/workflow-status"), _handle_status_alias_get),
-    (_exact("/api/status"), _handle_status_alias_get),
     (_prefix_suffix("/api/models/runs/", "/status"), _handle_model_run_status_get),
 ]
 

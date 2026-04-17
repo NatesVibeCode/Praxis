@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Protocol
+from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import partial
-from typing import Any
+from typing import Any, Protocol
 from datetime import datetime
 
 import asyncpg

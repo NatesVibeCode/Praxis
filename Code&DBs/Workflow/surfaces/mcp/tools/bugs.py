@@ -67,13 +67,15 @@ def tool_praxis_bugs(params: dict) -> dict:
 
     try:
         if action == "list":
+            request_payload = dict(params)
+            request_payload.setdefault("include_replay_state", True)
             return _bug_contract.list_bugs_payload(
                 bt=bt,
                 bt_mod=bt_mod,
-                body=params,
+                body=request_payload,
                 serialize_bug=_compact_bug,
                 default_limit=25,
-                include_replay_details=False,
+                include_replay_details=True,
                 parse_status=_parse_bug_status,
                 parse_severity=_parse_bug_severity,
                 parse_category=_parse_bug_category,

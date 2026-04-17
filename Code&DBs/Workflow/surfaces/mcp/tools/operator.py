@@ -1,14 +1,10 @@
 """Tools: praxis_operator_view, praxis_status."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from runtime.operation_catalog_gateway import execute_operation_from_subsystems
-from runtime.semantic_projection_subscriber import consume_semantic_projection_events
-from surfaces.api.handlers import workflow_query_core
-from surfaces.api.operator_write import OperatorControlFrontdoor
-from storage.postgres.workflow_runtime_repository import reset_observability_metrics
 
 from ..subsystems import _subs
 
@@ -25,35 +21,35 @@ def _parse_iso_datetime(value: object, *, field_name: str) -> datetime:
     return parsed
 
 
-def tool_praxis_status(params: dict) -> dict:
-    """Recent workflow status from canonical receipts, with categorized failure breakdown."""
+def _compat_status_snapshot(*, since_hours: int) -> dict[str, Any]:
+    from runtime import receipt_store
     from runtime.quality_views import load_failure_category_zones
-    from runtime.receipt_store import list_receipts, receipt_stats
 
     conn = _subs.get_pg_conn()
-
-    since_hours = params.get("since_hours", 24)
-
-    totals = receipt_stats(since_hours=since_hours, conn=conn).get("totals", {})
+    totals = receipt_store.receipt_stats(since_hours=since_hours, conn=conn).get("totals", {})
     receipt_count = int(totals.get("receipts") or 0)
-    records = list_receipts(limit=receipt_count, since_hours=since_hours) if receipt_count > 0 else []
+    records = (
+        receipt_store.list_receipts(limit=receipt_count, since_hours=since_hours)
+        if receipt_count > 0
+        else []
+    )
     total = len(records)
     succeeded = sum(1 for record in records if record.status == "succeeded")
     failure_counts: dict[str, int] = {}
     for record in records:
         if record.failure_code:
             failure_counts[record.failure_code] = failure_counts.get(record.failure_code, 0) + 1
-    top_failures = dict(sorted(failure_counts.items(), key=lambda item: (-item[1], item[0]))[:10])
-
+    top_failures = dict(
+        sorted(failure_counts.items(), key=lambda item: (-item[1], item[0]))[:10]
+    )
     pass_rate = (succeeded / total) if total > 0 else 0.0
 
-    # ── Categorized failure breakdown ─────────────────────────────────
     zone_counts: dict[str, int] = {}
     category_counts: dict[str, int] = {}
     zone_authority_ready = True
     zone_authority_error: str | None = None
     try:
-        zone_lookup = load_failure_category_zones(conn, consumer="praxis_status")
+        zone_lookup = load_failure_category_zones(conn, consumer="operator.status_snapshot")
         for record in records:
             payload = record.to_dict()
             failure_classification = payload.get("failure_classification")
@@ -70,14 +66,14 @@ def tool_praxis_status(params: dict) -> dict:
         zone_authority_ready = False
         zone_authority_error = str(exc)
 
-    # Adjusted pass rate: exclude external (provider/network) failures from denominator
     external_failures = zone_counts.get("external", 0)
     adjusted_denominator = total - external_failures
     adjusted_pass_rate = None
     if zone_authority_ready:
-        adjusted_pass_rate = (succeeded / adjusted_denominator) if adjusted_denominator > 0 else 0.0
+        adjusted_pass_rate = (
+            (succeeded / adjusted_denominator) if adjusted_denominator > 0 else 0.0
+        )
 
-    # In-flight workflows from workflow_runs
     in_flight = []
     try:
         running_rows = conn.execute(
@@ -86,37 +82,42 @@ def tool_praxis_status(params: dict) -> dict:
             WHERE current_state = 'running'
             ORDER BY requested_at DESC LIMIT 10""",
         )
-        import json as _json
-        from datetime import datetime as _dt, timezone as _tz
-        for r in running_rows:
-            envelope = r["request_envelope"] if isinstance(r["request_envelope"], dict) else _json.loads(r["request_envelope"])
-            # Count completed jobs in outbox
+        now = datetime.now(timezone.utc)
+        for row in running_rows:
+            envelope = row["request_envelope"]
+            if not isinstance(envelope, dict):
+                envelope = {}
             outbox_count = conn.execute(
                 "SELECT COUNT(*) as cnt FROM workflow_outbox WHERE run_id = $1 AND authority_table = 'receipts'",
-                r["run_id"],
+                row["run_id"],
             )
             completed = int(outbox_count[0]["cnt"]) if outbox_count else 0
             elapsed = None
-            if r["requested_at"]:
-                elapsed = round((_dt.now(_tz.utc) - r["requested_at"]).total_seconds(), 1)
-            total_jobs = envelope.get("total_jobs", 0)
-            # Skip stale runs where all jobs already finished
+            if row["requested_at"]:
+                elapsed = round((now - row["requested_at"]).total_seconds(), 1)
+            total_jobs = int(envelope.get("total_jobs") or 0)
             if total_jobs > 0 and completed >= total_jobs:
                 continue
-            in_flight.append({
-                "run_id": r["run_id"],
-                "workflow_name": envelope.get("name") or envelope.get("spec_name", ""),
-                "total_jobs": total_jobs,
-                "completed_jobs": completed,
-                "elapsed_seconds": elapsed,
-            })
+            in_flight.append(
+                {
+                    "run_id": row["run_id"],
+                    "workflow_name": envelope.get("name") or envelope.get("spec_name", ""),
+                    "total_jobs": total_jobs,
+                    "completed_jobs": completed,
+                    "elapsed_seconds": elapsed,
+                }
+            )
     except Exception:
         pass
 
     result: dict[str, Any] = {
         "total_workflows": total,
         "pass_rate": round(pass_rate, 4),
-        "adjusted_pass_rate": round(adjusted_pass_rate, 4) if adjusted_pass_rate is not None else None,
+        "adjusted_pass_rate": (
+            round(adjusted_pass_rate, 4)
+            if adjusted_pass_rate is not None
+            else None
+        ),
         "failure_breakdown": {
             "by_zone": zone_counts,
             "by_category": category_counts,
@@ -125,6 +126,17 @@ def tool_praxis_status(params: dict) -> dict:
         "since_hours": since_hours,
         "zone_authority_ready": zone_authority_ready,
         "observability_state": "ready" if zone_authority_ready else "degraded",
+        "queue_depth": 0,
+        "queue_depth_status": "unknown",
+        "queue_depth_pending": 0,
+        "queue_depth_ready": 0,
+        "queue_depth_claimed": 0,
+        "queue_depth_running": 0,
+        "queue_depth_total": 0,
+        "queue_depth_warning_threshold": 0,
+        "queue_depth_critical_threshold": 0,
+        "queue_depth_utilization_pct": 0.0,
+        "queue_depth_error": "queue depth unavailable in compatibility mode",
     }
     if zone_authority_error:
         result["errors"] = [
@@ -138,46 +150,37 @@ def tool_praxis_status(params: dict) -> dict:
     return result
 
 
+def tool_praxis_status(params: dict) -> dict:
+    """Recent workflow status from canonical receipts, with categorized failure breakdown."""
+    since_hours = params.get("since_hours", 24)
+    payload = {"since_hours": since_hours}
+    try:
+        return execute_operation_from_subsystems(
+            _subs,
+            operation_name="operator.status_snapshot",
+            payload=payload,
+        )
+    except Exception as exc:
+        try:
+            conn = _subs.get_pg_conn()
+        except Exception:
+            return {"error": str(exc)}
+        if not hasattr(conn, "fetchrow"):
+            return _compat_status_snapshot(since_hours=max(1, int(since_hours or 24)))
+        return {"error": str(exc)}
+
+
 def tool_praxis_maintenance(params: dict) -> dict:
     """Run explicit operator maintenance actions outside observability surfaces."""
 
     action = params.get("action", "")
-    if action == "backfill_semantic_bridges":
-        as_of = params.get("as_of")
-        return OperatorControlFrontdoor().backfill_semantic_bridges(
-            include_object_relations=bool(params.get("include_object_relations", True)),
-            include_operator_decisions=bool(params.get("include_operator_decisions", True)),
-            include_roadmap_items=bool(params.get("include_roadmap_items", True)),
-            as_of=(
-                _parse_iso_datetime(as_of, field_name="as_of")
-                if as_of is not None
-                else None
-            ),
-        )
-    if action == "refresh_semantic_projection":
-        as_of = params.get("as_of")
-        return {
-            "semantic_projection_refresh": consume_semantic_projection_events(
-                limit=max(1, int(params.get("limit", 100) or 100)),
-                as_of=(
-                    _parse_iso_datetime(as_of, field_name="as_of")
-                    if as_of is not None
-                    else None
-                ),
-            )
-        }
-    if action == "backfill_bug_replay_provenance":
-        bug_tracker = _subs.get_bug_tracker()
-        limit_raw = params.get("limit")
-        limit = None if limit_raw in (None, "") else max(0, int(limit_raw))
-        return {
-            "backfill": bug_tracker.bulk_backfill_replay_provenance(
-                limit=limit,
-                open_only=bool(params.get("open_only", True)),
-                receipt_limit=max(1, int(params.get("receipt_limit", 1) or 1)),
-            )
-        }
-    if action != "reset_metrics":
+    operation_name = {
+        "reset_metrics": "operator.metrics_reset",
+        "backfill_bug_replay_provenance": "operator.bug_replay_provenance_backfill",
+        "backfill_semantic_bridges": "operator.semantic_bridges_backfill",
+        "refresh_semantic_projection": "operator.semantic_projection_refresh",
+    }.get(action)
+    if operation_name is None:
         return {
             "error": (
                 "Unknown maintenance action. Supported actions: reset_metrics, "
@@ -185,16 +188,29 @@ def tool_praxis_maintenance(params: dict) -> dict:
                 "refresh_semantic_projection"
             )
         }
-    if not params.get("confirm"):
-        return {
-            "error": (
-                "Pass confirm=true to reset metrics. This truncates quality_rollups, "
-                "agent_profiles, failure_catalog and zeros routing counters."
-            )
-        }
-    return reset_observability_metrics(
-        _subs.get_pg_conn(),
-        before_date=params.get("before_date"),
+    as_of = params.get("as_of")
+    return execute_operation_from_subsystems(
+        _subs,
+        operation_name=operation_name,
+        payload={
+            "confirm": bool(params.get("confirm", False)),
+            "before_date": params.get("before_date"),
+            "limit": params.get("limit"),
+            "open_only": bool(params.get("open_only", True)),
+            "receipt_limit": params.get("receipt_limit", 1),
+            "include_object_relations": bool(
+                params.get("include_object_relations", True)
+            ),
+            "include_operator_decisions": bool(
+                params.get("include_operator_decisions", True)
+            ),
+            "include_roadmap_items": bool(params.get("include_roadmap_items", True)),
+            "as_of": (
+                _parse_iso_datetime(as_of, field_name="as_of")
+                if as_of is not None
+                else None
+            ),
+        },
     )
 
 
@@ -202,7 +218,67 @@ def tool_praxis_operator_view(params: dict) -> dict:
     """Observability views: operator status, scoreboard, workflow graph, operator graph, semantics, lineage, issue backlog, and replay-ready bugs."""
 
     try:
-        return workflow_query_core.handle_operator_view(_subs, params)
+        view = str(params.get("view") or "status").strip().lower()
+        operation_name = {
+            "status": "operator.run_status",
+            "scoreboard": "operator.run_scoreboard",
+            "graph": "operator.run_graph",
+            "operator_graph": "operator.graph_projection",
+            "semantics": "semantic_assertions.list",
+            "lineage": "operator.run_lineage",
+            "issue_backlog": "operator.issue_backlog",
+            "replay_ready_bugs": "operator.replay_ready_bugs",
+        }.get(view)
+        if operation_name is None:
+            raise ValueError(
+                "Unknown view. Options: status, scoreboard, graph, operator_graph, "
+                "semantics, lineage, issue_backlog, replay_ready_bugs"
+            )
+        payload: dict[str, Any] = {}
+        if view in {"status", "scoreboard", "graph", "lineage"}:
+            payload["run_id"] = params.get("run_id")
+        if view == "operator_graph":
+            payload["as_of"] = (
+                _parse_iso_datetime(params.get("as_of"), field_name="as_of")
+                if params.get("as_of") is not None
+                else None
+            )
+        if view == "semantics":
+            payload = {
+                "predicate_slug": params.get("predicate_slug"),
+                "subject_kind": params.get("subject_kind"),
+                "subject_ref": params.get("subject_ref"),
+                "object_kind": params.get("object_kind"),
+                "object_ref": params.get("object_ref"),
+                "source_kind": params.get("source_kind"),
+                "source_ref": params.get("source_ref"),
+                "active_only": bool(params.get("active_only", True)),
+                "as_of": (
+                    _parse_iso_datetime(params.get("as_of"), field_name="as_of")
+                    if params.get("as_of") is not None
+                    else None
+                ),
+                "limit": int(params.get("limit", 50) or 50),
+            }
+        if view == "issue_backlog":
+            payload = {
+                "limit": int(params.get("limit", 50) or 50),
+                "open_only": bool(params.get("open_only", True)),
+                "status": params.get("status"),
+            }
+        if view == "replay_ready_bugs":
+            if bool(params.get("refresh_backfill", False)):
+                raise ValueError(
+                    "replay_ready_bugs is read-only; use maintenance backfill instead"
+                )
+            payload = {
+                "limit": int(params.get("limit", 50) or 50),
+            }
+        return execute_operation_from_subsystems(
+            _subs,
+            operation_name=operation_name,
+            payload=payload,
+        )
     except Exception as exc:
         return {"error": str(exc)}
 

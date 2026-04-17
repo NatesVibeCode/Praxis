@@ -7,8 +7,7 @@ This module owns the DB-backed provider execution catalog:
 - parsing authoritative profile rows and adapter config
 - exposing the canonical provider profile lookup surface
 
-Transport mechanics remain in ``adapters.provider_transport`` and callers that
-need the legacy import path should continue using ``adapters.provider_registry``.
+Transport mechanics remain in ``adapters.provider_transport``.
 """
 
 from __future__ import annotations
@@ -58,6 +57,7 @@ __all__ = [
     "resolve_binary",
     "build_command",
     "validate_profiles",
+    "transport_support_report",
 ]
 
 logger = logging.getLogger(__name__)
@@ -191,6 +191,22 @@ def _record_load_failure(error: str, *, log_level: str, message: str) -> None:
     else:
         logger.info(message)
     _load_status = RegistryLoadStatus.LOAD_FAILED
+    _load_error = error
+    _load_timestamp = time.monotonic()
+    _DB_LOADED = True
+
+
+def _record_degraded_builtin(error: str, *, log_level: str, message: str) -> None:
+    global _load_status, _load_error, _load_timestamp, _DB_LOADED
+
+    _restore_builtin_registry()
+    if log_level == "error":
+        logger.error(message)
+    elif log_level == "warning":
+        logger.warning(message)
+    else:
+        logger.info(message)
+    _load_status = RegistryLoadStatus.DEGRADED_BUILTIN
     _load_error = error
     _load_timestamp = time.monotonic()
     _DB_LOADED = True
@@ -467,48 +483,51 @@ def _load_from_db() -> None:
             return
 
         if not _ASYNCPG_AVAILABLE:
-            _record_load_failure(
+            _record_degraded_builtin(
                 "asyncpg not installed",
                 log_level="warning",
-                message="provider_registry: asyncpg unavailable — registry load failed",
+                message="provider_registry: asyncpg unavailable — using built-in provider profiles",
             )
             return
 
         try:
             db_url = _require_database_url()
         except RuntimeError as exc:
-            _record_load_failure(
+            _record_degraded_builtin(
                 str(exc),
                 log_level="warning",
-                message=f"provider_registry: {exc} — registry load failed",
+                message=f"provider_registry: {exc} — using built-in provider profiles",
             )
             return
 
         try:
             rows, config_rows, failure_rows = _run_async(_fetch_from_db(db_url))
         except ProviderRegistryLoadTimeout as exc:
-            _record_load_failure(
+            _record_degraded_builtin(
                 str(exc),
                 log_level="error",
-                message=f"provider_registry: {exc} — registry load failed",
+                message=f"provider_registry: {exc} — using built-in provider profiles",
             )
             return
         except Exception as exc:
-            _record_load_failure(
+            _record_degraded_builtin(
                 f"{type(exc).__name__}: {exc}",
                 log_level="error",
                 message=(
                     "provider_registry: DB fetch failed "
-                    f"({type(exc).__name__}: {exc}) — registry load failed"
+                    f"({type(exc).__name__}: {exc}) — using built-in provider profiles"
                 ),
             )
             return
 
         if not rows:
-            _record_load_failure(
+            _record_degraded_builtin(
                 "no active rows",
                 log_level="warning",
-                message="provider_registry: no active provider_cli_profiles in DB — registry load failed",
+                message=(
+                    "provider_registry: no active provider_cli_profiles in DB "
+                    "— using built-in provider profiles"
+                ),
             )
             return
 
@@ -536,12 +555,12 @@ def _load_from_db() -> None:
                 loaded_aliases[alias] = profile.provider_slug
 
         if not loaded_registry:
-            _record_load_failure(
+            _record_degraded_builtin(
                 f"all {len(rows)} rows failed validation",
                 log_level="error",
                 message=(
                     "provider_registry: all "
-                    f"{len(rows)} DB rows failed validation — registry load failed. "
+                    f"{len(rows)} DB rows failed validation — using built-in provider profiles. "
                     f"Errors: {'; '.join(parse_errors)}"
                 ),
             )
@@ -768,3 +787,30 @@ def validate_profiles() -> dict[str, dict[str, Any]]:
         failure_mappings=_ADAPTER_FAILURE_MAPPINGS,
         adapter_types=tuple(provider_transport.KNOWN_LLM_ADAPTER_TYPES),
     )
+
+
+def transport_support_report(
+    *,
+    health_mod: Any,
+    pg: Any,
+    provider_filter: str | None = None,
+    model_filter: str | None = None,
+    runtime_profile_ref: str = "praxis",
+    jobs: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Assemble the operator-facing transport support report from canonical authority."""
+
+    from authority.transport_eligibility import load_transport_eligibility_authority
+    from storage.postgres import PostgresTransportEligibilityRepository
+
+    authority = load_transport_eligibility_authority(
+        repository=PostgresTransportEligibilityRepository(pg),
+        health_mod=health_mod,
+        pg=pg,
+        provider_filter=provider_filter,
+        model_filter=model_filter,
+        runtime_profile_ref=runtime_profile_ref,
+        jobs=jobs,
+        provider_registry_mod=__import__(__name__, fromlist=["transport_support_report"]),
+    )
+    return authority.to_json()

@@ -15,11 +15,23 @@ _REPO_ROOT = str(pathlib.Path(__file__).resolve().parents[4])
 
 
 @dataclass
+class _FakeTransaction:
+    async def __aenter__(self):
+        return None
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+@dataclass
 class _FakeConnection:
     schedule_rows: tuple[dict[str, object], ...]
     dispatch_rows: tuple[dict[str, object], ...]
     run_window_rows: tuple[dict[str, object], ...]
     seen: dict[str, object]
+
+    def transaction(self) -> _FakeTransaction:
+        return _FakeTransaction()
 
     async def fetch(self, query: str, *args: object):
         self.seen["queries"].append((query, args))

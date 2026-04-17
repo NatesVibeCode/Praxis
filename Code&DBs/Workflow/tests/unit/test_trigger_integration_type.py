@@ -23,12 +23,20 @@ class _FakeConn:
     def __init__(self, trigger_rows=None):
         self._trigger_rows = trigger_rows or []
         self.executed: list[tuple] = []
+        self.system_event_id = 0
 
     def execute(self, sql: str, *args):
         self.executed.append((sql, *args))
         if "workflow_triggers" in sql and "SELECT" in sql:
             return list(self._trigger_rows)
         return []
+
+    def fetchrow(self, sql: str, *args):
+        self.executed.append((sql, *args))
+        if "INSERT INTO public.system_events" in sql:
+            self.system_event_id += 1
+            return {"id": self.system_event_id}
+        return None
 
 
 # ---------------------------------------------------------------------------

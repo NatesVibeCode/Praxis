@@ -9,6 +9,8 @@ from fastapi.routing import APIRoute
 import pytest
 
 import surfaces.api.rest as rest
+from surfaces.api.handlers import workflow_query_routes
+from surfaces.api.handlers import workflow_run
 
 
 def _binding(
@@ -382,6 +384,23 @@ def test_provider_onboarding_has_no_static_route_owner() -> None:
 def test_circuits_has_no_static_route_owner() -> None:
     assert not any(
         isinstance(route, APIRoute) and route.path == "/api/circuits"
+        for route in rest.app.routes
+    )
+
+
+def test_status_has_no_static_route_owner() -> None:
+    assert not any(
+        matcher("/api/status") for matcher, _handler in workflow_query_routes.QUERY_GET_ROUTES
+    )
+    assert not any(
+        matcher("/api/status") for matcher, _handler in workflow_run.RUN_GET_ROUTES
+    )
+
+
+def test_operator_view_has_no_static_route_owner() -> None:
+    assert "/operator_view" not in workflow_query_routes.QUERY_ROUTES
+    assert not any(
+        isinstance(route, APIRoute) and route.path == "/operator_view"
         for route in rest.app.routes
     )
 

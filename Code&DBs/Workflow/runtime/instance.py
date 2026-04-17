@@ -316,10 +316,46 @@ def resolve_native_instance(
     )
 
 
+def _fallback_native_instance(
+    *,
+    env: Mapping[str, str] | None = None,
+    config_path: str | Path | None = None,
+) -> NativeWorkflowInstance:
+    source = env if env is not None else os.environ
+    resolved_config_path = _resolve_config_path(config_path=config_path, env=source)
+    _assert_repo_local_native_contract(source)
+
+    repo_root = _repo_root().resolve()
+    workdir = repo_root
+    receipts_dir = Path(source.get(PRAXIS_RECEIPTS_DIR_ENV) or _default_receipts_dir()).resolve()
+    topology_dir = Path(source.get(PRAXIS_TOPOLOGY_DIR_ENV) or _default_topology_dir()).resolve()
+
+    _assert_existing_directory(repo_root, field_name="repo_root")
+    _assert_existing_directory(workdir, field_name="workdir")
+    _assert_under_repo(workdir, repo_root=repo_root, field_name="workdir")
+    _assert_under_repo(receipts_dir, repo_root=repo_root, field_name="receipts_dir")
+    _assert_under_repo(topology_dir, repo_root=repo_root, field_name="topology_dir")
+
+    return NativeWorkflowInstance(
+        instance_name=str(source.get(PRAXIS_INSTANCE_NAME_ENV) or "praxis"),
+        runtime_profile_ref=str(source.get(PRAXIS_RUNTIME_PROFILE_ENV) or "praxis"),
+        repo_root=str(repo_root),
+        workdir=str(workdir),
+        receipts_dir=str(receipts_dir),
+        topology_dir=str(topology_dir),
+        runtime_profiles_config=str(resolved_config_path),
+    )
+
+
 def native_instance_contract(env: Mapping[str, str] | None = None) -> dict[str, str]:
     """Return the resolved repo-local native workflow instance contract."""
 
-    return resolve_native_instance(env=env).to_contract()
+    try:
+        return resolve_native_instance(env=env).to_contract()
+    except NativeInstanceResolutionError as exc:
+        if exc.reason_code != "native_instance.authority_unavailable":
+            raise
+        return _fallback_native_instance(env=env).to_contract()
 
 
 __all__ = [

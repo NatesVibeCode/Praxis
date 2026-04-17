@@ -422,6 +422,31 @@ class PostgresEvidenceRepository:
         result = await self._conn.execute(base_query, *args)
         return result == "UPDATE 1"
 
+    async def reset_workflow_run_for_submission_bootstrap(
+        self,
+        *,
+        run_id: str,
+    ) -> bool:
+        result = await self._conn.execute(
+            """
+            UPDATE workflow_runs
+            SET current_state = 'claim_received',
+                terminal_reason_code = NULL,
+                started_at = NULL,
+                finished_at = NULL,
+                last_event_id = NULL
+            WHERE run_id = $1
+              AND current_state IN (
+                  'claim_received',
+                  'claim_accepted',
+                  'claim_rejected',
+                  'claim_blocked'
+              )
+            """,
+            _require_text(run_id, field_name="run_id"),
+        )
+        return result == "UPDATE 1"
+
 
     async def notify_run_cancelled(self, *, channel: str, run_id: str) -> None:
         await self._conn.execute(

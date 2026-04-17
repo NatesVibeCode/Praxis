@@ -8,7 +8,12 @@ native_operator_common_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 native_operator_repo_root="$(cd "$native_operator_common_dir/.." && pwd)"
 native_operator_workflow_root="$native_operator_repo_root/Code&DBs/Workflow"
 native_operator_runtime_profiles_config="$native_operator_repo_root/config/runtime_profiles.json"
-native_operator_runtime_contract="$native_operator_repo_root/config/PRAXIS_NATIVE_INSTANCE_ENV.contract"
+native_operator_runtime_profile_ref="praxis"
+native_operator_instance_name="praxis"
+native_operator_workflow_database_url="postgresql://postgres@localhost:5432/praxis"
+native_operator_local_postgres_data_dir="$native_operator_repo_root/Code&DBs/Databases/postgres-dev/data"
+native_operator_receipts_dir="$native_operator_repo_root/artifacts/runtime_receipts"
+native_operator_topology_dir="$native_operator_repo_root/artifacts/runtime_topology"
 
 native_operator_contract_value() {
   if [ "$#" -ne 1 ]; then
@@ -16,54 +21,42 @@ native_operator_contract_value() {
     return 2
   fi
 
-  # The checked-in contract is authoritative; no shell defaults here.
   local key="$1"
-  local value=""
-
-  if [ -f "$native_operator_runtime_contract" ]; then
-    value="$(
-      awk -F= -v key="$key" '
-        /^[[:space:]]*#/ { next }
-        index($0, "=") == 0 { next }
-        {
-          current_key = $1
-          sub(/^[[:space:]]+/, "", current_key)
-          sub(/[[:space:]]+$/, "", current_key)
-          if (current_key != key) {
-            next
-          }
-          sub(/^[^=]*=/, "", $0)
-          sub(/^[[:space:]]+/, "", $0)
-          sub(/[[:space:]]+$/, "", $0)
-          print
-          exit
-        }
-      ' "$native_operator_runtime_contract"
-    )"
-  fi
-
-  if [ -n "$value" ]; then
-    printf '%s\n' "$value"
-    return 0
-  fi
-
-  echo "native operator wrappers require $key in $native_operator_runtime_contract" >&2
-  return 1
+  case "$key" in
+    WORKFLOW_DATABASE_URL)
+      printf '%s\n' "$native_operator_workflow_database_url"
+      ;;
+    PRAXIS_LOCAL_POSTGRES_DATA_DIR)
+      printf '%s\n' "$native_operator_local_postgres_data_dir"
+      ;;
+    PRAXIS_RUNTIME_PROFILE)
+      printf '%s\n' "$native_operator_runtime_profile_ref"
+      ;;
+    PRAXIS_INSTANCE_NAME)
+      printf '%s\n' "$native_operator_instance_name"
+      ;;
+    PRAXIS_RECEIPTS_DIR)
+      printf '%s\n' "$native_operator_receipts_dir"
+      ;;
+    PRAXIS_TOPOLOGY_DIR)
+      printf '%s\n' "$native_operator_topology_dir"
+      ;;
+    *)
+      echo "native operator wrappers do not define contract key $key" >&2
+      return 1
+      ;;
+  esac
 }
 
 native_operator_contract_keys() {
-  awk -F= '
-    /^[[:space:]]*#/ { next }
-    index($0, "=") == 0 { next }
-    {
-      key = $1
-      sub(/^[[:space:]]+/, "", key)
-      sub(/[[:space:]]+$/, "", key)
-      if (key != "") {
-        print key
-      }
-    }
-  ' "$native_operator_runtime_contract"
+  cat <<'EOF'
+WORKFLOW_DATABASE_URL
+PRAXIS_LOCAL_POSTGRES_DATA_DIR
+PRAXIS_RUNTIME_PROFILE
+PRAXIS_INSTANCE_NAME
+PRAXIS_RECEIPTS_DIR
+PRAXIS_TOPOLOGY_DIR
+EOF
 }
 
 native_operator_require_file() {
@@ -103,9 +96,6 @@ native_operator_derive_env() {
   native_operator_require_file \
     "$native_operator_runtime_profiles_config" \
     "checked-in runtime profiles config" || return 1
-  native_operator_require_file \
-    "$native_operator_runtime_contract" \
-    "checked-in native runtime contract" || return 1
 
   native_operator_assert_expected_env PRAXIS_RUNTIME_PROFILES_CONFIG "$native_operator_runtime_profiles_config" || return 1
   export PRAXIS_RUNTIME_PROFILES_CONFIG="$native_operator_runtime_profiles_config"

@@ -1,22 +1,5 @@
 from __future__ import annotations
 
-import importlib.util
-import sys
-import types
-from pathlib import Path
-
-_runtime_pkg = types.ModuleType("runtime")
-_runtime_pkg.__path__ = [str(Path(__file__).resolve().parents[2] / "runtime")]
-sys.modules.setdefault("runtime", _runtime_pkg)
-
-_spec = importlib.util.spec_from_file_location(
-    "runtime.task_type_router",
-    Path(__file__).resolve().parents[2] / "runtime" / "task_type_router.py",
-)
-_mod = importlib.util.module_from_spec(_spec)  # type: ignore[arg-type]
-sys.modules["runtime.task_type_router"] = _mod
-_spec.loader.exec_module(_mod)  # type: ignore[union-attr]
-
 from runtime.task_type_router import TaskTypeRouter
 
 

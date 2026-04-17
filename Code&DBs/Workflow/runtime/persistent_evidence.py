@@ -532,6 +532,25 @@ class PostgresEvidenceWriter:
                 raise RuntimeBoundaryError(
                     f"persistent evidence submission already exists for run {run_id}"
                 )
+            persisted_state = await repository.load_current_state(run_id=run_id)
+            if persisted_state not in (None, RunState.CLAIM_RECEIVED.value):
+                if persisted_state not in {
+                    RunState.CLAIM_ACCEPTED.value,
+                    RunState.CLAIM_REJECTED.value,
+                    RunState.CLAIM_BLOCKED.value,
+                }:
+                    raise RuntimeBoundaryError(
+                        "persistent evidence submission cannot realign an existing run in "
+                        f"state {persisted_state!r} for bootstrap: run={run_id}"
+                    )
+                realigned = await repository.reset_workflow_run_for_submission_bootstrap(
+                    run_id=run_id,
+                )
+                if not realigned:
+                    raise RuntimeBoundaryError(
+                        "persistent evidence submission bootstrap realignment was rejected "
+                        f"for run {run_id}"
+                    )
             # Insert workflow_definitions (idempotent)
             await repository.insert_workflow_definition_if_absent(
                 workflow_definition_id=admitted_definition_ref,

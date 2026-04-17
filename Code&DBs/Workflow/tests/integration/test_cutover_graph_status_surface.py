@@ -166,31 +166,37 @@ def _with_malformed_claim_envelope(
 
 
 def _binding_from_row(row: asyncpg.Record) -> WorkItemWorkflowBindingRecord:
+    payload = dict(row)
     return WorkItemWorkflowBindingRecord(
-        work_item_workflow_binding_id=str(row["work_item_workflow_binding_id"]),
-        binding_kind=str(row["binding_kind"]),
-        binding_status=str(row["binding_status"]),
+        work_item_workflow_binding_id=str(payload["work_item_workflow_binding_id"]),
+        binding_kind=str(payload["binding_kind"]),
+        binding_status=str(payload["binding_status"]),
+        issue_id=None if payload.get("issue_id") is None else str(payload["issue_id"]),
         roadmap_item_id=(
-            None if row["roadmap_item_id"] is None else str(row["roadmap_item_id"])
+            None if payload.get("roadmap_item_id") is None else str(payload["roadmap_item_id"])
         ),
-        bug_id=None if row["bug_id"] is None else str(row["bug_id"]),
+        bug_id=None if payload.get("bug_id") is None else str(payload["bug_id"]),
         cutover_gate_id=(
-            None if row["cutover_gate_id"] is None else str(row["cutover_gate_id"])
+            None if payload.get("cutover_gate_id") is None else str(payload["cutover_gate_id"])
         ),
         workflow_class_id=(
-            None if row["workflow_class_id"] is None else str(row["workflow_class_id"])
+            None if payload.get("workflow_class_id") is None else str(payload["workflow_class_id"])
         ),
         schedule_definition_id=(
-            None if row["schedule_definition_id"] is None else str(row["schedule_definition_id"])
+            None
+            if payload.get("schedule_definition_id") is None
+            else str(payload["schedule_definition_id"])
         ),
         workflow_run_id=(
-            None if row["workflow_run_id"] is None else str(row["workflow_run_id"])
+            None if payload.get("workflow_run_id") is None else str(payload["workflow_run_id"])
         ),
         bound_by_decision_id=(
-            None if row["bound_by_decision_id"] is None else str(row["bound_by_decision_id"])
+            None
+            if payload.get("bound_by_decision_id") is None
+            else str(payload["bound_by_decision_id"])
         ),
-        created_at=row["created_at"],
-        updated_at=row["updated_at"],
+        created_at=payload["created_at"],
+        updated_at=payload["updated_at"],
     )
 
 

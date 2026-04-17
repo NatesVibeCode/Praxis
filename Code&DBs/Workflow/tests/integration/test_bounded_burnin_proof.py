@@ -33,7 +33,7 @@ def _repo_root() -> Path:
 
 
 def _queue_path() -> Path:
-    return _repo_root() / "artifacts" / "dispatch" / _QUEUE_FILENAME
+    return _repo_root() / "artifacts" / "workflow" / _QUEUE_FILENAME
 
 
 def _load_queue() -> dict[str, object]:

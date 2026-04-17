@@ -70,7 +70,6 @@ QUERY_GET_ROUTES: list[RouteEntry] = [
     (_prefix_suffix("/api/workflows/", "/build/stream"), _workflows._handle_build_stream),
     (_exact("/api/dashboard"), _dashboard._handle_dashboard_get),
     (_exact("/api/leaderboard"), _dashboard._handle_leaderboard_get),
-    (_exact("/api/status"), _dashboard._handle_status_get),
     (_exact("/api/runs/recent"), _dashboard._handle_runs_recent_get),
     (_exact("/api/references"), _catalog._handle_references_get),
     (_exact("/api/source-options"), _catalog._handle_source_options_get),
@@ -128,7 +127,6 @@ QUERY_ROUTES: dict[str, object] = {
     "/artifacts": _handler._handle_artifacts,
     "/decompose": _handler._handle_decompose,
     "/research": _handler._handle_research,
-    "/operator_view": _handler._handle_operator_view,
 }
 
 
