@@ -30,6 +30,7 @@ from runtime.integrations.display_names import (
     base_integration_name,
     display_name_for_integration,
 )
+from runtime.object_schema import list_compiled_object_types
 from registry.integration_registry_sync import sync_integration_registry
 from registry.reference_catalog_sync import sync_reference_catalog
 
@@ -887,19 +888,19 @@ def _normalize_integration_row(row: object) -> dict[str, Any]:
 
 def _normalize_object_type_row(row: object) -> dict[str, Any]:
     item = _json_object(row)
-    raw_fields = _json_list(item.get("property_definitions"))
+    raw_fields = _json_list(item.get("fields"))
     fields: list[dict[str, Any]] = []
     for field in raw_fields:
         if not isinstance(field, dict):
             continue
-        name = _slugify(field.get("name"))
+        name = _slugify(field.get("name") or field.get("field_name"))
         if not name:
             continue
         fields.append(
             {
                 "name": name,
                 "label": _as_text(field.get("label")) or _as_text(field.get("name")),
-                "type": _as_text(field.get("type")),
+                "type": _as_text(field.get("type") or field.get("field_kind")),
                 "description": _as_text(field.get("description")),
                 "required": bool(field.get("required")),
             }
@@ -965,14 +966,7 @@ def _load_integrations(conn: Any) -> list[dict[str, Any]]:
 
 
 def _load_object_types(conn: Any) -> list[dict[str, Any]]:
-    rows = conn.execute(
-        """
-        SELECT type_id, name, description, icon, property_definitions
-          FROM object_types
-         ORDER BY name
-        """
-    )
-    return [_normalize_object_type_row(row) for row in (rows or [])]
+    return list_compiled_object_types(conn, limit=1000)
 
 
 def _load_compiler_route_hints(conn: Any) -> list[tuple[str, str]]:

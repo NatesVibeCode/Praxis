@@ -227,6 +227,37 @@ def test_run_registered_verifier_wraps_verification_registry_executor(
     assert len(conn.verification_inserts) == 1
 
 
+def test_run_registered_verifier_can_skip_control_plane_bug_promotion(
+    monkeypatch,
+) -> None:
+    import runtime.verification as verification
+
+    conn = _AuthorityConn()
+    summary = SimpleNamespace(
+        all_passed=False,
+        to_json=lambda: {"total": 1, "passed": 0, "failed": 1, "all_passed": False, "results": []},
+    )
+    monkeypatch.setattr(verification, "run_verify", lambda *_args, **_kwargs: ("result",))
+    monkeypatch.setattr(verification, "summarize_verification", lambda *_args, **_kwargs: summary)
+    promoted: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        verifier_authority,
+        "_maybe_promote_verifier_bug",
+        lambda **kwargs: promoted.append(kwargs) or "BUG-PROMOTED",
+    )
+
+    payload = verifier_authority.run_registered_verifier(
+        "verifier.job.python.py_compile",
+        inputs={"path": "sample.py"},
+        conn=conn,
+        promote_bug=False,
+    )
+
+    assert payload["status"] == "failed"
+    assert payload["bug_id"] is None
+    assert promoted == []
+
+
 def test_run_registered_healer_reruns_target_verifier_and_records_run(
     monkeypatch,
 ) -> None:

@@ -215,7 +215,7 @@ export function buildPrimitiveContractSuggestions(
 
   for (const ot of objectTypes || []) {
     const otLabel = (ot.name || ot.type_id || '').trim() || ot.type_id;
-    for (const pd of ot.property_definitions || []) {
+    for (const pd of ot.fields || []) {
       const name = typeof (pd as { name?: string })?.name === 'string'
         ? (pd as { name: string }).name.trim()
         : '';

@@ -58,16 +58,23 @@ class _FakeConn:
                     "type_id": "ticket",
                     "name": "Ticket",
                     "description": "Support ticket",
-                    "property_definitions": json.dumps(
-                        [
-                            {
-                                "name": "status",
-                                "label": "Status",
-                                "type": "string",
-                                "description": "Workflow state",
-                            }
-                        ]
-                    ),
+                    "icon": "",
+                    "created_at": "now",
+                }
+            ]
+        if "FROM object_field_registry" in query:
+            return [
+                {
+                    "type_id": "ticket",
+                    "field_name": "status",
+                    "label": "Status",
+                    "field_kind": "text",
+                    "description": "Workflow state",
+                    "required": False,
+                    "default_value": None,
+                    "options": json.dumps([]),
+                    "display_order": 10,
+                    "retired_at": None,
                 }
             ]
         if "FROM task_type_routing" in query:

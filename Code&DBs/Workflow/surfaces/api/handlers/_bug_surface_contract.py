@@ -74,6 +74,22 @@ def _optional_text(value: object) -> str | None:
     return text or None
 
 
+def _optional_object(value: object, *, field_name: str) -> dict[str, Any]:
+    if value in (None, ""):
+        return {}
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{field_name} must be a JSON object")
+    return dict(value)
+
+
+def _path_like_target_ref(inputs: Mapping[str, Any]) -> str | None:
+    for key in ("path", "file", "module", "target"):
+        value = _optional_text(inputs.get(key))
+        if value:
+            return value
+    return None
+
+
 def annotate_bug_dicts_with_replay_state(
     bt: Any,
     bugs: Sequence[Any],
@@ -341,8 +357,11 @@ def resolve_bug_payload(
     bt_mod: Any,
     body: Mapping[str, Any],
     serialize_bug: BugSerializer,
+    serialize: Serializer = lambda value, **_kwargs: value,
     resolved_statuses: set[Any],
     parse_status: BugParser = parse_bug_status,
+    created_by_default: str = "bug_surface.resolve",
+    run_registered_verifier: Callable[..., dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     bug_id = str(body.get("bug_id") or "").strip()
     if not bug_id:
@@ -353,10 +372,73 @@ def resolve_bug_payload(
     if status not in resolved_statuses:
         allowed = ", ".join(sorted(item.value for item in resolved_statuses))
         raise ValueError(f"resolve status must be one of {allowed}")
+    verifier_ref = _optional_text(body.get("verifier_ref"))
+    bug_getter = getattr(bt, "get", None)
+    if callable(bug_getter) and bug_getter(bug_id) is None:
+        raise ValueError(f"bug not found: {bug_id}")
+    if verifier_ref and status != getattr(bt_mod.BugStatus, "FIXED", None):
+        raise ValueError("verifier_ref may only be used when resolving status FIXED")
+    verification_payload: dict[str, Any] | None = None
+    evidence_link: dict[str, Any] | None = None
+    if verifier_ref:
+        verify_inputs = _optional_object(
+            body.get("inputs"),
+            field_name="inputs",
+        )
+        verifier_conn = getattr(bt, "_conn", None)
+        inferred_target_ref = _path_like_target_ref(verify_inputs)
+        target_kind = _optional_text(body.get("target_kind")) or (
+            "path" if inferred_target_ref else "platform"
+        )
+        target_ref = _optional_text(body.get("target_ref")) or inferred_target_ref or bug_id
+        if run_registered_verifier is None:
+            from runtime.verifier_authority import run_registered_verifier as _run_registered_verifier
+
+            run_registered_verifier = _run_registered_verifier
+        verification_payload = run_registered_verifier(
+            verifier_ref,
+            inputs=verify_inputs,
+            target_kind=target_kind,
+            target_ref=target_ref,
+            conn=verifier_conn,
+            promote_bug=False,
+        )
+        verification_status = str(verification_payload.get("status") or "").strip()
+        verification_run_id = str(verification_payload.get("verification_run_id") or "").strip()
+        if verification_status != "passed":
+            parts = [
+                f"verifier {verifier_ref} did not pass for {bug_id}",
+                f"status={verification_status or 'unknown'}",
+            ]
+            if verification_run_id:
+                parts.append(f"verification_run_id={verification_run_id}")
+            raise ValueError("; ".join(parts))
+        if not verification_run_id:
+            raise ValueError(
+                f"verifier {verifier_ref} passed for {bug_id} but did not record a verification_run_id"
+            )
+        evidence_link = bt.link_evidence(
+            bug_id,
+            evidence_kind="verification_run",
+            evidence_ref=verification_run_id,
+            evidence_role="validates_fix",
+            created_by=str(body.get("created_by") or created_by_default).strip() or created_by_default,
+            notes=_optional_text(body.get("notes"))
+            or f"Passed verifier {verifier_ref} during FIXED resolution.",
+        )
+        if evidence_link is None:
+            raise ValueError(
+                f"failed to attach validates_fix verification evidence for {bug_id}"
+            )
     bug = bt.resolve(bug_id, status)
     if bug is None:
         raise ValueError(f"bug not found: {bug_id}")
-    return {"resolved": True, "bug": serialize_bug(bug)}
+    payload = {"resolved": True, "bug": serialize_bug(bug)}
+    if verification_payload is not None:
+        payload["verification"] = serialize(verification_payload, strip_empty=True)
+    if evidence_link is not None:
+        payload["evidence_link"] = serialize(evidence_link, strip_empty=True)
+    return payload
 
 
 def patch_resume_payload(

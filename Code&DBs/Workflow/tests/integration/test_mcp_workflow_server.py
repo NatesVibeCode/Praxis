@@ -951,6 +951,88 @@ class TestDagBugs:
         assert result["attached"] is True
         assert result["evidence_link"]["evidence_ref"] == "receipt-123"
 
+    def test_resolve_fixed_with_verifier_records_validates_fix_evidence(self, monkeypatch):
+        filed = _call_tool("praxis_bugs", {
+            "action": "file",
+            "title": "Resolve with verifier from MCP",
+            "severity": "P2",
+        })
+        observed: dict[str, object] = {}
+
+        def _fake_run_registered_verifier(verifier_ref, **kwargs):
+            observed["verifier_ref"] = verifier_ref
+            observed["kwargs"] = dict(kwargs)
+            return {
+                "verification_run_id": "verification-run-123",
+                "status": "passed",
+                "verifier": {"verifier_ref": verifier_ref},
+                "target_kind": kwargs.get("target_kind"),
+                "target_ref": kwargs.get("target_ref"),
+                "inputs": kwargs.get("inputs", {}),
+                "outputs": {"verification_ref": "verification.python.pytest_file"},
+            }
+
+        monkeypatch.setattr(
+            "runtime.verifier_authority.run_registered_verifier",
+            _fake_run_registered_verifier,
+            raising=False,
+        )
+
+        result = _call_tool(
+            "praxis_bugs",
+            {
+                "action": "resolve",
+                "bug_id": filed["bug"]["bug_id"],
+                "status": "FIXED",
+                "verifier_ref": "verifier.job.python.pytest_file",
+                "inputs": {"path": "Code&DBs/Workflow/tests/integration/test_mcp_workflow_server.py"},
+            },
+        )
+
+        assert result["resolved"] is True
+        assert result["bug"]["status"] == "FIXED"
+        assert result["verification"]["verification_run_id"] == "verification-run-123"
+        assert result["evidence_link"]["evidence_role"] == "validates_fix"
+        assert observed["verifier_ref"] == "verifier.job.python.pytest_file"
+        assert observed["kwargs"]["inputs"] == {
+            "path": "Code&DBs/Workflow/tests/integration/test_mcp_workflow_server.py",
+        }
+        assert observed["kwargs"]["target_kind"] == "path"
+        assert observed["kwargs"]["target_ref"] == "Code&DBs/Workflow/tests/integration/test_mcp_workflow_server.py"
+        assert observed["kwargs"]["promote_bug"] is False
+
+    def test_resolve_fixed_with_verifier_returns_error_when_proof_fails(self, monkeypatch):
+        filed = _call_tool("praxis_bugs", {
+            "action": "file",
+            "title": "Resolve with failing verifier from MCP",
+            "severity": "P2",
+        })
+
+        monkeypatch.setattr(
+            "runtime.verifier_authority.run_registered_verifier",
+            lambda verifier_ref, **_kwargs: {
+                "verification_run_id": "verification-run-123",
+                "status": "failed",
+                "verifier": {"verifier_ref": verifier_ref},
+                "outputs": {"verification_ref": "verification.python.pytest_file"},
+            },
+            raising=False,
+        )
+
+        result = _call_tool(
+            "praxis_bugs",
+            {
+                "action": "resolve",
+                "bug_id": filed["bug"]["bug_id"],
+                "status": "FIXED",
+                "verifier_ref": "verifier.job.python.pytest_file",
+                "inputs": {"path": "Code&DBs/Workflow/tests/integration/test_mcp_workflow_server.py"},
+            },
+        )
+
+        assert "error" in result
+        assert "did not pass" in result["error"]
+
     def test_file_rejects_invalid_category(self):
         result = _call_tool("praxis_bugs", {
             "action": "file",

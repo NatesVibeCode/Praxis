@@ -97,7 +97,7 @@ def test_help_topic_bugs_exposes_the_full_bug_surface(capsys) -> None:
     ) in rendered
     assert "file               File a new bug" in rendered
     assert "attach_evidence    Attach canonical evidence to a bug" in rendered
-    assert "resolve            Mark an existing bug fixed, deferred, or won't-fix" in rendered
+    assert "resolve            Mark an existing bug fixed, deferred, or won't-fix; FIXED may run verifier proof" in rendered
 
 
 def test_top_level_help_aliases_return_command_index(capsys) -> None:
@@ -147,6 +147,52 @@ def test_bugs_command_resolve_dispatches_mutation_payload(monkeypatch) -> None:
     }
 
 
+def test_bugs_command_resolve_fixed_forwards_verifier_inputs(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_run_cli_tool(tool_name: str, params: dict[str, object], *, workflow_token: str = ""):
+        captured["tool_name"] = tool_name
+        captured["params"] = dict(params)
+        captured["workflow_token"] = workflow_token
+        return 0, {
+            "resolved": True,
+            "bug": {"bug_id": "BUG-1234", "status": "FIXED"},
+            "verification": {"verification_run_id": "verification_run:test"},
+        }
+
+    monkeypatch.setattr(workflow_query, "run_cli_tool", _fake_run_cli_tool)
+
+    stdout = StringIO()
+    rc = workflow_query._bugs_command(
+        [
+            "resolve",
+            "--bug-id",
+            "BUG-1234",
+            "--status",
+            "FIXED",
+            "--verifier-ref",
+            "verifier.job.python.pytest_file",
+            "--inputs-json",
+            '{"path":"Code&DBs/Workflow/tests/unit/test_bug_surface_contract.py"}',
+            "--target-kind",
+            "bug",
+            "--target-ref",
+            "BUG-1234",
+        ],
+        stdout=stdout,
+    )
+
+    assert rc == 0
+    assert captured["tool_name"] == "praxis_bugs"
+    assert captured["params"]["action"] == "resolve"
+    assert captured["params"]["verifier_ref"] == "verifier.job.python.pytest_file"
+    assert captured["params"]["inputs"] == {
+        "path": "Code&DBs/Workflow/tests/unit/test_bug_surface_contract.py",
+    }
+    assert captured["params"]["target_kind"] == "bug"
+    assert captured["params"]["target_ref"] == "BUG-1234"
+
+
 def test_bugs_command_search_forwards_status_and_severity_filters(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
@@ -171,6 +217,67 @@ def test_bugs_command_search_forwards_status_and_severity_filters(monkeypatch) -
     assert captured["params"]["status"] == "OPEN"
     assert captured["params"]["severity"] == "P1"
     assert json.loads(stdout.getvalue()) == {"bugs": [], "count": 0, "returned_count": 0}
+
+
+def test_bugs_command_file_parses_resume_context_json(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_run_cli_tool(tool_name: str, params: dict[str, object], *, workflow_token: str = ""):
+        captured["tool_name"] = tool_name
+        captured["params"] = dict(params)
+        captured["workflow_token"] = workflow_token
+        return 0, {"bug": {"bug_id": "BUG-1234"}}
+
+    monkeypatch.setattr(workflow_query, "run_cli_tool", _fake_run_cli_tool)
+
+    stdout = StringIO()
+    rc = workflow_query._bugs_command(
+        [
+            "file",
+            "--title",
+            "tmp probe",
+            "--description",
+            "tmp",
+            "--severity",
+            "P3",
+            "--category",
+            "OTHER",
+            "--filed-by",
+            "codex",
+            "--source-kind",
+            "manual",
+            "--resume-context-json",
+            '{"hypothesis":"x"}',
+        ],
+        stdout=stdout,
+    )
+
+    assert rc == 0
+    assert captured["tool_name"] == "praxis_bugs"
+    assert captured["params"]["action"] == "file"
+    assert captured["params"]["resume_context"] == {"hypothesis": "x"}
+    assert json.loads(stdout.getvalue()) == {"bug": {"bug_id": "BUG-1234"}}
+
+
+def test_recall_command_surfaces_unavailable_backend_state(monkeypatch) -> None:
+    def _fake_run_cli_tool(tool_name: str, params: dict[str, object], *, workflow_token: str = ""):
+        return 1, {
+            "status": "unavailable",
+            "error_type": "RuntimeError",
+            "error_message": "knowledge graph offline",
+            "results": [],
+        }
+
+    monkeypatch.setattr(workflow_query, "run_cli_tool", _fake_run_cli_tool)
+
+    stdout = StringIO()
+    rc = workflow_query._recall_command(["provider routing"], stdout=stdout)
+
+    assert rc == 1
+    rendered = stdout.getvalue()
+    assert "recall unavailable" in rendered
+    assert "knowledge graph offline" in rendered
+    assert "no results found" not in rendered
 
 
 def test_routes_command_delegates_to_modern_frontdoor(monkeypatch, capsys) -> None:

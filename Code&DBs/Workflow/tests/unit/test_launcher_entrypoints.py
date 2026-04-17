@@ -12,6 +12,10 @@ from surfaces.api.handlers import workflow_launcher
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
 
+def test_legacy_launch_ui_shell_wrapper_is_absent() -> None:
+    assert not (REPO_ROOT / "Code&DBs" / "Workflow" / "scripts" / "launch-ui.sh").exists()
+
+
 def _run_launcher_help(script_name: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [str(REPO_ROOT / "scripts" / script_name), "help"],

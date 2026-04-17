@@ -25,6 +25,7 @@ from runtime.support_ticket_drafts import (
     draft_ticket_responses,
     looks_like_ticket_drafting_task,
 )
+from runtime.object_schema import list_compiled_object_types
 from storage.postgres.object_lifecycle_repository import (
     create_object_record,
     ensure_object_type_record,
@@ -44,6 +45,15 @@ if TYPE_CHECKING:
     from runtime.embedding_service import EmbeddingService
 
 from storage.postgres.vector_store import PostgresVectorStore, VectorFilter
+
+
+def _normalize_object_type_spec(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    normalized = dict(raw)
+    if "fields" not in normalized and isinstance(normalized.get("properties"), list):
+        normalized["fields"] = list(normalized.get("properties") or [])
+    return normalized
 
 
 @dataclass(frozen=True)
@@ -324,13 +334,11 @@ class TaskAssembler:
 
         # Get object type schemas for context
         obj_schemas = {}
-        rows = self._conn.execute(
-            "SELECT type_id, name, property_definitions FROM object_types LIMIT 10"
-        )
+        rows = list_compiled_object_types(self._conn, limit=10)
         for r in rows:
             obj_schemas[r["type_id"]] = {
                 "name": r["name"],
-                "properties": r["property_definitions"],
+                "fields": r.get("fields", []),
             }
 
         def hydrate_quadrant(cell_id: str, qdef: dict) -> tuple[str, dict]:
@@ -972,7 +980,7 @@ Be specific: not "get data" but "Query open bugs via workflow bugs or praxis_bug
             "Output ONLY valid JSON with this structure:",
             '{',
             '  "data_sources": [{"id": "...", "name": "...", "endpoint": "/api/..."}],',
-            '  "object_type": {"name": "...", "description": "...", "properties": [{"name": "...", "type": "text|number|date|email|currency|dropdown", "required": true}]} | null,',
+            '  "object_type": {"name": "...", "description": "...", "fields": [{"name": "...", "type": "text|number|date|datetime|boolean|enum|json|reference", "required": true}]} | null,',
             '  "modules": [{"module_id": "data-table", "quadrant": "A1", "span": "2x2", "config": {...}}, ...],',
             '  "seed_records": [{"prop1": "val1", ...}, ...] | [],',
             '  "explanation": "one line summary"',
@@ -983,7 +991,7 @@ Be specific: not "get data" but "Query open bugs via workflow bugs or praxis_bug
             "- If a calculation matches, prefer it for derived fields or scoring widgets",
             "- If a workflow matches, prefer workflow-oriented modules like workflow-builder or workflow-status",
             "- If no integration matches, create an object_type as a holding table",
-            '- object_type properties should match the task semantics (e.g. "expenses" → amount:currency, date:date, category:dropdown)',
+            '- object_type fields should match the task semantics (e.g. "expenses" → amount:number, incurred_on:date, category:enum)',
             "- Use data-table for lists, metric for counts, key-value for details, chart for trends, button-row for actions",
             "- Layout in a 4x4 grid (A1-D4), use spans for important modules",
             "- Include 3-5 seed_records if creating an object_type",
@@ -1050,7 +1058,7 @@ Be specific: not "get data" but "Query open bugs via workflow bugs or praxis_bug
         return AssemblyPlan(
             task=task,
             data_sources=data.get("data_sources", []),
-            object_type=data.get("object_type"),
+            object_type=_normalize_object_type_spec(data.get("object_type")),
             modules=data.get("modules", []),
             seed_records=data.get("seed_records", []),
             explanation=data.get("explanation", ""),
@@ -1070,9 +1078,9 @@ Be specific: not "get data" but "Query open bugs via workflow bugs or praxis_bug
             object_type = {
                 "name": intg.get("name", task).title(),
                 "description": f"Data from {intg.get('name', 'integration')} for: {task}",
-                "properties": [
+                "fields": [
                     {"name": "name", "type": "text", "required": True},
-                    {"name": "status", "type": "dropdown", "options": ["active", "pending", "done"], "default": "active"},
+                    {"name": "status", "type": "enum", "options": ["active", "pending", "done"], "default": "active"},
                     {"name": "source", "type": "text", "default": intg.get("name", "")},
                     {"name": "notes", "type": "text"},
                 ],
@@ -1098,9 +1106,9 @@ Be specific: not "get data" but "Query open bugs via workflow bugs or praxis_bug
             object_type = {
                 "name": slug.replace("-", " ").title(),
                 "description": f"Holding table for: {task}",
-                "properties": [
+                "fields": [
                     {"name": "name", "type": "text", "required": True},
-                    {"name": "status", "type": "dropdown", "options": ["active", "pending", "done"], "default": "active"},
+                    {"name": "status", "type": "enum", "options": ["active", "pending", "done"], "default": "active"},
                     {"name": "notes", "type": "text"},
                 ],
             }
@@ -1155,7 +1163,7 @@ Be specific: not "get data" but "Query open bugs via workflow bugs or praxis_bug
                 type_id=type_id,
                 name=ot["name"],
                 description=ot.get("description", ""),
-                property_definitions=ot.get("properties", []),
+                fields=ot.get("fields") or ot.get("properties", []),
             )
 
             # Seed records if provided

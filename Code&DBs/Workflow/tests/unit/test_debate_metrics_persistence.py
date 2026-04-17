@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from io import StringIO
 from types import SimpleNamespace
@@ -76,6 +77,12 @@ def test_run_debate_threads_metrics_connection_through_persistence_path(monkeypa
 
     call_count = {"value": 0}
 
+    monkeypatch.setattr(
+        debate_workflow,
+        "WorkflowSpec",
+        lambda **kwargs: SimpleNamespace(**kwargs),
+    )
+
     def _fake_run_workflow_parallel(specs, max_workers):
         call_count["value"] += 1
         if call_count["value"] in (1, 2):
@@ -125,4 +132,38 @@ def test_workflow_debate_command_passes_metrics_connection(monkeypatch) -> None:
     assert captured == {
         "topic": "Should we persist debate metrics?",
         "metrics_conn": conn,
+    }
+
+
+def test_workflow_debate_command_surfaces_metrics_persistence_degradation(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _raise_sync_conn():
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(workflow_commands, "cli_sync_conn", _raise_sync_conn)
+
+    def _fake_run_debate(config, *, metrics_conn=None):
+        captured["metrics_conn"] = metrics_conn
+        return SimpleNamespace(
+            status="succeeded",
+            topic=config.topic,
+            persona_responses={"Pragmatist": "Ship it."},
+            synthesis="Keep it explicit.",
+        )
+
+    monkeypatch.setattr(debate_workflow, "run_debate", _fake_run_debate)
+
+    stdout = StringIO()
+    exit_code = workflow_commands._debate_command(
+        ["Should we persist debate metrics?"],
+        stdout=stdout,
+    )
+
+    assert exit_code == 0
+    assert captured["metrics_conn"] is None
+    payload = json.loads(stdout.getvalue())
+    assert payload["metrics_persistence"] == {
+        "available": False,
+        "error": "RuntimeError: db down",
     }

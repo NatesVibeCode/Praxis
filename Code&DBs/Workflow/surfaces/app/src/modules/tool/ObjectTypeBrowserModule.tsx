@@ -15,8 +15,10 @@ interface ObjectType {
   name: string;
   description: string;
   icon?: string;
-  property_definitions: PropertyDef[];
+  fields: PropertyDef[];
 }
+
+const FIELD_KIND_OPTIONS = ['text', 'number', 'boolean', 'enum', 'json', 'date', 'datetime', 'reference'];
 
 function ObjectTypeBrowserModule({ config }: QuadrantProps) {
   void config;
@@ -60,7 +62,7 @@ function ObjectTypeBrowserModule({ config }: QuadrantProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: newName, description: newDesc,
-          property_definitions: newProps.filter(p => p.name.trim()),
+          fields: newProps.filter(p => p.name.trim()),
         }),
       });
       setCreating(false);
@@ -100,20 +102,20 @@ function ObjectTypeBrowserModule({ config }: QuadrantProps) {
             style={{ background: 'var(--bg)', color: s.text, border: '1px solid var(--border)', borderRadius: 6, padding: '6px 10px', fontSize: 13 }} />
           <textarea placeholder="Description" value={newDesc} onChange={e => setNewDesc(e.target.value)} rows={2}
             style={{ background: 'var(--bg)', color: s.text, border: '1px solid var(--border)', borderRadius: 6, padding: '6px 10px', fontSize: 13, resize: 'none' }} />
-          <div style={{ fontSize: 12, fontWeight: 600, color: s.muted }}>Properties</div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: s.muted }}>Fields</div>
           {newProps.map((p, i) => (
             <div key={i} style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
               <input placeholder="name" value={p.name} onChange={e => updateProp(i, 'name', e.target.value)}
                 style={{ flex: 1, background: 'var(--bg)', color: s.text, border: '1px solid var(--border)', borderRadius: 4, padding: '4px 8px', fontSize: 12 }} />
               <select value={p.type} onChange={e => updateProp(i, 'type', e.target.value)}
                 style={{ background: 'var(--bg)', color: s.text, border: '1px solid var(--border)', borderRadius: 4, padding: '4px', fontSize: 12 }}>
-                {['text', 'number', 'date', 'email', 'url', 'boolean', 'dropdown', 'currency'].map(t => <option key={t} value={t}>{t}</option>)}
+                {FIELD_KIND_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
               </select>
               <button onClick={() => removeProp(i)} style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontSize: 14 }}>×</button>
             </div>
           ))}
           <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={addProp} style={{ background: 'none', border: 'none', color: s.accent, cursor: 'pointer', fontSize: 12 }}>+ Add property</button>
+            <button onClick={addProp} style={{ background: 'none', border: 'none', color: s.accent, cursor: 'pointer', fontSize: 12 }}>+ Add field</button>
             <button onClick={handleCreate} style={{ marginLeft: 'auto', background: s.accent, color: '#fff', border: 'none', borderRadius: 4, padding: '4px 12px', fontSize: 12, cursor: 'pointer' }}>Save</button>
           </div>
         </div>
@@ -127,7 +129,7 @@ function ObjectTypeBrowserModule({ config }: QuadrantProps) {
             background: selected === t.type_id ? 'rgba(88,166,255,0.08)' : undefined,
           }}>
             <div style={{ fontWeight: 500, fontSize: 13 }}>{t.icon || '📦'} {t.name}</div>
-            <div style={{ color: s.muted, fontSize: 11 }}>{t.property_definitions?.length ?? 0} properties · {t.description?.slice(0, 60)}</div>
+            <div style={{ color: s.muted, fontSize: 11 }}>{t.fields?.length ?? 0} fields · {t.description?.slice(0, 60)}</div>
             <button
               onClick={(event) => {
                 event.stopPropagation();

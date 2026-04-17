@@ -78,9 +78,13 @@ def _persist_object_types(
         type_id = _text(raw_object_type.get("type_id") or raw_object_type.get("id"))
         if not type_id:
             continue
-        property_definitions = raw_object_type.get("property_definitions")
-        if property_definitions is None:
-            property_definitions = raw_object_type.get("schema")
+        fields = raw_object_type.get("fields")
+        if fields is None:
+            schema = raw_object_type.get("schema")
+            if isinstance(schema, dict):
+                fields = schema.get("fields")
+            elif isinstance(schema, list):
+                fields = schema
         try:
             ensure_object_type_record(
                 conn,
@@ -88,7 +92,7 @@ def _persist_object_types(
                 name=_text(raw_object_type.get("name")) or type_id,
                 description=_text(raw_object_type.get("description")),
                 icon=_text(raw_object_type.get("icon")),
-                property_definitions=property_definitions if property_definitions is not None else {},
+                fields=fields if isinstance(fields, list) else [],
             )
         except PostgresWriteError as exc:
             _raise_storage_boundary(exc)

@@ -1271,10 +1271,12 @@ def _debate_command(args: list[str], *, stdout: TextIO) -> int:
     )
 
     metrics_conn = None
+    metrics_error = None
     try:
         metrics_conn = cli_sync_conn()
-    except Exception:
+    except Exception as exc:
         metrics_conn = None
+        metrics_error = f"{type(exc).__name__}: {exc}"
 
     try:
         result = run_debate(config, metrics_conn=metrics_conn)
@@ -1288,6 +1290,10 @@ def _debate_command(args: list[str], *, stdout: TextIO) -> int:
         "personas": list(result.persona_responses.keys()),
         "persona_responses": result.persona_responses,
         "synthesis": result.synthesis,
+        "metrics_persistence": {
+            "available": metrics_conn is not None,
+            **({"error": metrics_error} if metrics_error else {}),
+        },
     }
 
     stdout.write(_json.dumps(output, indent=2) + "\n")

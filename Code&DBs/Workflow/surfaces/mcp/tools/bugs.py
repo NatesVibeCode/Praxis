@@ -133,8 +133,10 @@ def tool_praxis_bugs(params: dict) -> dict:
                 bt_mod=bt_mod,
                 body=params,
                 serialize_bug=_bug_to_dict,
+                serialize=_serialize,
                 resolved_statuses=resolved_statuses,
                 parse_status=_parse_bug_status,
+                created_by_default="mcp_workflow_server",
             )
 
         if action == "patch_resume":
@@ -173,7 +175,8 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "  Attach evidence:   praxis_bugs(action='attach_evidence', bug_id='BUG-1234', evidence_kind='receipt', evidence_ref='receipt:abc')\n"
                 "  Patch handoff:     praxis_bugs(action='patch_resume', bug_id='BUG-1234', resume_patch={'hypothesis': '...', 'next_steps': ['...']})\n"
                 "  Bug stats:         praxis_bugs(action='stats')\n"
-                "  Resolve a bug:     praxis_bugs(action='resolve', bug_id='BUG-1234', status='WONT_FIX')\n\n"
+                "  Resolve a bug:     praxis_bugs(action='resolve', bug_id='BUG-1234', status='WONT_FIX')\n"
+                "  Resolve FIXED:     praxis_bugs(action='resolve', bug_id='BUG-1234', status='FIXED', verifier_ref='verifier.job.python.pytest_file', inputs={'path': 'tests/unit/test_bug.py'})\n\n"
                 "STATUSES: OPEN, IN_PROGRESS, FIXED, WONT_FIX, DEFERRED\n"
                 "SEVERITIES: P0 (critical), P1 (high), P2 (medium), P3 (low)"
             ),
@@ -182,7 +185,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "properties": {
                     "action": {
                         "type": "string",
-                        "description": "Operation: 'list', 'file', 'search', 'stats', 'packet', 'history', 'replay', 'backfill_replay', 'attach_evidence', 'patch_resume', or 'resolve'.",
+                        "description": "Operation: 'list', 'file', 'search', 'stats', 'packet', 'history', 'replay', 'backfill_replay', 'attach_evidence', 'patch_resume', or 'resolve'. Use resolve+verifier_ref to prove and close FIXED bugs in one mutation.",
                         "enum": ["list", "file", "search", "stats", "packet", "history", "replay", "backfill_replay", "attach_evidence", "patch_resume", "resolve"],
                     },
                     "bug_id": {"type": "string", "description": "Bug id (for resolve)."},
@@ -238,6 +241,22 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "evidence_role": {"type": "string", "description": "Evidence role for attach_evidence, such as observed_in, attempted_fix, or validates_fix."},
                     "created_by": {"type": "string", "description": "Actor attaching evidence."},
                     "notes": {"type": "string", "description": "Optional notes for attach_evidence."},
+                    "verifier_ref": {
+                        "type": "string",
+                        "description": "Optional verifier authority ref to run before resolving FIXED. When supplied with status=FIXED, the bug surface records the verification_run, links it as validates_fix, and then resolves the bug.",
+                    },
+                    "inputs": {
+                        "type": "object",
+                        "description": "Verifier input object for resolve+verifier_ref, for example {'path': 'tests/unit/test_bug.py'} or {'path': 'module.py', 'workdir': '/repo/root'}.",
+                    },
+                    "target_kind": {
+                        "type": "string",
+                        "description": "Optional verifier target kind for resolve+verifier_ref. Defaults to 'bug'.",
+                    },
+                    "target_ref": {
+                        "type": "string",
+                        "description": "Optional verifier target ref for resolve+verifier_ref. Defaults to the bug_id.",
+                    },
                     "resume_context": {
                         "type": "object",
                         "description": "Optional initial investigator handoff when filing (hypothesis, next_steps, etc.).",

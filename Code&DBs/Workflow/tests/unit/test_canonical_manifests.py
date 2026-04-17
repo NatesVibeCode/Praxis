@@ -102,7 +102,7 @@ def test_refine_manifest_persists_revision_through_storage_owner() -> None:
                 {
                     "type_id": "ticket",
                     "name": "Ticket",
-                    "property_definitions": {"title": {"type": "string"}},
+                    "fields": [{"name": "title", "type": "text"}],
                 },
             ),
         )

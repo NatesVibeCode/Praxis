@@ -6,6 +6,7 @@ import json
 import re
 from typing import Any
 
+from runtime.object_schema import list_compiled_object_types
 from runtime.integrations.display_names import (
     base_integration_name,
     display_name_for_integration,
@@ -96,42 +97,7 @@ def load_integrations(conn) -> list[dict[str, Any]]:
 
 
 def load_object_types(conn) -> list[dict[str, Any]]:
-    rows = conn.execute(
-        """
-        SELECT type_id, name, description, property_definitions
-          FROM object_types
-         ORDER BY name
-        """
-    )
-    object_types: list[dict[str, Any]] = []
-    for row in rows or []:
-        item = dict(row)
-        raw_fields = _as_json(item.get("property_definitions"), default=[])
-        fields: list[dict[str, Any]] = []
-        for field in raw_fields if isinstance(raw_fields, list) else []:
-            if not isinstance(field, dict):
-                continue
-            field_name = _slugify(field.get("name"))
-            if not field_name:
-                continue
-            fields.append(
-                {
-                    "name": field_name,
-                    "label": _as_text(field.get("label")) or _as_text(field.get("name")),
-                    "type": _as_text(field.get("type")),
-                    "description": _as_text(field.get("description")),
-                    "required": bool(field.get("required")),
-                }
-            )
-        object_types.append(
-            {
-                "type_id": _as_text(item.get("type_id")),
-                "name": _as_text(item.get("name")),
-                "description": _as_text(item.get("description")),
-                "fields": fields,
-            }
-        )
-    return object_types
+    return list_compiled_object_types(conn, limit=1000)
 
 
 def flatten_match_result(match_result) -> list[dict[str, Any]]:

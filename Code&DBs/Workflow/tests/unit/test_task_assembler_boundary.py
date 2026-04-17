@@ -91,7 +91,7 @@ def test_execute_plan_delegates_object_and_manifest_writes(monkeypatch) -> None:
             "type_id": "incident",
             "name": "Incident",
             "description": "Incident queue",
-            "property_definitions": [{"name": "title", "type": "text"}],
+            "fields": [{"name": "title", "type": "text"}],
         }
     ]
     assert len(object_calls) == 1

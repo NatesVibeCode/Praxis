@@ -48,7 +48,7 @@ def object_type_exists(conn: Any, *, type_id: str) -> bool:
 
 def load_object_type_record(conn: Any, *, type_id: str) -> dict[str, Any] | None:
     row = conn.fetchrow(
-        "SELECT type_id, name, description, icon, property_definitions, created_at "
+        "SELECT type_id, name, description, icon, created_at "
         "FROM object_types WHERE type_id = $1",
         _require_text(type_id, field_name="type_id"),
     )
@@ -62,23 +62,14 @@ def create_object_type_record(
     name: str,
     description: str = "",
     icon: str = "",
-    property_definitions: object | None = None,
 ) -> dict[str, Any]:
     row = conn.fetchrow(
-        "INSERT INTO object_types (type_id, name, description, icon, property_definitions) "
-        "VALUES ($1, $2, $3, $4, $5::jsonb) RETURNING *",
+        "INSERT INTO object_types (type_id, name, description, icon) "
+        "VALUES ($1, $2, $3, $4) RETURNING *",
         _require_text(type_id, field_name="type_id"),
         _require_text(name, field_name="name"),
         str(description or ""),
         str(icon or ""),
-        _encode_jsonb(
-            _json_document(
-                property_definitions if property_definitions is not None else {},
-                field_name="property_definitions",
-                allow_list=True,
-            ),
-            field_name="property_definitions",
-        ),
     )
     return _row_dict(row, operation="creating object type")
 
@@ -90,31 +81,200 @@ def upsert_object_type_record(
     name: str,
     description: str = "",
     icon: str = "",
-    property_definitions: object | None = None,
 ) -> dict[str, Any]:
     row = conn.fetchrow(
-        "INSERT INTO object_types (type_id, name, description, icon, property_definitions) "
-        "VALUES ($1, $2, $3, $4, $5::jsonb) "
+        "INSERT INTO object_types (type_id, name, description, icon) "
+        "VALUES ($1, $2, $3, $4) "
         "ON CONFLICT (type_id) DO UPDATE SET "
         "name = EXCLUDED.name, "
         "description = EXCLUDED.description, "
-        "icon = EXCLUDED.icon, "
-        "property_definitions = EXCLUDED.property_definitions "
+        "icon = EXCLUDED.icon "
         "RETURNING *",
         _require_text(type_id, field_name="type_id"),
         _require_text(name, field_name="name"),
         str(description or ""),
         str(icon or ""),
-        _encode_jsonb(
-            _json_document(
-                property_definitions if property_definitions is not None else {},
-                field_name="property_definitions",
-                allow_list=True,
-            ),
-            field_name="property_definitions",
-        ),
     )
     return _row_dict(row, operation="upserting object type")
+
+
+def replace_object_field_records(
+    conn: Any,
+    *,
+    type_id: str,
+    fields: list[dict[str, Any]],
+    binding_revision: str = "object_schema.fields.v1",
+    decision_ref: str = "object_schema.field_registry.runtime_owner",
+) -> None:
+    normalized_type_id = _require_text(type_id, field_name="type_id")
+    conn.execute(
+        "DELETE FROM object_field_registry WHERE type_id = $1",
+        normalized_type_id,
+    )
+    if not fields:
+        return
+    rows: list[tuple[Any, ...]] = []
+    for index, field in enumerate(fields):
+        rows.append(
+            (
+                normalized_type_id,
+                _require_text(
+                    field.get("name") or field.get("field_name"),
+                    field_name=f"fields[{index}].name",
+                ),
+                str(field.get("label") or field.get("name") or field.get("field_name") or ""),
+                _require_text(field.get("type") or field.get("field_kind"), field_name=f"fields[{index}].type"),
+                str(field.get("description") or ""),
+                bool(field.get("required")),
+                _encode_jsonb(field.get("default"), field_name=f"fields[{index}].default"),
+                _encode_jsonb(
+                    _json_document(field.get("options") or [], field_name=f"fields[{index}].options", allow_list=True),
+                    field_name=f"fields[{index}].options",
+                ),
+                int(field.get("display_order") or (index + 1) * 10),
+                str(field.get("binding_revision") or binding_revision),
+                str(field.get("decision_ref") or decision_ref),
+            )
+        )
+    conn.execute_many(
+        """
+        INSERT INTO object_field_registry (
+            type_id,
+            field_name,
+            label,
+            field_kind,
+            description,
+            required,
+            default_value,
+            options,
+            display_order,
+            binding_revision,
+            decision_ref
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11)
+        """,
+        rows,
+    )
+
+
+def upsert_object_field_record(
+    conn: Any,
+    *,
+    type_id: str,
+    field_name: str,
+    label: str = "",
+    field_kind: str,
+    description: str = "",
+    required: bool = False,
+    default_value: object | None = None,
+    options: object | None = None,
+    display_order: int = 100,
+    binding_revision: str = "object_schema.fields.v1",
+    decision_ref: str = "object_schema.field_registry.runtime_owner",
+) -> dict[str, Any]:
+    row = conn.fetchrow(
+        """
+        INSERT INTO object_field_registry (
+            type_id,
+            field_name,
+            label,
+            field_kind,
+            description,
+            required,
+            default_value,
+            options,
+            display_order,
+            binding_revision,
+            decision_ref
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11)
+        ON CONFLICT (type_id, field_name) DO UPDATE SET
+            label = EXCLUDED.label,
+            field_kind = EXCLUDED.field_kind,
+            description = EXCLUDED.description,
+            required = EXCLUDED.required,
+            default_value = EXCLUDED.default_value,
+            options = EXCLUDED.options,
+            display_order = EXCLUDED.display_order,
+            binding_revision = EXCLUDED.binding_revision,
+            decision_ref = EXCLUDED.decision_ref,
+            retired_at = NULL,
+            updated_at = now()
+        RETURNING type_id, field_name, label, field_kind, description, required,
+                  default_value, options, display_order, binding_revision, decision_ref, retired_at
+        """,
+        _require_text(type_id, field_name="type_id"),
+        _require_text(field_name, field_name="field_name"),
+        str(label or ""),
+        _require_text(field_kind, field_name="field_kind"),
+        str(description or ""),
+        bool(required),
+        _encode_jsonb(default_value, field_name="default_value"),
+        _encode_jsonb(
+            _json_document(options if options is not None else [], field_name="options", allow_list=True),
+            field_name="options",
+        ),
+        int(display_order),
+        str(binding_revision),
+        str(decision_ref),
+    )
+    return _row_dict(row, operation="upserting object field")
+
+
+def list_object_field_records(
+    conn: Any,
+    *,
+    type_id: str,
+    include_retired: bool = False,
+) -> list[dict[str, Any]]:
+    normalized_type_id = _require_text(type_id, field_name="type_id")
+    if include_retired:
+        rows = conn.execute(
+            """
+            SELECT type_id, field_name, label, field_kind, description, required,
+                   default_value, options, display_order, binding_revision, decision_ref, retired_at
+              FROM object_field_registry
+             WHERE type_id = $1
+             ORDER BY retired_at NULLS FIRST, display_order ASC, field_name ASC
+            """,
+            normalized_type_id,
+        )
+    else:
+        rows = conn.execute(
+            """
+            SELECT type_id, field_name, label, field_kind, description, required,
+                   default_value, options, display_order, binding_revision, decision_ref, retired_at
+              FROM object_field_registry
+             WHERE type_id = $1
+               AND retired_at IS NULL
+             ORDER BY display_order ASC, field_name ASC
+            """,
+            normalized_type_id,
+        )
+    return [dict(row) for row in rows or []]
+
+
+def retire_object_field_record(
+    conn: Any,
+    *,
+    type_id: str,
+    field_name: str,
+) -> dict[str, Any] | None:
+    row = conn.fetchrow(
+        """
+        UPDATE object_field_registry
+           SET retired_at = now(),
+               updated_at = now()
+         WHERE type_id = $1
+           AND field_name = $2
+           AND retired_at IS NULL
+         RETURNING type_id, field_name, label, field_kind, description, required,
+                   default_value, options, display_order, binding_revision, decision_ref, retired_at
+        """,
+        _require_text(type_id, field_name="type_id"),
+        _require_text(field_name, field_name="field_name"),
+    )
+    return None if row is None else dict(row)
 
 
 def delete_object_type_record(
@@ -138,25 +298,27 @@ def ensure_object_type_record(
     name: str,
     description: str = "",
     icon: str = "",
-    property_definitions: object | None = None,
+    fields: list[dict[str, Any]] | None = None,
 ) -> None:
+    normalized_type_id = _require_text(type_id, field_name="type_id")
+    missing = not object_type_exists(conn, type_id=normalized_type_id)
     conn.execute(
-        "INSERT INTO object_types (type_id, name, description, icon, property_definitions) "
-        "VALUES ($1, $2, $3, $4, $5::jsonb) "
+        "INSERT INTO object_types (type_id, name, description, icon) "
+        "VALUES ($1, $2, $3, $4) "
         "ON CONFLICT (type_id) DO NOTHING",
-        _require_text(type_id, field_name="type_id"),
+        normalized_type_id,
         _require_text(name, field_name="name"),
         str(description or ""),
         str(icon or ""),
-        _encode_jsonb(
-            _json_document(
-                property_definitions if property_definitions is not None else {},
-                field_name="property_definitions",
-                allow_list=True,
-            ),
-            field_name="property_definitions",
-        ),
     )
+    if missing:
+        replace_object_field_records(
+            conn,
+            type_id=normalized_type_id,
+            fields=list(fields or []),
+            binding_revision="object_schema.fields.ensure.v1",
+            decision_ref="object_schema.field_registry.ensure_owner",
+        )
 
 
 def create_object_record(

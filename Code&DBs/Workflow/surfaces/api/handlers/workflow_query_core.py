@@ -835,8 +835,10 @@ def handle_bugs(
                 bt_mod=bt_mod,
                 body=body,
                 serialize_bug=_bug_to_dict,
+                serialize=_serialize,
                 resolved_statuses=resolved_statuses,
                 parse_status=parse_bug_status,
+                created_by_default="workflow_api",
             )
 
         if action == "patch_resume":

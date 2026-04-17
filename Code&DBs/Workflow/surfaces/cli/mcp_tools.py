@@ -63,6 +63,15 @@ def render_bug_payload(payload: dict[str, Any], *, stdout: TextIO) -> None:
 
 
 def render_recall_payload(payload: dict[str, Any], *, stdout: TextIO) -> None:
+    status = str(payload.get("status") or "").strip().lower()
+    error_type = str(payload.get("error_type") or "").strip()
+    error_message = str(payload.get("error_message") or "").strip()
+    if status == "unavailable" or error_type or error_message:
+        stdout.write("recall unavailable\n")
+        if error_type or error_message:
+            detail = ": ".join(part for part in (error_type, error_message) if part)
+            stdout.write(f"{detail}\n")
+        return
     results = payload.get("results")
     if not isinstance(results, list):
         print_json(stdout, payload)

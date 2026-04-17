@@ -24,6 +24,7 @@ from .commands.admin import _compile_command, _github_command, _parse_pr_spec
 from .commands.authority import (
     _catalog_command,
     _object_command,
+    _object_field_command,
     _object_type_command,
     _reconcile_command,
     _registry_command,
@@ -91,7 +92,6 @@ from .commands.workflow import (
     _spawn_command,
     _status_command,
     _triggers_command,
-    _deprecated_workflow_records_alias_command,
     _records_command,
     _verify_command,
     _verify_platform_command,
@@ -285,6 +285,7 @@ def _workflow_arg_commands() -> dict[str, ArgsCommandHandler]:
         "schema": _schema_command,
         "registry": _registry_command,
         "object-type": _object_type_command,
+        "object-field": _object_field_command,
         "object": _object_command,
         "catalog": _catalog_command,
         "reload": _reload_command,
@@ -345,7 +346,6 @@ def _workflow_arg_commands() -> dict[str, ArgsCommandHandler]:
         ),
         "triggers": _triggers_command,
         "records": _records_command,
-        "defs": lambda args, *, stdout: _deprecated_workflow_records_alias_command("defs", stdout=stdout),
         "repair": _repair_command,
         "work": _work_command,
         "roadmap": _roadmap_command,
@@ -449,7 +449,7 @@ def _commands_index_text() -> str:
             "  workflow work <claim|acknowledge>             Claim or acknowledge worker work",
             "  workflow tools [list|search|describe|call]     Discover and call catalog-backed MCP tools",
             "  workflow data <action>                         Deterministic data cleanup, validation, and workflow launch",
-            "  workflow schema|registry|object-type|object|catalog|files|reload|reconcile",
+            "  workflow schema|registry|object-type|object-field|object|catalog|files|reload|reconcile",
             "                                                  Direct database, file, and registry authority frontdoors",
             "  workflow handoff <latest|lineage|status|history> CQRS handoff inspection surface",
             "  workflow query|recall|discover|architecture|artifacts|bugs|costs|leaderboard|trust|fitness|trends|scope|risk|reviews|receipts",
@@ -507,7 +507,7 @@ def _help_text() -> str:
             "  workflow data <action>",
             "  workflow files <list|get|content|upload|delete>",
             "  workflow handoff <latest|lineage|status|history>",
-            "  workflow schema|registry|object-type|object|catalog|files|reload|reconcile",
+            "  workflow schema|registry|object-type|object-field|object|catalog|files|reload|reconcile",
             "  workflow query|recall|discover|architecture|artifacts|bugs|costs|leaderboard|trust|fitness|trends|scope|risk|reviews|receipts",
             "  workflow run|preview|run-status|status|active|scheduler|fan-out|debate|runs|manifest|triggers|retry|cancel|repair|heal|verify|verify-platform|pipeline|proof|queue|diagnose|inspect-job",
             "  workflow inspect|replay|graph-topology|graph-lineage|topology|lineage",
@@ -695,6 +695,12 @@ def main(
         return _workflow_arg_commands()["tools"](args[1:], stdout=stdout)
 
     if args[0] not in _known_root_commands():
+        if args[0] == "defs":
+            stdout.write(
+                "workflow defs has been removed; use workflow records create|update|rename instead\n"
+            )
+            stdout.write(f"{_usage()}\n")
+            return 2
         stdout.write(f"unknown command: {args[0]}\n")
         suggestions = _command_suggestions(args[0], _help_topic_candidates())
         if suggestions:

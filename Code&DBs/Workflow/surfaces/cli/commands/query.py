@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import json
 import re
 from pathlib import Path
 from typing import Any, TextIO
@@ -842,7 +843,7 @@ def _bugs_command(args: list[str], *, stdout: TextIO) -> int:
             "  backfill_replay    Backfill replay provenance for bugs\n"
             "  attach_evidence    Attach canonical evidence to a bug\n"
             "  patch_resume       Update a bug's resume context\n"
-            "  resolve            Mark an existing bug fixed, deferred, or won't-fix\n"
+            "  resolve            Mark an existing bug fixed, deferred, or won't-fix; FIXED may run verifier proof\n"
             "\n"
             "  --status S         Filter: OPEN, IN_PROGRESS, FIXED, WONT_FIX, DEFERRED\n"
             "  --severity S       Filter: P0, P1, P2, P3\n"
@@ -854,6 +855,7 @@ def _bugs_command(args: list[str], *, stdout: TextIO) -> int:
             "    workflow bugs search routing\n"
             "    workflow bugs search timeout --status OPEN --limit 5\n"
             "    workflow bugs stats\n"
+            "    workflow bugs resolve --bug-id BUG-1234 --status FIXED --verifier-ref verifier.job.python.pytest_file --inputs-json '{\"path\":\"Code&DBs/Workflow/tests/unit/test_bug.py\"}'\n"
         )
         return 2
 
@@ -1003,6 +1005,30 @@ def _bugs_command(args: list[str], *, stdout: TextIO) -> int:
             if value is None:
                 return 2
             params["notes"] = value
+            continue
+        if token == "--verifier-ref":
+            value = _require_value(token)
+            if value is None:
+                return 2
+            params["verifier_ref"] = value
+            continue
+        if token == "--inputs-json":
+            value = _require_value(token)
+            if value is None:
+                return 2
+            params["inputs"] = json.loads(value)
+            continue
+        if token == "--target-kind":
+            value = _require_value(token)
+            if value is None:
+                return 2
+            params["target_kind"] = value
+            continue
+        if token == "--target-ref":
+            value = _require_value(token)
+            if value is None:
+                return 2
+            params["target_ref"] = value
             continue
         if token == "--resume-context-json":
             value = _require_value(token)

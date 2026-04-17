@@ -1,4 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-echo "praxis-wait-pg is disabled because native launchd/localhost Postgres startup is no longer a supported runtime mode." >&2
-exit 1

@@ -27,9 +27,26 @@ def _json_list(value: Any) -> list[Any]:
 
 def _field_kind(value: Any) -> str:
     normalized = _text(value).lower()
-    if normalized == "string":
-        return "text"
-    return normalized or "text"
+    aliases = {
+        "string": "text",
+        "str": "text",
+        "varchar": "text",
+        "integer": "number",
+        "int": "number",
+        "float": "number",
+        "double": "number",
+        "decimal": "number",
+        "bool": "boolean",
+        "object": "json",
+        "array": "json",
+        "list": "json",
+        "map": "json",
+        "dict": "json",
+        "jsonb": "json",
+        "timestamp": "datetime",
+        "ref": "reference",
+    }
+    return aliases.get(normalized, normalized or "text")
 
 
 def _normalize_field_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -48,26 +65,6 @@ def _normalize_field_row(row: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
-def _property_definitions(fields: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    definitions: list[dict[str, Any]] = []
-    for field in fields:
-        item: dict[str, Any] = {
-            "name": field["name"],
-            "label": field["label"],
-            "type": field["type"],
-            "required": bool(field["required"]),
-            "display_order": int(field.get("display_order") or 100),
-        }
-        if field.get("description"):
-            item["description"] = field["description"]
-        if field.get("default") is not None:
-            item["default"] = field["default"]
-        if field.get("options"):
-            item["options"] = list(field["options"])
-        definitions.append(item)
-    return definitions
-
-
 def _compile_object_type(
     type_row: dict[str, Any],
     field_rows: list[dict[str, Any]],
@@ -81,7 +78,6 @@ def _compile_object_type(
         "icon": _text(type_row.get("icon")),
         "created_at": type_row.get("created_at"),
         "fields": compiled_fields,
-        "property_definitions": _property_definitions(compiled_fields),
     }
 
 
@@ -190,4 +186,3 @@ def list_compiled_object_fields(
     if compiled is None:
         return []
     return list(compiled.get("fields") or [])
-

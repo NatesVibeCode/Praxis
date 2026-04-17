@@ -710,6 +710,7 @@ def run_registered_verifier(
     target_ref: str = "",
     conn: "SyncPostgresConnection | None" = None,
     record_run: bool = True,
+    promote_bug: bool = True,
 ) -> dict[str, Any]:
     verifier = _load_verifier(verifier_ref, conn=conn)
     merged_inputs = dict(verifier.default_inputs)
@@ -802,7 +803,7 @@ def run_registered_verifier(
             verification_run_id=verification_run_id,
             conn=conn,
         )
-        if record_run and verification_run_id
+        if record_run and promote_bug and verification_run_id
         else None
     )
     return {

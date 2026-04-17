@@ -9,7 +9,10 @@ from surfaces.cli.commands import operate
 
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-WORKFLOW_ROOT = REPO_ROOT / "Code&DBs" / "Workflow"
+
+
+def test_legacy_supervisor_shell_wrapper_is_absent() -> None:
+    assert not (REPO_ROOT / "Code&DBs" / "Workflow" / "scripts" / "supervisor.sh").exists()
 
 
 def test_supervisor_command_help_marks_compatibility_wrapper() -> None:
@@ -43,15 +46,3 @@ def test_supervisor_command_delegates_to_praxis(monkeypatch) -> None:
         "text": True,
         "check": False,
     }
-
-
-def test_supervisor_script_help_points_at_praxis() -> None:
-    completed = subprocess.run(
-        [str(WORKFLOW_ROOT / "scripts" / "supervisor.sh"), "--help"],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        check=True,
-        text=True,
-    )
-
-    assert "Legacy compatibility wrapper around ./scripts/praxis" in completed.stdout

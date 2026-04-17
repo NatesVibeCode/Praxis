@@ -5,7 +5,7 @@ export interface ObjectType {
   name: string;
   description: string;
   icon: string;
-  property_definitions: any[];
+  fields: any[];
 }
 
 export function useObjectTypes(): { objectTypes: ObjectType[]; loading: boolean } {

@@ -76,7 +76,9 @@ WORKFLOW_MIGRATION_SEQUENCE = ('001_v1_control_plane.sql',
  '139_operation_catalog_operator_control_bindings.sql',
  '140_operation_catalog_surface_cleanup.sql',
  '141_operation_catalog_provider_onboarding.sql',
- '142_operation_catalog_operator_decision_bindings.sql')
+ '142_operation_catalog_operator_decision_bindings.sql',
+ '143_object_field_registry_authority.sql',
+ '144_object_field_registry_hard_cutover.sql')
 
 WORKFLOW_FULL_BOOTSTRAP_SEQUENCE = ('001_v1_control_plane.sql',
  '002_registry_authority.sql',
@@ -245,7 +247,9 @@ WORKFLOW_FULL_BOOTSTRAP_SEQUENCE = ('001_v1_control_plane.sql',
  '139_operation_catalog_operator_control_bindings.sql',
  '140_operation_catalog_surface_cleanup.sql',
  '141_operation_catalog_provider_onboarding.sql',
- '142_operation_catalog_operator_decision_bindings.sql')
+ '142_operation_catalog_operator_decision_bindings.sql',
+ '143_object_field_registry_authority.sql',
+ '144_object_field_registry_hard_cutover.sql')
 
 WORKFLOW_POLICY_BUCKETS = {'canonical': ('001_v1_control_plane.sql',
                '002_registry_authority.sql',
@@ -317,7 +321,9 @@ WORKFLOW_POLICY_BUCKETS = {'canonical': ('001_v1_control_plane.sql',
                '139_operation_catalog_operator_control_bindings.sql',
                '140_operation_catalog_surface_cleanup.sql',
                '141_operation_catalog_provider_onboarding.sql',
-               '142_operation_catalog_operator_decision_bindings.sql'),
+               '142_operation_catalog_operator_decision_bindings.sql',
+               '143_object_field_registry_authority.sql',
+               '144_object_field_registry_hard_cutover.sql'),
  'bootstrap_only': ('012_execution_leases.sql',
                     '012_task_type_route_eligibility.sql',
                     '013_dispatch_control_tables.sql',
@@ -489,6 +495,8 @@ WORKFLOW_MIGRATION_POLICIES = {'001_v1_control_plane.sql': 'canonical',
  '140_operation_catalog_surface_cleanup.sql': 'canonical',
  '141_operation_catalog_provider_onboarding.sql': 'canonical',
  '142_operation_catalog_operator_decision_bindings.sql': 'canonical',
+ '143_object_field_registry_authority.sql': 'canonical',
+ '144_object_field_registry_hard_cutover.sql': 'canonical',
  '012_execution_leases.sql': 'bootstrap_only',
  '012_task_type_route_eligibility.sql': 'bootstrap_only',
  '013_dispatch_control_tables.sql': 'bootstrap_only',
@@ -1333,7 +1341,12 @@ WORKFLOW_MIGRATION_EXPECTED_OBJECTS = {'001_v1_control_plane.sql': (('table', 'w
  '142_operation_catalog_operator_decision_bindings.sql': (('row',
                                                            'operation_catalog_registry.operator.decision_record'),
                                                           ('row',
-                                                           'operation_catalog_registry.operator.decision_list'))}
+                                                           'operation_catalog_registry.operator.decision_list')),
+ '143_object_field_registry_authority.sql': (('table', 'object_field_registry'),
+                                             ('index',
+                                              'idx_object_field_registry_active_type_order')),
+ '144_object_field_registry_hard_cutover.sql': (('constraint',
+                                                 'object_field_registry.object_field_registry_field_name_nonblank'),)}
 
 WORKFLOW_SCHEMA_READINESS_SEQUENCE = (('001_v1_control_plane.sql',
   (('table', 'workflow_definitions'),
@@ -1892,5 +1905,10 @@ WORKFLOW_SCHEMA_READINESS_SEQUENCE = (('001_v1_control_plane.sql',
   (('row', 'operation_catalog_registry.operator.provider_onboarding'),)),
  ('142_operation_catalog_operator_decision_bindings.sql',
   (('row', 'operation_catalog_registry.operator.decision_record'),
-   ('row', 'operation_catalog_registry.operator.decision_list'))))
+   ('row', 'operation_catalog_registry.operator.decision_list'))),
+ ('143_object_field_registry_authority.sql',
+  (('table', 'object_field_registry'),
+   ('index', 'idx_object_field_registry_active_type_order'))),
+ ('144_object_field_registry_hard_cutover.sql',
+  (('constraint', 'object_field_registry.object_field_registry_field_name_nonblank'),)))
 

@@ -43,7 +43,7 @@ describe('buildPrimitiveContractSuggestions', () => {
         name: 'Ticket',
         description: '',
         icon: '',
-        property_definitions: [{ name: 'priority', type: 'string' }],
+        fields: [{ name: 'priority', type: 'string' }],
       },
     ]);
 

@@ -6,6 +6,8 @@ import json
 import logging
 from typing import Any
 
+from runtime.object_schema import list_compiled_object_types
+
 logger = logging.getLogger(__name__)
 
 
@@ -153,46 +155,7 @@ def _load_integrations(conn: Any) -> list[dict[str, Any]]:
 
 
 def _load_object_types(conn: Any) -> list[dict[str, Any]]:
-    rows = conn.execute(
-        """
-        SELECT type_id, name, description, property_definitions
-          FROM object_types
-         ORDER BY name
-        """
-    )
-    object_types: list[dict[str, Any]] = []
-    for row in rows or []:
-        item = dict(row)
-        raw_fields = item.get("property_definitions")
-        if isinstance(raw_fields, str):
-            try:
-                raw_fields = json.loads(raw_fields)
-            except (json.JSONDecodeError, TypeError):
-                raw_fields = []
-        fields: list[dict[str, Any]] = []
-        for field in raw_fields or []:
-            if not isinstance(field, dict):
-                continue
-            name = _slugify(field.get("name"))
-            if not name:
-                continue
-            fields.append(
-                {
-                    "name": name,
-                    "label": _as_text(field.get("label")) or _as_text(field.get("name")),
-                    "type": _as_text(field.get("type")),
-                    "description": _as_text(field.get("description")),
-                }
-            )
-        object_types.append(
-            {
-                "type_id": _slugify(item.get("type_id")),
-                "name": _as_text(item.get("name")),
-                "description": _as_text(item.get("description")),
-                "fields": fields,
-            }
-        )
-    return object_types
+    return list_compiled_object_types(conn, limit=1000)
 
 
 def _load_agent_routes(conn: Any) -> list[str]:

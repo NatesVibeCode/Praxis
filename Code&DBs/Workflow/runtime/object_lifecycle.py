@@ -6,15 +6,22 @@ import json
 import uuid
 from typing import Any
 
+from runtime.object_schema import (
+    list_compiled_object_fields,
+    list_compiled_object_types,
+    load_compiled_object_type,
+)
 from storage.postgres.object_lifecycle_repository import (
     attach_document_record,
     create_object_record,
     create_object_type_record,
     delete_object_type_record,
     load_object_record,
-    load_object_type_record,
     mark_object_deleted,
     object_type_exists,
+    replace_object_field_records,
+    retire_object_field_record,
+    upsert_object_field_record,
     upsert_object_type_record,
     update_object_properties_record,
 )
@@ -28,6 +35,9 @@ _ALLOWED_DOCUMENT_TYPES = frozenset(
         "context",
         "reference",
     }
+)
+_ALLOWED_OBJECT_FIELD_KINDS = frozenset(
+    {"text", "number", "boolean", "enum", "json", "date", "datetime", "reference"}
 )
 
 
@@ -49,26 +59,63 @@ def _properties(value: Any, *, field_name: str) -> dict[str, Any]:
     return dict(value)
 
 
-def _coerce_property_definition(*, value: Any, index: int) -> dict[str, Any]:
+def _field_kind(value: Any, *, field_name: str) -> str:
+    normalized = _text(value).lower()
+    if not normalized:
+        raise ObjectLifecycleBoundaryError(f"{field_name} is required")
+    aliases = {
+        "string": "text",
+        "str": "text",
+        "varchar": "text",
+        "integer": "number",
+        "int": "number",
+        "float": "number",
+        "double": "number",
+        "decimal": "number",
+        "bool": "boolean",
+        "object": "json",
+        "array": "json",
+        "list": "json",
+        "map": "json",
+        "dict": "json",
+        "jsonb": "json",
+        "timestamp": "datetime",
+        "ref": "reference",
+    }
+    canonical = aliases.get(normalized, normalized)
+    if canonical not in _ALLOWED_OBJECT_FIELD_KINDS:
+        raise ObjectLifecycleBoundaryError(
+            f"{field_name} must be one of: {', '.join(sorted(_ALLOWED_OBJECT_FIELD_KINDS))}"
+        )
+    return canonical
+
+
+def _coerce_field_definition(*, value: Any, index: int) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ObjectLifecycleBoundaryError(
-            f"property_definitions[{index}] must be an object"
+            f"fields[{index}] must be an object"
+        )
+    field_name = _text(value.get("field_name")) or _text(value.get("name"))
+    if not field_name:
+        raise ObjectLifecycleBoundaryError(
+            f"fields[{index}].name is required"
         )
     normalized: dict[str, Any] = {
-        "name": _text(value.get("name")),
-        "type": _text(value.get("type")) or "text",
+        "name": field_name,
+        "label": _text(value.get("label")) or field_name,
+        "type": _field_kind(value.get("field_kind") or value.get("type"), field_name=f"fields[{index}].type"),
+        "description": _text(value.get("description")),
+        "display_order": int(value.get("display_order") or (index + 1) * 10),
     }
-    if not normalized["name"]:
-        raise ObjectLifecycleBoundaryError(
-            f"property_definitions[{index}].name is required"
-        )
     if "required" in value:
         normalized["required"] = bool(value.get("required"))
-    if "options" in value and value.get("options") is not None:
+    if normalized["type"] == "enum" or "options" in value or "values" in value:
         options = value.get("options")
+        if options is None:
+            options = value.get("values")
         if not isinstance(options, list) or not all(isinstance(item, str) for item in options):
             raise ObjectLifecycleBoundaryError(
-                f"property_definitions[{index}].options must be a list of strings"
+                f"fields[{index}].options must be a list of strings"
             )
         normalized["options"] = list(options)
     if "default" in value and value.get("default") is not None:
@@ -76,17 +123,19 @@ def _coerce_property_definition(*, value: Any, index: int) -> dict[str, Any]:
     return normalized
 
 
-def _property_definitions(value: Any) -> list[dict[str, Any]]:
+def _fields(value: Any) -> list[dict[str, Any]]:
     if value is None:
         return []
+    if isinstance(value, dict) and isinstance(value.get("fields"), list):
+        return [_coerce_field_definition(value=item, index=index) for index, item in enumerate(value.get("fields") or [])]
     if isinstance(value, list):
-        return [_coerce_property_definition(value=item, index=index) for index, item in enumerate(value)]
+        return [_coerce_field_definition(value=item, index=index) for index, item in enumerate(value)]
     if isinstance(value, dict):
         normalized: list[dict[str, Any]] = []
         for index, item in enumerate(value.values()):
-            normalized.append(_coerce_property_definition(value=item, index=index))
+            normalized.append(_coerce_field_definition(value=item, index=index))
         return normalized
-    raise ObjectLifecycleBoundaryError("property_definitions must be an object or list")
+    raise ObjectLifecycleBoundaryError("fields must be an object or list")
 
 
 def _string_list(value: Any, *, field_name: str) -> list[str]:
@@ -122,7 +171,7 @@ def create_object_type(
     *,
     name: Any,
     description: Any = "",
-    property_definitions: Any = None,
+    fields: Any = None,
     icon: Any = "",
 ) -> dict[str, Any]:
     normalized_name = _text(name)
@@ -132,16 +181,25 @@ def create_object_type(
         raise ObjectLifecycleBoundaryError("description must be a string")
     if icon is not None and not isinstance(icon, str):
         raise ObjectLifecycleBoundaryError("icon must be a string")
+    normalized_fields = _fields(fields)
 
     try:
-        return create_object_type_record(
+        row = create_object_type_record(
             conn,
             type_id=f"{_slug_prefix(normalized_name)}-{uuid.uuid4().hex[:6]}",
             name=normalized_name,
             description=description or "",
             icon=icon or "",
-            property_definitions=_property_definitions(property_definitions),
         )
+        replace_object_field_records(
+            conn,
+            type_id=row["type_id"],
+            fields=normalized_fields,
+        )
+        created = load_compiled_object_type(conn, type_id=row["type_id"])
+        if created is None:
+            raise ObjectLifecycleBoundaryError("created object type could not be reloaded", status_code=500)
+        return created
     except PostgresWriteError as exc:
         _raise_storage_boundary(exc)
 
@@ -152,7 +210,7 @@ def upsert_object_type(
     type_id: Any = None,
     name: Any,
     description: Any = "",
-    property_definitions: Any = None,
+    fields: Any = None,
     icon: Any = "",
 ) -> dict[str, Any]:
     normalized_name = _text(name)
@@ -163,16 +221,25 @@ def upsert_object_type(
     if icon is not None and not isinstance(icon, str):
         raise ObjectLifecycleBoundaryError("icon must be a string")
     normalized_type_id = _text(type_id) or f"{_slug_prefix(normalized_name)}-{uuid.uuid4().hex[:6]}"
+    normalized_fields = _fields(fields)
 
     try:
-        return upsert_object_type_record(
+        upsert_object_type_record(
             conn,
             type_id=normalized_type_id,
             name=normalized_name,
             description=description or "",
             icon=icon or "",
-            property_definitions=_property_definitions(property_definitions),
         )
+        replace_object_field_records(
+            conn,
+            type_id=normalized_type_id,
+            fields=normalized_fields,
+        )
+        updated = load_compiled_object_type(conn, type_id=normalized_type_id)
+        if updated is None:
+            raise ObjectLifecycleBoundaryError("upserted object type could not be reloaded", status_code=500)
+        return updated
     except PostgresWriteError as exc:
         _raise_storage_boundary(exc)
 
@@ -229,7 +296,7 @@ def get_object_type(conn: Any, *, type_id: Any) -> dict[str, Any]:
     normalized_type_id = _text(type_id)
     if not normalized_type_id:
         raise ObjectLifecycleBoundaryError("type_id is required")
-    row = load_object_type_record(conn, type_id=normalized_type_id)
+    row = load_compiled_object_type(conn, type_id=normalized_type_id)
     if row is None:
         raise ObjectLifecycleBoundaryError(f"Object type not found: {normalized_type_id}", status_code=404)
     return row
@@ -260,22 +327,91 @@ def list_object_types(
 ) -> dict[str, Any]:
     if not isinstance(limit, int) or limit <= 0:
         raise ObjectLifecycleBoundaryError("limit must be a positive integer")
-    normalized_query = _text(query)
-    if normalized_query:
-        rows = conn.execute(
-            "SELECT type_id, name, description, icon, property_definitions, created_at "
-            "FROM object_types WHERE search_vector @@ plainto_tsquery('english', $1) "
-            "ORDER BY name LIMIT $2",
-            normalized_query,
-            limit,
+    rows = list_compiled_object_types(conn, query=_text(query), limit=limit)
+    return {"types": rows, "count": len(rows)}
+
+
+def list_object_fields(
+    conn: Any,
+    *,
+    type_id: Any,
+    include_retired: Any = False,
+) -> dict[str, Any]:
+    normalized_type_id = _text(type_id)
+    if not normalized_type_id:
+        raise ObjectLifecycleBoundaryError("type_id is required")
+    if load_compiled_object_type(conn, type_id=normalized_type_id, include_retired=True) is None:
+        raise ObjectLifecycleBoundaryError(f"Object type not found: {normalized_type_id}", status_code=404)
+    fields = list_compiled_object_fields(conn, type_id=normalized_type_id, include_retired=bool(include_retired))
+    return {"type_id": normalized_type_id, "fields": fields, "count": len(fields)}
+
+
+def upsert_object_field(
+    conn: Any,
+    *,
+    type_id: Any,
+    field_name: Any,
+    field_kind: Any,
+    label: Any = "",
+    description: Any = "",
+    required: Any = False,
+    default_value: Any = None,
+    options: Any = None,
+    display_order: Any = 100,
+) -> dict[str, Any]:
+    normalized_type_id = _text(type_id)
+    if not normalized_type_id:
+        raise ObjectLifecycleBoundaryError("type_id is required")
+    if not object_type_exists(conn, type_id=normalized_type_id):
+        raise ObjectLifecycleBoundaryError(f"Object type not found: {normalized_type_id}", status_code=404)
+    try:
+        row = upsert_object_field_record(
+            conn,
+            type_id=normalized_type_id,
+            field_name=_text(field_name),
+            label=_text(label),
+            field_kind=_field_kind(field_kind, field_name="field_kind"),
+            description=_text(description),
+            required=bool(required),
+            default_value=default_value,
+            options=options if options is not None else [],
+            display_order=int(display_order or 100),
         )
-    else:
-        rows = conn.execute(
-            "SELECT type_id, name, description, icon, property_definitions, created_at "
-            "FROM object_types ORDER BY name LIMIT $1",
-            limit,
+    except PostgresWriteError as exc:
+        _raise_storage_boundary(exc)
+    fields = list_compiled_object_fields(conn, type_id=normalized_type_id, include_retired=True)
+    matched = next((field for field in fields if field["name"] == row["field_name"]), None)
+    if matched is None:
+        raise ObjectLifecycleBoundaryError("upserted object field could not be reloaded", status_code=500)
+    return {"type_id": normalized_type_id, "field": matched}
+
+
+def retire_object_field(
+    conn: Any,
+    *,
+    type_id: Any,
+    field_name: Any,
+) -> dict[str, Any]:
+    normalized_type_id = _text(type_id)
+    normalized_field_name = _text(field_name)
+    if not normalized_type_id:
+        raise ObjectLifecycleBoundaryError("type_id is required")
+    if not normalized_field_name:
+        raise ObjectLifecycleBoundaryError("field_name is required")
+    try:
+        row = retire_object_field_record(
+            conn,
+            type_id=normalized_type_id,
+            field_name=normalized_field_name,
         )
-    return {"types": [dict(row) for row in rows], "count": len(rows)}
+    except PostgresWriteError as exc:
+        _raise_storage_boundary(exc)
+    if row is None:
+        raise ObjectLifecycleBoundaryError(
+            f"Object field not found: {normalized_type_id}.{normalized_field_name}",
+            status_code=404,
+        )
+    return {"type_id": normalized_type_id, "field_name": normalized_field_name, "retired": True}
 
 
 def get_object(conn: Any, *, object_id: Any) -> dict[str, Any]:

@@ -16,8 +16,10 @@ interface ObjectType {
   name: string;
   description: string;
   icon?: string;
-  property_definitions: PropertyDef[];
+  fields: PropertyDef[];
 }
+
+const FIELD_KIND_OPTIONS = ['text', 'number', 'boolean', 'enum', 'json', 'date', 'datetime', 'reference'];
 
 function SchemaEditorModule({ config }: QuadrantProps) {
   void config;
@@ -33,7 +35,7 @@ function SchemaEditorModule({ config }: QuadrantProps) {
     if (selected) {
       setName(selected.name);
       setDescription(selected.description || '');
-      setProps([...(selected.property_definitions || [])]);
+      setProps([...(selected.fields || [])]);
       setSaved(false);
     }
   }, [selected?.type_id]);
@@ -57,7 +59,7 @@ function SchemaEditorModule({ config }: QuadrantProps) {
         body: JSON.stringify({
           name,
           description,
-          property_definitions: props.filter(p => p.name.trim()),
+          fields: props.filter(p => p.name.trim()),
         }),
       });
       setSaved(true);
@@ -82,14 +84,14 @@ function SchemaEditorModule({ config }: QuadrantProps) {
       <textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="Description" rows={2}
         style={{ background: 'var(--bg)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 10px', fontSize: 13, resize: 'none' }} />
 
-      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginTop: 4 }}>Properties ({props.length})</div>
+      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginTop: 4 }}>Fields ({props.length})</div>
       {props.map((p, i) => (
         <div key={i} style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
           <input value={p.name} onChange={e => updateProp(i, 'name', e.target.value)} placeholder="name"
             style={{ flex: 1, background: 'var(--bg)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 4, padding: '4px 8px', fontSize: 12 }} />
           <select value={p.type} onChange={e => updateProp(i, 'type', e.target.value)}
             style={{ background: 'var(--bg)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 4, padding: '4px', fontSize: 12 }}>
-            {['text', 'number', 'date', 'email', 'url', 'boolean', 'dropdown', 'currency'].map(t => <option key={t} value={t}>{t}</option>)}
+            {FIELD_KIND_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
           </select>
           <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 2 }}>
             <input type="checkbox" checked={!!p.required} onChange={e => updateProp(i, 'required', e.target.checked)} /> req
@@ -99,7 +101,7 @@ function SchemaEditorModule({ config }: QuadrantProps) {
       ))}
 
       <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-        <button onClick={addProp} style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontSize: 12 }}>+ Add property</button>
+        <button onClick={addProp} style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontSize: 12 }}>+ Add field</button>
         <button onClick={handleSave} disabled={saving} style={{
           marginLeft: 'auto', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 4, padding: '4px 12px', fontSize: 12, cursor: 'pointer', opacity: saving ? 0.7 : 1
         }}>{saving ? 'Saving...' : 'Save Schema'}</button>

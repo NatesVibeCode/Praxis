@@ -1597,7 +1597,7 @@ def _handle_object_types_post(request: Any, path: str) -> None:
                         type_id=type_id,
                         name=body.get("name"),
                         description=body.get("description", ""),
-                        property_definitions=body.get("property_definitions", {}),
+                        fields=body.get("fields", []),
                         icon=body.get("icon", ""),
                     ),
                 )
@@ -1609,7 +1609,7 @@ def _handle_object_types_post(request: Any, path: str) -> None:
                     request.subsystems.get_pg_conn(),
                     name=body.get("name"),
                     description=body.get("description", ""),
-                    property_definitions=body.get("property_definitions", {}),
+                    fields=body.get("fields", []),
                     icon=body.get("icon", ""),
                 ),
             )
@@ -1647,7 +1647,7 @@ def _handle_object_types_put(request: Any, path: str) -> None:
                 type_id=payload_type_id,
                 name=body.get("name"),
                 description=body.get("description", ""),
-                property_definitions=body.get("property_definitions", {}),
+                fields=body.get("fields", []),
                 icon=body.get("icon", ""),
             ),
         )

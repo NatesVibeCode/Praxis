@@ -20,9 +20,12 @@ from runtime.object_lifecycle import (
     delete_object,
     get_object,
     get_object_type,
+    list_object_fields,
     list_objects,
     list_object_types,
+    retire_object_field,
     update_object,
+    upsert_object_field,
     upsert_object_type,
 )
 from runtime.surface_catalog import (
@@ -472,7 +475,7 @@ def _object_type_help_text() -> str:
             "Object type authority:",
             "  workflow object-type list [--query TEXT] [--limit N] [--json]",
             "  workflow object-type get <type-id> [--json]",
-            "  workflow object-type upsert [--type-id ID] --name NAME [--description TEXT] [--icon TEXT] [--property-definitions-file <path>|--property-definitions-json '<json>'] [--yes] [--json]",
+            "  workflow object-type upsert [--type-id ID] --name NAME [--description TEXT] [--icon TEXT] [--fields-file <path>|--fields-json '<json>'] [--yes] [--json]",
         ]
     )
 
@@ -490,8 +493,8 @@ def _object_type_command(args: list[str], *, stdout: TextIO) -> int:
     name = ""
     description = ""
     icon = ""
-    defs_file = None
-    defs_json = None
+    fields_file = None
+    fields_json = None
     i = 1
     while i < len(args):
         token = args[i]
@@ -527,12 +530,12 @@ def _object_type_command(args: list[str], *, stdout: TextIO) -> int:
             icon = args[i + 1]
             i += 2
             continue
-        if token == "--property-definitions-file" and i + 1 < len(args):
-            defs_file = args[i + 1]
+        if token == "--fields-file" and i + 1 < len(args):
+            fields_file = args[i + 1]
             i += 2
             continue
-        if token == "--property-definitions-json" and i + 1 < len(args):
-            defs_json = args[i + 1]
+        if token == "--fields-json" and i + 1 < len(args):
+            fields_json = args[i + 1]
             i += 2
             continue
         if action == "get" and not type_id:
@@ -552,14 +555,14 @@ def _object_type_command(args: list[str], *, stdout: TextIO) -> int:
             if not confirmed:
                 return _render_confirmation(stdout=stdout)
             conn = _sync_conn()
-            property_definitions = (
+            fields = (
                 _load_json_value(
-                    file_path=defs_file,
-                    inline_json=defs_json,
-                    field_name="property-definitions",
+                    file_path=fields_file,
+                    inline_json=fields_json,
+                    field_name="fields",
                 )
-                if defs_file or defs_json
-                else {}
+                if fields_file or fields_json
+                else []
             )
             payload = {
                 "type": upsert_object_type(
@@ -568,7 +571,7 @@ def _object_type_command(args: list[str], *, stdout: TextIO) -> int:
                     name=name,
                     description=description,
                     icon=icon,
-                    property_definitions=property_definitions,
+                    fields=fields,
                 )
             }
         else:
@@ -587,6 +590,171 @@ def _object_type_command(args: list[str], *, stdout: TextIO) -> int:
         return 0
     item = payload["type"]
     stdout.write(f"{item['type_id']}  {item['name']}\n")
+    return 0
+
+
+def _object_field_help_text() -> str:
+    return "\n".join(
+        [
+            "usage: workflow object-field <list|upsert|retire> [args]",
+            "",
+            "Object field authority:",
+            "  workflow object-field list --type-id TYPE [--include-retired] [--json]",
+            "  workflow object-field upsert --type-id TYPE --field-name NAME --field-kind KIND [--label TEXT] [--description TEXT] [--required] [--default-file <path>|--default-json '<json>'] [--options-file <path>|--options-json '<json>'] [--display-order N] [--yes] [--json]",
+            "  workflow object-field retire --type-id TYPE --field-name NAME [--yes] [--json]",
+        ]
+    )
+
+
+def _object_field_command(args: list[str], *, stdout: TextIO) -> int:
+    if not args or args[0] in {"-h", "--help"}:
+        stdout.write(_object_field_help_text() + "\n")
+        return 2
+    action = args[0]
+    type_id = ""
+    field_name = ""
+    field_kind = ""
+    label = ""
+    description = ""
+    required = False
+    display_order = 100
+    include_retired = False
+    default_file = None
+    default_json = None
+    options_file = None
+    options_json = None
+    as_json = False
+    confirmed = False
+    i = 1
+    while i < len(args):
+        token = args[i]
+        if token == "--type-id" and i + 1 < len(args):
+            type_id = args[i + 1]
+            i += 2
+            continue
+        if token == "--field-name" and i + 1 < len(args):
+            field_name = args[i + 1]
+            i += 2
+            continue
+        if token == "--field-kind" and i + 1 < len(args):
+            field_kind = args[i + 1]
+            i += 2
+            continue
+        if token == "--label" and i + 1 < len(args):
+            label = args[i + 1]
+            i += 2
+            continue
+        if token == "--description" and i + 1 < len(args):
+            description = args[i + 1]
+            i += 2
+            continue
+        if token == "--required":
+            required = True
+            i += 1
+            continue
+        if token == "--display-order" and i + 1 < len(args):
+            display_order = int(args[i + 1])
+            i += 2
+            continue
+        if token == "--include-retired":
+            include_retired = True
+            i += 1
+            continue
+        if token == "--default-file" and i + 1 < len(args):
+            default_file = args[i + 1]
+            i += 2
+            continue
+        if token == "--default-json" and i + 1 < len(args):
+            default_json = args[i + 1]
+            i += 2
+            continue
+        if token == "--options-file" and i + 1 < len(args):
+            options_file = args[i + 1]
+            i += 2
+            continue
+        if token == "--options-json" and i + 1 < len(args):
+            options_json = args[i + 1]
+            i += 2
+            continue
+        if token == "--json":
+            as_json = True
+            i += 1
+            continue
+        if token == "--yes":
+            confirmed = True
+            i += 1
+            continue
+        stdout.write(f"unexpected argument: {token}\n")
+        return 2
+    try:
+        conn = _sync_conn()
+        if action == "list":
+            payload = list_object_fields(
+                conn,
+                type_id=type_id,
+                include_retired=include_retired,
+            )
+        elif action == "upsert":
+            if not confirmed:
+                return _render_confirmation(stdout=stdout)
+            default_value = (
+                _load_json_value(
+                    file_path=default_file,
+                    inline_json=default_json,
+                    field_name="default",
+                )
+                if default_file or default_json
+                else None
+            )
+            options = (
+                _load_json_value(
+                    file_path=options_file,
+                    inline_json=options_json,
+                    field_name="options",
+                )
+                if options_file or options_json
+                else []
+            )
+            payload = upsert_object_field(
+                conn,
+                type_id=type_id,
+                field_name=field_name,
+                field_kind=field_kind,
+                label=label,
+                description=description,
+                required=required,
+                default_value=default_value,
+                options=options,
+                display_order=display_order,
+            )
+        elif action == "retire":
+            if not confirmed:
+                return _render_confirmation(stdout=stdout)
+            payload = retire_object_field(
+                conn,
+                type_id=type_id,
+                field_name=field_name,
+            )
+        else:
+            stdout.write(_object_field_help_text() + "\n")
+            return 2
+    except (ObjectLifecycleBoundaryError, ValueError, json.JSONDecodeError) as exc:
+        print_json(stdout, {"error": str(exc)})
+        return 1
+    if as_json:
+        print_json(stdout, payload)
+        return 0
+    if action == "list":
+        stdout.write(f"{payload['count']} field(s) for {payload['type_id']}\n")
+        for item in payload["fields"]:
+            status = " retired" if item.get("retired") else ""
+            stdout.write(f"  {item['name']}  {item['type']}{status}\n")
+        return 0
+    if action == "upsert":
+        item = payload["field"]
+        stdout.write(f"{payload['type_id']}.{item['name']}  {item['type']}\n")
+        return 0
+    stdout.write(f"{payload['type_id']}.{payload['field_name']} retired\n")
     return 0
 
 
@@ -855,6 +1023,7 @@ def _reconcile_command(args: list[str], *, stdout: TextIO) -> int:
 __all__ = [
     "_catalog_command",
     "_object_command",
+    "_object_field_command",
     "_object_type_command",
     "_reconcile_command",
     "_registry_command",

@@ -73,7 +73,9 @@ def test_workflow_migration_manifest_includes_provider_route_health_budget_migra
     assert "140_operation_catalog_surface_cleanup.sql" in filenames
     assert "141_operation_catalog_provider_onboarding.sql" in filenames
     assert "142_operation_catalog_operator_decision_bindings.sql" in filenames
-    assert filenames[-1] == "142_operation_catalog_operator_decision_bindings.sql"
+    assert "143_object_field_registry_authority.sql" in filenames
+    assert "144_object_field_registry_hard_cutover.sql" in filenames
+    assert filenames[-1] == "144_object_field_registry_hard_cutover.sql"
 
 
 def test_every_manifest_migration_has_expected_object_contract() -> None:
@@ -246,6 +248,21 @@ def test_operation_catalog_surface_cleanup_expected_objects_are_registered() -> 
             "operation_catalog_registry.operator.transport_support",
         }
     )
+
+
+def test_object_field_registry_authority_expected_objects_are_registered() -> None:
+    objects = workflow_migration_expected_objects("143_object_field_registry_authority.sql")
+    names = {item.object_name for item in objects}
+    assert names == {
+        "object_field_registry",
+        "idx_object_field_registry_active_type_order",
+    }
+
+
+def test_object_field_registry_hard_cutover_expected_objects_are_registered() -> None:
+    objects = workflow_migration_expected_objects("144_object_field_registry_hard_cutover.sql")
+    names = {item.object_name for item in objects}
+    assert names == {"object_field_registry.object_field_registry_field_name_nonblank"}
 
 
 def test_operator_decision_scope_policy_expected_objects_are_registered() -> None:

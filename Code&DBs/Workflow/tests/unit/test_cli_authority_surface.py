@@ -17,7 +17,7 @@ def test_top_level_help_mentions_authority_frontdoors() -> None:
 
     assert workflow_cli_main(["--help"], stdout=stdout) == 0
     rendered = stdout.getvalue()
-    assert "workflow schema|registry|object-type|object|catalog|files|reload|reconcile" in rendered
+    assert "workflow schema|registry|object-type|object-field|object|catalog|files|reload|reconcile" in rendered
     assert "workflow handoff <latest|lineage|status|history>" in rendered
 
 
@@ -94,7 +94,7 @@ def test_object_type_upsert_calls_runtime_boundary(monkeypatch: pytest.MonkeyPat
                 "ticket",
                 "--name",
                 "Ticket",
-                "--property-definitions-json",
+                "--fields-json",
                 "[]",
                 "--yes",
                 "--json",
@@ -105,6 +105,39 @@ def test_object_type_upsert_calls_runtime_boundary(monkeypatch: pytest.MonkeyPat
     )
     payload = json.loads(stdout.getvalue())
     assert payload["type"]["type_id"] == "ticket"
+
+
+def test_object_field_upsert_calls_runtime_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(authority_commands, "_sync_conn", lambda: object())
+    monkeypatch.setattr(
+        authority_commands,
+        "upsert_object_field",
+        lambda conn, **kwargs: {"type_id": kwargs["type_id"], "field": {"name": kwargs["field_name"], "type": kwargs["field_kind"]}},
+    )
+    stdout = StringIO()
+
+    assert (
+        workflow_cli_main(
+            [
+                "object-field",
+                "upsert",
+                "--type-id",
+                "ticket",
+                "--field-name",
+                "status",
+                "--field-kind",
+                "enum",
+                "--options-json",
+                '["open","closed"]',
+                "--yes",
+                "--json",
+            ],
+            stdout=stdout,
+        )
+        == 0
+    )
+    payload = json.loads(stdout.getvalue())
+    assert payload["field"]["name"] == "status"
 
 
 def test_object_upsert_routes_to_create_when_object_id_missing(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -70,7 +70,9 @@
     "139_operation_catalog_operator_control_bindings.sql",
     "140_operation_catalog_surface_cleanup.sql",
     "141_operation_catalog_provider_onboarding.sql",
-    "142_operation_catalog_operator_decision_bindings.sql"
+    "142_operation_catalog_operator_decision_bindings.sql",
+    "143_object_field_registry_authority.sql",
+    "144_object_field_registry_hard_cutover.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -2090,6 +2092,22 @@
         "object_type": "row",
         "object_name": "operation_catalog_registry.operator.decision_list"
       }
+    ],
+    "143_object_field_registry_authority.sql": [
+      {
+        "object_type": "table",
+        "object_name": "object_field_registry"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_object_field_registry_active_type_order"
+      }
+    ],
+    "144_object_field_registry_hard_cutover.sql": [
+      {
+        "object_type": "constraint",
+        "object_name": "object_field_registry.object_field_registry_field_name_nonblank"
+      }
     ]
   },
   "policy_buckets": {
@@ -2164,7 +2182,9 @@
       "139_operation_catalog_operator_control_bindings.sql",
       "140_operation_catalog_surface_cleanup.sql",
       "141_operation_catalog_provider_onboarding.sql",
-      "142_operation_catalog_operator_decision_bindings.sql"
+      "142_operation_catalog_operator_decision_bindings.sql",
+      "143_object_field_registry_authority.sql",
+      "144_object_field_registry_hard_cutover.sql"
     ],
     "bootstrap_only": [
       "012_execution_leases.sql",

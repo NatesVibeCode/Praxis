@@ -25,6 +25,7 @@ class _RequestStub:
 class _RuntimeConn:
     def __init__(self) -> None:
         self.object_types: dict[str, dict[str, Any]] = {}
+        self.object_fields: dict[tuple[str, str], dict[str, Any]] = {}
         self.objects: dict[str, dict[str, Any]] = {}
 
     @staticmethod
@@ -45,15 +46,37 @@ class _RuntimeConn:
     def fetchrow(self, query: str, *params: Any) -> dict[str, Any] | None:
         normalized = " ".join(query.split())
 
+        if normalized == "SELECT type_id, name, description, icon, created_at FROM object_types WHERE type_id = $1":
+            row = self.object_types.get(str(params[0]))
+            return None if row is None else dict(row)
+
         if normalized.startswith("INSERT INTO object_types"):
             row = {
                 "type_id": str(params[0]),
                 "name": params[1],
                 "description": params[2],
                 "icon": params[3],
-                "property_definitions": self._json_value(params[4]),
+                "created_at": "now",
             }
             self.object_types[row["type_id"]] = row
+            return dict(row)
+
+        if normalized.startswith("INSERT INTO object_field_registry"):
+            row = {
+                "type_id": str(params[0]),
+                "field_name": str(params[1]),
+                "label": str(params[2]),
+                "field_kind": str(params[3]),
+                "description": str(params[4]),
+                "required": bool(params[5]),
+                "default_value": self._json_value(params[6]),
+                "options": self._json_value(params[7]),
+                "display_order": int(params[8]),
+                "binding_revision": str(params[9]),
+                "decision_ref": str(params[10]),
+                "retired_at": None,
+            }
+            self.object_fields[(row["type_id"], row["field_name"])] = row
             return dict(row)
 
         if normalized.startswith("INSERT INTO objects"):
@@ -99,6 +122,29 @@ class _RuntimeConn:
 
     def execute(self, query: str, *params: Any) -> list[dict[str, Any]]:
         normalized = " ".join(query.split())
+        if normalized.startswith("DELETE FROM object_field_registry WHERE type_id = $1"):
+            type_id = str(params[0])
+            for key in [key for key in self.object_fields if key[0] == type_id]:
+                self.object_fields.pop(key, None)
+            return []
+        if normalized.startswith("SELECT type_id, name, description, icon, created_at FROM object_types WHERE search_vector @@ plainto_tsquery('english', $1) ORDER BY name LIMIT $2"):
+            return [dict(row) for row in self.object_types.values()][: int(params[1])]
+        if normalized.startswith("SELECT type_id, name, description, icon, created_at FROM object_types ORDER BY name LIMIT $1"):
+            return [dict(row) for row in self.object_types.values()][: int(params[0])]
+        if normalized.startswith("SELECT type_id, field_name, label, field_kind, description, required, default_value, options, display_order, retired_at FROM object_field_registry WHERE type_id = $1 AND retired_at IS NULL ORDER BY display_order ASC, field_name ASC"):
+            type_id = str(params[0])
+            return [
+                dict(row)
+                for row in self.object_fields.values()
+                if row["type_id"] == type_id and row.get("retired_at") is None
+            ]
+        if normalized.startswith("SELECT type_id, field_name, label, field_kind, description, required, default_value, options, display_order, retired_at FROM object_field_registry WHERE type_id = $1 ORDER BY display_order ASC, field_name ASC"):
+            type_id = str(params[0])
+            return [dict(row) for row in self.object_fields.values() if row["type_id"] == type_id]
+        if normalized.startswith("SELECT type_id, field_name, label, field_kind, description, required, default_value, options, display_order, retired_at FROM object_field_registry WHERE retired_at IS NULL ORDER BY type_id ASC, display_order ASC, field_name ASC"):
+            return [dict(row) for row in self.object_fields.values() if row.get("retired_at") is None]
+        if normalized.startswith("SELECT type_id, field_name, label, field_kind, description, required, default_value, options, display_order, retired_at FROM object_field_registry ORDER BY type_id ASC, display_order ASC, field_name ASC"):
+            return [dict(row) for row in self.object_fields.values()]
         if normalized == "UPDATE objects SET status = 'deleted', updated_at = now() WHERE object_id = $1":
             object_id = str(params[0])
             row = self.objects.get(object_id)
@@ -109,9 +155,31 @@ class _RuntimeConn:
             return []
         raise AssertionError(f"unexpected execute query: {normalized}")
 
+    def execute_many(self, query: str, rows: list[tuple[Any, ...]]) -> None:
+        normalized = " ".join(query.split())
+        if normalized.startswith("INSERT INTO object_field_registry ("):
+            for params in rows:
+                row = {
+                    "type_id": str(params[0]),
+                    "field_name": str(params[1]),
+                    "label": str(params[2]),
+                    "field_kind": str(params[3]),
+                    "description": str(params[4]),
+                    "required": bool(params[5]),
+                    "default_value": self._json_value(params[6]),
+                    "options": self._json_value(params[7]),
+                    "display_order": int(params[8]),
+                    "binding_revision": str(params[9]),
+                    "decision_ref": str(params[10]),
+                    "retired_at": None,
+                }
+                self.object_fields[(row["type_id"], row["field_name"])] = row
+            return
+        raise AssertionError(f"unexpected execute_many query: {normalized}")
+
 
 def test_object_type_handler_delegates_to_runtime_owner() -> None:
-    request = _RequestStub({"name": "Widget", "property_definitions": {"title": {"type": "string"}}})
+    request = _RequestStub({"name": "Widget", "fields": [{"name": "title", "type": "string"}]})
 
     with patch.object(
         workflow_query,
@@ -156,7 +224,7 @@ def test_object_handlers_delegate_to_runtime_owner() -> None:
 
     request = _RequestStub({"object_id": "obj-123"})
     with patch.object(workflow_query, "delete_object", return_value={"deleted": True}) as delete_mock:
-        workflow_query._handle_objects_post(request, "/api/objects/delete")
+        workflow_query._handle_objects_delete(request, "/api/objects/delete")
 
     delete_mock.assert_called_once()
     assert request.sent == (200, {"deleted": True})
@@ -315,3 +383,20 @@ def test_delete_object_marks_row_deleted_and_keeps_contract() -> None:
 
     assert deleted == {"deleted": True}
     assert conn.objects[created["object_id"]]["status"] == "deleted"
+
+
+def test_upsert_object_type_returns_compiled_fields() -> None:
+    conn = _RuntimeConn()
+
+    created = object_lifecycle.upsert_object_type(
+        conn,
+        type_id="ticket",
+        name="Ticket",
+        fields=[
+            {"name": "title", "type": "text", "required": True},
+            {"name": "status", "type": "enum", "options": ["open", "closed"]},
+        ],
+    )
+
+    assert [field["name"] for field in created["fields"]] == ["title", "status"]
+    assert "property_definitions" not in created

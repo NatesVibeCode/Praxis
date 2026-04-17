@@ -1186,6 +1186,16 @@ def test_unknown_root_command_suggests_help() -> None:
     assert "workflow help api" in rendered
 
 
+def test_defs_alias_is_no_longer_exposed_as_a_root_command() -> None:
+    stdout = StringIO()
+
+    assert workflow_cli_main(["defs"], stdout=stdout) == 2
+
+    rendered = stdout.getvalue()
+    assert "workflow defs has been removed" in rendered
+    assert "workflow records" in rendered
+
+
 def test_run_frontdoor_forwards_fresh_launch_intent(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

@@ -62,15 +62,15 @@ function DataTableModule({ config }: QuadrantProps) {
     }));
   }, [cfg.publishSelection, cfg.objectType]);
 
-  // Fetch property definitions for objectType
+  // Fetch field definitions for objectType
   useEffect(() => {
     if (!cfg.objectType) return;
     fetch(`/api/object-types/${cfg.objectType}`)
       .then(r => r.json())
       .then(data => {
-        const typePayload = (data as { type?: { property_definitions?: PropertyDef[] } } | null)?.type;
-        const directPayload = (data as { property_definitions?: PropertyDef[] })?.property_definitions;
-        setPropDefs(typePayload?.property_definitions ?? directPayload ?? []);
+        const typePayload = (data as { type?: { fields?: PropertyDef[] } } | null)?.type;
+        const directPayload = (data as { fields?: PropertyDef[] })?.fields;
+        setPropDefs(typePayload?.fields ?? directPayload ?? []);
       })
       .catch(() => setPropDefs([]));
   }, [cfg.objectType]);

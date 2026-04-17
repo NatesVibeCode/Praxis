@@ -131,6 +131,22 @@ backfilled AS (
         trim(COALESCE(field ->> 'label', field ->> 'field_name', field ->> 'name')) AS label,
         CASE lower(COALESCE(field ->> 'field_kind', field ->> 'type', 'text'))
             WHEN 'string' THEN 'text'
+            WHEN 'str' THEN 'text'
+            WHEN 'varchar' THEN 'text'
+            WHEN 'integer' THEN 'number'
+            WHEN 'int' THEN 'number'
+            WHEN 'float' THEN 'number'
+            WHEN 'double' THEN 'number'
+            WHEN 'decimal' THEN 'number'
+            WHEN 'bool' THEN 'boolean'
+            WHEN 'object' THEN 'json'
+            WHEN 'array' THEN 'json'
+            WHEN 'list' THEN 'json'
+            WHEN 'map' THEN 'json'
+            WHEN 'dict' THEN 'json'
+            WHEN 'jsonb' THEN 'json'
+            WHEN 'timestamp' THEN 'datetime'
+            WHEN 'ref' THEN 'reference'
             ELSE lower(COALESCE(field ->> 'field_kind', field ->> 'type', 'text'))
         END AS field_kind,
         trim(COALESCE(field ->> 'description', '')) AS description,

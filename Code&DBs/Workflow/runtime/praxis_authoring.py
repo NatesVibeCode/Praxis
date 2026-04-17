@@ -285,22 +285,13 @@ def scaffold_object_type(spec: dict[str, Any]) -> dict[str, Any]:
                 "description": "Canonical key field",
             },
         )
-    property_definitions = {
-        "fields": fields,
-        "display_field": display_field,
-        "key_field": key_field,
-        "ui_hints": {
-            "title_field": display_field,
-            "search_fields": [display_field, key_field],
-        },
-    }
     return {
         "object_type": {
             "type_id": type_id,
             "name": name,
             "description": _text(spec.get("description")),
             "icon": _text(spec.get("icon")),
-            "property_definitions": property_definitions,
+            "fields": fields,
         },
         "recommended_modules": [
             {"module": "search-panel", "config": {"objectType": type_id}},
