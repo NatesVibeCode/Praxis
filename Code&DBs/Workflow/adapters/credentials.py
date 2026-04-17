@@ -15,7 +15,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 from .keychain import resolve_secret
-from .provider_registry import resolve_api_key_env_vars
+from registry.provider_execution_registry import resolve_api_key_env_vars
 from .provider_transport import BUILTIN_PROVIDER_PROFILES, resolve_api_key_env_vars as resolve_builtin_api_key_env_vars
 
 

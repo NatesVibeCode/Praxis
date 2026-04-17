@@ -10,7 +10,7 @@ from memory.graph import BlastRadius, BlastResult, RandomWalkWithRestart
 from memory.ingest import IngestKind, IngestPayload, IngestResult, IngestRouter
 from memory.packer import ContextPacker, ContextSection, PackedContext, estimate_tokens
 from memory.retrieval import HybridRetriever, RetrievalResult
-from memory.types import EntityType, Edge
+from memory.types import Edge, EdgeAuthorityClass, EntityType
 
 from datetime import datetime, timezone
 
@@ -117,9 +117,19 @@ class KnowledgeGraph:
         rwr = RandomWalkWithRestart()
         return rwr.compute(seed_ids, edges)
 
-    def blast_radius(self, entity_id: str) -> BlastResult:
+    def blast_radius(
+        self,
+        entity_id: str,
+        *,
+        include_enrichment: bool = False,
+    ) -> BlastResult:
         """Compute blast radius from an entity via stored edges."""
-        edges = self._all_edges()
+        authority_classes = (
+            (EdgeAuthorityClass.canonical, EdgeAuthorityClass.enrichment)
+            if include_enrichment
+            else (EdgeAuthorityClass.canonical,)
+        )
+        edges = self._all_edges(authority_classes=authority_classes)
         br = BlastRadius()
         return br.compute(entity_id, edges)
 
@@ -141,14 +151,33 @@ class KnowledgeGraph:
 
     # -- internal helpers --------------------------------------------------
 
-    def _all_edges(self) -> list[Edge]:
+    def _all_edges(
+        self,
+        *,
+        authority_classes: tuple[EdgeAuthorityClass, ...] = (EdgeAuthorityClass.canonical,),
+    ) -> list[Edge]:
         """Retrieve all edges from the database."""
         conn = self._engine._connect()
         from memory.crud import _row_to_edge
-        rows = conn.execute("SELECT * FROM memory_edges")
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM memory_edges
+            WHERE active = true
+              AND authority_class = ANY($1::text[])
+            """,
+            [edge_class.value for edge_class in authority_classes],
+        )
         return [_row_to_edge(r) for r in rows]
 
     def _count_edges(self) -> int:
         conn = self._engine._connect()
-        row = conn.fetchval("SELECT COUNT(*) FROM memory_edges")
+        row = conn.fetchval(
+            """
+            SELECT COUNT(*)
+            FROM memory_edges
+            WHERE active = true
+              AND authority_class = 'canonical'
+            """
+        )
         return row or 0

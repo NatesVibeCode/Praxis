@@ -1135,7 +1135,7 @@ def test_execute_job_non_packet_runtime_uses_execution_manifest_authority(monkey
                                 "execution_manifest_ref": "execution_manifest:wf_alpha:def_alpha:manifest_alpha",
                                 "approved_bundle_refs": ["capability_bundle:email_triage"],
                                 "tool_allowlist": {
-                                    "mcp_tools": ["praxis_integration", "praxis_status"],
+                                    "mcp_tools": ["praxis_integration", "praxis_status_snapshot"],
                                     "adapter_tools": ["repo_fs"],
                                 },
                                 "verify_refs": ["verify.approved"],
@@ -1243,7 +1243,7 @@ def test_execute_job_non_packet_runtime_uses_execution_manifest_authority(monkey
     assert execution_bundle["execution_manifest_ref"] == "execution_manifest:wf_alpha:def_alpha:manifest_alpha"
     assert execution_bundle["allowed_tools"] == ["repo_fs"]
     assert "praxis_integration" in execution_bundle["mcp_tool_names"]
-    assert "praxis_status" in execution_bundle["mcp_tool_names"]
+    assert "praxis_status_snapshot" in execution_bundle["mcp_tool_names"]
     assert "praxis_query" not in execution_bundle["mcp_tool_names"]
     assert execution_bundle["access_policy"]["verify_refs"] == ["verify.approved"]
 
@@ -2275,10 +2275,11 @@ def test_submit_workflow_routes_graph_specs_through_graph_runtime_submit(monkeyp
 
     captured: dict[str, object] = {}
 
-    def _fake_graph_submit(conn, spec_dict, *, run_id):
+    def _fake_graph_submit(conn, spec_dict, *, run_id, packet_provenance=None):
         captured["conn"] = conn
         captured["spec_dict"] = spec_dict
         captured["run_id"] = run_id
+        captured["packet_provenance"] = packet_provenance
         return {"run_id": run_id, "status": "succeeded", "execution_mode": "graph_runtime"}
 
     monkeypatch.setattr(_admission_mod, "_submit_graph_workflow_inline", _fake_graph_submit)
@@ -2295,6 +2296,7 @@ def test_submit_workflow_routes_graph_specs_through_graph_runtime_submit(monkeyp
     assert captured["conn"] is conn
     assert captured["run_id"] == "graph_dispatch"
     assert captured["spec_dict"] == spec._raw
+    assert captured["packet_provenance"]["source_kind"] == "file_submit"
 
 
 def test_submit_workflow_routes_deterministic_specs_through_graph_runtime_submit(monkeypatch):
@@ -2318,10 +2320,11 @@ def test_submit_workflow_routes_deterministic_specs_through_graph_runtime_submit
 
     captured: dict[str, object] = {}
 
-    def _fake_graph_submit(conn, spec_dict, *, run_id):
+    def _fake_graph_submit(conn, spec_dict, *, run_id, packet_provenance=None):
         captured["conn"] = conn
         captured["spec_dict"] = spec_dict
         captured["run_id"] = run_id
+        captured["packet_provenance"] = packet_provenance
         return {"run_id": run_id, "status": "succeeded", "execution_mode": "graph_runtime"}
 
     monkeypatch.setattr(_admission_mod, "_submit_graph_workflow_inline", _fake_graph_submit)
@@ -2338,6 +2341,7 @@ def test_submit_workflow_routes_deterministic_specs_through_graph_runtime_submit
     assert captured["conn"] is conn
     assert captured["run_id"] == "deterministic_dispatch"
     assert captured["spec_dict"] == spec._raw
+    assert captured["packet_provenance"]["source_kind"] == "file_submit"
 
 
 def test_submit_workflow_inline_routes_single_prompt_specs_through_graph_runtime_submit(monkeypatch):
@@ -2358,10 +2362,11 @@ def test_submit_workflow_inline_routes_single_prompt_specs_through_graph_runtime
 
     captured: dict[str, object] = {}
 
-    def _fake_graph_submit(conn, inline_spec, *, run_id):
+    def _fake_graph_submit(conn, inline_spec, *, run_id, packet_provenance=None):
         captured["conn"] = conn
         captured["spec_dict"] = inline_spec
         captured["run_id"] = run_id
+        captured["packet_provenance"] = packet_provenance
         return {"run_id": run_id, "status": "succeeded", "execution_mode": "graph_runtime"}
 
     monkeypatch.setattr(_admission_mod, "_submit_graph_workflow_inline", _fake_graph_submit)
@@ -2378,6 +2383,7 @@ def test_submit_workflow_inline_routes_single_prompt_specs_through_graph_runtime
     assert captured["conn"] is conn
     assert captured["run_id"] == "prompt_inline_dispatch"
     assert captured["spec_dict"] == spec_dict
+    assert captured["packet_provenance"] is None
 
 
 def test_submit_workflow_inline_fails_closed_when_graph_only_single_job_cannot_compile(monkeypatch):
@@ -2445,6 +2451,19 @@ def test_submit_graph_workflow_inline_reports_current_state_for_success(monkeypa
         "_persist_graph_submission_evidence",
         _fake_persist_graph_submission_evidence,
     )
+    monkeypatch.setattr(
+        _admission_mod,
+        "_build_graph_execution_packet",
+        lambda *_args, **_kwargs: {
+            "compile_provenance": {
+                "input_fingerprint": "packet_input.alpha",
+                "reuse": {
+                    "decision": "compiled",
+                    "reason_code": "packet.compile.miss",
+                },
+            }
+        },
+    )
 
     result = _admission_mod._submit_graph_workflow_inline(
         _FakeConn(
@@ -2464,6 +2483,11 @@ def test_submit_graph_workflow_inline_reports_current_state_for_success(monkeypa
     assert result["status"] == "claim_accepted"
     assert result["reason_code"] == "claim.validated"
     assert result["execution_mode"] == "graph_runtime"
+    assert result["packet_reuse_provenance"] == {
+        "decision": "compiled",
+        "reason_code": "packet.compile.miss",
+        "input_fingerprint": "packet_input.alpha",
+    }
     assert captured["request"] is fake_request
 
 
@@ -2527,6 +2551,39 @@ def test_graph_adapter_registry_prefers_docker_for_cli_llm() -> None:
     cli_adapter = registry._registry["cli_llm"]
 
     assert getattr(cli_adapter, "_prefer_docker", None) is True
+
+
+def test_runtime_setup_and_graph_admission_share_adapter_registry_authority() -> None:
+    from runtime.workflow import runtime_setup as _runtime_setup_mod
+
+    setup_registry = _runtime_setup_mod._build_adapter_registry(
+        SimpleNamespace(
+            adapter_type="cli_llm",
+            scope_write=["README.md"],
+            workdir="/tmp/workflow",
+            verify_refs=["verifier.job.python.pytest_file"],
+            packet_provenance=None,
+            definition_revision=None,
+            plan_revision=None,
+            allowed_tools=(),
+            capabilities=(),
+            label=None,
+            task_type="implement",
+        )
+    )
+    graph_registry = _admission_mod._graph_adapter_registry(
+        SimpleNamespace(
+            nodes=[
+                SimpleNamespace(adapter_type="context_compiler"),
+                SimpleNamespace(adapter_type="cli_llm"),
+                SimpleNamespace(adapter_type="output_parser"),
+                SimpleNamespace(adapter_type="file_writer"),
+                SimpleNamespace(adapter_type="verifier"),
+            ]
+        )
+    )
+
+    assert set(setup_registry._registry) == set(graph_registry._registry)
 
 
 def test_graph_runtime_timeout_seconds_uses_finished_run_history(monkeypatch):
@@ -2689,9 +2746,9 @@ def test_submit_workflow_persists_execution_bundle_and_control_prompt(monkeypatc
             ],
         },
     )
-    monkeypatch.setattr(_admission_mod, "_runtime_profile_ref_from_spec", lambda _spec: None)
-    monkeypatch.setattr("runtime.workflow._routing._runtime_profile_ref_from_spec", lambda _spec: None)
-    monkeypatch.setattr("runtime.workflow._routing._workspace_ref_from_spec", lambda _spec: None)
+    monkeypatch.setattr(_admission_mod, "_runtime_profile_ref_from_spec", lambda _spec, conn=None: None)
+    monkeypatch.setattr("runtime.workflow._routing._runtime_profile_ref_from_spec", lambda _spec, conn=None: None)
+    monkeypatch.setattr("runtime.workflow._routing._workspace_ref_from_spec", lambda _spec, conn=None: None)
 
     conn = _FakeConn()
 
@@ -2886,9 +2943,9 @@ def test_preview_and_submit_share_execution_assembly_until_submit_boundary(monke
             "decisions": [{"decision_key": "authority.workspace_boundary"}],
         },
     )
-    monkeypatch.setattr(_admission_mod, "_runtime_profile_ref_from_spec", lambda _spec: None)
-    monkeypatch.setattr("runtime.workflow._routing._runtime_profile_ref_from_spec", lambda _spec: None)
-    monkeypatch.setattr("runtime.workflow._routing._workspace_ref_from_spec", lambda _spec: None)
+    monkeypatch.setattr(_admission_mod, "_runtime_profile_ref_from_spec", lambda _spec, conn=None: None)
+    monkeypatch.setattr("runtime.workflow._routing._runtime_profile_ref_from_spec", lambda _spec, conn=None: None)
+    monkeypatch.setattr("runtime.workflow._routing._workspace_ref_from_spec", lambda _spec, conn=None: None)
 
     preview_conn = _FakeConn()
     preview = _admission_mod.preview_workflow_execution(
@@ -2966,7 +3023,7 @@ def test_submit_workflow_prefers_execution_manifest_authority_over_prompt_bucket
             "execution_manifest_ref": "execution_manifest:wf:definition.bundle:1",
             "approved_bundle_refs": ["capability_bundle:email_triage"],
             "tool_allowlist": {
-                "mcp_tools": ["praxis_integration", "praxis_status"],
+                "mcp_tools": ["praxis_integration", "praxis_status_snapshot"],
                 "adapter_tools": ["repo_fs"],
             },
             "verify_refs": ["verify.approved"],
@@ -2996,9 +3053,9 @@ def test_submit_workflow_prefers_execution_manifest_authority_over_prompt_bucket
         ),
     )
     monkeypatch.setattr(_ctx_mod, "proof_metrics", lambda conn: {})
-    monkeypatch.setattr(_admission_mod, "_runtime_profile_ref_from_spec", lambda _spec: None)
-    monkeypatch.setattr("runtime.workflow._routing._runtime_profile_ref_from_spec", lambda _spec: None)
-    monkeypatch.setattr("runtime.workflow._routing._workspace_ref_from_spec", lambda _spec: None)
+    monkeypatch.setattr(_admission_mod, "_runtime_profile_ref_from_spec", lambda _spec, conn=None: None)
+    monkeypatch.setattr("runtime.workflow._routing._runtime_profile_ref_from_spec", lambda _spec, conn=None: None)
+    monkeypatch.setattr("runtime.workflow._routing._workspace_ref_from_spec", lambda _spec, conn=None: None)
 
     conn = _FakeConn()
 
@@ -3016,7 +3073,7 @@ def test_submit_workflow_prefers_execution_manifest_authority_over_prompt_bucket
     assert bundle["approved_bundle_refs"] == ["capability_bundle:email_triage"]
     assert bundle["allowed_tools"] == ["repo_fs"]
     assert "praxis_integration" in bundle["mcp_tool_names"]
-    assert "praxis_status" in bundle["mcp_tool_names"]
+    assert "praxis_status_snapshot" in bundle["mcp_tool_names"]
     assert "praxis_query" not in bundle["mcp_tool_names"]
     assert bundle["access_policy"]["verify_refs"] == ["verify.approved"]
     assert bundle["access_policy"]["write_scope"] == ["app.py"]
@@ -3026,9 +3083,9 @@ def test_submit_workflow_prefers_execution_manifest_authority_over_prompt_bucket
 
 
 def test_submit_workflow_inline_fails_closed_for_builder_path_without_execution_manifest(monkeypatch):
-    monkeypatch.setattr(_admission_mod, "_runtime_profile_ref_from_spec", lambda _spec: None)
-    monkeypatch.setattr("runtime.workflow._routing._runtime_profile_ref_from_spec", lambda _spec: None)
-    monkeypatch.setattr("runtime.workflow._routing._workspace_ref_from_spec", lambda _spec: None)
+    monkeypatch.setattr(_admission_mod, "_runtime_profile_ref_from_spec", lambda _spec, conn=None: None)
+    monkeypatch.setattr("runtime.workflow._routing._runtime_profile_ref_from_spec", lambda _spec, conn=None: None)
+    monkeypatch.setattr("runtime.workflow._routing._workspace_ref_from_spec", lambda _spec, conn=None: None)
     monkeypatch.setattr(
         _ctx_mod,
         "resolve_scope",

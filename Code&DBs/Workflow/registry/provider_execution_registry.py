@@ -176,7 +176,7 @@ def _require_database_url() -> str:
         return str(resolve_runtime_database_url(repo_root=_repo_root(), required=True))
     except PostgresConfigurationError as exc:
         raise RuntimeError(
-            "provider_registry requires explicit WORKFLOW_DATABASE_URL Postgres authority"
+            "provider execution registry requires explicit WORKFLOW_DATABASE_URL Postgres authority"
         ) from exc
 
 
@@ -359,7 +359,7 @@ async def _fetch_from_db(db_url: str) -> tuple[list[Any], list[Any], list[Any]]:
                 "SELECT config_key, config_value FROM adapter_config"
             )
         except Exception as exc:
-            logger.warning("provider_registry: adapter_config load failed: %s", exc)
+            logger.warning("provider execution registry: adapter_config load failed: %s", exc)
             config_rows = []
         try:
             failure_rows = await conn.fetch(
@@ -367,7 +367,7 @@ async def _fetch_from_db(db_url: str) -> tuple[list[Any], list[Any], list[Any]]:
                 "FROM adapter_failure_mappings"
             )
         except Exception as exc:
-            logger.warning("provider_registry: adapter_failure_mappings load failed: %s", exc)
+            logger.warning("provider execution registry: adapter_failure_mappings load failed: %s", exc)
             failure_rows = []
         return provider_rows, config_rows, failure_rows
     finally:
@@ -486,7 +486,7 @@ def _load_from_db() -> None:
             _record_degraded_builtin(
                 "asyncpg not installed",
                 log_level="warning",
-                message="provider_registry: asyncpg unavailable — using built-in provider profiles",
+                message="provider execution registry: asyncpg unavailable — using built-in provider profiles",
             )
             return
 
@@ -496,7 +496,7 @@ def _load_from_db() -> None:
             _record_degraded_builtin(
                 str(exc),
                 log_level="warning",
-                message=f"provider_registry: {exc} — using built-in provider profiles",
+                message=f"provider execution registry: {exc} — using built-in provider profiles",
             )
             return
 
@@ -506,7 +506,7 @@ def _load_from_db() -> None:
             _record_degraded_builtin(
                 str(exc),
                 log_level="error",
-                message=f"provider_registry: {exc} — using built-in provider profiles",
+                message=f"provider execution registry: {exc} — using built-in provider profiles",
             )
             return
         except Exception as exc:
@@ -514,7 +514,7 @@ def _load_from_db() -> None:
                 f"{type(exc).__name__}: {exc}",
                 log_level="error",
                 message=(
-                    "provider_registry: DB fetch failed "
+                    "provider execution registry: DB fetch failed "
                     f"({type(exc).__name__}: {exc}) — using built-in provider profiles"
                 ),
             )
@@ -525,7 +525,7 @@ def _load_from_db() -> None:
                 "no active rows",
                 log_level="warning",
                 message=(
-                    "provider_registry: no active provider_cli_profiles in DB "
+                    "provider execution registry: no active provider_cli_profiles in DB "
                     "— using built-in provider profiles"
                 ),
             )
@@ -540,14 +540,14 @@ def _load_from_db() -> None:
             except Exception as exc:
                 slug = row.get("provider_slug", "<unknown>")
                 parse_errors.append(f"{slug}: {exc}")
-                logger.warning("provider_registry: skipping bad row %s: %s", slug, exc)
+                logger.warning("provider execution registry: skipping bad row %s: %s", slug, exc)
                 continue
             loaded_registry[profile.provider_slug] = profile
             loaded_aliases[profile.binary] = profile.provider_slug
             for alias in profile.aliases:
                 if alias in loaded_aliases and loaded_aliases[alias] != profile.provider_slug:
                     logger.warning(
-                        "provider_registry: alias %r collision (%s overwrites %s)",
+                        "provider execution registry: alias %r collision (%s overwrites %s)",
                         alias,
                         profile.provider_slug,
                         loaded_aliases[alias],
@@ -559,7 +559,7 @@ def _load_from_db() -> None:
                 f"all {len(rows)} rows failed validation",
                 log_level="error",
                 message=(
-                    "provider_registry: all "
+                    "provider execution registry: all "
                     f"{len(rows)} DB rows failed validation — using built-in provider profiles. "
                     f"Errors: {'; '.join(parse_errors)}"
                 ),
@@ -579,7 +579,7 @@ def _load_from_db() -> None:
         _DB_LOADED = True
 
         logger.info(
-            "provider_registry: loaded %d provider(s) from DB%s",
+            "provider execution registry: loaded %d provider(s) from DB%s",
             len(loaded_registry),
             f" ({len(parse_errors)} skipped)" if parse_errors else "",
         )
@@ -642,14 +642,14 @@ def resolve_provider_from_alias(alias: str) -> str | None:
 def default_provider_slug() -> str:
     _load_from_db()
     if not _REGISTRY:
-        raise RuntimeError("provider_registry has no authoritative provider profiles")
+        raise RuntimeError("provider execution registry has no authoritative provider profiles")
     # Only explicit default-priority providers establish the runtime default.
     # Registry insertion order is transport data, not authority.
     for provider_slug in _DEFAULT_PROVIDER_PRIORITY:
         if provider_slug in _REGISTRY:
             return provider_slug
     raise RuntimeError(
-        "provider_registry has no configured default provider; registry order is not authoritative"
+        "provider execution registry has no configured default provider; registry order is not authoritative"
     )
 
 

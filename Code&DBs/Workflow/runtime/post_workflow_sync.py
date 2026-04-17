@@ -173,7 +173,7 @@ def closeout_workflow_run_roadmap_items(
 
     existing_rows = db.execute(
         """
-        SELECT roadmap_item_id, status, completed_at
+        SELECT roadmap_item_id, status, lifecycle, completed_at
         FROM roadmap_items
         WHERE roadmap_item_id = ANY($1::text[])
         """,
@@ -204,6 +204,7 @@ def closeout_workflow_run_roadmap_items(
             """
             UPDATE public.roadmap_items
             SET status = 'done',
+                lifecycle = 'completed',
                 completed_at = COALESCE(completed_at, now()),
                 updated_at = now()
             WHERE roadmap_item_id = ANY($1::text[])

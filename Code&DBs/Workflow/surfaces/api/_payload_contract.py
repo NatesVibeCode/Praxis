@@ -23,11 +23,18 @@ def require_text(value: object, *, field_name: str) -> str:
 
 
 def optional_text(value: object, *, field_name: str = "field") -> str | None:
-    """Return normalized text or ``None`` when the value is omitted."""
+    """Return normalized text or ``None`` when the value is omitted.
+
+    Blank strings are treated as omitted so read models can tolerate legacy
+    rows that persisted empty optional fields instead of ``NULL``.
+    """
 
     if value is None:
         return None
-    return require_text(value, field_name=field_name)
+    if not isinstance(value, str):
+        raise ValueError(f"{field_name} must be a non-empty string")
+    normalized = value.strip()
+    return normalized or None
 
 
 def coerce_optional_text(

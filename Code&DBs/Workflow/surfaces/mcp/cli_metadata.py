@@ -298,6 +298,10 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         examples=[
             _example("Inspect the latest entity", {"depth": 1}),
             _example("Inspect blast radius for one entity", {"entity_id": "entity_abc123", "depth": 1}),
+            _example(
+                "Inspect blast radius including enrichment edges",
+                {"entity_id": "entity_abc123", "depth": 1, "include_enrichment": True},
+            ),
         ],
     ),
     "praxis_heal": _tool(
@@ -379,28 +383,6 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             _example("Match an app intent", {"intent": "invoice approval workflow with status tracking"}),
         ],
     ),
-    "praxis_maintenance": _tool(
-        surface="operations",
-        tier="advanced",
-        recommended_alias=None,
-        when_to_use="Run explicit operator maintenance actions that mutate runtime state.",
-        when_not_to_use="Do not use it for ordinary observability or health reading.",
-        risks={
-            "default": "write",
-            "actions": {
-                "reset_metrics": "write",
-                "backfill_bug_replay_provenance": "write",
-                "backfill_semantic_bridges": "write",
-                "refresh_semantic_projection": "write",
-            },
-        },
-        examples=[
-            _example("Reset metrics with confirmation", {"action": "reset_metrics", "confirm": True}),
-            _example("Backfill replay provenance", {"action": "backfill_bug_replay_provenance", "open_only": True}),
-            _example("Backfill semantic bridges", {"action": "backfill_semantic_bridges"}),
-            _example("Refresh semantic projection", {"action": "refresh_semantic_projection"}),
-        ],
-    ),
     "praxis_manifest_generate": _tool(
         surface="planning",
         tier="advanced",
@@ -454,22 +436,6 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
                     "semantic_neighbor_limit": 8,
                 },
             ),
-        ],
-    ),
-    "praxis_operator_view": _tool(
-        surface="operator",
-        tier="advanced",
-        recommended_alias=None,
-        when_to_use="Discover native operator status, cutover readiness, run-scoped workflow topology, cross-domain operator graph topology, semantic assertion, issue backlog, or replay-ready bug views.",
-        when_not_to_use="Do not use it to mutate operator state.",
-        risks={"default": "read", "views": {"status": "read", "scoreboard": "read", "graph": "read", "operator_graph": "read", "semantics": "read", "lineage": "read", "issue_backlog": "read", "replay_ready_bugs": "read"}},
-        examples=[
-            _example("Read run-scoped workflow graph topology", {"view": "graph", "run_id": "run_123"}),
-            _example("Read cross-domain operator graph topology", {"view": "operator_graph"}),
-            _example("Read semantic assertions", {"view": "semantics", "predicate_slug": "grouped_in"}),
-            _example("Read graph lineage", {"view": "lineage", "run_id": "run_123"}),
-            _example("Read issue backlog", {"view": "issue_backlog", "limit": 25}),
-            _example("Read replay-ready bugs", {"view": "replay_ready_bugs", "limit": 25}),
         ],
     ),
     "praxis_operator_write": _tool(
@@ -746,17 +712,6 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         examples=[
             _example("Read session context", {"action": "read"}),
             _example("Write session context", {"action": "write", "context": {"step": 3}}),
-        ],
-    ),
-    "praxis_status": _tool(
-        surface="operations",
-        tier="advanced",
-        recommended_alias=None,
-        when_to_use="Inspect workflow pass rate, failure mix, and in-flight run summaries from receipts.",
-        when_not_to_use="Do not use it for deep health probes or workflow dispatch.",
-        risks={"default": "read"},
-        examples=[
-            _example("Show 24h status", {"since_hours": 24}),
         ],
     ),
     "praxis_submit_artifact_bundle": _tool(

@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING
 
 from storage.postgres.memory_graph_repository import PostgresMemoryGraphRepository
 
-from memory.types import Edge, Entity, EntityType, RelationType
+from memory.types import Edge, EdgeAuthorityClass, EdgeProvenanceKind, Entity, EntityType, RelationType
 
 if TYPE_CHECKING:
     from storage.postgres import SyncPostgresConnection
@@ -50,6 +51,22 @@ def _row_to_edge(row) -> Edge:
     elif metadata is None:
         metadata = {}
     created = row["created_at"]
+    authority_class = row["authority_class"] if "authority_class" in row else None
+    if authority_class in (None, "", "asserted"):
+        authority_enum = EdgeAuthorityClass.canonical
+    else:
+        authority_enum = EdgeAuthorityClass(str(authority_class))
+
+    provenance_kind = row["provenance_kind"] if "provenance_kind" in row else None
+    if provenance_kind in (None, ""):
+        provenance_kind = row["edge_origin"] if "edge_origin" in row else None
+    if provenance_kind in (None, ""):
+        provenance_enum = EdgeProvenanceKind.legacy_unspecified
+    else:
+        try:
+            provenance_enum = EdgeProvenanceKind(str(provenance_kind))
+        except ValueError:
+            provenance_enum = EdgeProvenanceKind.legacy_unspecified
     return Edge(
         source_id=row["source_id"],
         target_id=row["target_id"],
@@ -57,6 +74,9 @@ def _row_to_edge(row) -> Edge:
         weight=row["weight"],
         metadata=metadata if isinstance(metadata, dict) else dict(metadata),
         created_at=created if isinstance(created, datetime) else datetime.fromisoformat(created),
+        authority_class=authority_enum,
+        provenance_kind=provenance_enum,
+        provenance_ref=row["provenance_ref"] if "provenance_ref" in row else None,
     )
 
 
@@ -155,19 +175,50 @@ def remove_edge(
 
 
 def get_edges(
-    conn: "SyncPostgresConnection", entity_id: str, direction: str = "outgoing"
+    conn: "SyncPostgresConnection",
+    entity_id: str,
+    direction: str = "outgoing",
+    authority_classes: Sequence[EdgeAuthorityClass] | None = None,
 ) -> list[Edge]:
+    normalized_authority_classes = tuple(
+        edge_class.value for edge_class in (
+            authority_classes or (EdgeAuthorityClass.canonical,)
+        )
+    )
     if direction == "outgoing":
         rows = conn.execute(
-            f"SELECT * FROM {_EDGES} WHERE source_id = $1", entity_id,
+            f"""
+            SELECT *
+            FROM {_EDGES}
+            WHERE source_id = $1
+              AND active = true
+              AND authority_class = ANY($2::text[])
+            """,
+            entity_id,
+            list(normalized_authority_classes),
         )
     elif direction == "incoming":
         rows = conn.execute(
-            f"SELECT * FROM {_EDGES} WHERE target_id = $1", entity_id,
+            f"""
+            SELECT *
+            FROM {_EDGES}
+            WHERE target_id = $1
+              AND active = true
+              AND authority_class = ANY($2::text[])
+            """,
+            entity_id,
+            list(normalized_authority_classes),
         )
     else:
         rows = conn.execute(
-            f"SELECT * FROM {_EDGES} WHERE source_id = $1 OR target_id = $1",
+            f"""
+            SELECT *
+            FROM {_EDGES}
+            WHERE (source_id = $1 OR target_id = $1)
+              AND active = true
+              AND authority_class = ANY($2::text[])
+            """,
             entity_id,
+            list(normalized_authority_classes),
         )
     return [_row_to_edge(r) for r in rows]

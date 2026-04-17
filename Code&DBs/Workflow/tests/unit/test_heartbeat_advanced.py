@@ -12,7 +12,14 @@ import pytest
 from _pg_test_conn import get_test_conn
 
 from memory.engine import MemoryEngine
-from memory.types import Entity, EntityType, Edge, RelationType
+from memory.types import (
+    Edge,
+    EdgeAuthorityClass,
+    EdgeProvenanceKind,
+    Entity,
+    EntityType,
+    RelationType,
+)
 
 _RUN = uuid.uuid4().hex[:8]
 
@@ -144,7 +151,18 @@ class TestRelationshipIntegrityScanner:
         e2 = _make_entity()
         engine.insert(e1)
         engine.insert(e2)
-        engine.add_edge(Edge(e1.id, e2.id, RelationType.related_to, 0.5, {}, datetime.now(timezone.utc)))
+        engine.add_edge(
+            Edge(
+                e1.id,
+                e2.id,
+                RelationType.related_to,
+                0.5,
+                {},
+                datetime.now(timezone.utc),
+                authority_class=EdgeAuthorityClass.canonical,
+                provenance_kind=EdgeProvenanceKind.legacy_unspecified,
+            )
+        )
         scanner = RelationshipIntegrityScanner(engine)
         result = scanner.run()
         assert result.module_name == "relationship_integrity_scanner"

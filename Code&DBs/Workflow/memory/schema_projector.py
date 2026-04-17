@@ -16,7 +16,13 @@ import traceback
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from memory.types import Edge, Entity, EntityType, RelationType
+from memory.types import (
+    EdgeProvenanceKind,
+    Entity,
+    EntityType,
+    RelationType,
+    canonical_edge,
+)
 from runtime.heartbeat import HeartbeatModule, HeartbeatModuleResult, _ok, _fail
 
 if TYPE_CHECKING:
@@ -347,7 +353,7 @@ class SchemaProjector(HeartbeatModule):
             fk_pairs.setdefault(pair, []).append(r['fk_column'])
 
         for (src, tgt), fk_columns in fk_pairs.items():
-            edge = Edge(
+            edge = canonical_edge(
                 source_id=_table_entity_id(src),
                 target_id=_table_entity_id(tgt),
                 relation_type=RelationType.depends_on,
@@ -357,6 +363,8 @@ class SchemaProjector(HeartbeatModule):
                     'fk_columns': fk_columns,
                 },
                 created_at=now,
+                provenance_kind=EdgeProvenanceKind.schema_projection,
+                provenance_ref=f"foreign_key:{src}:{tgt}",
             )
             self._engine.add_edge(edge)
             actions += 1
@@ -409,7 +417,7 @@ class SchemaProjector(HeartbeatModule):
                 if (f'UPDATE {other_table}' in source
                         or f'INSERT INTO {other_table}' in source
                         or f'insert into {other_table}' in source.lower()):
-                    edge = Edge(
+                    edge = canonical_edge(
                         source_id=_table_entity_id(other_table),
                         target_id=_table_entity_id(src_table),
                         relation_type=RelationType.derived_from,
@@ -420,6 +428,8 @@ class SchemaProjector(HeartbeatModule):
                             'function_name': r['function_name'],
                         },
                         created_at=now,
+                        provenance_kind=EdgeProvenanceKind.schema_projection,
+                        provenance_ref=f"trigger:{r['trigger_name']}",
                     )
                     self._engine.add_edge(edge)
                     actions += 1
@@ -505,7 +515,7 @@ class SchemaProjector(HeartbeatModule):
             if not catalog_id:
                 continue
 
-            edge = Edge(
+            edge = canonical_edge(
                 source_id=_table_entity_id(table_name),
                 target_id=catalog_id,
                 relation_type=RelationType.implements,
@@ -516,6 +526,8 @@ class SchemaProjector(HeartbeatModule):
                     'module_count': r['module_count'],
                 },
                 created_at=now,
+                provenance_kind=EdgeProvenanceKind.schema_projection,
+                provenance_ref=f"table_to_catalog:{table_name}:{subsystem}",
             )
             self._engine.add_edge(edge)
             actions += 1

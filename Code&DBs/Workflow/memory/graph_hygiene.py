@@ -111,7 +111,8 @@ class GraphHygienist:
         # Load edges that connect active nodes
         edge_rows = conn.execute(
             "SELECT source_id, target_id, relation_type, weight, metadata, created_at "
-            "FROM memory_edges"
+            "FROM memory_edges "
+            "WHERE active = true AND authority_class = 'canonical'"
         )
 
         edges: list[Edge] = []

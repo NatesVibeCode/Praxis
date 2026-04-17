@@ -84,7 +84,7 @@ def probe_provider(provider_slug: str, model_slug: str) -> ProbeResult:
     env = dict(os.environ)
     # Ensure all declared API key env vars are populated from available aliases
     try:
-        from adapters.provider_registry import get_profile
+        from registry.provider_execution_registry import get_profile
         profile = get_profile(provider_slug)
         if profile and profile.api_key_env_vars:
             # If any declared key var has a value, copy it to all others

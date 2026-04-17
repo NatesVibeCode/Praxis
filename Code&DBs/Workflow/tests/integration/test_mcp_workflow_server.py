@@ -561,6 +561,235 @@ class _FakeBugTracker:
 class _FakePGConn:
     """Minimal Postgres stub for tests that need deterministic query results."""
 
+    _BINDING_REVISION = "binding.test.operator.mcp"
+    _DECISION_REF = "decision.test.operator.mcp"
+    _SOURCE_POLICIES = (
+        {
+            "policy_ref": "operation-command",
+            "source_kind": "operation_command",
+            "posture": "operate",
+            "idempotency_policy": "non_idempotent",
+            "enabled": True,
+            "binding_revision": _BINDING_REVISION,
+            "decision_ref": _DECISION_REF,
+        },
+        {
+            "policy_ref": "operation-query",
+            "source_kind": "operation_query",
+            "posture": "observe",
+            "idempotency_policy": "read_only",
+            "enabled": True,
+            "binding_revision": _BINDING_REVISION,
+            "decision_ref": _DECISION_REF,
+        },
+    )
+    _OPERATION_ROWS = {
+        "operator.status_snapshot": {
+            "operation_ref": "operator-status-snapshot",
+            "operation_name": "operator.status_snapshot",
+            "source_kind": "operation_query",
+            "operation_kind": "query",
+            "http_method": "GET",
+            "http_path": "/api/status",
+            "input_model_ref": "runtime.operations.queries.operator_observability.QueryOperatorStatusSnapshot",
+            "handler_ref": "runtime.operations.queries.operator_observability.handle_query_operator_status_snapshot",
+            "authority_ref": "authority.receipts",
+            "projection_ref": "projection.receipts",
+            "posture": None,
+            "idempotency_policy": None,
+            "enabled": True,
+            "binding_revision": _BINDING_REVISION,
+            "decision_ref": _DECISION_REF,
+        },
+        "operator.issue_backlog": {
+            "operation_ref": "operator-issue-backlog",
+            "operation_name": "operator.issue_backlog",
+            "source_kind": "operation_query",
+            "operation_kind": "query",
+            "http_method": "GET",
+            "http_path": "/api/operator/issue-backlog",
+            "input_model_ref": "runtime.operations.queries.operator_observability.QueryOperatorIssueBacklog",
+            "handler_ref": "runtime.operations.queries.operator_observability.handle_query_operator_issue_backlog",
+            "authority_ref": "authority.operator_issues",
+            "projection_ref": "projection.operator_issues",
+            "posture": None,
+            "idempotency_policy": None,
+            "enabled": True,
+            "binding_revision": _BINDING_REVISION,
+            "decision_ref": _DECISION_REF,
+        },
+        "operator.replay_ready_bugs": {
+            "operation_ref": "operator-replay-ready-bugs",
+            "operation_name": "operator.replay_ready_bugs",
+            "source_kind": "operation_query",
+            "operation_kind": "query",
+            "http_method": "GET",
+            "http_path": "/api/operator/replay-ready-bugs",
+            "input_model_ref": "runtime.operations.queries.operator_observability.QueryReplayReadyBugs",
+            "handler_ref": "runtime.operations.queries.operator_observability.handle_query_replay_ready_bugs",
+            "authority_ref": "authority.bugs",
+            "projection_ref": "projection.bugs",
+            "posture": None,
+            "idempotency_policy": None,
+            "enabled": True,
+            "binding_revision": _BINDING_REVISION,
+            "decision_ref": _DECISION_REF,
+        },
+        "operator.graph_projection": {
+            "operation_ref": "operator-graph-projection",
+            "operation_name": "operator.graph_projection",
+            "source_kind": "operation_query",
+            "operation_kind": "query",
+            "http_method": "GET",
+            "http_path": "/api/operator/graph",
+            "input_model_ref": "runtime.operations.queries.operator_observability.QueryOperatorGraphProjection",
+            "handler_ref": "runtime.operations.queries.operator_observability.handle_query_operator_graph_projection",
+            "authority_ref": "authority.semantic_assertions",
+            "projection_ref": "projection.operator_graph",
+            "posture": None,
+            "idempotency_policy": None,
+            "enabled": True,
+            "binding_revision": _BINDING_REVISION,
+            "decision_ref": _DECISION_REF,
+        },
+        "operator.run_status": {
+            "operation_ref": "operator-run-status",
+            "operation_name": "operator.run_status",
+            "source_kind": "operation_query",
+            "operation_kind": "query",
+            "http_method": "GET",
+            "http_path": "/api/operator/runs/{run_id}/status",
+            "input_model_ref": "runtime.operations.queries.operator_observability.QueryRunScopedOperatorView",
+            "handler_ref": "runtime.operations.queries.operator_observability.handle_query_run_status_view",
+            "authority_ref": "authority.workflow_runs",
+            "projection_ref": "projection.operator_status",
+            "posture": None,
+            "idempotency_policy": None,
+            "enabled": True,
+            "binding_revision": _BINDING_REVISION,
+            "decision_ref": _DECISION_REF,
+        },
+        "operator.run_scoreboard": {
+            "operation_ref": "operator-run-scoreboard",
+            "operation_name": "operator.run_scoreboard",
+            "source_kind": "operation_query",
+            "operation_kind": "query",
+            "http_method": "GET",
+            "http_path": "/api/operator/runs/{run_id}/scoreboard",
+            "input_model_ref": "runtime.operations.queries.operator_observability.QueryRunScopedOperatorView",
+            "handler_ref": "runtime.operations.queries.operator_observability.handle_query_run_scoreboard_view",
+            "authority_ref": "authority.workflow_runs",
+            "projection_ref": "projection.operator_scoreboard",
+            "posture": None,
+            "idempotency_policy": None,
+            "enabled": True,
+            "binding_revision": _BINDING_REVISION,
+            "decision_ref": _DECISION_REF,
+        },
+        "operator.run_graph": {
+            "operation_ref": "operator-run-graph",
+            "operation_name": "operator.run_graph",
+            "source_kind": "operation_query",
+            "operation_kind": "query",
+            "http_method": "GET",
+            "http_path": "/api/operator/runs/{run_id}/graph",
+            "input_model_ref": "runtime.operations.queries.operator_observability.QueryRunScopedOperatorView",
+            "handler_ref": "runtime.operations.queries.operator_observability.handle_query_run_graph_view",
+            "authority_ref": "authority.workflow_runs",
+            "projection_ref": "projection.workflow_graph",
+            "posture": None,
+            "idempotency_policy": None,
+            "enabled": True,
+            "binding_revision": _BINDING_REVISION,
+            "decision_ref": _DECISION_REF,
+        },
+        "operator.run_lineage": {
+            "operation_ref": "operator-run-lineage",
+            "operation_name": "operator.run_lineage",
+            "source_kind": "operation_query",
+            "operation_kind": "query",
+            "http_method": "GET",
+            "http_path": "/api/operator/runs/{run_id}/lineage",
+            "input_model_ref": "runtime.operations.queries.operator_observability.QueryRunScopedOperatorView",
+            "handler_ref": "runtime.operations.queries.operator_observability.handle_query_run_lineage_view",
+            "authority_ref": "authority.workflow_runs",
+            "projection_ref": "projection.workflow_lineage",
+            "posture": None,
+            "idempotency_policy": None,
+            "enabled": True,
+            "binding_revision": _BINDING_REVISION,
+            "decision_ref": _DECISION_REF,
+        },
+        "operator.metrics_reset": {
+            "operation_ref": "operator-metrics-reset",
+            "operation_name": "operator.metrics_reset",
+            "source_kind": "operation_command",
+            "operation_kind": "command",
+            "http_method": "POST",
+            "http_path": "/api/operator/maintenance/reset-metrics",
+            "input_model_ref": "runtime.operations.commands.operator_maintenance.ResetMetricsCommand",
+            "handler_ref": "runtime.operations.commands.operator_maintenance.handle_reset_metrics",
+            "authority_ref": "authority.observability_metrics",
+            "projection_ref": None,
+            "posture": None,
+            "idempotency_policy": None,
+            "enabled": True,
+            "binding_revision": _BINDING_REVISION,
+            "decision_ref": _DECISION_REF,
+        },
+        "operator.bug_replay_provenance_backfill": {
+            "operation_ref": "operator-bug-replay-provenance-backfill",
+            "operation_name": "operator.bug_replay_provenance_backfill",
+            "source_kind": "operation_command",
+            "operation_kind": "command",
+            "http_method": "POST",
+            "http_path": "/api/operator/maintenance/backfill-bug-replay-provenance",
+            "input_model_ref": "runtime.operations.commands.operator_maintenance.BackfillBugReplayProvenanceCommand",
+            "handler_ref": "runtime.operations.commands.operator_maintenance.handle_backfill_bug_replay_provenance",
+            "authority_ref": "authority.bugs",
+            "projection_ref": None,
+            "posture": None,
+            "idempotency_policy": None,
+            "enabled": True,
+            "binding_revision": _BINDING_REVISION,
+            "decision_ref": _DECISION_REF,
+        },
+        "operator.semantic_bridges_backfill": {
+            "operation_ref": "operator-semantic-bridges-backfill",
+            "operation_name": "operator.semantic_bridges_backfill",
+            "source_kind": "operation_command",
+            "operation_kind": "command",
+            "http_method": "POST",
+            "http_path": "/api/operator/maintenance/backfill-semantic-bridges",
+            "input_model_ref": "runtime.operations.commands.operator_maintenance.BackfillSemanticBridgesCommand",
+            "handler_ref": "runtime.operations.commands.operator_maintenance.handle_backfill_semantic_bridges",
+            "authority_ref": "authority.semantic_assertions",
+            "projection_ref": None,
+            "posture": None,
+            "idempotency_policy": None,
+            "enabled": True,
+            "binding_revision": _BINDING_REVISION,
+            "decision_ref": _DECISION_REF,
+        },
+        "operator.semantic_projection_refresh": {
+            "operation_ref": "operator-semantic-projection-refresh",
+            "operation_name": "operator.semantic_projection_refresh",
+            "source_kind": "operation_command",
+            "operation_kind": "command",
+            "http_method": "POST",
+            "http_path": "/api/operator/maintenance/refresh-semantic-projection",
+            "input_model_ref": "runtime.operations.commands.operator_maintenance.RefreshSemanticProjectionCommand",
+            "handler_ref": "runtime.operations.commands.operator_maintenance.handle_refresh_semantic_projection",
+            "authority_ref": "authority.semantic_assertions",
+            "projection_ref": None,
+            "posture": None,
+            "idempotency_policy": None,
+            "enabled": True,
+            "binding_revision": _BINDING_REVISION,
+            "decision_ref": _DECISION_REF,
+        },
+    }
+
     def __init__(
         self,
         *,
@@ -596,15 +825,36 @@ class _FakePGConn:
             return self._dispatch_totals_row
         raise AssertionError(f"Unexpected SQL in test stub: {sql}")
 
+    def fetch(self, sql: str, *args):
+        normalized = " ".join(sql.split())
+        if "FROM operation_catalog_registry" in normalized:
+            return list(self._OPERATION_ROWS.values())
+        if "FROM operation_catalog_source_policy_registry" in normalized:
+            return list(self._SOURCE_POLICIES)
+        raise AssertionError(f"Unexpected fetch SQL in test stub: {sql}")
+
+    def fetchrow(self, sql: str, *args):
+        normalized = " ".join(sql.split())
+        if "FROM operation_catalog_registry" in normalized and "operation_name = $1" in normalized:
+            return self._OPERATION_ROWS.get(str(args[0]))
+        if "FROM operation_catalog_registry" in normalized and "operation_ref = $1" in normalized:
+            operation_ref = str(args[0])
+            for row in self._OPERATION_ROWS.values():
+                if row["operation_ref"] == operation_ref:
+                    return row
+            return None
+        raise AssertionError(f"Unexpected fetchrow SQL in test stub: {sql}")
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(autouse=True)
-def _isolated_subsystems(tmp_path):
+def _isolated_subsystems(tmp_path, monkeypatch):
     """Point all subsystem paths to temp directories so tests are isolated."""
     subs = server._subs
+    fake_bug_tracker = _FakeBugTracker()
 
     # Reset all cached instances
     subs._initialized = False
@@ -628,7 +878,8 @@ def _isolated_subsystems(tmp_path):
     subs._intent_matcher = None
     subs._manifest_generator = None
     subs._pg_conn = None
-    subs._bug_tracker = _FakeBugTracker()
+    subs._bug_tracker = fake_bug_tracker
+    monkeypatch.setattr(subs, "_build_bug_tracker", lambda: fake_bug_tracker, raising=False)
 
     # Point to temp paths
     subs.receipts_dir = str(tmp_path / "receipts")
@@ -689,9 +940,9 @@ class TestToolsListing:
         tools = resp["result"]["tools"]
         names = {t["name"] for t in tools}
         required = {
-            "praxis_workflow", "praxis_workflow_validate", "praxis_status", "praxis_maintenance", "praxis_query",
+            "praxis_workflow", "praxis_workflow_validate", "praxis_status_snapshot", "praxis_metrics_reset", "praxis_query",
             "praxis_bugs", "praxis_health", "praxis_recall", "praxis_ingest",
-            "praxis_graph", "praxis_wave",
+            "praxis_graph", "praxis_wave", "praxis_issue_backlog", "praxis_run_status",
         }
         assert required <= names, f"Missing required tools: {required - names}"
 
@@ -767,12 +1018,15 @@ class TestDagValidate:
 class TestDagStatus:
     def test_status_empty_receipts(self, monkeypatch):
         server._subs._pg_conn = _FakePGConn()
-        monkeypatch.setattr("runtime.receipt_store.list_receipts", lambda **_kwargs: [])
         monkeypatch.setattr(
-            "runtime.receipt_store.receipt_stats",
+            "runtime.operations.queries.operator_observability.list_receipts",
+            lambda **_kwargs: [],
+        )
+        monkeypatch.setattr(
+            "runtime.operations.queries.operator_observability.receipt_stats",
             lambda **_kwargs: {"totals": {"receipts": 0}},
         )
-        result = _call_tool("praxis_status", {})
+        result = _call_tool("praxis_status_snapshot", {})
         assert result["total_workflows"] == 0
         assert result["pass_rate"] == 0.0
 
@@ -786,7 +1040,7 @@ class TestDagStatus:
             failure_category_zone_rows=[{"category": "provider_timeout", "zone": "external"}],
         )
         monkeypatch.setattr(
-            "runtime.receipt_store.list_receipts",
+            "runtime.operations.queries.operator_observability.list_receipts",
             lambda **_kwargs: [
                 _receipt_record(status="succeeded"),
                 _receipt_record(status="succeeded"),
@@ -794,10 +1048,10 @@ class TestDagStatus:
             ],
         )
         monkeypatch.setattr(
-            "runtime.receipt_store.receipt_stats",
+            "runtime.operations.queries.operator_observability.receipt_stats",
             lambda **_kwargs: {"totals": {"receipts": 3}},
         )
-        result = _call_tool("praxis_status", {"since_hours": 24})
+        result = _call_tool("praxis_status_snapshot", {"since_hours": 24})
         assert result["total_workflows"] == 3
         assert abs(result["pass_rate"] - 0.6667) < 0.01
         assert result["top_failure_codes"] == {"exit_1": 1}
@@ -816,7 +1070,7 @@ class TestDagStatus:
             fail_zone_lookup=True,
         )
         monkeypatch.setattr(
-            "runtime.receipt_store.list_receipts",
+            "runtime.operations.queries.operator_observability.list_receipts",
             lambda **_kwargs: [
                 _receipt_record(
                     status="failed",
@@ -826,11 +1080,11 @@ class TestDagStatus:
             ],
         )
         monkeypatch.setattr(
-            "runtime.receipt_store.receipt_stats",
+            "runtime.operations.queries.operator_observability.receipt_stats",
             lambda **_kwargs: {"totals": {"receipts": 1}},
         )
 
-        result = _call_tool("praxis_status", {"since_hours": 24})
+        result = _call_tool("praxis_status_snapshot", {"since_hours": 24})
 
         assert result["observability_state"] == "degraded"
         assert result["zone_authority_ready"] is False
@@ -840,11 +1094,11 @@ class TestDagStatus:
 
 class TestDagMaintenance:
     def test_reset_metrics_requires_confirm(self):
-        result = _call_tool("praxis_maintenance", {"action": "reset_metrics"})
+        result = _call_tool("praxis_metrics_reset", {})
         assert "confirm=true" in result["error"]
 
     def test_backfill_bug_replay_provenance_runs_without_confirm(self):
-        result = _call_tool("praxis_maintenance", {"action": "backfill_bug_replay_provenance"})
+        result = _call_tool("praxis_bug_replay_provenance_backfill", {})
         assert result["backfill"]["scanned_count"] >= 1
         assert result["backfill"]["replay_ready_count"] >= 1
 
@@ -872,8 +1126,15 @@ class TestDagQuery:
         assert result["routed_to"] == "leaderboard"
 
     def test_query_routes_to_staleness(self):
-        result = _call_tool("praxis_query", {"question": "What is stale?"})
+        result = _call_tool("praxis_query", {"question": "staleness"})
         assert result["routed_to"] == "staleness_detector"
+
+    def test_query_returns_hint_for_removed_operator_graph_alias(self):
+        result = _call_tool("praxis_query", {"question": "show me the operator graph"})
+        assert result["routed_to"] == "operator_graph"
+        assert result["status"] == "unsupported_query_alias"
+        assert result["reason_code"] == "workflow_query.operator_graph_alias_removed"
+        assert result["canonical_query"] == "operator graph"
 
     def test_query_empty_returns_error(self):
         result = _call_tool("praxis_query", {"question": ""})
@@ -1221,6 +1482,17 @@ class TestDagBugs:
 
         assert "error" in result
 
+    def test_bug_calls_stay_isolated_when_bug_tracker_cache_is_cleared(self):
+        server._subs._bug_tracker = None
+
+        filed = _call_tool("praxis_bugs", {
+            "action": "file",
+            "title": "Still isolated from MCP",
+            "severity": "P2",
+        })
+
+        assert filed["bug"]["bug_id"].startswith("BUG-TEST")
+
 
 class TestDagHealth:
     def test_health_returns_structure(self):
@@ -1242,7 +1514,7 @@ class TestDagHealth:
 
 class TestDagOperatorView:
     def test_replay_ready_bugs_view_returns_direct_payload(self):
-        result = _call_tool("praxis_operator_view", {"view": "replay_ready_bugs", "limit": 10})
+        result = _call_tool("praxis_replay_ready_bugs", {"limit": 10})
         assert result["view"] == "replay_ready_bugs"
         assert "maintenance" not in result
         assert result["bugs"][0]["replay_ready"] is True
@@ -1286,11 +1558,8 @@ class TestDagOperatorView:
         )
 
         result = _call_tool(
-            "praxis_operator_view",
-            {
-                "view": "operator_graph",
-                "as_of": "2026-04-16T20:05:00+00:00",
-            },
+            "praxis_graph_projection",
+            {"as_of": "2026-04-16T20:05:00+00:00"},
         )
 
         assert captured["env"]["WORKFLOW_DATABASE_URL"]

@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from adapters import provider_registry as provider_registry_mod
+from registry import provider_execution_registry as provider_registry_mod
 from adapters.provider_types import ProviderCLIProfile
 
 __all__ = [

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 import types
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -15,7 +16,7 @@ from adapters.deterministic import DeterministicTaskRequest
 from adapters.http_transport import HTTPResponse
 from adapters.llm_client import LLMClientError, LLMRequest, LLMResponse, call_llm, call_llm_streaming
 from adapters.llm_task import LLMTaskAdapter
-from adapters.provider_registry import resolve_api_endpoint
+from registry.provider_execution_registry import resolve_api_endpoint
 from runtime.http_transport import TransportExecutionError
 from runtime.task_type_router import TaskTypeRouter
 from runtime.workflow.execution_policy import resolve_cli_execution_policy
@@ -30,7 +31,7 @@ def _builtin_provider_registry_fixture(monkeypatch):
     import adapters.cli_llm as cli_llm_mod
     import adapters.credentials as credentials_mod
     import adapters.llm_task as llm_task_mod
-    import adapters.provider_registry as provider_registry_mod
+    import registry.provider_execution_registry as provider_registry_mod
 
     profiles = _builtin_profiles_map()
 
@@ -305,7 +306,7 @@ def test_http_transport_requires_configured_protocol_family(monkeypatch) -> None
 
 
 def test_db_backed_provider_profile_inherits_http_contract_fields(monkeypatch) -> None:
-    import adapters.provider_registry as provider_registry_mod
+    import registry.provider_execution_registry as provider_registry_mod
     import registry.provider_execution_registry as provider_registry_authority
 
     original_registry = dict(provider_registry_authority._REGISTRY)
@@ -402,7 +403,7 @@ def test_db_backed_provider_profile_inherits_http_contract_fields(monkeypatch) -
 
 
 def test_cursor_profile_is_registered_from_db_authority(monkeypatch) -> None:
-    import adapters.provider_registry as provider_registry_mod
+    import registry.provider_execution_registry as provider_registry_mod
     import registry.provider_execution_registry as provider_registry_authority
     from _pg_test_conn import get_test_env
 
@@ -422,8 +423,36 @@ def test_cursor_profile_is_registered_from_db_authority(monkeypatch) -> None:
     assert provider_registry_mod.supports_adapter("cursor", "cli_llm") is False
 
 
+def test_resolve_adapter_economics_defaults_optional_flags_for_sparse_authority() -> None:
+    profiles = _builtin_profiles_map()
+    openai_profile = profiles["openai"]
+    profiles["openai"] = replace(
+        openai_profile,
+        adapter_economics={
+            **dict(openai_profile.adapter_economics or {}),
+            "llm_task": {
+                "billing_mode": "metered_api",
+                "budget_bucket": "openai_api_payg",
+                "effective_marginal_cost": 1.0,
+            },
+        },
+    )
+
+    economics = provider_transport.resolve_adapter_economics(
+        "openai",
+        "llm_task",
+        profiles=profiles,
+    )
+
+    assert economics["billing_mode"] == "metered_api"
+    assert economics["budget_bucket"] == "openai_api_payg"
+    assert economics["effective_marginal_cost"] == 1.0
+    assert economics["prefer_prepaid"] is False
+    assert economics["allow_payg_fallback"] is False
+
+
 def test_cursor_local_profile_is_registered_for_local_cli(monkeypatch) -> None:
-    import adapters.provider_registry as provider_registry_mod
+    import registry.provider_execution_registry as provider_registry_mod
 
     original_resolve_binary = provider_transport.resolve_binary
     monkeypatch.setattr(
@@ -745,6 +774,38 @@ def test_cli_transport_respects_disabled_network_override(monkeypatch) -> None:
     assert result.status == "succeeded"
 
 
+def test_cli_adapter_fails_closed_when_runner_raises_runtime_error(monkeypatch) -> None:
+    import adapters.cli_llm as cli_llm_mod
+
+    monkeypatch.setattr(
+        cli_llm_mod,
+        "run_model",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("Docker is required for workflow model execution but is unavailable.")
+        ),
+    )
+
+    request = DeterministicTaskRequest(
+        node_id="node_cli_runtime_error",
+        task_name="transport_runtime_error",
+        input_payload={
+            "prompt": "hello",
+            "provider_slug": "openai",
+            "model_slug": "gpt-5.4-mini",
+        },
+        expected_outputs={},
+        dependency_inputs={},
+        execution_boundary_ref="workspace:test",
+    )
+
+    result = CLILLMAdapter(default_provider="openai", prefer_docker=True).execute(request=request)
+
+    assert result.status == "failed"
+    assert result.failure_code == "cli_adapter.exec_error"
+    assert result.outputs["transport_kind"] == "cli"
+    assert result.outputs["failure_namespace"] == "cli_adapter"
+
+
 def test_cli_execution_policy_uses_explicit_sandbox_contract() -> None:
     policy = resolve_cli_execution_policy(
         {
@@ -898,7 +959,7 @@ def test_llm_task_maps_custom_transport_http_errors(monkeypatch) -> None:
 
 
 def test_provider_adapter_contract_exposes_explicit_transport_surface() -> None:
-    from adapters.provider_registry import resolve_adapter_contract
+    from registry.provider_execution_registry import resolve_adapter_contract
 
     cli_contract = resolve_adapter_contract("openai", "cli_llm")
     api_contract = resolve_adapter_contract("openai", "llm_task")
@@ -1018,7 +1079,7 @@ def test_llm_task_uses_contract_retry_policy_and_failure_mapping(monkeypatch) ->
     _reg._REGISTRY.update(builtin_registry)
     _reg._DB_LOADED = True
     try:
-        from adapters.provider_registry import resolve_adapter_contract
+        from registry.provider_execution_registry import resolve_adapter_contract
 
         contract = resolve_adapter_contract("openai", "llm_task")
         assert contract is not None
@@ -1088,7 +1149,7 @@ def test_provider_registry_prefers_openai_as_default_provider(monkeypatch) -> No
 def test_llm_task_accepts_explicit_first_party_route_contract_without_registry_lookup(
     monkeypatch,
 ) -> None:
-    from adapters.provider_registry import resolve_adapter_contract
+    from registry.provider_execution_registry import resolve_adapter_contract
 
     contract = resolve_adapter_contract("openai", "llm_task")
     assert contract is not None
@@ -1184,7 +1245,7 @@ def test_llm_task_accepts_explicit_first_party_route_contract_without_registry_l
 
 
 def test_llm_task_strict_route_contract_requires_explicit_endpoint(monkeypatch) -> None:
-    from adapters.provider_registry import resolve_adapter_contract
+    from registry.provider_execution_registry import resolve_adapter_contract
 
     contract = resolve_adapter_contract("openai", "llm_task")
     assert contract is not None
@@ -1230,7 +1291,7 @@ def test_llm_task_strict_route_contract_requires_explicit_endpoint(monkeypatch) 
 
 
 def test_llm_task_strict_route_contract_requires_explicit_runtime_route(monkeypatch) -> None:
-    from adapters.provider_registry import resolve_adapter_contract
+    from registry.provider_execution_registry import resolve_adapter_contract
 
     contract = resolve_adapter_contract("openai", "llm_task")
     assert contract is not None
@@ -1279,7 +1340,7 @@ def test_llm_task_strict_route_contract_requires_explicit_runtime_route(monkeypa
 def test_cli_transport_refuses_first_party_route_contract_without_executing_cli(
     monkeypatch,
 ) -> None:
-    from adapters.provider_registry import resolve_adapter_contract
+    from registry.provider_execution_registry import resolve_adapter_contract
 
     contract = resolve_adapter_contract("openai", "llm_task")
     assert contract is not None

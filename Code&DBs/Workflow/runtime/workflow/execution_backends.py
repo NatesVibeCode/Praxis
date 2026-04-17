@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from adapters.docker_runner import normalize_command_parts_for_docker
-from adapters.provider_registry import build_command
+from registry.provider_execution_registry import build_command
 from runtime.load_balancer import get_load_balancer
 from runtime.execution_transport import resolve_execution_transport
 from runtime.sandbox_runtime import SandboxRuntime, derive_sandbox_identity
@@ -114,7 +114,7 @@ def _provider_api_key_names(provider_slug: str) -> tuple[str, ...]:
     if not provider_slug:
         return ()
     try:
-        from adapters import provider_registry as provider_registry_mod
+        from registry import provider_execution_registry as provider_registry_mod
 
         profile = provider_registry_mod.get_profile(provider_slug)
     except Exception:
@@ -178,7 +178,7 @@ def _build_execution_env(
         if isinstance(skill_refs, list) and skill_refs:
             sandbox_env[_ALLOWED_SKILLS_ENV] = ",".join(str(name) for name in skill_refs)
     # Apply provider-specific sandbox env overrides from profile
-    from adapters.provider_registry import get_profile as _get_env_profile
+    from registry.provider_execution_registry import get_profile as _get_env_profile
     _env_profile = _get_env_profile(provider_slug)
     if _env_profile and _env_profile.sandbox_env_overrides:
         overrides = _env_profile.sandbox_env_overrides
@@ -605,7 +605,7 @@ def execute_api(
         contract = resolve_execution_transport(agent_config)
         # Look up transport metadata from provider_cli_profiles.
         # The worker dispatches by protocol family — no provider names.
-        from adapters.provider_registry import get_profile as _get_provider_profile
+        from registry.provider_execution_registry import get_profile as _get_provider_profile
         _profile = _get_provider_profile(provider_slug)
         if not _profile or not _profile.api_protocol_family or not _profile.api_endpoint:
             return {

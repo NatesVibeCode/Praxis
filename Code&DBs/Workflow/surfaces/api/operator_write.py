@@ -99,7 +99,8 @@ _ISSUE_STATUSES = frozenset({"open", "resolved"})
 _ROADMAP_WRITE_ACTIONS = frozenset({"preview", "validate", "commit"})
 _WORK_ITEM_CLOSEOUT_ACTIONS = frozenset({"preview", "commit"})
 _ROADMAP_ITEM_KINDS = frozenset({"capability", "initiative"})
-_ROADMAP_STATUSES = frozenset({"active"})
+_ROADMAP_STATUSES = frozenset({"active", "completed", "done"})
+_ROADMAP_LIFECYCLES = frozenset({"idea", "planned", "claimed", "completed"})
 _ROADMAP_PRIORITIES = frozenset({"p1", "p2"})
 _CIRCUIT_BREAKER_OVERRIDE_STATES = frozenset({"open", "closed", "reset"})
 _FUNCTIONAL_AREA_STATUSES = frozenset(SUPPORTED_FUNCTIONAL_AREA_STATUSES)
@@ -141,6 +142,9 @@ _ROADMAP_SEMANTIC_PREDICATE_SPECS: dict[str, dict[str, object]] = {
 }
 _BUG_CLOSEOUT_EVIDENCE_ROLE = "validates_fix"
 _ROADMAP_COMPLETED_STATUS = "completed"
+_ROADMAP_DEFAULT_LIFECYCLE = "planned"
+_ROADMAP_CLAIMED_LIFECYCLE = "claimed"
+_ROADMAP_COMPLETED_LIFECYCLE = "completed"
 _BUG_CLOSEOUT_VERIFICATION_SUCCESS_STATUSES = frozenset({"passed", "succeeded", "success", "ok"})
 
 
@@ -333,6 +337,16 @@ def _normalize_roadmap_status(value: object | None) -> str:
         value,
         field_name="status",
         choices=_ROADMAP_STATUSES,
+    )
+
+
+def _normalize_roadmap_lifecycle(value: object | None) -> str:
+    if value is None:
+        return _ROADMAP_DEFAULT_LIFECYCLE
+    return coerce_choice(
+        value,
+        field_name="lifecycle",
+        choices=_ROADMAP_LIFECYCLES,
     )
 
 
@@ -601,6 +615,7 @@ def _roadmap_item_payload(
     title: str,
     item_kind: str,
     status: str,
+    lifecycle: str,
     priority: str,
     parent_roadmap_item_id: str | None,
     source_bug_id: str | None,
@@ -617,6 +632,7 @@ def _roadmap_item_payload(
         "title": title,
         "item_kind": item_kind,
         "status": status,
+        "lifecycle": lifecycle,
         "priority": priority,
         "parent_roadmap_item_id": parent_roadmap_item_id,
         "source_bug_id": source_bug_id,
@@ -1990,6 +2006,7 @@ class OperatorControlFrontdoor:
             SELECT
                 roadmap_item_id,
                 source_bug_id,
+                lifecycle,
                 registry_paths,
                 decision_ref,
                 created_at,
@@ -2042,6 +2059,29 @@ class OperatorControlFrontdoor:
                 created_at=created_at,
                 updated_at=updated_at,
             )
+            if (
+                roadmap_item_id is not None
+                and _binding_status_supports_pipeline(binding_status)
+                and (
+                    workflow_class_id is not None
+                    or schedule_definition_id is not None
+                    or workflow_run_id is not None
+                )
+            ):
+                claim_updated_at = (
+                    _normalize_as_of(
+                        updated_at,
+                        error_type=ValueError,
+                        reason_code="operator_control.invalid_updated_at",
+                    )
+                    if updated_at is not None
+                    else _now()
+                )
+                await self._claim_roadmap_item(
+                    conn,
+                    roadmap_item_id=roadmap_item_id,
+                    updated_at=claim_updated_at,
+                )
             auto_promoted_bug: dict[str, Any] | None = None
             auto_promoted_roadmap: dict[str, Any] | None = None
             if issue_id is not None:
@@ -2265,6 +2305,7 @@ class OperatorControlFrontdoor:
                 title,
                 item_kind,
                 status,
+                lifecycle,
                 priority,
                 parent_roadmap_item_id,
                 source_bug_id,
@@ -2294,6 +2335,56 @@ class OperatorControlFrontdoor:
             roadmap_item_id,
         )
         return row is not None
+
+    async def _claim_roadmap_item(
+        self,
+        conn: _Connection,
+        *,
+        roadmap_item_id: str,
+        updated_at: datetime,
+    ) -> Mapping[str, Any] | None:
+        roadmap_item = await self._fetch_roadmap_item(
+            conn,
+            roadmap_item_id=roadmap_item_id,
+        )
+        if roadmap_item is None:
+            return None
+        current_lifecycle = (
+            _optional_text(roadmap_item.get("lifecycle"), field_name="lifecycle")
+            or _ROADMAP_DEFAULT_LIFECYCLE
+        )
+        if current_lifecycle in {_ROADMAP_CLAIMED_LIFECYCLE, _ROADMAP_COMPLETED_LIFECYCLE}:
+            return roadmap_item
+        return await conn.fetchrow(
+            """
+            UPDATE roadmap_items
+            SET lifecycle = $2,
+                updated_at = $3
+            WHERE roadmap_item_id = $1
+            RETURNING
+                roadmap_item_id,
+                roadmap_key,
+                title,
+                item_kind,
+                status,
+                lifecycle,
+                priority,
+                parent_roadmap_item_id,
+                source_bug_id,
+                registry_paths,
+                summary,
+                acceptance_criteria,
+                decision_ref,
+                target_start_at,
+                target_end_at,
+                completed_at,
+                created_at,
+                updated_at
+            """,
+            roadmap_item_id,
+            _ROADMAP_CLAIMED_LIFECYCLE,
+            updated_at,
+        )
 
     async def _bug_exists(
         self,
@@ -2420,6 +2511,7 @@ class OperatorControlFrontdoor:
                 roadmap_key,
                 title,
                 status,
+                lifecycle,
                 priority,
                 source_bug_id,
                 created_at,
@@ -2851,6 +2943,7 @@ class OperatorControlFrontdoor:
                 title=title,
                 item_kind="capability",
                 status="active",
+                lifecycle=_ROADMAP_CLAIMED_LIFECYCLE,
                 priority=_auto_promoted_bug_priority(
                     _optional_text(
                         bug_row.get("severity"),
@@ -2878,9 +2971,18 @@ class OperatorControlFrontdoor:
                 existing_item.get("roadmap_item_id"),
                 field_name="roadmap_item_id",
             )
-            roadmap_item_payload = await self._fetch_roadmap_item(
+            roadmap_item_payload = await self._claim_roadmap_item(
                 conn,
                 roadmap_item_id=roadmap_item_id,
+                updated_at=(
+                    now
+                    if updated_at is None
+                    else _normalize_as_of(
+                        updated_at,
+                        error_type=ValueError,
+                        reason_code="operator_control.invalid_updated_at",
+                    )
+                ),
             )
 
         if roadmap_item_payload is not None:
@@ -2952,6 +3054,7 @@ class OperatorControlFrontdoor:
         decision_ref: str | None,
         item_kind: str | None,
         status: str | None,
+        lifecycle: str | None,
         tier: str | None,
         phase_ready: bool | None,
         approval_tag: str | None,
@@ -2977,6 +3080,7 @@ class OperatorControlFrontdoor:
         )
         normalized_registry_paths = _normalize_registry_paths(registry_paths)
         normalized_status = _normalize_roadmap_status(status)
+        normalized_lifecycle = _normalize_roadmap_lifecycle(lifecycle)
         normalized_depends_on = tuple(
             dependency
             for dependency in depends_on
@@ -3020,6 +3124,15 @@ class OperatorControlFrontdoor:
             item_kind,
             template=normalized_template,
         )
+        if normalized_status in {_ROADMAP_COMPLETED_STATUS, "done"} and lifecycle is None:
+            normalized_lifecycle = _ROADMAP_COMPLETED_LIFECYCLE
+            auto_fixes.append("lifecycle derived from completed status: completed")
+        elif (
+            normalized_lifecycle == _ROADMAP_COMPLETED_LIFECYCLE
+            and normalized_status not in {_ROADMAP_COMPLETED_STATUS, "done"}
+        ):
+            normalized_status = _ROADMAP_COMPLETED_STATUS
+            auto_fixes.append("status aligned to completed lifecycle: completed")
 
         parent_acceptance = (
             parent_row.get("acceptance_criteria")
@@ -3101,6 +3214,7 @@ class OperatorControlFrontdoor:
             title=normalized_title,
             item_kind=normalized_item_kind,
             status=normalized_status,
+            lifecycle=normalized_lifecycle,
             priority=normalized_priority,
             parent_roadmap_item_id=normalized_parent,
             source_bug_id=normalized_source_bug_id,
@@ -3152,6 +3266,7 @@ class OperatorControlFrontdoor:
                     title=child.title,
                     item_kind="capability",
                     status=normalized_status,
+                    lifecycle=normalized_lifecycle,
                     priority=child.priority,
                     parent_roadmap_item_id=root_roadmap_item_id,
                     source_bug_id=normalized_source_bug_id,
@@ -3187,6 +3302,7 @@ class OperatorControlFrontdoor:
             "slug": normalized_slug,
             "item_kind": normalized_item_kind,
             "status": normalized_status,
+            "lifecycle": normalized_lifecycle,
             "priority": normalized_priority,
             "parent_roadmap_item_id": normalized_parent,
             "depends_on": list(normalized_depends_on),
@@ -3230,6 +3346,7 @@ class OperatorControlFrontdoor:
         decision_ref: str | None = None,
         item_kind: str | None = None,
         status: str | None = None,
+        lifecycle: str | None = None,
         tier: str | None = None,
         phase_ready: bool | None = None,
         approval_tag: str | None = None,
@@ -3253,6 +3370,7 @@ class OperatorControlFrontdoor:
                 decision_ref=decision_ref,
                 item_kind=item_kind,
                 status=status,
+                lifecycle=lifecycle,
                 tier=tier,
                 phase_ready=phase_ready,
                 approval_tag=approval_tag,
@@ -3378,6 +3496,7 @@ class OperatorControlFrontdoor:
                         roadmap_item_id,
                         title,
                         status,
+                        lifecycle,
                         source_bug_id,
                         completed_at,
                         updated_at
@@ -3397,6 +3516,7 @@ class OperatorControlFrontdoor:
                     roadmap_item_id,
                     title,
                     status,
+                    lifecycle,
                     source_bug_id,
                     completed_at,
                     updated_at
@@ -3527,7 +3647,9 @@ class OperatorControlFrontdoor:
                             "roadmap_item_id": roadmap_item_id,
                             "source_bug_id": source_bug_id,
                             "current_status": str(row["status"]),
+                            "current_lifecycle": str(row["lifecycle"]),
                             "next_status": _ROADMAP_COMPLETED_STATUS,
+                            "next_lifecycle": _ROADMAP_COMPLETED_LIFECYCLE,
                             "reason_codes": [
                                 "source_bug_has_explicit_passed_fix_proof",
                             ],
@@ -3565,6 +3687,7 @@ class OperatorControlFrontdoor:
                             "roadmap_item_id": roadmap_item_id,
                             "source_bug_id": source_bug_id,
                             "current_status": str(row["status"]),
+                            "current_lifecycle": str(row["lifecycle"]),
                             "reason_codes": reason_codes,
                         }
                     )
@@ -3652,6 +3775,7 @@ class OperatorControlFrontdoor:
                     {
                         "roadmap_item_id": str(row["roadmap_item_id"]),
                         "status": str(row["status"]),
+                        "lifecycle": str(row["lifecycle"]),
                         "completed_at": row["completed_at"].isoformat() if row["completed_at"] is not None else None,
                         "source_bug_id": str(row["source_bug_id"]) if row["source_bug_id"] is not None else None,
                     }
@@ -4039,6 +4163,7 @@ class OperatorControlFrontdoor:
         decision_ref: str | None = None,
         item_kind: str | None = None,
         status: str | None = None,
+        lifecycle: str | None = None,
         tier: str | None = None,
         phase_ready: bool | None = None,
         approval_tag: str | None = None,
@@ -4061,6 +4186,7 @@ class OperatorControlFrontdoor:
             decision_ref=decision_ref,
             item_kind=item_kind,
             status=status,
+            lifecycle=lifecycle,
             tier=tier,
             phase_ready=phase_ready,
             approval_tag=approval_tag,
@@ -4668,6 +4794,7 @@ class OperatorControlFrontdoor:
         decision_ref: str | None = None,
         item_kind: str | None = None,
         status: str | None = None,
+        lifecycle: str | None = None,
         tier: str | None = None,
         phase_ready: bool | None = None,
         approval_tag: str | None = None,
@@ -4690,6 +4817,7 @@ class OperatorControlFrontdoor:
                 decision_ref=decision_ref,
                 item_kind=item_kind,
                 status=status,
+                lifecycle=lifecycle,
                 tier=tier,
                 phase_ready=phase_ready,
                 approval_tag=approval_tag,
@@ -5659,6 +5787,7 @@ def roadmap_write(
     decision_ref: str | None = None,
     item_kind: str | None = None,
     status: str | None = None,
+    lifecycle: str | None = None,
     tier: str | None = None,
     phase_ready: bool | None = None,
     approval_tag: str | None = None,
@@ -5682,6 +5811,7 @@ def roadmap_write(
         decision_ref=decision_ref,
         item_kind=item_kind,
         status=status,
+        lifecycle=lifecycle,
         tier=tier,
         phase_ready=phase_ready,
         approval_tag=approval_tag,
@@ -5706,6 +5836,7 @@ async def aroadmap_write(
     decision_ref: str | None = None,
     item_kind: str | None = None,
     status: str | None = None,
+    lifecycle: str | None = None,
     tier: str | None = None,
     phase_ready: bool | None = None,
     approval_tag: str | None = None,
@@ -5729,6 +5860,7 @@ async def aroadmap_write(
         decision_ref=decision_ref,
         item_kind=item_kind,
         status=status,
+        lifecycle=lifecycle,
         tier=tier,
         phase_ready=phase_ready,
         approval_tag=approval_tag,

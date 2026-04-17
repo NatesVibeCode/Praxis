@@ -97,6 +97,152 @@ def _make_receipt(
     return r
 
 
+def _seed_receipt_authority(
+    conn,
+    *,
+    run_id: str,
+    receipt_id: str,
+    workflow_id: str,
+    request_id: str,
+    occurred_at: datetime,
+) -> None:
+    suffix = receipt_id.replace(":", "_").replace(".", "_")
+    workflow_definition_id = f"workflow_definition.{suffix}"
+    admission_decision_id = f"admission_decision.{suffix}"
+    definition_hash = f"sha256:{suffix}"
+    envelope = json.dumps(
+        {
+            "kind": "observability_test",
+            "workflow_id": workflow_id,
+            "run_id": run_id,
+        }
+    )
+    conn.execute(
+        """
+        INSERT INTO workflow_definitions (
+            workflow_definition_id,
+            workflow_id,
+            schema_version,
+            definition_version,
+            definition_hash,
+            status,
+            request_envelope,
+            normalized_definition,
+            created_at,
+            supersedes_workflow_definition_id
+        ) VALUES (
+            $1, $2, 1, 1, $3, 'active', $4::jsonb, '{"nodes":[],"edges":[]}'::jsonb, $5, NULL
+        )
+        ON CONFLICT (workflow_definition_id) DO NOTHING
+        """,
+        workflow_definition_id,
+        workflow_id,
+        definition_hash,
+        envelope,
+        occurred_at,
+    )
+    conn.execute(
+        """
+        INSERT INTO admission_decisions (
+            admission_decision_id,
+            workflow_id,
+            request_id,
+            decision,
+            reason_code,
+            decided_at,
+            decided_by,
+            policy_snapshot_ref,
+            validation_result_ref,
+            authority_context_ref
+        ) VALUES (
+            $1, $2, $3, 'admit', 'test.observability_hub.seed', $4, 'test', 'policy:test', 'validation:test', 'authority:test'
+        )
+        ON CONFLICT (admission_decision_id) DO NOTHING
+        """,
+        admission_decision_id,
+        workflow_id,
+        request_id,
+        occurred_at,
+    )
+    conn.execute(
+        """
+        INSERT INTO workflow_runs (
+            run_id,
+            workflow_id,
+            request_id,
+            request_digest,
+            authority_context_digest,
+            workflow_definition_id,
+            admitted_definition_hash,
+            run_idempotency_key,
+            schema_version,
+            request_envelope,
+            context_bundle_id,
+            admission_decision_id,
+            current_state,
+            terminal_reason_code,
+            requested_at,
+            admitted_at,
+            started_at,
+            finished_at,
+            last_event_id
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, 1, $9::jsonb, $10, $11,
+            'claim_accepted', NULL, $12, $12, $12, NULL, NULL
+        )
+        ON CONFLICT (run_id) DO NOTHING
+        """,
+        run_id,
+        workflow_id,
+        request_id,
+        f"digest:{suffix}",
+        f"authority:{suffix}",
+        workflow_definition_id,
+        definition_hash,
+        request_id,
+        envelope,
+        f"context_bundle:{suffix}",
+        admission_decision_id,
+        occurred_at,
+    )
+    conn.execute(
+        """
+        INSERT INTO receipts (
+            receipt_id,
+            receipt_type,
+            schema_version,
+            workflow_id,
+            run_id,
+            request_id,
+            causation_id,
+            node_id,
+            attempt_no,
+            supersedes_receipt_id,
+            started_at,
+            finished_at,
+            evidence_seq,
+            executor_type,
+            status,
+            inputs,
+            outputs,
+            artifacts,
+            failure_code,
+            decision_refs
+        ) VALUES (
+            $1, 'workflow_completion_receipt', 1, $2, $3, $4, NULL, 'node.observe', 1, NULL,
+            $5, $5, 1, 'native_operator', 'failed', $6::jsonb, '{}'::jsonb, '[]'::jsonb, NULL, '[]'::jsonb
+        )
+        ON CONFLICT (receipt_id) DO NOTHING
+        """,
+        receipt_id,
+        workflow_id,
+        run_id,
+        request_id,
+        occurred_at,
+        json.dumps({"transition_seq": 1}),
+    )
+
+
 # ---------------------------------------------------------------------------
 # ObservabilityHub tests
 # ---------------------------------------------------------------------------
@@ -124,7 +270,7 @@ class TestIngestReceipt:
                 _make_receipt(
                     status="failed",
                     failure_code=code,
-                    job_label="job-%d" % i,
+                    job_label="job-timeout",
                 )
             )
 
@@ -141,7 +287,7 @@ class TestIngestReceipt:
                 _make_receipt(
                     status="failed",
                     failure_code=code,
-                    job_label="job-%d" % i,
+                    job_label="job-timeout",
                 )
             )
 
@@ -151,14 +297,26 @@ class TestIngestReceipt:
     def test_auto_bug_links_failure_evidence_and_signature_tags(self, hub):
         code = f"TIMEOUT_EXCEEDED_{uuid.uuid4().hex[:8]}"
         for i in range(3):
+            occurred_at = datetime.now(timezone.utc)
+            run_id = f"run-{i}"
+            receipt_id = f"receipt-{i}"
+            _seed_receipt_authority(
+                hub._conn,
+                run_id=run_id,
+                receipt_id=receipt_id,
+                workflow_id=f"workflow.observe.{i}",
+                request_id=f"request.observe.{i}",
+                occurred_at=occurred_at,
+            )
             hub.ingest_receipt(
                 _make_receipt(
                     status="failed",
                     failure_code=code,
                     job_label="job-observe",
-                    run_id=f"run-{i}",
-                    receipt_id=f"receipt-{i}",
+                    run_id=run_id,
+                    receipt_id=receipt_id,
                     failure_category="runtime_failed",
+                    timestamp=occurred_at.isoformat(),
                 )
             )
 
@@ -182,7 +340,7 @@ class TestIngestReceipt:
                     _make_receipt(
                         status="failed",
                         failure_code=code,
-                        job_label="job-%s-%d" % (code, i),
+                        job_label="job-%s" % code,
                     )
                 )
 

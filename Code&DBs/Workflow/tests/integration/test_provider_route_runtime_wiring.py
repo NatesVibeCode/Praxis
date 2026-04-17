@@ -125,8 +125,18 @@ async def _seed_route_catalog(
             effective_from,
             effective_to,
             decision_ref,
-            created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11, $12, $13, $14)
+            created_at,
+            route_tier,
+            route_tier_rank,
+            latency_class,
+            latency_rank,
+            reasoning_control,
+            task_affinities,
+            benchmark_profile
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11, $12, $13, $14,
+            $15, $16, $17, $18, $19::jsonb, $20::jsonb, $21::jsonb
+        )
         """,
         primary_candidate_ref,
         "provider.openai",
@@ -142,6 +152,13 @@ async def _seed_route_catalog(
         None,
         f"decision:candidate-primary:{suffix}",
         as_of,
+        "high",
+        1,
+        "reasoning",
+        2,
+        _jsonb({"default": "high", "kind": "openai_reasoning_effort"}),
+        _jsonb({"primary": ["build"], "secondary": ["review"], "avoid": []}),
+        _jsonb({"positioning": "provider route runtime primary seed", "source_refs": ["integration_test"]}),
     )
     await conn.execute(
         """
@@ -159,8 +176,18 @@ async def _seed_route_catalog(
             effective_from,
             effective_to,
             decision_ref,
-            created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11, $12, $13, $14)
+            created_at,
+            route_tier,
+            route_tier_rank,
+            latency_class,
+            latency_rank,
+            reasoning_control,
+            task_affinities,
+            benchmark_profile
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11, $12, $13, $14,
+            $15, $16, $17, $18, $19::jsonb, $20::jsonb, $21::jsonb
+        )
         """,
         fallback_candidate_ref,
         "provider.openai",
@@ -176,6 +203,13 @@ async def _seed_route_catalog(
         None,
         f"decision:candidate-fallback:{suffix}",
         as_of,
+        "medium",
+        2,
+        "instant",
+        1,
+        _jsonb({"default": "medium", "kind": "openai_reasoning_effort"}),
+        _jsonb({"primary": ["wiring"], "secondary": ["review"], "avoid": []}),
+        _jsonb({"positioning": "provider route runtime fallback seed", "source_refs": ["integration_test"]}),
     )
     await conn.execute(
         """
@@ -193,8 +227,18 @@ async def _seed_route_catalog(
             effective_from,
             effective_to,
             decision_ref,
-            created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11, $12, $13, $14)
+            created_at,
+            route_tier,
+            route_tier_rank,
+            latency_class,
+            latency_rank,
+            reasoning_control,
+            task_affinities,
+            benchmark_profile
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11, $12, $13, $14,
+            $15, $16, $17, $18, $19::jsonb, $20::jsonb, $21::jsonb
+        )
         """,
         future_candidate_ref,
         "provider.openai",
@@ -210,6 +254,13 @@ async def _seed_route_catalog(
         None,
         f"decision:candidate-future:{suffix}",
         as_of + timedelta(minutes=5),
+        "low",
+        3,
+        "instant",
+        3,
+        _jsonb({"default": "low", "kind": "openai_reasoning_effort"}),
+        _jsonb({"primary": ["batch"], "secondary": ["wiring"], "avoid": []}),
+        _jsonb({"positioning": "provider route runtime future seed", "source_refs": ["integration_test"]}),
     )
     await conn.execute(
         """

@@ -181,7 +181,7 @@ def test_execute_cli_google_emits_manifest_backed_mcp_settings(monkeypatch, tmp_
         lambda provider_slug, model=None: ["gemini", "-p", ".", "-o", "json", "--model", model or provider_slug],
     )
     monkeypatch.setattr(
-        "adapters.provider_registry.resolve_mcp_args_template",
+        "registry.provider_execution_registry.resolve_mcp_args_template",
         lambda provider_slug: ["--allowed-mcp-server-names", "dag-workflow"]
         if provider_slug == "google"
         else [],
@@ -505,7 +505,7 @@ def test_execute_api_routes_through_sandbox_runtime(monkeypatch, tmp_path) -> No
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setattr(execution_backends, "SandboxRuntime", lambda: _FakeRuntime())
     monkeypatch.setattr(
-        "adapters.provider_registry.get_profile",
+        "registry.provider_execution_registry.get_profile",
         lambda provider_slug: _provider_profile(
             api_protocol_family="anthropic_messages",
             api_endpoint="https://api.anthropic.test/v1/messages",
@@ -563,7 +563,7 @@ def test_execute_api_uses_provider_concurrency_slot(monkeypatch, tmp_path) -> No
     monkeypatch.setattr(execution_backends, "get_load_balancer", lambda: load_balancer)
     monkeypatch.setattr(execution_backends, "SandboxRuntime", lambda: _FakeRuntime())
     monkeypatch.setattr(
-        "adapters.provider_registry.get_profile",
+        "registry.provider_execution_registry.get_profile",
         lambda provider_slug: _provider_profile(
             api_protocol_family="anthropic_messages",
             api_endpoint="https://api.anthropic.test/v1/messages",
@@ -606,7 +606,7 @@ def test_execute_api_uses_stable_adhoc_sandbox_identity(monkeypatch, tmp_path) -
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setattr(execution_backends, "SandboxRuntime", lambda: _FakeRuntime())
     monkeypatch.setattr(
-        "adapters.provider_registry.get_profile",
+        "registry.provider_execution_registry.get_profile",
         lambda provider_slug: _provider_profile(
             api_protocol_family="anthropic_messages",
             api_endpoint="https://api.anthropic.test/v1/messages",
@@ -647,7 +647,7 @@ def test_execute_api_prefers_bundle_sandbox_profile_contract(monkeypatch, tmp_pa
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setattr(execution_backends, "SandboxRuntime", lambda: _FakeRuntime())
     monkeypatch.setattr(
-        "adapters.provider_registry.get_profile",
+        "registry.provider_execution_registry.get_profile",
         lambda provider_slug: _provider_profile(
             api_protocol_family="anthropic_messages",
             api_endpoint="https://api.anthropic.test/v1/messages",

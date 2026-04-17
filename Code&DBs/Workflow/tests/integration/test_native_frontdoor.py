@@ -614,7 +614,7 @@ def test_native_frontdoor_surfaces_shadow_packet_inspection(
     assert status_payload["observability"]["failure_taxonomy"]["dominant_category"] == "packet_drift"
 
 
-def test_native_frontdoor_status_tolerates_legacy_schema_without_packet_inspection_column(
+def test_native_frontdoor_status_fails_closed_when_packet_inspection_column_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     native_instance = NativeWorkflowInstance(
@@ -767,21 +767,115 @@ def test_native_frontdoor_status_tolerates_legacy_schema_without_packet_inspecti
         persist_submission=_persist_submission,
     )
 
-    status_payload = api.status(run_id=run_id, env=env)
+    with pytest.raises(Exception) as exc_info:
+        api.status(run_id=run_id, env=env)
 
-    assert status_payload["run"]["run_id"] == run_id
-    assert status_payload["packet_inspection"]["packet_revision"] == "packet.rev.shadow.1"
-    assert status_payload["packet_inspection"]["drift"]["status"] == "drifted"
-    assert status_payload["observability"]["packet_drift_status"] == "drifted"
-    assert status_payload["observability"]["packet_inspection_source"] == "derived"
-    assert status_payload["observability"]["health_state"] == "degraded"
-    assert status_payload["observability"]["contract_drift"]["status"] == "drifted"
-    assert status_payload["observability"]["contract_drift"]["issues"][0]["issue_code"] == "workflow_runs.packet_inspection_column_missing"
-    assert any(
-        "NULL::jsonb AS packet_inspection" in query
-        for query, _ in seen["status_queries"]
-        if isinstance(query, str)
+    assert type(exc_info.value).__name__ == "NativeFrontdoorError"
+    assert exc_info.value.reason_code == "frontdoor.packet_inspection_unavailable"
+    assert exc_info.value.details["stage"] == "schema"
+    assert exc_info.value.details["run_id"] == run_id
+    assert exc_info.value.details["contract_drift_ref"] == "workflow_runs.packet_inspection_column_missing"
+
+
+def test_native_frontdoor_status_fails_closed_when_packet_derivation_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import runtime.execution_packet_authority as execution_packet_authority
+
+    native_instance = NativeWorkflowInstance(
+        instance_name="praxis",
+        runtime_profile_ref="praxis",
+        repo_root=_REPO_ROOT,
+        workdir=_REPO_ROOT,
+        receipts_dir=f"{_REPO_ROOT}/artifacts/runtime_receipts",
+        topology_dir=f"{_REPO_ROOT}/artifacts/runtime_topology",
+        runtime_profiles_config=f"{_REPO_ROOT}/config/runtime_profiles.json",
     )
+    env = {"WORKFLOW_DATABASE_URL": "postgresql://workflow@127.0.0.1:5432/workflow"}
+    run_id = "run:workflow.shadow:derive-error"
+    run_row = {
+        "run_id": run_id,
+        "workflow_id": "workflow.shadow",
+        "request_id": "request.shadow",
+        "request_digest": "digest.shadow",
+        "workflow_definition_id": "workflow_definition.shadow.v1",
+        "admitted_definition_hash": "sha256:shadow",
+        "current_state": "claim_accepted",
+        "terminal_reason_code": None,
+        "run_idempotency_key": "request.shadow",
+        "context_bundle_id": "context.shadow",
+        "authority_context_digest": "digest.shadow",
+        "admission_decision_id": "admission.shadow",
+        "requested_at": datetime(2026, 4, 2, 12, 0, tzinfo=timezone.utc),
+        "admitted_at": datetime(2026, 4, 2, 12, 0, 1, tzinfo=timezone.utc),
+        "started_at": datetime(2026, 4, 2, 12, 1, tzinfo=timezone.utc),
+        "finished_at": None,
+        "last_event_id": None,
+        "request_envelope": {"name": "shadow-spec"},
+    }
+    seen: dict[str, object] = {
+        "resolved_envs": [],
+        "health_envs": [],
+        "connect_envs": [],
+        "submissions": [],
+        "status_queries": [],
+        "bootstrap_calls": 0,
+        "closed_connections": 0,
+    }
+
+    def _resolve_instance(*, env=None, config_path=None):
+        assert config_path is None
+        seen["resolved_envs"].append(dict(env or {}))
+        return native_instance
+
+    def _postgres_health(env=None):
+        seen["health_envs"].append(dict(env or {}))
+        return _FakeStatus(schema_bootstrapped=True)
+
+    async def _connect_database(env=None):
+        seen["connect_envs"].append(dict(env or {}))
+        return _FakeConnection(
+            run_row=run_row,
+            seen=seen,
+            packet_row={"packets": [{"packet_revision": "packet.rev.shadow.1"}]},
+        )
+
+    async def _bootstrap_schema(conn) -> None:
+        seen["bootstrap_calls"] += 1
+
+    async def _persist_submission(conn, *, submission):
+        seen["submissions"].append(submission)
+        return type(
+            "WriteResult",
+            (),
+            {
+                "admission_decision_id": submission.decision.admission_decision_id,
+                "run_id": submission.run.run_id,
+            },
+        )()
+
+    monkeypatch.setattr(frontdoor, "resolve_native_instance", _resolve_instance)
+    monkeypatch.setattr(
+        execution_packet_authority,
+        "inspect_execution_packets",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    api = frontdoor.NativeWorkflowFrontdoor(
+        registry=_registry(),
+        postgres_health_service=_postgres_health,
+        connect_database=_connect_database,
+        bootstrap_schema=_bootstrap_schema,
+        persist_submission=_persist_submission,
+    )
+
+    with pytest.raises(Exception) as exc_info:
+        api.status(run_id=run_id, env=env)
+
+    assert type(exc_info.value).__name__ == "NativeFrontdoorError"
+    assert exc_info.value.reason_code == "frontdoor.packet_inspection_unavailable"
+    assert exc_info.value.details["stage"] == "derive"
+    assert exc_info.value.details["run_id"] == run_id
 
 
 @pytest.mark.parametrize(

@@ -134,16 +134,16 @@ class TestFailureCategoryZones:
     def test_load_failure_category_zones_returns_zone_map(self):
         zone_map = load_failure_category_zones(
             _ZoneConn([{"category": "provider_timeout", "zone": "external"}]),
-            consumer="praxis_status",
+            consumer="praxis_status_snapshot",
         )
 
         assert zone_map == {"provider_timeout": "external"}
 
     def test_load_failure_category_zones_fails_when_query_errors(self):
-        with pytest.raises(RuntimeError, match="failure_category_zones authority is required for praxis_status"):
+        with pytest.raises(RuntimeError, match="failure_category_zones authority is required for praxis_status_snapshot"):
             load_failure_category_zones(
                 _ZoneConn([], exc=RuntimeError("db unavailable")),
-                consumer="praxis_status",
+                consumer="praxis_status_snapshot",
             )
 
     def test_load_failure_category_zones_fails_when_rows_missing(self):

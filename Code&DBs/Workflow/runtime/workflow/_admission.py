@@ -14,12 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from adapters import AdapterRegistry, CLILLMAdapter, LLMTaskAdapter, MCPTaskAdapter
-from adapters.api_task import APITaskAdapter
-from adapters.context_adapter import ContextCompilerAdapter
-from adapters.file_writer_adapter import FileWriterAdapter
-from adapters.output_parser_adapter import OutputParserAdapter
-from adapters.verify_adapter import VerifyAdapter
+from adapters import AdapterRegistry
 from contracts.domain import WorkflowEdgeContract, WorkflowNodeContract, WorkflowRequest
 from registry.domain import RegistryResolver, RuntimeProfileAuthorityRecord, WorkspaceAuthorityRecord
 from registry.native_runtime_profile_sync import resolve_native_runtime_profile_config
@@ -44,6 +39,7 @@ from runtime.workflow_graph_compiler import (
     compile_graph_workflow_request,
     spec_uses_graph_runtime,
 )
+from ._adapter_registry import build_workflow_adapter_registry
 from ._shared import (
     _WORKFLOW_REPLAYABLE_RUN_STATES,
     _json_loads_maybe,
@@ -276,6 +272,404 @@ def _graph_execution_identity(request: WorkflowRequest) -> tuple[str, str | None
     return "openai", None, "graph_runtime"
 
 
+def _graph_packet_jobs(
+    spec_dict: Mapping[str, object],
+) -> tuple[Mapping[str, object], ...]:
+    raw_jobs = spec_dict.get("jobs")
+    if not isinstance(raw_jobs, list):
+        return ()
+    return tuple(item for item in raw_jobs if isinstance(item, Mapping))
+
+
+def _graph_packet_source_kind(packet_provenance: Mapping[str, object] | None) -> str:
+    value = str((packet_provenance or {}).get("source_kind") or "").strip()
+    return value or "inline_submit"
+
+
+def _graph_packet_definition_revision(
+    *,
+    request: WorkflowRequest,
+    spec_dict: Mapping[str, object],
+    packet_provenance: Mapping[str, object] | None,
+) -> str:
+    provenance = packet_provenance or {}
+    compiled_spec_row = (
+        provenance.get("compiled_spec_row")
+        if isinstance(provenance.get("compiled_spec_row"), Mapping)
+        else {}
+    )
+    definition_row = (
+        provenance.get("definition_row")
+        if isinstance(provenance.get("definition_row"), Mapping)
+        else {}
+    )
+    for candidate in (
+        compiled_spec_row.get("definition_revision"),
+        definition_row.get("definition_revision"),
+        spec_dict.get("definition_revision"),
+        request.workflow_definition_id,
+    ):
+        text = str(candidate or "").strip()
+        if text:
+            return text
+    raise RuntimeError("graph execution packet requires a definition_revision")
+
+
+def _graph_packet_plan_revision(
+    *,
+    request: WorkflowRequest,
+    spec_dict: Mapping[str, object],
+    packet_provenance: Mapping[str, object] | None,
+) -> str:
+    provenance = packet_provenance or {}
+    compiled_spec_row = (
+        provenance.get("compiled_spec_row")
+        if isinstance(provenance.get("compiled_spec_row"), Mapping)
+        else {}
+    )
+    for candidate in (
+        compiled_spec_row.get("plan_revision"),
+        spec_dict.get("plan_revision"),
+        request.workflow_definition_id,
+    ):
+        text = str(candidate or "").strip()
+        if text:
+            return text
+    raise RuntimeError("graph execution packet requires a plan_revision")
+
+
+def _graph_packet_model_messages(
+    *,
+    request: WorkflowRequest,
+    spec_dict: Mapping[str, object],
+) -> list[dict[str, object]]:
+    messages: list[dict[str, object]] = []
+    for job in _graph_packet_jobs(spec_dict):
+        prompt = str(job.get("prompt") or "")
+        system_prompt = str(job.get("system_prompt") or "").strip()
+        if not prompt and not system_prompt:
+            continue
+        job_messages: list[dict[str, str]] = []
+        if system_prompt:
+            job_messages.append({"role": "system", "content": system_prompt})
+        if prompt:
+            job_messages.append({"role": "user", "content": prompt})
+        if not job_messages:
+            continue
+        messages.append(
+            {
+                "job_label": str(job.get("label") or "job"),
+                "agent_slug": str(job.get("agent") or "").strip(),
+                "messages": job_messages,
+            }
+        )
+    if messages:
+        return messages
+
+    for node in request.nodes:
+        prompt = str(node.inputs.get("prompt") or "")
+        system_prompt = str(node.inputs.get("system_prompt") or "").strip()
+        if not prompt and not system_prompt:
+            continue
+        node_messages: list[dict[str, str]] = []
+        if system_prompt:
+            node_messages.append({"role": "system", "content": system_prompt})
+        if prompt:
+            node_messages.append({"role": "user", "content": prompt})
+        if not node_messages:
+            continue
+        provider_slug = str(node.inputs.get("provider_slug") or "").strip()
+        model_slug = str(node.inputs.get("model_slug") or "").strip()
+        agent_slug = str(node.inputs.get("agent_slug") or "").strip()
+        if not agent_slug and provider_slug and model_slug:
+            agent_slug = f"{provider_slug}/{model_slug}"
+        messages.append(
+            {
+                "job_label": node.display_name,
+                "agent_slug": agent_slug,
+                "messages": node_messages,
+            }
+        )
+    return messages
+
+
+def _graph_packet_reference_bindings(
+    *,
+    request: WorkflowRequest,
+    spec_dict: Mapping[str, object],
+) -> list[dict[str, object]]:
+    bindings: list[dict[str, object]] = []
+    for job in _graph_packet_jobs(spec_dict):
+        prompt = str(job.get("prompt") or "")
+        if not prompt:
+            continue
+        agent_slug = str(job.get("agent") or "").strip()
+        route_candidates = [agent_slug] if agent_slug else []
+        bindings.append(
+            {
+                "job_label": str(job.get("label") or "job"),
+                "agent_slug": agent_slug,
+                "depends_on": [
+                    str(item).strip()
+                    for item in (job.get("depends_on") or [])
+                    if str(item).strip()
+                ],
+                "prompt_hash": hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:16],
+                "route_task_type": str(job.get("task_type") or "general").strip() or "general",
+                "route_origin_slug": agent_slug,
+                "route_candidates": route_candidates,
+            }
+        )
+    if bindings:
+        return bindings
+
+    inbound_edges: dict[str, list[str]] = {}
+    for edge in request.edges:
+        inbound_edges.setdefault(edge.to_node_id, []).append(edge.from_node_id)
+    for node in request.nodes:
+        prompt = str(node.inputs.get("prompt") or "")
+        if not prompt:
+            continue
+        provider_slug = str(node.inputs.get("provider_slug") or "").strip()
+        model_slug = str(node.inputs.get("model_slug") or "").strip()
+        agent_slug = str(node.inputs.get("agent_slug") or "").strip()
+        if not agent_slug and provider_slug and model_slug:
+            agent_slug = f"{provider_slug}/{model_slug}"
+        route_candidates = [agent_slug] if agent_slug else []
+        bindings.append(
+            {
+                "job_label": node.display_name,
+                "agent_slug": agent_slug,
+                "depends_on": inbound_edges.get(node.node_id, []),
+                "prompt_hash": hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:16],
+                "route_task_type": str(node.inputs.get("task_type") or "general").strip() or "general",
+                "route_origin_slug": node.adapter_type,
+                "route_candidates": route_candidates,
+            }
+        )
+    return bindings
+
+
+def _graph_packet_capability_bindings(
+    *,
+    spec_dict: Mapping[str, object],
+) -> list[dict[str, object]]:
+    bindings: list[dict[str, object]] = []
+    for job in _graph_packet_jobs(spec_dict):
+        capabilities = [
+            str(item).strip()
+            for item in (job.get("capabilities") or [])
+            if str(item).strip()
+        ]
+        if not capabilities:
+            continue
+        agent_slug = str(job.get("agent") or "").strip()
+        route_candidates = [agent_slug] if agent_slug else []
+        bindings.append(
+            {
+                "job_label": str(job.get("label") or "job"),
+                "agent_slug": agent_slug,
+                "route_task_type": str(job.get("task_type") or "general").strip() or "general",
+                "capabilities": capabilities,
+                "route_candidates": route_candidates,
+            }
+        )
+    return bindings
+
+
+def _graph_packet_verify_refs(
+    *,
+    request: WorkflowRequest,
+    spec_dict: Mapping[str, object],
+) -> list[str]:
+    refs: list[str] = []
+    for job in _graph_packet_jobs(spec_dict):
+        refs.extend(
+            str(item).strip()
+            for item in (job.get("verify_refs") or [])
+            if str(item).strip()
+        )
+    if refs:
+        return list(dict.fromkeys(refs))
+    for node in request.nodes:
+        if node.adapter_type != "verifier":
+            continue
+        refs.extend(
+            str(item).strip()
+            for item in (node.inputs.get("bindings") or [])
+            if str(item).strip()
+        )
+    return list(dict.fromkeys(refs))
+
+
+def _build_graph_execution_packet(
+    conn: SyncPostgresConnection,
+    *,
+    request: WorkflowRequest,
+    spec_dict: Mapping[str, object],
+    packet_provenance: Mapping[str, object] | None,
+) -> dict[str, object]:
+    provenance = packet_provenance or {}
+    request_payload = _workflow_request_payload(request)
+    source_kind = _graph_packet_source_kind(provenance)
+    definition_revision = _graph_packet_definition_revision(
+        request=request,
+        spec_dict=spec_dict,
+        packet_provenance=provenance,
+    )
+    plan_revision = _graph_packet_plan_revision(
+        request=request,
+        spec_dict=spec_dict,
+        packet_provenance=provenance,
+    )
+    model_messages = _graph_packet_model_messages(request=request, spec_dict=spec_dict)
+    reference_bindings = _graph_packet_reference_bindings(
+        request=request,
+        spec_dict=spec_dict,
+    )
+    capability_bindings = _graph_packet_capability_bindings(spec_dict=spec_dict)
+    verify_refs = _graph_packet_verify_refs(request=request, spec_dict=spec_dict)
+    provenance_file_inputs = (
+        provenance.get("file_inputs")
+        if isinstance(provenance.get("file_inputs"), Mapping)
+        else {}
+    )
+    reuse_file_inputs = json.loads(
+        json.dumps(
+            {
+                **dict(provenance_file_inputs),
+                "spec_snapshot": dict(spec_dict),
+            },
+            default=str,
+        )
+    )
+    reuse_authority_inputs = json.loads(
+        json.dumps(
+            {
+                "workflow_definition": {
+                    "workflow_definition_id": request.workflow_definition_id,
+                    "definition_hash": request.definition_hash,
+                },
+                "workflow_row": (
+                    dict(provenance.get("workflow_row"))
+                    if isinstance(provenance.get("workflow_row"), Mapping)
+                    else {"id": request.workflow_id}
+                ),
+                "definition_row": (
+                    dict(provenance.get("definition_row"))
+                    if isinstance(provenance.get("definition_row"), Mapping)
+                    else {"definition_revision": definition_revision}
+                ),
+                "compiled_spec_row": (
+                    dict(provenance.get("compiled_spec_row"))
+                    if isinstance(provenance.get("compiled_spec_row"), Mapping)
+                    else {
+                        "definition_revision": definition_revision,
+                        "plan_revision": plan_revision,
+                    }
+                ),
+            },
+            default=str,
+        )
+    )
+    file_inputs = json.loads(
+        json.dumps(
+            {
+                **dict(provenance_file_inputs),
+                "spec_snapshot": dict(spec_dict),
+                "workflow_request": request_payload,
+            },
+            default=str,
+        )
+    )
+    authority_inputs = json.loads(
+        json.dumps(
+            {
+                "workflow_request": request_payload,
+                "workflow_definition": {
+                    "workflow_definition_id": request.workflow_definition_id,
+                    "definition_hash": request.definition_hash,
+                },
+                "workflow_row": (
+                    dict(provenance.get("workflow_row"))
+                    if isinstance(provenance.get("workflow_row"), Mapping)
+                    else {"id": request.workflow_id}
+                ),
+                "definition_row": (
+                    dict(provenance.get("definition_row"))
+                    if isinstance(provenance.get("definition_row"), Mapping)
+                    else {"definition_revision": definition_revision}
+                ),
+                "compiled_spec_row": (
+                    dict(provenance.get("compiled_spec_row"))
+                    if isinstance(provenance.get("compiled_spec_row"), Mapping)
+                    else {
+                        "definition_revision": definition_revision,
+                        "plan_revision": plan_revision,
+                    }
+                ),
+            },
+            default=str,
+        )
+    )
+    packet_payload: dict[str, object] = {
+        "definition_revision": definition_revision,
+        "plan_revision": plan_revision,
+        "packet_version": 1,
+        "workflow_id": request.workflow_id,
+        "run_id": request.request_id,
+        "spec_name": str(spec_dict.get("name") or request.workflow_id or "inline"),
+        "source_kind": source_kind,
+        "authority_refs": [definition_revision, plan_revision],
+        "model_messages": model_messages,
+        "reference_bindings": reference_bindings,
+        "capability_bindings": capability_bindings,
+        "verify_refs": verify_refs,
+        "authority_inputs": authority_inputs,
+        "file_inputs": file_inputs,
+        "compile_provenance": {
+            "artifact_kind": "packet_lineage",
+            "input_fingerprint": "",
+            "surface_revision": "workflow_graph_runtime.packet_submit",
+            "definition_revision": definition_revision,
+            "plan_revision": plan_revision,
+            "workflow_id": request.workflow_id,
+            "spec_name": str(spec_dict.get("name") or request.workflow_id or "inline"),
+            "source_kind": source_kind,
+            "file_inputs": reuse_file_inputs,
+            "authority_inputs": reuse_authority_inputs,
+        },
+    }
+    compile_provenance = dict(packet_payload["compile_provenance"])
+    compile_input_payload = {
+        "artifact_kind": compile_provenance["artifact_kind"],
+        "surface_revision": compile_provenance["surface_revision"],
+        "definition_revision": definition_revision,
+        "plan_revision": plan_revision,
+        "workflow_id": request.workflow_id,
+        "spec_name": str(packet_payload["spec_name"]),
+        "source_kind": source_kind,
+        "model_messages": model_messages,
+        "reference_bindings": reference_bindings,
+        "capability_bindings": capability_bindings,
+        "verify_refs": verify_refs,
+        "file_inputs": compile_provenance["file_inputs"],
+        "authority_inputs": compile_provenance["authority_inputs"],
+    }
+    compile_provenance["input_fingerprint"] = canonical_hash(compile_input_payload)
+    packet_payload["compile_provenance"] = compile_provenance
+    try:
+        return CompileArtifactStore(conn).persist_execution_packet_with_reuse(
+            packet=packet_payload,
+            authority_refs=[definition_revision, plan_revision],
+            parent_artifact_ref=plan_revision,
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            f"workflow packet lineage reuse failed closed: {exc}"
+        ) from exc
+
+
 def _persist_graph_submission_evidence(
     *,
     evidence_writer: PostgresEvidenceWriter,
@@ -386,21 +780,10 @@ def _graph_registry_for_request(request: WorkflowRequest) -> RegistryResolver:
 
 def _graph_adapter_registry(request: WorkflowRequest) -> AdapterRegistry:
     adapter_types = {str(node.adapter_type).strip() for node in request.nodes if str(node.adapter_type).strip()}
-    registry = AdapterRegistry(
-        api_task_adapter=APITaskAdapter() if "api_task" in adapter_types else None,
-        llm_task_adapter=LLMTaskAdapter() if "llm_task" in adapter_types else None,
-        cli_llm_adapter=CLILLMAdapter() if "cli_llm" in adapter_types else None,
-        mcp_task_adapter=MCPTaskAdapter() if "mcp_task" in adapter_types else None,
+    return build_workflow_adapter_registry(
+        adapter_types=adapter_types,
+        shadow_packet_config=None,
     )
-    if "context_compiler" in adapter_types:
-        registry.register("context_compiler", ContextCompilerAdapter(shadow_packet_config=None))
-    if "output_parser" in adapter_types:
-        registry.register("output_parser", OutputParserAdapter())
-    if "file_writer" in adapter_types:
-        registry.register("file_writer", FileWriterAdapter())
-    if "verifier" in adapter_types:
-        registry.register("verifier", VerifyAdapter())
-    return registry
 
 
 def _graph_runtime_history_p95_seconds(
@@ -897,9 +1280,13 @@ def _submit_graph_workflow_inline(
     spec_dict: dict[str, object],
     *,
     run_id: str | None,
+    packet_provenance: dict[str, object] | None = None,
 ) -> dict:
     requested_at = datetime.now(timezone.utc)
-    request = compile_graph_workflow_request(spec_dict, run_id=run_id)
+    try:
+        request = compile_graph_workflow_request(spec_dict, run_id=run_id, conn=conn)
+    except Exception as exc:
+        raise RuntimeError(f"graph-capable workflow submit failed closed: {exc}") from exc
     registry = _graph_registry_for_request(request)
     planner = WorkflowIntakePlanner(registry=registry)
     intake_outcome = planner.plan(request=request)
@@ -935,13 +1322,30 @@ def _submit_graph_workflow_inline(
         )
     finally:
         evidence_writer.close_blocking()
+    execution_packet = _build_graph_execution_packet(
+        conn,
+        request=request,
+        spec_dict=spec_dict,
+        packet_provenance=packet_provenance,
+    )
+    packet_reuse_provenance = None
+    compile_provenance = execution_packet.get("compile_provenance")
+    if isinstance(compile_provenance, dict) and isinstance(
+        compile_provenance.get("reuse"),
+        dict,
+    ):
+        packet_reuse_provenance = dict(compile_provenance["reuse"])
+        packet_reuse_provenance.setdefault(
+            "input_fingerprint",
+            str(compile_provenance.get("input_fingerprint") or "").strip(),
+        )
     payload = {
         "run_id": intake_outcome.run_id,
         "status": intake_outcome.current_state.value,
         "total_jobs": len(spec_dict.get("jobs", [])) if isinstance(spec_dict.get("jobs"), list) else 0,
         "spec_name": str(spec_dict.get("name") or "inline"),
         "workflow_id": request.workflow_id,
-        "packet_reuse_provenance": None,
+        "packet_reuse_provenance": packet_reuse_provenance,
         "execution_mode": "graph_runtime",
     }
     payload["reason_code"] = intake_outcome.admission_decision.reason_code
@@ -970,7 +1374,7 @@ def _do_submit_workflow(
     Returns {run_id, status, total_jobs, spec_name}.
     """
     now = datetime.now(timezone.utc)
-    runtime_profile_ref = _runtime_profile_ref_from_spec(spec)
+    runtime_profile_ref = _runtime_profile_ref_from_spec(spec, conn=conn)
 
     # Resolve auto/ agent slugs via task_type_router
     try:
@@ -1222,7 +1626,7 @@ def _do_submit_workflow(
                 execution_context_shards=execution_context_shards,
                 run_id=run_id,
                 workflow_id=authority["workflow_id"],
-                runtime_profile_ref=_runtime_profile_ref_from_spec(spec),
+                runtime_profile_ref=_runtime_profile_ref_from_spec(spec, conn=conn),
             )
         )
         execution_bundles = {
@@ -1334,6 +1738,12 @@ def submit_workflow(
                 conn,
                 spec._raw,
                 run_id=run_id,
+                packet_provenance={
+                    "source_kind": "file_submit",
+                    "spec_path": full_path,
+                    "repo_root": repo_root,
+                    "file_inputs": spec._raw,
+                },
             )
         except GraphWorkflowCompileError as exc:
             raise RuntimeError(
@@ -1386,6 +1796,7 @@ def submit_workflow_inline(
                 conn,
                 spec_dict,
                 run_id=run_id,
+                packet_provenance=packet_provenance,
             )
         except GraphWorkflowCompileError as exc:
             raise RuntimeError(

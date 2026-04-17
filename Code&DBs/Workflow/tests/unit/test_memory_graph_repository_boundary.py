@@ -10,7 +10,14 @@ from pathlib import Path
 import memory.graph_hygiene as graph_hygiene_module
 from memory.graph_hygiene import GraphHygienist
 from memory.repository import MemoryEdgeRef
-from memory.types import Edge, Entity, EntityType, RelationType
+from memory.types import (
+    Edge,
+    EdgeAuthorityClass,
+    EdgeProvenanceKind,
+    Entity,
+    EntityType,
+    RelationType,
+)
 from runtime.database_maintenance import DatabaseMaintenanceProcessor, MaintenanceIntent
 from runtime.embedding_service import EmbeddingRuntimeAuthority
 from storage.postgres.memory_graph_repository import PostgresMemoryGraphRepository
@@ -161,6 +168,8 @@ def _edge(*, source_id: str, target_id: str) -> Edge:
         weight=0.7,
         metadata={"kind": "test"},
         created_at=_utc_now(),
+        authority_class=EdgeAuthorityClass.canonical,
+        provenance_kind=EdgeProvenanceKind.legacy_unspecified,
     )
 
 
@@ -290,12 +299,24 @@ def test_postgres_memory_graph_repository_upserts_edges_through_owned_insert():
             relation_type,
             weight,
             metadata,
-            created_at
+            created_at,
+            authority_class,
+            provenance_kind,
+            provenance_ref,
+            edge_origin,
+            active,
+            last_validated_at
         )
-        VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $8, true, now())
         ON CONFLICT (source_id, target_id, relation_type) DO UPDATE SET
             weight = EXCLUDED.weight,
-            metadata = EXCLUDED.metadata
+            metadata = EXCLUDED.metadata,
+            authority_class = EXCLUDED.authority_class,
+            provenance_kind = EXCLUDED.provenance_kind,
+            provenance_ref = EXCLUDED.provenance_ref,
+            edge_origin = EXCLUDED.edge_origin,
+            active = true,
+            last_validated_at = now()
         """
     )
     conn = _FakeConn()
@@ -315,6 +336,9 @@ def test_postgres_memory_graph_repository_upserts_edges_through_owned_insert():
                 0.7,
                 '{"kind":"test"}',
                 edge.created_at,
+                "canonical",
+                "legacy_unspecified",
+                None,
             ),
         )
     ]

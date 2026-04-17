@@ -43,6 +43,27 @@ class RelationType(enum.Enum):
     semantic_neighbor = "semantic_neighbor"
 
 
+class EdgeAuthorityClass(enum.Enum):
+    canonical = "canonical"
+    enrichment = "enrichment"
+
+
+class EdgeProvenanceKind(enum.Enum):
+    legacy_unspecified = "legacy_unspecified"
+    structured_ingest = "structured_ingest"
+    conversation_extraction = "conversation_extraction"
+    receipt_projection = "receipt_projection"
+    verification_projection = "verification_projection"
+    failure_projection = "failure_projection"
+    constraint_projection = "constraint_projection"
+    friction_projection = "friction_projection"
+    schema_projection = "schema_projection"
+    import_graph_projection = "import_graph_projection"
+    heuristic_extraction = "heuristic_extraction"
+    relationship_mining = "relationship_mining"
+    rollup_inference = "rollup_inference"
+
+
 @dataclass(frozen=True)
 class Entity:
     id: str
@@ -64,6 +85,57 @@ class Edge:
     weight: float  # 0-1
     metadata: dict
     created_at: datetime
+    authority_class: EdgeAuthorityClass = EdgeAuthorityClass.enrichment
+    provenance_kind: EdgeProvenanceKind = EdgeProvenanceKind.legacy_unspecified
+    provenance_ref: str | None = None
+
+
+def canonical_edge(
+    *,
+    source_id: str,
+    target_id: str,
+    relation_type: RelationType,
+    weight: float,
+    metadata: dict,
+    created_at: datetime,
+    provenance_kind: EdgeProvenanceKind,
+    provenance_ref: str | None = None,
+) -> Edge:
+    return Edge(
+        source_id=source_id,
+        target_id=target_id,
+        relation_type=relation_type,
+        weight=weight,
+        metadata=metadata,
+        created_at=created_at,
+        authority_class=EdgeAuthorityClass.canonical,
+        provenance_kind=provenance_kind,
+        provenance_ref=provenance_ref,
+    )
+
+
+def enrichment_edge(
+    *,
+    source_id: str,
+    target_id: str,
+    relation_type: RelationType,
+    weight: float,
+    metadata: dict,
+    created_at: datetime,
+    provenance_kind: EdgeProvenanceKind,
+    provenance_ref: str | None = None,
+) -> Edge:
+    return Edge(
+        source_id=source_id,
+        target_id=target_id,
+        relation_type=relation_type,
+        weight=weight,
+        metadata=metadata,
+        created_at=created_at,
+        authority_class=EdgeAuthorityClass.enrichment,
+        provenance_kind=provenance_kind,
+        provenance_ref=provenance_ref,
+    )
 
 
 @dataclass

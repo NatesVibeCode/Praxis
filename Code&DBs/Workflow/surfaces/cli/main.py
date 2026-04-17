@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import importlib
 import os
 from difflib import SequenceMatcher
 import sys
@@ -70,34 +71,6 @@ from .commands.query import (
 )
 from .commands.roadmap import _roadmap_command
 from .commands.tools import _tools_command, _tools_quickstart_text
-from .commands.workflow import (
-    _active_command,
-    _cancel_command,
-    _chain_command,
-    _debate_command,
-    _diagnose_command,
-    _dry_run_command,
-    _fan_out_command,
-    _heal_command,
-    _inspect_job_command,
-    _manifest_command,
-    _pipeline_command,
-    _proof_command,
-    _queue_command,
-    _repair_command,
-    _retry_command,
-    _run_command,
-    _run_status_command,
-    _runs_command,
-    _scheduler_command,
-    _spawn_command,
-    _status_command,
-    _triggers_command,
-    _records_command,
-    _verify_command,
-    _verify_platform_command,
-    _work_command,
-)
 from .render import (
     render_graph_lineage,
     render_graph_topology,
@@ -241,6 +214,25 @@ def _build_default_observability_service(
 os.environ.setdefault("PRAXIS_DISABLE_STARTUP_WIRING", "1")
 
 
+def _workflow_command_handler(command_name: str):
+    workflow_commands = importlib.import_module(".commands.workflow", __package__)
+    return getattr(workflow_commands, command_name)
+
+
+def _lazy_workflow_args_command(command_name: str) -> ArgsCommandHandler:
+    def _handler(args: list[str], *, stdout: TextIO) -> int:
+        return _workflow_command_handler(command_name)(args, stdout=stdout)
+
+    return _handler
+
+
+def _lazy_workflow_stdout_command(command_name: str) -> StdoutCommandHandler:
+    def _handler(*, stdout: TextIO) -> int:
+        return _workflow_command_handler(command_name)(stdout=stdout)
+
+    return _handler
+
+
 def _run_legacy_compat_command(
     args: list[str],
     *,
@@ -330,7 +322,7 @@ def _preview_workflow_cli_command(args: list[str], *, stdout: TextIO) -> int:
     forwarded_args = list(args)
     if "--preview-execution" not in forwarded_args:
         forwarded_args.append("--preview-execution")
-    return _run_command(forwarded_args, stdout=stdout)
+    return _lazy_workflow_args_command("_run_command")(forwarded_args, stdout=stdout)
 
 
 _ARG_COMMANDS: dict[str, ArgsCommandHandler] | None = None
@@ -342,11 +334,11 @@ def _workflow_arg_commands() -> dict[str, ArgsCommandHandler]:
         return _ARG_COMMANDS
 
     _ARG_COMMANDS = {
-        "run": _run_command,
+        "run": _lazy_workflow_args_command("_run_command"),
         "preview": _preview_workflow_cli_command,
-        "spawn": _spawn_command,
-        "dry-run": _dry_run_command,
-        "chain": _chain_command,
+        "spawn": _lazy_workflow_args_command("_spawn_command"),
+        "dry-run": _lazy_workflow_args_command("_dry_run_command"),
+        "chain": _lazy_workflow_args_command("_chain_command"),
         "query": _query_command,
         "data": _data_command,
         "files": _files_command,
@@ -366,31 +358,31 @@ def _workflow_arg_commands() -> dict[str, ArgsCommandHandler]:
         "artifacts": _artifacts_command,
         "health": _health_command,
         "receipts": _receipts_command,
-        "diagnose": _diagnose_command,
-        "inspect-job": _inspect_job_command,
+        "diagnose": _lazy_workflow_args_command("_diagnose_command"),
+        "inspect-job": _lazy_workflow_args_command("_inspect_job_command"),
         "leaderboard": _leaderboard_command,
-        "manifest": _manifest_command,
+        "manifest": _lazy_workflow_args_command("_manifest_command"),
         "trust": _trust_command,
         "fitness": _fitness_command,
         "trends": _trends_command,
-        "verify": _verify_command,
-        "verify-platform": _verify_platform_command,
-        "pipeline": _pipeline_command,
-        "proof": _proof_command,
-        "heal": _heal_command,
-        "run-status": _run_status_command,
-        "scheduler": _scheduler_command,
-        "fan-out": _fan_out_command,
-        "debate": _debate_command,
-        "runs": _runs_command,
-        "retry": _retry_command,
-        "cancel": _cancel_command,
+        "verify": _lazy_workflow_args_command("_verify_command"),
+        "verify-platform": _lazy_workflow_args_command("_verify_platform_command"),
+        "pipeline": _lazy_workflow_args_command("_pipeline_command"),
+        "proof": _lazy_workflow_args_command("_proof_command"),
+        "heal": _lazy_workflow_args_command("_heal_command"),
+        "run-status": _lazy_workflow_args_command("_run_status_command"),
+        "scheduler": _lazy_workflow_args_command("_scheduler_command"),
+        "fan-out": _lazy_workflow_args_command("_fan_out_command"),
+        "debate": _lazy_workflow_args_command("_debate_command"),
+        "runs": _lazy_workflow_args_command("_runs_command"),
+        "retry": _lazy_workflow_args_command("_retry_command"),
+        "cancel": _lazy_workflow_args_command("_cancel_command"),
         "circuits": _circuits_command,
         "params": _params_command,
         "notifications": _notifications_command,
         "config": _config_command,
         "dashboard": _dashboard_command,
-        "queue": _queue_command,
+        "queue": _lazy_workflow_args_command("_queue_command"),
         "capabilities": _capabilities_command,
         "scope": _scope_command,
         "risk": _risk_command,
@@ -409,20 +401,20 @@ def _workflow_arg_commands() -> dict[str, ArgsCommandHandler]:
         "validate": _validate_command,
         "stream": _stream_command,
         "chain-status": _chain_status_command,
-        "triggers": _triggers_command,
-        "records": _records_command,
-        "repair": _repair_command,
-        "work": _work_command,
+        "triggers": _lazy_workflow_args_command("_triggers_command"),
+        "records": _lazy_workflow_args_command("_records_command"),
+        "repair": _lazy_workflow_args_command("_repair_command"),
+        "work": _lazy_workflow_args_command("_work_command"),
         "roadmap": _roadmap_command,
     }
     return _ARG_COMMANDS
 
 _STDOUT_COMMANDS: dict[str, StdoutCommandHandler] = {
     "commands": lambda *, stdout: _commands_index_command(stdout=stdout),
-    "status": _status_command,
+    "status": _lazy_workflow_stdout_command("_status_command"),
     "costs": _costs_command,
     "slots": _slots_command,
-    "active": _active_command,
+    "active": _lazy_workflow_stdout_command("_active_command"),
 }
 
 

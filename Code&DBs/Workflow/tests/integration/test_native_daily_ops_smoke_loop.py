@@ -364,6 +364,20 @@ class _FakeConnection:
         self._close_events = close_events
         self.label = label
 
+    async def fetchrow(self, query: str, *params: object):
+        assert params == ("run.daily.ops",)
+        if "FROM workflow_runs" in query:
+            return {
+                "workspace_ref": _repo_root(),
+                "runtime_profile_ref": "praxis",
+            }
+        if "FROM workflow_claim_lease_proposal_runtime" in query:
+            return None
+        return {
+            "workspace_ref": _repo_root(),
+            "runtime_profile_ref": "praxis",
+        }
+
     async def close(self) -> None:
         self._close_events.append(f"closed:{self.label}")
 
@@ -538,6 +552,7 @@ def test_native_daily_ops_smoke_loop_stays_truthful_and_boring(
                 work_item_workflow_binding_id="binding.daily.ops",
                 binding_kind="governed_by",
                 binding_status="active",
+                issue_id=None,
                 roadmap_item_id=None,
                 bug_id=None,
                 cutover_gate_id="cutover_gate.daily.ops",
@@ -558,6 +573,27 @@ def test_native_daily_ops_smoke_loop_stays_truthful_and_boring(
 
     async def _fake_load_cutover_status(self, *, env, run_id, as_of, work_bindings):
         return cutover_status
+
+    async def _fake_load_fork_worktree_ownership(self, *, env, run_id):
+        return {
+            "kind": "native_operator_fork_worktree_ownership",
+            "authority": "test.stub",
+            "selector_authority": "test.stub",
+            "selection_status": "not_selected",
+            "selector": {"run_id": run_id},
+            "provenance": {"reason_code": "test.stub"},
+            "fork_worktree_binding": None,
+        }
+
+    async def _fake_load_smoke_freshness(self, *, env, as_of):
+        return {
+            "kind": "native_smoke_freshness",
+            "authority": "workflow_runs",
+            "workflow_id_prefix": "workflow.native-self-hosted-smoke",
+            "freshness_slo_seconds": 86400,
+            "state": "fresh",
+            "as_of": as_of.isoformat(),
+        }
 
     def _fake_frontdoor_status(*, run_id: str, env=None) -> dict[str, object]:
         status_calls.append({"run_id": run_id, "env": dict(env or {})})
@@ -640,6 +676,16 @@ def test_native_daily_ops_smoke_loop_stays_truthful_and_boring(
     )
     monkeypatch.setattr(
         native_operator_surface.NativeOperatorSurfaceFrontdoor,
+        "_load_fork_worktree_ownership",
+        _fake_load_fork_worktree_ownership,
+    )
+    monkeypatch.setattr(
+        native_operator_surface.NativeOperatorSurfaceFrontdoor,
+        "_load_smoke_freshness",
+        _fake_load_smoke_freshness,
+    )
+    monkeypatch.setattr(
+        native_operator_surface.NativeOperatorSurfaceFrontdoor,
         "_load_canonical_evidence",
         _fake_load_canonical_evidence,
     )
@@ -672,7 +718,9 @@ def test_native_daily_ops_smoke_loop_stays_truthful_and_boring(
         _fake_resolve_recurring_review_repair_flow,
     )
 
-    daily_surface_frontdoor = native_operator_surface.NativeOperatorSurfaceFrontdoor()
+    daily_surface_frontdoor = native_operator_surface.NativeOperatorSurfaceFrontdoor(
+        connect_database=_fake_connect_database,
+    )
     dispatch_frontdoor = operator_write.NativeWorkflowFlowFrontdoor(
         connect_database=_fake_connect_database,
     )
@@ -775,7 +823,8 @@ def test_native_daily_ops_smoke_loop_stays_truthful_and_boring(
     assert all(call["dispatch_resolution"] == review_dispatch_decision for call in cockpit_build_calls)
     assert all(call["cutover_status"] == cutover_status for call in cockpit_build_calls)
     assert resolve_instance_calls == [env, env, env, env, env, env]
-    assert [event.startswith("closed:") for event in connection_closes] == [True, True, True, True]
+    assert len(connection_closes) == 6
+    assert all(event.startswith("closed:") for event in connection_closes)
     assert len(dispatch_calls) == 2
     assert len(recurring_calls) == 2
     assert dispatch_calls[0]["as_of"] == as_of

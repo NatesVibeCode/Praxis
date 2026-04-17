@@ -182,16 +182,16 @@ def render_health_payload(payload: dict[str, Any], *, stdout: TextIO) -> None:
         ):
             if key in snapshot:
                 stdout.write(f"  {key}: {snapshot[key]}\n")
-    provider_registry = payload.get("provider_registry")
-    if isinstance(provider_registry, dict):
-        stdout.write("\nRouting\n")
+    transport_support_summary = payload.get("transport_support_summary")
+    if isinstance(transport_support_summary, dict):
+        stdout.write("\nTransport Support\n")
         stdout.write("-" * 50 + "\n")
-        default_provider = str(provider_registry.get("default_provider_slug") or "").strip()
-        default_adapter = str(provider_registry.get("default_adapter_type") or "").strip()
+        default_provider = str(transport_support_summary.get("default_provider_slug") or "").strip()
+        default_adapter = str(transport_support_summary.get("default_adapter_type") or "").strip()
         if default_provider:
             suffix = f" ({default_adapter})" if default_adapter else ""
             stdout.write(f"  default: {default_provider}{suffix}\n")
-        providers = provider_registry.get("providers")
+        providers = transport_support_summary.get("providers")
         if isinstance(providers, list):
             for provider in providers:
                 if not isinstance(provider, dict):

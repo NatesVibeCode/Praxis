@@ -522,3 +522,66 @@ def test_run_registered_healer_resolves_bug_after_post_verification_passes(
 
     assert payload["status"] == "succeeded"
     assert payload["resolved_bug_id"] == "BUG-VERIFY"
+
+
+def test_maybe_resolve_verifier_bug_links_evidence_once_and_resolves_once(
+    monkeypatch,
+) -> None:
+    import runtime.bug_tracker as bug_tracker
+
+    bug = SimpleNamespace(bug_id="BUG-VERIFY")
+    evidence_links: list[tuple[str, str, str, str]] = []
+    resolves: list[tuple[str, object]] = []
+    conn = object()
+
+    monkeypatch.setattr(
+        verifier_authority,
+        "_latest_failed_verification_fingerprint",
+        lambda **_kwargs: "fp.verify",
+    )
+    monkeypatch.setattr(
+        verifier_authority,
+        "_load_open_bug_by_fingerprint",
+        lambda **_kwargs: bug,
+    )
+    monkeypatch.setattr(
+        verifier_authority,
+        "_link_bug_evidence",
+        lambda **kwargs: evidence_links.append(
+            (
+                kwargs["bug_id"],
+                kwargs["evidence_kind"],
+                kwargs["evidence_ref"],
+                kwargs["evidence_role"],
+            )
+        ),
+    )
+
+    class _FakeTracker:
+        def __init__(self, db) -> None:
+            assert db is conn
+
+        def resolve(self, bug_id, status):
+            resolves.append((bug_id, status))
+            return SimpleNamespace(bug_id=bug_id)
+
+    monkeypatch.setattr(bug_tracker, "BugTracker", _FakeTracker)
+
+    resolved_bug_id = verifier_authority._maybe_resolve_verifier_bug(
+        verifier_ref="verifier.platform.receipt_provenance",
+        target_kind="path",
+        target_ref="Code&DBs/Workflow/tests/unit/test_verifier_authority.py",
+        healing_run_id="healing_run:test",
+        post_verification={
+            "status": "passed",
+            "verification_run_id": "verification_run:test",
+        },
+        conn=conn,
+    )
+
+    assert resolved_bug_id == "BUG-VERIFY"
+    assert evidence_links == [
+        ("BUG-VERIFY", "healing_run", "healing_run:test", "attempted_fix"),
+        ("BUG-VERIFY", "verification_run", "verification_run:test", "validates_fix"),
+    ]
+    assert resolves == [("BUG-VERIFY", bug_tracker.BugStatus.FIXED)]

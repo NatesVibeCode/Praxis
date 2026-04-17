@@ -81,9 +81,12 @@ def test_gate_policy_migration_resolution_fails_closed_when_canonical_file_is_mi
     finally:
         _clear_workflow_migration_caches()
 
-    assert exc_info.value.reason_code == "workflow.migration_manifest_incomplete"
-    assert exc_info.value.details["filename"] == _POLICY_MIGRATION_FILENAME
-    assert exc_info.value.details["missing_filenames"] == _POLICY_MIGRATION_FILENAME
+    assert exc_info.value.reason_code == "workflow.migration_policy_drift"
+    assert exc_info.value.details["unclassified_filenames"] == ""
+    missing_on_disk = set(
+        filter(None, exc_info.value.details["missing_on_disk_filenames"].split(","))
+    )
+    assert _POLICY_MIGRATION_FILENAME in missing_on_disk
 
 
 async def _exercise_blocked_gate_has_no_promotion_bypass_path() -> None:

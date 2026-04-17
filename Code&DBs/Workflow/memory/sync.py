@@ -12,7 +12,13 @@ import time
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from memory.types import Entity, EntityType, Edge, RelationType
+from memory.types import (
+    EdgeProvenanceKind,
+    Entity,
+    EntityType,
+    RelationType,
+    canonical_edge,
+)
 if TYPE_CHECKING:
     from memory.engine import MemoryEngine
     from storage.postgres.connection import SyncPostgresConnection
@@ -205,7 +211,7 @@ class MemorySync(HeartbeatModule):
                 confidence=0.9,
             )
             self._engine.add_edge(
-                Edge(
+                canonical_edge(
                     source_id=receipt_entity_id,
                     target_id=code_entity_id,
                     relation_type=RelationType.produced,
@@ -216,6 +222,8 @@ class MemorySync(HeartbeatModule):
                         "path": path,
                     },
                     created_at=ts,
+                    provenance_kind=EdgeProvenanceKind.receipt_projection,
+                    provenance_ref=receipt_id,
                 )
             )
             actions += 1
@@ -277,13 +285,15 @@ class MemorySync(HeartbeatModule):
             )
         )
         self._engine.add_edge(
-            Edge(
+            canonical_edge(
                 source_id=verification_entity_id,
                 target_id=receipt_entity_id,
                 relation_type=RelationType.recorded_in,
                 weight=1.0,
                 metadata={"edge_kind": "verification_receipt"},
                 created_at=ts,
+                provenance_kind=EdgeProvenanceKind.verification_projection,
+                provenance_ref=receipt_id,
             )
         )
 
@@ -298,13 +308,15 @@ class MemorySync(HeartbeatModule):
                 confidence=0.9,
             )
             self._engine.add_edge(
-                Edge(
+                canonical_edge(
                     source_id=code_entity_id,
                     target_id=verification_entity_id,
                     relation_type=RelationType.verified_by,
                     weight=1.0,
                     metadata={"edge_kind": "verification_coverage", "path": path},
                     created_at=ts,
+                    provenance_kind=EdgeProvenanceKind.verification_projection,
+                    provenance_ref=receipt_id,
                 )
             )
             actions += 1
@@ -358,13 +370,15 @@ class MemorySync(HeartbeatModule):
             )
         )
         self._engine.add_edge(
-            Edge(
+            canonical_edge(
                 source_id=failure_entity_id,
                 target_id=receipt_entity_id,
                 relation_type=RelationType.recorded_in,
                 weight=1.0,
                 metadata={"edge_kind": "failure_receipt"},
                 created_at=ts,
+                provenance_kind=EdgeProvenanceKind.failure_projection,
+                provenance_ref=receipt_id,
             )
         )
 
@@ -377,7 +391,7 @@ class MemorySync(HeartbeatModule):
                 confidence=0.85,
             )
             self._engine.add_edge(
-                Edge(
+                canonical_edge(
                     source_id=code_entity_id,
                     target_id=failure_entity_id,
                     relation_type=RelationType.related_to,
@@ -388,6 +402,8 @@ class MemorySync(HeartbeatModule):
                         "receipt_id": receipt_id,
                     },
                     created_at=ts,
+                    provenance_kind=EdgeProvenanceKind.failure_projection,
+                    provenance_ref=receipt_id,
                 )
             )
             actions += 1
@@ -669,13 +685,15 @@ class MemorySync(HeartbeatModule):
                     job_label,
                 )
                 if receipt_rows:
-                    edge = Edge(
+                    edge = canonical_edge(
                         source_id=f"constraint:{r['constraint_id']}",
                         target_id=self._receipt_entity_id(receipt_rows[0]['receipt_id']),
                         relation_type=RelationType.derived_from,
                         weight=float(r['confidence'] or 0.5),
                         metadata={},
                         created_at=ts,
+                        provenance_kind=EdgeProvenanceKind.constraint_projection,
+                        provenance_ref=str(r['constraint_id']),
                     )
                     self._engine.add_edge(edge)
             count += 1
@@ -731,13 +749,15 @@ class MemorySync(HeartbeatModule):
                     job_label,
                 )
                 if receipt_rows:
-                    edge = Edge(
+                    edge = canonical_edge(
                         source_id=f"friction:{r['event_id']}",
                         target_id=self._receipt_entity_id(receipt_rows[0]['receipt_id']),
                         relation_type=RelationType.caused_by,
                         weight=0.8,
                         metadata={},
                         created_at=ts,
+                        provenance_kind=EdgeProvenanceKind.friction_projection,
+                        provenance_ref=str(r['event_id']),
                     )
                     self._engine.add_edge(edge)
             count += 1

@@ -42,6 +42,11 @@ _ROW_EXPECTATION_KEY_COLUMNS = {
 }
 _STRUCTURAL_EXPECTED_OBJECT_TYPES = frozenset({"table", "index", "column", "constraint", "function"})
 _ABSENCE_EXPECTED_OBJECT_TYPE_PREFIX = "absent_"
+_BOOTSTRAP_BASELINE_ANCHOR_OBJECTS = (
+    WorkflowMigrationExpectedObject(object_type="table", object_name="workflows"),
+    WorkflowMigrationExpectedObject(object_type="table", object_name="system_events"),
+    WorkflowMigrationExpectedObject(object_type="table", object_name="maintenance_policies"),
+)
 
 logger = logging.getLogger(__name__)
 
@@ -486,11 +491,22 @@ async def bootstrap_workflow_schema(conn: asyncpg.Connection) -> None:
             for filename in _full_workflow_migration_filenames():
                 await _bootstrap_migration(conn, filename)
             return
+        if await _bootstrap_baseline_anchor_is_missing(conn):
+            for filename in _full_workflow_migration_filenames():
+                await _bootstrap_migration(conn, filename)
+            return
         for filename in _workflow_schema_manifest_filenames():
             missing_objects = readiness.missing_by_migration.get(filename, ())
             if not missing_objects:
                 continue
             await _bootstrap_migration(conn, filename)
+
+
+async def _bootstrap_baseline_anchor_is_missing(conn: asyncpg.Connection) -> bool:
+    for expected in _BOOTSTRAP_BASELINE_ANCHOR_OBJECTS:
+        if not await _workflow_expected_object_exists(conn, expected):
+            return True
+    return False
 
 
 async def inspect_control_plane_schema(

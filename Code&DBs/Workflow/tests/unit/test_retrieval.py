@@ -17,6 +17,7 @@ from memory.retrieval import (
     RetrievalResult,
 )
 from memory.types import Edge, Entity, EntityType, RelationType
+from memory.types import EdgeAuthorityClass, EdgeProvenanceKind
 
 
 # ---------------------------------------------------------------------------
@@ -52,6 +53,8 @@ def _make_edge(src: str, tgt: str, weight: float = 0.8) -> Edge:
         weight=weight,
         metadata={},
         created_at=datetime.utcnow(),
+        authority_class=EdgeAuthorityClass.canonical,
+        provenance_kind=EdgeProvenanceKind.legacy_unspecified,
     )
 
 
@@ -197,9 +200,17 @@ class InMemoryEngine:
         self._edges.append(edge)
         return True
 
-    def get_edges(self, entity_id: str, direction: str = "outgoing") -> list[Edge]:
+    def get_edges(
+        self,
+        entity_id: str,
+        direction: str = "outgoing",
+        authority_classes=None,
+    ) -> list[Edge]:
+        normalized_authority_classes = authority_classes or (EdgeAuthorityClass.canonical,)
         result = []
         for e in self._edges:
+            if e.authority_class not in normalized_authority_classes:
+                continue
             if direction == "outgoing" and e.source_id == entity_id:
                 result.append(e)
             elif direction == "incoming" and e.target_id == entity_id:
@@ -257,6 +268,28 @@ class TestHybridRetriever:
         results = retriever.search("python")
         graph_results = [r for r in results if "graph" in r.found_via]
         assert len(graph_results) > 0
+
+    def test_enrichment_edges_do_not_expand_graph_by_default(self, populated_engine):
+        populated_engine.insert(
+            _make_entity("e5", "hidden heuristic", "only reachable through enrichment")
+        )
+        populated_engine.add_edge(
+            Edge(
+                source_id="e1",
+                target_id="e5",
+                relation_type=RelationType.related_to,
+                weight=0.95,
+                metadata={"kind": "heuristic"},
+                created_at=datetime.utcnow(),
+                authority_class=EdgeAuthorityClass.enrichment,
+                provenance_kind=EdgeProvenanceKind.heuristic_extraction,
+            )
+        )
+
+        retriever = HybridRetriever(populated_engine, alpha=0.0)
+        results = retriever.search("python")
+        ids = {result.entity.id for result in results}
+        assert "e5" not in ids
 
     def test_alpha_one_text_only(self, populated_engine):
         retriever = HybridRetriever(populated_engine, alpha=1.0)

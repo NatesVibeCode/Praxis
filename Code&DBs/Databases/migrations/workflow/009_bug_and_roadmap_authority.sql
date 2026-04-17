@@ -75,6 +75,7 @@ CREATE TABLE roadmap_items (
     title text NOT NULL,
     item_kind text NOT NULL,
     status text NOT NULL,
+    lifecycle text NOT NULL DEFAULT 'planned',
     priority text NOT NULL,
     parent_roadmap_item_id text,
     source_bug_id text,
@@ -95,6 +96,8 @@ CREATE TABLE roadmap_items (
         FOREIGN KEY (source_bug_id)
         REFERENCES bugs (bug_id)
         ON DELETE SET NULL,
+    CONSTRAINT roadmap_items_lifecycle_check
+        CHECK (lifecycle IN ('idea', 'planned', 'claimed', 'completed')),
     CONSTRAINT roadmap_items_target_window
         CHECK (
             target_start_at IS NULL
@@ -113,6 +116,7 @@ CREATE INDEX roadmap_items_source_bug_idx
     ON roadmap_items (source_bug_id);
 
 COMMENT ON TABLE roadmap_items IS 'Canonical roadmap backlog, capability, and initiative records for native operator planning. Owned by surfaces/.';
+COMMENT ON COLUMN roadmap_items.lifecycle IS 'Explicit roadmap lifecycle from idea intake through claimed execution and completed closeout. Do not infer planning state only from bindings or acceptance JSON.';
 COMMENT ON COLUMN roadmap_items.acceptance_criteria IS 'Structured acceptance contract for one roadmap item. Do not hide done criteria only in docs or queue prompts.';
 
 CREATE TABLE roadmap_item_dependencies (

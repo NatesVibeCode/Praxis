@@ -21,7 +21,7 @@ from .http_transport import (
     open_http_stream,
     perform_http_request,
 )
-from .provider_registry import resolve_adapter_config, resolve_api_protocol_family
+from registry.provider_execution_registry import resolve_adapter_config, resolve_api_protocol_family
 
 if TYPE_CHECKING:
     from .deterministic import DeterministicExecutionControl

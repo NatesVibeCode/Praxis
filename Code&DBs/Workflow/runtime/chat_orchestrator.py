@@ -208,7 +208,7 @@ class ChatOrchestrator:
 
                     # Add to messages for next LLM call
                     from runtime.http_transport import format_tool_messages
-                    from adapters.provider_registry import get_profile
+                    from registry.provider_execution_registry import get_profile
                     _prof = get_profile(provider)
                     _proto = _prof.api_protocol_family if _prof else "openai_chat_completions"
                     messages.extend(format_tool_messages(
@@ -358,7 +358,7 @@ class ChatOrchestrator:
                     summary = tr["result"].get("summary", "") if tr else ""
 
                     from runtime.http_transport import format_tool_messages
-                    from adapters.provider_registry import get_profile
+                    from registry.provider_execution_registry import get_profile
                     _prof = get_profile(provider)
                     _proto = _prof.api_protocol_family if _prof else "openai_chat_completions"
                     messages.extend(format_tool_messages(
@@ -486,7 +486,7 @@ class ChatOrchestrator:
 
     def _resolve_route_chain(self) -> list[ResolvedChatRoute]:
         """Resolve chat failover routes and filter to currently usable lanes."""
-        from adapters.provider_registry import resolve_binary
+        from registry.provider_execution_registry import resolve_binary
         router_mod = importlib.import_module(f"{__package__}.task_type_router")
         TaskTypeRouter = router_mod.TaskTypeRouter
 
@@ -588,7 +588,7 @@ class ChatOrchestrator:
 
 def _resolve_api_key(provider: str, *, required: bool = True) -> str | None:
     """Resolve a provider API key from authoritative env var mappings."""
-    from adapters.provider_registry import resolve_api_key_env_vars
+    from registry.provider_execution_registry import resolve_api_key_env_vars
 
     for env_var in resolve_api_key_env_vars(provider):
         value = str(os.environ.get(env_var, "")).strip()
@@ -696,11 +696,11 @@ def _run_cli_chat_route(
     repo_root: str,
 ) -> tuple[str, int]:
     from adapters.docker_runner import run_on_host
-    from adapters.provider_registry import build_command, get_profile
+    from registry.provider_execution_registry import build_command, get_profile
 
     profile = get_profile(route.provider_slug)
     if profile is None:
-        raise RuntimeError(f"provider_registry has no profile for {route.provider_slug!r}")
+        raise RuntimeError(f"provider execution registry has no profile for {route.provider_slug!r}")
 
     prompt = _render_cli_chat_prompt(messages)
     cmd_parts = build_command(

@@ -25,7 +25,7 @@ _DUPLICATE_SQLSTATES = {"42P07", "42710"}
 _SCHEMA_BOOTSTRAP_LOCK_ID = 741001
 
 
-def test_runtime_breadth_authority_schema_is_the_canonical_tail_migration() -> None:
+def test_runtime_breadth_authority_schema_is_retained_in_the_canonical_manifest() -> None:
     filenames = [entry.filename for entry in workflow_migration_manifest()]
     assert "011_runtime_breadth_authority.sql" in filenames
     assert "071_repo_snapshots_runtime_breadth_repair.sql" in filenames
@@ -37,7 +37,10 @@ def test_runtime_breadth_authority_schema_is_the_canonical_tail_migration() -> N
     assert "125_cursor_local_cli_provider_seed.sql" in filenames
     assert "126_operator_decision_scope_policy.sql" in filenames
     assert "127_operator_decision_architecture_policies.sql" in filenames
-    assert filenames[-1] == "127_operator_decision_architecture_policies.sql"
+    assert "154_roadmap_lifecycle_authority.sql" in filenames
+    assert filenames.index("011_runtime_breadth_authority.sql") < filenames.index(
+        "154_roadmap_lifecycle_authority.sql"
+    )
 
 
 def test_runtime_breadth_authority_schema_expected_objects_are_declared() -> None:

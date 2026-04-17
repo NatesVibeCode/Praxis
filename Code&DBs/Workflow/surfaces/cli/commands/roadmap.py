@@ -81,10 +81,11 @@ def _roadmap_view_command(args: list[str], *, stdout: TextIO) -> int:
     return exit_code
 
 
-def _roadmap_operator_view_command(
+def _roadmap_run_view_command(
     args: list[str],
     *,
-    view: str,
+    tool_name: str,
+    command_name: str,
     stdout: TextIO,
 ) -> int:
     run_id: str | None = None
@@ -103,17 +104,14 @@ def _roadmap_operator_view_command(
 
     if not run_id:
         stdout.write(
-            f"usage: workflow roadmap {view} --run-id <run_id>\n"
+            f"usage: workflow roadmap {command_name} --run-id <run_id>\n"
             "note: this command is run-scoped.\n"
             "for roadmap table/read-model visibility, use:\n"
             "  workflow roadmap view\n"
         )
         return 2
 
-    exit_code, payload = run_cli_tool(
-        "praxis_operator_view",
-        {"view": view, "run_id": run_id},
-    )
+    exit_code, payload = run_cli_tool(tool_name, {"run_id": run_id})
     print_json(stdout, payload)
     return exit_code
 
@@ -170,6 +168,8 @@ def _roadmap_write_command(args: list[str], *, stdout: TextIO) -> int:
             params["decision_ref"] = value
         elif flag == "--item-kind":
             params["item_kind"] = value
+        elif flag == "--lifecycle":
+            params["lifecycle"] = value
         elif flag == "--tier":
             params["tier"] = value
         elif flag == "--approval-tag":
@@ -255,8 +255,27 @@ def _roadmap_command(args: list[str], *, stdout: TextIO) -> int:
     tail = args[1:]
     if subcommand == "view":
         return _roadmap_view_command(tail, stdout=stdout)
-    if subcommand in {"status", "scoreboard", "graph"}:
-        return _roadmap_operator_view_command(tail, view=subcommand, stdout=stdout)
+    if subcommand == "status":
+        return _roadmap_run_view_command(
+            tail,
+            tool_name="praxis_run_status",
+            command_name="status",
+            stdout=stdout,
+        )
+    if subcommand == "scoreboard":
+        return _roadmap_run_view_command(
+            tail,
+            tool_name="praxis_run_scoreboard",
+            command_name="scoreboard",
+            stdout=stdout,
+        )
+    if subcommand == "graph":
+        return _roadmap_run_view_command(
+            tail,
+            tool_name="praxis_run_graph",
+            command_name="graph",
+            stdout=stdout,
+        )
     if subcommand == "write":
         return _roadmap_write_command(tail, stdout=stdout)
     if subcommand == "closeout":

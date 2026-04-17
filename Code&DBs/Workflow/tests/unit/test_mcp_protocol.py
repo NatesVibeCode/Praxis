@@ -119,12 +119,12 @@ def test_jsonl_override_forces_jsonl_response(monkeypatch):
 def test_tools_list_honors_allowed_tool_filter():
     response = protocol.handle_request(
         {"jsonrpc": "2.0", "id": 7, "method": "tools/list"},
-        allowed_tool_names=["praxis_query", "praxis_status"],
+        allowed_tool_names=["praxis_query", "praxis_status_snapshot"],
     )
 
     assert response is not None
     names = [tool["name"] for tool in response["result"]["tools"]]
-    assert set(names) == {"praxis_query", "praxis_status"}
+    assert set(names) == {"praxis_query", "praxis_status_snapshot"}
 
 
 def test_tools_call_rejects_unallowed_tool_before_execution():
@@ -135,7 +135,7 @@ def test_tools_call_rejects_unallowed_tool_before_execution():
             "method": "tools/call",
             "params": {"name": "praxis_query", "arguments": {"question": "status"}},
         },
-        allowed_tool_names=["praxis_status"],
+        allowed_tool_names=["praxis_status_snapshot"],
     )
 
     assert response is not None

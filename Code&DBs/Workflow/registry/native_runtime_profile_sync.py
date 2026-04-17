@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from adapters.provider_registry import default_llm_adapter_type, get_profile, supports_adapter
+from registry.provider_execution_registry import default_llm_adapter_type, get_profile, supports_adapter
 from runtime._workflow_database import resolve_runtime_database_url
 from storage.postgres import PostgresConfigurationError, ensure_postgres_available
 

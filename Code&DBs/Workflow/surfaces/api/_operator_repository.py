@@ -228,7 +228,7 @@ _WORKFLOW_RUN_PACKET_INSPECTIONS_QUERY = """
         SELECT
             run_id,
             COALESCE(
-                json_agg(payload ORDER BY created_at, execution_packet_id),
+                jsonb_agg(payload ORDER BY created_at, execution_packet_id),
                 '[]'::jsonb
             ) AS packets
         FROM execution_packets
@@ -240,8 +240,8 @@ _WORKFLOW_RUN_PACKET_INSPECTIONS_QUERY = """
         SELECT
             run_id,
             COALESCE(
-                json_agg(
-                    json_build_object(
+                jsonb_agg(
+                    jsonb_build_object(
                         'operator_frame_id', operator_frame_id,
                         'node_id', node_id,
                         'operator_kind', operator_kind,
@@ -297,7 +297,7 @@ _LEGACY_WORKFLOW_RUN_PACKET_INSPECTIONS_QUERY = """
         SELECT
             run_id,
             COALESCE(
-                json_agg(payload ORDER BY created_at, execution_packet_id),
+                jsonb_agg(payload ORDER BY created_at, execution_packet_id),
                 '[]'::jsonb
             ) AS packets
         FROM execution_packets
@@ -309,8 +309,8 @@ _LEGACY_WORKFLOW_RUN_PACKET_INSPECTIONS_QUERY = """
         SELECT
             run_id,
             COALESCE(
-                json_agg(
-                    json_build_object(
+                jsonb_agg(
+                    jsonb_build_object(
                         'operator_frame_id', operator_frame_id,
                         'node_id', node_id,
                         'operator_kind', operator_kind,
@@ -367,7 +367,7 @@ _WORKFLOW_RUN_PACKET_INSPECTIONS_WITHOUT_OPERATOR_FRAMES_QUERY = """
         SELECT
             run_id,
             COALESCE(
-                json_agg(payload ORDER BY created_at, execution_packet_id),
+                jsonb_agg(payload ORDER BY created_at, execution_packet_id),
                 '[]'::jsonb
             ) AS packets
         FROM execution_packets
@@ -404,7 +404,7 @@ _LEGACY_WORKFLOW_RUN_PACKET_INSPECTIONS_WITHOUT_OPERATOR_FRAMES_QUERY = """
         SELECT
             run_id,
             COALESCE(
-                json_agg(payload ORDER BY created_at, execution_packet_id),
+                jsonb_agg(payload ORDER BY created_at, execution_packet_id),
                 '[]'::jsonb
             ) AS packets
         FROM execution_packets
@@ -614,6 +614,7 @@ class OperatorRoadmapItemRecord:
     title: str
     item_kind: str
     status: str
+    lifecycle: str
     priority: str
     parent_roadmap_item_id: str | None
     source_bug_id: str | None
@@ -634,6 +635,7 @@ class OperatorRoadmapItemRecord:
             "title": self.title,
             "item_kind": self.item_kind,
             "status": self.status,
+            "lifecycle": self.lifecycle,
             "priority": self.priority,
             "parent_roadmap_item_id": self.parent_roadmap_item_id,
             "source_bug_id": self.source_bug_id,
@@ -1101,6 +1103,7 @@ def _roadmap_record_from_row(row: Mapping[str, Any]) -> OperatorRoadmapItemRecor
         title=_require_text(row.get("title"), field_name="title"),
         item_kind=_require_text(row.get("item_kind"), field_name="item_kind"),
         status=_require_text(row.get("status"), field_name="status"),
+        lifecycle=_require_text(row.get("lifecycle"), field_name="lifecycle"),
         priority=_require_text(row.get("priority"), field_name="priority"),
         parent_roadmap_item_id=_optional_text(
             row.get("parent_roadmap_item_id"),
@@ -1208,6 +1211,7 @@ def _roadmap_truth_summary(
             "roadmap_key": record.roadmap_key,
             "title": record.title,
             "status": record.status,
+            "lifecycle": record.lifecycle,
             "priority": record.priority,
             "parent_roadmap_item_id": record.parent_roadmap_item_id,
             "decision_ref": record.decision_ref,
@@ -1853,6 +1857,7 @@ class NativeOperatorQueryFrontdoor:
                 title,
                 item_kind,
                 status,
+                lifecycle,
                 priority,
                 parent_roadmap_item_id,
                 source_bug_id,
@@ -1893,7 +1898,7 @@ class NativeOperatorQueryFrontdoor:
         completed_filter = ""
         args = [root_roadmap_item_id, f"{root_roadmap_item_id}.%"]
         if not include_completed_nodes:
-            completed_filter = " AND (roadmap_item_id = $1 OR status != 'completed')"
+            completed_filter = " AND (roadmap_item_id = $1 OR lifecycle != 'completed')"
         try:
             rows = await conn.fetch(
                 """
@@ -1903,6 +1908,7 @@ class NativeOperatorQueryFrontdoor:
                     title,
                     item_kind,
                     status,
+                    lifecycle,
                     priority,
                     parent_roadmap_item_id,
                     source_bug_id,
@@ -2050,12 +2056,13 @@ class NativeOperatorQueryFrontdoor:
                     ri.roadmap_item_id,
                     ri.title,
                     ri.status,
+                    ri.lifecycle,
                     ri.priority,
                     semantic_matches.shared_signal_count
                 FROM semantic_matches
                 INNER JOIN roadmap_items ri
                     ON ri.roadmap_item_id = semantic_matches.roadmap_item_id
-                WHERE (ri.status IS NULL OR lower(ri.status) NOT IN ('completed', 'done', 'closed'))
+                WHERE (ri.lifecycle IS NULL OR lower(ri.lifecycle) != 'completed')
                 ORDER BY semantic_matches.shared_signal_count DESC, ri.updated_at DESC, ri.roadmap_item_id
                 LIMIT $3
                 """,
@@ -2309,24 +2316,40 @@ class NativeOperatorQueryFrontdoor:
         contract_drift_refs: tuple[str, ...] = ()
         operator_frame_source = "canonical_operator_frames"
         run_id_list = list(workflow_run_ids)
+
+        def _packet_inspection_unavailable(
+            stage: str,
+            message: str,
+            *,
+            error: Exception | None = None,
+            workflow_run_id: str | None = None,
+        ) -> NativeOperatorQueryError:
+            details: dict[str, Any] = {
+                "stage": stage,
+                "workflow_run_ids": list(workflow_run_ids),
+            }
+            if workflow_run_id is not None:
+                details["workflow_run_id"] = workflow_run_id
+            if error is not None:
+                details["error_type"] = type(error).__name__
+                details["error_message"] = str(error)
+            if stage == "schema":
+                details["contract_drift_ref"] = "workflow_runs.packet_inspection_column_missing"
+            return NativeOperatorQueryError(
+                "operator_query.packet_inspection_unavailable",
+                message,
+                details=details,
+            )
+
         try:
             rows = await conn.fetch(_WORKFLOW_RUN_PACKET_INSPECTIONS_QUERY, run_id_list)
         except Exception as exc:
             if _missing_packet_inspection_column_error(exc):
-                contract_drift_refs = ("workflow_runs.packet_inspection_column_missing",)
-                try:
-                    rows = await conn.fetch(
-                        _LEGACY_WORKFLOW_RUN_PACKET_INSPECTIONS_QUERY,
-                        run_id_list,
-                    )
-                except Exception as legacy_exc:
-                    if not _missing_run_operator_frames_table_error(legacy_exc):
-                        raise
-                    operator_frame_source = "missing"
-                    rows = await conn.fetch(
-                        _LEGACY_WORKFLOW_RUN_PACKET_INSPECTIONS_WITHOUT_OPERATOR_FRAMES_QUERY,
-                        run_id_list,
-                    )
+                raise _packet_inspection_unavailable(
+                    "schema",
+                    "workflow run packet inspection authority is unavailable",
+                    error=exc,
+                ) from exc
             elif _missing_run_operator_frames_table_error(exc):
                 operator_frame_source = "missing"
                 try:
@@ -2335,34 +2358,38 @@ class NativeOperatorQueryFrontdoor:
                         run_id_list,
                     )
                 except Exception as no_frames_exc:
-                    if not _missing_packet_inspection_column_error(no_frames_exc):
-                        raise
-                    contract_drift_refs = ("workflow_runs.packet_inspection_column_missing",)
-                    rows = await conn.fetch(
-                        _LEGACY_WORKFLOW_RUN_PACKET_INSPECTIONS_WITHOUT_OPERATOR_FRAMES_QUERY,
-                        run_id_list,
-                    )
+                    if _missing_packet_inspection_column_error(no_frames_exc):
+                        raise _packet_inspection_unavailable(
+                            "schema",
+                            "workflow run packet inspection authority is unavailable",
+                            error=no_frames_exc,
+                        ) from no_frames_exc
+                    raise
             else:
-                return (), None
+                raise _packet_inspection_unavailable(
+                    "query",
+                    "workflow run packet inspection query failed",
+                    error=exc,
+                ) from exc
 
-        try:
-            from runtime.execution_packet_authority import (
-                inspect_execution_packets,
-                packet_inspection_from_row,
-            )
-        except Exception:
-            inspect_execution_packets = None
-            packet_inspection_from_row = None
+        def _packet_inspection_from_row_value(
+            row: Mapping[str, Any],
+        ) -> dict[str, Any] | None:
+            inspection = row.get("packet_inspection")
+            if not isinstance(inspection, Mapping):
+                return None
+            return dict(inspection)
+
+        inspect_execution_packets: Callable[..., Any] | None = None
+        inspect_execution_packets_imported = False
 
         packet_inspections: list[OperatorWorkflowRunPacketInspectionRecord] = []
         for row in rows:
             packet_inspection_source = "missing"
-            packet_inspection = None
+            packet_inspection = _packet_inspection_from_row_value(row)
             operator_frames = _normalize_operator_frame_payloads(row.get("operator_frames"))
-            if packet_inspection_from_row is not None:
-                packet_inspection = packet_inspection_from_row(row)
-                if packet_inspection is not None:
-                    packet_inspection_source = "materialized"
+            if packet_inspection is not None:
+                packet_inspection_source = "materialized"
             if packet_inspection is None:
                 packets = row.get("packets")
                 if isinstance(packets, str):
@@ -2372,16 +2399,30 @@ class NativeOperatorQueryFrontdoor:
                         packets = []
                 if not isinstance(packets, Sequence) or isinstance(packets, (str, bytes, bytearray)):
                     packets = []
-                if (
-                    packets
-                    and inspect_execution_packets is not None
-                ):
+                if packets:
+                    if not inspect_execution_packets_imported:
+                        inspect_execution_packets_imported = True
+                        try:
+                            from runtime.execution_packet_authority import inspect_execution_packets
+                        except Exception as import_exc:
+                            raise _packet_inspection_unavailable(
+                                "import",
+                                "workflow run packet inspection helpers are unavailable",
+                                error=import_exc,
+                                workflow_run_id=str(row.get("run_id") or "").strip() or None,
+                            ) from import_exc
+                    assert inspect_execution_packets is not None
                     try:
                         packet_inspection = inspect_execution_packets(packets, run_row=dict(row))
-                        if packet_inspection is not None:
-                            packet_inspection_source = "derived"
-                    except Exception:
-                        packet_inspection = None
+                    except Exception as derive_exc:
+                        raise _packet_inspection_unavailable(
+                            "derive",
+                            "workflow run packet inspection derivation failed",
+                            error=derive_exc,
+                            workflow_run_id=str(row.get("run_id") or "").strip() or None,
+                        ) from derive_exc
+                    if packet_inspection is not None:
+                        packet_inspection_source = "derived"
             packet_inspections.append(
                 _workflow_run_packet_inspection_record_from_row(
                     row,

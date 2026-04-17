@@ -8,7 +8,7 @@ from typing import Any
 
 import asyncpg
 
-from adapters import provider_registry as provider_registry_mod
+from registry import provider_execution_registry as provider_registry_mod
 from . import _probe as provider_onboarding_probe
 from registry.provider_onboarding_repository import (
     _apply_benchmark_plan as _apply_benchmark_plan_impl,

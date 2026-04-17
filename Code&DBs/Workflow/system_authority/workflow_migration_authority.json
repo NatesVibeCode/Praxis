@@ -80,7 +80,9 @@
     "149_native_self_hosted_smoke_definition.sql",
     "150_native_self_hosted_smoke_execution_identity.sql",
     "151_operation_catalog_operator_finish.sql",
-    "152_operation_catalog_observability_finish.sql"
+    "152_operation_catalog_observability_finish.sql",
+    "153_memory_edge_authority_contract.sql",
+    "154_roadmap_lifecycle_authority.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -2320,6 +2322,46 @@
         "object_type": "row",
         "object_name": "operation_catalog_registry.operator.semantic_projection_refresh"
       }
+    ],
+    "153_memory_edge_authority_contract.sql": [
+      {
+        "object_type": "column",
+        "object_name": "memory_edges.authority_class"
+      },
+      {
+        "object_type": "column",
+        "object_name": "memory_edges.provenance_kind"
+      },
+      {
+        "object_type": "column",
+        "object_name": "memory_edges.provenance_ref"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "memory_edges.ck_memory_edges_authority_class"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "memory_edges.ck_memory_edges_provenance_kind"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_memory_edges_active_authority_source"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_memory_edges_active_authority_target"
+      }
+    ],
+    "154_roadmap_lifecycle_authority.sql": [
+      {
+        "object_type": "column",
+        "object_name": "roadmap_items.lifecycle"
+      },
+      {
+        "object_type": "constraint",
+        "object_name": "roadmap_items_lifecycle_check"
+      }
     ]
   },
   "policy_buckets": {
@@ -2404,7 +2446,9 @@
       "149_native_self_hosted_smoke_definition.sql",
       "150_native_self_hosted_smoke_execution_identity.sql",
       "151_operation_catalog_operator_finish.sql",
-      "152_operation_catalog_observability_finish.sql"
+      "152_operation_catalog_observability_finish.sql",
+      "153_memory_edge_authority_contract.sql",
+      "154_roadmap_lifecycle_authority.sql"
     ],
     "bootstrap_only": [
       "012_execution_leases.sql",

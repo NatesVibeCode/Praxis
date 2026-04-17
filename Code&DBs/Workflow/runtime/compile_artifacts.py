@@ -7,7 +7,11 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from runtime.execution_packet_authority import rebuild_workflow_run_packet_inspection
+from runtime.execution_packet_authority import (
+    build_execution_packet_lineage_payload,
+    finalize_execution_packet,
+    rebuild_workflow_run_packet_inspection,
+)
 from storage.postgres.compile_artifact_repository import PostgresCompileArtifactRepository
 
 
@@ -310,6 +314,84 @@ class CompileArtifactStore:
             payload=normalized_payload,
             decision_ref=decision_ref,
         )
+
+    def persist_execution_packet_with_reuse(
+        self,
+        *,
+        packet: dict[str, Any],
+        authority_refs: list[str] | tuple[str, ...] = (),
+        parent_artifact_ref: str | None = None,
+    ) -> dict[str, Any]:
+        normalized_packet = _freeze_jsonish(packet)
+        if not isinstance(normalized_packet, dict):
+            raise CompileArtifactError("execution packet payload must be mapping-shaped")
+
+        compile_provenance = normalized_packet.get("compile_provenance", {})
+        if not isinstance(compile_provenance, dict):
+            raise CompileArtifactError(
+                "execution packet compile_provenance must be mapping-shaped"
+            )
+
+        input_fingerprint = _require_text(
+            compile_provenance.get("input_fingerprint"),
+            field_name="compile_provenance.input_fingerprint",
+        )
+        effective_parent_artifact_ref = _require_text(
+            parent_artifact_ref or normalized_packet.get("plan_revision"),
+            field_name="parent_artifact_ref",
+        )
+
+        lineage_payload = build_execution_packet_lineage_payload(
+            normalized_packet,
+            parent_artifact_ref=effective_parent_artifact_ref,
+        )
+        reusable_lineage = self.load_reusable_artifact(
+            artifact_kind="packet_lineage",
+            input_fingerprint=input_fingerprint,
+        )
+        if reusable_lineage is not None:
+            lineage_payload = _freeze_jsonish(reusable_lineage.payload)
+            if not isinstance(lineage_payload, dict):
+                raise CompileArtifactError(
+                    "reusable packet lineage payload must be mapping-shaped"
+                )
+            reuse_metadata = {
+                "decision": "reused",
+                "reason_code": "packet.compile.exact_input_match",
+                "artifact_ref": reusable_lineage.artifact_ref,
+                "revision_ref": reusable_lineage.revision_ref,
+                "content_hash": reusable_lineage.content_hash,
+                "decision_ref": reusable_lineage.decision_ref,
+            }
+        else:
+            self.record_packet_lineage(
+                packet=lineage_payload,
+                authority_refs=tuple(str(ref) for ref in authority_refs),
+                decision_ref=str(lineage_payload["decision_ref"]),
+                parent_artifact_ref=str(lineage_payload["parent_artifact_ref"]),
+                input_fingerprint=input_fingerprint,
+            )
+            reuse_metadata = {
+                "decision": "compiled",
+                "reason_code": "packet.compile.miss",
+                "artifact_ref": str(lineage_payload["packet_revision"]),
+                "revision_ref": str(lineage_payload["packet_revision"]),
+                "content_hash": str(lineage_payload["packet_hash"]),
+                "decision_ref": str(lineage_payload["decision_ref"]),
+            }
+
+        finalized_packet = finalize_execution_packet(
+            normalized_packet,
+            lineage_payload=lineage_payload,
+            reuse_metadata=reuse_metadata,
+        )
+        self.record_execution_packet(
+            packet=finalized_packet,
+            authority_refs=tuple(str(ref) for ref in authority_refs),
+            decision_ref=str(finalized_packet["decision_ref"]),
+            parent_artifact_ref=str(finalized_packet["parent_artifact_ref"]),
+        )
+        return finalized_packet
 
     def load_execution_packets(
         self,

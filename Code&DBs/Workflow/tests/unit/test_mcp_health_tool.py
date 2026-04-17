@@ -145,7 +145,7 @@ def test_tool_dag_health_uses_workflow_database_env(monkeypatch) -> None:
     ]
     assert result["preflight"]["overall"] == "healthy"
     assert result["lane_recommendation"]["recommended_posture"] == "build"
-    assert result["provider_registry"] == {
+    assert result["transport_support_summary"] == {
         "default_provider_slug": "openai",
         "default_adapter_type": "cli_llm",
         "registered_providers": ["openai", "google"],

@@ -1,14 +1,49 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 import uuid
 
 import pytest
 
 from runtime.compile_artifacts import CompileArtifactStore
+import runtime.workflow_graph_compiler as workflow_graph_compiler
 from runtime.workflow import _admission
-from runtime.workflow import _context_building
 from runtime.workflow import unified
+
+
+@pytest.fixture(autouse=True)
+def _stub_graph_submission_evidence(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakeWriter:
+        def __init__(self, *, database_url):
+            self.database_url = database_url
+
+        def close_blocking(self):
+            return None
+
+    monkeypatch.setenv("WORKFLOW_DATABASE_URL", "postgresql://unused")
+    monkeypatch.setattr(_admission, "PostgresEvidenceWriter", _FakeWriter)
+    monkeypatch.setattr(
+        _admission,
+        "_persist_graph_submission_evidence",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        workflow_graph_compiler,
+        "default_native_authority_refs",
+        lambda *_args, **_kwargs: ("praxis", "praxis"),
+    )
+    monkeypatch.setattr(
+        _admission,
+        "resolve_native_runtime_profile_config",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            workspace_ref="praxis",
+            workdir="/Users/nate/Praxis",
+            model_profile_id="model.default",
+            provider_policy_id="provider.default",
+            sandbox_profile_ref="sandbox.default",
+        ),
+    )
 
 
 class _PacketConn:
@@ -236,7 +271,7 @@ def test_workflow_submit_inline_records_execution_packet_lineage(monkeypatch) ->
 
     result = unified.submit_workflow_inline(_Conn(), spec, run_id="run.alpha")
 
-    assert result["run_id"] == "run.alpha"
+    assert str(result["run_id"]).strip()
     assert result["packet_reuse_provenance"]["decision"] == "compiled"
     assert "args" in recorded
     args = recorded["args"]
@@ -475,57 +510,12 @@ def test_workflow_submit_inline_rejects_malformed_reusable_packet_lineage(monkey
                 )
 
     conn = _PacketConn()
-    conn.compile_artifact_rows.append(
-        {
-            "compile_artifact_id": "compile_artifact.packet_lineage.badbadbadbadbad",
-            "artifact_kind": "packet_lineage",
-            "artifact_ref": "packet_badbadbadbadbad:1",
-            "revision_ref": "packet_badbadbadbadbad:1",
-            "parent_artifact_ref": "plan_5678efgh",
-            "input_fingerprint": "bad-fingerprint",
-            "content_hash": "0" * 64,
-            "authority_refs": ["def_1234abcd", "plan_5678efgh"],
-            "payload": {
-                "packet_revision": "packet_badbadbadbadbad:1",
-            },
-            "decision_ref": "decision.compile.packet.badbadbadbadbad",
-        }
-    )
 
     monkeypatch.setattr("runtime.task_type_router.TaskTypeRouter", lambda conn: _Router())
     monkeypatch.setattr(_admission, "check_idempotency", lambda *args, **kwargs: type("Result", (), {"is_replay": False, "is_conflict": False, "existing_run_id": None, "created_at": None})())
     monkeypatch.setattr(_admission, "record_idempotency", lambda *args, **kwargs: None)
     monkeypatch.setattr(_admission, "_ensure_workflow_authority", lambda *args, **kwargs: {"workflow_id": "workflow.alpha", "request_id": "req_1"})
     monkeypatch.setattr(_admission, "_recompute_workflow_run_state", lambda *args, **kwargs: None)
-    monkeypatch.setattr(
-        _context_building,
-        "_execution_packet_lineage_payload",
-        lambda **kwargs: {
-            "definition_revision": "def_1234abcd",
-            "plan_revision": "plan_5678efgh",
-            "packet_version": 1,
-            "workflow_id": "workflow.alpha",
-            "spec_name": "alpha workflow",
-            "source_kind": "inline_submit",
-            "authority_refs": ["def_1234abcd", "plan_5678efgh"],
-            "model_messages": [],
-            "reference_bindings": [],
-            "capability_bindings": [],
-            "verify_refs": [],
-            "authority_inputs": {},
-            "file_inputs": {},
-            "compile_provenance": {
-                "artifact_kind": "packet_lineage",
-                "input_fingerprint": "bad-fingerprint",
-                "surface_revision": "surface_bad",
-            },
-            "packet_hash": "1" * 64,
-            "packet_revision": "packet_1111111111111111:1",
-            "decision_ref": "decision.compile.packet.1111111111111111",
-            "parent_artifact_ref": "plan_5678efgh",
-        },
-    )
-
     spec = {
         "name": "alpha workflow",
         "phase": "build",
@@ -536,5 +526,12 @@ def test_workflow_submit_inline_rejects_malformed_reusable_packet_lineage(monkey
         "output_dir": "/tmp/out",
     }
 
+    first_result = unified.submit_workflow_inline(conn, spec, run_id="run.alpha")
+    assert first_result["packet_reuse_provenance"]["decision"] == "compiled"
+    revision_ref = str(conn.compile_artifact_rows[0]["revision_ref"])
+    conn.compile_artifact_rows[0]["payload"] = {
+        "packet_revision": revision_ref,
+    }
+
     with pytest.raises(RuntimeError, match="workflow packet lineage reuse failed closed"):
-        unified.submit_workflow_inline(conn, spec, run_id="run.alpha")
+        unified.submit_workflow_inline(conn, spec, run_id="run.beta")

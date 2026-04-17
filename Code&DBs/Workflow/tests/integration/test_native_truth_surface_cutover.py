@@ -47,6 +47,27 @@ async def _fake_load_persona_activation(self, *, env, run_id, as_of):
     }
 
 
+async def _fake_load_run_context(self, *, run_id: str):
+    del self
+    return native_operator_surface._NativeOperatorRunContext(
+        run_id=run_id,
+        workspace_ref="workspace.test",
+        runtime_profile_ref="runtime_profile.test",
+    )
+
+
+async def _fake_load_smoke_freshness(self, *, env, as_of):
+    del self, env, as_of
+    return {
+        "kind": "native_smoke_freshness",
+        "authority": "test.stub",
+        "workflow_id_prefix": "workflow.native.daily_ops.smoke",
+        "freshness_slo_seconds": 0,
+        "state": "fresh",
+        "latest_run_id": None,
+    }
+
+
 def test_native_truth_surface_cutover_publishes_status_receipts_and_cockpit(monkeypatch) -> None:
     as_of = datetime(2026, 4, 2, 23, 0, tzinfo=timezone.utc)
     env = {"PRAXIS_RUNTIME_PROFILE": "praxis"}
@@ -132,6 +153,7 @@ def test_native_truth_surface_cutover_publishes_status_receipts_and_cockpit(monk
                 work_item_workflow_binding_id="binding.truth.1",
                 binding_kind="governed_by",
                 binding_status="active",
+                issue_id=None,
                 roadmap_item_id=None,
                 bug_id=None,
                 cutover_gate_id="gate.truth.1",
@@ -292,6 +314,16 @@ def test_native_truth_surface_cutover_publishes_status_receipts_and_cockpit(monk
         native_operator_surface.NativeOperatorSurfaceFrontdoor,
         "_load_persona_activation",
         _fake_load_persona_activation,
+    )
+    monkeypatch.setattr(
+        native_operator_surface._NativeOperatorRequestScope,
+        "load_run_context",
+        _fake_load_run_context,
+    )
+    monkeypatch.setattr(
+        native_operator_surface.NativeOperatorSurfaceFrontdoor,
+        "_load_smoke_freshness",
+        _fake_load_smoke_freshness,
     )
 
     payload = native_operator_surface.query_native_operator_surface(
@@ -523,6 +555,7 @@ def test_native_truth_surface_cutover_keeps_activity_feedback_evidence_linked(
                     "title": "Review activity truth drift",
                     "item_kind": "capability",
                     "status": "proposed",
+                    "lifecycle": "planned",
                     "priority": "p1",
                     "parent_roadmap_item_id": None,
                     "source_bug_id": bug_id,
@@ -562,6 +595,7 @@ def test_native_truth_surface_cutover_keeps_activity_feedback_evidence_linked(
                 work_item_workflow_binding_id="binding.truth.feedback.1",
                 binding_kind="observed_feedback",
                 binding_status="active",
+                issue_id=None,
                 roadmap_item_id=roadmap_item_id,
                 bug_id=None,
                 cutover_gate_id=None,
@@ -681,6 +715,16 @@ def test_native_truth_surface_cutover_keeps_activity_feedback_evidence_linked(
         "_load_persona_activation",
         _fake_load_persona_activation,
     )
+    monkeypatch.setattr(
+        native_operator_surface._NativeOperatorRequestScope,
+        "load_run_context",
+        _fake_load_run_context,
+    )
+    monkeypatch.setattr(
+        native_operator_surface.NativeOperatorSurfaceFrontdoor,
+        "_load_smoke_freshness",
+        _fake_load_smoke_freshness,
+    )
 
     payload = native_operator_surface.query_native_operator_surface(
         run_id=run_id,
@@ -727,6 +771,7 @@ def test_native_truth_surface_cutover_keeps_activity_feedback_evidence_linked(
             "title": "Review activity truth drift",
             "item_kind": "capability",
             "status": "proposed",
+            "lifecycle": "planned",
             "priority": "p1",
             "parent_roadmap_item_id": None,
             "source_bug_id": bug_id,

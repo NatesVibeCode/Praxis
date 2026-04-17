@@ -142,7 +142,17 @@ def test_sync_integration_registry_projects_static_and_mcp_rows() -> None:
     assert inserted == len(rows)
     by_id = {row[0]: row for row in rows}
     assert {"praxis-dispatch", "notifications", "webhook", "workflow"} <= set(by_id)
-    assert {"praxis_query", "praxis_status", "praxis_maintenance", "praxis_operator_view", "praxis_workflow"} <= set(by_id)
+    assert {
+        "praxis_query",
+        "praxis_status_snapshot",
+        "praxis_metrics_reset",
+        "praxis_issue_backlog",
+        "praxis_run_status",
+        "praxis_workflow",
+    } <= set(by_id)
+    assert "praxis_status" not in by_id
+    assert "praxis_maintenance" not in by_id
+    assert "praxis_operator_view" not in by_id
 
     praxis_query = by_id["praxis_query"]
     assert praxis_query[3] == "mcp"
@@ -150,31 +160,17 @@ def test_sync_integration_registry_projects_static_and_mcp_rows() -> None:
     assert praxis_query[7] == "praxis-workflow-mcp"
     assert json.loads(praxis_query[4])[0]["action"] == "query"
 
-    praxis_status_caps = json.loads(by_id["praxis_status"][4])
-    assert [cap["action"] for cap in praxis_status_caps] == ["status"]
+    status_caps = json.loads(by_id["praxis_status_snapshot"][4])
+    assert [cap["action"] for cap in status_caps] == ["status_snapshot"]
 
-    praxis_maintenance_caps = json.loads(by_id["praxis_maintenance"][4])
-    assert {
-        "reset_metrics",
-        "backfill_bug_replay_provenance",
-        "backfill_semantic_bridges",
-        "refresh_semantic_projection",
-    } <= {
-        cap["action"] for cap in praxis_maintenance_caps
-    }
+    metrics_caps = json.loads(by_id["praxis_metrics_reset"][4])
+    assert [cap["action"] for cap in metrics_caps] == ["metrics_reset"]
 
-    operator_view_caps = json.loads(by_id["praxis_operator_view"][4])
-    assert operator_view_caps[0]["selectorField"] == "view"
-    assert [cap["action"] for cap in operator_view_caps] == [
-        "status",
-        "scoreboard",
-        "graph",
-        "operator_graph",
-        "semantics",
-        "lineage",
-        "issue_backlog",
-        "replay_ready_bugs",
-    ]
+    issue_backlog_caps = json.loads(by_id["praxis_issue_backlog"][4])
+    assert [cap["action"] for cap in issue_backlog_caps] == ["issue_backlog"]
+
+    run_status_caps = json.loads(by_id["praxis_run_status"][4])
+    assert [cap["action"] for cap in run_status_caps] == ["run_status"]
 
 
 def test_startup_wiring_syncs_registry_before_reference_catalog_and_starts_heartbeat(monkeypatch) -> None:

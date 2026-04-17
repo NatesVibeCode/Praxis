@@ -13,6 +13,11 @@ from policy.workflow_lanes import (
     admit_native_workflow_lane_catalog,
     bootstrap_workflow_lane_catalog_schema,
 )
+import registry.provider_execution_registry as provider_registry_authority
+from registry.provider_execution_registry import (
+    reload_from_db as reload_provider_registry_from_db,
+    resolve_adapter_contract as resolve_provider_adapter_contract,
+)
 from registry.provider_routing import PostgresProviderRouteAuthorityRepository
 from registry.route_catalog_repository import PostgresRouteCatalogRepository
 from runtime.default_path_pilot import (
@@ -631,6 +636,8 @@ def test_default_path_pilot_adopts_failover_and_endpoint_authority_on_one_bounde
 
 async def _exercise_default_path_failover_endpoint_adoption() -> None:
     database_url = os.environ.get("WORKFLOW_DATABASE_URL", "postgresql://127.0.0.1/postgres")
+    original_database_url = os.environ.get("WORKFLOW_DATABASE_URL")
+    original_require_database_url = provider_registry_authority._require_database_url
     try:
         conn = await connect_workflow_database(env={"WORKFLOW_DATABASE_URL": database_url})
     except PostgresConfigurationError as exc:
@@ -639,8 +646,12 @@ async def _exercise_default_path_failover_endpoint_adoption() -> None:
             f"{exc.reason_code}"
         )
 
+    os.environ["WORKFLOW_DATABASE_URL"] = database_url
+    provider_registry_authority._require_database_url = lambda: database_url
+    await _bootstrap_workflow_migration(conn, "001_v1_control_plane.sql")
     await _bootstrap_workflow_migration(conn, "076_provider_cli_profile_transport_metadata.sql")
     await _bootstrap_workflow_migration(conn, "078_provider_transport_admission_receipts.sql")
+    reload_provider_registry_from_db()
     transaction = conn.transaction()
     await transaction.start()
     try:
@@ -743,13 +754,21 @@ async def _exercise_default_path_failover_endpoint_adoption() -> None:
             "circuit_breaker_policy": {"threshold": 3, "window_s": 60},
             "decision_ref": f"decision:endpoint:{suffix}",
         }
+        reload_provider_registry_from_db()
+        if resolve_provider_adapter_contract("openai", "llm_task") is None:
+            provider_registry_authority._restore_builtin_registry()
+            provider_registry_authority._DB_LOADED = True
+            provider_registry_authority._load_status = (
+                provider_registry_authority.RegistryLoadStatus.DEGRADED_BUILTIN
+            )
+            provider_registry_authority._load_error = "integration fallback to builtin registry"
         first_party_runtime = resolution.to_first_party_runtime_contract()
         assert first_party_runtime["kind"] == "default_path_first_party_runtime_contract"
         assert first_party_runtime["authorities"] == {
             "route": "registry.provider_routing",
             "dispatch": "authority.workflow_class_resolution",
             "schedule": "runtime.scheduler_window_repository",
-            "provider_adapter": "adapters.provider_registry",
+            "provider_adapter": "registry.provider_execution_registry",
         }
         assert first_party_runtime["route_runtime"] == {
             "route_decision_id": resolution.route_runtime.route_decision_id,
@@ -955,5 +974,11 @@ async def _exercise_default_path_failover_endpoint_adoption() -> None:
             ),
         }
     finally:
+        provider_registry_authority._require_database_url = original_require_database_url
+        if original_database_url is None:
+            os.environ.pop("WORKFLOW_DATABASE_URL", None)
+        else:
+            os.environ["WORKFLOW_DATABASE_URL"] = original_database_url
+        reload_provider_registry_from_db()
         await transaction.rollback()
         await conn.close()

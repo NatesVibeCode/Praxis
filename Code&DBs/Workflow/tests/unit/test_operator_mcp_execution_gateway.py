@@ -30,6 +30,8 @@ def test_mcp_operator_write_uses_operation_catalog_gateway(monkeypatch) -> None:
     assert captured["operation_name"] == "operator.roadmap_write"
     assert captured["payload"]["action"] == "commit"
     assert captured["payload"]["title"] == "Bound operator write"
+    assert captured["payload"]["depends_on"] == []
+    assert captured["payload"]["registry_paths"] == []
 
 
 def test_mcp_operator_closeout_uses_operation_catalog_gateway(monkeypatch) -> None:
@@ -56,6 +58,27 @@ def test_mcp_operator_closeout_uses_operation_catalog_gateway(monkeypatch) -> No
     assert result == {"ok": True}
     assert captured["operation_name"] == "operator.work_item_closeout"
     assert captured["payload"]["bug_ids"] == ["bug.1"]
+
+
+def test_mcp_operator_closeout_normalizes_missing_sequences(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(operator, "_subs", object())
+
+    def _execute(subsystems, *, operation_name: str, payload):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"ok": True}
+
+    monkeypatch.setattr(operator, "execute_operation_from_subsystems", _execute)
+
+    result = operator.tool_praxis_operator_closeout({"action": "preview"})
+
+    assert result == {"ok": True}
+    assert captured["operation_name"] == "operator.work_item_closeout"
+    assert captured["payload"]["bug_ids"] == []
+    assert captured["payload"]["roadmap_item_ids"] == []
 
 
 def test_mcp_operator_roadmap_view_uses_operation_catalog_gateway(monkeypatch) -> None:
@@ -383,7 +406,7 @@ def test_mcp_semantic_assertions_record_uses_operation_catalog_gateway(monkeypat
     assert captured["payload"]["subject_ref"] == "bug.checkout.1"
 
 
-def test_mcp_status_uses_operation_catalog_gateway(monkeypatch) -> None:
+def test_mcp_status_snapshot_uses_operation_catalog_gateway(monkeypatch) -> None:
     captured: dict[str, object] = {}
     monkeypatch.setattr(operator, "_subs", object())
 
@@ -395,14 +418,14 @@ def test_mcp_status_uses_operation_catalog_gateway(monkeypatch) -> None:
 
     monkeypatch.setattr(operator, "execute_operation_from_subsystems", _execute)
 
-    result = operator.tool_praxis_status({"since_hours": 24})
+    result = operator.tool_praxis_status_snapshot({"since_hours": 24})
 
     assert result["operation_receipt"]["operation_name"] == "operator.status_snapshot"
     assert captured["operation_name"] == "operator.status_snapshot"
     assert captured["payload"] == {"since_hours": 24}
 
 
-def test_mcp_maintenance_backfill_semantic_bridges_uses_operation_catalog_gateway(monkeypatch) -> None:
+def test_mcp_metrics_reset_uses_operation_catalog_gateway(monkeypatch) -> None:
     captured: dict[str, object] = {}
     monkeypatch.setattr(operator, "_subs", object())
 
@@ -414,9 +437,59 @@ def test_mcp_maintenance_backfill_semantic_bridges_uses_operation_catalog_gatewa
 
     monkeypatch.setattr(operator, "execute_operation_from_subsystems", _execute)
 
-    result = operator.tool_praxis_maintenance(
+    result = operator.tool_praxis_metrics_reset(
         {
-            "action": "backfill_semantic_bridges",
+            "confirm": True,
+            "before_date": "2026-04-16",
+        }
+    )
+
+    assert result["operation_receipt"]["operation_name"] == "operator.metrics_reset"
+    assert captured["operation_name"] == "operator.metrics_reset"
+    assert captured["payload"] == {"confirm": True, "before_date": "2026-04-16"}
+
+
+def test_mcp_bug_replay_provenance_backfill_uses_operation_catalog_gateway(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(operator, "_subs", object())
+
+    def _execute(subsystems, *, operation_name: str, payload):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"operation_receipt": {"operation_name": operation_name}}
+
+    monkeypatch.setattr(operator, "execute_operation_from_subsystems", _execute)
+
+    result = operator.tool_praxis_bug_replay_provenance_backfill(
+        {
+            "limit": 25,
+            "open_only": False,
+            "receipt_limit": 3,
+        }
+    )
+
+    assert result["operation_receipt"]["operation_name"] == "operator.bug_replay_provenance_backfill"
+    assert captured["operation_name"] == "operator.bug_replay_provenance_backfill"
+    assert captured["payload"]["limit"] == 25
+    assert captured["payload"]["open_only"] is False
+    assert captured["payload"]["receipt_limit"] == 3
+
+
+def test_mcp_semantic_bridges_backfill_uses_operation_catalog_gateway(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(operator, "_subs", object())
+
+    def _execute(subsystems, *, operation_name: str, payload):
+        captured["subsystems"] = subsystems
+        captured["operation_name"] = operation_name
+        captured["payload"] = payload
+        return {"operation_receipt": {"operation_name": operation_name}}
+
+    monkeypatch.setattr(operator, "execute_operation_from_subsystems", _execute)
+
+    result = operator.tool_praxis_semantic_bridges_backfill(
+        {
             "include_object_relations": False,
             "include_operator_decisions": True,
             "as_of": "2026-04-16T21:00:00+00:00",
@@ -431,7 +504,7 @@ def test_mcp_maintenance_backfill_semantic_bridges_uses_operation_catalog_gatewa
     assert captured["payload"]["as_of"] == datetime(2026, 4, 16, 21, 0, tzinfo=timezone.utc)
 
 
-def test_mcp_maintenance_refresh_semantic_projection_uses_operation_catalog_gateway(monkeypatch) -> None:
+def test_mcp_semantic_projection_refresh_uses_operation_catalog_gateway(monkeypatch) -> None:
     captured: dict[str, object] = {}
     monkeypatch.setattr(operator, "_subs", object())
 
@@ -443,9 +516,8 @@ def test_mcp_maintenance_refresh_semantic_projection_uses_operation_catalog_gate
 
     monkeypatch.setattr(operator, "execute_operation_from_subsystems", _execute)
 
-    result = operator.tool_praxis_maintenance(
+    result = operator.tool_praxis_semantic_projection_refresh(
         {
-            "action": "refresh_semantic_projection",
             "limit": 25,
             "as_of": "2026-04-16T21:05:00+00:00",
         }
@@ -457,7 +529,7 @@ def test_mcp_maintenance_refresh_semantic_projection_uses_operation_catalog_gate
     assert captured["payload"]["as_of"] == datetime(2026, 4, 16, 21, 5, tzinfo=timezone.utc)
 
 
-def test_mcp_operator_view_status_uses_operation_catalog_gateway(monkeypatch) -> None:
+def test_mcp_run_status_uses_operation_catalog_gateway(monkeypatch) -> None:
     captured: dict[str, object] = {}
     monkeypatch.setattr(operator, "_subs", object())
 
@@ -469,14 +541,14 @@ def test_mcp_operator_view_status_uses_operation_catalog_gateway(monkeypatch) ->
 
     monkeypatch.setattr(operator, "execute_operation_from_subsystems", _execute)
 
-    result = operator.tool_praxis_operator_view({"view": "status", "run_id": "run_123"})
+    result = operator.tool_praxis_run_status({"run_id": "run_123"})
 
     assert result["operation_receipt"]["operation_name"] == "operator.run_status"
     assert captured["operation_name"] == "operator.run_status"
     assert captured["payload"] == {"run_id": "run_123"}
 
 
-def test_mcp_operator_view_issue_backlog_uses_operation_catalog_gateway(monkeypatch) -> None:
+def test_mcp_issue_backlog_uses_operation_catalog_gateway(monkeypatch) -> None:
     captured: dict[str, object] = {}
     monkeypatch.setattr(operator, "_subs", object())
 
@@ -488,8 +560,8 @@ def test_mcp_operator_view_issue_backlog_uses_operation_catalog_gateway(monkeypa
 
     monkeypatch.setattr(operator, "execute_operation_from_subsystems", _execute)
 
-    result = operator.tool_praxis_operator_view(
-        {"view": "issue_backlog", "limit": 12, "open_only": False, "status": "open"}
+    result = operator.tool_praxis_issue_backlog(
+        {"limit": 12, "open_only": False, "status": "open"}
     )
 
     assert result["operation_receipt"]["operation_name"] == "operator.issue_backlog"

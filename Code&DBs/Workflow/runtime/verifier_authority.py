@@ -647,14 +647,14 @@ def _maybe_resolve_verifier_bug(
             notes=f"Verifier {verifier_ref} passed after healing.",
             conn=conn,
         )
-    return _verifier_bug_bridge.maybe_resolve_verifier_bug(
-        verifier_ref=verifier_ref,
-        target_kind=target_kind,
-        target_ref=target_ref,
-        healing_run_id=healing_run_id,
-        post_verification=post_verification,
-        conn=conn,
-    )
+    db = _optional_connection(conn)
+    if db is None:
+        return None
+    from runtime.bug_tracker import BugStatus, BugTracker
+
+    tracker = BugTracker(db)
+    resolved = tracker.resolve(bug.bug_id, BugStatus.FIXED)
+    return resolved.bug_id if resolved is not None else bug.bug_id
 
 
 def _builtin_verify_schema_authority(*, inputs: dict[str, Any]) -> tuple[str, dict[str, Any]]:

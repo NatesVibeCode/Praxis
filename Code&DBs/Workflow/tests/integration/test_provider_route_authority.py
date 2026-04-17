@@ -114,8 +114,18 @@ async def _seed_route_catalog(conn, *, suffix: str) -> tuple[str, str, tuple[str
             effective_from,
             effective_to,
             decision_ref,
-            created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11, $12, $13, $14)
+            created_at,
+            route_tier,
+            route_tier_rank,
+            latency_class,
+            latency_rank,
+            reasoning_control,
+            task_affinities,
+            benchmark_profile
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11, $12, $13, $14,
+            $15, $16, $17, $18, $19::jsonb, $20::jsonb, $21::jsonb
+        )
         """,
         candidate_refs[0],
         "provider.openai",
@@ -131,6 +141,24 @@ async def _seed_route_catalog(conn, *, suffix: str) -> tuple[str, str, tuple[str
         None,
         f"decision.{suffix}.mini",
         clock,
+        "medium",
+        1,
+        "instant",
+        1,
+        json.dumps({"default": "medium"}),
+        json.dumps(
+            {
+                "primary": ["build", "wiring"],
+                "secondary": ["review", "chat"],
+                "avoid": [],
+            }
+        ),
+        json.dumps(
+            {
+                "evidence_level": "test_seed",
+                "positioning": "Fast fallback OpenAI route for deterministic routing tests.",
+            }
+        ),
     )
     await conn.execute(
         """
@@ -148,8 +176,18 @@ async def _seed_route_catalog(conn, *, suffix: str) -> tuple[str, str, tuple[str
             effective_from,
             effective_to,
             decision_ref,
-            created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11, $12, $13, $14)
+            created_at,
+            route_tier,
+            route_tier_rank,
+            latency_class,
+            latency_rank,
+            reasoning_control,
+            task_affinities,
+            benchmark_profile
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11, $12, $13, $14,
+            $15, $16, $17, $18, $19::jsonb, $20::jsonb, $21::jsonb
+        )
         """,
         candidate_refs[1],
         "provider.openai",
@@ -165,6 +203,24 @@ async def _seed_route_catalog(conn, *, suffix: str) -> tuple[str, str, tuple[str
         None,
         f"decision.{suffix}.primary",
         clock,
+        "high",
+        1,
+        "reasoning",
+        2,
+        json.dumps({"default": "high"}),
+        json.dumps(
+            {
+                "primary": ["analysis", "research"],
+                "secondary": ["build", "review"],
+                "avoid": [],
+            }
+        ),
+        json.dumps(
+            {
+                "evidence_level": "test_seed",
+                "positioning": "Primary OpenAI reasoning route for deterministic routing tests.",
+            }
+        ),
     )
     await conn.execute(
         """
@@ -182,8 +238,18 @@ async def _seed_route_catalog(conn, *, suffix: str) -> tuple[str, str, tuple[str
             effective_from,
             effective_to,
             decision_ref,
-            created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11, $12, $13, $14)
+            created_at,
+            route_tier,
+            route_tier_rank,
+            latency_class,
+            latency_rank,
+            reasoning_control,
+            task_affinities,
+            benchmark_profile
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11, $12, $13, $14,
+            $15, $16, $17, $18, $19::jsonb, $20::jsonb, $21::jsonb
+        )
         """,
         candidate_refs[2],
         "provider.anthropic",
@@ -199,6 +265,24 @@ async def _seed_route_catalog(conn, *, suffix: str) -> tuple[str, str, tuple[str
         None,
         f"decision.{suffix}.blocked",
         clock,
+        "medium",
+        2,
+        "instant",
+        2,
+        json.dumps({"default": "adaptive"}),
+        json.dumps(
+            {
+                "primary": ["review"],
+                "secondary": ["chat"],
+                "avoid": ["general-routing"],
+            }
+        ),
+        json.dumps(
+            {
+                "evidence_level": "test_seed",
+                "positioning": "Blocked non-OpenAI comparison route for fail-closed routing tests.",
+            }
+        ),
     )
     await conn.execute(
         """
@@ -553,6 +637,6 @@ async def _exercise_provider_route_authority() -> None:
         )
         with pytest.raises(ModelRoutingError) as exc:
             fail_closed_router.resolve_candidates(runtime_profile=runtime_profile)
-        assert exc.value.reason_code == "routing.no_allowed_candidates"
+        assert exc.value.reason_code == "routing.route_eligibility_state_missing"
     finally:
         await conn.close()

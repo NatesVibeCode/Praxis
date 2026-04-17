@@ -1,4 +1,4 @@
-"""Tools: praxis_operator_view, praxis_status."""
+"""Catalog-backed operator MCP tools."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -21,183 +21,62 @@ def _parse_iso_datetime(value: object, *, field_name: str) -> datetime:
     return parsed
 
 
-def _compat_status_snapshot(*, since_hours: int) -> dict[str, Any]:
-    from runtime import receipt_store
-    from runtime.quality_views import load_failure_category_zones
-
-    conn = _subs.get_pg_conn()
-    totals = receipt_store.receipt_stats(since_hours=since_hours, conn=conn).get("totals", {})
-    receipt_count = int(totals.get("receipts") or 0)
-    records = (
-        receipt_store.list_receipts(limit=receipt_count, since_hours=since_hours)
-        if receipt_count > 0
-        else []
-    )
-    total = len(records)
-    succeeded = sum(1 for record in records if record.status == "succeeded")
-    failure_counts: dict[str, int] = {}
-    for record in records:
-        if record.failure_code:
-            failure_counts[record.failure_code] = failure_counts.get(record.failure_code, 0) + 1
-    top_failures = dict(
-        sorted(failure_counts.items(), key=lambda item: (-item[1], item[0]))[:10]
-    )
-    pass_rate = (succeeded / total) if total > 0 else 0.0
-
-    zone_counts: dict[str, int] = {}
-    category_counts: dict[str, int] = {}
-    zone_authority_ready = True
-    zone_authority_error: str | None = None
-    try:
-        zone_lookup = load_failure_category_zones(conn, consumer="operator.status_snapshot")
-        for record in records:
-            payload = record.to_dict()
-            failure_classification = payload.get("failure_classification")
-            if isinstance(failure_classification, dict):
-                category = str(failure_classification.get("category") or "").strip()
-            else:
-                category = str(payload.get("failure_category") or "").strip()
-            if not category:
-                continue
-            category_counts[category] = category_counts.get(category, 0) + 1
-            zone = zone_lookup.get(category, "internal")
-            zone_counts[zone] = zone_counts.get(zone, 0) + 1
-    except Exception as exc:
-        zone_authority_ready = False
-        zone_authority_error = str(exc)
-
-    external_failures = zone_counts.get("external", 0)
-    adjusted_denominator = total - external_failures
-    adjusted_pass_rate = None
-    if zone_authority_ready:
-        adjusted_pass_rate = (
-            (succeeded / adjusted_denominator) if adjusted_denominator > 0 else 0.0
-        )
-
-    in_flight = []
-    try:
-        running_rows = conn.execute(
-            """SELECT run_id, current_state, requested_at, request_envelope
-            FROM workflow_runs
-            WHERE current_state = 'running'
-            ORDER BY requested_at DESC LIMIT 10""",
-        )
-        now = datetime.now(timezone.utc)
-        for row in running_rows:
-            envelope = row["request_envelope"]
-            if not isinstance(envelope, dict):
-                envelope = {}
-            outbox_count = conn.execute(
-                "SELECT COUNT(*) as cnt FROM workflow_outbox WHERE run_id = $1 AND authority_table = 'receipts'",
-                row["run_id"],
-            )
-            completed = int(outbox_count[0]["cnt"]) if outbox_count else 0
-            elapsed = None
-            if row["requested_at"]:
-                elapsed = round((now - row["requested_at"]).total_seconds(), 1)
-            total_jobs = int(envelope.get("total_jobs") or 0)
-            if total_jobs > 0 and completed >= total_jobs:
-                continue
-            in_flight.append(
-                {
-                    "run_id": row["run_id"],
-                    "workflow_name": envelope.get("name") or envelope.get("spec_name", ""),
-                    "total_jobs": total_jobs,
-                    "completed_jobs": completed,
-                    "elapsed_seconds": elapsed,
-                }
-            )
-    except Exception:
-        pass
-
-    result: dict[str, Any] = {
-        "total_workflows": total,
-        "pass_rate": round(pass_rate, 4),
-        "adjusted_pass_rate": (
-            round(adjusted_pass_rate, 4)
-            if adjusted_pass_rate is not None
-            else None
-        ),
-        "failure_breakdown": {
-            "by_zone": zone_counts,
-            "by_category": category_counts,
-        },
-        "top_failure_codes": top_failures,
-        "since_hours": since_hours,
-        "zone_authority_ready": zone_authority_ready,
-        "observability_state": "ready" if zone_authority_ready else "degraded",
-        "queue_depth": 0,
-        "queue_depth_status": "unknown",
-        "queue_depth_pending": 0,
-        "queue_depth_ready": 0,
-        "queue_depth_claimed": 0,
-        "queue_depth_running": 0,
-        "queue_depth_total": 0,
-        "queue_depth_warning_threshold": 0,
-        "queue_depth_critical_threshold": 0,
-        "queue_depth_utilization_pct": 0.0,
-        "queue_depth_error": "queue depth unavailable in compatibility mode",
-    }
-    if zone_authority_error:
-        result["errors"] = [
-            {
-                "code": "failure_category_zones_lookup_failed",
-                "message": zone_authority_error,
-            }
-        ]
-    if in_flight:
-        result["in_flight_workflows"] = in_flight
-    return result
-
-
-def tool_praxis_status(params: dict) -> dict:
-    """Recent workflow status from canonical receipts, with categorized failure breakdown."""
-    since_hours = params.get("since_hours", 24)
-    payload = {"since_hours": since_hours}
-    try:
-        return execute_operation_from_subsystems(
-            _subs,
-            operation_name="operator.status_snapshot",
-            payload=payload,
-        )
-    except Exception as exc:
-        try:
-            conn = _subs.get_pg_conn()
-        except Exception:
-            return {"error": str(exc)}
-        if not hasattr(conn, "fetchrow"):
-            return _compat_status_snapshot(since_hours=max(1, int(since_hours or 24)))
-        return {"error": str(exc)}
-
-
-def tool_praxis_maintenance(params: dict) -> dict:
-    """Run explicit operator maintenance actions outside observability surfaces."""
-
-    action = params.get("action", "")
-    operation_name = {
-        "reset_metrics": "operator.metrics_reset",
-        "backfill_bug_replay_provenance": "operator.bug_replay_provenance_backfill",
-        "backfill_semantic_bridges": "operator.semantic_bridges_backfill",
-        "refresh_semantic_projection": "operator.semantic_projection_refresh",
-    }.get(action)
-    if operation_name is None:
-        return {
-            "error": (
-                "Unknown maintenance action. Supported actions: reset_metrics, "
-                "backfill_bug_replay_provenance, backfill_semantic_bridges, "
-                "refresh_semantic_projection"
-            )
-        }
-    as_of = params.get("as_of")
+def _execute_catalog_tool(*, operation_name: str, payload: dict[str, Any]) -> dict:
     return execute_operation_from_subsystems(
         _subs,
         operation_name=operation_name,
+        payload=payload,
+    )
+
+
+def _optional_sequence_payload(params: dict[str, Any], field_name: str) -> Any:
+    """Avoid leaking ``None`` into tuple-backed operator command contracts."""
+
+    value = params.get(field_name)
+    return [] if value is None else value
+
+
+def tool_praxis_status_snapshot(params: dict) -> dict:
+    """Read the canonical workflow status snapshot."""
+
+    return _execute_catalog_tool(
+        operation_name="operator.status_snapshot",
+        payload={"since_hours": params.get("since_hours", 24)},
+    )
+
+
+def tool_praxis_metrics_reset(params: dict) -> dict:
+    """Reset observability metrics through explicit operator maintenance authority."""
+
+    return _execute_catalog_tool(
+        operation_name="operator.metrics_reset",
         payload={
             "confirm": bool(params.get("confirm", False)),
             "before_date": params.get("before_date"),
+        },
+    )
+
+
+def tool_praxis_bug_replay_provenance_backfill(params: dict) -> dict:
+    """Backfill replay provenance from authoritative bug and receipt state."""
+
+    return _execute_catalog_tool(
+        operation_name="operator.bug_replay_provenance_backfill",
+        payload={
             "limit": params.get("limit"),
             "open_only": bool(params.get("open_only", True)),
             "receipt_limit": params.get("receipt_limit", 1),
+        },
+    )
+
+
+def tool_praxis_semantic_bridges_backfill(params: dict) -> dict:
+    """Replay semantic bridges from canonical operator authority."""
+
+    as_of = params.get("as_of")
+    return _execute_catalog_tool(
+        operation_name="operator.semantic_bridges_backfill",
+        payload={
             "include_object_relations": bool(
                 params.get("include_object_relations", True)
             ),
@@ -214,73 +93,97 @@ def tool_praxis_maintenance(params: dict) -> dict:
     )
 
 
-def tool_praxis_operator_view(params: dict) -> dict:
-    """Observability views: operator status, scoreboard, workflow graph, operator graph, semantics, lineage, issue backlog, and replay-ready bugs."""
+def tool_praxis_semantic_projection_refresh(params: dict) -> dict:
+    """Refresh the semantic projection through explicit operator maintenance authority."""
 
-    try:
-        view = str(params.get("view") or "status").strip().lower()
-        operation_name = {
-            "status": "operator.run_status",
-            "scoreboard": "operator.run_scoreboard",
-            "graph": "operator.run_graph",
-            "operator_graph": "operator.graph_projection",
-            "semantics": "semantic_assertions.list",
-            "lineage": "operator.run_lineage",
-            "issue_backlog": "operator.issue_backlog",
-            "replay_ready_bugs": "operator.replay_ready_bugs",
-        }.get(view)
-        if operation_name is None:
-            raise ValueError(
-                "Unknown view. Options: status, scoreboard, graph, operator_graph, "
-                "semantics, lineage, issue_backlog, replay_ready_bugs"
-            )
-        payload: dict[str, Any] = {}
-        if view in {"status", "scoreboard", "graph", "lineage"}:
-            payload["run_id"] = params.get("run_id")
-        if view == "operator_graph":
-            payload["as_of"] = (
-                _parse_iso_datetime(params.get("as_of"), field_name="as_of")
-                if params.get("as_of") is not None
+    as_of = params.get("as_of")
+    return _execute_catalog_tool(
+        operation_name="operator.semantic_projection_refresh",
+        payload={
+            "limit": params.get("limit", 100),
+            "as_of": (
+                _parse_iso_datetime(as_of, field_name="as_of")
+                if as_of is not None
                 else None
-            )
-        if view == "semantics":
-            payload = {
-                "predicate_slug": params.get("predicate_slug"),
-                "subject_kind": params.get("subject_kind"),
-                "subject_ref": params.get("subject_ref"),
-                "object_kind": params.get("object_kind"),
-                "object_ref": params.get("object_ref"),
-                "source_kind": params.get("source_kind"),
-                "source_ref": params.get("source_ref"),
-                "active_only": bool(params.get("active_only", True)),
-                "as_of": (
-                    _parse_iso_datetime(params.get("as_of"), field_name="as_of")
-                    if params.get("as_of") is not None
-                    else None
-                ),
-                "limit": int(params.get("limit", 50) or 50),
-            }
-        if view == "issue_backlog":
-            payload = {
-                "limit": int(params.get("limit", 50) or 50),
-                "open_only": bool(params.get("open_only", True)),
-                "status": params.get("status"),
-            }
-        if view == "replay_ready_bugs":
-            if bool(params.get("refresh_backfill", False)):
-                raise ValueError(
-                    "replay_ready_bugs is read-only; use maintenance backfill instead"
-                )
-            payload = {
-                "limit": int(params.get("limit", 50) or 50),
-            }
-        return execute_operation_from_subsystems(
-            _subs,
-            operation_name=operation_name,
-            payload=payload,
-        )
-    except Exception as exc:
-        return {"error": str(exc)}
+            ),
+        },
+    )
+
+
+def tool_praxis_run_status(params: dict) -> dict:
+    """Read one run-scoped operator status view."""
+
+    return _execute_catalog_tool(
+        operation_name="operator.run_status",
+        payload={"run_id": params.get("run_id")},
+    )
+
+
+def tool_praxis_run_scoreboard(params: dict) -> dict:
+    """Read one run-scoped cutover scoreboard."""
+
+    return _execute_catalog_tool(
+        operation_name="operator.run_scoreboard",
+        payload={"run_id": params.get("run_id")},
+    )
+
+
+def tool_praxis_run_graph(params: dict) -> dict:
+    """Read one run-scoped workflow graph."""
+
+    return _execute_catalog_tool(
+        operation_name="operator.run_graph",
+        payload={"run_id": params.get("run_id")},
+    )
+
+
+def tool_praxis_graph_projection(params: dict) -> dict:
+    """Read the cross-domain operator graph projection."""
+
+    as_of = params.get("as_of")
+    return _execute_catalog_tool(
+        operation_name="operator.graph_projection",
+        payload={
+            "as_of": (
+                _parse_iso_datetime(as_of, field_name="as_of")
+                if as_of is not None
+                else None
+            ),
+        },
+    )
+
+
+def tool_praxis_run_lineage(params: dict) -> dict:
+    """Read one run-scoped lineage view."""
+
+    return _execute_catalog_tool(
+        operation_name="operator.run_lineage",
+        payload={"run_id": params.get("run_id")},
+    )
+
+
+def tool_praxis_issue_backlog(params: dict) -> dict:
+    """Read the canonical operator issue backlog."""
+
+    return _execute_catalog_tool(
+        operation_name="operator.issue_backlog",
+        payload={
+            "limit": int(params.get("limit", 50) or 50),
+            "open_only": bool(params.get("open_only", True)),
+            "status": params.get("status"),
+        },
+    )
+
+
+def tool_praxis_replay_ready_bugs(params: dict) -> dict:
+    """Read the replay-ready bug backlog."""
+
+    return _execute_catalog_tool(
+        operation_name="operator.replay_ready_bugs",
+        payload={
+            "limit": int(params.get("limit", 50) or 50),
+        },
+    )
 
 
 def tool_praxis_operator_write(params: dict) -> dict:
@@ -297,9 +200,9 @@ def tool_praxis_operator_write(params: dict) -> dict:
             "priority": params.get("priority", "p2"),
             "parent_roadmap_item_id": params.get("parent_roadmap_item_id"),
             "slug": params.get("slug"),
-            "depends_on": params.get("depends_on"),
+            "depends_on": _optional_sequence_payload(params, "depends_on"),
             "source_bug_id": params.get("source_bug_id"),
-            "registry_paths": params.get("registry_paths"),
+            "registry_paths": _optional_sequence_payload(params, "registry_paths"),
             "decision_ref": params.get("decision_ref"),
             "item_kind": params.get("item_kind"),
             "tier": params.get("tier"),
@@ -606,8 +509,8 @@ def tool_praxis_operator_closeout(params: dict) -> dict:
         operation_name="operator.work_item_closeout",
         payload={
             "action": params.get("action", "preview"),
-            "bug_ids": params.get("bug_ids"),
-            "roadmap_item_ids": params.get("roadmap_item_ids"),
+            "bug_ids": _optional_sequence_payload(params, "bug_ids"),
+            "roadmap_item_ids": _optional_sequence_payload(params, "roadmap_item_ids"),
         },
     )
 
@@ -705,53 +608,35 @@ def tool_praxis_circuits(params: dict) -> dict:
 
 
 TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
-    "praxis_status": (
-        tool_praxis_status,
+    "praxis_status_snapshot": (
+        tool_praxis_status_snapshot,
         {
-            "description": (
-                "Quick snapshot of how workflows are performing — total runs, pass/fail rate, "
-                "categorized failure breakdown by zone (external/config/internal), and adjusted "
-                "pass rate that excludes external provider failures.\n\n"
-                "USE WHEN: you want a quick health check on workflow activity. 'How are things going?' "
-                "'What's the pass rate?' 'Any failures today?' 'What's our real system quality?'\n\n"
-                "EXAMPLE: praxis_status()  or  praxis_status(since_hours=4)\n\n"
-                "DO NOT USE: for deep inspection of a specific run (use praxis_workflow action='inspect'), "
-                "or for full system health (use praxis_health)."
-            ),
+            "description": "Read the canonical workflow status snapshot — pass rate, failure mix, queue depth, and in-flight run summaries from receipt authority.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "since_hours": {"type": "integer", "description": "Lookback window in hours.", "default": 24},
                 },
             },
+            "cli": {
+                "surface": "operations",
+                "tier": "advanced",
+                "when_to_use": "Inspect workflow pass rate, failure mix, and in-flight run summaries from canonical receipts.",
+                "when_not_to_use": "Do not use it for deep run inspection or workflow dispatch.",
+                "risks": {"default": "read"},
+                "examples": [
+                    {"title": "Show 24h status", "input": {"since_hours": 24}},
+                ],
+            },
         },
     ),
-    "praxis_maintenance": (
-        tool_praxis_maintenance,
+    "praxis_metrics_reset": (
+        tool_praxis_metrics_reset,
         {
-            "description": (
-                "Run explicit operator maintenance actions that mutate observability aggregates.\n\n"
-                "USE WHEN: you need to clean polluted quality metrics or routing counters without "
-                "mixing destructive actions into read-only status surfaces.\n\n"
-                "EXAMPLES:\n"
-                "  praxis_maintenance(action='reset_metrics', confirm=true)\n"
-                "  praxis_maintenance(action='backfill_bug_replay_provenance')\n"
-                "  praxis_maintenance(action='backfill_semantic_bridges')\n"
-                "  praxis_maintenance(action='refresh_semantic_projection')"
-            ),
+            "description": "Reset observability metrics through explicit operator maintenance authority.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "action": {
-                        "type": "string",
-                        "description": "Maintenance action to run.",
-                        "enum": [
-                            "reset_metrics",
-                            "backfill_bug_replay_provenance",
-                            "backfill_semantic_bridges",
-                            "refresh_semantic_projection",
-                        ],
-                    },
                     "confirm": {
                         "type": "boolean",
                         "description": "Required for destructive maintenance actions.",
@@ -761,14 +646,35 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         "type": "string",
                         "description": "ISO date for surgical reset (only delete data before this date).",
                     },
+                },
+            },
+            "cli": {
+                "surface": "operations",
+                "tier": "advanced",
+                "when_to_use": "Reset polluted quality metrics or routing counters through one explicit maintenance operation.",
+                "when_not_to_use": "Do not use it for ordinary observability reads.",
+                "risks": {"default": "write"},
+                "examples": [
+                    {"title": "Reset metrics with confirmation", "input": {"confirm": True}},
+                ],
+            },
+        },
+    ),
+    "praxis_bug_replay_provenance_backfill": (
+        tool_praxis_bug_replay_provenance_backfill,
+        {
+            "description": "Backfill replay provenance from canonical bug and receipt authority.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
                     "limit": {
                         "type": "integer",
-                        "description": "Optional scan limit for bug replay provenance backfill.",
+                        "description": "Optional scan limit.",
                         "minimum": 0,
                     },
                     "open_only": {
                         "type": "boolean",
-                        "description": "When true, only scan unresolved bugs during replay provenance backfill.",
+                        "description": "When true, only scan unresolved bugs.",
                         "default": True,
                     },
                     "receipt_limit": {
@@ -777,124 +683,268 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         "minimum": 1,
                         "default": 1,
                     },
+                },
+            },
+            "cli": {
+                "surface": "operations",
+                "tier": "advanced",
+                "when_to_use": "Backfill replay provenance without bundling unrelated maintenance actions into one selector tool.",
+                "when_not_to_use": "Do not use it for read-only bug backlog inspection.",
+                "risks": {"default": "write"},
+                "examples": [
+                    {"title": "Backfill replay provenance", "input": {"open_only": True}},
+                ],
+            },
+        },
+    ),
+    "praxis_semantic_bridges_backfill": (
+        tool_praxis_semantic_bridges_backfill,
+        {
+            "description": "Replay semantic bridges from canonical operator authority into semantic assertions.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
                     "as_of": {
                         "type": "string",
-                        "description": "Optional ISO-8601 cutoff for semantic bridge replay or semantic projection refresh.",
+                        "description": "Optional ISO-8601 cutoff for semantic bridge replay.",
                     },
                     "include_object_relations": {
                         "type": "boolean",
-                        "description": "When action='backfill_semantic_bridges', replay operator_object_relations into semantic assertions.",
+                        "description": "Replay operator_object_relations into semantic assertions.",
                         "default": True,
                     },
                     "include_operator_decisions": {
                         "type": "boolean",
-                        "description": "When action='backfill_semantic_bridges', replay operator_decisions into semantic assertions.",
+                        "description": "Replay operator_decisions into semantic assertions.",
                         "default": True,
                     },
                     "include_roadmap_items": {
                         "type": "boolean",
-                        "description": "When action='backfill_semantic_bridges', replay roadmap_items semantic fields into semantic assertions.",
+                        "description": "Replay roadmap semantic fields into semantic assertions.",
                         "default": True,
                     },
                 },
-                "required": ["action"],
+            },
+            "cli": {
+                "surface": "operations",
+                "tier": "advanced",
+                "when_to_use": "Rebuild semantic bridge authority from canonical operator sources.",
+                "when_not_to_use": "Do not use it for semantic reads; use praxis_semantic_assertions instead.",
+                "risks": {"default": "write"},
+                "examples": [
+                    {"title": "Backfill semantic bridges", "input": {"include_object_relations": True}},
+                ],
             },
         },
     ),
-    "praxis_operator_view": (
-        tool_praxis_operator_view,
+    "praxis_semantic_projection_refresh": (
+        tool_praxis_semantic_projection_refresh,
         {
-            "description": (
-                "Render detailed operator observability views — deeper than praxis_status.\n\n"
-                "VIEWS:\n"
-                "  'status'     — operator status with outbox depth, subscription state, watermark drift\n"
-                "  'scoreboard' — cutover readiness: which gates are proven, which are blocked\n"
-                "  'graph'      — run-scoped workflow graph topology for one workflow run\n"
-                "  'operator_graph' — cross-domain operator graph projection sourced from semantic assertions first,\n"
-                "                   with legacy relation rows only as compatibility input\n"
-                "  'semantics'  — unified semantic assertion inspection over semantic_current_assertions\n"
-                "  'lineage'    — graph lineage for one run, including operator frames\n"
-                "  'issue_backlog' — canonical upstream issue intake rows before bug promotion\n"
-                "  'replay_ready_bugs' — replayable bug backlog from already-authoritative provenance\n\n"
-                "USE WHEN: you need detailed operational insight beyond pass/fail rates. "
-                "'Show me the workflow graph for this run.' 'Show me the operator graph.' "
-                "'Show me the semantic links.' "
-                "'What's the cutover status?' 'Show the issue backlog.' "
-                "'Which bugs can I replay right now?'\n\n"
-                "EXAMPLES:\n"
-                "  praxis_operator_view(view='graph', run_id='run_123')\n"
-                "  praxis_operator_view(view='operator_graph')\n"
-                "  praxis_operator_view(view='semantics', predicate_slug='grouped_in')\n"
-                "  praxis_operator_view(view='lineage', run_id='run_123')\n"
-                "  praxis_operator_view(view='issue_backlog')\n"
-                "  praxis_operator_view(view='replay_ready_bugs')"
-            ),
+            "description": "Refresh the semantic projection through explicit operator maintenance authority.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "view": {
-                        "type": "string",
-                        "description": "View to render: 'status', 'scoreboard', 'graph', 'operator_graph', 'semantics', 'lineage', 'issue_backlog', or 'replay_ready_bugs'.",
-                        "enum": ["status", "scoreboard", "graph", "operator_graph", "semantics", "lineage", "issue_backlog", "replay_ready_bugs"],
-                    },
-                    "run_id": {
-                        "type": "string",
-                        "description": "Required for run-scoped views: 'status', 'scoreboard', 'graph', and 'lineage'. Not used by 'operator_graph' or 'semantics'.",
-                    },
-                    "status": {
-                        "type": "string",
-                        "description": "Optional issue status filter for issue_backlog, e.g. open or resolved.",
-                    },
-                    "open_only": {
-                        "type": "boolean",
-                        "description": "When true, exclude resolved issues from issue_backlog.",
-                        "default": True,
-                    },
                     "limit": {
                         "type": "integer",
-                        "description": "Maximum rows to return for issue_backlog, replay_ready_bugs, or semantics.",
+                        "description": "Maximum events to consume in one refresh.",
                         "minimum": 1,
-                        "default": 50,
-                    },
-                    "predicate_slug": {
-                        "type": "string",
-                        "description": "Optional semantic predicate filter for view='semantics'.",
-                    },
-                    "subject_kind": {
-                        "type": "string",
-                        "description": "Optional semantic subject kind filter for view='semantics'.",
-                    },
-                    "subject_ref": {
-                        "type": "string",
-                        "description": "Optional semantic subject ref filter for view='semantics'.",
-                    },
-                    "object_kind": {
-                        "type": "string",
-                        "description": "Optional semantic object kind filter for view='semantics'.",
-                    },
-                    "object_ref": {
-                        "type": "string",
-                        "description": "Optional semantic object ref filter for view='semantics'.",
-                    },
-                    "source_kind": {
-                        "type": "string",
-                        "description": "Optional semantic source kind filter for view='semantics'.",
-                    },
-                    "source_ref": {
-                        "type": "string",
-                        "description": "Optional semantic source ref filter for view='semantics'.",
-                    },
-                    "active_only": {
-                        "type": "boolean",
-                        "description": "When view='semantics', prefer semantic_current_assertions instead of historical reads.",
-                        "default": True,
+                        "default": 100,
                     },
                     "as_of": {
                         "type": "string",
-                        "description": "Optional ISO-8601 as-of timestamp for historical semantic inspection or operator_graph projection reads.",
+                        "description": "Optional ISO-8601 cutoff for projection refresh.",
                     },
                 },
-                "required": ["view"],
+            },
+            "cli": {
+                "surface": "operations",
+                "tier": "advanced",
+                "when_to_use": "Consume semantic projection events through one explicit maintenance operation.",
+                "when_not_to_use": "Do not use it for read-only graph inspection.",
+                "risks": {"default": "write"},
+                "examples": [
+                    {"title": "Refresh semantic projection", "input": {"limit": 100}},
+                ],
+            },
+        },
+    ),
+    "praxis_run_status": (
+        tool_praxis_run_status,
+        {
+            "description": "Read one run-scoped operator status view.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "run_id": {"type": "string", "description": "Workflow run id."},
+                },
+                "required": ["run_id"],
+            },
+            "cli": {
+                "surface": "operator",
+                "tier": "advanced",
+                "when_to_use": "Inspect operator status for one workflow run.",
+                "when_not_to_use": "Do not use it for whole-system pass-rate summaries.",
+                "risks": {"default": "read"},
+                "examples": [
+                    {"title": "Read run status", "input": {"run_id": "run_123"}},
+                ],
+            },
+        },
+    ),
+    "praxis_run_scoreboard": (
+        tool_praxis_run_scoreboard,
+        {
+            "description": "Read one run-scoped cutover scoreboard.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "run_id": {"type": "string", "description": "Workflow run id."},
+                },
+                "required": ["run_id"],
+            },
+            "cli": {
+                "surface": "operator",
+                "tier": "advanced",
+                "when_to_use": "Inspect cutover readiness for one workflow run.",
+                "when_not_to_use": "Do not use it for workflow dispatch or global status.",
+                "risks": {"default": "read"},
+                "examples": [
+                    {"title": "Read run scoreboard", "input": {"run_id": "run_123"}},
+                ],
+            },
+        },
+    ),
+    "praxis_run_graph": (
+        tool_praxis_run_graph,
+        {
+            "description": "Read one run-scoped workflow graph.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "run_id": {"type": "string", "description": "Workflow run id."},
+                },
+                "required": ["run_id"],
+            },
+            "cli": {
+                "surface": "operator",
+                "tier": "advanced",
+                "when_to_use": "Inspect workflow topology for one run.",
+                "when_not_to_use": "Do not use it for cross-domain operator graph inspection.",
+                "risks": {"default": "read"},
+                "examples": [
+                    {"title": "Read run graph", "input": {"run_id": "run_123"}},
+                ],
+            },
+        },
+    ),
+    "praxis_graph_projection": (
+        tool_praxis_graph_projection,
+        {
+            "description": "Read the cross-domain operator graph projection.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "as_of": {
+                        "type": "string",
+                        "description": "Optional ISO-8601 timestamp for the projection snapshot.",
+                    },
+                },
+            },
+            "cli": {
+                "surface": "operator",
+                "tier": "advanced",
+                "when_to_use": "Inspect the semantic-first operator graph across domains.",
+                "when_not_to_use": "Do not use it for run-scoped workflow topology.",
+                "risks": {"default": "read"},
+                "examples": [
+                    {"title": "Read operator graph projection", "input": {"as_of": "2026-04-16T20:05:00+00:00"}},
+                ],
+            },
+        },
+    ),
+    "praxis_run_lineage": (
+        tool_praxis_run_lineage,
+        {
+            "description": "Read one run-scoped lineage view.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "run_id": {"type": "string", "description": "Workflow run id."},
+                },
+                "required": ["run_id"],
+            },
+            "cli": {
+                "surface": "operator",
+                "tier": "advanced",
+                "when_to_use": "Inspect graph lineage and operator frames for one run.",
+                "when_not_to_use": "Do not use it for whole-system summaries.",
+                "risks": {"default": "read"},
+                "examples": [
+                    {"title": "Read run lineage", "input": {"run_id": "run_123"}},
+                ],
+            },
+        },
+    ),
+    "praxis_issue_backlog": (
+        tool_praxis_issue_backlog,
+        {
+            "description": "Read the canonical operator issue backlog.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum rows to return.",
+                        "minimum": 1,
+                        "default": 50,
+                    },
+                    "open_only": {
+                        "type": "boolean",
+                        "description": "When true, exclude resolved issues.",
+                        "default": True,
+                    },
+                    "status": {
+                        "type": "string",
+                        "description": "Optional issue status filter.",
+                    },
+                },
+            },
+            "cli": {
+                "surface": "operator",
+                "tier": "advanced",
+                "when_to_use": "Inspect the canonical upstream issue backlog before bug promotion.",
+                "when_not_to_use": "Do not use it to mutate issue or bug state.",
+                "risks": {"default": "read"},
+                "examples": [
+                    {"title": "Read issue backlog", "input": {"limit": 25}},
+                ],
+            },
+        },
+    ),
+    "praxis_replay_ready_bugs": (
+        tool_praxis_replay_ready_bugs,
+        {
+            "description": "Read the replay-ready bug backlog from authoritative provenance.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum rows to return.",
+                        "minimum": 1,
+                        "default": 50,
+                    },
+                },
+            },
+            "cli": {
+                "surface": "operator",
+                "tier": "advanced",
+                "when_to_use": "Inspect replayable bugs without bundling that read behind a selector view.",
+                "when_not_to_use": "Do not use it to trigger replay backfill.",
+                "risks": {"default": "read"},
+                "examples": [
+                    {"title": "Read replay-ready bugs", "input": {"limit": 25}},
+                ],
             },
         },
     ),

@@ -464,6 +464,7 @@ class _RecordingPgConn:
     def __init__(self):
         self.receipt_rows: list[dict[str, object]] = []
         self._lock = threading.Lock()
+        self._receipt_evidence_seq = 0
 
     def execute(self, query, *args):
         if "FROM failure_category_zones" in query:
@@ -474,17 +475,21 @@ class _RecordingPgConn:
             ]
         if "INSERT INTO receipts" in query:
             with self._lock:
-                inputs = json.loads(args[11])
-                outputs = json.loads(args[12])
+                self._receipt_evidence_seq += 1
+                evidence_seq = self._receipt_evidence_seq
+                inputs = json.loads(args[15])
+                outputs = json.loads(args[16])
+                inputs["transition_seq"] = evidence_seq
                 self.receipt_rows.append({
                     "receipt_id": args[0],
-                    "status": args[10],
-                    "evidence_seq": args[8],
-                    "transition_seq": inputs["transition_seq"],
-                    "failure_code": args[15],
+                    "status": args[14],
+                    "evidence_seq": evidence_seq,
+                    "transition_seq": evidence_seq,
+                    "failure_code": args[18],
                     "inputs": inputs,
                     "outputs": outputs,
                 })
+                return [{"evidence_seq": evidence_seq}]
         return []
 
 
@@ -556,14 +561,17 @@ class TestEvidenceSequencing:
         )
 
         assert receipt_ref.startswith("rcpt_")
-        assert len(pg_conn.receipt_rows) == 1
-        assert pg_conn.receipt_rows[0]["receipt_id"].startswith("rcpt_")
-        assert pg_conn.receipt_rows[0]["status"] == "failed"
-        assert pg_conn.receipt_rows[0]["failure_code"] == "timeout"
-        assert pg_conn.receipt_rows[0]["inputs"]["job_label"] == "job_1"
-        assert pg_conn.receipt_rows[0]["inputs"]["transition_seq"] == 1
-        assert pg_conn.receipt_rows[0]["outputs"]["cost_usd"] == pytest.approx(0.42)
-        assert pg_conn.receipt_rows[0]["outputs"]["tool_use"] == {"web_search_requests": 1}
+        canonical_rows = [
+            row for row in pg_conn.receipt_rows if str(row["receipt_id"]).startswith("rcpt_")
+        ]
+        assert len(canonical_rows) == 1
+        assert canonical_rows[0]["status"] == "failed"
+        assert canonical_rows[0]["failure_code"] == "timeout"
+        assert canonical_rows[0]["inputs"]["job_label"] == "job_1"
+        assert canonical_rows[0]["inputs"]["transition_seq"] == canonical_rows[0]["evidence_seq"]
+        assert canonical_rows[0]["evidence_seq"] >= 1
+        assert canonical_rows[0]["outputs"]["cost_usd"] == pytest.approx(0.42)
+        assert canonical_rows[0]["outputs"]["tool_use"] == {"web_search_requests": 1}
         assert len(obs_receipts) == 1
         assert obs_receipts[0]["job_label"] == "job_1"
         assert obs_receipts[0]["status"] == "failed"

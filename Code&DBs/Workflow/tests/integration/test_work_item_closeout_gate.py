@@ -29,6 +29,11 @@ def _is_duplicate_object_error(error: BaseException) -> bool:
     return getattr(error, "sqlstate", None) in _DUPLICATE_SQLSTATES
 
 
+def _is_transaction_wrapper_statement(statement: str) -> bool:
+    normalized = statement.strip().rstrip(";").strip().lower()
+    return normalized in {"begin", "begin transaction", "commit"}
+
+
 async def _bootstrap_migration(conn, filename: str) -> None:
     async with conn.transaction():
         await conn.execute(
@@ -36,6 +41,8 @@ async def _bootstrap_migration(conn, filename: str) -> None:
             _SCHEMA_BOOTSTRAP_LOCK_ID,
         )
         for statement in workflow_migration_statements(filename):
+            if _is_transaction_wrapper_statement(statement):
+                continue
             try:
                 async with conn.transaction():
                     await conn.execute(statement)
@@ -85,6 +92,30 @@ async def _seed_bug_evidence(
     suffix: str,
     clock: datetime,
 ) -> None:
+    verification_run_id = f"verification_run.{suffix}.fix"
+    await conn.execute(
+        """
+        INSERT INTO verification_runs (
+            verification_run_id,
+            verifier_ref,
+            target_kind,
+            target_ref,
+            status,
+            inputs,
+            outputs,
+            decision_ref,
+            attempted_at,
+            duration_ms
+        ) VALUES (
+            $1, 'verifier.platform.schema_authority', 'platform', $2, 'passed',
+            '{}'::jsonb, '{}'::jsonb, $3, $4, 25
+        )
+        """,
+        verification_run_id,
+        f"bug_resolution:{bug_id}",
+        f"decision.{suffix}.verification",
+        clock,
+    )
     await conn.execute(
         """
         INSERT INTO bug_evidence_links (
@@ -97,12 +128,12 @@ async def _seed_bug_evidence(
             created_by,
             notes
         ) VALUES (
-            $1, $2, 'receipt', $3, 'validates_fix', $4, 'test.work_item_closeout_gate', $5
+            $1, $2, 'verification_run', $3, 'validates_fix', $4, 'test.work_item_closeout_gate', $5
         )
         """,
         f"bug_evidence_link.{suffix}.1",
         bug_id,
-        f"receipt.{suffix}.fix",
+        verification_run_id,
         clock,
         "Explicit proof row for auto-close testing.",
     )
@@ -161,6 +192,10 @@ async def _cleanup_work_item_closeout_rows(conn, *, suffix: str) -> None:
         f"bug.%{suffix}%",
     )
     await conn.execute(
+        "DELETE FROM verification_runs WHERE verification_run_id LIKE $1",
+        f"verification_run.%{suffix}%",
+    )
+    await conn.execute(
         "DELETE FROM roadmap_items WHERE roadmap_item_id LIKE $1",
         f"roadmap_item.%{suffix}%",
     )
@@ -212,6 +247,8 @@ async def _exercise_work_item_closeout_gate_previews_and_commits_from_explicit_f
     await transaction.start()
     try:
         await _bootstrap_migration(conn, "009_bug_and_roadmap_authority.sql")
+        await _bootstrap_migration(conn, "050_verification_registry.sql")
+        await _bootstrap_migration(conn, "072_verifier_healer_authority.sql")
 
         suffix = _unique_suffix()
         clock = _fixed_clock()
@@ -244,7 +281,7 @@ async def _exercise_work_item_closeout_gate_previews_and_commits_from_explicit_f
             candidate["roadmap_item_id"]
             for candidate in preview["candidates"]["roadmap_items"]
         ] == [roadmap_item_id]
-        assert preview["applied"] == {"bugs": [], "roadmap_items": []}
+        assert preview["applied"] == {"bugs": [], "issues": [], "roadmap_items": []}
 
         committed = await frontdoor.reconcile_work_item_closeout_async(
             action="commit",
@@ -308,6 +345,8 @@ async def _exercise_work_item_closeout_gate_read_projection_reflects_commit_stat
     roadmap_item_id = f"roadmap_item.{suffix}.closeout"
     try:
         await _bootstrap_migration(conn, "009_bug_and_roadmap_authority.sql")
+        await _bootstrap_migration(conn, "050_verification_registry.sql")
+        await _bootstrap_migration(conn, "072_verifier_healer_authority.sql")
         await _seed_bug(conn=conn, bug_id=bug_id, suffix=suffix, clock=clock)
         await _seed_bug_evidence(conn=conn, bug_id=bug_id, suffix=suffix, clock=clock)
         await _seed_roadmap_item(

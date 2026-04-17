@@ -17,8 +17,18 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-DROP TRIGGER IF EXISTS trg_notify_system_event_ready ON system_events;
-CREATE TRIGGER trg_notify_system_event_ready
-    AFTER INSERT ON system_events
-    FOR EACH ROW
-    EXECUTE FUNCTION notify_system_event_ready();
+DO $$
+BEGIN
+    IF to_regclass('public.system_events') IS NULL THEN
+        RETURN;
+    END IF;
+
+    EXECUTE 'DROP TRIGGER IF EXISTS trg_notify_system_event_ready ON system_events';
+    EXECUTE $trigger$
+        CREATE TRIGGER trg_notify_system_event_ready
+            AFTER INSERT ON system_events
+            FOR EACH ROW
+            EXECUTE FUNCTION notify_system_event_ready()
+    $trigger$;
+END;
+$$;

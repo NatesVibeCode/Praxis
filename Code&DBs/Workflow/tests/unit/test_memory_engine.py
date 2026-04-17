@@ -8,6 +8,8 @@ from memory.engine import MemoryEngine
 from memory.types import (
     ChangeSet,
     Edge,
+    EdgeAuthorityClass,
+    EdgeProvenanceKind,
     Entity,
     EntityType,
     RelationType,
@@ -157,6 +159,8 @@ def _edge(src: str, tgt: str, rel: RelationType = RelationType.related_to) -> Ed
         weight=1.0,
         metadata={},
         created_at=_now(),
+        authority_class=EdgeAuthorityClass.canonical,
+        provenance_kind=EdgeProvenanceKind.legacy_unspecified,
     )
 
 
@@ -184,6 +188,37 @@ def test_get_edges_incoming():
     eng.add_edge(_edge(c, b))
     edges = eng.get_edges(b, direction="incoming")
     assert len(edges) == 2
+
+
+def test_get_edges_excludes_enrichment_by_default():
+    eng = MemoryEngine(conn=get_test_conn())
+    a, b = _uid("ga_a"), _uid("ga_b")
+    eng.insert(_entity(a, name="source"))
+    eng.insert(_entity(b, name="target"))
+    eng.add_edge(
+        Edge(
+            source_id=a,
+            target_id=b,
+            relation_type=RelationType.related_to,
+            weight=0.6,
+            metadata={"kind": "heuristic"},
+            created_at=_now(),
+            authority_class=EdgeAuthorityClass.enrichment,
+            provenance_kind=EdgeProvenanceKind.heuristic_extraction,
+        )
+    )
+
+    assert eng.get_edges(a, direction="outgoing") == []
+    edges = eng.get_edges(
+        a,
+        direction="outgoing",
+        authority_classes=(
+            EdgeAuthorityClass.canonical,
+            EdgeAuthorityClass.enrichment,
+        ),
+    )
+    assert len(edges) == 1
+    assert edges[0].authority_class is EdgeAuthorityClass.enrichment
 
 
 def test_remove_edge():

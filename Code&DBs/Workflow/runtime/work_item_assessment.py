@@ -31,6 +31,7 @@ _RUN_FAILURE_STATES = frozenset(
         "lease_expired",
     }
 )
+_ROADMAP_LIFECYCLES = frozenset({"idea", "planned", "claimed", "completed"})
 
 
 def _require_text(value: object, *, field_name: str) -> str:
@@ -206,6 +207,23 @@ def _normalize_binding_status(value: object) -> str:
     return _require_text(value, field_name="binding_status").lower()
 
 
+def _roadmap_lifecycle(roadmap_item: Mapping[str, Any]) -> str:
+    value = roadmap_item.get("lifecycle")
+    if value is None:
+        if _optional_datetime(roadmap_item.get("completed_at"), field_name="completed_at") is not None:
+            return "completed"
+        normalized_status = str(roadmap_item.get("status") or "").strip().lower()
+        if normalized_status in {"completed", "done"}:
+            return "completed"
+        return "planned"
+    normalized = _require_text(value, field_name="lifecycle").lower()
+    if normalized not in _ROADMAP_LIFECYCLES:
+        raise ValueError(
+            "lifecycle must be one of " + ", ".join(sorted(_ROADMAP_LIFECYCLES))
+        )
+    return normalized
+
+
 def _activity_snapshot(
     *,
     item_kind: str,
@@ -214,6 +232,8 @@ def _activity_snapshot(
     workflow_run_activity: Mapping[str, Mapping[str, Any]],
     assessed_at: datetime,
     idle_timeout: timedelta,
+    declared_claimed: bool = False,
+    declared_backlog: bool = False,
 ) -> dict[str, Any]:
     relevant_bindings = [
         binding
@@ -297,8 +317,10 @@ def _activity_snapshot(
         activity_state = "built"
     elif failed_run_present:
         activity_state = "blocked"
+    elif declared_claimed:
+        activity_state = "in_progress"
     else:
-        activity_state = "backlog" if item_kind in {"bug", "issue"} else "planned"
+        activity_state = "backlog" if declared_backlog or item_kind in {"bug", "issue"} else "planned"
 
     return {
         "activity_state": activity_state,
@@ -465,6 +487,7 @@ def assess_work_items(
             workflow_run_activity=normalized_run_activity,
             assessed_at=assessed_at,
             idle_timeout=idle_timeout,
+            declared_claimed=str(bug.get("status") or "").strip().upper() == "IN_PROGRESS",
         )
         reason_codes.extend(activity["reason_codes"])
         promotion_state = (
@@ -618,6 +641,7 @@ def assess_work_items(
 
         source_bug_id = _optional_text(roadmap_item.get("source_bug_id"), field_name="source_bug_id")
         related_bug = bug_by_id.get(source_bug_id) if source_bug_id is not None else None
+        lifecycle = _roadmap_lifecycle(roadmap_item)
         activity = _activity_snapshot(
             item_kind="roadmap_item",
             item_id=roadmap_item_id,
@@ -625,6 +649,8 @@ def assess_work_items(
             workflow_run_activity=normalized_run_activity,
             assessed_at=assessed_at,
             idle_timeout=idle_timeout,
+            declared_claimed=lifecycle == "claimed",
+            declared_backlog=lifecycle == "idea",
         )
         reason_codes.extend(activity["reason_codes"])
         if related_bug is not None and _optional_datetime(
@@ -716,6 +742,8 @@ def assess_work_items(
                 pipeline_state = "built_candidate"
             elif activity["activity_state"] == "blocked":
                 pipeline_state = "blocked"
+            elif activity["activity_state"] == "backlog":
+                pipeline_state = "backlog"
 
         assessments.append(
             WorkItemAssessmentRecord(

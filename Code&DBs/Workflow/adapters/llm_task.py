@@ -20,7 +20,7 @@ from .deterministic import (
     cancelled_task_result,
 )
 from .llm_client import LLMClientError, LLMRequest, LLMResponse, call_llm
-from .provider_registry import (
+from registry.provider_execution_registry import (
     ProviderAdapterContract,
     default_model_for_provider,
     default_provider_slug,

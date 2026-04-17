@@ -114,7 +114,7 @@ def test_build_execution_bundle_can_derive_tool_authority_from_execution_manifes
         "execution_manifest_ref": "execution_manifest:wf_alpha:def_alpha:manifest_alpha",
         "approved_bundle_refs": ["capability_bundle:email_triage"],
         "tool_allowlist": {
-            "mcp_tools": ["praxis_integration", "praxis_status"],
+            "mcp_tools": ["praxis_integration", "praxis_status_snapshot"],
             "adapter_tools": ["repo_fs"],
         },
         "verify_refs": ["verify_ref.workflow.support_triage"],
@@ -138,7 +138,7 @@ def test_build_execution_bundle_can_derive_tool_authority_from_execution_manifes
     assert build_bundle["allowed_tools"] == ["repo_fs"]
     assert build_bundle["mcp_tool_names"] == architecture_bundle["mcp_tool_names"]
     assert "praxis_integration" in build_bundle["mcp_tool_names"]
-    assert "praxis_status" in build_bundle["mcp_tool_names"]
+    assert "praxis_status_snapshot" in build_bundle["mcp_tool_names"]
     assert "praxis_workflow_validate" in build_bundle["mcp_tool_names"]
 
 

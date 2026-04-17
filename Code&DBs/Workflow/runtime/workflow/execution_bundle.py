@@ -23,12 +23,12 @@ from .artifact_contracts import (
 
 
 _BUCKET_MCP_TOOLS: dict[str, tuple[str, ...]] = {
-    "general": ("praxis_query", "praxis_status", "praxis_integration"),
+    "general": ("praxis_query", "praxis_status_snapshot", "praxis_integration"),
     "build": ("praxis_query", "praxis_discover", "praxis_recall", "praxis_health", "praxis_integration"),
-    "debug": ("praxis_query", "praxis_status", "praxis_heal", "praxis_receipts", "praxis_health", "praxis_discover"),
-    "review": ("praxis_query", "praxis_status", "praxis_receipts", "praxis_bugs", "praxis_health"),
+    "debug": ("praxis_query", "praxis_status_snapshot", "praxis_heal", "praxis_receipts", "praxis_health", "praxis_discover"),
+    "review": ("praxis_query", "praxis_status_snapshot", "praxis_receipts", "praxis_bugs", "praxis_health"),
     "research": ("praxis_query", "praxis_research", "praxis_recall", "praxis_discover", "praxis_graph", "praxis_integration"),
-    "analysis": ("praxis_query", "praxis_status", "praxis_recall", "praxis_graph", "praxis_integration"),
+    "analysis": ("praxis_query", "praxis_status_snapshot", "praxis_recall", "praxis_graph", "praxis_integration"),
     "architecture": ("praxis_query", "praxis_discover", "praxis_graph", "praxis_recall", "praxis_integration"),
 }
 
@@ -420,7 +420,7 @@ def build_execution_bundle(
             tool_name
             for tool_name in (
                 "praxis_query",
-                "praxis_status",
+                "praxis_status_snapshot",
                 "praxis_integration",
                 "praxis_workflow_validate",
                 "praxis_get_submission",

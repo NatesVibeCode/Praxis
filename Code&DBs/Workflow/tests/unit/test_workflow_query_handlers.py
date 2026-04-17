@@ -3317,7 +3317,7 @@ def test_handle_trigger_post_uses_command_bus_helper(tmp_path, monkeypatch) -> N
                     "outcome_goal": "triage the inbox",
                     "anti_requirements": [],
                 },
-                "tool_allowlist": {"mcp_tools": ["praxis_status"], "adapter_tools": ["repo_fs"]},
+                "tool_allowlist": {"mcp_tools": ["praxis_status_snapshot"], "adapter_tools": ["repo_fs"]},
                 "verify_refs": ["verify.alpha"],
                 "approved_bundle_refs": ["capability_bundle:triage"],
             },
@@ -3389,7 +3389,7 @@ def test_handle_trigger_post_uses_command_bus_helper(tmp_path, monkeypatch) -> N
                 "outcome_goal": "triage the inbox",
                 "anti_requirements": [],
             },
-            "tool_allowlist": {"mcp_tools": ["praxis_status"], "adapter_tools": ["repo_fs"]},
+            "tool_allowlist": {"mcp_tools": ["praxis_status_snapshot"], "adapter_tools": ["repo_fs"]},
             "verify_refs": ["verify.alpha"],
             "approved_bundle_refs": ["capability_bundle:triage"],
         },
@@ -4403,7 +4403,7 @@ def test_handle_query_routes_operator_graph_view(monkeypatch) -> None:
     result = workflow_query_core.handle_query(
         subs,
         {
-            "question": "show me the operator graph",
+            "question": "operator graph",
             "as_of": "2026-04-16T20:05:00+00:00",
         },
     )
@@ -4435,7 +4435,7 @@ def test_handle_query_routes_semantic_assertions_view(monkeypatch) -> None:
     result = workflow_query_core.handle_query(
         subs,
         {
-            "question": "show me semantic assertions",
+            "question": "semantic assertions",
             "predicate_slug": "grouped_in",
             "subject_kind": "roadmap_item",
             "active_only": False,
@@ -4461,6 +4461,92 @@ def test_handle_query_routes_semantic_assertions_view(monkeypatch) -> None:
     assert result["returned_count"] == 1
 
 
+def test_handle_query_returns_hint_for_removed_operator_graph_alias() -> None:
+    result = workflow_query_core.handle_query(
+        SimpleNamespace(get_knowledge_graph=lambda: pytest.fail("knowledge graph fallback is not expected")),
+        {"question": "show me the operator graph"},
+    )
+
+    assert result["routed_to"] == "operator_graph"
+    assert result["status"] == "unsupported_query_alias"
+    assert result["reason_code"] == "workflow_query.operator_graph_alias_removed"
+    assert result["canonical_query"] == "operator graph"
+
+
+def test_handle_query_returns_hint_for_removed_semantic_assertions_alias() -> None:
+    result = workflow_query_core.handle_query(
+        SimpleNamespace(get_knowledge_graph=lambda: pytest.fail("knowledge graph fallback is not expected")),
+        {"question": "show me semantic assertions"},
+    )
+
+    assert result["routed_to"] == "semantic_assertions"
+    assert result["status"] == "unsupported_query_alias"
+    assert result["reason_code"] == "workflow_query.semantic_assertions_alias_removed"
+    assert result["canonical_query"] == "semantic assertions"
+
+
+def test_handle_query_returns_hint_for_removed_import_path_alias() -> None:
+    result = workflow_query_core.handle_query(
+        SimpleNamespace(get_knowledge_graph=lambda: pytest.fail("knowledge graph fallback is not expected")),
+        {"question": "how to import SchemaProjector"},
+    )
+
+    assert result["routed_to"] == "import_resolver"
+    assert result["status"] == "unsupported_query_alias"
+    assert result["reason_code"] == "workflow_query.import_path_alias_removed"
+    assert result["canonical_prefix"] == "import path for "
+    assert result["canonical_query"] == "import path for schemaprojector"
+
+
+def test_handle_query_routes_canonical_import_path_prefix(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def _import_resolver(subs: Any, question: str) -> dict[str, Any]:
+        captured["subsystems"] = subs
+        captured["question"] = question
+        return {"routed_to": "import_resolver", "results": [{"import": "from runtime.compiler import SchemaProjector"}]}
+
+    monkeypatch.setattr(workflow_query_core, "_import_resolver", _import_resolver)
+    subs = SimpleNamespace()
+
+    result = workflow_query_core.handle_query(
+        subs,
+        {"question": "import path for SchemaProjector"},
+    )
+
+    assert captured == {
+        "subsystems": subs,
+        "question": "import path for schemaprojector",
+    }
+    assert result["routed_to"] == "import_resolver"
+    assert result["results"] == [{"import": "from runtime.compiler import SchemaProjector"}]
+
+
+def test_handle_query_returns_hint_for_removed_test_command_alias() -> None:
+    result = workflow_query_core.handle_query(
+        SimpleNamespace(get_knowledge_graph=lambda: pytest.fail("knowledge graph fallback is not expected")),
+        {"question": "pytest for runtime/compiler.py"},
+    )
+
+    assert result["routed_to"] == "test_commands"
+    assert result["status"] == "unsupported_query_alias"
+    assert result["reason_code"] == "workflow_query.test_command_alias_removed"
+    assert result["canonical_prefix"] == "test command for "
+    assert result["canonical_query"] == "test command for runtime/compiler.py"
+
+
+def test_handle_query_returns_hint_for_removed_staleness_alias() -> None:
+    result = workflow_query_core.handle_query(
+        SimpleNamespace(get_knowledge_graph=lambda: pytest.fail("knowledge graph fallback is not expected")),
+        {"question": "what is stale?"},
+    )
+
+    assert result["routed_to"] == "staleness_detector"
+    assert result["status"] == "unsupported_query_alias"
+    assert result["reason_code"] == "workflow_query.staleness_alias_removed"
+    assert result["canonical_query"] == "staleness"
+
+
 def test_handle_query_rejects_diagnose_query_alias() -> None:
     subs = SimpleNamespace(
         get_knowledge_graph=lambda: SimpleNamespace(search=lambda *_args, **_kwargs: []),
@@ -4472,6 +4558,7 @@ def test_handle_query_rejects_diagnose_query_alias() -> None:
     assert result["status"] == "unsupported_query_alias"
     assert result["reason_code"] == "workflow_query.diagnose_alias_removed"
     assert result["run_id"] == "run_abc123"
+    assert result["canonical_query"] == "praxis workflow diagnose <run_id>"
     assert "praxis_diagnose" in result["message"]
 
 

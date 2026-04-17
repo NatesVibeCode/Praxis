@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, List, Optional
 
 from memory.crud import (
@@ -15,7 +16,7 @@ from memory.crud import (
     search_entities,
     update_entity,
 )
-from memory.types import ChangeSet, Edge, Entity, EntityType, RelationType
+from memory.types import ChangeSet, Edge, EdgeAuthorityClass, Entity, EntityType, RelationType
 if TYPE_CHECKING:
     from storage.postgres import SyncPostgresConnection
     from runtime.embedding_service import EmbeddingService
@@ -122,8 +123,18 @@ class MemoryEngine:
     ) -> bool:
         return remove_edge(self._conn, source_id, target_id, relation_type)
 
-    def get_edges(self, entity_id: str, direction: str = "outgoing") -> List[Edge]:
-        return get_edges(self._conn, entity_id, direction)
+    def get_edges(
+        self,
+        entity_id: str,
+        direction: str = "outgoing",
+        authority_classes: Sequence[EdgeAuthorityClass] | None = None,
+    ) -> List[Edge]:
+        return get_edges(
+            self._conn,
+            entity_id,
+            direction,
+            authority_classes=authority_classes,
+        )
 
     # --- Graph traversal ---
 
@@ -133,6 +144,7 @@ class MemoryEngine:
         entity_type: EntityType,
         relation_types: Optional[List[RelationType]] = None,
         depth: int = 1,
+        authority_classes: Sequence[EdgeAuthorityClass] | None = None,
     ) -> List[Entity]:
         visited: set = {entity_id}
         frontier: set = {entity_id}
@@ -140,7 +152,12 @@ class MemoryEngine:
         for _ in range(depth):
             next_frontier: set = set()
             for nid in frontier:
-                edges = get_edges(self._conn, nid, direction="both")
+                edges = get_edges(
+                    self._conn,
+                    nid,
+                    direction="both",
+                    authority_classes=authority_classes,
+                )
                 for edge in edges:
                     if relation_types and edge.relation_type not in relation_types:
                         continue

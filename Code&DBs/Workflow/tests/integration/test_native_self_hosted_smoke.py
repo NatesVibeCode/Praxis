@@ -189,6 +189,7 @@ def test_native_self_hosted_smoke_proves_repo_local_authority_and_durable_graph_
         repeat_submit_payload = api.submit(request_payload=request_payload, env=env)
         status_payload = api.status(run_id=submit_payload["run"]["run_id"], env=env)
         health_payload = api.health(env=env)
+        bootstrap_health_payload = api.health(env=env, bootstrap=True)
 
         workflow_request = frontdoor._request_from_mapping(request_payload)
         outcome = WorkflowIntakePlanner(registry=resolver).plan(request=workflow_request)
@@ -232,6 +233,8 @@ def test_native_self_hosted_smoke_proves_repo_local_authority_and_durable_graph_
     assert health_payload["database"]["process_running"] is True
     assert health_payload["database"]["database_reachable"] is True
     assert health_payload["database"]["schema_bootstrapped"] is True
+    assert bootstrap_health_payload["native_instance"] == native_instance.to_contract()
+    assert bootstrap_health_payload["database"]["schema_bootstrapped"] is True
 
     assert submit_payload["admission_decision"]["decision"] == "admit"
     assert submit_payload["run"]["run_id"] == outcome.run_id

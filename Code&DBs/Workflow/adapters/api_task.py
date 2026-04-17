@@ -13,7 +13,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from .credentials import CredentialResolutionError, resolve_credential
-from .provider_registry import resolve_adapter_config as _resolve_adapter_config
+from registry.provider_execution_registry import resolve_adapter_config as _resolve_adapter_config
 from .deterministic import (
     DeterministicTaskRequest,
     DeterministicTaskResult,

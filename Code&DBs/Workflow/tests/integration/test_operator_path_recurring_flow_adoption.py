@@ -65,7 +65,7 @@ def test_operator_path_adopts_recurring_review_repair_flow(monkeypatch: pytest.M
         assert first_payload["recurring_flow_authority"] == "runtime.recurring_review_repair_flow"
         assert first_payload["as_of"] == as_of.isoformat()
         assert first_payload["recurring_review_repair_flow"]["authorities"] == {
-            "dispatch": "authority.workflow_class_resolution",
+            "workflow_class": "authority.workflow_class_resolution",
             "schedule": "runtime.scheduler_window_repository",
         }
         assert first_payload["recurring_review_repair_flow"]["request"] == {

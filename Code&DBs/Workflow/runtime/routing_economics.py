@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from asyncpg import PostgresError
-from adapters.provider_registry import (
+from registry.provider_execution_registry import (
     default_llm_adapter_type,
     resolve_adapter_economics,
     supports_adapter,

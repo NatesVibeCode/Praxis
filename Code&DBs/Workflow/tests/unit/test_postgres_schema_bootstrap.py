@@ -159,6 +159,11 @@ def test_bootstrap_workflow_schema_locks_and_applies_only_missing_migrations(
         "inspect_control_plane_schema",
         lambda _conn: asyncio.sleep(0, result=_control_readiness(bootstrapped=True)),
     )
+    monkeypatch.setattr(
+        postgres_schema,
+        "_bootstrap_baseline_anchor_is_missing",
+        lambda _conn: asyncio.sleep(0, result=False),
+    )
     monkeypatch.setattr(postgres_schema, "_bootstrap_migration", _bootstrap_migration)
     acquire_calls: list[_FakeAsyncConn] = []
 
@@ -225,6 +230,11 @@ def test_bootstrap_workflow_schema_applies_missing_constraint_migration(
         "inspect_control_plane_schema",
         lambda _conn: asyncio.sleep(0, result=_control_readiness(bootstrapped=True)),
     )
+    monkeypatch.setattr(
+        postgres_schema,
+        "_bootstrap_baseline_anchor_is_missing",
+        lambda _conn: asyncio.sleep(0, result=False),
+    )
     monkeypatch.setattr(postgres_schema, "_bootstrap_migration", _bootstrap_migration)
     monkeypatch.setattr(
         postgres_schema,
@@ -284,6 +294,11 @@ def test_bootstrap_workflow_schema_applies_partially_drifted_migration(
         postgres_schema,
         "inspect_control_plane_schema",
         lambda _conn: asyncio.sleep(0, result=_control_readiness(bootstrapped=True)),
+    )
+    monkeypatch.setattr(
+        postgres_schema,
+        "_bootstrap_baseline_anchor_is_missing",
+        lambda _conn: asyncio.sleep(0, result=False),
     )
     monkeypatch.setattr(postgres_schema, "_bootstrap_migration", _bootstrap_migration)
     monkeypatch.setattr(
@@ -363,6 +378,76 @@ def test_bootstrap_workflow_schema_uses_full_tree_for_fresh_cluster(
         "001_v1_control_plane.sql",
         "002_registry_authority.sql",
         "032_triggers_and_events.sql",
+    ]
+
+
+def test_bootstrap_workflow_schema_replays_full_tree_when_bootstrap_only_baseline_is_missing(
+    monkeypatch,
+) -> None:
+    conn = _FakeAsyncConn()
+    readiness_states = iter(
+        (
+            _readiness(
+                bootstrapped=False,
+                missing_objects=(("column", "provider_policies.preferred_provider_ref"),),
+                missing_by_migration={
+                    "074_provider_policy_multi_provider_refs.sql": (
+                        ("column", "provider_policies.preferred_provider_ref"),
+                    ),
+                },
+            ),
+            _readiness(
+                bootstrapped=False,
+                missing_objects=(("column", "provider_policies.preferred_provider_ref"),),
+                missing_by_migration={
+                    "074_provider_policy_multi_provider_refs.sql": (
+                        ("column", "provider_policies.preferred_provider_ref"),
+                    ),
+                },
+            ),
+        )
+    )
+    applied: list[str] = []
+
+    async def _inspect(_conn):
+        return next(readiness_states)
+
+    async def _bootstrap_migration(_conn, filename: str) -> None:
+        applied.append(filename)
+
+    monkeypatch.setattr(postgres_schema, "inspect_workflow_schema", _inspect)
+    monkeypatch.setattr(
+        postgres_schema,
+        "inspect_control_plane_schema",
+        lambda _conn: asyncio.sleep(0, result=_control_readiness(bootstrapped=True)),
+    )
+    monkeypatch.setattr(
+        postgres_schema,
+        "_bootstrap_baseline_anchor_is_missing",
+        lambda _conn: asyncio.sleep(0, result=True),
+    )
+    monkeypatch.setattr(postgres_schema, "_bootstrap_migration", _bootstrap_migration)
+    monkeypatch.setattr(
+        postgres_schema,
+        "_acquire_schema_bootstrap_lock",
+        lambda _conn: asyncio.sleep(0, result=0.0),
+    )
+    monkeypatch.setattr(
+        postgres_schema,
+        "_full_workflow_migration_filenames",
+        lambda: (
+            "001_v1_control_plane.sql",
+            "032_triggers_and_events.sql",
+            "074_provider_policy_multi_provider_refs.sql",
+        ),
+    )
+
+    asyncio.run(postgres_schema.bootstrap_workflow_schema(conn))
+
+    assert applied == [
+        "001_v1_control_plane.sql",
+        "032_triggers_and_events.sql",
+        "074_provider_policy_multi_provider_refs.sql",
     ]
 
 

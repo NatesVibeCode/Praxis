@@ -11,7 +11,13 @@ import traceback
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from memory.types import Edge, Entity, EntityType, RelationType
+from memory.types import (
+    EdgeProvenanceKind,
+    Entity,
+    EntityType,
+    RelationType,
+    enrichment_edge,
+)
 from runtime.heartbeat import HeartbeatModule, HeartbeatModuleResult, _ok, _fail
 from storage.postgres.vector_store import cosine_similarity
 
@@ -106,13 +112,15 @@ class RelationshipMiner(HeartbeatModule):
             actions += 1
 
             for receipt_id in sample_ids:
-                edge = Edge(
+                edge = enrichment_edge(
                     source_id=pattern_id,
                     target_id=receipt_id,
                     relation_type=RelationType.correlates_with,
                     weight=0.7,
                     metadata={},
                     created_at=now,
+                    provenance_kind=EdgeProvenanceKind.relationship_mining,
+                    provenance_ref="agent_failure_patterns",
                 )
                 self._engine.add_edge(edge)
                 actions += 1
@@ -226,13 +234,15 @@ class RelationshipMiner(HeartbeatModule):
             actions += 1
 
             for receipt_id in sample_ids:
-                edge = Edge(
+                edge = enrichment_edge(
                     source_id=pattern_id,
                     target_id=receipt_id,
                     relation_type=RelationType.covers,
                     weight=0.7,
                     metadata={},
                     created_at=now,
+                    provenance_kind=EdgeProvenanceKind.relationship_mining,
+                    provenance_ref="model_task_affinity",
                 )
                 self._engine.add_edge(edge)
                 actions += 1
@@ -284,13 +294,15 @@ class RelationshipMiner(HeartbeatModule):
                 if already:
                     continue
 
-                edge = Edge(
+                edge = enrichment_edge(
                     source_id=c_id,
                     target_id=b_id,
                     relation_type=RelationType.correlates_with,
                     weight=0.7,
                     metadata={},
                     created_at=now,
+                    provenance_kind=EdgeProvenanceKind.relationship_mining,
+                    provenance_ref="constraint_bug_correlation",
                 )
                 self._engine.add_edge(edge)
                 actions += 1
@@ -339,13 +351,15 @@ class RelationshipMiner(HeartbeatModule):
             if already:
                 continue
 
-            edge = Edge(
+            edge = enrichment_edge(
                 source_id=later_id,
                 target_id=earlier_id,
                 relation_type=RelationType.caused_by,
                 weight=0.6,
                 metadata={},
                 created_at=now,
+                provenance_kind=EdgeProvenanceKind.relationship_mining,
+                provenance_ref="failure_cascades",
             )
             self._engine.add_edge(edge)
             actions += 1
@@ -394,13 +408,15 @@ class RelationshipMiner(HeartbeatModule):
 
             for b_row in bugs:
                 b_id = b_row['id']
-                edge = Edge(
+                edge = enrichment_edge(
                     source_id=f_id,
                     target_id=b_id,
                     relation_type=RelationType.triggered,
                     weight=0.6,
                     metadata={},
                     created_at=now,
+                    provenance_kind=EdgeProvenanceKind.relationship_mining,
+                    provenance_ref="friction_fix_loops",
                 )
                 self._engine.add_edge(edge)
                 actions += 1
@@ -515,7 +531,7 @@ class RelationshipMiner(HeartbeatModule):
                 if key in existing_edges:
                     continue
 
-                edge = Edge(
+                edge = enrichment_edge(
                     source_id=src_id,
                     target_id=target_id,
                     relation_type=RelationType.depends_on,
@@ -527,6 +543,8 @@ class RelationshipMiner(HeartbeatModule):
                         'target_subsystem': target_sub,
                     },
                     created_at=now,
+                    provenance_kind=EdgeProvenanceKind.relationship_mining,
+                    provenance_ref="catalog_cross_references",
                 )
                 self._engine.add_edge(edge)
                 existing_edges.add(key)
@@ -556,7 +574,7 @@ class RelationshipMiner(HeartbeatModule):
                     if key in existing_edges:
                         continue
 
-                    edge = Edge(
+                    edge = enrichment_edge(
                         source_id=src_id,
                         target_id=tgt_id,
                         relation_type=RelationType.depends_on,
@@ -567,6 +585,8 @@ class RelationshipMiner(HeartbeatModule):
                             'extraction': 'explicit_depends_on',
                         },
                         created_at=now,
+                        provenance_kind=EdgeProvenanceKind.relationship_mining,
+                        provenance_ref="catalog_cross_references",
                     )
                     self._engine.add_edge(edge)
                     existing_edges.add(key)
@@ -588,7 +608,7 @@ class RelationshipMiner(HeartbeatModule):
                 if key in existing_edges:
                     continue
 
-                edge = Edge(
+                edge = enrichment_edge(
                     source_id=src_id,
                     target_id=target_id,
                     relation_type=RelationType.depends_on,
@@ -601,6 +621,8 @@ class RelationshipMiner(HeartbeatModule):
                         'extraction': 'class_name_cross_ref',
                     },
                     created_at=now,
+                    provenance_kind=EdgeProvenanceKind.relationship_mining,
+                    provenance_ref="catalog_cross_references",
                 )
                 self._engine.add_edge(edge)
                 existing_edges.add(key)
@@ -674,7 +696,7 @@ class RelationshipMiner(HeartbeatModule):
             key = (src_cid, tgt_cid, 'depends_on')
             if key in existing_edges:
                 continue
-            edge = Edge(
+            edge = enrichment_edge(
                 source_id=src_cid,
                 target_id=tgt_cid,
                 relation_type=RelationType.depends_on,
@@ -686,6 +708,8 @@ class RelationshipMiner(HeartbeatModule):
                     'extraction': 'ast_import_graph',
                 },
                 created_at=now,
+                provenance_kind=EdgeProvenanceKind.relationship_mining,
+                provenance_ref="catalog_cross_references",
             )
             self._engine.add_edge(edge)
             existing_edges.add(key)
@@ -730,7 +754,7 @@ class RelationshipMiner(HeartbeatModule):
             key = (cid_a, cid_b, 'related_to')
             if key in existing_edges:
                 continue
-            edge = Edge(
+            edge = enrichment_edge(
                 source_id=cid_a,
                 target_id=cid_b,
                 relation_type=RelationType.related_to,
@@ -742,6 +766,8 @@ class RelationshipMiner(HeartbeatModule):
                     'extraction': 'behavioral_vector_centroid',
                 },
                 created_at=now,
+                provenance_kind=EdgeProvenanceKind.relationship_mining,
+                provenance_ref="catalog_cross_references",
             )
             self._engine.add_edge(edge)
             existing_edges.add(key)

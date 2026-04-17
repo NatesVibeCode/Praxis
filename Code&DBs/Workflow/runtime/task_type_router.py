@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from asyncpg import PostgresError
-from adapters.provider_registry import (
+from registry.provider_execution_registry import (
     default_llm_adapter_type,
 )
 from registry.runtime_profile_admission import (
@@ -164,7 +164,7 @@ def _state_str(state_row: dict[str, Any] | None, key: str) -> str:
 
 def _rotate_chain(chain: list[Any], task_type: str, rotation_counters: dict[str, int]) -> tuple[Any, tuple[str, ...]]:
     """Dedup by provider and rotate chain for diversity. Returns (primary, slugs)."""
-    from adapters.provider_registry import get_profile as _rotation_profile
+    from registry.provider_execution_registry import get_profile as _rotation_profile
     seen_providers: set[str] = set()
     provider_best: list = []
     provider_rest: list = []

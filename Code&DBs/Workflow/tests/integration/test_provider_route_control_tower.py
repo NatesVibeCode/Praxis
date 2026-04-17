@@ -114,8 +114,18 @@ async def _seed_route_catalog_prereqs(
             effective_from,
             effective_to,
             decision_ref,
-            created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11, $12, $13, $14)
+            created_at,
+            route_tier,
+            route_tier_rank,
+            latency_class,
+            latency_rank,
+            reasoning_control,
+            task_affinities,
+            benchmark_profile
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11, $12, $13, $14,
+            $15, $16, $17, $18, $19::jsonb, $20::jsonb, $21::jsonb
+        )
         """,
         candidate_ref,
         "provider.openai",
@@ -131,6 +141,24 @@ async def _seed_route_catalog_prereqs(
         None,
         f"decision.{suffix}.candidate",
         clock,
+        "medium",
+        1,
+        "instant",
+        1,
+        json.dumps({"default": "medium"}),
+        json.dumps(
+            {
+                "primary": ["build", "wiring"],
+                "secondary": ["review", "chat"],
+                "avoid": [],
+            }
+        ),
+        json.dumps(
+            {
+                "evidence_level": "test_seed",
+                "positioning": "Fast OpenAI route for control-tower authority tests.",
+            }
+        ),
     )
 
     return model_profile_id, provider_policy_id, candidate_ref

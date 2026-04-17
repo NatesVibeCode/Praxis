@@ -12,7 +12,7 @@ from runtime.engineering_observability import (
 )
 from surfaces._boot import resolve_surface_env, workflow_database_status
 from surfaces.api.operator_read import (
-    build_provider_registry_summary,
+    build_transport_support_summary,
     query_transport_support,
 )
 from surfaces.api.handlers import workflow_launcher
@@ -456,8 +456,8 @@ def _handle_health(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         health_mod=hs_mod,
         pg=subs.get_pg_conn(),
     )
-    provider_registry = build_provider_registry_summary(transport_support)
-    for provider_slug, adapter_type in provider_registry["probe_targets"]:
+    transport_support_summary = build_transport_support_summary(transport_support)
+    for provider_slug, adapter_type in transport_support_summary["probe_targets"]:
         probes.append(hs_mod.ProviderTransportProbe(provider_slug, adapter_type))
 
     runner = hs_mod.PreflightRunner(probes)
@@ -515,12 +515,12 @@ def _handle_health(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         "proof_metrics": proof_payload,
         "schema_authority": schema_authority,
         "dependency_truth": dependency_truth,
-        "provider_registry": {
-            "default_provider_slug": provider_registry["default_provider_slug"],
-            "default_adapter_type": provider_registry["default_adapter_type"],
-            "registered_providers": list(provider_registry["registered_providers"]),
-            "providers": list(provider_registry["providers"]),
-            "support_basis": provider_registry["support_basis"],
+        "transport_support_summary": {
+            "default_provider_slug": transport_support_summary["default_provider_slug"],
+            "default_adapter_type": transport_support_summary["default_adapter_type"],
+            "registered_providers": list(transport_support_summary["registered_providers"]),
+            "providers": list(transport_support_summary["providers"]),
+            "support_basis": transport_support_summary["support_basis"],
         },
         "lane_recommendation": {
             "recommended_posture": lane.recommended_posture,

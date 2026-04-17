@@ -9,7 +9,14 @@ from pathlib import Path
 from _pg_test_conn import get_test_conn
 from memory.engine import MemoryEngine
 from memory.repository import MemoryEdgeRef
-from memory.types import Edge, Entity, EntityType, RelationType
+from memory.types import (
+    Edge,
+    EdgeAuthorityClass,
+    EdgeProvenanceKind,
+    Entity,
+    EntityType,
+    RelationType,
+)
 
 # Direct-load heartbeat to avoid runtime/__init__.py (slots= compat issue)
 import sys as _sys
@@ -65,6 +72,8 @@ def _edge(src: str, tgt: str, rel: RelationType = RelationType.related_to) -> Ed
         weight=1.0,
         metadata={},
         created_at=_now(),
+        authority_class=EdgeAuthorityClass.canonical,
+        provenance_kind=EdgeProvenanceKind.legacy_unspecified,
     )
 
 

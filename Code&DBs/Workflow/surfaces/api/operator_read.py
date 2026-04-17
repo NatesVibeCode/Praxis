@@ -76,10 +76,10 @@ class TransportSupportFrontdoor:
 _DEFAULT_TRANSPORT_SUPPORT_FRONTDOOR = TransportSupportFrontdoor()
 
 
-def build_provider_registry_summary(
+def build_transport_support_summary(
     transport_support_payload: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Project canonical transport support into the lightweight provider summary surfaces expect."""
+    """Project canonical transport support into the lightweight summary health surfaces expect."""
 
     providers_payload = transport_support_payload.get("providers")
     provider_rows = (
@@ -162,7 +162,7 @@ __all__ = [
     "OperatorWorkItemCloseoutRecommendationRecord",
     "load_native_self_hosted_smoke_contract",
     "TransportSupportFrontdoor",
-    "build_provider_registry_summary",
+    "build_transport_support_summary",
     "query_transport_support",
     "query_issue_backlog",
     "query_roadmap_tree",

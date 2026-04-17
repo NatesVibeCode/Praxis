@@ -482,7 +482,7 @@ ONLY JSON."""
     def _call_provider(provider: str, model_slug: str, prompt: str, env: dict) -> str | None:
         """Call a provider CLI using registry profile — no hardcoded commands."""
         import subprocess
-        from adapters.provider_registry import build_command, get_profile
+        from registry.provider_execution_registry import build_command, get_profile
 
         profile = get_profile(provider)
         if not profile:

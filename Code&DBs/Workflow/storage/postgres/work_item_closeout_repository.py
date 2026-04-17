@@ -135,11 +135,12 @@ class PostgresWorkItemCloseoutRepository:
                 UPDATE roadmap_items
                 SET
                     status = $1,
+                    lifecycle = 'completed',
                     completed_at = COALESCE(completed_at, $2),
                     updated_at = $2
                 WHERE roadmap_item_id = ANY($3::text[])
                   AND completed_at IS NULL
-                RETURNING roadmap_item_id, status, completed_at, source_bug_id
+                RETURNING roadmap_item_id, status, lifecycle, completed_at, source_bug_id
                 """,
                 normalized_completed_status,
                 normalized_completed_at,

@@ -14,7 +14,13 @@ import traceback
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
-from memory.types import Edge, Entity, EntityType, RelationType
+from memory.types import (
+    EdgeProvenanceKind,
+    Entity,
+    EntityType,
+    RelationType,
+    enrichment_edge,
+)
 from runtime.heartbeat import HeartbeatModule, HeartbeatModuleResult, _ok, _fail
 
 if TYPE_CHECKING:
@@ -583,21 +589,25 @@ class RollupGenerator(HeartbeatModule):
                         confidence=0.9,
                     )
                     self._engine.insert(lesson)
-                    self._engine.add_edge(Edge(
+                    self._engine.add_edge(enrichment_edge(
                         source_id=lesson_id,
                         target_id=today_id,
                         relation_type=RelationType.regressed_from,
                         weight=0.9,
                         metadata={},
                         created_at=now,
+                        provenance_kind=EdgeProvenanceKind.rollup_inference,
+                        provenance_ref="pass_rate_regression",
                     ))
-                    self._engine.add_edge(Edge(
+                    self._engine.add_edge(enrichment_edge(
                         source_id=lesson_id,
                         target_id=yesterday_id,
                         relation_type=RelationType.regressed_from,
                         weight=0.9,
                         metadata={},
                         created_at=now,
+                        provenance_kind=EdgeProvenanceKind.rollup_inference,
+                        provenance_ref="pass_rate_regression",
                     ))
                     actions += 3
                     findings += 1
@@ -633,21 +643,25 @@ class RollupGenerator(HeartbeatModule):
                         confidence=0.85,
                     )
                     self._engine.insert(lesson)
-                    self._engine.add_edge(Edge(
+                    self._engine.add_edge(enrichment_edge(
                         source_id=lesson_id,
                         target_id=today_id,
                         relation_type=RelationType.regressed_from,
                         weight=0.8,
                         metadata={},
                         created_at=now,
+                        provenance_kind=EdgeProvenanceKind.rollup_inference,
+                        provenance_ref="cost_spike",
                     ))
-                    self._engine.add_edge(Edge(
+                    self._engine.add_edge(enrichment_edge(
                         source_id=lesson_id,
                         target_id=yesterday_id,
                         relation_type=RelationType.regressed_from,
                         weight=0.8,
                         metadata={},
                         created_at=now,
+                        provenance_kind=EdgeProvenanceKind.rollup_inference,
+                        provenance_ref="cost_spike",
                     ))
                     actions += 3
                     findings += 1
@@ -683,21 +697,25 @@ class RollupGenerator(HeartbeatModule):
                         confidence=0.85,
                     )
                     self._engine.insert(lesson)
-                    self._engine.add_edge(Edge(
+                    self._engine.add_edge(enrichment_edge(
                         source_id=lesson_id,
                         target_id=today_id,
                         relation_type=RelationType.regressed_from,
                         weight=0.8,
                         metadata={},
                         created_at=now,
+                        provenance_kind=EdgeProvenanceKind.rollup_inference,
+                        provenance_ref="efficiency_drop",
                     ))
-                    self._engine.add_edge(Edge(
+                    self._engine.add_edge(enrichment_edge(
                         source_id=lesson_id,
                         target_id=yesterday_id,
                         relation_type=RelationType.regressed_from,
                         weight=0.8,
                         metadata={},
                         created_at=now,
+                        provenance_kind=EdgeProvenanceKind.rollup_inference,
+                        provenance_ref="efficiency_drop",
                     ))
                     actions += 3
                     findings += 1

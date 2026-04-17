@@ -20,7 +20,7 @@ from hashlib import sha256
 from typing import Any
 import uuid
 
-from adapters.provider_registry import (
+from registry.provider_execution_registry import (
     default_adapter_type_for_provider,
     default_llm_adapter_type,
     default_model_for_provider,
@@ -62,12 +62,12 @@ _STAGE_TEMPLATES: dict[str, str] = {
     "research": "Research and report on the following:\n\n{description}",
 }
 
-def _default_workspace_ref() -> str:
-    return default_native_authority_refs()[0]
+def _default_workspace_ref(conn=None) -> str:
+    return default_native_authority_refs(conn)[0]
 
 
-def _default_runtime_profile_ref() -> str:
-    return default_native_authority_refs()[1]
+def _default_runtime_profile_ref(conn=None) -> str:
+    return default_native_authority_refs(conn)[1]
 
 
 def _default_provider_slug() -> str:
@@ -122,8 +122,8 @@ class CompiledSpec:
     provider_slug: str | None = None
     model_slug: str | None = None
     adapter_type: str = field(default_factory=_default_llm_adapter)
-    workspace_ref: str = field(default_factory=_default_workspace_ref)
-    runtime_profile_ref: str = field(default_factory=_default_runtime_profile_ref)
+    workspace_ref: str | None = None
+    runtime_profile_ref: str | None = None
     max_retries: int = 0
     definition_graph: dict[str, Any] | None = None
     definition_revision: str | None = None
@@ -329,6 +329,23 @@ def compile_spec(
     # Determine read scope (empty for now; will be computed by scope_resolver if auto_read_scope=True)
     read_scope = intent.read
 
+    workspace_ref: str | None = None
+    runtime_profile_ref: str | None = None
+    if conn is None:
+        workspace_ref = _default_workspace_ref()
+        runtime_profile_ref = _default_runtime_profile_ref()
+    else:
+        from registry.native_runtime_profile_sync import NativeRuntimeProfileSyncError
+
+        try:
+            workspace_ref = _default_workspace_ref(conn)
+        except NativeRuntimeProfileSyncError:
+            workspace_ref = None
+        try:
+            runtime_profile_ref = _default_runtime_profile_ref(conn)
+        except NativeRuntimeProfileSyncError:
+            runtime_profile_ref = None
+
     # Build compiled spec
     kernel_definition = build_definition_kernel(
         source_prose=intent.description,
@@ -351,6 +368,8 @@ def compile_spec(
         timeout=intent.timeout,
         max_tokens=intent.max_tokens,
         temperature=intent.temperature,
+        workspace_ref=workspace_ref,
+        runtime_profile_ref=runtime_profile_ref,
         definition_graph=kernel_definition["definition_graph"],
         definition_revision=kernel_definition["definition_revision"],
         compiled_prose=kernel_definition["compiled_prose"],

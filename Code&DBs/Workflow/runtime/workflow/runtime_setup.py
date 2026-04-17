@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from adapters import AdapterRegistry, CLILLMAdapter, LLMTaskAdapter
+from adapters import AdapterRegistry
 from contracts.domain import WorkflowEdgeContract, WorkflowNodeContract, WorkflowRequest
 from runtime.domain import AtomicEvidenceWriter
 from runtime.native_authority import default_native_authority_refs
@@ -22,6 +22,7 @@ from registry.native_runtime_profile_sync import (
     resolve_native_runtime_profile_config,
 )
 from storage.postgres.validators import PostgresConfigurationError
+from ._adapter_registry import build_workflow_adapter_registry
 
 if TYPE_CHECKING:
     from .orchestrator import WorkflowSpec
@@ -296,28 +297,19 @@ def _shadow_packet_job_label(spec: "WorkflowSpec") -> str:
 
 def _build_adapter_registry(spec: "WorkflowSpec") -> AdapterRegistry:
     """Build the adapter registry for deterministic workflow execution."""
-
-    from adapters.api_task import APITaskAdapter
-    from adapters.context_adapter import ContextCompilerAdapter
-    from adapters.file_writer_adapter import FileWriterAdapter
-    from adapters.output_parser_adapter import OutputParserAdapter
-    from adapters.verify_adapter import VerifyAdapter
-
-    registry = AdapterRegistry(
-        api_task_adapter=APITaskAdapter(),
-        llm_task_adapter=LLMTaskAdapter(),
-        cli_llm_adapter=CLILLMAdapter(),
-    )
-    registry.register(
+    adapter_types = {
         "context_compiler",
-        ContextCompilerAdapter(
-            shadow_packet_config=_shadow_packet_config(spec),
-        ),
+        str(spec.adapter_type or "").strip(),
+        "output_parser",
+    }
+    if spec.scope_write and spec.workdir:
+        adapter_types.add("file_writer")
+    if spec.verify_refs:
+        adapter_types.add("verifier")
+    return build_workflow_adapter_registry(
+        adapter_types=adapter_types,
+        shadow_packet_config=_shadow_packet_config(spec),
     )
-    registry.register("output_parser", OutputParserAdapter())
-    registry.register("file_writer", FileWriterAdapter())
-    registry.register("verifier", VerifyAdapter())
-    return registry
 
 
 def _build_evidence_writer(spec: "WorkflowSpec") -> AtomicEvidenceWriter:

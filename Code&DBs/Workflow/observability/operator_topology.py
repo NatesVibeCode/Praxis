@@ -237,6 +237,7 @@ class OperatorGraphRoadmapRecord:
     title: str
     item_kind: str
     status: str
+    lifecycle: str
     priority: str
     parent_roadmap_item_id: str | None
     source_bug_id: str | None
@@ -350,6 +351,7 @@ def _roadmap_record_from_row(row: Mapping[str, object]) -> OperatorGraphRoadmapR
         title=_require_text(row["title"], field_name="title"),
         item_kind=_require_text(row["item_kind"], field_name="item_kind"),
         status=_require_text(row["status"], field_name="status"),
+        lifecycle=_require_text(row["lifecycle"], field_name="lifecycle"),
         priority=_require_text(row["priority"], field_name="priority"),
         parent_roadmap_item_id=(
             _require_text(row["parent_roadmap_item_id"], field_name="parent_roadmap_item_id")
@@ -436,6 +438,7 @@ async def _fetch_roadmap_records(
                 title,
                 item_kind,
                 status,
+                lifecycle,
                 priority,
                 parent_roadmap_item_id,
                 source_bug_id,

@@ -79,6 +79,10 @@ class PostgresRoadmapAuthoringRepository:
                         item.get("status"),
                         field_name=f"roadmap_items[{index}].status",
                     ),
+                    "lifecycle": _require_text(
+                        item.get("lifecycle"),
+                        field_name=f"roadmap_items[{index}].lifecycle",
+                    ),
                     "priority": _require_text(
                         item.get("priority"),
                         field_name=f"roadmap_items[{index}].priority",
@@ -154,6 +158,7 @@ class PostgresRoadmapAuthoringRepository:
                             title,
                             item_kind,
                             status,
+                            lifecycle,
                             priority,
                             parent_roadmap_item_id,
                             source_bug_id,
@@ -167,13 +172,14 @@ class PostgresRoadmapAuthoringRepository:
                             created_at,
                             updated_at
                         ) VALUES (
-                            $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11::jsonb, $12, NULL, NULL, NULL, $13, $14
+                            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12::jsonb, $13, NULL, NULL, NULL, $14, $15
                         )
                         ON CONFLICT (roadmap_item_id) DO UPDATE SET
                             roadmap_key = EXCLUDED.roadmap_key,
                             title = EXCLUDED.title,
                             item_kind = EXCLUDED.item_kind,
                             status = EXCLUDED.status,
+                            lifecycle = EXCLUDED.lifecycle,
                             priority = EXCLUDED.priority,
                             parent_roadmap_item_id = EXCLUDED.parent_roadmap_item_id,
                             source_bug_id = EXCLUDED.source_bug_id,
@@ -188,6 +194,7 @@ class PostgresRoadmapAuthoringRepository:
                         item["title"],
                         item["item_kind"],
                         item["status"],
+                        item["lifecycle"],
                         item["priority"],
                         item["parent_roadmap_item_id"],
                         item["source_bug_id"],

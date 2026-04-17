@@ -36,7 +36,10 @@ def validate_workflow_spec(spec, *, pg_conn) -> dict[str, Any]:
     """Validate a loaded workflow spec against live Postgres authority."""
     from contracts.domain import validate_workflow_request
     from registry.agent_config import AgentRegistry
-    from registry.native_runtime_profile_sync import default_native_runtime_profile_ref
+    from registry.native_runtime_profile_sync import (
+        NativeRuntimeProfileSyncError,
+        default_native_runtime_profile_ref,
+    )
     from runtime.workflow_graph_compiler import (
         GraphWorkflowCompileError,
         compile_graph_workflow_request,
@@ -46,7 +49,7 @@ def validate_workflow_spec(spec, *, pg_conn) -> dict[str, Any]:
     summary = spec.summary()
     if spec_uses_graph_runtime(getattr(spec, "_raw", {})):
         try:
-            request = compile_graph_workflow_request(spec._raw)
+            request = compile_graph_workflow_request(spec._raw, conn=pg_conn)
         except GraphWorkflowCompileError as exc:
             return {
                 "valid": False,
@@ -76,7 +79,7 @@ def validate_workflow_spec(spec, *, pg_conn) -> dict[str, Any]:
     except Exception as exc:
         return _authority_error_result(spec, f"{type(exc).__name__}: {exc}")
 
-    runtime_profile_ref = getattr(spec, "runtime_profile_ref", None) or default_native_runtime_profile_ref()
+    runtime_profile_ref = getattr(spec, "runtime_profile_ref", None)
     router = None
     unresolved = False
     agent_resolution: dict[str, str] = {}
@@ -104,6 +107,11 @@ def validate_workflow_spec(spec, *, pg_conn) -> dict[str, Any]:
                     from runtime.task_type_router import TaskTypeRouter
 
                     router = TaskTypeRouter(pg_conn)
+                if not runtime_profile_ref:
+                    try:
+                        runtime_profile_ref = default_native_runtime_profile_ref(pg_conn)
+                    except (AttributeError, NativeRuntimeProfileSyncError):
+                        runtime_profile_ref = None
                 chain = router.resolve_failover_chain(
                     requested_slug,
                     runtime_profile_ref=runtime_profile_ref,

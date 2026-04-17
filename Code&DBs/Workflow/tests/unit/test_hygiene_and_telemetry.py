@@ -78,11 +78,11 @@ def _insert_edge(engine: MemoryEngine, src: str, tgt: str, weight: float = 1.0) 
     conn = engine._connect()
     conn.execute(
         "INSERT INTO memory_edges "
-        "(source_id, target_id, relation_type, weight, metadata, created_at) "
-        "VALUES ($1, $2, $3, $4, $5, $6) "
+        "(source_id, target_id, relation_type, weight, metadata, created_at, authority_class, provenance_kind) "
+        "VALUES ($1, $2, $3, $4, $5, $6, $7, $8) "
         "ON CONFLICT (source_id, target_id, relation_type) DO UPDATE SET "
-        "weight=$4, metadata=$5, created_at=$6",
-        src, tgt, "related_to", weight, "{}", datetime.now(timezone.utc),
+        "weight=$4, metadata=$5, created_at=$6, authority_class=$7, provenance_kind=$8",
+        src, tgt, "related_to", weight, "{}", datetime.now(timezone.utc), "canonical", "legacy_unspecified",
     )
 
 

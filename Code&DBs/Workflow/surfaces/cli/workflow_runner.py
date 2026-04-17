@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 import uuid
 from dataclasses import dataclass
@@ -200,6 +201,9 @@ class WorkflowRunner:
         self._workflow_id = spec.workflow_id if spec.workflow_id.startswith("workflow.") else f"workflow.{spec.workflow_id}"
         self._request_id = f"req_{uuid.uuid4().hex[:12]}"
 
+        if dry_run:
+            return self._run_dry_run_workflow(spec)
+
         job_results: list[JobExecution] = []
         receipts_written: list[str] = []
         completed: dict[str, JobExecution] = {}
@@ -350,6 +354,54 @@ class WorkflowRunner:
             receipts_written=tuple(receipts_written),
         )
 
+        self._emit_batch_summary_notification(result)
+        return result
+
+    def _run_dry_run_workflow(self, spec: WorkflowSpec) -> RunResult:
+        from runtime.workflow.dry_run import dry_run_workflow
+
+        dry_run_result = dry_run_workflow(spec)
+        job_results = tuple(
+            JobExecution(
+                job_label=job_result.job_label,
+                agent_slug=job_result.agent_slug,
+                status=job_result.status,
+                exit_code=job_result.exit_code,
+                stdout=(
+                    f"[dry-run] Would execute workflow job '{job_result.job_label}'"
+                    if job_result.status == "succeeded"
+                    else ""
+                ),
+                stderr=(
+                    "Blocked by dry-run governance or dependency simulation."
+                    if job_result.status == "blocked"
+                    else ""
+                ),
+                duration_seconds=job_result.duration_seconds,
+                verify_passed=job_result.verify_passed,
+                retry_count=job_result.retry_count,
+                telemetry=None,
+            )
+            for job_result in dry_run_result.job_results
+        )
+        result = RunResult(
+            spec_name=dry_run_result.spec_name,
+            total_jobs=dry_run_result.total_jobs,
+            succeeded=dry_run_result.succeeded,
+            failed=dry_run_result.failed,
+            skipped=dry_run_result.skipped,
+            blocked=dry_run_result.blocked,
+            job_results=job_results,
+            duration_seconds=dry_run_result.duration_seconds,
+            receipts_written=dry_run_result.receipts_written,
+        )
+        self._emit_batch_summary_notification(result)
+        return result
+
+    def _emit_batch_summary_notification(self, result: RunResult) -> None:
+        failed = result.failed
+        blocked = result.blocked
+
         try:
             dispatch_notification_payload(
                 {
@@ -362,21 +414,19 @@ class WorkflowRunner:
                     "reason_code": "workflow_runner.batch_complete",
                     "run_id": self._run_id,
                     "workflow_id": self._workflow_id,
-                    "spec_name": spec.name,
-                    "total_jobs": len(spec.jobs),
-                    "succeeded": succeeded,
+                    "spec_name": result.spec_name,
+                    "total_jobs": result.total_jobs,
+                    "succeeded": result.succeeded,
                     "failed": failed,
-                    "skipped": skipped,
+                    "skipped": result.skipped,
                     "blocked": blocked,
-                    "duration_seconds": duration_seconds,
-                    "latency_ms": int(duration_seconds * 1000),
-                    "receipt_count": len(receipts_written),
+                    "duration_seconds": result.duration_seconds,
+                    "latency_ms": int(result.duration_seconds * 1000),
+                    "receipt_count": len(result.receipts_written),
                 }
             )
         except Exception:
             pass
-
-        return result
 
     # ------------------------------------------------------------------
     # Job execution
@@ -586,7 +636,7 @@ class WorkflowRunner:
 
         # Look up protocol family from provider profile
         try:
-            from adapters.provider_registry import get_profile
+            from registry.provider_execution_registry import get_profile
             profile = get_profile(provider)
             protocol = profile.api_protocol_family if profile else None
         except Exception:

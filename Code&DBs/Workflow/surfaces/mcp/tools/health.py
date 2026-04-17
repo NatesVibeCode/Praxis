@@ -7,7 +7,7 @@ from runtime.engineering_observability import build_trend_observability
 from runtime.dependency_contract import dependency_truth_report
 from runtime.context_cache import get_context_cache
 from surfaces.api.operator_read import (
-    build_provider_registry_summary,
+    build_transport_support_summary,
     query_transport_support,
 )
 
@@ -31,8 +31,8 @@ def tool_praxis_health(params: dict, _progress_emitter=None) -> dict:
         health_mod=hs_mod,
         pg=_subs.get_pg_conn(),
     )
-    provider_registry = build_provider_registry_summary(transport_support)
-    for provider_slug, adapter_type in provider_registry["probe_targets"]:
+    transport_support_summary = build_transport_support_summary(transport_support)
+    for provider_slug, adapter_type in transport_support_summary["probe_targets"]:
         probes.append(hs_mod.ProviderTransportProbe(provider_slug, adapter_type))
 
     if _progress_emitter:
@@ -125,12 +125,12 @@ def tool_praxis_health(params: dict, _progress_emitter=None) -> dict:
             "reasons": list(lane.reasons),
             "degraded_cause": lane.degraded_cause,
         },
-        "provider_registry": {
-            "default_provider_slug": provider_registry["default_provider_slug"],
-            "default_adapter_type": provider_registry["default_adapter_type"],
-            "registered_providers": list(provider_registry["registered_providers"]),
-            "providers": list(provider_registry["providers"]),
-            "support_basis": provider_registry["support_basis"],
+        "transport_support_summary": {
+            "default_provider_slug": transport_support_summary["default_provider_slug"],
+            "default_adapter_type": transport_support_summary["default_adapter_type"],
+            "registered_providers": list(transport_support_summary["registered_providers"]),
+            "providers": list(transport_support_summary["providers"]),
+            "support_basis": transport_support_summary["support_basis"],
         },
         "dependency_truth": dependency_truth,
         "context_cache": cache_stats,
@@ -190,8 +190,8 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "USE WHEN: starting a session, things seem broken, or you want to verify the platform "
                 "is ready before dispatching work. No parameters needed.\n\n"
                 "EXAMPLE: praxis_health()\n\n"
-                "DO NOT USE: for workflow pass/fail rates (use praxis_status), or for operator-level "
-                "detail (use praxis_operator_view)."
+                "DO NOT USE: for workflow pass/fail rates (use praxis_status_snapshot), or for operator-level "
+                "detail (use explicit tools like praxis_run_status or praxis_graph_projection)."
             ),
             "inputSchema": {
                 "type": "object",

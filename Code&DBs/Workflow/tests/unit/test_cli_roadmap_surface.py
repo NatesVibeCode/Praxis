@@ -68,6 +68,8 @@ def test_roadmap_write_commit_routes_to_command_tool(monkeypatch: pytest.MonkeyP
                 "roadmap_item.phase_program.build_closure",
                 "--depends-on",
                 "roadmap_item.phase_program.build_closure.phase_001",
+                "--lifecycle",
+                "claimed",
                 "--phase-ready",
             ],
             stdout=stdout,
@@ -82,6 +84,7 @@ def test_roadmap_write_commit_routes_to_command_tool(monkeypatch: pytest.MonkeyP
         "intent_brief": "Promote closure work with explicit proof gates",
         "parent_roadmap_item_id": "roadmap_item.phase_program.build_closure",
         "depends_on": ["roadmap_item.phase_program.build_closure.phase_001"],
+        "lifecycle": "claimed",
         "phase_ready": True,
     }
     payload = json.loads(stdout.getvalue())

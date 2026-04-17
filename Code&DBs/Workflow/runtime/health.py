@@ -155,7 +155,7 @@ def _aggregate_platform(checks: list[PreflightCheck]) -> HealthStatus:
 
 def _provider_api_key_present(provider_slug: str) -> bool:
     from adapters.keychain import resolve_secret
-    from adapters.provider_registry import resolve_api_key_env_vars
+    from registry.provider_execution_registry import resolve_api_key_env_vars
 
     return any(
         resolve_secret(name, env=dict(os.environ))
@@ -174,7 +174,7 @@ def _sync_lane_admission(
     when a later probe succeeds."""
     try:
         import asyncpg
-        from adapters.provider_registry import reload_from_db
+        from registry.provider_execution_registry import reload_from_db
 
         db_url = _resolve_database_url(None)
         if not db_url:
@@ -374,7 +374,7 @@ class ProviderTransportProbe(HealthProbe):
         started_at = _utcnow()
         started_monotonic = time.monotonic()
         try:
-            from adapters.provider_registry import (
+            from registry.provider_execution_registry import (
                 resolve_adapter_economics,
                 resolve_adapter_contract,
                 resolve_api_endpoint,
@@ -382,16 +382,29 @@ class ProviderTransportProbe(HealthProbe):
                 resolve_lane_policy,
                 supports_adapter,
             )
+            from runtime.workflow._adapter_registry import runtime_supports_workflow_adapter_type
 
             lane_policy = resolve_lane_policy(self._provider_slug, self._adapter_type)
             contract = resolve_adapter_contract(self._provider_slug, self._adapter_type)
             supported = supports_adapter(self._provider_slug, self._adapter_type)
+            runtime_adapter_supported = runtime_supports_workflow_adapter_type(self._adapter_type)
             details: dict[str, Any] = {
                 "provider_slug": self._provider_slug,
                 "adapter_type": self._adapter_type,
                 "supported": supported,
+                "runtime_adapter_supported": runtime_adapter_supported,
                 "lane_policy": lane_policy or {},
             }
+            if not runtime_adapter_supported:
+                return _build_check(
+                    name=self.name,
+                    passed=False,
+                    message=f"workflow runtime does not register adapter_type={self._adapter_type}",
+                    started_at=started_at,
+                    started_monotonic=started_monotonic,
+                    status="failed",
+                    details=details,
+                )
             if supported:
                 economics = resolve_adapter_economics(self._provider_slug, self._adapter_type)
                 details.update({

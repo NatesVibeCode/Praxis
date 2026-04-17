@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 from typing import Any
+from typing import TYPE_CHECKING
 
 from contracts.domain import (
     MINIMAL_WORKFLOW_NODE_TYPE,
@@ -22,7 +23,11 @@ from contracts.domain import (
     WorkflowNodeContract,
     WorkflowRequest,
 )
+from registry.native_runtime_profile_sync import NativeRuntimeProfileSyncError
 from runtime.native_authority import default_native_authority_refs
+
+if TYPE_CHECKING:
+    from storage.postgres.connection import SyncPostgresConnection
 
 _GRAPH_SUPPORTED_ADAPTER_TYPES = frozenset({
     "llm_task",
@@ -41,14 +46,30 @@ _GRAPH_RUNTIME_TRIGGER_ADAPTER_TYPES = _GRAPH_SUPPORTED_ADAPTER_TYPES - frozense
     "llm_task",
 })
 _STATIC_BRANCHING_KINDS = frozenset({"if", "switch"})
+_COMPILE_LOCAL_WORKSPACE_REF = "workspace.compile.unbound"
+_COMPILE_LOCAL_RUNTIME_PROFILE_REF = "runtime_profile.compile.unbound"
 
 
-def _default_workspace_ref() -> str:
-    return default_native_authority_refs()[0]
+def _default_workspace_ref(
+    conn: "SyncPostgresConnection | None" = None,
+) -> str:
+    if conn is not None:
+        return default_native_authority_refs(conn)[0]
+    try:
+        return default_native_authority_refs()[0]
+    except (NativeRuntimeProfileSyncError, RuntimeError):
+        return _COMPILE_LOCAL_WORKSPACE_REF
 
 
-def _default_runtime_profile_ref() -> str:
-    return default_native_authority_refs()[1]
+def _default_runtime_profile_ref(
+    conn: "SyncPostgresConnection | None" = None,
+) -> str:
+    if conn is not None:
+        return default_native_authority_refs(conn)[1]
+    try:
+        return default_native_authority_refs()[1]
+    except (NativeRuntimeProfileSyncError, RuntimeError):
+        return _COMPILE_LOCAL_RUNTIME_PROFILE_REF
 
 
 class GraphWorkflowCompileError(ValueError):
@@ -717,6 +738,7 @@ def compile_graph_workflow_request(
     spec_dict: Mapping[str, Any],
     *,
     run_id: str | None = None,
+    conn: "SyncPostgresConnection | None" = None,
 ) -> WorkflowRequest:
     if not isinstance(spec_dict, Mapping):
         raise GraphWorkflowCompileError(
@@ -729,9 +751,9 @@ def compile_graph_workflow_request(
             "workflow.graph_invalid",
             "graph-capable workflow spec requires a non-empty jobs array",
         )
-    workspace_ref = _as_text(spec_dict.get("workspace_ref")) or _default_workspace_ref()
+    workspace_ref = _as_text(spec_dict.get("workspace_ref")) or _default_workspace_ref(conn)
     runtime_profile_ref = (
-        _as_text(spec_dict.get("runtime_profile_ref")) or _default_runtime_profile_ref()
+        _as_text(spec_dict.get("runtime_profile_ref")) or _default_runtime_profile_ref(conn)
     )
     state = _CompileState(
         workspace_ref=workspace_ref,

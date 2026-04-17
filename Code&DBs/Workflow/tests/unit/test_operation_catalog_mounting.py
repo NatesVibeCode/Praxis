@@ -1,5 +1,6 @@
 from __future__ import annotations
 from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
@@ -9,6 +10,7 @@ from fastapi.routing import APIRoute
 import pytest
 
 import surfaces.api.rest as rest
+from surfaces.api.handlers import workflow_query
 from surfaces.api.handlers import workflow_query_routes
 from surfaces.api.handlers import workflow_run
 
@@ -81,6 +83,41 @@ def test_mount_capabilities_uses_operation_catalog_when_available(monkeypatch) -
     assert mounted[0].openapi_extra["x-praxis-binding-source"] == "operation_catalog"
     assert mounted[0].name == "workflow_build.mutate"
     assert target_app.state.capabilities_mounted is True
+
+
+def test_workflow_query_routes_do_not_import_dead_trampoline_modules() -> None:
+    source = Path(workflow_query_routes.__file__).read_text(encoding="utf-8")
+
+    for retired_module in (
+        "_query_catalog",
+        "_query_dashboard",
+        "_query_files",
+        "_query_objects",
+        "_query_workflows",
+    ):
+        assert retired_module not in source
+
+
+def test_workflow_query_routes_bind_directly_to_authoritative_handlers() -> None:
+    matched_catalog = [
+        handler
+        for matcher, handler in workflow_query_routes.QUERY_GET_ROUTES
+        if matcher("/api/catalog")
+    ]
+    matched_workflows = [
+        handler
+        for matcher, handler in workflow_query_routes.QUERY_GET_ROUTES
+        if matcher("/api/workflows")
+    ]
+    matched_files = [
+        handler
+        for matcher, handler in workflow_query_routes.QUERY_GET_ROUTES
+        if matcher("/api/files")
+    ]
+
+    assert workflow_query._handle_catalog_get in matched_catalog
+    assert workflow_query._handle_workflows_get in matched_workflows
+    assert workflow_query._handle_files_get in matched_files
 
 
 def test_mount_capabilities_raises_when_catalog_load_fails(monkeypatch) -> None:

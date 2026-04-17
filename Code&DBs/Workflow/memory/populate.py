@@ -111,6 +111,13 @@ def populate_from_codebase(
                                     "target_id": module_ids[base],
                                     "relation_type": "depends_on",
                                     "weight": 0.8,
+                                    "authority_class": "canonical",
+                                    "provenance_kind": "import_graph_projection",
+                                    "provenance_ref": str(py_file),
+                                    "metadata": {
+                                        "edge_kind": "ast_import",
+                                        "source_file": str(py_file),
+                                    },
                                 }],
                             }),
                             source=str(py_file),

@@ -20,6 +20,7 @@ class RoadmapWriteCommand(BaseModel):
     decision_ref: str | None = None
     item_kind: str | None = None
     status: str | None = None
+    lifecycle: str | None = None
     tier: str | None = None
     phase_ready: bool | None = None
     approval_tag: str | None = None
@@ -148,6 +149,7 @@ def handle_operator_roadmap_write(
         decision_ref=command.decision_ref,
         item_kind=command.item_kind,
         status=command.status,
+        lifecycle=command.lifecycle,
         tier=command.tier,
         phase_ready=command.phase_ready,
         approval_tag=command.approval_tag,

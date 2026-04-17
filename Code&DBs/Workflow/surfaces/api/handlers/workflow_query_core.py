@@ -33,6 +33,36 @@ _ISSUE_BACKLOG_KEYWORDS = frozenset(
         "intake issues",
     }
 )
+_OPERATOR_STATUS_QUERIES = frozenset({"operator status"})
+_OPERATOR_GRAPH_QUERIES = frozenset({"operator graph"})
+_SEMANTIC_ASSERTION_QUERIES = frozenset({"semantic assertions", "semantic assertion"})
+_SCOREBOARD_QUERIES = frozenset({"scoreboard", "cutover scoreboard"})
+_CARRY_FORWARD_QUERIES = frozenset({"carry forward", "carry-forward"})
+_STALENESS_QUERIES = frozenset({"staleness"})
+_DATA_DICTIONARY_QUERIES = frozenset({"data dictionary", "list tables"})
+_CALIBRATION_QUERIES = frozenset({"calibration"})
+_ROUTE_STATUS_QUERIES = frozenset({"route status"})
+_DYNAMIC_TIMEOUT_QUERIES = frozenset({"dynamic timeout"})
+_IMPORT_PATH_PREFIXES = ("import path for ",)
+_TEST_COMMAND_PREFIXES = ("test command for ",)
+_DATA_DICTIONARY_PREFIXES = ("schema for ",)
+_SHOW_QUERY_PREFIXES = ("show me ", "show ")
+_OPERATOR_GRAPH_ALIAS_QUERIES = frozenset({"semantic graph", "cross-domain graph"})
+_SEMANTIC_ASSERTION_ALIAS_QUERIES = frozenset({"semantic links", "operator semantics"})
+_STALENESS_ALIAS_QUERIES = frozenset({"what is stale", "what is stale right now"})
+_IMPORT_PATH_ALIAS_PREFIXES = (
+    "how to import ",
+    "where is ",
+    "defined in ",
+    "from import ",
+    "import for ",
+    "import ",
+)
+_TEST_COMMAND_ALIAS_PREFIXES = (
+    "how to test ",
+    "pytest for ",
+    "verify command for ",
+)
 
 
 def _build_workflow_bridge(subs: Any):
@@ -105,8 +135,148 @@ def _annotate_bug_dicts_with_replay_state(
 
 
 def _has_issue_backlog_intent(question: str) -> bool:
+    return _normalized_query(question) in _ISSUE_BACKLOG_KEYWORDS
+
+
+def _normalized_query(question: str) -> str:
     normalized = " ".join(str(question or "").split()).lower()
-    return normalized in _ISSUE_BACKLOG_KEYWORDS
+    return normalized.rstrip("?.!")
+
+
+def _query_is(question: str, phrases: frozenset[str]) -> bool:
+    return _normalized_query(question) in phrases
+
+
+def _query_starts_with(question: str, prefixes: tuple[str, ...]) -> bool:
+    normalized = _normalized_query(question)
+    return any(normalized.startswith(prefix) for prefix in prefixes)
+
+
+def _query_tail_after_prefix(
+    question: str,
+    prefixes: tuple[str, ...],
+    *,
+    strip_leading_article: bool = False,
+) -> str | None:
+    normalized = _normalized_query(question)
+    for prefix in prefixes:
+        if not normalized.startswith(prefix):
+            continue
+        tail = normalized[len(prefix):].strip()
+        if strip_leading_article and tail.startswith("the "):
+            tail = tail[4:].strip()
+        return tail
+    return None
+
+
+def _rewrite_canonical_prefixed_query(
+    question: str,
+    *,
+    alias_prefixes: tuple[str, ...],
+    canonical_prefix: str,
+) -> str | None:
+    tail = _query_tail_after_prefix(question, alias_prefixes)
+    if not tail:
+        return None
+    return f"{canonical_prefix}{tail}"
+
+
+def _unsupported_query_alias(
+    *,
+    routed_to: str,
+    reason_code: str,
+    message: str,
+    canonical_query: str | None = None,
+    canonical_prefix: str | None = None,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    response = {
+        "routed_to": routed_to,
+        "status": "unsupported_query_alias",
+        "reason_code": reason_code,
+        "message": message,
+    }
+    if canonical_query is not None:
+        response["canonical_query"] = canonical_query
+    if canonical_prefix is not None:
+        response["canonical_prefix"] = canonical_prefix
+    if payload:
+        response.update(payload)
+    return response
+
+
+def _deprecated_specialized_query_alias(question: str) -> dict[str, Any] | None:
+    shown_query = _query_tail_after_prefix(
+        question,
+        _SHOW_QUERY_PREFIXES,
+        strip_leading_article=True,
+    )
+    if shown_query in _OPERATOR_GRAPH_QUERIES:
+        return _unsupported_query_alias(
+            routed_to="operator_graph",
+            reason_code="workflow_query.operator_graph_alias_removed",
+            canonical_query="operator graph",
+            message="Use `operator graph` exactly.",
+        )
+    if shown_query in _SEMANTIC_ASSERTION_QUERIES:
+        return _unsupported_query_alias(
+            routed_to="semantic_assertions",
+            reason_code="workflow_query.semantic_assertions_alias_removed",
+            canonical_query="semantic assertions",
+            message="Use `semantic assertions` exactly.",
+        )
+
+    if _query_is(question, _OPERATOR_GRAPH_ALIAS_QUERIES):
+        return _unsupported_query_alias(
+            routed_to="operator_graph",
+            reason_code="workflow_query.operator_graph_alias_removed",
+            canonical_query="operator graph",
+            message="Use `operator graph` exactly.",
+        )
+    if _query_is(question, _SEMANTIC_ASSERTION_ALIAS_QUERIES):
+        return _unsupported_query_alias(
+            routed_to="semantic_assertions",
+            reason_code="workflow_query.semantic_assertions_alias_removed",
+            canonical_query="semantic assertions",
+            message="Use `semantic assertions` exactly.",
+        )
+    if _query_is(question, _STALENESS_ALIAS_QUERIES):
+        return _unsupported_query_alias(
+            routed_to="staleness_detector",
+            reason_code="workflow_query.staleness_alias_removed",
+            canonical_query="staleness",
+            message="Use `staleness` exactly.",
+        )
+
+    canonical_import_query = _rewrite_canonical_prefixed_query(
+        question,
+        alias_prefixes=_IMPORT_PATH_ALIAS_PREFIXES,
+        canonical_prefix=_IMPORT_PATH_PREFIXES[0],
+    )
+    if canonical_import_query is not None:
+        return _unsupported_query_alias(
+            routed_to="import_resolver",
+            reason_code="workflow_query.import_path_alias_removed",
+            canonical_query=canonical_import_query,
+            canonical_prefix=_IMPORT_PATH_PREFIXES[0],
+            message=f"Use `{canonical_import_query}`.",
+        )
+
+    canonical_test_query = _rewrite_canonical_prefixed_query(
+        question,
+        alias_prefixes=_TEST_COMMAND_ALIAS_PREFIXES,
+        canonical_prefix=_TEST_COMMAND_PREFIXES[0],
+    )
+    if canonical_test_query is not None:
+        return _unsupported_query_alias(
+            routed_to="test_commands",
+            reason_code="workflow_query.test_command_alias_removed",
+            canonical_query=canonical_test_query,
+            canonical_prefix=_TEST_COMMAND_PREFIXES[0],
+            message=f"Use `{canonical_test_query}`.",
+        )
+
+    return None
 
 
 def handle_query(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
@@ -666,21 +836,21 @@ def handle_specialized_query(subs: Any, body: dict[str, Any]) -> dict | None:
         return None
 
     if _matches(question, ["diagnose", "diagnosis", "troubleshoot", "why did", "run id"]):
-        return {
-            "routed_to": "workflow_diagnose",
-            "status": "unsupported_query_alias",
-            "reason_code": "workflow_query.diagnose_alias_removed",
-            "run_id": _extract_run_id(question),
-            "message": "Use praxis_diagnose or `praxis workflow diagnose <run_id>` directly.",
-        }
+        return _unsupported_query_alias(
+            routed_to="workflow_diagnose",
+            reason_code="workflow_query.diagnose_alias_removed",
+            canonical_query="praxis workflow diagnose <run_id>",
+            message="Use praxis_diagnose or `praxis workflow diagnose <run_id>` directly.",
+            payload={"run_id": _extract_run_id(question)},
+        )
 
-    if _matches(question, ["operator status", "operator view", "cockpit"]):
+    if _query_is(question, _OPERATOR_STATUS_QUERIES):
         return handle_operator_view(
             subs,
             {"view": "status", "run_id": _extract_run_id(question) or body.get("run_id")},
         )
 
-    if _matches(question, ["operator graph", "semantic graph", "cross-domain graph"]):
+    if _query_is(question, _OPERATOR_GRAPH_QUERIES):
         return handle_operator_view(
             subs,
             {
@@ -689,7 +859,7 @@ def handle_specialized_query(subs: Any, body: dict[str, Any]) -> dict | None:
             },
         )
 
-    if _matches(question, ["semantic assertions", "semantic assertion", "semantic links", "operator semantics"]):
+    if _query_is(question, _SEMANTIC_ASSERTION_QUERIES):
         return handle_operator_view(
             subs,
             {
@@ -707,13 +877,13 @@ def handle_specialized_query(subs: Any, body: dict[str, Any]) -> dict | None:
             },
         )
 
-    if _matches(question, ["scoreboard", "cutover"]):
+    if _query_is(question, _SCOREBOARD_QUERIES):
         return handle_operator_view(
             subs,
             {"view": "scoreboard", "run_id": _extract_run_id(question) or body.get("run_id")},
         )
 
-    if _matches(question, ["session", "carry forward", "carry-forward"]):
+    if _query_is(question, _CARRY_FORWARD_QUERIES):
         from runtime.session_carry import pack_to_summary_dict
 
         mgr = subs.get_session_carry_mgr()
@@ -734,22 +904,19 @@ def handle_specialized_query(subs: Any, body: dict[str, Any]) -> dict | None:
             return {"valid": False, "pack": pack_to_summary_dict(pack), "issues": issues}
         return {"error": f"Unknown session action: {action}"}
 
-    if _matches(question, ["stale", "staleness", "inactive", "dormant"]):
+    if _query_is(question, _STALENESS_QUERIES):
         return _run_staleness_query(subs, dict(body))
 
-    if _matches(question, ["import path", "how to import", "where is", "from import", "import for", "defined in"]):
+    if _query_starts_with(question, _IMPORT_PATH_PREFIXES):
         return _import_resolver(subs, question)
 
-    if _matches(question, ["test command", "how to test", "pytest for", "verify command"]):
+    if _query_starts_with(question, _TEST_COMMAND_PREFIXES):
         return _test_command_resolver(subs, question)
 
-    if _matches(
-        question,
-        ["data dictionary", "what tables", "list tables", "schema for", "table schema", "valid values", "what columns", "what fields", "allowed values"],
-    ):
+    if _query_is(question, _DATA_DICTIONARY_QUERIES) or _query_starts_with(question, _DATA_DICTIONARY_PREFIXES):
         return _data_dictionary(subs, question)
 
-    if _matches(question, ["calibrat", "tuned param", "auto-tune"]):
+    if _query_is(question, _CALIBRATION_QUERIES):
         try:
             from runtime.calibration import CalibrationEngine
 
@@ -771,7 +938,7 @@ def handle_specialized_query(subs: Any, body: dict[str, Any]) -> dict | None:
         except Exception as exc:
             return {"routed_to": "calibration", "error": str(exc)}
 
-    if _matches(question, ["route", "routing", "which model", "tier"]):
+    if _query_is(question, _ROUTE_STATUS_QUERIES):
         try:
             import runtime.auto_router as auto_router_mod
 
@@ -787,11 +954,15 @@ def handle_specialized_query(subs: Any, body: dict[str, Any]) -> dict | None:
         except Exception as exc:
             return {"routed_to": "auto_router", "error": str(exc)}
 
-    if _matches(question, ["timeout", "dynamic timeout", "complexity"]):
+    if _query_is(question, _DYNAMIC_TIMEOUT_QUERIES):
         return {
             "routed_to": "dynamic_timeout",
             "message": "Timeouts are auto-computed per complexity tier. Use praxis_query 'calibration' to see tuned parameters.",
         }
+
+    deprecated_alias = _deprecated_specialized_query_alias(question)
+    if deprecated_alias is not None:
+        return deprecated_alias
 
     return None
 

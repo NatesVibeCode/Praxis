@@ -26,7 +26,7 @@ from typing import Any
 
 from ..prompt_renderer import render_prompt, render_prompt_as_messages
 from ..output_writer import apply_structured_output
-from adapters.provider_registry import default_llm_adapter_type, default_provider_slug
+from registry.provider_execution_registry import default_llm_adapter_type, default_provider_slug
 from runtime.domain import RuntimeBoundaryError
 from adapters.task_profiles import resolve_profile
 from runtime.native_authority import default_native_authority_refs

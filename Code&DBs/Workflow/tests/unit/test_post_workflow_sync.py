@@ -20,7 +20,7 @@ class _FakeConn:
 
     def execute(self, query: str, *args):
         normalized = " ".join(query.split())
-        if "SELECT roadmap_item_id, status, completed_at FROM roadmap_items" in normalized:
+        if "SELECT roadmap_item_id, status, lifecycle, completed_at FROM roadmap_items" in normalized:
             ids = [str(item) for item in args[0]]
             return [
                 self.roadmap_rows[roadmap_item_id]
@@ -35,6 +35,7 @@ class _FakeConn:
                 if row is None:
                     continue
                 row["status"] = "done"
+                row["lifecycle"] = "completed"
                 row["completed_at"] = row.get("completed_at") or datetime(2026, 4, 8, 12, 5, tzinfo=timezone.utc)
                 updated.append({"roadmap_item_id": roadmap_item_id})
             return updated
@@ -146,11 +147,13 @@ def test_backfill_workflow_proof_reconciles_receipts_and_memory(monkeypatch) -> 
     conn.roadmap_rows["roadmap_item.alpha"] = {
         "roadmap_item_id": "roadmap_item.alpha",
         "status": "active",
+        "lifecycle": "planned",
         "completed_at": None,
     }
     conn.roadmap_rows["roadmap_item.beta"] = {
         "roadmap_item_id": "roadmap_item.beta",
         "status": "done",
+        "lifecycle": "completed",
         "completed_at": datetime(2026, 4, 8, 11, 0, tzinfo=timezone.utc),
     }
     seen: dict[str, object] = {}
@@ -218,11 +221,13 @@ def test_closeout_workflow_run_roadmap_items_marks_packet_items_done() -> None:
     conn.roadmap_rows["roadmap_item.alpha"] = {
         "roadmap_item_id": "roadmap_item.alpha",
         "status": "active",
+        "lifecycle": "planned",
         "completed_at": None,
     }
     conn.roadmap_rows["roadmap_item.beta"] = {
         "roadmap_item_id": "roadmap_item.beta",
         "status": "done",
+        "lifecycle": "completed",
         "completed_at": datetime(2026, 4, 8, 11, 0, tzinfo=timezone.utc),
     }
 
@@ -252,6 +257,7 @@ def test_closeout_workflow_run_roadmap_items_refuses_incomplete_lifecycle() -> N
     conn.roadmap_rows["roadmap_item.alpha"] = {
         "roadmap_item_id": "roadmap_item.alpha",
         "status": "active",
+        "lifecycle": "planned",
         "completed_at": None,
     }
 

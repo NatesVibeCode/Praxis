@@ -21,7 +21,7 @@ from typing import Any, TypeVar
 
 import asyncpg
 
-from adapters.provider_registry import (
+from registry.provider_execution_registry import (
     ProviderAdapterContract,
     resolve_adapter_contract,
 )
@@ -478,7 +478,7 @@ class DefaultPathPilotResolution:
         payload["kind"] = "default_path_first_party_runtime_contract"
         payload["authorities"] = {
             **dict(payload["authorities"]),
-            "provider_adapter": "adapters.provider_registry",
+            "provider_adapter": "registry.provider_execution_registry",
         }
         payload["route_runtime"] = self._route_runtime_payload()
         payload["provider_adapter_contract"] = contract.to_contract()

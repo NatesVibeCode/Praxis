@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from adapters.provider_registry import default_llm_adapter_type
+from registry.provider_execution_registry import default_llm_adapter_type
 from contracts.domain import (
     WorkflowEdgeContract,
     WorkflowNodeContract,

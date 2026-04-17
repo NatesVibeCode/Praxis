@@ -85,12 +85,16 @@ def _circuit_breakers():
         return None
 
 
-def _default_native_workspace_ref() -> str:
-    return default_native_authority_refs()[0]
+def _default_native_workspace_ref(
+    conn: "SyncPostgresConnection | None" = None,
+) -> str:
+    return default_native_authority_refs(conn)[0]
 
 
-def _default_native_runtime_profile_ref() -> str:
-    return default_native_authority_refs()[1]
+def _default_native_runtime_profile_ref(
+    conn: "SyncPostgresConnection | None" = None,
+) -> str:
+    return default_native_authority_refs(conn)[1]
 
 
 def _json_loads_maybe(value, default):

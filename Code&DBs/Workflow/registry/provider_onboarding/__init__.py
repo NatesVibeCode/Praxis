@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncpg  # noqa: F401  — tests monkeypatch provider_onboarding.asyncpg
 
-from adapters import provider_registry as provider_registry_mod  # noqa: F401
+from registry import provider_execution_registry as provider_registry_mod  # noqa: F401
 from registry.provider_onboarding_repository import (
     _apply_benchmark_plan,
     _record_provider_transport_probe_receipts,

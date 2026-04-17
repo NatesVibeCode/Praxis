@@ -40,7 +40,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError
 
-from adapters.provider_registry import default_llm_adapter_type, default_provider_slug
+from registry.provider_execution_registry import default_llm_adapter_type, default_provider_slug
 from adapters.provider_transport import BUILTIN_PROVIDER_PROFILES, builtin_default_provider_slug
 from contracts.domain import validate_workflow_request
 from runtime.native_authority import default_native_authority_refs

@@ -79,9 +79,13 @@ def test_workflow_migration_manifest_includes_provider_route_health_budget_migra
     assert "146_semantic_assertion_substrate.sql" in filenames
     assert "147_operation_catalog_semantic_assertions.sql" in filenames
     assert "148_drop_workflow_notifications.sql" in filenames
+    assert "149_native_self_hosted_smoke_definition.sql" in filenames
+    assert "150_native_self_hosted_smoke_execution_identity.sql" in filenames
     assert "151_operation_catalog_operator_finish.sql" in filenames
     assert "152_operation_catalog_observability_finish.sql" in filenames
-    assert filenames[-1] == "152_operation_catalog_observability_finish.sql"
+    assert "153_memory_edge_authority_contract.sql" in filenames
+    assert "154_roadmap_lifecycle_authority.sql" in filenames
+    assert filenames[-1] == "154_roadmap_lifecycle_authority.sql"
 
 
 def test_every_manifest_migration_has_expected_object_contract() -> None:
@@ -638,6 +642,8 @@ def test_notify_and_provider_transport_migration_expected_objects_are_registered
     notify_objects = workflow_migration_expected_objects("075_notify_system_events.sql")
     notify_names = {item.object_name for item in notify_objects}
     assert "notify_system_event_ready" in notify_names
+    notify_sql = workflow_migration_sql_text("075_notify_system_events.sql")
+    assert "to_regclass('public.system_events') IS NULL" in notify_sql
 
     profile_objects = workflow_migration_expected_objects("076_provider_cli_profile_transport_metadata.sql")
     profile_names = {item.object_name for item in profile_objects}
@@ -783,6 +789,11 @@ def test_adapter_config_authority_migration_creates_platform_config_defaults() -
     assert "'breaker.recovery_timeout_s'" in sql_text
     assert "'health.max_consecutive_failures'" in sql_text
     assert "'context.preview_chars'" in sql_text
+
+
+def test_sandbox_cleanup_reconciliation_migration_guards_optional_maintenance_policy_seed() -> None:
+    sql_text = workflow_migration_sql_text("113_sandbox_cleanup_reconciliation.sql")
+    assert "to_regclass('public.maintenance_policies') IS NULL" in sql_text
 
 
 def test_expected_index_names_match_postgres_identifier_limit() -> None:

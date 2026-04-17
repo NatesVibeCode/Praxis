@@ -303,3 +303,42 @@ def test_assess_work_items_projects_issue_lineage_and_inherited_activity() -> No
     assert waiting_issue.promotion_state == "auto_promote_to_bug"
     assert waiting_issue.binding_ids == ("binding.issue.direct",)
     assert waiting_issue.workflow_run_ids == ("run.issue.direct",)
+
+
+def test_assess_work_items_uses_roadmap_lifecycle_when_bindings_are_absent() -> None:
+    assessment_time = datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc)
+
+    assessments = assess_work_items(
+        bugs=[],
+        roadmap_items=[
+            {
+                "roadmap_item_id": "roadmap_item.idea",
+                "lifecycle": "idea",
+                "registry_paths": [],
+                "updated_at": assessment_time - timedelta(days=2),
+                "completed_at": None,
+                "target_end_at": None,
+            },
+            {
+                "roadmap_item_id": "roadmap_item.claimed",
+                "lifecycle": "claimed",
+                "registry_paths": [],
+                "updated_at": assessment_time - timedelta(days=2),
+                "completed_at": None,
+                "target_end_at": None,
+            },
+        ],
+        bug_evidence_links={},
+        as_of=assessment_time,
+        repo_root=Path("/tmp"),
+    )
+
+    by_key = {
+        (record.item_kind, record.item_id): record
+        for record in assessments
+    }
+
+    assert by_key[("roadmap_item", "roadmap_item.idea")].activity_state == "backlog"
+    assert by_key[("roadmap_item", "roadmap_item.idea")].pipeline_state == "backlog"
+    assert by_key[("roadmap_item", "roadmap_item.claimed")].activity_state == "in_progress"
+    assert by_key[("roadmap_item", "roadmap_item.claimed")].pipeline_state == "in_progress"

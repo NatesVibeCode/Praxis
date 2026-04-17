@@ -66,6 +66,7 @@ def _ensure_workflow_authority(
     workflow_id = _workflow_id_for_spec(spec)
     request_envelope = _build_request_envelope(
         spec,
+        conn=conn,
         run_id=run_id,
         raw_snapshot=raw_snapshot,
         workflow_id=workflow_id,

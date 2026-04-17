@@ -1003,16 +1003,44 @@ def test_preview_frontdoor_delegates_to_run_with_preview_execution(
     captured: dict[str, object] = {}
     workflow_main_module = importlib.import_module("surfaces.cli.main")
 
-    def _fake_run(args: list[str], *, stdout) -> int:
-        captured["args"] = list(args)
-        return 0
+    def _fake_workflow_command_handler(command_name: str):
+        assert command_name == "_run_command"
 
-    monkeypatch.setattr(workflow_main_module, "_run_command", _fake_run)
+        def _fake_run(args: list[str], *, stdout) -> int:
+            captured["args"] = list(args)
+            return 0
+
+        return _fake_run
+
+    monkeypatch.setattr(
+        workflow_main_module,
+        "_workflow_command_handler",
+        _fake_workflow_command_handler,
+    )
 
     assert workflow_cli_main(["preview", "spec.queue.json"], stdout=StringIO()) == 0
     assert captured == {
         "args": ["spec.queue.json", "--preview-execution"],
     }
+
+
+def test_commands_root_does_not_import_workflow_command_table(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workflow_main_module = importlib.import_module("surfaces.cli.main")
+    original_import_module = workflow_main_module.importlib.import_module
+
+    def _guarded_import(name: str, package: str | None = None):
+        if name == ".commands.workflow" and package == "surfaces.cli":
+            raise AssertionError("commands root should not import workflow command handlers")
+        return original_import_module(name, package)
+
+    monkeypatch.setattr(workflow_main_module.importlib, "import_module", _guarded_import)
+
+    stdout = StringIO()
+    assert workflow_cli_main(["commands"], stdout=stdout) == 0
+    rendered = stdout.getvalue()
+    assert "workflow commands" in rendered
 
 
 def test_generate_frontdoor_uses_direct_compat_handler(monkeypatch: pytest.MonkeyPatch) -> None:

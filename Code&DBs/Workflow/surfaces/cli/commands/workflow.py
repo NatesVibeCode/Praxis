@@ -47,13 +47,13 @@ def _workflow_query_mod():
 
 
 def _prompt_provider_choices() -> tuple[str, ...]:
-    from adapters import provider_registry as provider_registry_mod
+    from registry import provider_execution_registry as provider_registry_mod
 
     return tuple(provider_registry_mod.registered_providers())
 
 
 def _default_prompt_provider_slug() -> str:
-    from adapters import provider_registry as provider_registry_mod
+    from registry import provider_execution_registry as provider_registry_mod
     from adapters.provider_transport import BUILTIN_PROVIDER_PROFILES, builtin_default_provider_slug
 
     try:

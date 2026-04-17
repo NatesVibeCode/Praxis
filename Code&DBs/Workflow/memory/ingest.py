@@ -17,7 +17,15 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import List, Tuple
 
-from memory.types import Edge, Entity, EntityType, RelationType
+from memory.types import (
+    Edge,
+    EdgeAuthorityClass,
+    EdgeProvenanceKind,
+    Entity,
+    EntityType,
+    RelationType,
+    enrichment_edge,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -256,13 +264,14 @@ class IngestRouter:
             # Link parent if present
             parent = data.get("parent_id")
             if parent:
-                edges.append(Edge(
+                edges.append(enrichment_edge(
                     source_id=eid,
                     target_id=parent,
                     relation_type=RelationType.depends_on,
                     weight=1.0,
                     metadata={},
                     created_at=now,
+                    provenance_kind=EdgeProvenanceKind.structured_ingest,
                 ))
         else:
             # Plain-text fallback: create a single task entity
@@ -324,13 +333,14 @@ class IngestRouter:
                     source=source,
                     confidence=0.5,
                 ))
-                edges.append(Edge(
+                edges.append(enrichment_edge(
                     source_id=conv_id,
                     target_id=person_id,
                     relation_type=RelationType.related_to,
                     weight=0.5,
                     metadata={},
                     created_at=now,
+                    provenance_kind=EdgeProvenanceKind.conversation_extraction,
                 ))
 
         return entities, edges
@@ -396,6 +406,13 @@ class IngestRouter:
                     weight=float(raw.get("weight", 0.5)),
                     metadata=raw.get("metadata", {}),
                     created_at=now,
+                    authority_class=EdgeAuthorityClass(
+                        raw.get("authority_class", EdgeAuthorityClass.enrichment.value)
+                    ),
+                    provenance_kind=EdgeProvenanceKind(
+                        raw.get("provenance_kind", EdgeProvenanceKind.structured_ingest.value)
+                    ),
+                    provenance_ref=raw.get("provenance_ref"),
                 )
                 edges.append(edg)
             except Exception as exc:

@@ -1,4 +1,4 @@
 interface:
   display_name: "Conversation Closeout"
-  short_description: "Persist chat outcomes into DB authority"
-  default_prompt: "Use $praxis-conversation-closeout to turn this conversation into durable DB-backed records and save architecture decisions correctly."
+  short_description: "Persist decisions, bugs, roadmap work, and closeouts"
+  default_prompt: "Use $praxis-conversation-closeout to persist architecture decisions, unfinished roadmap work, new or fixed bugs, and closeout receipts into DB authority."

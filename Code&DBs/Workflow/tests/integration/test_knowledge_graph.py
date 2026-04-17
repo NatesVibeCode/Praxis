@@ -3,23 +3,125 @@
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 from pathlib import Path
 
 import pytest
 
+import memory.knowledge_graph as knowledge_graph_mod
 from memory.knowledge_graph import KnowledgeGraph
 from memory.populate import populate_from_codebase
+from memory.types import EdgeAuthorityClass, Entity, EntityType
 
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
+class _InMemoryKnowledgeGraphEngine:
+    """Small in-memory engine for facade-style KnowledgeGraph tests."""
+
+    def __init__(self, conn=None, *, db_path: str | None = None, embedder=None) -> None:
+        del conn, db_path, embedder
+        self._entities: dict[str, Entity] = {}
+        self._edges = []
+
+    def insert(self, entity: Entity) -> str:
+        self._entities[entity.id] = entity
+        return entity.id
+
+    def get(self, entity_id: str, entity_type: EntityType) -> Entity | None:
+        entity = self._entities.get(entity_id)
+        if entity is None or entity.entity_type is not entity_type:
+            return None
+        return entity
+
+    def list(
+        self,
+        entity_type: EntityType,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[Entity]:
+        entities = [
+            entity
+            for entity in self._entities.values()
+            if entity.entity_type is entity_type
+        ]
+        return entities[offset:offset + limit]
+
+    def search(
+        self,
+        query: str,
+        entity_type: EntityType | None = None,
+        limit: int = 20,
+    ) -> list[Entity]:
+        terms = [term for term in query.lower().split() if term]
+        results: list[Entity] = []
+        for entity in self._entities.values():
+            if entity_type is not None and entity.entity_type is not entity_type:
+                continue
+            haystack = f"{entity.name} {entity.content}".lower()
+            if not terms or any(term in haystack for term in terms):
+                results.append(entity)
+        return results[:limit]
+
+    def add_edge(self, edge) -> bool:
+        self._edges.append(edge)
+        return True
+
+    def get_edges(
+        self,
+        entity_id: str,
+        direction: str = "outgoing",
+        authority_classes=None,
+    ) -> list:
+        allowed = tuple(
+            authority_classes or (EdgeAuthorityClass.canonical,)
+        )
+        edges = [
+            edge
+            for edge in self._edges
+            if edge.authority_class in allowed
+        ]
+        if direction == "outgoing":
+            return [edge for edge in edges if edge.source_id == entity_id]
+        if direction == "incoming":
+            return [edge for edge in edges if edge.target_id == entity_id]
+        return [
+            edge
+            for edge in edges
+            if edge.source_id == entity_id or edge.target_id == entity_id
+        ]
+
+
 @pytest.fixture
-def kg():
-    """In-memory KnowledgeGraph for unit-style tests."""
+def kg(monkeypatch: pytest.MonkeyPatch):
+    """Unit-style KnowledgeGraph facade backed by an in-memory engine stub."""
+
+    monkeypatch.setattr(
+        knowledge_graph_mod,
+        "MemoryEngine",
+        _InMemoryKnowledgeGraphEngine,
+    )
+    monkeypatch.setattr(
+        knowledge_graph_mod.KnowledgeGraph,
+        "_all_edges",
+        lambda self, authority_classes=(EdgeAuthorityClass.canonical,): [
+            edge
+            for edge in self._engine._edges
+            if edge.authority_class in authority_classes
+        ],
+    )
+    monkeypatch.setattr(
+        knowledge_graph_mod.KnowledgeGraph,
+        "_count_edges",
+        lambda self: len(
+            [
+                edge
+                for edge in self._engine._edges
+                if edge.authority_class is EdgeAuthorityClass.canonical
+            ]
+        ),
+    )
     return KnowledgeGraph(db_path=":memory:")
 
 
@@ -52,6 +154,7 @@ def kg_with_data(kg):
                     "target_id": "mod:engine",
                     "relation_type": "depends_on",
                     "weight": 0.8,
+                    "authority_class": "canonical",
                 },
             ],
         }),
@@ -182,8 +285,20 @@ class TestBlastRadius:
                     {"id": "c", "entity_type": "module", "name": "c", "content": "node c"},
                 ],
                 "edges": [
-                    {"source_id": "a", "target_id": "b", "relation_type": "depends_on", "weight": 1.0},
-                    {"source_id": "b", "target_id": "c", "relation_type": "depends_on", "weight": 1.0},
+                    {
+                        "source_id": "a",
+                        "target_id": "b",
+                        "relation_type": "depends_on",
+                        "weight": 1.0,
+                        "authority_class": "canonical",
+                    },
+                    {
+                        "source_id": "b",
+                        "target_id": "c",
+                        "relation_type": "depends_on",
+                        "weight": 1.0,
+                        "authority_class": "canonical",
+                    },
                 ],
             }),
             source="test",
@@ -217,27 +332,20 @@ class TestStats:
 # ---------------------------------------------------------------------------
 
 class TestPopulateFromCodebase:
-    def test_populate_creates_entities(self):
+    def test_populate_creates_entities(self, kg):
         repo_root = str(Path(__file__).resolve().parents[4])
-        # Use a temp file DB so we don't pollute the repo
-        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
-            db_path = f.name
-        try:
-            kg = KnowledgeGraph(db_path=db_path)
-            result = populate_from_codebase(kg, repo_root)
+        result = populate_from_codebase(kg, repo_root)
 
-            assert result["entities_created"] > 0, "Should create entities from real files"
-            assert result["edges_created"] > 0, "Should create import edges"
+        assert result["entities_created"] > 0, "Should create entities from real files"
+        assert result["edges_created"] > 0, "Should create import edges"
 
-            stats = kg.stats()
-            assert stats["total_entities"] > 0
-            assert stats["entity_counts"]["module"] > 0
+        stats = kg.stats()
+        assert stats["total_entities"] > 0
+        assert stats["entity_counts"]["module"] > 0
 
-            # Verify a known module was ingested
-            search_results = kg.search("engine", entity_type="module")
-            assert len(search_results) > 0
+        # Verify a known module was ingested
+        search_results = kg.search("engine", entity_type="module")
+        assert len(search_results) > 0
 
-            # Verify documents from Build Plan
-            assert stats["entity_counts"]["document"] > 0
-        finally:
-            os.unlink(db_path)
+        # Verify documents from Build Plan
+        assert stats["entity_counts"]["document"] > 0

@@ -201,7 +201,7 @@ def augment_cli_command_for_workflow_mcp(
         return base_parts
     _tool_names, mcp_url = connection
     provider = str(provider_slug or "").strip().lower()
-    from adapters.provider_registry import resolve_mcp_args_template
+    from registry.provider_execution_registry import resolve_mcp_args_template
 
     template = resolve_mcp_args_template(provider)
     if not template:

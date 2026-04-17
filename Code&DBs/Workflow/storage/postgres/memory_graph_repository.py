@@ -10,7 +10,7 @@ from memory.types import Edge, Entity, EntityType, RelationType
 
 from memory.repository import MemoryEdgeRef
 
-from .validators import _encode_jsonb, _require_mapping, _require_text, _require_utc
+from .validators import _encode_jsonb, _optional_text, _require_mapping, _require_text, _require_utc
 
 
 def _normalize_entity_ids(entity_ids: Sequence[str]) -> tuple[str, ...]:
@@ -289,12 +289,24 @@ class PostgresMemoryGraphRepository:
                     relation_type,
                     weight,
                     metadata,
-                    created_at
+                    created_at,
+                    authority_class,
+                    provenance_kind,
+                    provenance_ref,
+                    edge_origin,
+                    active,
+                    last_validated_at
                 )
-                VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+                VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $8, true, now())
                 ON CONFLICT (source_id, target_id, relation_type) DO UPDATE SET
                     weight = EXCLUDED.weight,
-                    metadata = EXCLUDED.metadata
+                    metadata = EXCLUDED.metadata,
+                    authority_class = EXCLUDED.authority_class,
+                    provenance_kind = EXCLUDED.provenance_kind,
+                    provenance_ref = EXCLUDED.provenance_ref,
+                    edge_origin = EXCLUDED.edge_origin,
+                    active = true,
+                    last_validated_at = now()
                 """,
                 _require_text(edge.source_id, field_name="edge.source_id"),
                 _require_text(edge.target_id, field_name="edge.target_id"),
@@ -302,6 +314,9 @@ class PostgresMemoryGraphRepository:
                 edge.weight,
                 _encode_jsonb(edge.metadata, field_name="edge.metadata"),
                 _require_utc(edge.created_at, field_name="edge.created_at"),
+                edge.authority_class.value,
+                edge.provenance_kind.value,
+                _optional_text(edge.provenance_ref, field_name="edge.provenance_ref"),
             )
         except Exception:
             return False

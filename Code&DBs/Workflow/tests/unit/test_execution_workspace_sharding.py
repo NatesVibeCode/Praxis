@@ -4,8 +4,8 @@ import importlib
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
-import adapters.provider_registry as provider_registry_module
 import registry.agent_config as agent_config_module
+import registry.provider_execution_registry as provider_registry_module
 from runtime.workflow import _execution_core as _exec_mod
 
 

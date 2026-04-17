@@ -141,7 +141,7 @@ WHERE run_id = $1
 
 _ExecutionPacketsQuery = """
 SELECT COALESCE(
-    json_agg(payload ORDER BY created_at, execution_packet_id),
+    jsonb_agg(payload ORDER BY created_at, execution_packet_id),
     '[]'::jsonb
 ) AS packets
 FROM execution_packets
@@ -168,6 +168,15 @@ def _missing_packet_inspection_column_error(exc: Exception) -> bool:
     if "packet_inspection" not in message:
         return False
     return "does not exist" in message or "undefined column" in message
+
+
+def _packet_inspection_from_row_value(row: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    inspection = row.get("packet_inspection")
+    if not isinstance(inspection, Mapping):
+        return None
+    return dict(inspection)
 
 
 async def _fetch_run_row(
@@ -684,29 +693,37 @@ class NativeWorkflowFrontdoor:
                     "run_id is not present in the native control plane",
                     details={"run_id": run_id},
                 )
+            if "workflow_runs.packet_inspection_column_missing" in metadata.contract_drift_refs:
+                raise NativeFrontdoorError(
+                    "frontdoor.packet_inspection_unavailable",
+                    "workflow run packet inspection authority is unavailable",
+                    details={
+                        "stage": "schema",
+                        "run_id": run_id,
+                        "contract_drift_ref": "workflow_runs.packet_inspection_column_missing",
+                    },
+                )
             try:
                 packet_row = await conn.fetchrow(_ExecutionPacketsQuery, run_id)
-            except Exception:
-                packet_row = None
+            except Exception as exc:
+                raise NativeFrontdoorError(
+                    "frontdoor.packet_inspection_unavailable",
+                    "workflow run packet inspection query failed",
+                    details={
+                        "stage": "query",
+                        "run_id": run_id,
+                        "error_type": type(exc).__name__,
+                        "error_message": str(exc),
+                    },
+                ) from exc
             jobs = await _load_run_jobs_with_submission_summary(conn, run_id=run_id)
         finally:
             await conn.close()
 
-        packet_inspection = None
+        packet_inspection = _packet_inspection_from_row_value(row)
         packet_inspection_source = "missing"
-        try:
-            from runtime.execution_packet_authority import (
-                inspect_execution_packets,
-                packet_inspection_from_row,
-            )
-        except Exception:
-            inspect_execution_packets = None
-            packet_inspection_from_row = None
-
-        if packet_inspection_from_row is not None:
-            packet_inspection = packet_inspection_from_row(row)
-            if packet_inspection is not None:
-                packet_inspection_source = "materialized"
+        if packet_inspection is not None:
+            packet_inspection_source = "materialized"
         if packet_row is not None:
             packets = packet_row.get("packets")
             if isinstance(packets, str):
@@ -716,11 +733,23 @@ class NativeWorkflowFrontdoor:
                     packets = []
             if (
                 packet_inspection is None
-                and inspect_execution_packets is not None
                 and isinstance(packets, Sequence)
                 and not isinstance(packets, (str, bytes, bytearray))
                 and packets
             ):
+                try:
+                    from runtime.execution_packet_authority import inspect_execution_packets
+                except Exception as exc:
+                    raise NativeFrontdoorError(
+                        "frontdoor.packet_inspection_unavailable",
+                        "workflow run packet inspection helpers are unavailable",
+                        details={
+                            "stage": "import",
+                            "run_id": run_id,
+                            "error_type": type(exc).__name__,
+                            "error_message": str(exc),
+                        },
+                    ) from exc
                 try:
                     packet_inspection = inspect_execution_packets(
                         packets,
@@ -728,8 +757,17 @@ class NativeWorkflowFrontdoor:
                     )
                     if packet_inspection is not None:
                         packet_inspection_source = "derived"
-                except Exception:
-                    packet_inspection = None
+                except Exception as exc:
+                    raise NativeFrontdoorError(
+                        "frontdoor.packet_inspection_unavailable",
+                        "workflow run packet inspection derivation failed",
+                        details={
+                            "stage": "derive",
+                            "run_id": run_id,
+                            "error_type": type(exc).__name__,
+                            "error_message": str(exc),
+                        },
+                    ) from exc
 
         return (
             dict(row),

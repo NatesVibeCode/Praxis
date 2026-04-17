@@ -6,10 +6,23 @@ from memory.multimodal_ingest import (
     ingest_multimodal_to_knowledge_graph,
 )
 from typing import Any
-from surfaces._recall import search_recall_results
+from surfaces._recall import _readable_name, search_recall_results
 
 from ..subsystems import _subs
 from ..helpers import _serialize
+
+
+def _bool_param(value: object, *, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return default
 
 
 def tool_praxis_recall(params: dict) -> dict:
@@ -129,6 +142,7 @@ def tool_praxis_graph(params: dict) -> dict:
     """Get entity neighbors and blast radius."""
     entity_id = str(params.get("entity_id", "")).strip()
     depth = params.get("depth", 1)
+    include_enrichment = _bool_param(params.get("include_enrichment"), default=False)
 
     try:
         kg = _subs.get_knowledge_graph()
@@ -142,7 +156,7 @@ def tool_praxis_graph(params: dict) -> dict:
         elif _resolve_entity(kg, entity_id) is None:
             return {"entity_id": entity_id, "error": "entity_id was not found"}
 
-        blast = kg.blast_radius(entity_id)
+        blast = kg.blast_radius(entity_id, include_enrichment=include_enrichment)
         raw = _serialize(blast)
 
         # Resolve hex entity IDs to readable names
@@ -160,7 +174,11 @@ def tool_praxis_graph(params: dict) -> dict:
                         from memory.types import EntityType
                         ent = engine.get(eid, EntityType(etype))
                         if ent:
-                            id_to_name[eid] = _readable_name(ent)
+                            id_to_name[eid] = _readable_name(
+                                name=ent.name,
+                                source=ent.source,
+                                content=ent.content,
+                            )
                             break
                 except Exception:
                     pass
@@ -171,7 +189,18 @@ def tool_praxis_graph(params: dict) -> dict:
                 for eid, score in sorted(d.items(), key=lambda x: -x[1])
             ]
 
-        result: dict = {"entity_id": entity_id, "depth": depth}
+        result: dict = {
+            "entity_id": entity_id,
+            "depth": depth,
+            "authority": {
+                "default_edges": (
+                    "canonical_plus_enrichment"
+                    if include_enrichment
+                    else "canonical_only"
+                ),
+                "enrichment_included": include_enrichment,
+            },
+        }
         if resolution_note:
             result["note"] = resolution_note
         if isinstance(raw.get("direct"), dict) and raw["direct"]:

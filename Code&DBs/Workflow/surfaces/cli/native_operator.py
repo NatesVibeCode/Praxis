@@ -121,6 +121,7 @@ class RoadmapWriteCommand:
     registry_paths: tuple[str, ...]
     decision_ref: str | None
     item_kind: str | None
+    lifecycle: str | None
     tier: str | None
     phase_ready: bool | None
     approval_tag: str | None
@@ -309,6 +310,7 @@ def _parse_roadmap_write(args: list[str]) -> RoadmapWriteCommand:
     registry_paths: list[str] = []
     decision_ref: str | None = None
     item_kind: str | None = None
+    lifecycle: str | None = None
     tier: str | None = None
     phase_ready: bool | None = None
     approval_tag: str | None = None
@@ -359,6 +361,8 @@ def _parse_roadmap_write(args: list[str]) -> RoadmapWriteCommand:
             decision_ref = value
         elif flag == "--item-kind":
             item_kind = value
+        elif flag == "--lifecycle":
+            lifecycle = value
         elif flag == "--tier":
             tier = value
         elif flag == "--approval-tag":
@@ -378,6 +382,7 @@ def _parse_roadmap_write(args: list[str]) -> RoadmapWriteCommand:
             "[--depends-on <roadmap_item_id>]... [--source-bug <bug_id>] "
             "[--registry-path <repo_relative_path>]... "
             "[--decision-ref <ref>] [--item-kind <capability|initiative>] "
+            "[--lifecycle <idea|planned|claimed|completed>] "
             "[--tier <tier>] [--phase-ready|--not-phase-ready] "
             "[--approval-tag <tag>] [--reference-doc <path>] "
             "[--outcome-gate <text>] [--validate|--commit]"
@@ -395,6 +400,7 @@ def _parse_roadmap_write(args: list[str]) -> RoadmapWriteCommand:
         registry_paths=tuple(registry_paths),
         decision_ref=decision_ref,
         item_kind=item_kind,
+        lifecycle=lifecycle,
         tier=tier,
         phase_ready=phase_ready,
         approval_tag=approval_tag,
@@ -844,6 +850,7 @@ def main(
                     "registry_paths": command.registry_paths,
                     "decision_ref": command.decision_ref,
                     "item_kind": command.item_kind,
+                    "lifecycle": command.lifecycle,
                     "tier": command.tier,
                     "phase_ready": command.phase_ready,
                     "approval_tag": command.approval_tag,

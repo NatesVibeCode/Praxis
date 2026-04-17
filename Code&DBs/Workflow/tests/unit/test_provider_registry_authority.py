@@ -4,8 +4,11 @@ from types import SimpleNamespace
 
 import pytest
 
-import adapters.provider_registry as provider_registry_mod
 from adapters.provider_types import ProviderCLIProfile
+import registry.provider_execution_registry as provider_registry_mod
+import runtime.health as runtime_health
+from runtime.workflow import runtime_setup as workflow_runtime_setup
+from runtime.workflow import _admission as workflow_admission
 from surfaces.mcp.tools import health as health_tool
 from surfaces.api.handlers import workflow_admin
 
@@ -121,6 +124,67 @@ def test_default_provider_slug_raises_without_configured_priority_provider(monke
         execution_registry.default_provider_slug()
 
 
+def test_provider_transport_probe_fails_when_runtime_registry_lacks_adapter(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "runtime.workflow._adapter_registry.runtime_supports_workflow_adapter_type",
+        lambda _adapter_type: False,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "registry.provider_execution_registry.resolve_lane_policy",
+        lambda provider_slug, adapter_type: {"policy_reason": "supported"},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "registry.provider_execution_registry.resolve_adapter_contract",
+        lambda provider_slug, adapter_type: None,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "registry.provider_execution_registry.supports_adapter",
+        lambda provider_slug, adapter_type: True,
+        raising=False,
+    )
+
+    check = runtime_health.ProviderTransportProbe("openai", "llm_task").check()
+
+    assert check.passed is False
+    assert check.status == "failed"
+    assert check.message == "workflow runtime does not register adapter_type=llm_task"
+    assert check.details["runtime_adapter_supported"] is False
+
+
+def test_workflow_runtime_uses_one_adapter_registry_authority() -> None:
+    setup_registry = workflow_runtime_setup._build_adapter_registry(
+        SimpleNamespace(
+            adapter_type="cli_llm",
+            scope_write=["README.md"],
+            workdir="/tmp/workflow",
+            verify_refs=["verifier.job.python.pytest_file"],
+            packet_provenance=None,
+            definition_revision=None,
+            plan_revision=None,
+            allowed_tools=(),
+            capabilities=(),
+            label=None,
+            task_type="implement",
+        )
+    )
+    graph_registry = workflow_admission._graph_adapter_registry(
+        SimpleNamespace(
+            nodes=[
+                SimpleNamespace(adapter_type="context_compiler"),
+                SimpleNamespace(adapter_type="cli_llm"),
+                SimpleNamespace(adapter_type="output_parser"),
+                SimpleNamespace(adapter_type="file_writer"),
+                SimpleNamespace(adapter_type="verifier"),
+            ]
+        )
+    )
+
+    assert set(setup_registry._registry) == set(graph_registry._registry)
+
+
 def test_admin_health_uses_transport_support_frontdoor_for_provider_probes(monkeypatch) -> None:
     captured: dict[str, object] = {}
     provider_probe_calls: list[tuple[str, str]] = []
@@ -200,7 +264,7 @@ def test_admin_health_uses_transport_support_frontdoor_for_provider_probes(monke
         ("openai", "llm_task"),
         ("google", "cli_llm"),
     ]
-    assert result["provider_registry"] == {
+    assert result["transport_support_summary"] == {
         "default_provider_slug": "openai",
         "default_adapter_type": "cli_llm",
         "registered_providers": ["openai", "google"],
@@ -281,7 +345,7 @@ def test_mcp_health_uses_transport_support_frontdoor_for_provider_probes(monkeyp
         ("openai", "llm_task"),
         ("google", "cli_llm"),
     ]
-    assert result["provider_registry"] == {
+    assert result["transport_support_summary"] == {
         "default_provider_slug": "openai",
         "default_adapter_type": "cli_llm",
         "registered_providers": ["openai", "google"],

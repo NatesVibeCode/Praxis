@@ -128,6 +128,7 @@ def _derive_touch_keys(job: dict) -> list[dict[str, str]]:
 
 def _build_request_envelope(
     spec,
+    conn: "SyncPostgresConnection | None" = None,
     *,
     run_id: str,
     raw_snapshot: dict,
@@ -140,8 +141,8 @@ def _build_request_envelope(
     lineage_depth: int | None = None,
     route_plan_manifest: dict[str, object] | None = None,
 ) -> dict:
-    workspace_ref = _workspace_ref_from_spec(spec)
-    runtime_profile_ref = _runtime_profile_ref_from_spec(spec)
+    workspace_ref = _workspace_ref_from_spec(spec, conn=conn)
+    runtime_profile_ref = _runtime_profile_ref_from_spec(spec, conn=conn)
     normalized_parent_job_label = str(parent_job_label or "").strip() or None
     normalized_dispatch_reason = str(dispatch_reason or "").strip() or None
     if lineage_depth is None:
@@ -307,7 +308,11 @@ def _runtime_profile_ref_for_run(conn: SyncPostgresConnection, run_id: str) -> s
     return None
 
 
-def _runtime_profile_ref_from_spec(spec) -> str | None:
+def _runtime_profile_ref_from_spec(
+    spec,
+    *,
+    conn: "SyncPostgresConnection | None" = None,
+) -> str | None:
     raw_snapshot = getattr(spec, "_raw", {})
     if isinstance(raw_snapshot, dict):
         runtime_profile_ref = raw_snapshot.get("runtime_profile_ref")
@@ -316,10 +321,26 @@ def _runtime_profile_ref_from_spec(spec) -> str | None:
     runtime_profile_ref = getattr(spec, "runtime_profile_ref", None)
     if isinstance(runtime_profile_ref, str) and runtime_profile_ref.strip():
         return runtime_profile_ref.strip()
-    return _default_native_runtime_profile_ref()
+    if conn is None:
+        return _default_native_runtime_profile_ref()
+    from registry.native_runtime_profile_sync import NativeRuntimeProfileSyncError
+
+    try:
+        return _default_native_runtime_profile_ref(conn)
+    except NativeRuntimeProfileSyncError:
+        logger.debug(
+            "No default native runtime profile available on explicit submission authority; "
+            "leaving runtime_profile_ref unset",
+            exc_info=True,
+        )
+        return None
 
 
-def _workspace_ref_from_spec(spec) -> str | None:
+def _workspace_ref_from_spec(
+    spec,
+    *,
+    conn: "SyncPostgresConnection | None" = None,
+) -> str | None:
     raw_snapshot = getattr(spec, "_raw", {})
     if isinstance(raw_snapshot, dict):
         workspace_ref = raw_snapshot.get("workspace_ref")
@@ -328,7 +349,19 @@ def _workspace_ref_from_spec(spec) -> str | None:
     workspace_ref = getattr(spec, "workspace_ref", None)
     if isinstance(workspace_ref, str) and workspace_ref.strip():
         return workspace_ref.strip()
-    return _default_native_workspace_ref()
+    if conn is None:
+        return _default_native_workspace_ref()
+    from registry.native_runtime_profile_sync import NativeRuntimeProfileSyncError
+
+    try:
+        return _default_native_workspace_ref(conn)
+    except NativeRuntimeProfileSyncError:
+        logger.debug(
+            "No default native workspace available on explicit submission authority; "
+            "leaving workspace_ref unset",
+            exc_info=True,
+        )
+        return None
 
 
 def _runtime_profile_admitted_route_candidates(

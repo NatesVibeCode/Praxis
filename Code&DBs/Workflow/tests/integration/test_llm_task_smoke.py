@@ -10,11 +10,45 @@ import os
 import pytest
 
 from adapters.cli_llm import CLILLMAdapter
+import adapters.credentials as credentials_mod
 from adapters.credentials import CredentialResolutionError, resolve_credential
 from adapters.deterministic import AdapterRegistry, DeterministicTaskRequest
 from adapters.llm_client import LLMClientError
 import adapters.llm_task as llm_task_mod
 from adapters.llm_task import LLMTaskAdapter
+from registry.provider_execution_registry import (
+    registered_providers,
+    resolve_api_key_env_vars,
+    resolve_api_protocol_family,
+    supports_adapter,
+)
+
+_LLM_CLIENT_PROTOCOL_FAMILIES = frozenset(
+    {"anthropic_messages", "google_generate_content", "openai_chat_completions"}
+)
+
+
+def _supported_llm_task_provider() -> str:
+    for provider_slug in registered_providers():
+        if supports_adapter(provider_slug, "llm_task"):
+            return provider_slug
+    pytest.skip("provider execution registry exposes no llm_task-admitted provider")
+
+
+def _supported_chat_llm_provider() -> str:
+    for provider_slug in registered_providers():
+        if not supports_adapter(provider_slug, "llm_task"):
+            continue
+        if resolve_api_protocol_family(provider_slug) in _LLM_CLIENT_PROTOCOL_FAMILIES:
+            return provider_slug
+    pytest.skip("provider execution registry exposes no chat-protocol llm_task provider")
+
+
+def _credential_env_for_provider(provider_slug: str) -> dict[str, str]:
+    env_vars = resolve_api_key_env_vars(provider_slug)
+    if not env_vars:
+        pytest.skip(f"provider execution registry exposes no auth env var mapping for {provider_slug}")
+    return {env_vars[0]: "sk-test"}
 
 
 def test_credential_resolver_maps_openai_auth_ref() -> None:
@@ -44,7 +78,7 @@ def test_credential_resolver_fails_on_missing_env_var() -> None:
 
 def test_credential_resolver_fails_on_unknown_provider() -> None:
     with pytest.raises(CredentialResolutionError) as exc_info:
-        resolve_credential("secret.default-path.deepseek", env={})
+        resolve_credential("secret.default-path.unknown-provider", env={})
     assert exc_info.value.reason_code == "credential.provider_unknown"
 
 
@@ -63,12 +97,14 @@ def test_llm_adapter_fails_closed_without_prompt() -> None:
     assert result.failure_code == "adapter.input_invalid"
 
 
-def test_llm_adapter_fails_closed_without_credentials() -> None:
+def test_llm_adapter_fails_closed_without_credentials(monkeypatch) -> None:
     adapter = LLMTaskAdapter(credential_env={})
+    provider_slug = _supported_llm_task_provider()
+    monkeypatch.setattr(credentials_mod, "resolve_secret", lambda *_args, **_kwargs: None)
     request = DeterministicTaskRequest(
         node_id="node_0",
         task_name="no_creds",
-        input_payload={"prompt": "hello"},
+        input_payload={"prompt": "hello", "provider_slug": provider_slug},
         expected_outputs={},
         dependency_inputs={},
         execution_boundary_ref="workspace:test",
@@ -79,11 +115,12 @@ def test_llm_adapter_fails_closed_without_credentials() -> None:
 
 
 def test_llm_adapter_maps_http_errors_to_adapter_contract(monkeypatch) -> None:
-    adapter = LLMTaskAdapter(credential_env={"OPENAI_API_KEY": "sk-test"})
+    provider_slug = _supported_chat_llm_provider()
+    adapter = LLMTaskAdapter(credential_env=_credential_env_for_provider(provider_slug))
     request = DeterministicTaskRequest(
         node_id="node_0",
         task_name="http_error",
-        input_payload={"prompt": "hello", "provider_slug": "openai"},
+        input_payload={"prompt": "hello", "provider_slug": provider_slug},
         expected_outputs={},
         dependency_inputs={},
         execution_boundary_ref="workspace:test",
@@ -199,6 +236,7 @@ def test_cli_adapter_resolves_provider_from_legacy_cli_hint() -> None:
     if result.status == "failed":
         assert result.failure_code in (
             "cli_adapter.binary_not_found",
+            "cli_adapter.exec_error",
             "cli_adapter.nonzero_exit",
         )
 

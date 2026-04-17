@@ -240,7 +240,7 @@ def load_transport_eligibility_authority(
     normalized_jobs = _normalize_jobs(jobs)
 
     if provider_registry_mod is None:
-        from adapters import provider_registry as provider_registry_mod
+        from registry import provider_execution_registry as provider_registry_mod
 
     if task_type_router_factory is None:
         from runtime.task_type_router import TaskTypeRouter

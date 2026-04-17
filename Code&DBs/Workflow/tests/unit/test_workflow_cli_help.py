@@ -10,80 +10,86 @@ from surfaces.cli.commands import query as workflow_query
 workflow_main = importlib.import_module("surfaces.cli.main")
 
 
-def test_commands_prints_command_index(capsys) -> None:
-    rc = workflow_cli.main(["commands"])
-
-    assert rc == 0
-    rendered = capsys.readouterr().out
-    assert "usage: workflow_cli.py <command> [args]" in rendered
-    assert "commands / help" in rendered
-    assert "workflow_cli.py diagnose <run_id>" in rendered
-    assert "workflow_cli.py routes" in rendered
-    assert "workflow_cli.py tools" in rendered
-    assert "workflow_cli.py run <spec.json>" in rendered
+def _run_legacy(argv: list[str], capsys) -> tuple[int, str]:
+    rc = workflow_cli.main(argv)
+    return rc, capsys.readouterr().out
 
 
-def test_help_topic_prints_command_usage(capsys) -> None:
-    rc = workflow_cli.main(["help", "run"])
-
-    assert rc == 0
-    rendered = capsys.readouterr().out
-    assert "usage: workflow_cli.py run <spec.json>" in rendered
-    assert "Tip: `workflow_cli.py commands` shows the full command index." in rendered
+def _run_modern(argv: list[str]) -> tuple[int, str]:
+    stdout = StringIO()
+    rc = workflow_main.main(argv, stdout=stdout)
+    return rc, stdout.getvalue()
 
 
-def test_help_topic_routes_points_at_modern_discovery_frontdoor(capsys) -> None:
-    rc = workflow_cli.main(["help", "routes"])
+def test_commands_delegates_to_modern_command_index(capsys) -> None:
+    legacy_rc, legacy_rendered = _run_legacy(["commands"], capsys)
+    modern_rc, modern_rendered = _run_modern(["commands"])
 
-    assert rc == 0
-    rendered = capsys.readouterr().out
-    assert "workflow api routes" in rendered
-    assert "workflow routes --tag workflow --json" in rendered
-    assert "workflow_cli.py routes" in rendered
-    assert "workflow help api" in rendered
+    assert legacy_rc == modern_rc == 0
+    assert legacy_rendered == modern_rendered
+    assert "workflow commands" in legacy_rendered
+    assert "workflow tools [list|search|describe|call]" in legacy_rendered
+
+
+def test_help_topic_delegates_to_modern_command_usage(capsys) -> None:
+    legacy_rc, legacy_rendered = _run_legacy(["help", "run"], capsys)
+    modern_rc, modern_rendered = _run_modern(["help", "run"])
+
+    assert legacy_rc == modern_rc == 0
+    assert legacy_rendered == modern_rendered
+    assert "workflow run <spec.json>" in legacy_rendered
+    assert "workflow run -p <prompt>" in legacy_rendered
+
+
+def test_help_topic_routes_delegates_to_modern_discovery_frontdoor(capsys) -> None:
+    legacy_rc, legacy_rendered = _run_legacy(["help", "routes"], capsys)
+    modern_rc, modern_rendered = _run_modern(["help", "routes"])
+
+    assert legacy_rc == modern_rc == 0
+    assert legacy_rendered == modern_rendered
+    assert "workflow api [routes|--host HOST|--port PORT]" in legacy_rendered
+    assert "workflow routes --json" in legacy_rendered
+    assert "workflow help routes" in legacy_rendered
 
 
 def test_help_topic_api_is_an_alias_for_routes(capsys) -> None:
-    rc = workflow_cli.main(["help", "api"])
+    legacy_rc, legacy_rendered = _run_legacy(["help", "api"], capsys)
+    modern_rc, modern_rendered = _run_modern(["help", "api"])
 
-    assert rc == 0
-    rendered = capsys.readouterr().out
-    assert "workflow api routes" in rendered
-    assert "workflow routes --tag workflow --json" in rendered
-    assert "workflow help api" in rendered
+    assert legacy_rc == modern_rc == 0
+    assert legacy_rendered == modern_rendered
+    assert "workflow api [routes|--host HOST|--port PORT]" in legacy_rendered
+    assert "Flat alias: workflow routes" in legacy_rendered
 
 
-def test_help_topic_tools_points_at_modern_discovery_frontdoor(capsys) -> None:
-    rc = workflow_cli.main(["help", "tools"])
+def test_help_topic_tools_delegates_to_modern_discovery_frontdoor(capsys) -> None:
+    legacy_rc, legacy_rendered = _run_legacy(["help", "tools"], capsys)
+    modern_rc, modern_rendered = _run_modern(["help", "tools"])
 
-    assert rc == 0
-    rendered = capsys.readouterr().out
-    assert "workflow tools list" in rendered
-    assert "workflow tools describe <tool|alias>" in rendered
-    assert "workflow_cli.py tools" in rendered
-    assert "workflow mcp" in rendered
+    assert legacy_rc == modern_rc == 0
+    assert legacy_rendered == modern_rendered
+    assert "workflow tools list" in legacy_rendered
+    assert "workflow tools describe <tool|alias>" in legacy_rendered
+    assert "workflow tools call <tool|alias> --input-json '<json>' --yes" in legacy_rendered
 
 
 def test_help_topic_mcp_is_an_alias_for_tools(capsys) -> None:
-    rc = workflow_cli.main(["help", "mcp"])
+    legacy_rc, legacy_rendered = _run_legacy(["help", "mcp"], capsys)
+    modern_rc, modern_rendered = _run_modern(["help", "mcp"])
 
-    assert rc == 0
-    rendered = capsys.readouterr().out
-    assert "workflow tools list" in rendered
-    assert "workflow tools describe <tool|alias>" in rendered
-    assert "workflow mcp" in rendered
+    assert legacy_rc == modern_rc == 0
+    assert legacy_rendered == modern_rendered
+    assert "workflow tools list" in legacy_rendered
+    assert "workflow tools search <topic> [--exact]" in legacy_rendered
 
 
-def test_help_topic_diagnose_prints_command_usage(capsys) -> None:
-    rc = workflow_cli.main(["help", "diagnose"])
+def test_help_topic_diagnose_delegates_to_modern_usage(capsys) -> None:
+    legacy_rc, legacy_rendered = _run_legacy(["help", "diagnose"], capsys)
+    modern_rc, modern_rendered = _run_modern(["help", "diagnose"])
 
-    assert rc == 0
-    rendered = capsys.readouterr().out
-    assert "usage: workflow_cli.py diagnose <run_id>" in rendered
-    assert (
-        "Tip: run `workflow_cli.py diagnose <run_id>` to inspect one workflow receipt "
-        "and provider-health context."
-    ) in rendered
+    assert legacy_rc == modern_rc == 0
+    assert legacy_rendered == modern_rendered
+    assert "usage: workflow diagnose <run_id>" in legacy_rendered
 
 
 def test_help_topic_bugs_exposes_the_full_bug_surface(capsys) -> None:
@@ -100,12 +106,13 @@ def test_help_topic_bugs_exposes_the_full_bug_surface(capsys) -> None:
     assert "resolve            Mark an existing bug fixed, deferred, or won't-fix; FIXED may run verifier proof" in rendered
 
 
-def test_top_level_help_aliases_return_command_index(capsys) -> None:
-    rc = workflow_cli.main(["--help"])
+def test_top_level_help_delegates_to_modern_command_index(capsys) -> None:
+    legacy_rc, legacy_rendered = _run_legacy(["--help"], capsys)
+    modern_rc, modern_rendered = _run_modern(["--help"])
 
-    assert rc == 0
-    rendered = capsys.readouterr().out
-    assert "workflow_cli.py repair <run_id>" in rendered
+    assert legacy_rc == modern_rc == 0
+    assert legacy_rendered == modern_rendered
+    assert "workflow help commands" in legacy_rendered
 
 
 def test_modern_help_index_mentions_bug_tracker_surface() -> None:

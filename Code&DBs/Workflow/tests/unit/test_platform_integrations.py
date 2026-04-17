@@ -100,7 +100,7 @@ def test_execute_integration_routes_workflow_invoke_to_saved_workflow(monkeypatc
                 "definition_revision": definition_revision,
                 "jobs": [{"label": "step-1"}],
             },
-            "tool_allowlist": {"mcp_tools": ["praxis_status"], "adapter_tools": ["repo_fs"]},
+            "tool_allowlist": {"mcp_tools": ["praxis_status_snapshot"], "adapter_tools": ["repo_fs"]},
             "verify_refs": ["verify.child"],
             "approved_bundle_refs": ["capability_bundle:child"],
         },

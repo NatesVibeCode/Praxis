@@ -40,21 +40,13 @@ def test_native_operator_query_surface_reads_canonical_rows_without_mutation() -
         registry_path.unlink(missing_ok=True)
 
 
-def test_workflow_run_packet_observability_rolls_up_sources_and_contract_drift() -> None:
+def test_workflow_run_packet_observability_rolls_up_sources_without_contract_drift() -> None:
     as_of = datetime(2026, 4, 10, 17, 0, tzinfo=timezone.utc)
-
-    class _MissingColumnError(Exception):
-        sqlstate = "42703"
-
-        def __init__(self, column_name: str) -> None:
-            super().__init__(f'column "{column_name}" does not exist')
 
     class _FakePacketConnection:
         async def fetch(self, query: str, *args: object):
             workflow_run_ids = args[0]
             assert workflow_run_ids == ["run.derived", "run.missing"]
-            if "NULL::jsonb AS packet_inspection" not in query and "packet_inspection" in query:
-                raise _MissingColumnError("packet_inspection")
             return [
                 {
                     "run_id": "run.derived",
@@ -178,30 +170,108 @@ def test_workflow_run_packet_observability_rolls_up_sources_and_contract_drift()
     assert by_id["run.missing"].operator_frame_source == "canonical_operator_frames"
     assert by_id["run.missing"].operator_frame_count == 0
     assert summary is not None
-    assert summary.to_json() == {
-        "kind": "workflow_run_observability",
-        "observability_digest": "2 runs | 50.0% packet coverage | 100.0% operator-frame coverage | dominant failure provider_timeout | 2 synthetic | 2 isolated | 1 active frame run(s) | 1 drift refs",
-        "workflow_run_count": 2,
-        "packet_inspection_source_counts": {
-            "derived": 1,
-            "missing": 1,
-        },
-        "packet_inspection_coverage_rate": 0.5,
-        "operator_frame_source_counts": {
-            "canonical_operator_frames": 2,
-        },
-        "operator_frame_coverage_rate": 1.0,
-        "active_operator_frame_run_count": 1,
-        "failure_category_counts": {
-            "in_progress": 1,
-            "provider_timeout": 1,
-        },
-        "dominant_failure_category": "provider_timeout",
-        "synthetic_run_count": 2,
-        "isolated_run_count": 2,
-        "missing_workflow_run_ids": [],
-        "contract_drift_refs": ["workflow_runs.packet_inspection_column_missing"],
+    summary_payload = summary.to_json()
+    assert summary_payload["packet_inspection_source_counts"] == {
+        "derived": 1,
+        "missing": 1,
     }
+    assert summary_payload["packet_inspection_coverage_rate"] == 0.5
+    assert summary_payload["operator_frame_source_counts"] == {
+        "canonical_operator_frames": 2,
+    }
+    assert summary_payload["operator_frame_coverage_rate"] == 1.0
+    assert summary_payload["active_operator_frame_run_count"] == 1
+    assert summary_payload["failure_category_counts"] == {
+        "in_progress": 1,
+        "provider_timeout": 1,
+    }
+    assert summary_payload["dominant_failure_category"] == "provider_timeout"
+    assert summary_payload["synthetic_run_count"] == 2
+    assert summary_payload["isolated_run_count"] == 2
+    assert summary_payload["missing_workflow_run_ids"] == []
+    assert summary_payload["contract_drift_refs"] == []
+    assert "drift refs" not in summary_payload["observability_digest"]
+
+
+def test_workflow_run_packet_observability_fails_closed_when_packet_inspection_column_missing() -> None:
+    class _MissingColumnError(Exception):
+        sqlstate = "42703"
+
+        def __init__(self, column_name: str) -> None:
+            super().__init__(f'column "{column_name}" does not exist')
+
+    class _FakePacketConnection:
+        async def fetch(self, query: str, *args: object):
+            workflow_run_ids = args[0]
+            assert workflow_run_ids == ["run.derived"]
+            if "packet_inspection" in query:
+                raise _MissingColumnError("packet_inspection")
+            raise AssertionError(query)
+
+    with pytest.raises(operator_read.NativeOperatorQueryError) as exc_info:
+        asyncio.run(
+            operator_read.NativeOperatorQueryFrontdoor()._fetch_workflow_run_packet_inspections(
+                conn=_FakePacketConnection(),
+                workflow_run_ids=("run.derived",),
+            )
+        )
+
+    assert exc_info.value.reason_code == "operator_query.packet_inspection_unavailable"
+    assert exc_info.value.details["stage"] == "schema"
+    assert exc_info.value.details["contract_drift_ref"] == "workflow_runs.packet_inspection_column_missing"
+
+
+def test_workflow_run_packet_observability_fails_closed_when_derivation_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    as_of = datetime(2026, 4, 10, 17, 0, tzinfo=timezone.utc)
+
+    class _FakePacketConnection:
+        async def fetch(self, query: str, *args: object):
+            workflow_run_ids = args[0]
+            assert workflow_run_ids == ["run.derived"]
+            return [
+                {
+                    "run_id": "run.derived",
+                    "workflow_id": "workflow.native-self-hosted-smoke.abc123",
+                    "request_id": "request.native-self-hosted-smoke.abc123",
+                    "request_digest": "digest.derived",
+                    "workflow_definition_id": "workflow_definition.native_self_hosted_smoke.v1.abc123",
+                    "admitted_definition_hash": "sha256:smoke.abc123",
+                    "current_state": "claim_accepted",
+                    "terminal_reason_code": None,
+                    "run_idempotency_key": "request.native-self-hosted-smoke.abc123",
+                    "packet_inspection": None,
+                    "request_envelope": {"name": "native smoke"},
+                    "requested_at": as_of,
+                    "admitted_at": as_of,
+                    "started_at": as_of,
+                    "finished_at": None,
+                    "last_event_id": None,
+                    "packets": [{"packet_revision": "packet.rev.smoke.1"}],
+                    "operator_frames": [],
+                }
+            ]
+
+    import runtime.execution_packet_authority as execution_packet_authority
+
+    monkeypatch.setattr(
+        execution_packet_authority,
+        "inspect_execution_packets",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    with pytest.raises(operator_read.NativeOperatorQueryError) as exc_info:
+        asyncio.run(
+            operator_read.NativeOperatorQueryFrontdoor()._fetch_workflow_run_packet_inspections(
+                conn=_FakePacketConnection(),
+                workflow_run_ids=("run.derived",),
+            )
+        )
+
+    assert exc_info.value.reason_code == "operator_query.packet_inspection_unavailable"
+    assert exc_info.value.details["stage"] == "derive"
+    assert exc_info.value.details["workflow_run_id"] == "run.derived"
 
 
 async def _seed_native_operator_query_surface_test_data() -> dict[str, object]:
@@ -302,14 +372,15 @@ def _assert_native_operator_query_surface_reads_canonical_rows_without_mutation(
             "roadmap_item_ids": [roadmap_item_id],
             "items": [
                 {
-                        "roadmap_item_id": roadmap_item_id,
-                        "roadmap_key": f"roadmap.{suffix}.query",
-                        "title": f"Query surface roadmap {suffix}",
-                        "status": "active",
-                        "priority": "p1",
-                        "parent_roadmap_item_id": None,
-                        "decision_ref": f"decision.{suffix}.query",
-                    }
+                    "roadmap_item_id": roadmap_item_id,
+                    "roadmap_key": f"roadmap.{suffix}.query",
+                    "title": f"Query surface roadmap {suffix}",
+                    "status": "active",
+                    "lifecycle": "planned",
+                    "priority": "p1",
+                    "parent_roadmap_item_id": None,
+                    "decision_ref": f"decision.{suffix}.query",
+                }
                 ],
             },
         "queue_refs": {

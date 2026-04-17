@@ -224,6 +224,7 @@ class _CloseoutRepositorySpy:
             {
                 "roadmap_item_id": roadmap_item_id,
                 "status": completed_status,
+                "lifecycle": "completed",
                 "completed_at": completed_at,
                 "source_bug_id": "bug.closeout.1",
             }
@@ -259,6 +260,7 @@ def test_work_item_closeout_commit_delegates_to_closeout_repository(monkeypatch)
                 "roadmap_item_id": roadmap_item_ids[0],
                 "title": "Closeout roadmap",
                 "status": "active",
+                "lifecycle": "claimed",
                 "source_bug_id": "bug.closeout.1",
                 "completed_at": None,
                 "updated_at": resolved_at,
@@ -335,6 +337,7 @@ def test_work_item_closeout_commit_delegates_to_closeout_repository(monkeypatch)
         {
             "roadmap_item_id": "roadmap_item.closeout.1",
             "status": "completed",
+            "lifecycle": "completed",
             "completed_at": resolved_at.isoformat(),
             "source_bug_id": "bug.closeout.1",
         }

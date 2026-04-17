@@ -1,6 +1,6 @@
 # Praxis MCP Tools
 
-Praxis exposes 50 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
+Praxis exposes 59 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
 
 CLI discovery is generated from the same catalog metadata:
 
@@ -29,21 +29,30 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_ingest` | `knowledge` | `advanced` | - | `write` | Store new information in the knowledge graph so it can be recalled later via praxis_recall. Content is automatically entity-extracted, deduplicated, and embedded for vector search. |
 | `praxis_recall` | `knowledge` | `stable` | `workflow recall` | `read` | Search the platform's knowledge graph for information about modules, functions, decisions, patterns, bugs, constraints, people, or any previously ingested content. Returns ranked results with confidence scores and how each result was found (text match, graph traversal, or vector similarity). |
 | `praxis_research` | `knowledge` | `stable` | - | `read` | Search the knowledge graph specifically for research findings and analysis results. Lighter-weight than praxis_recall — focused on retrieving prior research. |
+| `praxis_bug_replay_provenance_backfill` | `operations` | `advanced` | - | `write` | Backfill replay provenance from canonical bug and receipt authority. |
 | `praxis_circuits` | `operations` | `stable` | `workflow circuits` | `read`, `write` | Inspect effective circuit-breaker state or apply a durable manual override for one provider. |
 | `praxis_diagnose` | `operations` | `stable` | `workflow diagnose` | `read` | Diagnose one workflow run by id. Combines the receipt, failure classification, and provider health into a single operator-facing report. |
 | `praxis_health` | `operations` | `stable` | `workflow health` | `read` | Full system health check — Postgres connectivity, disk space, operator panel state, workflow lane recommendations, context cache stats, and memory graph health. |
 | `praxis_heartbeat` | `operations` | `advanced` | - | `read`, `write` | Run or check the knowledge graph maintenance cycle. The heartbeat syncs receipts, bugs, constraints, and friction events into the knowledge graph, mines relationships between entities, generates daily/weekly rollups, and archives stale nodes. |
-| `praxis_maintenance` | `operations` | `advanced` | - | `write` | Run explicit operator maintenance actions that mutate observability aggregates. |
+| `praxis_metrics_reset` | `operations` | `advanced` | - | `write` | Reset observability metrics through explicit operator maintenance authority. |
 | `praxis_reload` | `operations` | `advanced` | - | `write` | Clear all in-process caches so DB and config changes take effect without restarting Claude Desktop. |
-| `praxis_status` | `operations` | `advanced` | - | `read` | Quick snapshot of how workflows are performing — total runs, pass/fail rate, categorized failure breakdown by zone (external/config/internal), and adjusted pass rate that excludes external provider failures. |
+| `praxis_semantic_bridges_backfill` | `operations` | `advanced` | - | `write` | Replay semantic bridges from canonical operator authority into semantic assertions. |
+| `praxis_semantic_projection_refresh` | `operations` | `advanced` | - | `write` | Refresh the semantic projection through explicit operator maintenance authority. |
+| `praxis_status_snapshot` | `operations` | `advanced` | - | `read` | Read the canonical workflow status snapshot — pass rate, failure mix, queue depth, and in-flight run summaries from receipt authority. |
+| `praxis_graph_projection` | `operator` | `advanced` | - | `read` | Read the cross-domain operator graph projection. |
+| `praxis_issue_backlog` | `operator` | `advanced` | - | `read` | Read the canonical operator issue backlog. |
 | `praxis_operator_architecture_policy` | `operator` | `advanced` | - | `write` | Record a durable architecture-policy decision in operator authority. |
 | `praxis_operator_closeout` | `operator` | `advanced` | - | `read`, `write` | Preview or commit proof-backed bug and roadmap closeout through the shared reconciliation gate. |
 | `praxis_operator_decisions` | `operator` | `advanced` | - | `read`, `write` | List or record canonical operator decisions through the shared operator_decisions table. |
 | `praxis_operator_native_primary_cutover_gate` | `operator` | `advanced` | - | `write` | Admit a native primary cutover gate into operator-control decision and gate authority tables. |
 | `praxis_operator_relations` | `operator` | `advanced` | - | `write` | Record canonical functional areas and cross-object semantic relations. |
 | `praxis_operator_roadmap_view` | `operator` | `advanced` | - | `read` | Read one roadmap subtree and its dependency edges from DB-backed authority. |
-| `praxis_operator_view` | `operator` | `advanced` | - | `read` | Render detailed operator observability views — deeper than praxis_status. |
 | `praxis_operator_write` | `operator` | `advanced` | - | `read`, `write` | Preview, validate, or commit roadmap rows through the shared operator-write validation gate. |
+| `praxis_replay_ready_bugs` | `operator` | `advanced` | - | `read` | Read the replay-ready bug backlog from authoritative provenance. |
+| `praxis_run_graph` | `operator` | `advanced` | - | `read` | Read one run-scoped workflow graph. |
+| `praxis_run_lineage` | `operator` | `advanced` | - | `read` | Read one run-scoped lineage view. |
+| `praxis_run_scoreboard` | `operator` | `advanced` | - | `read` | Read one run-scoped cutover scoreboard. |
+| `praxis_run_status` | `operator` | `advanced` | - | `read` | Read one run-scoped operator status view. |
 | `praxis_semantic_assertions` | `operator` | `advanced` | - | `read`, `write` | Register semantic predicates, record or retract semantic assertions, and query the canonical semantic substrate. |
 | `praxis_decompose` | `planning` | `stable` | - | `read` | Break down a large objective into small, workflow-ready micro-sprints. Returns each sprint with estimated complexity, dependencies between sprints, and the critical path. |
 | `praxis_intent_match` | `planning` | `stable` | - | `read` | Find existing UI components, workflows, and integrations that match what you want to build. Searches the registry and proposes how to compose them into an app. |
@@ -415,6 +424,27 @@ Example input:
 
 ### Operations
 
+#### `praxis_bug_replay_provenance_backfill`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow tools call praxis_bug_replay_provenance_backfill`
+- CLI schema help: `workflow tools describe praxis_bug_replay_provenance_backfill`
+- When to use: Backfill replay provenance without bundling unrelated maintenance actions into one selector tool.
+- When not to use: Do not use it for read-only bug backlog inspection.
+- Selector: none
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "open_only": true
+}
+```
+
 #### `praxis_circuits`
 
 - Surface: `operations`
@@ -500,24 +530,23 @@ Example input:
 }
 ```
 
-#### `praxis_maintenance`
+#### `praxis_metrics_reset`
 
 - Surface: `operations`
 - Tier: `advanced`
 - Badges: `advanced`, `operations`, `mutates-state`
 - Risks: `write`
-- CLI entrypoint: `workflow tools call praxis_maintenance`
-- CLI schema help: `workflow tools describe praxis_maintenance`
-- When to use: Run explicit operator maintenance actions that mutate runtime state.
-- When not to use: Do not use it for ordinary observability or health reading.
-- Selector: `action`; default `reset_metrics`; values `reset_metrics`, `backfill_bug_replay_provenance`, `backfill_semantic_bridges`, `refresh_semantic_projection`
+- CLI entrypoint: `workflow tools call praxis_metrics_reset`
+- CLI schema help: `workflow tools describe praxis_metrics_reset`
+- When to use: Reset polluted quality metrics or routing counters through one explicit maintenance operation.
+- When not to use: Do not use it for ordinary observability reads.
+- Selector: none
 - Required args: (none)
 
 Example input:
 
 ```json
 {
-  "action": "reset_metrics",
   "confirm": true
 }
 ```
@@ -541,16 +570,58 @@ Example input:
 {}
 ```
 
-#### `praxis_status`
+#### `praxis_semantic_bridges_backfill`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow tools call praxis_semantic_bridges_backfill`
+- CLI schema help: `workflow tools describe praxis_semantic_bridges_backfill`
+- When to use: Rebuild semantic bridge authority from canonical operator sources.
+- When not to use: Do not use it for semantic reads; use praxis_semantic_assertions instead.
+- Selector: none
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "include_object_relations": true
+}
+```
+
+#### `praxis_semantic_projection_refresh`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow tools call praxis_semantic_projection_refresh`
+- CLI schema help: `workflow tools describe praxis_semantic_projection_refresh`
+- When to use: Consume semantic projection events through one explicit maintenance operation.
+- When not to use: Do not use it for read-only graph inspection.
+- Selector: none
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "limit": 100
+}
+```
+
+#### `praxis_status_snapshot`
 
 - Surface: `operations`
 - Tier: `advanced`
 - Badges: `advanced`, `operations`
 - Risks: `read`
-- CLI entrypoint: `workflow tools call praxis_status`
-- CLI schema help: `workflow tools describe praxis_status`
-- When to use: Inspect workflow pass rate, failure mix, and in-flight run summaries from receipts.
-- When not to use: Do not use it for deep health probes or workflow dispatch.
+- CLI entrypoint: `workflow tools call praxis_status_snapshot`
+- CLI schema help: `workflow tools describe praxis_status_snapshot`
+- When to use: Inspect workflow pass rate, failure mix, and in-flight run summaries from canonical receipts.
+- When not to use: Do not use it for deep run inspection or workflow dispatch.
 - Selector: none
 - Required args: (none)
 
@@ -563,6 +634,48 @@ Example input:
 ```
 
 ### Operator
+
+#### `praxis_graph_projection`
+
+- Surface: `operator`
+- Tier: `advanced`
+- Badges: `advanced`, `operator`
+- Risks: `read`
+- CLI entrypoint: `workflow tools call praxis_graph_projection`
+- CLI schema help: `workflow tools describe praxis_graph_projection`
+- When to use: Inspect the semantic-first operator graph across domains.
+- When not to use: Do not use it for run-scoped workflow topology.
+- Selector: none
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "as_of": "2026-04-16T20:05:00+00:00"
+}
+```
+
+#### `praxis_issue_backlog`
+
+- Surface: `operator`
+- Tier: `advanced`
+- Badges: `advanced`, `operator`
+- Risks: `read`
+- CLI entrypoint: `workflow tools call praxis_issue_backlog`
+- CLI schema help: `workflow tools describe praxis_issue_backlog`
+- When to use: Inspect the canonical upstream issue backlog before bug promotion.
+- When not to use: Do not use it to mutate issue or bug state.
+- Selector: none
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "limit": 25
+}
+```
 
 #### `praxis_operator_architecture_policy`
 
@@ -701,28 +814,6 @@ Example input:
 {}
 ```
 
-#### `praxis_operator_view`
-
-- Surface: `operator`
-- Tier: `advanced`
-- Badges: `advanced`, `operator`
-- Risks: `read`
-- CLI entrypoint: `workflow tools call praxis_operator_view`
-- CLI schema help: `workflow tools describe praxis_operator_view`
-- When to use: Discover native operator status, cutover readiness, run-scoped workflow topology, cross-domain operator graph topology, semantic assertion, issue backlog, or replay-ready bug views.
-- When not to use: Do not use it to mutate operator state.
-- Selector: `view`; default `status`; values `status`, `scoreboard`, `graph`, `operator_graph`, `semantics`, `lineage`, `issue_backlog`, `replay_ready_bugs`
-- Required args: `view`
-
-Example input:
-
-```json
-{
-  "view": "graph",
-  "run_id": "run_123"
-}
-```
-
 #### `praxis_operator_write`
 
 - Surface: `operator`
@@ -743,6 +834,111 @@ Example input:
   "action": "preview",
   "title": "Consolidate CLI frontdoors",
   "intent_brief": "one authority for operator CLI"
+}
+```
+
+#### `praxis_replay_ready_bugs`
+
+- Surface: `operator`
+- Tier: `advanced`
+- Badges: `advanced`, `operator`
+- Risks: `read`
+- CLI entrypoint: `workflow tools call praxis_replay_ready_bugs`
+- CLI schema help: `workflow tools describe praxis_replay_ready_bugs`
+- When to use: Inspect replayable bugs without bundling that read behind a selector view.
+- When not to use: Do not use it to trigger replay backfill.
+- Selector: none
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "limit": 25
+}
+```
+
+#### `praxis_run_graph`
+
+- Surface: `operator`
+- Tier: `advanced`
+- Badges: `advanced`, `operator`
+- Risks: `read`
+- CLI entrypoint: `workflow tools call praxis_run_graph`
+- CLI schema help: `workflow tools describe praxis_run_graph`
+- When to use: Inspect workflow topology for one run.
+- When not to use: Do not use it for cross-domain operator graph inspection.
+- Selector: none
+- Required args: `run_id`
+
+Example input:
+
+```json
+{
+  "run_id": "run_123"
+}
+```
+
+#### `praxis_run_lineage`
+
+- Surface: `operator`
+- Tier: `advanced`
+- Badges: `advanced`, `operator`
+- Risks: `read`
+- CLI entrypoint: `workflow tools call praxis_run_lineage`
+- CLI schema help: `workflow tools describe praxis_run_lineage`
+- When to use: Inspect graph lineage and operator frames for one run.
+- When not to use: Do not use it for whole-system summaries.
+- Selector: none
+- Required args: `run_id`
+
+Example input:
+
+```json
+{
+  "run_id": "run_123"
+}
+```
+
+#### `praxis_run_scoreboard`
+
+- Surface: `operator`
+- Tier: `advanced`
+- Badges: `advanced`, `operator`
+- Risks: `read`
+- CLI entrypoint: `workflow tools call praxis_run_scoreboard`
+- CLI schema help: `workflow tools describe praxis_run_scoreboard`
+- When to use: Inspect cutover readiness for one workflow run.
+- When not to use: Do not use it for workflow dispatch or global status.
+- Selector: none
+- Required args: `run_id`
+
+Example input:
+
+```json
+{
+  "run_id": "run_123"
+}
+```
+
+#### `praxis_run_status`
+
+- Surface: `operator`
+- Tier: `advanced`
+- Badges: `advanced`, `operator`
+- Risks: `read`
+- CLI entrypoint: `workflow tools call praxis_run_status`
+- CLI schema help: `workflow tools describe praxis_run_status`
+- When to use: Inspect operator status for one workflow run.
+- When not to use: Do not use it for whole-system pass-rate summaries.
+- Selector: none
+- Required args: `run_id`
+
+Example input:
+
+```json
+{
+  "run_id": "run_123"
 }
 ```
 

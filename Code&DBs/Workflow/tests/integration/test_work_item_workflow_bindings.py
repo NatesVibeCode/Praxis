@@ -112,6 +112,7 @@ async def _exercise_work_item_workflow_bindings_record_bug_to_workflow_class_bin
                 title,
                 item_kind,
                 status,
+                lifecycle,
                 priority,
                 source_bug_id,
                 summary
@@ -125,6 +126,7 @@ async def _exercise_work_item_workflow_bindings_record_bug_to_workflow_class_bin
         assert roadmap_row["title"] == "Binding test bug"
         assert roadmap_row["item_kind"] == "capability"
         assert roadmap_row["status"] == "active"
+        assert roadmap_row["lifecycle"] == "claimed"
         assert roadmap_row["priority"] == "p2"
         assert roadmap_row["source_bug_id"] == "bug.dispatch-binding.1"
         assert roadmap_row["summary"] == (
@@ -376,7 +378,8 @@ async def _exercise_work_item_workflow_bindings_issue_binding_auto_promotes_issu
             SELECT
                 roadmap_item_id,
                 source_bug_id,
-                status
+                status,
+                lifecycle
             FROM roadmap_items
             WHERE roadmap_item_id = $1
             """,
@@ -385,6 +388,7 @@ async def _exercise_work_item_workflow_bindings_issue_binding_auto_promotes_issu
         assert roadmap_row is not None
         assert roadmap_row["source_bug_id"] == promoted_bug["bug_id"]
         assert roadmap_row["status"] == "active"
+        assert roadmap_row["lifecycle"] == "claimed"
 
         roadmap_semantic_rows = await conn.fetch(
             """

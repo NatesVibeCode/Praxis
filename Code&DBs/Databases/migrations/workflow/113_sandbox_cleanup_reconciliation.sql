@@ -66,38 +66,46 @@ COMMENT ON COLUMN sandbox_sessions.cleanup_attempt_count IS 'How many DB-native 
 COMMENT ON COLUMN sandbox_sessions.cleanup_last_error IS 'Last reconciliation error when cleanup_status = failed.';
 COMMENT ON COLUMN sandbox_sessions.cleanup_outcome IS 'Latest structured cleanup receipt for this sandbox session.';
 
-INSERT INTO maintenance_policies (
-    policy_key,
-    subject_kind,
-    intent_kind,
-    enabled,
-    priority,
-    cadence_seconds,
-    max_attempts,
-    config,
-    created_at,
-    updated_at
-)
-VALUES (
-    'sandbox_session.cleanup_reconcile',
-    'sandbox_session',
-    'reconcile_sandbox_session_cleanup',
-    true,
-    70,
-    600,
-    5,
-    '{"batch_limit":25,"claim_timeout_seconds":900}'::jsonb,
-    now(),
-    now()
-)
-ON CONFLICT (policy_key) DO UPDATE
-SET subject_kind = EXCLUDED.subject_kind,
-    intent_kind = EXCLUDED.intent_kind,
-    enabled = EXCLUDED.enabled,
-    priority = EXCLUDED.priority,
-    cadence_seconds = EXCLUDED.cadence_seconds,
-    max_attempts = EXCLUDED.max_attempts,
-    config = EXCLUDED.config,
-    updated_at = now();
+DO $$
+BEGIN
+    IF to_regclass('public.maintenance_policies') IS NULL THEN
+        RETURN;
+    END IF;
+
+    INSERT INTO maintenance_policies (
+        policy_key,
+        subject_kind,
+        intent_kind,
+        enabled,
+        priority,
+        cadence_seconds,
+        max_attempts,
+        config,
+        created_at,
+        updated_at
+    )
+    VALUES (
+        'sandbox_session.cleanup_reconcile',
+        'sandbox_session',
+        'reconcile_sandbox_session_cleanup',
+        true,
+        70,
+        600,
+        5,
+        '{"batch_limit":25,"claim_timeout_seconds":900}'::jsonb,
+        now(),
+        now()
+    )
+    ON CONFLICT (policy_key) DO UPDATE
+    SET subject_kind = EXCLUDED.subject_kind,
+        intent_kind = EXCLUDED.intent_kind,
+        enabled = EXCLUDED.enabled,
+        priority = EXCLUDED.priority,
+        cadence_seconds = EXCLUDED.cadence_seconds,
+        max_attempts = EXCLUDED.max_attempts,
+        config = EXCLUDED.config,
+        updated_at = now();
+END
+$$;
 
 COMMIT;

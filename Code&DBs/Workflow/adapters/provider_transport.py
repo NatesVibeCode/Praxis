@@ -519,7 +519,7 @@ def default_llm_adapter_type(
     failure_mappings: Mapping[str, dict[str, str]],
 ) -> str:
     if not profiles:
-        raise RuntimeError("provider_registry has no authoritative provider profiles")
+        raise RuntimeError("provider execution registry has no authoritative provider profiles")
     for candidate in ("cli_llm", "llm_task"):
         if any(
             resolve_adapter_contract(
@@ -533,7 +533,7 @@ def default_llm_adapter_type(
             for provider_slug in profiles
         ):
             return candidate
-    raise RuntimeError("provider_registry has no supported LLM adapter types")
+    raise RuntimeError("provider execution registry has no supported LLM adapter types")
 
 
 def default_adapter_type_for_provider(
@@ -583,26 +583,29 @@ def resolve_adapter_economics(
 ) -> dict[str, Any]:
     profile = profiles.get(provider_slug)
     if profile is None:
-        raise RuntimeError(f"provider_registry has no profile for {provider_slug!r}")
+        raise RuntimeError(f"provider execution registry has no profile for {provider_slug!r}")
 
     lane_policy = resolve_lane_policy(provider_slug, adapter_type, profiles=profiles)
     if not lane_policy or not bool(lane_policy.get("admitted_by_policy")):
         raise RuntimeError(
-            f"provider_registry adapter not admitted by policy for {provider_slug}/{adapter_type}"
+            f"provider execution registry adapter not admitted by policy for {provider_slug}/{adapter_type}"
         )
 
     adapter_defaults = profile.adapter_economics or {}
     if adapter_type not in adapter_defaults:
         raise RuntimeError(
-            f"provider_registry missing authoritative adapter_economics for {provider_slug}/{adapter_type}"
+            f"provider execution registry missing authoritative adapter_economics for {provider_slug}/{adapter_type}"
         )
     economics = dict(adapter_defaults[adapter_type])
     return {
         "billing_mode": str(economics["billing_mode"]),
         "budget_bucket": str(economics["budget_bucket"]),
         "effective_marginal_cost": float(economics["effective_marginal_cost"]),
-        "prefer_prepaid": bool(economics["prefer_prepaid"]),
-        "allow_payg_fallback": bool(economics["allow_payg_fallback"]),
+        # Older DB-backed authority rows may omit optional economics hints.
+        # Normalize them here so health and routing surfaces stay inspectable
+        # instead of crashing on sparse metadata.
+        "prefer_prepaid": bool(economics.get("prefer_prepaid", False)),
+        "allow_payg_fallback": bool(economics.get("allow_payg_fallback", False)),
     }
 
 
@@ -626,7 +629,7 @@ def resolve_api_endpoint(
         except (KeyError, ValueError) as exc:
             if logger is not None:
                 logger.warning(
-                    "provider_registry: endpoint template error for %s: %s",
+                    "provider execution registry: endpoint template error for %s: %s",
                     provider_slug,
                     exc,
                 )

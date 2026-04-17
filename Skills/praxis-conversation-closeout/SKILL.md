@@ -1,6 +1,6 @@
 ---
 name: praxis-conversation-closeout
-description: "Praxis repo-local closeout skill. Use when work completed in a conversation must be turned into durable DB-backed operator records instead of being left in chat history, especially when Nate made architecture decisions that belong in the decisions table."
+description: "Praxis repo-local closeout skill. Use when conversation outcomes must become durable DB-backed operator records instead of chat residue, including architecture decisions, unfinished roadmap work, bugs discovered or fixed in-thread, and closeout receipts."
 ---
 
 # Praxis Conversation Closeout
@@ -22,7 +22,7 @@ Primary references:
 - `Skills/praxis-roadmap/SKILL.md`
 - `Skills/praxis-bug-logging/SKILL.md`
 
-Use this skill when a conversation produced real work, decisions, backlog changes, or evidence that should survive the thread and become queryable operator state.
+Use this skill when a conversation produced real work, decisions, backlog changes, fixes, enhancements, or evidence that should survive the thread and become queryable operator state.
 
 ## Mission
 
@@ -32,10 +32,12 @@ Classify what happened, then persist it through the narrowest authoritative DB-b
 
 - architecture policy -> `praxis_operator_architecture_policy` when the conversation established durable policy
 - other durable operator decisions -> `praxis_operator_decisions`
-- roadmap or backlog additions -> `praxis_operator_write`
+- roadmap or backlog additions, including enhancements and planned follow-up work -> `praxis_operator_write`
 - existing bugs or roadmap items that are now complete -> `praxis_operator_closeout`
-- newly discovered defects -> `praxis_bugs`
+- newly discovered defects, including defects fixed during the conversation but never formally tracked -> `praxis_bugs`
 - searchable conversation knowledge with no stronger operator table -> `praxis_ingest`
+
+If a defect was fixed in the thread but no bug row exists yet, file the bug anyway, attach evidence, and resolve it through bug authority. If the remaining work is an enhancement rather than a defect, create a roadmap item instead of burying it in prose.
 
 If you do not know which authority owns a piece of work, ask the router first:
 
@@ -45,15 +47,28 @@ praxis workflow query "What DB-backed record should capture this conversation ou
 
 Then switch to the specific surface. Do not stay at the router once the authority is clear.
 
+Prefer first-class `praxis workflow` entrypoints when they exist:
+
+- `praxis workflow bugs ...`
+- `praxis workflow roadmap write ...`
+- `praxis workflow roadmap closeout ...`
+- `praxis workflow query ...`
+- `praxis workflow recall ...`
+
+Drop to `praxis workflow tools describe|call ...` only for decision and policy surfaces that do not yet have a stable dedicated command.
+
 ## Core Laws
 
 1. Conversation history is not authority.
 2. The decisions table is for durable decisions, not generic summaries.
 3. Architecture policy belongs in `operator_decisions` under typed policy authority, not in markdown drift.
 4. Bugs, roadmap rows, and closeout receipts keep their own write seams; do not stuff them into decisions just because they were discussed.
-5. Do not invent ids, decision keys, roadmap ids, bug ids, or provenance.
-6. Read first when duplicate risk is non-trivial.
-7. Finish with an explicit list of what was persisted, what authority owns it, and what still lacks a safe home.
+5. If a stable `praxis workflow <noun>` command exists, prefer it over a raw tool name.
+6. Do not invent ids, decision keys, roadmap ids, bug ids, or provenance.
+7. Read first when duplicate risk is non-trivial.
+8. Finish with an explicit list of what was persisted, what authority owns it, and what still lacks a safe home.
+9. A fix that shipped without a bug row still lacks durable defect authority; file and resolve it when the conversation clearly fixed a real bug.
+10. Enhancements, hardening, and planned follow-up work belong in roadmap authority unless they are genuinely describing a defect.
 
 ## Workflow
 
@@ -63,7 +78,9 @@ Separate the thread into explicit candidate records:
 
 - architecture decisions
 - other operator decisions
-- new roadmap work
+- new roadmap work or enhancements
+- defects still needing work
+- defects fixed in-thread but never tracked
 - closeout-ready roadmap or bug work
 - bugs discovered
 - residual knowledge worth recall later
@@ -77,6 +94,13 @@ Reject fluff:
 ### 2. Match each outcome to one authority
 
 Use the strongest write seam available.
+
+When the conversation includes implementation work or follow-up obligations, use this split:
+
+- defect still broken, deferred, or only partially mitigated -> `praxis workflow bugs file`
+- defect fixed in this thread but never tracked -> `praxis workflow bugs file`, then `attach_evidence`, then `resolve` only after real verification evidence exists
+- enhancement, hardening, refactor, or new capability request -> `praxis workflow roadmap write preview|validate|commit`
+- already tracked bug or roadmap item now complete -> `praxis workflow roadmap closeout preview|commit`
 
 For architectural decisions, prefer the typed surface:
 
@@ -104,22 +128,28 @@ Only use this path when you can provide the minimum durable packet:
 
 If you cannot satisfy that packet cleanly, do not write a generic decision row.
 
-Use roadmap write authority for new backlog shape:
+Use roadmap write authority through the stable CLI surface:
 
 ```text
-praxis workflow tools describe praxis_operator_write
+praxis workflow roadmap write preview --title "<title>" --intent-brief "<brief>"
+praxis workflow roadmap write validate --title "<title>" --intent-brief "<brief>"
+praxis workflow roadmap write commit --title "<title>" --intent-brief "<brief>"
 ```
 
 Use closeout when the conversation finished already-tracked work:
 
 ```text
-praxis workflow tools describe praxis_operator_closeout
+praxis workflow roadmap closeout preview [--bug-id <id>]... [--roadmap-item-id <id>]...
+praxis workflow roadmap closeout commit [--bug-id <id>]... [--roadmap-item-id <id>]...
 ```
 
-Use bug authority for defects:
+Use bug authority through the stable CLI surface:
 
 ```text
-praxis workflow tools describe praxis_bugs
+praxis workflow bugs search "<symptom or title>"
+praxis workflow bugs file ...
+praxis workflow bugs attach_evidence ...
+praxis workflow bugs resolve ...
 ```
 
 Use ingest only when no stronger operator table exists and the content still deserves durable recall:
@@ -162,12 +192,13 @@ praxis workflow tools call praxis_operator_decisions --input-json '{"action":"li
 
 Use the correct table for the actual object:
 
-- new roadmap item -> `praxis_operator_write` with `preview`, then `validate` when needed, then `commit`
-- completed roadmap item or bug set -> discover the exact existing ids first, run `praxis_operator_closeout` with `action:"preview"`, inspect the reconciliation result, then `commit` only those exact `bug_ids` and `roadmap_item_ids`
-- new bug -> `praxis_bugs`
+- new roadmap item or enhancement -> `praxis workflow roadmap write preview|validate|commit`
+- new bug for a defect still needing work -> `praxis workflow bugs file`, plus immediate evidence attachment when authoritative provenance exists
+- defect fixed during the conversation but not previously tracked -> duplicate check first with `praxis workflow bugs search`, then `file`, attach `observed_in`, `attempted_fix`, and `validates_fix` evidence as available, then `resolve` to `FIXED` only after validation evidence is attached
+- completed roadmap item or bug set -> discover the exact existing ids first, run `praxis workflow roadmap closeout preview`, inspect the reconciliation result, then `commit` only those exact `bug_ids` and `roadmap_item_ids`
 - recallable conversation artifact with no better home -> `praxis_ingest` using `kind:"conversation"` or another schema-valid kind
 
-Do not create a decision row just to say that work happened.
+Do not create a decision row just to say that work happened. Do not skip bug creation just because the patch already landed, and do not file an enhancement as a bug just because it was discovered while fixing something else.
 
 ### 5. Verify by reading back through the authority surface
 
@@ -176,7 +207,7 @@ After mutation, verify through the same operator lane or a read lane that sees t
 - `praxis workflow tools call praxis_operator_decisions --input-json '{"action":"list",...}'`
 - `praxis workflow query "<what changed?>"`
 - `praxis workflow bugs ...`
-- `praxis workflow tools call praxis_operator_roadmap_view --input-json '{...}'`
+- `praxis workflow roadmap view [--root <roadmap_item_id>]`
 - `praxis workflow recall "<distinctive phrase from the ingested conversation record>"`
 
 If you cannot verify the write, call that out plainly.
@@ -197,4 +228,7 @@ When using this skill, return:
 - writing architecture policy into freehand docs without updating DB authority
 - using `praxis_ingest` when a stronger operator table exists
 - using the decisions table as a junk drawer for bugs, roadmap items, or generic summaries
+- using raw tool calls for roadmap writes or closeout when the stable `praxis workflow roadmap` surface already exists
 - inventing write payload fields without `praxis workflow tools describe ...`
+- calling a shipped fix "done" without either a resolved bug row or a closeout receipt under the correct authority
+- filing enhancements as bugs, or leaving real follow-up enhancements as chat residue instead of roadmap rows

@@ -7,7 +7,7 @@ from runtime.workflow import mcp_bridge
 
 
 def test_augment_cli_command_uses_adapter_side_mcp_template_helper(monkeypatch) -> None:
-    import adapters.provider_registry as provider_registry_mod
+    import registry.provider_execution_registry as provider_registry_mod
 
     monkeypatch.setenv("PRAXIS_WORKFLOW_MCP_URL", "http://mcp.local/mcp?existing=1")
     monkeypatch.setenv("PRAXIS_WORKFLOW_MCP_SIGNING_SECRET", "test-secret")
@@ -56,7 +56,7 @@ def test_augment_cli_command_uses_adapter_side_mcp_template_helper(monkeypatch) 
 
 
 def test_augment_cli_command_returns_base_command_when_no_template(monkeypatch) -> None:
-    import adapters.provider_registry as provider_registry_mod
+    import registry.provider_execution_registry as provider_registry_mod
 
     monkeypatch.setenv("PRAXIS_WORKFLOW_MCP_SIGNING_SECRET", "test-secret")
     monkeypatch.setattr(provider_registry_mod, "resolve_mcp_args_template", lambda _provider_slug: [])
@@ -101,7 +101,7 @@ def test_google_cli_mcp_overlay_uses_project_settings_json(monkeypatch) -> None:
 
 
 def test_google_cli_mcp_command_uses_allowed_server_names(monkeypatch) -> None:
-    import adapters.provider_registry as provider_registry_mod
+    import registry.provider_execution_registry as provider_registry_mod
 
     monkeypatch.setenv("PRAXIS_WORKFLOW_MCP_SIGNING_SECRET", "test-secret")
     monkeypatch.setattr(

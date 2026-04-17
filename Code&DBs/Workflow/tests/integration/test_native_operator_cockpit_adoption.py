@@ -28,6 +28,31 @@ async def _fake_load_persona_activation(self, *, env, run_id, as_of):
     }
 
 
+class _SurfaceQueryConnection:
+    async def fetchrow(self, query: str, *params: object):
+        if "FROM workflow_runs" in query:
+            assert len(params) == 1
+            return {
+                "workspace_ref": "workspace.test",
+                "runtime_profile_ref": "runtime_profile.test",
+            }
+        if "FROM workflow_claim_lease_proposal_runtime" in query:
+            return None
+        return None
+
+    async def fetch(self, query: str, *params: object):
+        del query, params
+        return []
+
+    async def close(self) -> None:
+        return None
+
+
+async def _fake_surface_query_connect_database(source_env):
+    del source_env
+    return _SurfaceQueryConnection()
+
+
 def test_native_operator_surface_route_loader_uses_explicit_as_of_bound_snapshot(monkeypatch) -> None:
     as_of = datetime(2026, 4, 2, 21, 20, tzinfo=timezone.utc)
     env = {"PRAXIS_RUNTIME_PROFILE": "praxis"}
@@ -69,7 +94,7 @@ def test_native_operator_surface_route_loader_uses_explicit_as_of_bound_snapshot
     )
     monkeypatch.setattr(
         native_operator_surface,
-        "load_provider_route_authority_snapshot",
+        "load_provider_route_control_tower_snapshot",
         _fake_load_provider_route_authority_snapshot,
     )
 
@@ -200,6 +225,7 @@ def test_native_operator_surface_refuses_ambiguous_dispatch_selection(monkeypatc
                 work_item_workflow_binding_id="binding.1",
                 binding_kind="governed_by",
                 binding_status="active",
+                issue_id=None,
                 roadmap_item_id=None,
                 bug_id=None,
                 cutover_gate_id="gate.1",
@@ -214,6 +240,7 @@ def test_native_operator_surface_refuses_ambiguous_dispatch_selection(monkeypatc
                 work_item_workflow_binding_id="binding.2",
                 binding_kind="governed_by",
                 binding_status="active",
+                issue_id=None,
                 roadmap_item_id=None,
                 bug_id=None,
                 cutover_gate_id="gate.2",
@@ -258,8 +285,12 @@ def test_native_operator_surface_refuses_ambiguous_dispatch_selection(monkeypatc
         _fake_load_persona_activation,
     )
 
+    frontdoor = native_operator_surface.NativeOperatorSurfaceFrontdoor(
+        connect_database=_fake_surface_query_connect_database
+    )
+
     with pytest.raises(native_operator_surface.NativeOperatorSurfaceError) as exc_info:
-        native_operator_surface.query_native_operator_surface(
+        frontdoor.query_native_operator_surface(
             run_id="run.1",
             env=env,
             as_of=as_of,
@@ -267,11 +298,7 @@ def test_native_operator_surface_refuses_ambiguous_dispatch_selection(monkeypatc
 
     assert exc_info.value.reason_code == "native_operator_surface.workflow_class_ambiguous"
     assert route_calls == [{"env": env, "as_of": as_of}]
-    assert cutover_calls[0]["env"] == env
-    assert cutover_calls[0]["run_id"] == "run.1"
-    assert cutover_calls[0]["as_of"] == as_of
-    assert len(cutover_calls[0]["work_bindings"]) == 2
-    assert all(binding.workflow_run_id == "run.1" for binding in cutover_calls[0]["work_bindings"])
+    assert cutover_calls == []
     assert cockpit_calls == []
 
 
@@ -366,6 +393,7 @@ def test_native_operator_surface_fails_closed_when_route_authority_is_missing(
                 work_item_workflow_binding_id="binding.1",
                 binding_kind="governed_by",
                 binding_status="active",
+                issue_id=None,
                 roadmap_item_id=None,
                 bug_id=None,
                 cutover_gate_id="gate.1",
@@ -410,8 +438,12 @@ def test_native_operator_surface_fails_closed_when_route_authority_is_missing(
         _fake_load_persona_activation,
     )
 
+    frontdoor = native_operator_surface.NativeOperatorSurfaceFrontdoor(
+        connect_database=_fake_surface_query_connect_database
+    )
+
     with pytest.raises(native_operator_surface.NativeOperatorSurfaceError) as exc_info:
-        native_operator_surface.query_native_operator_surface(
+        frontdoor.query_native_operator_surface(
             run_id="run.1",
             env=env,
             as_of=as_of,
@@ -431,6 +463,7 @@ def test_native_operator_surface_fails_closed_when_route_authority_is_missing(
                     work_item_workflow_binding_id="binding.1",
                     binding_kind="governed_by",
                     binding_status="active",
+                    issue_id=None,
                     roadmap_item_id=None,
                     bug_id=None,
                     cutover_gate_id="gate.1",
@@ -454,6 +487,7 @@ def test_native_operator_surface_fails_closed_when_route_authority_is_missing(
                     work_item_workflow_binding_id="binding.1",
                     binding_kind="governed_by",
                     binding_status="active",
+                    issue_id=None,
                     roadmap_item_id=None,
                     bug_id=None,
                     cutover_gate_id="gate.1",
@@ -564,6 +598,7 @@ def test_native_operator_surface_fails_closed_when_cutover_truth_is_missing(
                 work_item_workflow_binding_id="binding.1",
                 binding_kind="governed_by",
                 binding_status="active",
+                issue_id=None,
                 roadmap_item_id=None,
                 bug_id=None,
                 cutover_gate_id="gate.1",
@@ -608,8 +643,12 @@ def test_native_operator_surface_fails_closed_when_cutover_truth_is_missing(
         _fake_load_persona_activation,
     )
 
+    frontdoor = native_operator_surface.NativeOperatorSurfaceFrontdoor(
+        connect_database=_fake_surface_query_connect_database
+    )
+
     with pytest.raises(native_operator_surface.NativeOperatorSurfaceError) as exc_info:
-        native_operator_surface.query_native_operator_surface(
+        frontdoor.query_native_operator_surface(
             run_id="run.1",
             env=env,
             as_of=as_of,
@@ -633,6 +672,7 @@ def test_native_operator_surface_fails_closed_when_cutover_truth_is_missing(
                     work_item_workflow_binding_id="binding.1",
                     binding_kind="governed_by",
                     binding_status="active",
+                    issue_id=None,
                     roadmap_item_id=None,
                     bug_id=None,
                     cutover_gate_id="gate.1",

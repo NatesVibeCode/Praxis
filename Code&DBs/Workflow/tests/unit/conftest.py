@@ -36,10 +36,10 @@ def _patch_imported_native_authority_defaults(
     monkeypatch: pytest.MonkeyPatch,
     request: pytest.FixtureRequest,
 ) -> None:
-    def _default_native_authority_refs() -> tuple[str, str]:
+    def _default_native_authority_refs(conn=None) -> tuple[str, str]:
         return (_UNIT_WORKSPACE_REF, _UNIT_RUNTIME_PROFILE_REF)
 
-    def _default_native_runtime_profile_ref_required() -> str:
+    def _default_native_runtime_profile_ref_required(conn=None) -> str:
         return _UNIT_RUNTIME_PROFILE_REF
 
     if Path(str(request.node.fspath)).name not in _NATIVE_AUTHORITY_STRICT_TESTS:

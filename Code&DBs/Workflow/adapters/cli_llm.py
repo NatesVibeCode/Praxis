@@ -1,7 +1,7 @@
 """CLI-based LLM adapter with prompt-channel support, no filesystem access.
 
 This adapter is a thin executor. ALL provider-specific knowledge lives
-in provider_registry.py. This module:
+in the provider execution registry authority. This module:
   1. Reads the registry profile for the requested provider
   2. Builds the command from the registry
   3. Sends the prompt via the registry-declared channel
@@ -30,7 +30,7 @@ from .deterministic import (
     cancelled_task_result,
 )
 from .docker_runner import run_model, ExecutionResult
-from .provider_registry import (
+from registry.provider_execution_registry import (
     default_provider_slug,
     get_profile,
     build_command,
@@ -73,7 +73,7 @@ class CLILLMResult:
 
 # PROVIDER_PROFILES dict built from registry at import time.
 # Tests and other code that reads this dict get registry data, not hardcoded values.
-from .provider_registry import get_all_profiles as _get_all_profiles
+from registry.provider_execution_registry import get_all_profiles as _get_all_profiles
 PROVIDER_PROFILES: dict[str, dict[str, Any]] = {
     slug: {
         "binary": p.binary,
@@ -254,6 +254,11 @@ def _invoke_cli(
             execution_control=execution_control,
         )
     except OSError as exc:
+        raise CLIAdapterError(
+            "cli_adapter.exec_error",
+            f"failed to execute {profile.binary}: {exc}",
+        )
+    except RuntimeError as exc:
         raise CLIAdapterError(
             "cli_adapter.exec_error",
             f"failed to execute {profile.binary}: {exc}",

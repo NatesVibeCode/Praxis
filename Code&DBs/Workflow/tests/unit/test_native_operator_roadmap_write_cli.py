@@ -73,6 +73,8 @@ def test_native_operator_roadmap_write_uses_shared_gate(monkeypatch) -> None:
                 "p1",
                 "--depends-on",
                 "roadmap_item.authority.cleanup.validation_review",
+                "--lifecycle",
+                "claimed",
                 "--phase-ready",
                 "--commit",
             ],
@@ -93,6 +95,7 @@ def test_native_operator_roadmap_write_uses_shared_gate(monkeypatch) -> None:
     assert captured["payload"]["depends_on"] == (
         "roadmap_item.authority.cleanup.validation_review",
     )
+    assert captured["payload"]["lifecycle"] == "claimed"
     assert captured["payload"]["phase_ready"] is True
     assert payload["committed"] is True
     assert payload["operation_receipt"]["operation_name"] == "operator.roadmap_write"
