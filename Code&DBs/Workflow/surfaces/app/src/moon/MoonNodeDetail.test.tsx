@@ -245,4 +245,58 @@ describe('MoonNodeDetail', () => {
     expect(screen.getByLabelText('Required inputs field: payload')).toBeInTheDocument();
     expect(screen.getByLabelText('Outputs field: verified_event')).toBeInTheDocument();
   });
+
+  test('keeps long route and contract values in the DOM for readable wrapping surfaces', () => {
+    const longRoute = 'integration/very-long-authority-route/that-should-wrap-cleanly-inside-the-detail-surface';
+    const longField = 'customer.primary_account.executive.owner_email_address';
+    const node: OrbitNode = {
+      id: 'n-long',
+      kind: 'step',
+      title: 'Long contract step',
+      summary: 'Long summary',
+      glyphType: 'tool',
+      ringState: 'decided-grounded',
+      isOnDominantPath: true,
+      issueCount: 0,
+      needsBadge: false,
+      dominantPathIndex: 0,
+      x: 0,
+      y: 0,
+      rank: 0,
+      route: longRoute,
+    };
+
+    const buildGraph: NonNullable<BuildPayload['build_graph']> = {
+      nodes: [
+        {
+          node_id: 'n-long',
+          kind: 'step',
+          title: 'Long contract step',
+          route: longRoute,
+          required_inputs: [longField],
+          outputs: ['research.summary'],
+          persistence_targets: [],
+        },
+      ],
+      edges: [],
+    };
+
+    render(
+      <MoonNodeDetail
+        node={node}
+        content={null}
+        workflowId="wf_1"
+        onMutate={vi.fn()}
+        onClose={vi.fn()}
+        buildGraph={buildGraph}
+        onUpdateBuildGraph={vi.fn()}
+      />,
+    );
+
+    expect(screen.getAllByText(`Route: ${longRoute}`)).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole('button', { name: /show advanced contract fields/i }));
+
+    expect(screen.getByDisplayValue(longField)).toBeInTheDocument();
+  });
 });

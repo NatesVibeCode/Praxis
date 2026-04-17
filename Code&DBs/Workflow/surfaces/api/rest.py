@@ -2363,6 +2363,26 @@ async def manifests_history_get(request: Request) -> Response:
 async def manifests_get(request: Request, manifest_id: str) -> Response:
     return await _route_to_handler(request)
 
+
+@app.get("/api/handoff/latest")
+async def handoff_latest_get(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+
+@app.get("/api/handoff/lineage")
+async def handoff_lineage_get(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+
+@app.get("/api/handoff/status")
+async def handoff_status_get(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+
+@app.get("/api/handoff/history")
+async def handoff_history_get(request: Request) -> Response:
+    return await _route_to_handler(request)
+
 # -- Checkpoints --
 @app.post("/api/checkpoints")
 async def checkpoints_post(request: Request) -> Response:

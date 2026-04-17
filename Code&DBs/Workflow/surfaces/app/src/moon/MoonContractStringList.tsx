@@ -188,7 +188,6 @@ export function MoonContractStringListField({
             placeholder={inputPlaceholder}
             autoComplete="off"
             spellCheck={false}
-            style={{ marginBottom: 8 }}
             aria-autocomplete="list"
             aria-controls={`${fieldId}-suggest`}
           />
@@ -222,7 +221,7 @@ export function MoonContractStringListField({
               </div>
             </>
           ) : null}
-          <div className="moon-dock-form__row" style={{ flexWrap: 'wrap', gap: 6 }}>
+          <div className="moon-dock-form__actions">
             <button
               type="button"
               className="moon-dock-form__btn--small"
@@ -248,7 +247,7 @@ export function MoonContractStringListField({
             </button>
           </div>
         </div>
-        )}
-        </div>
-        );
-        }
+      )}
+    </div>
+  );
+}

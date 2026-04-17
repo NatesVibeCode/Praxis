@@ -6,6 +6,7 @@ from ._shared import RouteEntry, RouteMatcher, _exact, _prefix, _prefix_suffix
 from . import _query_bugs as _bugs
 from . import _query_catalog as _catalog
 from . import _query_dashboard as _dashboard
+from . import _query_handoff as _handoff
 from . import _query_files as _files
 from . import _query_objects as _objects
 from . import _query_workflows as _workflows
@@ -78,6 +79,10 @@ QUERY_GET_ROUTES: list[RouteEntry] = [
     (_exact("/api/manifest-heads"), _handler._handle_manifest_heads_get),
     (_exact("/api/manifests"), _handler._handle_manifests_get),
     (_exact("/api/manifests/history"), _handler._handle_manifest_history_get),
+    (_exact("/api/handoff/latest"), _handoff._handle_handoff_latest_get),
+    (_exact("/api/handoff/lineage"), _handoff._handle_handoff_lineage_get),
+    (_exact("/api/handoff/status"), _handoff._handle_handoff_status_get),
+    (_exact("/api/handoff/history"), _handoff._handle_handoff_history_get),
     (_exact("/api/templates"), _catalog._handle_templates_get),
     (_exact("/api/models"), _catalog._handle_models_get),
     (_exact("/api/models/market"), _catalog._handle_market_models_get),

@@ -11,8 +11,8 @@
   z-index: 110;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 12px;
+  gap: 14px;
+  padding: 14px;
   border-radius: 20px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   background:
@@ -31,7 +31,7 @@
 
 .menu-panel--popover {
   width: min(360px, calc(100vw - 24px));
-  max-height: min(70vh, 520px);
+  max-height: min(72vh, 560px);
 }
 
 .menu-panel__header {
@@ -42,13 +42,14 @@
 }
 
 .menu-panel__title {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
 }
 
 .menu-panel__subtitle {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
+  line-height: 1.45;
 }
 
 .menu-panel__search {
@@ -58,7 +59,7 @@
   background: rgba(255, 255, 255, 0.03);
   color: var(--text);
   padding: 10px 12px;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .menu-panel__search:focus {
@@ -84,7 +85,7 @@
 
 .menu-panel__section-title {
   padding: 0 6px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   color: var(--text-muted);
   text-transform: uppercase;
@@ -94,7 +95,7 @@
 .menu-panel__list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .menu-panel__item {
@@ -103,7 +104,8 @@
   align-items: center;
   gap: 12px;
   width: 100%;
-  padding: 12px 13px;
+  min-height: 52px;
+  padding: 13px 14px;
   border-radius: 16px;
   border: 1px solid transparent;
   background: rgba(255, 255, 255, 0.02);
@@ -138,13 +140,13 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  min-height: 24px;
+  width: 28px;
+  min-height: 28px;
   margin-top: 0;
   border-radius: 9px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.04);
-  font-size: 12px;
+  font-size: 13px;
   color: inherit;
 }
 
@@ -163,7 +165,7 @@
 }
 
 .menu-panel__label {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
@@ -172,12 +174,12 @@
 
 .menu-panel__check {
   color: var(--accent);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
 }
 
 .menu-panel__description {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
   line-height: 1.4;
   display: -webkit-box;
@@ -191,12 +193,12 @@
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
-  min-height: 18px;
+  min-height: 22px;
   padding: 4px 8px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.06);
-  font-size: 11px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   color: var(--text-muted);
 }
@@ -204,7 +206,7 @@
 .menu-panel__empty {
   padding: 18px 14px;
   text-align: center;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-muted);
   border-radius: 14px;
   border: 1px dashed rgba(255, 255, 255, 0.14);

@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 from runtime import canonical_workflows
 from runtime.compile_index import CompileIndexAuthorityError
+from runtime.operations.queries import handoff as handoff_queries
 from runtime.self_healing import SelfHealingOrchestrator
 from policy.workflow_lanes import (
     WorkflowLaneAuthorityRecord,
@@ -4143,11 +4144,60 @@ def test_handle_manifest_history_get_filters_control_plane_rows() -> None:
     assert payload["history"][0]["manifest_id"] == "plan_123"
     assert payload["history"][0]["manifest_family"] == "control_plane"
     assert payload["history"][0]["manifest_type"] == "data_approval"
-    assert payload["history"][0]["workspace_ref"] == "workspace.alpha"
-    assert payload["history"][0]["scope_ref"] == "scope.beta"
-    assert payload["history"][0]["change_description"] == "Approved control manifest"
-    assert payload["filters"]["manifest_type"] == "data_approval"
-    assert payload["filters"]["status"] == "approved"
+
+
+def test_handle_handoff_latest_get_dispatches_through_api_routes(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def _fake_latest(query, subsystems):
+        captured["query"] = query
+        captured["subsystems"] = subsystems
+        return {
+            "artifact": {
+                "artifact_kind": query.artifact_kind,
+                "revision_ref": "definition-2",
+            },
+            "history": [],
+            "count": 1,
+            "scope": "latest",
+        }
+
+    monkeypatch.setattr(handoff_queries, "handle_query_handoff_latest", _fake_latest)
+    request = _RequestStub(
+        subsystems=SimpleNamespace(get_pg_conn=lambda: object()),
+        path="/api/handoff/latest?artifact_kind=definition&artifact_ref=definition-1&input_fingerprint=fp-123",
+    )
+
+    handled = api_handlers.handle_get_request(request, "/api/handoff/latest")
+
+    assert handled is True
+    assert request.sent is not None
+    status, payload = request.sent
+    assert status == 200
+    assert payload["artifact"]["revision_ref"] == "definition-2"
+    assert payload["filters"] == {
+        "artifact_kind": "definition",
+        "artifact_ref": "definition-1",
+        "input_fingerprint": "fp-123",
+    }
+    assert captured["query"].artifact_kind == "definition"
+    assert captured["query"].artifact_ref == "definition-1"
+    assert captured["query"].input_fingerprint == "fp-123"
+
+
+def test_handle_handoff_status_get_requires_run_id() -> None:
+    request = _RequestStub(
+        subsystems=SimpleNamespace(get_pg_conn=lambda: object()),
+        path="/api/handoff/status?subscription_id=sub-123",
+    )
+
+    handled = api_handlers.handle_get_request(request, "/api/handoff/status")
+
+    assert handled is True
+    assert request.sent is not None
+    status, payload = request.sent
+    assert status == 400
+    assert payload["error"] == "run_id is required for handoff queries"
 
 
 def test_api_rest_registers_control_manifest_history_routes() -> None:

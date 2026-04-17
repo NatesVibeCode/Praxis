@@ -1,5 +1,5 @@
 @layer moon-layout {
-/* Moon Build — flex layout with edge docks that push center inward */
+/* Moon Build — yielding desktop docks with overlay fallbacks on small screens */
 
 .moon-page {
   position: absolute;
@@ -75,60 +75,83 @@
   flex-direction: column;
   overflow: hidden;
   position: relative;
-  padding: 0;
+  padding: 0 0 12px;
   gap: 0;
 }
 
 /* Middle row: left | center | right */
 .moon-middle {
   flex: 1;
-  display: flex;
+  display: grid;
+  grid-template-columns: 0 minmax(0, 1fr) 0;
+  gap: 24px;
   overflow: hidden;
   position: relative;
   min-height: 0;
+  padding: 0 20px 24px;
 }
 
-/* Side docks (Absolute Overlays) */
+.moon-middle--action-open {
+  grid-template-columns: clamp(360px, 30vw, 460px) minmax(0, 1fr) 0;
+}
+
+.moon-middle--context-open {
+  grid-template-columns: 0 minmax(0, 1fr) clamp(400px, 34vw, 520px);
+}
+
+.moon-middle--action-open.moon-middle--context-open {
+  grid-template-columns: clamp(360px, 30vw, 460px) minmax(0, 1fr) clamp(400px, 34vw, 520px);
+}
+
+/* Side docks */
 .moon-dock-overlay {
-  position: absolute;
-  top: 0;
-  bottom: 0;
+  position: relative;
   z-index: var(--moon-z-dock);
-  width: var(--moon-dock-open);
-  min-width: var(--moon-dock-side-min);
-  max-width: var(--moon-dock-side-max);
-  padding: var(--moon-nav-clearance) var(--moon-dock-pad-h) var(--moon-dock-pad-v);
+  min-width: 0;
+  width: 100%;
+  max-width: none;
+  padding: calc(var(--moon-nav-clearance) + 4px) var(--moon-dock-pad-h) var(--moon-dock-pad-v);
   background: linear-gradient(180deg, var(--moon-shell-overlay-start), var(--moon-shell-overlay-end));
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
-  transition: transform var(--moon-motion-dock), opacity var(--moon-motion-dock);
-  opacity: 0;
-  pointer-events: none;
+  transition: border-color var(--moon-motion-dock), box-shadow var(--moon-motion-dock), opacity var(--moon-motion-dock);
+  opacity: 1;
+  pointer-events: auto;
   overflow-y: auto;
   overflow-x: hidden;
   box-shadow: var(--moon-shadow-line-soft);
+  min-height: 0;
 }
 
 .moon-dock-overlay--left {
-  left: 0;
-  transform: translateX(-100%);
   border-right: 1px solid var(--moon-white-a08);
   border-top-right-radius: 24px;
   border-bottom-right-radius: 24px;
 }
 
 .moon-dock-overlay--right {
-  right: 0;
-  transform: translateX(100%);
   border-left: 1px solid var(--moon-white-a08);
   border-top-left-radius: 24px;
   border-bottom-left-radius: 24px;
 }
 
 .moon-dock-overlay--open {
-  transform: translateX(0);
   opacity: 1;
   pointer-events: all;
+}
+
+.moon-dock-overlay:not(.moon-dock-overlay--open) {
+  padding: 0;
+  border-width: 0;
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
+  background: transparent;
+  box-shadow: none;
+}
+
+.moon-dock-overlay:not(.moon-dock-overlay--open) > * {
+  display: none;
 }
 
 /* Legacy flex classes (Hidden) */
@@ -166,12 +189,68 @@
   justify-content: center;
   position: relative;
   overflow: auto;
-  transition: flex var(--moon-motion-dock);
-  padding: 12px 18px 40px;
+  min-width: 0;
+  transition: flex var(--moon-motion-dock), padding var(--moon-motion-dock);
+  padding: 28px 32px 72px;
 }
 
 .moon-center--empty {
-  padding-bottom: 72px;
+  padding-bottom: 96px;
+}
+
+.moon-center__dock-actions {
+  position: absolute;
+  top: calc(var(--moon-nav-clearance) - 8px);
+  left: 24px;
+  right: 24px;
+  z-index: var(--moon-z-overlay);
+  display: flex;
+  justify-content: flex-start;
+  pointer-events: none;
+}
+
+.moon-center__dock-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  pointer-events: auto;
+}
+
+.moon-center__dock-btn {
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--moon-white-a12);
+  background: var(--moon-shell-ghost);
+  color: var(--moon-fg-muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  box-shadow: var(--moon-shadow-line-soft);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: border-color 180ms ease, background 180ms ease, color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
+}
+
+.moon-center__dock-btn:hover {
+  transform: translateY(-1px);
+  border-color: var(--moon-accent-a34);
+  color: var(--moon-fg);
+  background: var(--moon-white-a05);
+  box-shadow: var(--moon-shadow-line-mid);
+}
+
+.moon-center__dock-btn--active {
+  border-color: var(--moon-accent-a44);
+  color: var(--moon-fg);
+  background: var(--moon-accent-a08);
+  box-shadow: var(--moon-shadow-accent-line-soft);
+}
+
+.moon-center__dock-btn-label {
+  white-space: nowrap;
 }
 
 /* Bottom dock (Release) */
@@ -242,10 +321,11 @@
 
 /* Bottom half-moon */
 .moon-halfmoon--bottom {
-  bottom: 0;
+  bottom: 10px;
   left: 50%;
   transform: translateX(-50%);
-  padding: 8px 36px;
+  min-height: 44px;
+  padding: 0 42px;
   border-top-left-radius: 28px;
   border-top-right-radius: 28px;
   border-bottom: none;
@@ -281,13 +361,29 @@
 }
 
 @media (max-width: 900px) {
+  .moon-body {
+    padding-bottom: 0;
+  }
+
+  .moon-middle {
+    display: flex;
+    gap: 0;
+    padding: 0;
+  }
+
   .moon-dock-overlay {
+    position: absolute;
     top: 10px;
     bottom: 10px;
     width: min(calc(100vw - 28px), 420px);
     min-width: 0;
     max-width: calc(100vw - 20px);
     padding: 52px 18px 24px;
+    opacity: 0;
+    pointer-events: none;
+    overflow-y: auto;
+    background: linear-gradient(180deg, var(--moon-shell-overlay-start), var(--moon-shell-overlay-end));
+    box-shadow: var(--moon-shadow-line-soft);
   }
 
   .moon-dock-overlay--left {
@@ -300,6 +396,26 @@
     right: 10px;
     transform: translateX(calc(100% + 20px));
     border-radius: 24px;
+  }
+
+  .moon-dock-overlay:not(.moon-dock-overlay--open) > * {
+    display: block;
+  }
+
+  .moon-dock-overlay--open {
+    transform: translateX(0);
+    opacity: 1;
+    pointer-events: all;
+  }
+
+  .moon-center {
+    padding: 24px 20px 72px;
+  }
+
+  .moon-center__dock-actions {
+    top: 14px;
+    left: 14px;
+    right: 14px;
   }
 }
 
@@ -323,6 +439,28 @@
 
   .moon-dock-overlay--open {
     transform: translateY(0);
+  }
+
+  .moon-center {
+    padding: 18px 12px 72px;
+  }
+
+  .moon-center__dock-actions {
+    left: 10px;
+    right: 10px;
+    top: 10px;
+    justify-content: center;
+  }
+
+  .moon-center__dock-group {
+    width: 100%;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .moon-center__dock-btn {
+    min-height: 38px;
+    padding-inline: 14px;
   }
 }
 

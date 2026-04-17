@@ -9,6 +9,7 @@ const moonBuildPageMocks = vi.hoisted(() => ({
   getCatalog: vi.fn(),
   loadCatalog: vi.fn(),
   mutate: vi.fn(),
+  payload: null as BuildPayload | null,
   registerUndoExecutor: vi.fn(() => () => undefined),
   reload: vi.fn(),
   runUiAction: vi.fn(async ({ apply }: { apply: () => void | Promise<void> }) => {
@@ -22,7 +23,7 @@ const moonBuildPageMocks = vi.hoisted(() => ({
 
 vi.mock('../shared/hooks/useBuildPayload', () => ({
   useBuildPayload: () => ({
-    payload: null,
+    payload: moonBuildPageMocks.payload,
     loading: false,
     error: null,
     mutate: moonBuildPageMocks.mutate,
@@ -51,14 +52,16 @@ vi.mock('../menu', () => ({
     open,
     title,
     sections,
+    width,
   }: {
     open: boolean;
     title?: string;
     sections: Array<{ id: string; items: Array<{ id: string; label: string; disabled?: boolean; onSelect: () => void }> }>;
+    width?: number;
   }) => {
     if (!open) return null;
     return (
-      <div aria-label={title || 'menu'}>
+      <div aria-label={title || 'menu'} data-width={width}>
         {sections.flatMap((section) =>
           section.items.map((item) => (
             <button key={item.id} type="button" disabled={item.disabled} onClick={item.onSelect}>
@@ -132,6 +135,7 @@ vi.mock('./useMoonDrag', () => ({
 describe('MoonBuildPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    moonBuildPageMocks.payload = null;
     const triggerCatalog = [
       {
         id: 'trigger-manual',
@@ -206,5 +210,54 @@ describe('MoonBuildPage', () => {
     expect(screen.getByRole('textbox')).toHaveValue(
       'Research competitor pricing, classify by tier, draft a comparison report, notify the team on Slack',
     );
+  });
+
+  test('applies the yielding detail-dock class when the detail panel is opened on a populated graph', () => {
+    moonBuildPageMocks.loadCatalog.mockImplementation(() => new Promise(() => undefined));
+    moonBuildPageMocks.payload = {
+      definition: {},
+      build_graph: {
+        nodes: [
+          {
+            node_id: 'node-1',
+            kind: 'step',
+            title: 'Webhook',
+            route: 'trigger/webhook',
+            status: 'ready',
+          },
+          {
+            node_id: 'node-2',
+            kind: 'step',
+            title: 'Next step',
+            route: '',
+          },
+        ],
+        edges: [
+          {
+            edge_id: 'edge-1-2',
+            kind: 'sequence',
+            from_node_id: 'node-1',
+            to_node_id: 'node-2',
+          },
+        ],
+      },
+    };
+
+    render(<MoonBuildPage workflowId="wf-123" />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open Detail dock' }));
+
+    expect(screen.getByTestId('moon-middle')).toHaveClass('moon-middle--context-open');
+  });
+
+  test('uses the larger trigger picker width contract', async () => {
+    render(
+      <MoonBuildPage
+        workflowId={null}
+        initialMode="trigger-picker"
+      />,
+    );
+
+    expect(await screen.findByLabelText('Choose a trigger')).toHaveAttribute('data-width', '400');
   });
 });

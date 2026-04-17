@@ -169,6 +169,15 @@ def test_api_routes_endpoint_can_include_internal_routes() -> None:
     assert routes_route["visibility"] == "internal"
 
 
+def test_api_handoff_routes_are_registered_on_the_fastapi_app() -> None:
+    paths = {route.path for route in rest.app.routes if getattr(route, "path", None)}
+
+    assert "/api/handoff/latest" in paths
+    assert "/api/handoff/lineage" in paths
+    assert "/api/handoff/status" in paths
+    assert "/api/handoff/history" in paths
+
+
 def test_query_route_is_gone_from_rest_surface(monkeypatch) -> None:
     recorded: list[dict[str, Any]] = []
     fake_subsystems = object()

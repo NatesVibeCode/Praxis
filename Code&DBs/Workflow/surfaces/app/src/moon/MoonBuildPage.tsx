@@ -89,6 +89,28 @@ function HalfMoon({ position, label, onClick }: {
   );
 }
 
+function DockToggleButton({
+  active,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`moon-center__dock-btn${active ? ' moon-center__dock-btn--active' : ''}`}
+      aria-label={`Open ${label} dock`}
+      aria-pressed={active}
+      onClick={onClick}
+    >
+      <span className="moon-center__dock-btn-label">{label}</span>
+    </button>
+  );
+}
+
 type GatePodTone = 'empty' | 'core' | 'later' | 'legacy';
 
 function gatePodTone(edge: OrbitEdge, item?: CatalogItem | null): GatePodTone {
@@ -1147,6 +1169,12 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
     () => getMoonAppendPosition(viewModel.layout.width),
     [viewModel.layout.width],
   );
+  const middleClassName = [
+    'moon-middle',
+    actionOpen ? 'moon-middle--action-open' : '',
+    contextOpen ? 'moon-middle--context-open' : '',
+    releaseOpen ? 'moon-middle--release-open' : '',
+  ].filter(Boolean).join(' ');
 
   return (
     <div className="moon-page" style={MOON_LAYOUT_CSS_VARS} data-moon-glow-profile={moonGlowProfile}>
@@ -1160,7 +1188,7 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
       )}
       <div className="moon-body">
         {/* Middle row */}
-        <div className="moon-middle">
+        <div className={middleClassName} data-testid="moon-middle">
           {/* Left dock: Action (Overlay) */}
           <div className={`moon-dock-overlay moon-dock-overlay--left${actionOpen ? ' moon-dock-overlay--open' : ''}`}>
             {actionOpen && (
@@ -1183,8 +1211,12 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
           <div className={`moon-center${!hasNodes ? ' moon-center--empty' : ''}`} ref={centerRef}>
             {hasNodes && (
               <>
-                {!actionOpen && <HalfMoon position="left" label="Action" onClick={() => openDock('action')} />}
-                {!contextOpen && <HalfMoon position="right" label="Detail" onClick={() => openDock('context')} />}
+                <div className="moon-center__dock-actions" aria-label="Workspace panels">
+                  <div className="moon-center__dock-group">
+                    <DockToggleButton active={actionOpen} label="Action" onClick={() => openDock('action')} />
+                    <DockToggleButton active={contextOpen} label="Detail" onClick={() => openDock('context')} />
+                  </div>
+                </div>
                 {!releaseOpen && !state.runViewOpen && <HalfMoon position="bottom" label="Release" onClick={() => dispatch({ type: 'TOGGLE_RELEASE' })} />}
               </>
             )}

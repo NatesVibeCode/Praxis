@@ -6,6 +6,19 @@ import {
 } from './moonLayout';
 
 describe('moonLayout', () => {
+  test('uses the larger Moon workspace geometry contract', () => {
+    expect(MOON_LAYOUT).toMatchObject({
+      graphAppendRadius: 24,
+      graphAppendSize: 48,
+      minGraphHeight: 260,
+      nodeRadius: 36,
+      nodeSize: 72,
+      nodeSpacing: 144,
+      projectedNodeSize: 52,
+      triggerMenuWidth: 400,
+    });
+  });
+
   test('derives node and append positions from the shared layout authority', () => {
     expect(getMoonNodeCanvasPosition({ x: 0, y: 0 })).toEqual({
       left: MOON_LAYOUT.canvasPad - MOON_LAYOUT.nodeRadius,

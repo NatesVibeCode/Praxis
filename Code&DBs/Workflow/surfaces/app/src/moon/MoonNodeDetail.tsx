@@ -1324,128 +1324,129 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
       {/* Gate config — when an edge is selected */}
       {selectedEdge && onApplyGate ? (
         <>
-          <div className="moon-dock__title">Gate</div>
-          <div className="moon-dock__subtitle">{edgeFromLabel} &rarr; {edgeToLabel}</div>
-          <div className="moon-dock__sep" />
-          <div className="moon-gate-panel">
-            <div className="moon-gate-panel__meta">
-              <span className="moon-surface-badge">
-                {selectedGateCatalogModel?.policy.badge || (selectedEdge.gateState === 'empty' ? 'Core now' : 'Gate')}
-              </span>
-              {selectedGateCatalogModel && (
-                <span className={`moon-truth-badge moon-truth-badge--${selectedGateCatalogModel.truth.category}`}>
-                  {selectedGateCatalogModel.truth.badge}
-                </span>
-              )}
-            </div>
-            <div className="moon-gate-panel__title">
-              {selectedEdge.gateState === 'empty'
-                ? 'This connection is ungated'
-                : selectedEdge.gateLabel || selectedGateCatalogModel?.item.label || 'Gate configured'}
-            </div>
+          <div className="moon-dock-header">
+            <div className="moon-dock__title">Gate</div>
+            <div className="moon-dock__subtitle">{edgeFromLabel} &rarr; {edgeToLabel}</div>
           </div>
-
-          {selectableGateModels.length > 0 && (
-            <div className="moon-branch-editor__control">
-              <label className="moon-dock-form__label" htmlFor="moon-gate-family-select">Gate type</label>
-              <div className="moon-dock-form__row">
-                <select
-                  id="moon-gate-family-select"
-                  className="moon-dock-form__select"
-                  value={selectedEdge.gateFamily || ''}
-                  onChange={e => handleGateFamilyChange(e.target.value)}
-                >
-                  <option value="" disabled>{selectedEdge.gateState === 'empty' ? 'Choose a gate' : 'Choose gate type'}</option>
-                  {selectableGateModels.map(({ item, truth, policy }) => (
-                    <option key={item.id} value={item.gateFamily}>
-                      {item.label} - {policy.badge} - {truth.badge}
-                    </option>
-                  ))}
-                </select>
+          <div className="moon-dock-section-card moon-dock-section-card--dense">
+            <div className="moon-gate-panel">
+              <div className="moon-gate-panel__meta">
+                <span className="moon-surface-badge">
+                  {selectedGateCatalogModel?.policy.badge || (selectedEdge.gateState === 'empty' ? 'Core now' : 'Gate')}
+                </span>
+                {selectedGateCatalogModel && (
+                  <span className={`moon-truth-badge moon-truth-badge--${selectedGateCatalogModel.truth.category}`}>
+                    {selectedGateCatalogModel.truth.badge}
+                  </span>
+                )}
+              </div>
+              <div className="moon-gate-panel__title">
+                {selectedEdge.gateState === 'empty'
+                  ? 'This connection is ungated'
+                  : selectedEdge.gateLabel || selectedGateCatalogModel?.item.label || 'Gate configured'}
               </div>
             </div>
-          )}
 
-          {isFailureEdge && (
-            <>
-              <div className="moon-branch-editor__hint" style={{ marginBottom: 8 }}>
-                Runs only when {failureSourceLabel} fails.
-              </div>
-              <div className="moon-gate-panel__actions">
-                <button
-                  className="moon-dock-form__btn"
-                  onClick={handleClearFailureGate}
-                  disabled={failureGateLoading || !buildGraph || !canCommitGraph}
-                >
-                  {failureGateLoading ? <><span className="moon-spinner" /> Updating...</> : 'Make normal path'}
-                </button>
-              </div>
-              {failureGateError && <div className="moon-dock-form__error">{failureGateError}</div>}
-            </>
-          )}
-
-          {isConditionalEdge && (
-            <>
-              <div className="moon-branch-editor">
-                <div className="moon-branch-editor__routes" aria-label="Branch routes">
-                  <div className={`moon-branch-editor__route${buildEdgeRelease?.branch_reason === 'then' ? ' moon-branch-editor__route--active' : ''}`}>
-                    <span className="moon-branch-editor__route-label">Then</span>
-                    <span className="moon-branch-editor__route-target">{conditionalTargets.thenTarget || edgeToLabel || 'Then path'}</span>
-                  </div>
-                  <div className={`moon-branch-editor__route${buildEdgeRelease?.branch_reason === 'else' ? ' moon-branch-editor__route--active' : ''}`}>
-                    <span className="moon-branch-editor__route-label">Else</span>
-                    <span className="moon-branch-editor__route-target">{conditionalTargets.elseTarget || 'Inverse path'}</span>
-                  </div>
+            {selectableGateModels.length > 0 && (
+              <div className="moon-branch-editor__control">
+                <label className="moon-dock-form__label" htmlFor="moon-gate-family-select">Gate type</label>
+                <div className="moon-dock-form__row">
+                  <select
+                    id="moon-gate-family-select"
+                    className="moon-dock-form__select"
+                    value={selectedEdge.gateFamily || ''}
+                    onChange={e => handleGateFamilyChange(e.target.value)}
+                  >
+                    <option value="" disabled>{selectedEdge.gateState === 'empty' ? 'Choose a gate' : 'Choose gate type'}</option>
+                    {selectableGateModels.map(({ item, truth, policy }) => (
+                      <option key={item.id} value={item.gateFamily}>
+                        {item.label} - {policy.badge} - {truth.badge}
+                      </option>
+                    ))}
+                  </select>
                 </div>
+              </div>
+            )}
 
-                <div className="moon-branch-editor__control">
-                  <label className="moon-dock-form__label" htmlFor="moon-branch-editor-mode">Condition mode</label>
-                  <div className="moon-dock-form__row">
-                    <select
-                      id="moon-branch-editor-mode"
-                      className="moon-dock-form__select"
-                      value={edgeConditionMode}
-                      onChange={e => handleEdgeConditionModeChange(e.target.value as BranchConditionMode)}
-                    >
-                      <option value="simple">Form (recommended)</option>
-                      <option value="json">JSON (advanced)</option>
-                    </select>
-                  </div>
+            {isFailureEdge && (
+              <>
+                <div className="moon-branch-editor__hint">
+                  Runs only when {failureSourceLabel} fails.
                 </div>
+                <div className="moon-dock-form__actions">
+                  <button
+                    className="moon-dock-form__btn"
+                    onClick={handleClearFailureGate}
+                    disabled={failureGateLoading || !buildGraph || !canCommitGraph}
+                  >
+                    {failureGateLoading ? <><span className="moon-spinner" /> Updating...</> : 'Make normal path'}
+                  </button>
+                </div>
+                {failureGateError && <div className="moon-dock-form__error">{failureGateError}</div>}
+              </>
+            )}
 
-                {edgeConditionMode === 'simple' ? (
-                  <>
-                    <input
-                      className="moon-dock-form__input"
-                      type="text"
-                      value={edgeConditionField}
-                      onChange={e => setEdgeConditionField(e.target.value)}
-                      placeholder="Field or path, for example should_continue"
-                    />
+            {isConditionalEdge && (
+              <>
+                <div className="moon-branch-editor">
+                  <div className="moon-branch-editor__routes" aria-label="Branch routes">
+                    <div className={`moon-branch-editor__route${buildEdgeRelease?.branch_reason === 'then' ? ' moon-branch-editor__route--active' : ''}`}>
+                      <span className="moon-branch-editor__route-label">Then</span>
+                      <span className="moon-branch-editor__route-target">{conditionalTargets.thenTarget || edgeToLabel || 'Then path'}</span>
+                    </div>
+                    <div className={`moon-branch-editor__route${buildEdgeRelease?.branch_reason === 'else' ? ' moon-branch-editor__route--active' : ''}`}>
+                      <span className="moon-branch-editor__route-label">Else</span>
+                      <span className="moon-branch-editor__route-target">{conditionalTargets.elseTarget || 'Inverse path'}</span>
+                    </div>
+                  </div>
+
+                  <div className="moon-branch-editor__control">
+                    <label className="moon-dock-form__label" htmlFor="moon-branch-editor-mode">Condition mode</label>
                     <div className="moon-dock-form__row">
                       <select
+                        id="moon-branch-editor-mode"
                         className="moon-dock-form__select"
-                        value={edgeConditionOp}
-                        onChange={e => setEdgeConditionOp(e.target.value as BranchComposerOp)}
+                        value={edgeConditionMode}
+                        onChange={e => handleEdgeConditionModeChange(e.target.value as BranchConditionMode)}
                       >
-                        {BRANCH_OP_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>{option.label}</option>
-                        ))}
+                        <option value="simple">Form (recommended)</option>
+                        <option value="json">JSON (advanced)</option>
                       </select>
                     </div>
-                    {selectedBranchOp.expectsValue ? (
-                      <textarea
+                  </div>
+
+                  {edgeConditionMode === 'simple' ? (
+                    <>
+                      <input
                         className="moon-dock-form__input"
-                        value={edgeConditionValueText}
-                        onChange={e => setEdgeConditionValueText(e.target.value)}
-                        placeholder="Value (text or ['array'])"
-                        rows={3}
-                        style={{ minHeight: 86, resize: 'vertical' }}
+                        type="text"
+                        value={edgeConditionField}
+                        onChange={e => setEdgeConditionField(e.target.value)}
+                        placeholder="Field or path, for example should_continue"
                       />
-                    ) : null}
-                  </>
-                ) : (
-                  <>
+                      <div className="moon-dock-form__row">
+                        <select
+                          className="moon-dock-form__select"
+                          value={edgeConditionOp}
+                          onChange={e => setEdgeConditionOp(e.target.value as BranchComposerOp)}
+                        >
+                          {BRANCH_OP_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                      {selectedBranchOp.expectsValue ? (
+                        <textarea
+                          className="moon-dock-form__input"
+                          value={edgeConditionValueText}
+                          onChange={e => setEdgeConditionValueText(e.target.value)}
+                          placeholder="Value (text or ['array'])"
+                          rows={3}
+                          style={{ minHeight: 86, resize: 'vertical' }}
+                        />
+                      ) : null}
+                    </>
+                  ) : (
                     <textarea
                       className="moon-dock-form__input"
                       value={edgeConditionText}
@@ -1454,24 +1455,27 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
                       rows={8}
                       style={{ minHeight: 132, resize: 'vertical' }}
                     />
-                  </>
-                )}
-              </div>
-              <button
-                className="moon-dock-form__btn"
-                onClick={handleSaveConditionalEdge}
-                disabled={edgeConditionLoading || !buildGraph || !canCommitGraph}
-              >
-                {edgeConditionLoading ? <><span className="moon-spinner" /> Saving...</> : 'Save branch condition'}
-              </button>
-              {edgeConditionError && <div className="moon-dock-form__error">{edgeConditionError}</div>}
-            </>
-          )}
+                  )}
+                </div>
+                <div className="moon-dock-form__actions">
+                  <button
+                    className="moon-dock-form__btn"
+                    onClick={handleSaveConditionalEdge}
+                    disabled={edgeConditionLoading || !buildGraph || !canCommitGraph}
+                  >
+                    {edgeConditionLoading ? <><span className="moon-spinner" /> Saving...</> : 'Save branch condition'}
+                  </button>
+                </div>
+                {edgeConditionError && <div className="moon-dock-form__error">{edgeConditionError}</div>}
+              </>
+            )}
+          </div>
         </>
       ) : (
-        <>
+        <div className="moon-dock-header">
           <div className="moon-dock__title">{node ? node.title : 'Detail'}</div>
-        </>
+          {node?.route ? <div className="moon-dock__subtitle">Route: {node.route}</div> : null}
+        </div>
       )}
 
       {!node && !selectedEdge ? (
@@ -1479,15 +1483,16 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
       ) : node ? (
         <>
           {isTriggerNode && (
-            <>
-              <div className="moon-dock__sep" />
-              <div className="moon-dock__section-label">Trigger config</div>
-              <div className="moon-dock__item-desc" style={{ marginBottom: 10, fontWeight: 600 }}>
-                {triggerRoute === TRIGGER_SCHEDULE_ROUTE
-                  ? 'Schedule trigger'
-                  : triggerRoute === TRIGGER_WEBHOOK_ROUTE
-                    ? 'Webhook trigger'
-                    : 'Manual trigger'}
+            <div className="moon-dock-section-card">
+              <div className="moon-dock-section-card__header">
+                <div className="moon-dock__section-label">Trigger config</div>
+                <div className="moon-dock__item-desc" style={{ marginTop: 0, fontWeight: 600 }}>
+                  {triggerRoute === TRIGGER_SCHEDULE_ROUTE
+                    ? 'Schedule trigger'
+                    : triggerRoute === TRIGGER_WEBHOOK_ROUTE
+                      ? 'Webhook trigger'
+                      : 'Manual trigger'}
+                </div>
               </div>
               {triggerRoute === TRIGGER_SCHEDULE_ROUTE ? (
                 <>
@@ -1516,9 +1521,9 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
                   />
                 </>
               )}
-              <div className="moon-dock__section-label" style={{ marginTop: 14 }}>Event filter</div>
-              {triggerNeedsJsonEditor ? (
-                <>
+              <div className="moon-dock-subsection">
+                <div className="moon-dock__section-label" style={{ marginTop: 0 }}>Event filter</div>
+                {triggerNeedsJsonEditor ? (
                   <textarea
                     id="moon-trigger-event-filter"
                     className="moon-dock-form__input"
@@ -1530,113 +1535,117 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
                     style={{ minHeight: 110, resize: 'vertical' }}
                     aria-label="Trigger filter JSON"
                   />
-                </>
-              ) : (
-                <>
-                  <div className="moon-trigger-pill-row">
-                    {triggerFilterRows.map((row) => (
+                ) : (
+                  <>
+                    <div className="moon-trigger-pill-row">
+                      {triggerFilterRows.map((row) => (
+                        <button
+                          key={row.id}
+                          type="button"
+                          className={`moon-trigger-pill${activeTriggerFilterId === row.id ? ' moon-trigger-pill--active' : ''}`}
+                          onClick={() => setActiveTriggerFilterId(row.id)}
+                        >
+                          <span className="moon-trigger-pill__label">{triggerFilterChipText(row)}</span>
+                        </button>
+                      ))}
                       <button
-                        key={row.id}
                         type="button"
-                        className={`moon-trigger-pill${activeTriggerFilterId === row.id ? ' moon-trigger-pill--active' : ''}`}
-                        onClick={() => setActiveTriggerFilterId(row.id)}
+                        className="moon-trigger-pill moon-trigger-pill--add"
+                        onClick={addTriggerFilterRow}
                       >
-                        <span className="moon-trigger-pill__label">{triggerFilterChipText(row)}</span>
+                        + Filter
                       </button>
-                    ))}
-                    <button
-                      type="button"
-                      className="moon-trigger-pill moon-trigger-pill--add"
-                      onClick={addTriggerFilterRow}
-                    >
-                      + Filter
-                    </button>
-                  </div>
-                  <div className="moon-trigger-pill-suggestions">
-                    {TRIGGER_FILTER_SUGGESTIONS.map((suggestion) => (
-                      <button
-                        key={suggestion.label}
-                        type="button"
-                        className="moon-trigger-pill-suggestion"
-                        onClick={() => applyTriggerFilterSuggestion(suggestion)}
-                      >
-                        {suggestion.label}
-                      </button>
-                    ))}
-                  </div>
-                  {activeTriggerFilterRow && (
-                  <div className="moon-trigger-pill-editor">
-                    <div className="moon-dock-form__row" style={{ marginBottom: 4 }}>
-                      <input
-                        className="moon-dock-form__input"
-                        type="text"
-                        value={activeTriggerFilterRow.key}
-                        onChange={(event) => updateTriggerFilterRow(activeTriggerFilterRow.id, { key: event.target.value })}
-                        placeholder="Payload field, e.g. env"
-                        style={{ marginBottom: 0 }}
-                      />
-                      <select
-                        className="moon-dock-form__select"
-                        value={activeTriggerFilterRow.valueType}
-                        onChange={(event) => updateTriggerFilterRow(activeTriggerFilterRow.id, { valueType: event.target.value as TriggerFilterValueType })}
-                        style={{ minWidth: 110 }}
-                      >
-                        <option value="string">Text</option>
-                        <option value="number">Number</option>
-                        <option value="boolean">True/false</option>
-                        <option value="null">Null</option>
-                        <option value="json">JSON</option>
-                      </select>
                     </div>
-                    {activeTriggerFilterRow.valueType !== 'null' && (
-                      <input
-                        className="moon-dock-form__input"
-                        type="text"
-                        value={activeTriggerFilterRow.valueText}
-                        onChange={(event) => updateTriggerFilterRow(activeTriggerFilterRow.id, { valueText: event.target.value })}
-                        placeholder="Expected value, e.g. prod"
-                        style={{ marginBottom: 4 }}
-                      />
+                    <div className="moon-trigger-pill-suggestions">
+                      {TRIGGER_FILTER_SUGGESTIONS.map((suggestion) => (
+                        <button
+                          key={suggestion.label}
+                          type="button"
+                          className="moon-trigger-pill-suggestion"
+                          onClick={() => applyTriggerFilterSuggestion(suggestion)}
+                        >
+                          {suggestion.label}
+                        </button>
+                      ))}
+                    </div>
+                    {activeTriggerFilterRow && (
+                      <div className="moon-trigger-pill-editor">
+                        <div className="moon-dock-form__row" style={{ marginBottom: 4 }}>
+                          <input
+                            className="moon-dock-form__input"
+                            type="text"
+                            value={activeTriggerFilterRow.key}
+                            onChange={(event) => updateTriggerFilterRow(activeTriggerFilterRow.id, { key: event.target.value })}
+                            placeholder="Payload field, e.g. env"
+                            style={{ marginBottom: 0 }}
+                          />
+                          <select
+                            className="moon-dock-form__select"
+                            value={activeTriggerFilterRow.valueType}
+                            onChange={(event) => updateTriggerFilterRow(activeTriggerFilterRow.id, { valueType: event.target.value as TriggerFilterValueType })}
+                            style={{ minWidth: 120 }}
+                          >
+                            <option value="string">Text</option>
+                            <option value="number">Number</option>
+                            <option value="boolean">True/false</option>
+                            <option value="null">Null</option>
+                            <option value="json">JSON</option>
+                          </select>
+                        </div>
+                        {activeTriggerFilterRow.valueType !== 'null' && (
+                          <input
+                            className="moon-dock-form__input"
+                            type="text"
+                            value={activeTriggerFilterRow.valueText}
+                            onChange={(event) => updateTriggerFilterRow(activeTriggerFilterRow.id, { valueText: event.target.value })}
+                            placeholder="Expected value, e.g. prod"
+                            style={{ marginBottom: 4 }}
+                          />
+                        )}
+                        <div className="moon-dock-form__actions">
+                          <button
+                            type="button"
+                            className="moon-dock-form__btn--small"
+                            onClick={() => removeTriggerFilterRow(activeTriggerFilterRow.id)}
+                          >
+                            Remove selected
+                          </button>
+                          <button
+                            type="button"
+                            className="moon-dock-form__btn--small"
+                            onClick={addTriggerFilterRow}
+                          >
+                            Add another
+                          </button>
+                        </div>
+                      </div>
                     )}
-                    <button
-                      type="button"
-                      className="moon-dock-form__btn--small"
-                      onClick={() => removeTriggerFilterRow(activeTriggerFilterRow.id)}
-                    >
-                      Remove selected
-                    </button>
-                  </div>
-                  )}
-                  <div className="moon-dock-form__row">
-                  <button
-                    type="button"
-                    className="moon-dock-form__btn--small"
-                    onClick={addTriggerFilterRow}
-                  >
-                    Add another
-                  </button>
-                  </div>
                   </>
-                  )}              <button
-                className="moon-dock-form__btn"
-                onClick={handleSaveTrigger}
-                disabled={triggerLoading || !buildGraph || !canCommitGraph}
-              >
-                {triggerLoading ? <><span className="moon-spinner" /> Saving...</> : 'Save trigger'}
-              </button>
+                )}
+              </div>
+              <div className="moon-dock-form__actions">
+                <button
+                  className="moon-dock-form__btn"
+                  onClick={handleSaveTrigger}
+                  disabled={triggerLoading || !buildGraph || !canCommitGraph}
+                >
+                  {triggerLoading ? <><span className="moon-spinner" /> Saving...</> : 'Save trigger'}
+                </button>
+              </div>
               {triggerError && <div className="moon-dock-form__error">{triggerError}</div>}
-            </>
+            </div>
           )}
 
           {showPrimitiveEditor && (
-            <>
-              <div className="moon-dock__sep" />
-              <div className="moon-dock__section-label">Step details</div>
-              <div className="moon-dock__item-desc" style={{ marginBottom: 8 }}>
-                Route: {triggerRoute || 'Unassigned'}
-              </div>
-              <div className="moon-dock__item-desc" style={{ marginBottom: 10 }}>
-                Write the step in plain English. The prompt is free text; the builder infers the graph shape from your description.
+            <div className="moon-dock-section-card">
+              <div className="moon-dock-section-card__header">
+                <div className="moon-dock__section-label">Step details</div>
+                <div className="moon-dock__item-desc" style={{ marginTop: 0 }}>
+                  Route: {triggerRoute || 'Unassigned'}
+                </div>
+                <div className="moon-dock__item-desc" style={{ marginTop: 0 }}>
+                  Write the step in plain English. The prompt is free text; the builder infers the graph shape from your description.
+                </div>
               </div>
               <input
                 className="moon-dock-form__input"
@@ -1655,8 +1664,8 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
               />
 
               {!isTriggerNode && (
-                <>
-                  <div className="moon-dock__section-label" style={{ marginTop: 12 }}>Prompt</div>
+                <div className="moon-dock-subsection">
+                  <div className="moon-dock__section-label" style={{ marginTop: 0 }}>Prompt</div>
                   <textarea
                     className="moon-dock-form__input"
                     value={nodePrompt}
@@ -1672,7 +1681,7 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
                     onChange={e => setNodeHandoffTarget(e.target.value)}
                     placeholder="Handoff target (optional)"
                   />
-                </>
+                </div>
               )}
 
               <div className="moon-node-advanced">
@@ -1724,8 +1733,8 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
               </div>
 
               {isNotificationRoute && (
-                <>
-                  <div className="moon-dock__section-label" style={{ marginTop: 16 }}>Notification properties</div>
+                <div className="moon-dock-subsection">
+                  <div className="moon-dock__section-label" style={{ marginTop: 0 }}>Notification properties</div>
                   <input
                     className="moon-dock-form__input"
                     type="text"
@@ -1752,12 +1761,12 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
                     <option value="warning">Warning</option>
                     <option value="error">Error</option>
                   </select>
-                </>
+                </div>
               )}
 
               {isWebhookRoute && (
-                <>
-                  <div className="moon-dock__section-label" style={{ marginTop: 16 }}>HTTP request properties</div>
+                <div className="moon-dock-subsection">
+                  <div className="moon-dock__section-label" style={{ marginTop: 0 }}>HTTP request properties</div>
                   <div className="moon-http-request__preset-grid">
                     {HTTP_REQUEST_PRESETS.map((preset) => (
                       <button
@@ -1819,12 +1828,12 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
                   <div className="moon-dock__item-desc" style={{ marginBottom: 8 }}>
                     Save persists the request contract on this block, so the dropped step reopens with the same preset and fields later.
                   </div>
-                </>
+                </div>
               )}
 
               {isWorkflowInvokeRoute && (
-                <>
-                  <div className="moon-dock__section-label" style={{ marginTop: 16 }}>Workflow invoke properties</div>
+                <div className="moon-dock-subsection">
+                  <div className="moon-dock__section-label" style={{ marginTop: 0 }}>Workflow invoke properties</div>
                   <select
                     className="moon-dock-form__select"
                     value={invokeWorkflowId}
@@ -1868,12 +1877,12 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
                     rows={5}
                     style={{ minHeight: 118, resize: 'vertical' }}
                   />
-                </>
+                </div>
               )}
 
               {isIntegrationRoute && !isNotificationRoute && !isWebhookRoute && !isWorkflowInvokeRoute && (
-                <>
-                  <div className="moon-dock__section-label" style={{ marginTop: 16 }}>Integration properties</div>
+                <div className="moon-dock-subsection">
+                  <div className="moon-dock__section-label" style={{ marginTop: 0 }}>Integration properties</div>
                   <textarea
                     className="moon-dock-form__input"
                     value={genericIntegrationArgsText}
@@ -1882,196 +1891,208 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
                     rows={6}
                     style={{ minHeight: 132, resize: 'vertical' }}
                   />
-                </>
+                </div>
               )}
 
-              <button
-                className="moon-dock-form__btn"
-                onClick={handleSaveNodePrimitive}
-                disabled={nodeSaveLoading || !buildGraph || !canCommitGraph}
-              >
-                {nodeSaveLoading ? <><span className="moon-spinner" /> Saving...</> : 'Save step'}
-              </button>
+              <div className="moon-dock-form__actions">
+                <button
+                  className="moon-dock-form__btn"
+                  onClick={handleSaveNodePrimitive}
+                  disabled={nodeSaveLoading || !buildGraph || !canCommitGraph}
+                >
+                  {nodeSaveLoading ? <><span className="moon-spinner" /> Saving...</> : 'Save step'}
+                </button>
+              </div>
               {nodeSaveError && <div className="moon-dock-form__error">{nodeSaveError}</div>}
-            </>
+            </div>
           )}
 
           {requiresSavedWorkflow ? (
-            <>
-              <div className="moon-dock__sep" style={{ marginTop: 20 }} />
+            <div className="moon-dock-section-card">
               <div className="moon-dock__section-label">Authority-backed tools</div>
               <div className="moon-dock__item" style={{ cursor: 'default' }}>
                 <div className="moon-dock__item-title">Save draft to unlock imports and attachments</div>
               </div>
-            </>
+            </div>
           ) : (
             <>
-              {/* Attached */}
-              <div className="moon-dock__sep" />
-              <div className="moon-dock__section-label">
-                Attached ({content?.contextAttachments?.length || 0})
-              </div>
-              {(content?.contextAttachments || []).map(a => (
-                <div
-                  key={a.attachment_id}
-                  className="moon-dock__item"
-                  draggable
-                  onDragStart={e => {
-                    e.dataTransfer.setData('moon/dock', 'context');
-                    e.dataTransfer.setData('text/plain', a.label || a.authority_ref || '');
-                    e.dataTransfer.effectAllowed = 'link';
-                  }}
-                >
-                  <div className="moon-dock__item-title">{a.label || a.authority_ref || 'Reference'}</div>
-                  <div className="moon-dock__item-desc">{a.authority_kind} / {a.role || 'input'}</div>
+              <div className="moon-dock-section-card">
+                <div className="moon-dock__section-label">
+                  Attached ({content?.contextAttachments?.length || 0})
                 </div>
-              ))}
-
-              {/* Imports */}
-              <div className="moon-dock__section-label" style={{ marginTop: 16 }}>
-                Imports ({content?.imports?.length || 0})
+                {(content?.contextAttachments || []).map(a => (
+                  <div
+                    key={a.attachment_id}
+                    className="moon-dock__item"
+                    draggable
+                    onDragStart={e => {
+                      e.dataTransfer.setData('moon/dock', 'context');
+                      e.dataTransfer.setData('text/plain', a.label || a.authority_ref || '');
+                      e.dataTransfer.effectAllowed = 'link';
+                    }}
+                  >
+                    <div className="moon-dock__item-title">{a.label || a.authority_ref || 'Reference'}</div>
+                    <div className="moon-dock__item-desc">{a.authority_kind} / {a.role || 'input'}</div>
+                  </div>
+                ))}
+                {!(content?.contextAttachments || []).length && (
+                  <div className="moon-dock__empty">No attachments yet.</div>
+                )}
               </div>
-              {(content?.imports || []).map(s => (
-                <div key={s.snapshot_id} className="moon-dock__item">
-                  <div className="moon-dock__item-title">{s.source_locator || s.snapshot_id}</div>
-                  <div className="moon-dock__item-desc">
-                    {s.approval_state === 'admitted' ? 'Admitted' : 'Staged'}
+
+              <div className="moon-dock-section-card">
+                <div className="moon-dock__section-label">
+                  Imports ({content?.imports?.length || 0})
+                </div>
+                {(content?.imports || []).map(s => (
+                  <div key={s.snapshot_id} className="moon-dock__item">
+                    <div className="moon-dock__item-title">{s.source_locator || s.snapshot_id}</div>
+                    <div className="moon-dock__item-desc">
+                      {s.approval_state === 'admitted' ? 'Admitted' : 'Staged'}
+                    </div>
                     {s.approval_state !== 'admitted' && (
-                      <button
-                        className="moon-dock-form__btn--small"
-                        onClick={() => handleAdmitImport(s.snapshot_id, (s as any).requested_shape || {})}
-                      >
-                        Approve
-                      </button>
+                      <div className="moon-dock-form__actions">
+                        <button
+                          className="moon-dock-form__btn--small"
+                          onClick={() => handleAdmitImport(s.snapshot_id, (s as any).requested_shape || {})}
+                        >
+                          Approve
+                        </button>
+                      </div>
                     )}
                   </div>
+                ))}
+                {!(content?.imports || []).length && (
+                  <div className="moon-dock__empty">No imports staged.</div>
+                )}
+              </div>
+
+              <div className="moon-dock-section-card">
+                <div className="moon-dock__section-label">
+                  Bindings ({bindings.length})
                 </div>
-              ))}
-
-              {/* Bindings */}
-              <div className="moon-dock__section-label" style={{ marginTop: 16 }}>
-                Bindings ({bindings.length})
+                {bindings.map(binding => (
+                  <BindingCard key={binding.binding_id} binding={binding} onMutate={onMutate} onCommitAuthorityAction={onCommitAuthorityAction} />
+                ))}
+                {!bindings.length && (
+                  <div className="moon-dock__empty">No bindings.</div>
+                )}
               </div>
-              {bindings.map(binding => (
-                <BindingCard key={binding.binding_id} binding={binding} onMutate={onMutate} onCommitAuthorityAction={onCommitAuthorityAction} />
-              ))}
-              {!bindings.length && (
-                <div className="moon-dock__empty">No bindings.</div>
-              )}
 
-              {/* DB Objects — drag onto chain nodes to attach */}
-              <div className="moon-dock__sep" style={{ marginTop: 20 }} />
-              <div className="moon-dock__section-label">
-                DB Objects ({objectTypes.length})
-              </div>
-              {objectTypes.length > 6 && (
-                <input
-                  className="moon-dock-form__input"
-                  type="text"
-                  value={objectSearch}
-                  onChange={e => setObjectSearch(e.target.value)}
-                  placeholder="Filter objects..."
-                  style={{ marginBottom: 8, fontSize: 12, padding: '5px 8px' }}
-                />
-              )}
-              {objectTypesLoading ? (
-                <div className="moon-dock__empty"><span className="moon-spinner" /> Loading...</div>
-              ) : objectTypes.length === 0 ? (
-                <div className="moon-dock__empty">No object types registered.</div>
-              ) : (
-                <div className="moon-dock__catalog-grid">
-                  {objectTypes
-                    .filter(ot => !objectSearch || ot.name.toLowerCase().includes(objectSearch.toLowerCase()))
-                    .slice(0, 20)
-                    .map(ot => (
-                      <div
-                        key={ot.type_id}
-                        className="moon-dock__catalog-item"
-                        draggable
-                        onDragStart={e => {
-                          e.dataTransfer.setData('moon/object-type-id', ot.type_id);
-                          e.dataTransfer.setData('moon/object-type-label', ot.name);
-                          e.dataTransfer.setData('text/plain', ot.name);
-                          e.dataTransfer.effectAllowed = 'copyLink';
-                        }}
-                        onClick={() => {
-                          if (!node) return;
-                          const request = {
-                            node_id: node.id,
-                            authority_kind: 'object_type',
-                            authority_ref: ot.type_id,
-                            role: 'input',
-                            label: ot.name,
-                            promote_to_state: false,
-                          };
-                          const promise = onCommitAuthorityAction
-                            ? onCommitAuthorityAction('attachments', request, {
-                                label: 'Attach object type',
-                                reason: `Attach ${ot.name} to ${node.title || node.id}.`,
-                                outcome: `${ot.name} is now available to ${node.title || node.id}.`,
-                                authority: 'build.authority_attachments',
-                                target: nodeTarget(node),
-                                changeSummary: ['Object type', ot.name],
-                              })
-                            : onMutate('attachments', request);
-                          promise.catch(() => {});
-                        }}
-                        title={ot.description || `Attach ${ot.name} to this step`}
-                      >
-                        <span style={{ fontSize: 14 }}>{ot.icon || '◆'}</span>
-                        <span>{ot.name}</span>
-                      </div>
-                    ))}
+              <div className="moon-dock-section-card">
+                <div className="moon-dock__section-label">
+                  DB Objects ({objectTypes.length})
                 </div>
-              )}
-
-              {/* Attach reference form */}
-              <div className="moon-dock__sep" style={{ marginTop: 20 }} />
-              <div className="moon-dock__section-label">Attach reference</div>
-
-              <div className="moon-dock-form__row">
-                <select className="moon-dock-form__select" value={attachKind} onChange={e => setAttachKind(e.target.value)}>
-                  <option value="reference">Reference</option>
-                  <option value="object_type">Object Type</option>
-                  <option value="object">Object</option>
-                </select>
-                <select className="moon-dock-form__select" value={attachRole} onChange={e => setAttachRole(e.target.value)}>
-                  <option value="input">Input</option>
-                  <option value="evidence">Evidence</option>
-                  <option value="state_dependency">State dep</option>
-                  <option value="output">Output</option>
-                </select>
+                {objectTypes.length > 6 && (
+                  <input
+                    className="moon-dock-form__input"
+                    type="text"
+                    value={objectSearch}
+                    onChange={e => setObjectSearch(e.target.value)}
+                    placeholder="Filter objects..."
+                  />
+                )}
+                {objectTypesLoading ? (
+                  <div className="moon-dock__empty"><span className="moon-spinner" /> Loading...</div>
+                ) : objectTypes.length === 0 ? (
+                  <div className="moon-dock__empty">No object types registered.</div>
+                ) : (
+                  <div className="moon-dock__catalog-grid">
+                    {objectTypes
+                      .filter(ot => !objectSearch || ot.name.toLowerCase().includes(objectSearch.toLowerCase()))
+                      .slice(0, 20)
+                      .map(ot => (
+                        <div
+                          key={ot.type_id}
+                          className="moon-dock__catalog-item"
+                          draggable
+                          onDragStart={e => {
+                            e.dataTransfer.setData('moon/object-type-id', ot.type_id);
+                            e.dataTransfer.setData('moon/object-type-label', ot.name);
+                            e.dataTransfer.setData('text/plain', ot.name);
+                            e.dataTransfer.effectAllowed = 'copyLink';
+                          }}
+                          onClick={() => {
+                            if (!node) return;
+                            const request = {
+                              node_id: node.id,
+                              authority_kind: 'object_type',
+                              authority_ref: ot.type_id,
+                              role: 'input',
+                              label: ot.name,
+                              promote_to_state: false,
+                            };
+                            const promise = onCommitAuthorityAction
+                              ? onCommitAuthorityAction('attachments', request, {
+                                  label: 'Attach object type',
+                                  reason: `Attach ${ot.name} to ${node.title || node.id}.`,
+                                  outcome: `${ot.name} is now available to ${node.title || node.id}.`,
+                                  authority: 'build.authority_attachments',
+                                  target: nodeTarget(node),
+                                  changeSummary: ['Object type', ot.name],
+                                })
+                              : onMutate('attachments', request);
+                            promise.catch(() => {});
+                          }}
+                          title={ot.description || `Attach ${ot.name} to this step`}
+                        >
+                          <span style={{ fontSize: 14 }}>{ot.icon || '◆'}</span>
+                          <span>{ot.name}</span>
+                        </div>
+                      ))}
+                  </div>
+                )}
               </div>
 
-              <input className="moon-dock-form__input" type="text" value={attachRef} onChange={e => setAttachRef(e.target.value)} placeholder="Authority ref (slug or ID)" />
-              <input className="moon-dock-form__input" type="text" value={attachLabel} onChange={e => setAttachLabel(e.target.value)} placeholder="Label (optional)" />
+              <div className="moon-dock-section-card">
+                <div className="moon-dock__section-label">Attach reference</div>
 
-              <label className="moon-dock-form__checkbox">
-                <input type="checkbox" checked={attachPromote} onChange={e => setAttachPromote(e.target.checked)} />
-                Promote to state node
-              </label>
+                <div className="moon-dock-form__row">
+                  <select className="moon-dock-form__select" value={attachKind} onChange={e => setAttachKind(e.target.value)}>
+                    <option value="reference">Reference</option>
+                    <option value="object_type">Object Type</option>
+                    <option value="object">Object</option>
+                  </select>
+                  <select className="moon-dock-form__select" value={attachRole} onChange={e => setAttachRole(e.target.value)}>
+                    <option value="input">Input</option>
+                    <option value="evidence">Evidence</option>
+                    <option value="state_dependency">State dep</option>
+                    <option value="output">Output</option>
+                  </select>
+                </div>
 
-              <button className="moon-dock-form__btn" onClick={handleAttach} disabled={attachLoading || !attachRef.trim()}>
-                {attachLoading ? <><span className="moon-spinner" /> Attaching...</> : 'Attach'}
-              </button>
-              {attachError && <div className="moon-dock-form__error">{attachError}</div>}
+                <input className="moon-dock-form__input" type="text" value={attachRef} onChange={e => setAttachRef(e.target.value)} placeholder="Authority ref (slug or ID)" />
+                <input className="moon-dock-form__input" type="text" value={attachLabel} onChange={e => setAttachLabel(e.target.value)} placeholder="Label (optional)" />
 
-              {/* Stage import form */}
-              <div className="moon-dock__sep" style={{ marginTop: 20 }} />
-              <div className="moon-dock__section-label">Stage import</div>
+                <label className="moon-dock-form__checkbox">
+                  <input type="checkbox" checked={attachPromote} onChange={e => setAttachPromote(e.target.checked)} />
+                  Promote to state node
+                </label>
 
-              <input className="moon-dock-form__input" type="text" value={importLocator} onChange={e => setImportLocator(e.target.value)} placeholder="URL or source locator" />
-              <input className="moon-dock-form__input" type="text" value={importLabel} onChange={e => setImportLabel(e.target.value)} placeholder="Label (optional)" />
-
-              <div className="moon-dock-form__row">
-                <button className="moon-dock-form__btn" onClick={handleStageImport} disabled={importLoading || !importLocator.trim()}>
-                  {importLoading ? <><span className="moon-spinner" /> Staging...</> : 'Stage'}
-                </button>
-                <button className="moon-dock-form__btn" onClick={handleMaterialize} disabled={importLoading || !importLocator.trim()}>
-                  Materialize here
-                </button>
+                <div className="moon-dock-form__actions">
+                  <button className="moon-dock-form__btn" onClick={handleAttach} disabled={attachLoading || !attachRef.trim()}>
+                    {attachLoading ? <><span className="moon-spinner" /> Attaching...</> : 'Attach'}
+                  </button>
+                </div>
+                {attachError && <div className="moon-dock-form__error">{attachError}</div>}
               </div>
-              {importError && <div className="moon-dock-form__error">{importError}</div>}
+
+              <div className="moon-dock-section-card">
+                <div className="moon-dock__section-label">Stage import</div>
+
+                <input className="moon-dock-form__input" type="text" value={importLocator} onChange={e => setImportLocator(e.target.value)} placeholder="URL or source locator" />
+                <input className="moon-dock-form__input" type="text" value={importLabel} onChange={e => setImportLabel(e.target.value)} placeholder="Label (optional)" />
+
+                <div className="moon-dock-form__actions">
+                  <button className="moon-dock-form__btn" onClick={handleStageImport} disabled={importLoading || !importLocator.trim()}>
+                    {importLoading ? <><span className="moon-spinner" /> Staging...</> : 'Stage'}
+                  </button>
+                  <button className="moon-dock-form__btn" onClick={handleMaterialize} disabled={importLoading || !importLocator.trim()}>
+                    Materialize here
+                  </button>
+                </div>
+                {importError && <div className="moon-dock-form__error">{importError}</div>}
+              </div>
             </>
           )}
         </>
@@ -2244,7 +2265,7 @@ function BindingCard({
 
       {/* Candidate targets */}
       {!isAccepted && !isRejected && binding.candidate_targets?.length ? (
-        <div style={{ marginTop: 8 }}>
+        <div className="moon-dock-subsection" style={{ marginTop: 8 }}>
           <div className="moon-dock__section-label">Pick a target:</div>
           {binding.candidate_targets.map((target, i) => (
             <button
@@ -2258,7 +2279,7 @@ function BindingCard({
                 e.dataTransfer.setData('text/plain', target.label || target.target_ref || '');
                 e.dataTransfer.effectAllowed = 'link';
               }}
-              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '6px 10px', marginBottom: 4 }}
+              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 12px', marginBottom: 6 }}
             >
               {target.enrichment?.integration_name || target.label || target.target_ref || 'Target'}
               {target.enrichment?.auth_status ? (
@@ -2275,7 +2296,7 @@ function BindingCard({
 
       {/* Replace / Reject actions */}
       {!isAccepted && !isRejected && (
-        <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div className="moon-dock-form__actions">
           {!showReplace ? (
             <button className="moon-dock-form__btn--small" onClick={() => setShowReplace(true)}>
               Custom target

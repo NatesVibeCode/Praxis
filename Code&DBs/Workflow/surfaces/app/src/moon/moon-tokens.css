@@ -3,23 +3,23 @@
 @layer moon-tokens {
   .moon-page {
     /* ---- Base geometry & rhythm ---- */
-    --moon-node-size: var(--moon-layout-node-size, 60px);
-    --moon-node-shadow: var(--moon-layout-projected-node-size, 44px);
-    --moon-node-spacing: var(--moon-layout-node-spacing, 120px);
+    --moon-node-size: var(--moon-layout-node-size, 72px);
+    --moon-node-shadow: var(--moon-layout-projected-node-size, 52px);
+    --moon-node-spacing: var(--moon-layout-node-spacing, 144px);
     --moon-canvas-pad: var(--moon-layout-canvas-pad, 120px);
-    --moon-graph-append-size: var(--moon-layout-graph-append-size, 40px);
-    --moon-label-max: 12ch;
+    --moon-graph-append-size: var(--moon-layout-graph-append-size, 48px);
+    --moon-label-max: 16ch;
 
     --moon-icon-size: 22px;
     --moon-dock-open: 33%;
-    --moon-dock-side-min: 320px;
-    --moon-dock-side-max: 430px;
+    --moon-dock-side-min: 360px;
+    --moon-dock-side-max: 520px;
     --moon-dock-tb-min: 200px;
-    --moon-dock-pad-v: 40px;
-    --moon-dock-pad-h: 34px;
+    --moon-dock-pad-v: 44px;
+    --moon-dock-pad-h: 36px;
     --moon-popout-width: 260px;
     --moon-popout-min-h: 112px;
-    --moon-compose-width: 380px;
+    --moon-compose-width: 480px;
     --moon-nav-clearance: 52px;
 
     --moon-arc-weight: 2px;
@@ -36,12 +36,12 @@
     --moon-motion-fast: 160ms ease;
     --moon-motion-micro: 100ms ease;
 
-    --moon-font-size-xxs: 10px;
-    --moon-font-size-xs: 11px;
-    --moon-font-size-sm: 12px;
-    --moon-font-size-md: 13px;
-    --moon-font-size-lg: 14px;
-    --moon-font-size-xl: 16px;
+    --moon-font-size-xxs: 11px;
+    --moon-font-size-xs: 12px;
+    --moon-font-size-sm: 13px;
+    --moon-font-size-md: 14px;
+    --moon-font-size-lg: 16px;
+    --moon-font-size-xl: 18px;
     --moon-font-weight-medium: 500;
     --moon-font-weight-semibold: 600;
     --moon-font-mono: var(--font-mono, monospace);
