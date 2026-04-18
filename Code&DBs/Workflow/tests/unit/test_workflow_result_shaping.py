@@ -101,15 +101,15 @@ def test_shape_pipeline_dispatch_result_returns_node_not_found_failure():
     assert result.evidence_count == 3
 
 
-def test_shape_pipeline_dispatch_result_applies_fan_out(monkeypatch):
-    fan_out_calls = []
+def test_shape_pipeline_dispatch_result_applies_loop(monkeypatch):
+    loop_calls = []
 
-    import runtime.fan_out as fan_out_module
+    import runtime.loop as loop_module
 
     monkeypatch.setattr(
-        fan_out_module,
-        "fan_out_from_completion",
-        lambda completion, *, prompt_template, tier, max_parallel: fan_out_calls.append(
+        loop_module,
+        "loop_from_completion",
+        lambda completion, *, prompt_template, tier, max_parallel: loop_calls.append(
             {
                 "completion": completion,
                 "prompt_template": prompt_template,
@@ -120,18 +120,18 @@ def test_shape_pipeline_dispatch_result_applies_fan_out(monkeypatch):
         or ["a", "b"],
     )
     monkeypatch.setattr(
-        fan_out_module,
-        "aggregate_fan_out_results",
+        loop_module,
+        "aggregate_loop_results",
         lambda results: {"completions": ["done-a", "done-b"], "results": results},
     )
 
     steps = [
         SimpleNamespace(prompt="first"),
         SimpleNamespace(
-            prompt="fan this",
-            fan_out=True,
-            fan_out_prompt="rewrite {item}",
-            fan_out_max_parallel=7,
+            prompt="loop this",
+            loop=True,
+            loop_prompt="rewrite {item}",
+            loop_max_parallel=7,
             tier="frontier",
         ),
     ]
@@ -144,13 +144,13 @@ def test_shape_pipeline_dispatch_result_applies_fan_out(monkeypatch):
 
     result = shape_pipeline_workflow_result(
         steps=steps,
-        intake_outcome=SimpleNamespace(run_id="run_fan"),
+        intake_outcome=SimpleNamespace(run_id="run_loop"),
         execution_result=execution_result,
         evidence_writer=SimpleNamespace(evidence_timeline=lambda run_id: [1, 2]),
         context=_context(),
     )
 
-    assert fan_out_calls == [
+    assert loop_calls == [
         {
             "completion": "seed",
             "prompt_template": "rewrite {item}",
@@ -159,5 +159,5 @@ def test_shape_pipeline_dispatch_result_applies_fan_out(monkeypatch):
         }
     ]
     assert json.loads(result.completion) == ["done-a", "done-b"]
-    assert result.outputs["fan_out"] == {"completions": ["done-a", "done-b"], "results": ["a", "b"]}
-    assert result.outputs["fan_out_source_completion"] == "seed"
+    assert result.outputs["loop"] == {"completions": ["done-a", "done-b"], "results": ["a", "b"]}
+    assert result.outputs["loop_source_completion"] == "seed"

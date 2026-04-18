@@ -164,6 +164,18 @@ _OPERATOR_DECISION_SCOPE_POLICIES: dict[str, OperatorDecisionScopePolicy] = {
         allowed_scope_kinds=_CUTOVER_TARGET_SCOPE_KINDS,
         infer_from_target=True,
     ),
+    "dataset_promotion": OperatorDecisionScopePolicy(
+        scope_mode="required",
+        allowed_scope_kinds=("dataset_specialist",),
+    ),
+    "dataset_rejection": OperatorDecisionScopePolicy(
+        scope_mode="required",
+        allowed_scope_kinds=("dataset_candidate",),
+    ),
+    "dataset_promotion_supersede": OperatorDecisionScopePolicy(
+        scope_mode="required",
+        allowed_scope_kinds=("dataset_promotion",),
+    ),
 }
 
 

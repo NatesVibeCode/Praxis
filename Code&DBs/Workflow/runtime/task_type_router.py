@@ -969,6 +969,7 @@ class TaskTypeRouter:
         return self._decision_chain(profile_value, rows)
 
     def _decision_chain(self, task_type: str, rows: list[dict[str, Any]]) -> list[TaskRouteDecision]:
+        rows = self._apply_lane_policy(task_type, rows)
         chain = [
             TaskRouteDecision(
                 task_type=task_type,
@@ -1003,6 +1004,60 @@ class TaskTypeRouter:
             len(chain) - 1,
         )
         return chain
+
+    def _apply_lane_policy(
+        self,
+        task_type: str,
+        rows: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Narrow rows to adapter types admitted by provider lane policy.
+
+        Gate 1 of the lane-control hierarchy: a provider's policy row
+        declares which adapter types may be admitted. Rows whose resolved
+        adapter_type is not in the policy's allowed set are dropped here.
+        """
+        if not rows:
+            return rows
+        from runtime.lane_policy import admit_adapter_type, load_provider_lane_policies
+        policies = load_provider_lane_policies(self._conn)
+        if not policies:
+            return rows
+        kept: list[dict[str, Any]] = []
+        rejected: list[str] = []
+        for row in rows:
+            provider = str(row.get("provider_slug") or "")
+            adapter_type = str(row.get("adapter_type") or self._default_adapter_type)
+            spend_pressure = str(row.get("spend_pressure") or "") or None
+            admitted, reason = admit_adapter_type(
+                policies, provider, adapter_type, spend_pressure=spend_pressure,
+            )
+            if admitted:
+                kept.append(row)
+            else:
+                rejected.append(f"{provider}/{row.get('model_slug')}:{adapter_type}:{reason}")
+        if rejected:
+            logger.info(
+                "lane_policy narrowed auto/%s chain: dropped %d candidate(s) [%s]",
+                task_type, len(rejected), "; ".join(rejected),
+            )
+        if not kept:
+            raise TaskRouteAuthorityError(
+                f"auto/{task_type}: all candidates rejected by provider lane policy "
+                f"({'; '.join(rejected)})"
+            )
+        # Zero-marginal-cost routes (subscription_included, prepaid_credit,
+        # owned_compute) are always preferred: stable-sort so prepaid rows
+        # precede metered rows regardless of benchmark/cost rerank. The
+        # sort keys off billing_mode, not adapter_type, so a metered CLI
+        # correctly ranks as failover and a prepaid API correctly ranks
+        # as primary.
+        from runtime.routing_economics import _PREPAID_BILLING_MODES
+        kept.sort(
+            key=lambda r: 0
+            if str(r.get("billing_mode") or "").strip() in _PREPAID_BILLING_MODES
+            else 1
+        )
+        return kept
 
     def _apply_route_eligibility(
         self,

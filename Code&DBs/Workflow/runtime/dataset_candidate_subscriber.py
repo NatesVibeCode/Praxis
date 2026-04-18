@@ -731,13 +731,28 @@ async def _maybe_auto_promote(
         f"{score.eligibility} @ confidence={float(score.confidence):.3f}"
     )
 
+    # Bridge: every auto-promotion writes a typed dataset_promotion decision
+    # row so the refinery has decision-table authority alongside the event.
+    from surfaces.api.operator_write import _arecord_dataset_decision
+    decision_ref = await _arecord_dataset_decision(
+        conn,
+        decision_kind="dataset_promotion",
+        decision_key=f"dataset-promotion::{promotion_id}",
+        decision_scope_kind="dataset_specialist",
+        decision_scope_ref=policy.specialist_target,
+        title=f"Dataset auto-promotion {promotion_id}",
+        rationale=rationale,
+        decided_by=promoted_by,
+        decision_source=f"dataset_candidate_subscriber.auto_promote:{policy.policy_slug}",
+    )
+
     # Serialize for Postgres
     await conn.execute(
         """INSERT INTO dataset_promotions (
                 promotion_id, candidate_ids, dataset_family, specialist_target,
                 policy_id, payload, split_tag, promoted_by, promotion_kind,
                 rationale, decision_ref
-            ) VALUES ($1, $2::text[], $3, $4, $5, $6::jsonb, $7, $8, $9, $10, NULL)""",
+            ) VALUES ($1, $2::text[], $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11)""",
         promotion_id,
         [candidate.candidate_id],
         family,
@@ -748,6 +763,7 @@ async def _maybe_auto_promote(
         promoted_by,
         "auto",
         rationale,
+        decision_ref,
     )
     await aemit(
         conn,
@@ -764,6 +780,7 @@ async def _maybe_auto_promote(
             "promotion_kind": "auto",
             "split_tag": split_tag,
             "candidate_ids": [candidate.candidate_id],
+            "decision_ref": decision_ref,
         },
         emitted_by="dataset_candidate_subscriber.auto_promote",
     )

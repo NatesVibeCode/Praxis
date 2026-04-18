@@ -275,7 +275,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         "type": "number",
                         "default": 40,
                         "description": (
-                            "Number of parallel fan-out workers (default 40). "
+                            "Number of parallel loop workers (default 40). "
                             "Each worker investigates one angle of the research topic."
                         ),
                     },

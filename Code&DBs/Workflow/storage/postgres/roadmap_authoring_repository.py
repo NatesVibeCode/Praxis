@@ -8,6 +8,7 @@ from typing import Any
 
 import asyncpg
 
+from runtime.embedding_service import embed_text_literal
 from storage.postgres.validators import (
     PostgresWriteError,
     _encode_jsonb,
@@ -150,6 +151,9 @@ class PostgresRoadmapAuthoringRepository:
         try:
             async with self._conn.transaction():
                 for item in normalized_items:
+                    embedding_literal = embed_text_literal(
+                        f"{item['title']} {item['summary']}".strip(),
+                    )
                     await self._conn.execute(
                         """
                         INSERT INTO roadmap_items (
@@ -170,9 +174,10 @@ class PostgresRoadmapAuthoringRepository:
                             target_end_at,
                             completed_at,
                             created_at,
-                            updated_at
+                            updated_at,
+                            embedding
                         ) VALUES (
-                            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12::jsonb, $13, NULL, NULL, NULL, $14, $15
+                            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12::jsonb, $13, NULL, NULL, NULL, $14, $15, $16::vector
                         )
                         ON CONFLICT (roadmap_item_id) DO UPDATE SET
                             roadmap_key = EXCLUDED.roadmap_key,
@@ -187,7 +192,8 @@ class PostgresRoadmapAuthoringRepository:
                             summary = EXCLUDED.summary,
                             acceptance_criteria = EXCLUDED.acceptance_criteria,
                             decision_ref = EXCLUDED.decision_ref,
-                            updated_at = EXCLUDED.updated_at
+                            updated_at = EXCLUDED.updated_at,
+                            embedding = COALESCE(EXCLUDED.embedding, roadmap_items.embedding)
                         """,
                         item["roadmap_item_id"],
                         item["roadmap_key"],
@@ -210,6 +216,7 @@ class PostgresRoadmapAuthoringRepository:
                         item["decision_ref"],
                         item["created_at"],
                         item["updated_at"],
+                        embedding_literal,
                     )
 
                 for dependency in normalized_dependencies:

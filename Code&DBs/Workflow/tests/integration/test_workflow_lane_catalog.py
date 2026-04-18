@@ -41,6 +41,7 @@ async def _exercise_workflow_lane_catalog_is_deterministic_and_fail_closed() -> 
         assert catalog.as_of == as_of
         assert catalog.lane_names == (
             "fanout",
+            "loop",
             "promotion-gated",
             "repair",
             "review",
@@ -48,6 +49,7 @@ async def _exercise_workflow_lane_catalog_is_deterministic_and_fail_closed() -> 
         )
         assert catalog.policy_keys == (
             ("workflow.fanout", "fanout"),
+            ("workflow.loop", "loop"),
             ("workflow.gated", "promotion-gated"),
             ("workflow.repair", "repair"),
             ("workflow.review", "review"),

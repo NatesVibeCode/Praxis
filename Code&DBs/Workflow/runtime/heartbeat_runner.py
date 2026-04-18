@@ -463,6 +463,46 @@ class _DatasetCurationRefreshModule(HeartbeatModule):
         return _ok(self.name, t0)
 
 
+class _DatasetStalenessReconcileModule(HeartbeatModule):
+    """Heartbeat adapter for dataset candidate staleness reconciliation.
+
+    Flips fresh candidates to definition_stale / evidence_stale when upstream
+    definitions, assertions, or bugs move, and tombstones active promotions
+    that reference stale candidates.
+    """
+
+    def __init__(
+        self,
+        *,
+        workflow_env: Mapping[str, str] | None = None,
+    ) -> None:
+        self._workflow_env = None if workflow_env is None else dict(workflow_env)
+
+    @property
+    def name(self) -> str:
+        return "dataset_staleness_reconcile"
+
+    def _has_workflow_authority(self) -> bool:
+        if self._workflow_env and str(self._workflow_env.get("WORKFLOW_DATABASE_URL") or "").strip():
+            return True
+        return bool(str(os.environ.get("WORKFLOW_DATABASE_URL") or "").strip())
+
+    def run(self) -> HeartbeatModuleResult:
+        t0 = time.monotonic()
+        if not self._has_workflow_authority():
+            return _ok(self.name, t0)
+        try:
+            from runtime.dataset_staleness import reconcile_dataset_staleness
+
+            reconcile_dataset_staleness(
+                reconciled_by="heartbeat",
+                env=self._workflow_env,
+            )
+        except Exception as exc:
+            return _fail(self.name, t0, str(exc))
+        return _ok(self.name, t0)
+
+
 class _RateLimitProbeModule(HeartbeatModule):
     """Heartbeat adapter for provider rate-limit health probes."""
 
@@ -564,6 +604,7 @@ class HeartbeatRunner:
                 _SemanticProjectionRefreshModule(workflow_env=self._workflow_env),
                 _DatasetCandidateRefreshModule(workflow_env=self._workflow_env),
                 _DatasetCurationRefreshModule(workflow_env=self._workflow_env),
+                _DatasetStalenessReconcileModule(workflow_env=self._workflow_env),
             ])
             if self._embedder is not None:
                 from runtime.codebase_index_module import CodebaseIndexModule

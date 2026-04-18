@@ -22,19 +22,34 @@ const paths: Record<GlyphType, string> = {
   review:   'M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z',
   tool:     'M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.4z',
   blocked:  'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8 0-1.85.63-3.55 1.69-4.9L16.9 18.31A7.9 7.9 0 0112 20zm6.31-3.1L7.1 5.69A7.9 7.9 0 0112 4c4.42 0 8 3.58 8 8 0 1.85-.63 3.55-1.69 4.9z',
+  analyze:  'M4 20h3V10H4v10zm6 0h3V4h-3v16zm6 0h3v-7h-3v7z',
+  decompose:'M12 3v4m-1 3h2v2h-2zm-5 5h2v2H6zm10 0h2v2h-2zM12 7l-5 3m5-3l5 3',
+  diff:     'M4 4h7v16H4V4zm9 0h7v16h-7V4zM2 12h4m12 0h4',
+  chat:     'M20 2H4a2 2 0 00-2 2v14l4-4h14a2 2 0 002-2V4a2 2 0 00-2-2zM7 9h10v2H7V9zm0 3h7v2H7v-2z',
+  spec:     'M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zm0 7V3.5L19.5 9H14zm-5 4h8v2H9v-2zm0 4h8v2H9v-2zm0-8h3v2H9V9z',
+  build:    'M22 11.1l-1-1-4 4-1-1 4-4-1-1-6 6c-.83-.33-2-.5-3 .5l-6 6 2 2 6-6c1-1 .83-2.17.5-3l6-6zM5 13l4 4-6 6-4-4 6-6z',
+  test:     'M9 2v5.5L3.5 18a2 2 0 001.75 3h13.5a2 2 0 001.75-3L15 7.5V2H9zm2 2h2v4h-2V4zm-3.5 12h9L13 10h-2l-3.5 6z',
+  deploy:   'M12 2l-1.5 1.5a9 9 0 00-2.5 6.5v3l-3 3 1 3h3l1-1h4l1 1h3l1-3-3-3v-3a9 9 0 00-2.5-6.5L12 2zm0 5a2 2 0 110 4 2 2 0 010-4zm-2 14l2 2 2-2h-4z',
+  data:     'M12 3C7.58 3 4 4.34 4 6v12c0 1.66 3.58 3 8 3s8-1.34 8-3V6c0-1.66-3.58-3-8-3zm0 2c3.87 0 6 1.17 6 1.5S15.87 8 12 8s-6-1.17-6-1.5S8.13 5 12 5zm6 13c0 .33-2.13 1.5-6 1.5s-6-1.17-6-1.5v-3.7c1.45.72 3.53 1.2 6 1.2s4.55-.48 6-1.2V18zm0-6c0 .33-2.13 1.5-6 1.5s-6-1.17-6-1.5V8.3c1.45.72 3.53 1.2 6 1.2s4.55-.48 6-1.2V12z',
+  metric:   'M2 12h4l3-9 4 18 3-9h6',
+  render:   'M3 4h18a1 1 0 011 1v11a1 1 0 01-1 1h-7v2h3v2H7v-2h3v-2H3a1 1 0 01-1-1V5a1 1 0 011-1zm2 3v8h14V7H5z',
+  adversarial:'M6.5 3L3 6.5l7 7L6 17v4h4l3.5-4 7 7 3.5-3.5-7-7 4-3.5H17l-3.5 4-7-7z',
+  validate: 'M12 2L4 5v6c0 5 3.5 9.4 8 11 4.5-1.6 8-6 8-11V5l-8-3zm-1 14l-4-4 1.4-1.4 2.6 2.6 5.6-5.6L18 9l-7 7z',
+  idea:     'M9 21h6v-2H9v2zm3-19a7 7 0 00-4 12.7V17a2 2 0 002 2h4a2 2 0 002-2v-2.3A7 7 0 0012 2zm2.85 11.1L14 14.1V17h-4v-2.9l-.85-1A5 5 0 019 9a5 5 0 0110 0 5 5 0 01-2.15 4.1z',
+  summary:  'M3 4h18v2H3V4zm3 4h12v2H6V8zm0 4h12v2H6v-2zm-3 4h18v2H3v-2zm3 4h12v2H6v-2z',
 };
 
 export function MoonGlyph({ type, size = 24, color = 'currentColor' }: MoonGlyphProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
-      <path 
-        d={paths[type] || paths.step} 
-        fill={color} 
-        fillOpacity={0.08} 
+      <path
+        d={paths[type] || paths.step}
+        fill={color}
+        fillOpacity={0.08}
         stroke="none"
       />
-      <path 
-        d={paths[type] || paths.step} 
+      <path
+        d={paths[type] || paths.step}
         stroke={color}
         strokeWidth="1.6"
         opacity={0.9}

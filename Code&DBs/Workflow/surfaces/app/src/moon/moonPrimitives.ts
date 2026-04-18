@@ -328,22 +328,25 @@ const MOON_PRIMITIVES: Record<string, MoonPrimitiveSpec> = {
     route: 'workflow.fanout',
     surface: {
       tier: 'primary',
-      badge: 'Core now',
-      detail: 'Fan-out now has a verified runtime lane, so Moon can surface it as a core builder primitive.',
+      badge: 'API only',
+      detail: 'Count-based burst. Use when you want N parallel SLM workers against the same prompt template — e.g. 40 Haiku workers for broad research or architecture sweeps. CLI adapters are rejected.',
     },
     scaffold: (node) => ({
-      prompt: node.prompt || 'Split the work into bounded parallel tasks and return a merged result.',
+      prompt: node.prompt || 'Burst N parallel workers over the same prompt template and return merged results.',
       outputs: isStringArray(node.outputs) && node.outputs.length > 0 ? node.outputs : ['fanout_results'],
     }),
   },
-  'auto/fan-out': {
-    route: 'auto/fan-out',
+  'workflow.loop': {
+    route: 'workflow.loop',
     surface: {
-      tier: 'hidden',
-      badge: 'Alias',
-      detail: 'Legacy token only, kept so older graphs still open cleanly.',
-      hardChoice: 'Compatibility alias for saved graphs only.',
+      tier: 'primary',
+      badge: 'Any provider',
+      detail: 'Item-based map. Use when you have a list of distinct inputs and want to run the same step over each — e.g. per-lead research, per-URL scrape.',
     },
+    scaffold: (node) => ({
+      prompt: node.prompt || 'For each item in the list, run this step and return per-item results.',
+      outputs: isStringArray(node.outputs) && node.outputs.length > 0 ? node.outputs : ['loop_results'],
+    }),
   },
 };
 

@@ -9,7 +9,60 @@ import { branchLabel, normalizeBuildEdgeRelease } from '../shared/edgeRelease';
 
 // --- View model types ---
 
-export type GlyphType = 'step' | 'gate' | 'state' | 'trigger' | 'human' | 'binding' | 'research' | 'classify' | 'draft' | 'notify' | 'review' | 'tool' | 'blocked';
+export type GlyphType =
+  | 'step' | 'gate' | 'state' | 'trigger' | 'human' | 'binding'
+  | 'research' | 'classify' | 'draft' | 'notify' | 'review' | 'tool' | 'blocked'
+  | 'analyze' | 'decompose' | 'diff' | 'chat' | 'spec' | 'build' | 'test'
+  | 'deploy' | 'data' | 'metric' | 'render' | 'adversarial' | 'validate'
+  | 'idea' | 'summary';
+
+/**
+ * Type vocabulary: a *token* (word-boundary match) found in a label maps
+ * to exactly one glyph. Jobs sharing a type token share a glyph; jobs with
+ * no recognised token fall back to 'step'.
+ *
+ * Keep this list small and deliberate. Don't add a type unless the glyph
+ * genuinely means something about the job's role, not just a word that
+ * happens to appear in a label.
+ */
+const TYPE_TOKEN_TO_GLYPH: Record<string, GlyphType> = {
+  analyze: 'analyze', analyse: 'analyze', inspect: 'analyze', audit: 'analyze',
+  decompose: 'decompose', fanout: 'decompose', loop: 'decompose', split: 'decompose',
+  propose: 'idea', suggest: 'idea', brainstorm: 'idea',
+  adversarial: 'adversarial', redteam: 'adversarial', attack: 'adversarial', debate: 'adversarial',
+  diff: 'diff', compare: 'diff', contrast: 'diff',
+  review: 'review', approve: 'review',
+  validate: 'validate', validation: 'validate', verify: 'validate',
+  test: 'test', assert: 'test',
+  build: 'build', compile: 'build',
+  deploy: 'deploy', release: 'deploy', ship: 'deploy', cutover: 'deploy',
+  chat: 'chat', message: 'chat',
+  spec: 'spec', schema: 'spec', blueprint: 'spec',
+  render: 'render', markdown: 'render',
+  data: 'data', dataset: 'data', ingest: 'data', fetch: 'data',
+  metric: 'metric', measure: 'metric', score: 'metric',
+  research: 'research',
+  classify: 'classify', triage: 'classify',
+  draft: 'draft', write: 'draft',
+  notify: 'notify', alert: 'notify', email: 'notify',
+  trigger: 'trigger',
+  human: 'human',
+  tool: 'tool', api: 'tool', webhook: 'tool',
+  summary: 'summary', report: 'summary', record: 'summary', register: 'summary',
+};
+
+/**
+ * Tokenize a label by non-word separators and return the first known type
+ * glyph, or null if no token matches the vocabulary.
+ */
+export function glyphFromLabel(label: string): GlyphType | null {
+  const tokens = label.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  for (const t of tokens) {
+    const g = TYPE_TOKEN_TO_GLYPH[t];
+    if (g) return g;
+  }
+  return null;
+}
 
 // 6-state circle model
 export type RingState =
@@ -56,7 +109,6 @@ export interface OrbitNode {
   isOnDominantPath: boolean;
   issueCount: number;
   route?: string;
-  needsBadge: boolean;
   dominantPathIndex: number;
   x: number;
   y: number;
@@ -132,17 +184,8 @@ function nodeToGlyph(node: BuildNode): GlyphType {
   const status = (node.status || '').toLowerCase();
   if (status === 'blocked' || status === 'error') return 'blocked';
   const route = (node.route || '').toLowerCase();
-  if (route.includes('trigger')) return 'trigger';
-  if (route.includes('research')) return 'research';
-  if (route.includes('fanout') || route.includes('fan-out')) return 'classify';
-  if (route.includes('classify') || route.includes('score') || route.includes('triage')) return 'classify';
-  if (route.includes('draft') || route.includes('write') || route.includes('generate')) return 'draft';
-  if (route.includes('notify') || route.includes('alert') || route.includes('send')) return 'notify';
-  if (route.includes('review') || route.includes('approve')) return 'review';
-  if (route.includes('human')) return 'human';
-  if (route.includes('api') || route.includes('tool') || route.includes('webhook')) return 'tool';
-  if (!route) return 'step'; // no route assigned = empty ring, no icon
-  return 'step';
+  const label = ((node as { label?: string; title?: string }).label || (node as { title?: string }).title || '').toLowerCase();
+  return glyphFromLabel(`${route} ${label}`) ?? 'step';
 }
 
 function isNodeDecided(node: BuildNode): boolean {
@@ -362,7 +405,6 @@ export function presentBuild(
   }
 
   const nodes: OrbitNode[] = allOrdered.map((n) => {
-    const badge = nodeNeedsBadge(n, payload);
     let ring = nodeToRingState(n, payload, activeNodeId);
 
     // Override with run status when a run is active
@@ -378,7 +420,6 @@ export function presentBuild(
       isOnDominantPath: pathSet.has(n.node_id),
       issueCount: issuesByNode.get(n.node_id) || 0,
       route: n.route,
-      needsBadge: badge,
       dominantPathIndex: pathIndexMap.get(n.node_id) ?? -1,
       x: layout.nodes.get(n.node_id)?.x ?? 0,
       y: layout.nodes.get(n.node_id)?.y ?? 0,
@@ -457,7 +498,7 @@ export function presentBuild(
     nodeId: untypedNodes[0]?.id,
     message: untypedNodes.length === 0 ? 'All nodes have types' : `${untypedNodes.length} node${untypedNodes.length > 1 ? 's' : ''} need types`,
   });
-  const incompleteNodes = nodes.filter(n => n.isOnDominantPath && n.needsBadge);
+  const incompleteNodes = nodes.filter(n => n.isOnDominantPath && n.ringState === 'decided-incomplete');
   checklist.push({
     label: 'Context attached',
     passed: incompleteNodes.length === 0,

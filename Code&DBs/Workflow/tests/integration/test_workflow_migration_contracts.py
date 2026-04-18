@@ -85,7 +85,17 @@ def test_workflow_migration_manifest_includes_provider_route_health_budget_migra
     assert "152_operation_catalog_observability_finish.sql" in filenames
     assert "153_memory_edge_authority_contract.sql" in filenames
     assert "154_roadmap_lifecycle_authority.sql" in filenames
-    assert filenames[-1] == "154_roadmap_lifecycle_authority.sql"
+    assert "155_dataset_refinery_authority.sql" in filenames
+    assert "156_dataset_refinery_projections.sql" in filenames
+    assert "157_dataset_refinery_indexes.sql" in filenames
+    assert "158_authority_memory_projection_vocabulary.sql" in filenames
+    assert "159_provider_lane_policy.sql" in filenames
+    assert "160_pgvector_roadmap_and_decisions.sql" in filenames
+    assert "161_workflow_spec_ready.sql" in filenames
+    assert "162_split_fanout_and_loop.sql" in filenames
+    assert "163_dataset_candidate_score_history.sql" in filenames
+    assert "164_dataset_promotion_decision_bridge.sql" in filenames
+    assert filenames[-1] == "164_dataset_promotion_decision_bridge.sql"
 
 
 def test_every_manifest_migration_has_expected_object_contract() -> None:

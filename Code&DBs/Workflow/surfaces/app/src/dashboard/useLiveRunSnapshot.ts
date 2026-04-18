@@ -58,7 +58,7 @@ export interface RunGraphNode {
   agent?: string;
   attempt?: number;
   error_code?: string;
-  fan_out?: { count: number; succeeded: number; failed: number; running: number };
+  loop?: { count: number; succeeded: number; failed: number; running: number };
 }
 
 export interface RunGraphEdge {

@@ -894,9 +894,9 @@ def test_compile_prose_emits_research_toolchains_from_runtime_catalog(monkeypatc
 
     slugs = [capability["slug"] for capability in definition["capabilities"]]
     assert "research/local-knowledge" in slugs
-    assert "research/fan-out" in slugs
+    assert "research/loop" in slugs
     assert "tool/recruiter/company_intel" in slugs
-    assert definition["execution_setup"]["method"]["key"] == "seed_fanout_synthesize"
+    assert definition["execution_setup"]["method"]["key"] == "seed_loop_synthesize"
     assert definition["execution_setup"]["constraints"]["briefing_fields"] == [
         "Research topic, company, or question to investigate",
         "Comparison set or entities in scope",
@@ -906,14 +906,14 @@ def test_compile_prose_emits_research_toolchains_from_runtime_catalog(monkeypatc
         "Output format or deliverable expectation",
     ]
     assert definition["execution_setup"]["constraints"]["blocking_inputs"] == []
-    assert definition["execution_setup"]["budget_policy"]["fanout_workers"] == 4
+    assert definition["execution_setup"]["budget_policy"]["loop_workers"] == 4
     assert definition["surface_manifest"]["surface_now"]["approaches"][0]["label"] == "Seed research plan"
     assert any(
         command["id"] == "fill_briefing_fields"
         for command in definition["surface_manifest"]["surface_now"]["commands"]
     )
     assert any(
-        decision["choice"] == "seed_fanout_synthesize"
+        decision["choice"] == "seed_loop_synthesize"
         for decision in definition["build_receipt"]["decisions"]
     )
     assert any(

@@ -51,20 +51,6 @@ class _Subsystems(_BaseSubsystems):
     def _handle_reference_catalog_sync_error(self, exc: Exception) -> None:
         logger.debug("reference catalog sync skipped: %s", exc)
 
-    def _build_bug_tracker(self):
-        from runtime.bug_tracker import BugTracker
-
-        return BugTracker(self.get_pg_conn(), self.get_embedding_service())
-
-    def _build_heartbeat_runner(self):
-        from runtime.heartbeat_runner import HeartbeatRunner
-
-        return HeartbeatRunner(
-            conn=self.get_pg_conn(),
-            embedder=self.get_embedding_service(),
-            workflow_env=self._postgres_env(),
-        )
-
 
 # Singleton subsystems instance
 _subs = _Subsystems()

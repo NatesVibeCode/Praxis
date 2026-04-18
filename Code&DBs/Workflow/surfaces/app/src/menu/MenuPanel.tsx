@@ -236,7 +236,7 @@ export function MenuPanel({
                           if (!item.keepOpen) onClose();
                         }}
                       >
-                        <span className="menu-panel__icon">{item.icon}</span>
+                        {item.icon && <span className="menu-panel__icon">{item.icon}</span>}
                         <span className="menu-panel__content">
                           <span className="menu-panel__label-row">
                             <span className="menu-panel__label">{item.label}</span>

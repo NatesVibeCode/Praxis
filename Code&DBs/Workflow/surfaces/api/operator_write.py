@@ -559,11 +559,11 @@ _ROADMAP_TEMPLATE_CHILDREN: dict[str, tuple[_RoadmapTemplateChild, ...]] = {
             ),
         ),
         _RoadmapTemplateChild(
-            suffix="tool_fanout",
+            suffix="tool_loop",
             title="Wire dictionary outputs into existing tools (queries, runbooks, roadmap)",
             priority="p1",
             summary=(
-                "Add tool-level fanout so dictionary output is consumed by MCP and CLI surfaces "
+                "Add tool-level loop so dictionary output is consumed by MCP and CLI surfaces "
                 "to propose roadmap items, runbooks, and scenario previews automatically."
             ),
             must_have=(
@@ -5973,7 +5973,7 @@ class _WorkflowFlowSpec:
 _FLOW_SPECS: tuple[_WorkflowFlowSpec, ...] = (
     _WorkflowFlowSpec(flow_name="review", class_name="review"),
     _WorkflowFlowSpec(flow_name="repair", class_name="repair"),
-    _WorkflowFlowSpec(flow_name="fanout", class_name="fanout"),
+    _WorkflowFlowSpec(flow_name="loop", class_name="loop"),
 )
 
 
@@ -6031,7 +6031,7 @@ class NativeWorkflowFlowRecord:
 
 @dataclass(frozen=True, slots=True)
 class NativeWorkflowFlowCatalog:
-    """Inspectable snapshot of native review, repair, and fanout flow authority."""
+    """Inspectable snapshot of native review, repair, and loop flow authority."""
 
     flow_records: tuple[NativeWorkflowFlowRecord, ...]
     as_of: datetime
@@ -6087,7 +6087,7 @@ class NativeRecurringReviewRepairFlowReadModel:
 
 @dataclass(slots=True)
 class NativeWorkflowFlowFrontdoor:
-    """Repo-local frontdoor for workflow-class review, repair, and fanout flows."""
+    """Repo-local frontdoor for workflow-class review, repair, and loop flows."""
 
     connect_database: Callable[[Mapping[str, str] | None], Awaitable[_Connection]] = (
         connect_workflow_database
@@ -6146,7 +6146,7 @@ class NativeWorkflowFlowFrontdoor:
         env: Mapping[str, str] | None = None,
         as_of: datetime | None = None,
     ) -> dict[str, Any]:
-        """Inspect the native review, repair, and fanout flows through class authority."""
+        """Inspect the native review, repair, and loop flows through class authority."""
 
         source, instance = self._resolve_instance(env=env)
         flow_catalog = _run_async(
@@ -6216,7 +6216,7 @@ def inspect_workflow_flows(
     env: Mapping[str, str] | None = None,
     as_of: datetime | None = None,
 ) -> dict[str, Any]:
-    """Inspect the native review, repair, and fanout flows through repo-local authority."""
+    """Inspect the native review, repair, and loop flows through repo-local authority."""
 
     return NativeWorkflowFlowFrontdoor().inspect_workflow_flows(
         env=env,
@@ -6261,6 +6261,52 @@ EVENT_DATASET_POLICY_RECORDED = "dataset_policy_recorded"
 EVENT_DATASET_PROMOTION_RECORDED = "dataset_promotion_recorded"
 EVENT_DATASET_PROMOTION_SUPERSEDED = "dataset_promotion_superseded"
 EVENT_DATASET_CANDIDATE_REJECTED = "dataset_candidate_rejected"
+
+
+async def _arecord_dataset_decision(
+    conn: _Connection,
+    *,
+    decision_kind: str,
+    decision_key: str,
+    decision_scope_kind: str,
+    decision_scope_ref: str,
+    title: str,
+    rationale: str,
+    decided_by: str,
+    decision_source: str,
+) -> str:
+    """Insert one dataset-scoped operator_decisions row on the given connection
+    and return its operator_decision_id.
+
+    This bypasses the OperatorControlFrontdoor factory because dataset writes
+    need to share a transaction with the downstream dataset_* row, so the
+    decision + promotion/rejection/supersede land atomically.
+    """
+
+    now = _now()
+    record = OperatorDecisionAuthorityRecord(
+        operator_decision_id=_operator_decision_id_from_key(
+            decision_kind=decision_kind,
+            decision_key=decision_key,
+        ),
+        decision_key=decision_key,
+        decision_kind=decision_kind,
+        decision_status="decided",
+        title=title,
+        rationale=rationale,
+        decided_by=decided_by,
+        decision_source=decision_source,
+        effective_from=now,
+        effective_to=None,
+        decided_at=now,
+        created_at=now,
+        updated_at=now,
+        decision_scope_kind=decision_scope_kind,
+        decision_scope_ref=decision_scope_ref,
+    )
+    repository = PostgresOperatorControlRepository(conn)
+    persisted = await repository.record_operator_decision(operator_decision=record)
+    return persisted.operator_decision_id
 
 
 async def arecord_dataset_policy(
@@ -6387,6 +6433,19 @@ async def arecord_dataset_promotion(
     conn = await connect_workflow_database(env)
     try:
         async with conn.transaction():
+            resolved_decision_ref = decision_ref
+            if not (resolved_decision_ref or "").strip():
+                resolved_decision_ref = await _arecord_dataset_decision(
+                    conn,
+                    decision_kind="dataset_promotion",
+                    decision_key=f"dataset-promotion::{pid}",
+                    decision_scope_kind="dataset_specialist",
+                    decision_scope_ref=specialist_target,
+                    title=f"Dataset promotion {pid}",
+                    rationale=rationale,
+                    decided_by=promoted_by,
+                    decision_source=f"operator_write.arecord_dataset_promotion:{promotion_kind}",
+                )
             await conn.execute(
                 """INSERT INTO dataset_promotions (
                         promotion_id, candidate_ids, dataset_family, specialist_target,
@@ -6403,7 +6462,7 @@ async def arecord_dataset_promotion(
                 promoted_by,
                 promotion_kind,
                 rationale,
-                decision_ref,
+                resolved_decision_ref,
             )
             event_id = await aemit(
                 conn,
@@ -6420,6 +6479,7 @@ async def arecord_dataset_promotion(
                     "promotion_kind": promotion_kind,
                     "split_tag": split_tag,
                     "candidate_ids": list(candidate_ids),
+                    "decision_ref": resolved_decision_ref,
                 },
                 emitted_by="operator_write.arecord_dataset_promotion",
             )
@@ -6439,6 +6499,7 @@ async def arecord_dataset_promotion(
         "policy_id": policy_id,
         "split_tag": split_tag,
         "candidate_ids": list(candidate_ids),
+        "decision_ref": resolved_decision_ref,
         "event_id": event_id,
     }
 
@@ -6452,10 +6513,11 @@ async def arecord_dataset_rejection(
 ) -> dict[str, Any]:
     """Record an operator's explicit rejection of a candidate.
 
-    Phase 1: this is an event-only marker. Promotions still go through
-    arecord_dataset_promotion; rejections are visible in the event log
-    so a follow-up promote attempt can be cross-checked. The candidate
-    row itself is left untouched (its score may already be 'rejected').
+    Writes a typed operator_decisions row (decision_kind=dataset_rejection,
+    scope=dataset_candidate/candidate_id) alongside the event so the
+    rejection is queryable as decision-table authority, not only as an
+    event. The candidate row itself is left untouched (its score may
+    already be 'rejected').
     """
 
     if not (reason or "").strip():
@@ -6474,6 +6536,17 @@ async def arecord_dataset_rejection(
             )
             if row is None:
                 raise ValueError(f"unknown candidate_id {candidate_id!r}")
+            decision_id = await _arecord_dataset_decision(
+                conn,
+                decision_kind="dataset_rejection",
+                decision_key=f"dataset-rejection::{candidate_id}",
+                decision_scope_kind="dataset_candidate",
+                decision_scope_ref=candidate_id,
+                title=f"Dataset candidate {candidate_id} rejected",
+                rationale=reason,
+                decided_by=rejected_by,
+                decision_source="operator_write.arecord_dataset_rejection",
+            )
             event_id = await aemit(
                 conn,
                 channel=CHANNEL_DATASET,
@@ -6484,6 +6557,7 @@ async def arecord_dataset_rejection(
                     "candidate_id": candidate_id,
                     "rejected_by": rejected_by,
                     "reason": reason,
+                    "decision_ref": decision_id,
                 },
                 emitted_by="operator_write.arecord_dataset_rejection",
             )
@@ -6493,6 +6567,7 @@ async def arecord_dataset_rejection(
         "candidate_id": candidate_id,
         "rejected_by": rejected_by,
         "reason": reason,
+        "decision_ref": decision_id,
         "event_id": event_id,
     }
 
@@ -6569,6 +6644,17 @@ async def asupersede_dataset_promotion(
                 superseded_reason,
                 promotion_id,
             )
+            decision_id = await _arecord_dataset_decision(
+                conn,
+                decision_kind="dataset_promotion_supersede",
+                decision_key=f"dataset-promotion-supersede::{promotion_id}",
+                decision_scope_kind="dataset_promotion",
+                decision_scope_ref=promotion_id,
+                title=f"Dataset promotion {promotion_id} superseded",
+                rationale=superseded_reason,
+                decided_by=superseded_by_operator,
+                decision_source="operator_write.asupersede_dataset_promotion",
+            )
             event_id = await aemit(
                 conn,
                 channel=CHANNEL_DATASET,
@@ -6580,6 +6666,7 @@ async def asupersede_dataset_promotion(
                     "tombstone_promotion_id": tombstone_id,
                     "reason": superseded_reason,
                     "superseded_by_operator": superseded_by_operator,
+                    "decision_ref": decision_id,
                 },
                 emitted_by="operator_write.asupersede_dataset_promotion",
             )
@@ -6597,6 +6684,7 @@ async def asupersede_dataset_promotion(
         "tombstone_promotion_id": tombstone_id,
         "reason": superseded_reason,
         "superseded_by_operator": superseded_by_operator,
+        "decision_ref": decision_id,
         "event_id": event_id,
     }
 

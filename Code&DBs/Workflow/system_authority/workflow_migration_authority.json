@@ -82,7 +82,17 @@
     "151_operation_catalog_operator_finish.sql",
     "152_operation_catalog_observability_finish.sql",
     "153_memory_edge_authority_contract.sql",
-    "154_roadmap_lifecycle_authority.sql"
+    "154_roadmap_lifecycle_authority.sql",
+    "155_dataset_refinery_authority.sql",
+    "156_dataset_refinery_projections.sql",
+    "157_dataset_refinery_indexes.sql",
+    "158_authority_memory_projection_vocabulary.sql",
+    "159_provider_lane_policy.sql",
+    "160_pgvector_roadmap_and_decisions.sql",
+    "161_workflow_spec_ready.sql",
+    "162_split_fanout_and_loop.sql",
+    "163_dataset_candidate_score_history.sql",
+    "164_dataset_promotion_decision_bridge.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -2362,6 +2372,138 @@
         "object_type": "constraint",
         "object_name": "roadmap_items_lifecycle_check"
       }
+    ],
+    "155_dataset_refinery_authority.sql": [
+      {
+        "object_type": "table",
+        "object_name": "dataset_raw_candidates"
+      },
+      {
+        "object_type": "table",
+        "object_name": "dataset_candidate_evidence_links"
+      },
+      {
+        "object_type": "table",
+        "object_name": "dataset_scoring_policies"
+      },
+      {
+        "object_type": "table",
+        "object_name": "dataset_candidate_scores"
+      },
+      {
+        "object_type": "table",
+        "object_name": "dataset_promotions"
+      }
+    ],
+    "156_dataset_refinery_projections.sql": [
+      {
+        "object_type": "table",
+        "object_name": "dataset_curated_examples"
+      },
+      {
+        "object_type": "table",
+        "object_name": "dataset_curated_preference_pairs"
+      },
+      {
+        "object_type": "table",
+        "object_name": "dataset_curated_eval_cases"
+      },
+      {
+        "object_type": "table",
+        "object_name": "dataset_export_manifests"
+      }
+    ],
+    "157_dataset_refinery_indexes.sql": [
+      {
+        "object_type": "index",
+        "object_name": "dataset_raw_candidates_kind_route_ingested_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "dataset_candidate_scores_eligibility_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "dataset_promotions_active_lookup_idx"
+      }
+    ],
+    "158_authority_memory_projection_vocabulary.sql": [
+      {
+        "object_type": "column",
+        "object_name": "memory_entities.authority_domain"
+      },
+      {
+        "object_type": "column",
+        "object_name": "memory_edges.authority_domain"
+      }
+    ],
+    "159_provider_lane_policy.sql": [
+      {
+        "object_type": "table",
+        "object_name": "provider_lane_policy"
+      }
+    ],
+    "160_pgvector_roadmap_and_decisions.sql": [
+      {
+        "object_type": "column",
+        "object_name": "roadmap_items.embedding"
+      },
+      {
+        "object_type": "column",
+        "object_name": "operator_decisions.embedding"
+      },
+      {
+        "object_type": "index",
+        "object_name": "roadmap_items_hnsw_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "operator_decisions_hnsw_idx"
+      }
+    ],
+    "161_workflow_spec_ready.sql": [
+      {
+        "object_type": "table",
+        "object_name": "workflow_spec_ready"
+      }
+    ],
+    "162_split_fanout_and_loop.sql": [
+      {
+        "object_type": "row",
+        "object_name": "surface_catalog_registry.workflow_runtime.split_fanout"
+      },
+      {
+        "object_type": "row",
+        "object_name": "surface_catalog_registry.workflow_runtime.loop"
+      }
+    ],
+    "163_dataset_candidate_score_history.sql": [
+      {
+        "object_type": "table",
+        "object_name": "dataset_candidate_score_history"
+      },
+      {
+        "object_type": "function",
+        "object_name": "dataset_candidate_scores_append_history"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "dataset_candidate_scores_history_ai"
+      },
+      {
+        "object_type": "index",
+        "object_name": "dataset_candidate_score_history_by_candidate_idx"
+      }
+    ],
+    "164_dataset_promotion_decision_bridge.sql": [
+      {
+        "object_type": "constraint",
+        "object_name": "operator_decisions_kind_scope_policy"
+      },
+      {
+        "object_type": "row",
+        "object_name": "operator_decisions.operator_decision.architecture_policy.decision_tables.dataset_refinery_authority"
+      }
     ]
   },
   "policy_buckets": {
@@ -2448,7 +2590,17 @@
       "151_operation_catalog_operator_finish.sql",
       "152_operation_catalog_observability_finish.sql",
       "153_memory_edge_authority_contract.sql",
-      "154_roadmap_lifecycle_authority.sql"
+      "154_roadmap_lifecycle_authority.sql",
+      "155_dataset_refinery_authority.sql",
+      "156_dataset_refinery_projections.sql",
+      "157_dataset_refinery_indexes.sql",
+      "158_authority_memory_projection_vocabulary.sql",
+      "159_provider_lane_policy.sql",
+      "160_pgvector_roadmap_and_decisions.sql",
+      "161_workflow_spec_ready.sql",
+      "162_split_fanout_and_loop.sql",
+      "163_dataset_candidate_score_history.sql",
+      "164_dataset_promotion_decision_bridge.sql"
     ],
     "bootstrap_only": [
       "012_execution_leases.sql",

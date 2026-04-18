@@ -487,6 +487,7 @@ class ChatOrchestrator:
     def _resolve_route_chain(self) -> list[ResolvedChatRoute]:
         """Resolve chat failover routes and filter to currently usable lanes."""
         from registry.provider_execution_registry import resolve_binary
+        from runtime.lane_policy import admit_adapter_type, load_provider_lane_policies
         router_mod = importlib.import_module(f"{__package__}.task_type_router")
         TaskTypeRouter = router_mod.TaskTypeRouter
 
@@ -499,8 +500,10 @@ class ChatOrchestrator:
         if not raw_decisions:
             raise RuntimeError("task type routing returned no decisions for auto/chat")
 
+        lane_policies = load_provider_lane_policies(self._pg)
         now = time.monotonic()
         routes: list[ResolvedChatRoute] = []
+        rejections: list[str] = []
         for decision in raw_decisions:
             provider = str(decision.provider_slug)
             model = str(decision.model_slug)
@@ -511,11 +514,36 @@ class ChatOrchestrator:
             if failed_at is not None and (now - failed_at) < _ROUTE_FAILURE_TTL_SECONDS:
                 continue
 
-            adapter_type = str(getattr(decision, "adapter_type", "llm_task") or "llm_task")
+            # Fail-closed on missing adapter_type: the router is expected to
+            # populate this. A None/empty value means the route is malformed,
+            # not a license to silently pick the paid API.
+            raw_adapter_type = getattr(decision, "adapter_type", None)
+            adapter_type = str(raw_adapter_type or "").strip().lower()
+            if not adapter_type:
+                _log.warning(
+                    "Skipping route %s/%s: decision has no adapter_type (fail-closed)",
+                    provider, model,
+                )
+                rejections.append(f"{provider}/{model}:no_adapter_type")
+                continue
+
+            decision_pressure = str(getattr(decision, "spend_pressure", "") or "") or None
+            admitted, reason = admit_adapter_type(
+                lane_policies, provider, adapter_type, spend_pressure=decision_pressure,
+            )
+            if not admitted:
+                _log.info(
+                    "Lane policy rejected %s/%s adapter=%s reason=%s",
+                    provider, model, adapter_type, reason,
+                )
+                rejections.append(f"{provider}/{model}:{reason}")
+                continue
+
             if adapter_type == "cli_llm":
                 # Skip CLI routes whose binary isn't installed
                 if resolve_binary(provider) is None:
                     _log.debug("Skipping CLI route %s/%s: binary not on PATH", provider, model)
+                    rejections.append(f"{provider}/{model}:cli_binary_missing")
                     continue
                 routes.append(
                     ResolvedChatRoute(
@@ -540,10 +568,15 @@ class ChatOrchestrator:
                         supports_tool_loop=True,
                     )
                 )
+            else:
+                rejections.append(f"{provider}/{model}:no_api_key")
 
         routes = _prioritize_last_good_cli_route(routes)
         if not routes:
-            raise RuntimeError("no usable chat routes available for auto/chat")
+            detail = "; ".join(rejections) if rejections else "no candidates"
+            raise RuntimeError(
+                f"no usable chat routes available for auto/chat (lane-gated): {detail}"
+            )
         return routes
 
     def _resolve_model(self) -> tuple[str, str, str, str]:

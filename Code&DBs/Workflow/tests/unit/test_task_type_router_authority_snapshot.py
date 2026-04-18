@@ -73,6 +73,8 @@ class _CountingConn:
         if "FROM market_benchmark_metric_registry" in sql:
             self.counts["market_benchmark_metric_registry"] += 1
             return []
+        if "FROM provider_lane_policy" in sql:
+            return []
         raise AssertionError(sql)
 
 

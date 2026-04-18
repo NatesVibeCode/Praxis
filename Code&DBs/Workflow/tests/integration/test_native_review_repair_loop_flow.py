@@ -83,7 +83,7 @@ def _workflow_class_row(
     }
 
 
-def test_native_review_repair_fanout_flow_is_deterministic_and_fail_closed(
+def test_native_review_repair_loop_flow_is_deterministic_and_fail_closed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     as_of = datetime(2026, 4, 2, 20, 0, tzinfo=timezone.utc)
@@ -118,9 +118,9 @@ def test_native_review_repair_fanout_flow_is_deterministic_and_fail_closed(
                     as_of=as_of,
                 ),
                 _workflow_class_row(
-                    class_name="fanout",
-                    workflow_class_id="workflow_class.fanout",
-                    workflow_lane_id="workflow_lane.fanout",
+                    class_name="loop",
+                    workflow_class_id="workflow_class.loop",
+                    workflow_lane_id="workflow_lane.loop",
                     review_required=False,
                     as_of=as_of,
                 ),
@@ -146,25 +146,25 @@ def test_native_review_repair_fanout_flow_is_deterministic_and_fail_closed(
     assert first_payload["native_instance"]["praxis_instance_name"] == "praxis"
     assert first_payload["workflow_class_authority"] == "policy.workflow_classes"
     assert first_payload["as_of"] == as_of.isoformat()
-    assert first_payload["flow_names"] == ["review", "repair", "fanout"]
+    assert first_payload["flow_names"] == ["review", "repair", "loop"]
     assert [flow["flow_name"] for flow in first_payload["flows"]] == [
         "review",
         "repair",
-        "fanout",
+        "loop",
     ]
     assert [
         flow["workflow_class"]["workflow_class_id"] for flow in first_payload["flows"]
     ] == [
         "workflow_class.review",
         "workflow_class.repair",
-        "workflow_class.fanout",
+        "workflow_class.loop",
     ]
     assert [
         flow["workflow_class"]["workflow_lane_id"] for flow in first_payload["flows"]
     ] == [
         "workflow_lane.review",
         "workflow_lane.repair",
-        "workflow_lane.fanout",
+        "workflow_lane.loop",
     ]
     assert seen["resolved_envs"] == [env, env]
     assert seen["closed_connections"] == 2
@@ -181,9 +181,9 @@ def test_native_review_repair_fanout_flow_is_deterministic_and_fail_closed(
                     as_of=as_of,
                 ),
                 _workflow_class_row(
-                    class_name="fanout",
-                    workflow_class_id="workflow_class.fanout",
-                    workflow_lane_id="workflow_lane.fanout",
+                    class_name="loop",
+                    workflow_class_id="workflow_class.loop",
+                    workflow_lane_id="workflow_lane.loop",
                     review_required=False,
                     as_of=as_of,
                 ),

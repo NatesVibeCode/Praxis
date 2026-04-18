@@ -815,9 +815,9 @@ class WorkflowStepRequest(BaseModel):
     tier: str | None = None
     max_tokens: int = 4096
     depends_on: list[str] = []
-    fan_out: bool = False
-    fan_out_prompt: str | None = None
-    fan_out_max_parallel: int = 4
+    loop: bool = False
+    loop_prompt: str | None = None
+    loop_max_parallel: int = 4
 
 
 class PipelineRequest(BaseModel):
@@ -1619,7 +1619,7 @@ def _build_run_graph_from_graph_spec(
             if job.get("last_error_code"):
                 node_payload["error_code"] = job.get("last_error_code")
         if total_frames:
-            node_payload["fan_out"] = {
+            node_payload["loop"] = {
                 "count": total_frames,
                 "succeeded": succeeded_frames,
                 "failed": failed_frames,
@@ -1666,7 +1666,7 @@ def _build_run_graph(conn: Any, run_id: str, jobs: list[dict[str, Any]]) -> dict
 
     Reads the original spec's jobs + depends_on from request_envelope.spec_snapshot,
     then annotates each node with runtime status from workflow_jobs.
-    Fan-out jobs (replicate: labels like prefix_01, prefix_02) are collapsed.
+    Loop jobs (replicate: labels like prefix_01, prefix_02) are collapsed.
     """
     spec_snapshot = _load_run_spec_snapshot(conn, run_id)
     if isinstance(spec_snapshot, dict) and spec_uses_graph_runtime(spec_snapshot):
@@ -1695,14 +1695,14 @@ def _build_run_graph(conn: Any, run_id: str, jobs: list[dict[str, Any]]) -> dict
         for j in jobs:
             job_by_label[j["label"]] = j
 
-        # Detect fan-out groups from runtime jobs
+        # Detect loop groups from runtime jobs
         spec_labels = {sj.get("label") for sj in spec_jobs if sj.get("label")}
-        fan_out_groups: dict[str, list[dict[str, Any]]] = {}
+        loop_groups: dict[str, list[dict[str, Any]]] = {}
         for j in jobs:
             label = j["label"]
             parts = label.rsplit("_", 1)
             if len(parts) == 2 and parts[1].isdigit() and parts[0] in spec_labels:
-                fan_out_groups.setdefault(parts[0], []).append(j)
+                loop_groups.setdefault(parts[0], []).append(j)
 
         # Build nodes from spec jobs
         graph_nodes: list[dict[str, Any]] = []
@@ -1716,12 +1716,12 @@ def _build_run_graph(conn: Any, run_id: str, jobs: list[dict[str, Any]]) -> dict
                 "position": i,
             }
 
-            if label in fan_out_groups:
-                children = fan_out_groups[label]
+            if label in loop_groups:
+                children = loop_groups[label]
                 succeeded = sum(1 for c in children if c["status"] == "succeeded")
                 failed = sum(1 for c in children if c["status"] in ("failed", "dead_letter"))
                 running = sum(1 for c in children if c["status"] in ("running", "claimed"))
-                node["fan_out"] = {"count": len(children), "succeeded": succeeded, "failed": failed, "running": running}
+                node["loop"] = {"count": len(children), "succeeded": succeeded, "failed": failed, "running": running}
                 node["cost_usd"] = sum(c["cost_usd"] for c in children)
                 node["duration_ms"] = max((c["duration_ms"] for c in children), default=0)
                 node["status"] = "succeeded" if succeeded == len(children) else "failed" if failed > 0 else "running" if running > 0 else "pending"

@@ -56,32 +56,32 @@ def _surface_registry_rows() -> list[dict[str, Any]]:
             "drop_kind": "node",
             "action_value": "workflow.fanout",
             "gate_family": None,
-            "description": "Split into parallel sub-tasks and aggregate",
+            "description": "Count-based burst of N parallel API workers (e.g. 40 Haiku workers for broad research)",
             "truth_category": "runtime",
             "truth_badge": "Runs on release",
             "truth_detail": "Fan-out now has a verified runtime lane and compiles into the same release path as other core step routes.",
             "surface_tier": "primary",
-            "surface_badge": "Core now",
-            "surface_detail": "Fan-out now has a verified runtime lane, so Moon can surface it as a core builder primitive.",
+            "surface_badge": "API only",
+            "surface_detail": "Count-based parallel burst of SLM API workers. CLI adapters are rejected because they break under concurrency.",
             "hard_choice": None,
         },
         {
-            "catalog_item_id": "think-fan-out-legacy",
-            "label": "Fan Out (Legacy)",
+            "catalog_item_id": "think-loop",
+            "label": "Loop",
             "icon": "classify",
             "family": "think",
             "status": "ready",
             "drop_kind": "node",
-            "action_value": "auto/fan-out",
+            "action_value": "workflow.loop",
             "gate_family": None,
-            "description": "Legacy fan-out token kept for older saved graphs",
-            "truth_category": "alias",
-            "truth_badge": "Alias",
-            "truth_detail": "Legacy fan-out token kept for existing saved graphs; Moon uses `workflow.fanout` now.",
-            "surface_tier": "hidden",
-            "surface_badge": "Alias",
-            "surface_detail": "Legacy token only, kept so older graphs still open cleanly.",
-            "hard_choice": "Compatibility alias for saved graphs only.",
+            "description": "Item-based for-each map — run the same step once per item in a list",
+            "truth_category": "runtime",
+            "truth_badge": "Runs on release",
+            "truth_detail": "Loop compiles `replicate_with: [items]` into one parallel sub-job per item.",
+            "surface_tier": "primary",
+            "surface_badge": "Any provider",
+            "surface_detail": "Item-based for-each map. Any provider allowed; one spec per item with templated substitution.",
+            "hard_choice": None,
         },
         {
             "catalog_item_id": "ctrl-approval",
@@ -401,7 +401,7 @@ def test_build_catalog_payload_surfaces_shared_static_and_connector_items() -> N
     assert items_by_id["ctrl-retry"]["gateFamily"] == "retry"
     assert items_by_id["ctrl-on-failure"]["gateFamily"] == "after_failure"
     assert items_by_id["think-fan-out"]["actionValue"] == "workflow.fanout"
-    assert items_by_id["think-fan-out-legacy"]["actionValue"] == "auto/fan-out"
+    assert items_by_id["think-loop"]["actionValue"] == "workflow.loop"
     assert items_by_id["trigger-manual"]["source"] == "surface_registry"
     assert items_by_id["ctrl-branch"]["source"] == "surface_registry"
     assert items_by_id["conn-gmail"]["actionValue"] == "@gmail"
@@ -421,7 +421,8 @@ def test_build_catalog_payload_surfaces_shared_static_and_connector_items() -> N
     assert items_by_id["gather-docs"]["surfacePolicy"]["tier"] == "hidden"
     assert items_by_id["think-fan-out"]["truth"]["category"] == "runtime"
     assert items_by_id["think-fan-out"]["surfacePolicy"]["tier"] == "primary"
-    assert items_by_id["think-fan-out-legacy"]["surfacePolicy"]["tier"] == "hidden"
+    assert items_by_id["think-loop"]["truth"]["category"] == "runtime"
+    assert items_by_id["think-loop"]["surfacePolicy"]["tier"] == "primary"
     assert items_by_id["int-workflow-invoke"]["surfacePolicy"]["tier"] == "hidden"
     assert items_by_id["int-workflow-invoke"]["truth"]["category"] == "runtime"
     assert items_by_id["cap-debug"]["surfacePolicy"]["tier"] == "hidden"
@@ -551,11 +552,13 @@ def test_legacy_catalog_handler_uses_shared_catalog_authority() -> None:
     assert items_by_id["ctrl-retry"]["gateFamily"] == "retry"
     assert items_by_id["ctrl-on-failure"]["gateFamily"] == "after_failure"
     assert items_by_id["think-fan-out"]["actionValue"] == "workflow.fanout"
-    assert items_by_id["think-fan-out-legacy"]["actionValue"] == "auto/fan-out"
+    assert items_by_id["think-loop"]["actionValue"] == "workflow.loop"
     assert items_by_id["trigger-manual"]["source"] == "surface_registry"
     assert items_by_id["conn-gmail"]["actionValue"] == "@gmail"
     assert items_by_id["think-fan-out"]["truth"]["category"] == "runtime"
     assert items_by_id["think-fan-out"]["surfacePolicy"]["tier"] == "primary"
+    assert items_by_id["think-loop"]["truth"]["category"] == "runtime"
+    assert items_by_id["think-loop"]["surfacePolicy"]["tier"] == "primary"
     assert items_by_id["ctrl-approval"]["surfacePolicy"]["tier"] == "primary"
     assert items_by_id["ctrl-review"]["surfacePolicy"]["tier"] == "hidden"
     assert items_by_id["ctrl-retry"]["surfacePolicy"]["tier"] == "advanced"

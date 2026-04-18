@@ -19,7 +19,7 @@ const NODE_FAMILIES = ['trigger', 'gather', 'think', 'act'] as const;
 
 function questionFor(node: OrbitNode): string {
   if (!node.route) return 'What should this step do?';
-  if (node.needsBadge) return 'What else does this step need?';
+  if (node.ringState === 'decided-incomplete') return 'What else does this step need?';
   return 'Change this step?';
 }
 
@@ -61,7 +61,7 @@ export function MoonPopout({
       keywords: [item.actionValue || '', item.family, meta, detail, item.source || '', item.connectionStatus || ''],
       selected: node.route === item.actionValue,
       meta,
-      icon: <MoonGlyph type={item.icon} size={14} color={node.route === item.actionValue ? 'var(--moon-glow)' : '#F4F6F8'} />,
+      icon: <MoonGlyph type={item.icon} size={14} color={node.route === item.actionValue ? 'currentColor' : '#F4F6F8'} />,
       onPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => onStartCatalogDrag(event, item),
       onSelect: () => {
         if (item.actionValue) onSelect(node.id, item.actionValue);

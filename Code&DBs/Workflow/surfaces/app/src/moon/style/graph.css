@@ -15,11 +15,13 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: transform 300ms cubic-bezier(0.23, 1, 0.32, 1), box-shadow 300ms ease;
+  filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.08)) drop-shadow(0 0 2px rgba(255, 255, 255, 0.14));
+  transition: transform 300ms cubic-bezier(0.23, 1, 0.32, 1), box-shadow 300ms ease, filter 300ms ease;
 }
 
 .moon-graph-node:hover {
   transform: translateY(-2px) scale(1.05);
+  filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.16)) drop-shadow(0 0 2px rgba(255, 255, 255, 0.24));
   z-index: 2;
 }
 
@@ -78,9 +80,11 @@
 }
 
 .moon-graph-gate__trigger {
-  min-width: 128px;
-  min-height: 40px;
-  padding: 8px 18px;
+  min-width: 28px;
+  min-height: 28px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
   border-radius: 999px;
   border: 1px solid var(--moon-glass-border);
   background: var(--moon-glass-bg);
@@ -101,6 +105,7 @@
 }
 
 .moon-graph-gate__trigger-label {
+  display: none;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -126,15 +131,34 @@
 .moon-graph-gate__trigger:hover,
 .moon-graph-gate--selected .moon-graph-gate__trigger,
 .moon-graph-gate--drag-over .moon-graph-gate__trigger {
+  min-width: 128px;
+  width: auto;
+  height: auto;
+  min-height: 40px;
+  padding: 8px 18px;
   transform: translateY(-1px);
   border-color: var(--moon-accent);
   color: var(--moon-fg);
   box-shadow: var(--moon-shadow-accent-line-mid);
+  z-index: 5;
+}
+
+.moon-graph-gate__trigger:hover .moon-graph-gate__trigger-label,
+.moon-graph-gate--selected .moon-graph-gate__trigger-label,
+.moon-graph-gate--drag-over .moon-graph-gate__trigger-label {
+  display: inline;
 }
 
 .moon-graph-gate--empty .moon-graph-gate__trigger {
   border-style: dashed;
   color: var(--moon-glow);
+  opacity: 0.15;
+}
+
+.moon-graph-gate--empty .moon-graph-gate__trigger:hover,
+.moon-graph-gate--empty.moon-graph-gate--selected .moon-graph-gate__trigger,
+.moon-graph-gate--empty.moon-graph-gate--drag-over .moon-graph-gate__trigger {
+  opacity: 1;
 }
 
 .moon-graph-gate--core .moon-graph-gate__trigger {

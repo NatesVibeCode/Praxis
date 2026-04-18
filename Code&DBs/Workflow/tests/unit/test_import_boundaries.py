@@ -10,7 +10,7 @@ This test pins the allowed import prefixes for those two modules. Every
 `from X import …` / `import X` statement must resolve to either the
 Python standard library (no dotted package prefix) or a module on the
 allowlist. Add to the allowlist only when the new dependency is
-deliberately narrow (no upward fan-out).
+deliberately narrow (no upward dependency sprawl).
 """
 
 from __future__ import annotations

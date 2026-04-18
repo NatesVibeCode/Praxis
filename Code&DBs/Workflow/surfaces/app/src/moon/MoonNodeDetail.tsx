@@ -516,15 +516,9 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
     })),
     [gateItems],
   );
-  const primaryGateItems = gateCatalogModels.filter(({ policy }) => policy.tier === 'primary');
   const selectedGateCatalogModel = gateCatalogModels.find(
     ({ item }) => item.gateFamily === selectedEdge?.gateFamily,
   ) || null;
-  const selectableGateModels = useMemo(() => {
-    if (!selectedGateCatalogModel) return primaryGateItems;
-    if (primaryGateItems.some(({ item }) => item.id === selectedGateCatalogModel.item.id)) return primaryGateItems;
-    return [selectedGateCatalogModel, ...primaryGateItems];
-  }, [primaryGateItems, selectedGateCatalogModel]);
   const selectedBranchOp = BRANCH_OP_OPTIONS.find((option) => option.value === edgeConditionOp) || BRANCH_OP_OPTIONS[0];
   const conditionalTargets = useMemo(() => {
     if (!buildEdge || !buildGraph || !isConditionalEdge) {
@@ -1199,12 +1193,6 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
     }
   }, [edgeConditionField, edgeConditionMode, edgeConditionOp, edgeConditionText, edgeConditionValueText]);
 
-  const handleGateFamilyChange = useCallback((nextGateFamily: string) => {
-    if (!selectedEdge || !nextGateFamily) return;
-    if ((selectedEdge.gateFamily || '') === nextGateFamily) return;
-    onApplyGate?.(selectedEdge.id, nextGateFamily);
-  }, [onApplyGate, selectedEdge]);
-
   const handleSaveConditionalEdge = useCallback(async () => {
     if (!selectedEdge || !buildGraph || !canCommitGraph || !buildEdge) return;
     setEdgeConditionLoading(true);
@@ -1346,27 +1334,6 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
                   : selectedEdge.gateLabel || selectedGateCatalogModel?.item.label || 'Gate configured'}
               </div>
             </div>
-
-            {selectableGateModels.length > 0 && (
-              <div className="moon-branch-editor__control">
-                <label className="moon-dock-form__label" htmlFor="moon-gate-family-select">Gate type</label>
-                <div className="moon-dock-form__row">
-                  <select
-                    id="moon-gate-family-select"
-                    className="moon-dock-form__select"
-                    value={selectedEdge.gateFamily || ''}
-                    onChange={e => handleGateFamilyChange(e.target.value)}
-                  >
-                    <option value="" disabled>{selectedEdge.gateState === 'empty' ? 'Choose a gate' : 'Choose gate type'}</option>
-                    {selectableGateModels.map(({ item, truth, policy }) => (
-                      <option key={item.id} value={item.gateFamily}>
-                        {item.label} - {policy.badge} - {truth.badge}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            )}
 
             {isFailureEdge && (
               <>

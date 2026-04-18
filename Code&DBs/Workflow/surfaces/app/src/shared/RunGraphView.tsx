@@ -75,8 +75,8 @@ export function RunGraphView({
           <div className="shared-run-graph__column">
             {column.map((node) => {
               const variant = getGraphNodeVariant(node.status);
-              const subtitle = node.fan_out
-                ? `${node.fan_out.succeeded}/${node.fan_out.count} done`
+              const subtitle = node.loop
+                ? `${node.loop.succeeded}/${node.loop.count} done`
                 : (node.error_code
                     ? node.error_code.replace(/^workflow_submission\./, '')
                     : node.status);

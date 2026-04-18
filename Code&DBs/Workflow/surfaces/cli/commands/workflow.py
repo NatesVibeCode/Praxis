@@ -1087,9 +1087,9 @@ def _pipeline_command(args: list[str], *, stdout: TextIO) -> int:
                 tier=step.get("tier"),
                 max_tokens=step.get("max_tokens", 4096),
                 depends_on=tuple(step.get("depends_on", ())),
-                fan_out=step.get("fan_out", False),
-                fan_out_prompt=step.get("fan_out_prompt"),
-                fan_out_max_parallel=step.get("fan_out_max_parallel", 4),
+                loop=step.get("loop", False),
+                loop_prompt=step.get("loop_prompt"),
+                loop_max_parallel=step.get("loop_max_parallel", 4),
             )
             for step in raw_steps
         ]
@@ -1170,8 +1170,8 @@ def _scheduler_command(args: list[str], *, stdout: TextIO) -> int:
     return 2
 
 
-def _fan_out_command(args: list[str], *, stdout: TextIO) -> int:
-    """Handle `workflow fan-out --items "a,b,c" --prompt "Do X with {{item}}"`.
+def _loop_command(args: list[str], *, stdout: TextIO) -> int:
+    """Handle `workflow loop --items "a,b,c" --prompt "Do X with {{item}}"`.
 
     Runs one spec per item in parallel, prints each result as a
     JSON line, then prints a summary object.
@@ -1179,11 +1179,11 @@ def _fan_out_command(args: list[str], *, stdout: TextIO) -> int:
 
     import json as _json
 
-    from runtime.fan_out import aggregate_fan_out_results, fan_out_dispatch
+    from runtime.loop import aggregate_loop_results, loop_dispatch
 
     if not args or args[0] in {"-h", "--help"}:
         stdout.write(
-            'usage: workflow fan-out --items "a,b,c" --prompt "Analyze: {{item}}"'
+            'usage: workflow loop --items "a,b,c" --prompt "Analyze: {{item}}"'
             " [--tier mid] [--max-parallel 4]\n"
         )
         return 2
@@ -1229,7 +1229,7 @@ def _fan_out_command(args: list[str], *, stdout: TextIO) -> int:
         stdout.write("error: --items produced an empty list\n")
         return 2
 
-    results = fan_out_dispatch(
+    results = loop_dispatch(
         items,
         prompt_template=prompt,
         tier=tier,
@@ -1239,7 +1239,7 @@ def _fan_out_command(args: list[str], *, stdout: TextIO) -> int:
     for result in results:
         stdout.write(_json.dumps(result.to_json()) + "\n")
 
-    summary = aggregate_fan_out_results(results)
+    summary = aggregate_loop_results(results)
     stdout.write(_json.dumps(summary) + "\n")
     return 0 if summary["failed"] == 0 else 1
 

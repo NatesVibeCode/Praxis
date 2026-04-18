@@ -455,6 +455,30 @@ _NATIVE_WORKFLOW_LANE_ADMISSION_SPECS: tuple[_NativeWorkflowLaneAdmissionSpec, .
         lane_parameters={
             "route_kind": "fanout",
             "batching": "parallel",
+            "provider_kind": "api",
+        },
+    ),
+    _NativeWorkflowLaneAdmissionSpec(
+        workflow_lane_id="workflow_lane.loop",
+        lane_name="loop",
+        lane_kind="loop",
+        concurrency_cap=8,
+        default_route_kind="loop",
+        review_required=False,
+        retry_policy={
+            "max_attempts": 1,
+            "backoff": "none",
+        },
+        workflow_lane_policy_id="workflow_lane_policy.loop",
+        policy_scope="workflow.loop",
+        work_kind="loop",
+        match_rules={
+            "work_kind": "loop",
+            "loop": True,
+        },
+        lane_parameters={
+            "route_kind": "loop",
+            "batching": "parallel",
         },
     ),
     _NativeWorkflowLaneAdmissionSpec(

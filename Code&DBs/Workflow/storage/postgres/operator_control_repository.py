@@ -17,6 +17,7 @@ from authority.operator_control import (
     _require_mapping,
     _require_text,
 )
+from runtime.embedding_service import embed_text_literal
 from storage.migrations import WorkflowMigrationError, workflow_migration_statements
 
 _DUPLICATE_SQLSTATES = {"42P07", "42701", "42710"}
@@ -171,6 +172,10 @@ class PostgresOperatorControlRepository:
         normalized_operator_decision = normalize_operator_decision_record(
             operator_decision,
         )
+        embedding_literal = embed_text_literal(
+            f"{normalized_operator_decision.title} "
+            f"{normalized_operator_decision.rationale}".strip(),
+        )
 
         try:
             row = await self._conn.fetchrow(
@@ -190,9 +195,10 @@ class PostgresOperatorControlRepository:
                     created_at,
                     updated_at,
                     decision_scope_kind,
-                    decision_scope_ref
+                    decision_scope_ref,
+                    embedding
                 ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::vector
                 )
                 ON CONFLICT (operator_decision_id) DO UPDATE SET
                     decision_key = EXCLUDED.decision_key,
@@ -207,7 +213,8 @@ class PostgresOperatorControlRepository:
                     decided_at = EXCLUDED.decided_at,
                     updated_at = EXCLUDED.updated_at,
                     decision_scope_kind = EXCLUDED.decision_scope_kind,
-                    decision_scope_ref = EXCLUDED.decision_scope_ref
+                    decision_scope_ref = EXCLUDED.decision_scope_ref,
+                    embedding = COALESCE(EXCLUDED.embedding, operator_decisions.embedding)
                 RETURNING
                     operator_decision_id,
                     decision_key,
@@ -240,6 +247,7 @@ class PostgresOperatorControlRepository:
                 normalized_operator_decision.updated_at,
                 normalized_operator_decision.decision_scope_kind,
                 normalized_operator_decision.decision_scope_ref,
+                embedding_literal,
             )
         except asyncpg.PostgresError as exc:
             raise OperatorControlRepositoryError(
@@ -419,6 +427,11 @@ class PostgresOperatorControlRepository:
                 },
             )
 
+        gate_decision_embedding_literal = embed_text_literal(
+            f"{normalized_operator_decision.title} "
+            f"{normalized_operator_decision.rationale}".strip(),
+        )
+
         try:
             async with self._conn.transaction():
                 decision_row = await self._conn.fetchrow(
@@ -438,9 +451,10 @@ class PostgresOperatorControlRepository:
                         created_at,
                         updated_at,
                         decision_scope_kind,
-                        decision_scope_ref
+                        decision_scope_ref,
+                        embedding
                     ) VALUES (
-                        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+                        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::vector
                     )
                     ON CONFLICT (operator_decision_id) DO UPDATE SET
                         decision_key = EXCLUDED.decision_key,
@@ -455,7 +469,8 @@ class PostgresOperatorControlRepository:
                         decided_at = EXCLUDED.decided_at,
                         updated_at = EXCLUDED.updated_at,
                         decision_scope_kind = EXCLUDED.decision_scope_kind,
-                        decision_scope_ref = EXCLUDED.decision_scope_ref
+                        decision_scope_ref = EXCLUDED.decision_scope_ref,
+                        embedding = COALESCE(EXCLUDED.embedding, operator_decisions.embedding)
                     RETURNING
                         operator_decision_id,
                         decision_key,
@@ -488,6 +503,7 @@ class PostgresOperatorControlRepository:
                     normalized_operator_decision.updated_at,
                     normalized_operator_decision.decision_scope_kind,
                     normalized_operator_decision.decision_scope_ref,
+                    gate_decision_embedding_literal,
                 )
                 gate_row = await self._conn.fetchrow(
                     """

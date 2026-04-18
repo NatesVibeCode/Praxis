@@ -19,7 +19,7 @@ import type {
   GraphLayout,
   LayoutNode,
 } from './moonBuildPresenter';
-import { RANK_SPACING, COLUMN_SPACING } from './moonBuildPresenter';
+import { RANK_SPACING, COLUMN_SPACING, glyphFromLabel } from './moonBuildPresenter';
 
 // --- Status mapping ---
 
@@ -39,22 +39,16 @@ export function jobStatusToRingState(status: string | undefined): RingState {
 }
 
 /**
- * Lightweight glyph inference for run-view nodes. The underlying workflow
- * job can hint at its purpose through `adapter` / `job_type` strings; if
- * nothing matches, fall back to 'step' (a generic ring with no icon).
+ * Type-based glyph inference. Labels carry the real semantic signal in run
+ * graphs (job_type is usually "dispatch"); parse tokens out of the label
+ * plus any adapter/type hints and match against the bounded vocabulary in
+ * moonBuildPresenter's TYPE_TOKEN_TO_GLYPH. Same type → same icon.
  */
 function inferGlyph(node: RunGraphNode, job: RunJob | undefined): GlyphType {
-  const adapter = (node.adapter || job?.agent_slug || '').toLowerCase();
+  const label = (node.label || node.id || '').toLowerCase();
   const jobType = (node.type || job?.job_type || '').toLowerCase();
-  if (jobType.includes('research')) return 'research';
-  if (jobType.includes('classify') || jobType.includes('score') || jobType.includes('triage')) return 'classify';
-  if (jobType.includes('draft') || jobType.includes('generate') || jobType.includes('write')) return 'draft';
-  if (jobType.includes('notify') || jobType.includes('send') || jobType.includes('alert')) return 'notify';
-  if (jobType.includes('review') || jobType.includes('approve')) return 'review';
-  if (jobType.includes('trigger')) return 'trigger';
-  if (jobType.includes('human')) return 'human';
-  if (adapter.includes('tool') || adapter.includes('integration') || adapter.includes('webhook')) return 'tool';
-  return 'step';
+  const adapter = (node.adapter || job?.agent_slug || '').toLowerCase();
+  return glyphFromLabel(`${label} ${jobType} ${adapter}`) ?? 'step';
 }
 
 // --- Layout (topological, same spacing constants as build presenter) ---
@@ -255,7 +249,6 @@ export function presentRun(
       isOnDominantPath: pathSet.has(n.id),
       issueCount: 0,
       route: n.adapter || undefined,
-      needsBadge: false,
       dominantPathIndex: pathIndexMap.get(n.id) ?? -1,
       x: pos.x,
       y: pos.y,

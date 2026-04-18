@@ -975,7 +975,7 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
               : item.source === 'integration' && item.connectionStatus && item.connectionStatus !== 'connected'
                 ? item.connectionStatus
                 : truth.badge,
-            icon: <MoonGlyph type={item.icon} size={16} color={item.status === 'ready' ? 'var(--moon-glow)' : '#8b949e'} />,
+            icon: <MoonGlyph type={item.icon} size={16} color={item.status === 'ready' ? 'currentColor' : '#8b949e'} />,
             onSelect: () => handleTriggerSelect(item),
           };
         }),
@@ -1195,6 +1195,16 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
       if (item.dropKind === 'edge' && item.gateFamily) byFamily.set(item.gateFamily, item);
     }
     return byFamily;
+  }, [catalog]);
+  const primaryGateModels = useMemo(() => {
+    return catalog
+      .filter(item => item.family === 'control' && item.status === 'ready')
+      .map(item => ({
+        item,
+        truth: getCatalogTruth(item),
+        policy: getCatalogSurfacePolicy(item),
+      }))
+      .filter(({ policy }) => policy.tier === 'primary');
   }, [catalog]);
 
   // Selected edge for gate config in Detail dock
@@ -1441,9 +1451,8 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                     const isDragOver = previewEdgeId === control.edge.id;
                     const isEmpty = !control.edge.gateFamily;
                     const isConditional = control.edge.gateFamily === 'conditional';
-                    const isFailure = control.edge.gateFamily === 'after_failure';
                     const summary = isEmpty
-                      ? 'Branch and On Failure are the only inline controls. Later gates stay in Detail until they earn real execution authority.'
+                      ? 'Pick a gate type to guard this connection.'
                       : control.gatePolicy?.detail || control.gateTruth?.detail || 'This connection already carries gate metadata.';
                     const title = isConditional
                       ? `${control.label} path`
@@ -1489,33 +1498,43 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                             </div>
                             <div className="moon-graph-gate__summary">{summary}</div>
 
-                            {isEmpty ? (
+                            {primaryGateModels.length > 0 && (
                               <div className="moon-graph-gate__actions">
-                                <button
-                                  type="button"
-                                  className="moon-graph-gate__action moon-graph-gate__action--primary"
-                                  onClick={() => void handleCreateBranch(control.edge.id, 'above')}
+                                <label className="moon-dock-form__label" htmlFor={`moon-gate-family-${control.edge.id}`}>Type</label>
+                                <select
+                                  id={`moon-gate-family-${control.edge.id}`}
+                                  className="moon-dock-form__select"
+                                  value={control.edge.gateFamily || ''}
+                                  onChange={e => {
+                                    const family = e.target.value;
+                                    if (family) void handleApplyGate(control.edge.id, family);
+                                  }}
                                 >
-                                  Branch above
-                                </button>
-                                <button
-                                  type="button"
-                                  className="moon-graph-gate__action moon-graph-gate__action--primary"
-                                  onClick={() => void handleCreateBranch(control.edge.id, 'below')}
+                                  <option value="" disabled>{isEmpty ? 'Choose a gate' : 'Choose gate type'}</option>
+                                  {primaryGateModels.map(({ item }) => (
+                                    <option key={item.id} value={item.gateFamily}>{item.label}</option>
+                                  ))}
+                                </select>
+                                <label className="moon-dock-form__label" htmlFor={`moon-gate-detail-${control.edge.id}`}>Detail</label>
+                                <select
+                                  id={`moon-gate-detail-${control.edge.id}`}
+                                  className="moon-dock-form__select"
+                                  value={control.gateItem?.id || ''}
+                                  onChange={e => {
+                                    const picked = primaryGateModels.find(({ item }) => item.id === e.target.value);
+                                    if (picked?.item.gateFamily) void handleApplyGate(control.edge.id, picked.item.gateFamily);
+                                  }}
+                                  disabled={!control.edge.gateFamily}
                                 >
-                                  Branch below
-                                </button>
-                                <button
-                                  type="button"
-                                  className="moon-graph-gate__action moon-graph-gate__action--wide"
-                                  onClick={() => void handleApplyGate(control.edge.id, 'after_failure')}
-                                >
-                                  On Failure
-                                </button>
-                              </div>
-                            ) : (
-                              <div className="moon-graph-gate__note">
-                                {isConditional ? 'Conditional gate active' : isFailure ? 'Failure gate active' : 'Gate configured'}
+                                  <option value="" disabled>Pick a type first</option>
+                                  {primaryGateModels
+                                    .filter(({ item }) => item.gateFamily === control.edge.gateFamily)
+                                    .map(({ item, truth, policy }) => (
+                                      <option key={item.id} value={item.id}>
+                                        {policy.badge} - {truth.badge}
+                                      </option>
+                                    ))}
+                                </select>
                               </div>
                             )}
 
@@ -1550,7 +1569,6 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                         ) : (
                           <span className="moon-chain__step-index">{node.dominantPathIndex >= 0 ? node.dominantPathIndex + 1 : ''}</span>
                         )}
-                        {node.needsBadge && <div className="moon-chain__badge" />}
                         <span className="moon-graph-node__label">{node.title}</span>
                       </div>
                     );

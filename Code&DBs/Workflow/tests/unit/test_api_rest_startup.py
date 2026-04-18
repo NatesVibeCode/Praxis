@@ -1040,7 +1040,7 @@ def test_run_detail_graph_shows_control_gates_and_operator_frames(monkeypatch) -
 
     assert "gate" in nodes
     assert "route_mode" in nodes
-    assert nodes["loop_checks"]["fan_out"] == {
+    assert nodes["loop_checks"]["loop"] == {
         "count": 3,
         "succeeded": 2,
         "failed": 0,

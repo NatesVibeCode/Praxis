@@ -298,6 +298,26 @@
       0 0 2px var(--moon-white-a16),
       0 0 12px var(--moon-white-a20),
       0 0 0 1px var(--moon-glow-line-mid);
+
+    /* ---- Shadow name aliases (components.css uses --moon-glow-<kind>-<depth>) ---- */
+    --moon-glow-black-soft: var(--moon-shadow-black-soft);
+    --moon-glow-black-mid: var(--moon-shadow-black-mid);
+    --moon-glow-black-strong: var(--moon-shadow-black-strong);
+    --moon-glow-accent-soft: var(--moon-accent-glow-soft);
+    --moon-glow-accent-mid: var(--moon-accent-glow-mid);
+    --moon-glow-accent-strong: var(--moon-accent-glow-strong);
+    --moon-glow-success-soft: var(--moon-success-glow-soft);
+    --moon-glow-success-mid: var(--moon-success-glow-mid);
+    --moon-glow-success-strong: var(--moon-success-glow-strong);
+    --moon-glow-danger-soft: var(--moon-danger-glow-soft);
+    --moon-glow-danger-mid: var(--moon-danger-glow-mid);
+    --moon-glow-danger-strong: var(--moon-danger-glow-strong);
+    --moon-glow-neutral-soft: var(--moon-neutral-glow-soft);
+    --moon-glow-neutral-mid: var(--moon-neutral-glow-mid);
+    --moon-glow-neutral-strong: var(--moon-neutral-glow-strong);
+
+    /* Lite default node glow — subtle halo always present on graph nodes */
+    --moon-node-glow-lite: 0 0 0 1px var(--moon-white-a08), 0 0 10px var(--moon-white-a08);
   }
 }
 

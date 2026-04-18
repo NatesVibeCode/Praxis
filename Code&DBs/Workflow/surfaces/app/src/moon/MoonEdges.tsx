@@ -74,11 +74,11 @@ export function MoonEdges({ edges, layout, selectedEdgeId, onEdgeClick }: MoonEd
         const isConditional = edge.gateFamily === 'conditional';
         const isFlowing = isSelected || edge.isOnDominantPath;
         const color = isConditional
-          ? 'var(--moon-branch, #D29922)'
+          ? 'var(--moon-fg, #ffffff)'
           : isFlowing
-            ? 'var(--moon-glow, #D29922)'
-            : 'var(--moon-muted, #484f58)';
-        const width = isSelected ? 2.5 : edge.isOnDominantPath ? 2 : 1.5;
+            ? 'var(--moon-fg, #ffffff)'
+            : 'var(--moon-fg-muted, rgba(232, 232, 232, 0.55))';
+        const width = isSelected ? 2.5 : edge.isOnDominantPath ? 2 : 1.75;
 
         return (
           <g key={edge.id} filter={isFlowing ? 'url(#moon-edge-glow)' : undefined}>
@@ -105,14 +105,14 @@ export function MoonEdges({ edges, layout, selectedEdgeId, onEdgeClick }: MoonEd
             {isFlowing && (
               <path
                 d={geometry.path}
-                stroke="var(--moon-accent)"
+                stroke="var(--moon-fg, #ffffff)"
                 strokeWidth={width * 1.6}
                 fill="none"
                 strokeDasharray="4 24"
-                style={{ 
-                  pointerEvents: 'none', 
-                  opacity: 0.5,
-                  animation: 'moon-edge-flow 2.5s infinite linear' 
+                style={{
+                  pointerEvents: 'none',
+                  opacity: 0.35,
+                  animation: 'moon-edge-flow 2.5s infinite linear'
                 }}
               />
             )}

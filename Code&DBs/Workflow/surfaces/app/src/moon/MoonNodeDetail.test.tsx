@@ -144,7 +144,7 @@ describe('MoonNodeDetail', () => {
       ringState: 'decided-grounded',
       isOnDominantPath: true,
       issueCount: 0,
-      needsBadge: false,
+
       dominantPathIndex: 0,
       x: 0,
       y: 0,
@@ -198,7 +198,7 @@ describe('MoonNodeDetail', () => {
       ringState: 'decided-grounded',
       isOnDominantPath: true,
       issueCount: 0,
-      needsBadge: false,
+
       dominantPathIndex: 0,
       x: 0,
       y: 0,
@@ -258,7 +258,7 @@ describe('MoonNodeDetail', () => {
       ringState: 'decided-grounded',
       isOnDominantPath: true,
       issueCount: 0,
-      needsBadge: false,
+
       dominantPathIndex: 0,
       x: 0,
       y: 0,

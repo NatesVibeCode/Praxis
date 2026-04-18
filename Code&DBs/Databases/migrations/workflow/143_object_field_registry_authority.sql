@@ -147,6 +147,13 @@ backfilled AS (
             WHEN 'jsonb' THEN 'json'
             WHEN 'timestamp' THEN 'datetime'
             WHEN 'ref' THEN 'reference'
+            WHEN 'email' THEN 'text'
+            WHEN 'url' THEN 'text'
+            WHEN 'phone' THEN 'text'
+            WHEN 'currency' THEN 'number'
+            WHEN 'percent' THEN 'number'
+            WHEN 'dropdown' THEN 'enum'
+            WHEN 'select' THEN 'enum'
             ELSE lower(COALESCE(field ->> 'field_kind', field ->> 'type', 'text'))
         END AS field_kind,
         trim(COALESCE(field ->> 'description', '')) AS description,

@@ -176,7 +176,7 @@ class _BaseSubsystems:
 
     def _build_bug_tracker(self):
         from runtime.bug_tracker import BugTracker
-        return BugTracker(self.get_pg_conn())
+        return BugTracker(self.get_pg_conn(), self.get_embedding_service())
 
     def _build_heartbeat_runner(self):
         from runtime.heartbeat_runner import HeartbeatRunner

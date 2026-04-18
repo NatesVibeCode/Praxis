@@ -542,3 +542,52 @@ class EmbeddingService:
     def embed_one(self, text: str) -> list[float]:
         """Embed a single text. Convenience wrapper."""
         return self.embed([text])[0]
+
+
+_SHARED_EMBEDDER: EmbeddingService | None = None
+_SHARED_EMBEDDER_FAILED: bool = False
+_SHARED_EMBEDDER_LOCK = threading.Lock()
+
+
+def get_shared_embedder() -> EmbeddingService | None:
+    """Return a process-wide shared EmbeddingService, or None if unavailable.
+
+    Live writers call this to auto-embed on INSERT without threading an
+    embedder through every composition root. Returns None when the backend
+    is unavailable so callers can skip embedding without exploding.
+    """
+    global _SHARED_EMBEDDER, _SHARED_EMBEDDER_FAILED
+    if _SHARED_EMBEDDER is not None:
+        return _SHARED_EMBEDDER
+    if _SHARED_EMBEDDER_FAILED:
+        return None
+    with _SHARED_EMBEDDER_LOCK:
+        if _SHARED_EMBEDDER is not None:
+            return _SHARED_EMBEDDER
+        if _SHARED_EMBEDDER_FAILED:
+            return None
+        if not EmbeddingService.backend_available():
+            _SHARED_EMBEDDER_FAILED = True
+            return None
+        try:
+            _SHARED_EMBEDDER = EmbeddingService(
+                authority=resolve_embedding_runtime_authority(),
+            )
+        except Exception:
+            _SHARED_EMBEDDER_FAILED = True
+            return None
+        return _SHARED_EMBEDDER
+
+
+def embed_text_literal(text: str) -> str | None:
+    """Embed *text* and return a pgvector literal, or None on any failure."""
+    if not text or not text.strip():
+        return None
+    embedder = get_shared_embedder()
+    if embedder is None:
+        return None
+    try:
+        from storage.postgres.vector_store import format_vector_literal
+        return format_vector_literal(embedder.embed_one(text))
+    except Exception:
+        return None

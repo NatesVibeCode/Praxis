@@ -116,6 +116,8 @@ class _FakeConn:
             return candidates
         if "FROM task_type_route_eligibility" in sql:
             return []
+        if "FROM provider_lane_policy" in sql:
+            return []
         if sql.lstrip().upper().startswith(("INSERT", "UPDATE", "DELETE")):
             return None
         assert params

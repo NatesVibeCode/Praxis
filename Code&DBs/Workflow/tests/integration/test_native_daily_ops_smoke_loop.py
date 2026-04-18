@@ -87,7 +87,7 @@ def _workflow_class(
         status="active",
         queue_shape={"mode": class_kind, "max_parallel": 1},
         throttle_policy={"dispatch_limit": 1},
-        review_required=class_kind != "fanout",
+        review_required=class_kind != "loop",
         effective_from=as_of - timedelta(minutes=5),
         effective_to=None,
         decision_ref=f"decision:workflow-class:{class_name}",
@@ -135,10 +135,10 @@ def _dispatch_catalog(as_of: datetime) -> WorkflowClassCatalog:
                 as_of=as_of,
             ),
             _workflow_class(
-                class_name="fanout",
-                class_kind="fanout",
-                workflow_class_id="workflow_class.fanout.daily_ops",
-                workflow_lane_id="workflow_lane.fanout.daily_ops",
+                class_name="loop",
+                class_kind="loop",
+                workflow_class_id="workflow_class.loop.daily_ops",
+                workflow_lane_id="workflow_lane.loop.daily_ops",
                 as_of=as_of,
             ),
         ),
@@ -772,7 +772,7 @@ def test_native_daily_ops_smoke_loop_stays_truthful_and_boring(
     assert first["surface"]["status"]["run"]["run_id"] == cutover_status.run_id
     assert first["surface"]["receipts"]["terminal_status"] == "succeeded"
     assert first["dispatch_flows"]["native_instance"] == native_instance.to_contract()
-    assert first["dispatch_flows"]["flow_names"] == ["review", "repair", "fanout"]
+    assert first["dispatch_flows"]["flow_names"] == ["review", "repair", "loop"]
     assert first["dispatch_flows"]["workflow_class_authority"] == "policy.workflow_classes"
     assert first["recurring_flow"]["native_instance"] == native_instance.to_contract()
     assert first["recurring_flow"]["recurring_flow_authority"] == "runtime.recurring_review_repair_flow"

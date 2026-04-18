@@ -21,7 +21,7 @@ _OVERLAY_DECISIONS = {"approve", "widen"}
 _KIND_TO_FAMILY: dict[str, str] = {
     "task": "think",
     "memory": "gather",
-    "fanout": "think",
+    "loop": "think",
     "cli": "gather",
     "integration": "act",
 }
@@ -29,7 +29,7 @@ _KIND_TO_FAMILY: dict[str, str] = {
 _KIND_TO_ICON: dict[str, str] = {
     "task": "classify",
     "memory": "research",
-    "fanout": "classify",
+    "loop": "classify",
     "cli": "research",
     "integration": "tool",
 }

@@ -139,6 +139,22 @@ async def ainspect_candidate(
                 candidate_id,
             )
         ]
+        score_history = [
+            _row(r)
+            for r in await conn.fetch(
+                """SELECT h.history_id, h.candidate_id, h.policy_id,
+                          h.eligibility, h.confidence,
+                          h.previous_eligibility, h.previous_confidence,
+                          h.change_reason, h.rationale, h.scored_at,
+                          h.scored_against_definition_hash, h.recorded_at,
+                          p.policy_slug, p.specialist_target
+                     FROM dataset_candidate_score_history h
+                     JOIN dataset_scoring_policies p ON p.policy_id = h.policy_id
+                    WHERE h.candidate_id = $1
+                    ORDER BY h.recorded_at DESC""",
+                candidate_id,
+            )
+        ]
         links = [
             _row(r)
             for r in await conn.fetch(
@@ -166,6 +182,7 @@ async def ainspect_candidate(
     return {
         "candidate": candidate,
         "scores": scores,
+        "score_history": score_history,
         "evidence_links": links,
         "promotions": promotions,
     }

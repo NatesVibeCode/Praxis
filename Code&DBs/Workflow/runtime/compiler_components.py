@@ -153,15 +153,27 @@ def build_capability_catalog(integrations: list[dict[str, Any]]) -> list[dict[st
             "reference_slugs": [],
         },
         {
-            "id": "cap-research-fanout",
+            "id": "cap-research-fan-out",
             "slug": "research/fan-out",
             "kind": "fanout",
-            "title": "Parallel research fan-out",
-            "summary": "Split research into parallel sub-queries and aggregate the result.",
-            "description": "Uses runtime fan_out dispatch and fast Haiku-backed fan-out work when a question benefits from parallel angles or source sweeps.",
+            "title": "Parallel research fan-out (API burst)",
+            "summary": "Burst N parallel Haiku workers over a research prompt.",
+            "description": "Count-based SLM burst via runtime fan_out dispatch. API providers only; CLI adapters are rejected because they break under concurrency bursts.",
             "route": "workflow.fanout",
             "engines": ["fan_out_dispatch", "claude-haiku-4-5-20251001"],
-            "signals": ["parallel", "fan out", "compare", "multiple", "angles", "sources", "sweep", "broad", "research"],
+            "signals": ["parallel", "fan out", "burst", "haiku", "workers", "broad", "sweep"],
+            "reference_slugs": [],
+        },
+        {
+            "id": "cap-research-loop",
+            "slug": "research/loop",
+            "kind": "loop",
+            "title": "Research loop (item-based)",
+            "summary": "Run a research step over each item in a list.",
+            "description": "Item-based parallel map via runtime loop dispatch. Any provider is allowed; one spec per item with templated prompt substitution.",
+            "route": "workflow.loop",
+            "engines": ["loop_dispatch"],
+            "signals": ["for each", "loop", "iterate", "per item", "per lead", "per url", "map"],
             "reference_slugs": [],
         },
         {
@@ -338,10 +350,12 @@ def infer_capability_slugs(
     ):
         selected.append("research/local-knowledge")
 
-    if any(token in haystack for token in ("parallel", "fan out", "compare", "multiple sources", "broad sweep", "cross-check")):
+    if any(token in haystack for token in ("fan out", "burst", "broad sweep", "multiple sources", "cross-check", "parallel", "compare")):
         selected.append("research/fan-out")
     elif "research" in haystack and len(jobs) > 1:
         selected.append("research/fan-out")
+    if any(token in haystack for token in ("for each", "per item", "per lead", "per url", "iterate", "loop over", "map over")):
+        selected.append("research/loop")
 
     if has_external_research:
         selected.append("research/gemini-cli")
@@ -394,7 +408,7 @@ def infer_capability_step_indexes(capability: dict[str, Any], jobs: list[dict[st
     kind = _as_text(capability.get("capability_kind") or capability.get("kind"))
     if kind in {"memory", "cli"}:
         return [0]
-    if kind == "fanout":
+    if kind in {"loop", "fanout"}:
         return list(range(len(jobs)))
     return []
 
@@ -414,7 +428,9 @@ def infer_capability_rationale(
     if kind == "memory":
         return "This workflow benefits from checking prior findings before new work starts."
     if kind == "fanout":
-        return "This workflow benefits from splitting research into parallel angles instead of a single pass."
+        return "This workflow benefits from bursting N parallel API workers rather than relying on a single pass."
+    if kind == "loop":
+        return "This workflow benefits from iterating the same step over each item in a list."
     if kind == "cli":
         return "This workflow may need a broader external scan than the local graph alone can provide."
     if kind == "integration":

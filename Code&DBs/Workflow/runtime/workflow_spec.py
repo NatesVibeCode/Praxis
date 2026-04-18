@@ -293,7 +293,7 @@ class WorkflowSpec:
                 if isinstance(deps, list):
                     job["depends_on"] = [id_to_label.get(d, d) for d in deps]
 
-        # Expand replicate jobs (fan-out primitive)
+        # Expand replicate jobs (fan-out for count-based, loop for item-based)
         normalized_jobs = _expand_replicate_jobs(normalized_jobs)
 
         if any("sprint" in job for job in normalized_jobs):
@@ -485,14 +485,16 @@ def _expand_replicate_jobs(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         items = job.get("replicate_with")
         count = job.get("replicate")
 
-        # replicate_with takes precedence — item-driven fan-out
+        # replicate_with takes precedence — item-driven loop (for-each)
         if isinstance(items, list) and len(items) > 0:
             count = len(items)
+            primitive_kind = "loop"
         elif not isinstance(count, int) or count <= 1:
             expanded.append(job)
             continue
         else:
             items = None  # pure count-based
+            primitive_kind = "fanout"
 
         if count > 200:
             raise WorkflowSpecError(
@@ -509,6 +511,11 @@ def _expand_replicate_jobs(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
             child["label"] = child_label
             child.pop("replicate", None)
             child.pop("replicate_with", None)
+            # Count-based bursts require API providers — CLI adapters break
+            # under concurrency. Pin adapter_type unless the spec already
+            # set one explicitly.
+            if primitive_kind == "fanout" and "adapter_type" not in child:
+                child["adapter_type"] = "llm_task"
 
             # Serialize item if present
             item_str = ""

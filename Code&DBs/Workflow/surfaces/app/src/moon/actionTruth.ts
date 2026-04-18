@@ -41,6 +41,7 @@ const RUNTIME_NODE_ROUTES = new Set([
   'auto/draft',
   'auto/classify',
   'workflow.fanout',
+  'workflow.loop',
   '@notifications/send',
   '@webhook/post',
   '@workflow/invoke',
@@ -136,19 +137,19 @@ export function getCatalogTruth(item: CatalogItem): CatalogTruth {
     };
   }
 
-  if (item.actionValue === 'auto/fan-out') {
-    return {
-      category: 'alias',
-      badge: 'Alias',
-      detail: 'Legacy fan-out token kept for existing saved graphs; Moon uses `workflow.fanout` now.',
-    };
-  }
-
   if (item.actionValue === 'workflow.fanout') {
     return {
       category: 'runtime',
       badge: 'Runs on release',
-      detail: 'Fan-out now has a verified runtime lane and compiles into the release path like the other core step routes.',
+      detail: 'Fan-out compiles into a count-based burst of parallel SLM API workers. CLI adapters are rejected — they break under concurrency.',
+    };
+  }
+
+  if (item.actionValue === 'workflow.loop') {
+    return {
+      category: 'runtime',
+      badge: 'Runs on release',
+      detail: 'Loop compiles into one spec per item via replicate_with and dispatches them through the shared parallel runtime; any provider is allowed.',
     };
   }
 
@@ -192,15 +193,6 @@ export function getCatalogSurfacePolicy(item: CatalogItem): CatalogSurfacePolicy
       badge: 'Merged',
       detail: 'Merged into Web Research because both buttons point at the same route today.',
       hardChoice: 'Merged into Web Research. One route gets one obvious button.',
-    };
-  }
-
-  if (item.actionValue === 'auto/fan-out') {
-    return {
-      tier: 'hidden',
-      badge: 'Alias',
-      detail: 'Legacy token only, kept so older graphs still open cleanly.',
-      hardChoice: 'Compatibility alias for saved graphs only.',
     };
   }
 

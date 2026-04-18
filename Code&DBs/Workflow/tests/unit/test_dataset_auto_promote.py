@@ -13,6 +13,7 @@ from runtime.dataset_candidate_subscriber import _maybe_auto_promote
 class _FakeConn:
     def __init__(self) -> None:
         self.executed: list[tuple[str, tuple]] = []
+        self.decision_inserts: list[tuple[str, tuple]] = []
         self.emitted: list[dict] = []
 
     async def execute(self, sql: str, *args: object) -> str:
@@ -20,6 +21,25 @@ class _FakeConn:
         return "INSERT 0 1"
 
     async def fetchrow(self, sql: str, *args: object):
+        if "INSERT INTO operator_decisions" in sql:
+            self.decision_inserts.append((sql, args))
+            return {
+                "operator_decision_id": args[0],
+                "decision_key": args[1],
+                "decision_kind": args[2],
+                "decision_status": args[3],
+                "title": args[4],
+                "rationale": args[5],
+                "decided_by": args[6],
+                "decision_source": args[7],
+                "effective_from": args[8],
+                "effective_to": args[9],
+                "decided_at": args[10],
+                "created_at": args[11],
+                "updated_at": args[12],
+                "decision_scope_kind": args[13],
+                "decision_scope_ref": args[14],
+            }
         return None
 
     async def fetch(self, sql: str, *args: object):
@@ -193,6 +213,14 @@ def test_auto_promote_inserts_and_emits_when_eligible(monkeypatch) -> None:
     assert "slm/review" in args
     assert "auto" in args
     assert "system:review.v1" in args
+    # decision_ref (args[10]) must be populated by the bridge
+    assert args[10] is not None and str(args[10]).startswith("operator_decision.dataset_promotion.")
+    assert len(conn.decision_inserts) == 1
+    _, decision_args = conn.decision_inserts[0]
+    assert decision_args[2] == "dataset_promotion"
+    assert decision_args[13] == "dataset_specialist"
+    assert decision_args[14] == "slm/review"
     assert len(conn.emitted) == 1
     assert conn.emitted[0]["event_type"] == "dataset_promotion_recorded"
     assert conn.emitted[0]["payload"]["promotion_kind"] == "auto"
+    assert conn.emitted[0]["payload"]["decision_ref"].startswith("operator_decision.dataset_promotion.")

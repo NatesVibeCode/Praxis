@@ -78,6 +78,8 @@ class _FakeConn:
             return []
         if "FROM task_type_route_eligibility" in sql:
             return []
+        if "FROM provider_lane_policy" in sql:
+            return []
         if "FROM provider_model_candidates" in sql:
             return [
                 {
@@ -207,6 +209,8 @@ class _CatalogProfileConn:
                 "rationale": "build profile",
             }]
         if "FROM task_type_route_eligibility" in sql:
+            return []
+        if "FROM provider_lane_policy" in sql:
             return []
         if "FROM provider_model_candidates" in sql:
             return [
