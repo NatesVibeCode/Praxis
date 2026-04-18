@@ -486,6 +486,101 @@ def _scan_jobs_for_health(
     }
 
 
+# --------------------------------------------------------------------------
+# First-failure summary
+# --------------------------------------------------------------------------
+# Receipts store the full completion JSON inside job.stdout_preview. For a
+# failed run, the OPERATOR almost always wants a one-line "what actually went
+# wrong and where" before diving into receipts. The signal below pulls that
+# out so `run-status` shows it inline instead of requiring a psql excursion.
+
+# Ordered by specificity: earlier keys win when multiple are present in the
+# same JSON envelope. Paired: (json_key, trim_length). `result` is claude's
+# human-readable message; `error` and `message` are generic fallbacks.
+_FAILURE_HINT_FIELDS: tuple[tuple[str, int], ...] = (
+    ("result", 300),
+    ("error", 300),
+    ("message", 300),
+    ("stderr", 300),
+)
+
+
+def _extract_failure_hint(stdout_preview: str) -> str | None:
+    """Pull a short human-readable failure reason from a job's stdout_preview.
+
+    Operators see this in `run-status`. Keep it a single line, trimmed.
+    Returns None when no hint could be extracted.
+    """
+    preview = (stdout_preview or "").strip()
+    if not preview:
+        return None
+    # Most adapters stringify JSON into stdout_preview; try to parse first.
+    try:
+        parsed = json.loads(preview)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        parsed = None
+    if isinstance(parsed, Mapping):
+        for key, limit in _FAILURE_HINT_FIELDS:
+            value = parsed.get(key)
+            if isinstance(value, str) and value.strip():
+                snippet = value.strip().splitlines()[0]
+                return snippet[:limit] + ("…" if len(snippet) > limit else "")
+        # Nested: some adapters wrap the completion JSON inside a "stdout" key
+        nested = parsed.get("stdout")
+        if isinstance(nested, str) and nested.strip():
+            return _extract_failure_hint(nested)
+        return None
+    # Non-JSON: take the first non-empty line, trimmed.
+    for line in preview.splitlines():
+        stripped = line.strip()
+        if stripped:
+            return stripped[:300] + ("…" if len(stripped) > 300 else "")
+    return None
+
+
+def _append_first_failure_signal(
+    signals: list[dict[str, object]],
+    *,
+    status: str,
+    jobs: list[dict[str, Any]] | None,
+) -> None:
+    """Add an inline summary of the first failed job so operators don't have
+    to dig through receipts to learn what broke.
+
+    Activates only on terminal-failure run status; the per-job stall/running
+    signals already cover in-flight cases.
+    """
+    if status not in {"failed", "dead_letter"}:
+        return
+    if not jobs:
+        return
+    for job in jobs:
+        job_status = str(job.get("status") or "")
+        if job_status != "failed":
+            continue
+        label = str(job.get("label") or "").strip() or "<unknown>"
+        failure_code = str(job.get("last_error_code") or "").strip()
+        hint = _extract_failure_hint(str(job.get("stdout_preview") or ""))
+        parts = [f"{label} failed"]
+        if failure_code:
+            parts.append(f"({failure_code})")
+        message = " ".join(parts)
+        if hint:
+            message = f"{message}: {hint}"
+        entry: dict[str, object] = {
+            "type": "first_failed_node",
+            "severity": "high",
+            "message": message,
+            "node_id": label,
+        }
+        if failure_code:
+            entry["failure_code"] = failure_code
+        if hint:
+            entry["hint"] = hint
+        signals.append(entry)
+        return
+
+
 def _append_terminal_status_signals(
     signals: list[dict[str, object]],
     *,
@@ -701,6 +796,7 @@ def summarize_run_health(run_data: dict, now: datetime) -> dict:
     )
 
     _append_terminal_status_signals(signals, status=str(status), run_data=run_data)
+    _append_first_failure_signal(signals, status=str(status), jobs=jobs)
     _append_job_stall_signals(
         signals,
         stalled_claim=list(scan["stalled_claim"]),

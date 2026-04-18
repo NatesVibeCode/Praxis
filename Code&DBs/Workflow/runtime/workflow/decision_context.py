@@ -12,6 +12,13 @@ import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from runtime.workspace_paths import code_tree_dirname, tree_aliases
+
+
+def _workflow_prefixes() -> tuple[str, ...]:
+    canonical = code_tree_dirname()
+    return tuple(f"{name}/Workflow/" for name in (canonical, *tree_aliases()))
+
 
 _ARCHITECTURE_POLICY_PATH_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
@@ -107,9 +114,9 @@ def _path_variants(path: str) -> tuple[str, ...]:
     if not normalized:
         return ()
     variants = [normalized]
-    marker = "Code&DBs/Workflow/"
-    if marker in normalized:
-        variants.append(normalized.split(marker, 1)[1])
+    for marker in _workflow_prefixes():
+        if marker in normalized:
+            variants.append(normalized.split(marker, 1)[1])
     return tuple(_dedupe(variants))
 
 

@@ -1,0 +1,14 @@
+{
+  "code_tree": {
+    "canonical": "Code&DBs",
+    "aliases": ["CodeDBs"]
+  },
+  "subdirs": {
+    "workflow": "Workflow",
+    "databases": "Databases",
+    "workflow_migrations": "Databases/migrations/workflow"
+  },
+  "log_paths": {
+    "postgres": "Databases/postgres-dev/log/postgres.log"
+  }
+}

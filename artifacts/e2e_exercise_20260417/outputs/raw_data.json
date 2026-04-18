@@ -1,0 +1,31 @@
+{
+  "dataset": "praxis_e2e_exercise_20260417",
+  "generated_by": "anthropic/claude-haiku-4-5-20251001",
+  "records": [
+    {
+      "id": "rec_001",
+      "severity": "high",
+      "topic": "database_connectivity"
+    },
+    {
+      "id": "rec_002",
+      "severity": "medium",
+      "topic": "api_rate_limiting"
+    },
+    {
+      "id": "rec_003",
+      "severity": "low",
+      "topic": "ui_rendering"
+    },
+    {
+      "id": "rec_004",
+      "severity": "high",
+      "topic": "authentication_timeout"
+    },
+    {
+      "id": "rec_005",
+      "severity": "medium",
+      "topic": "cache_invalidation"
+    }
+  ]
+}

@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 import pytest
 
+from _pg_test_conn import ensure_test_database_ready
 from policy.workflow_lanes import bootstrap_workflow_lane_catalog_schema
 from runtime.work_item_workflow_bindings import (
     PostgresWorkItemWorkflowBindingRepository,
@@ -17,14 +18,13 @@ from storage.migrations import (
     workflow_migration_statements,
 )
 from storage.postgres import (
-    PostgresConfigurationError,
     bootstrap_control_plane_schema,
     connect_workflow_database,
-    resolve_workflow_database_url,
 )
 from surfaces.api import operator_write
 
 _SCHEMA_BOOTSTRAP_LOCK_ID = 741001
+_TEST_DATABASE_URL = ensure_test_database_ready()
 
 
 def test_work_item_workflow_bindings_record_bug_to_workflow_class_binding_is_canonical_and_persisted() -> None:
@@ -708,11 +708,4 @@ async def _seed_operator_decision(conn, *, as_of: datetime) -> None:
 
 
 def _workflow_env() -> dict[str, str]:
-    try:
-        database_url = resolve_workflow_database_url()
-    except PostgresConfigurationError as exc:
-        pytest.skip(
-            "WORKFLOW_DATABASE_URL is required for the work-item dispatch binding integration test: "
-            f"{exc.reason_code}"
-        )
-    return {"WORKFLOW_DATABASE_URL": database_url}
+    return {"WORKFLOW_DATABASE_URL": _TEST_DATABASE_URL}

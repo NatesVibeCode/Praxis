@@ -37,6 +37,7 @@ from runtime.workflow.decision_context import (
     explicit_authority_domains_for_job,
     resolve_job_decision_pack,
 )
+from runtime.workspace_paths import workflow_root
 from runtime.workflow.submission_capture import (
     capture_submission_baseline_for_job as _submission_capture_baseline_for_job,
     get_submission_for_job_attempt as _submission_get_submission_for_job_attempt,
@@ -428,7 +429,7 @@ def _job_execution_context_shard(
                 normalized_repo_root, ""
             )
             test_commands.append(
-                f"PYTHONPATH='Code&DBs/Workflow' python3 -m pytest --noconftest -q {rel}"
+                f"PYTHONPATH='{workflow_root()}' python3 -m pytest --noconftest -q {rel}"
             )
         if test_commands:
             shard["test_commands"] = test_commands

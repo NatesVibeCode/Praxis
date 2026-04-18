@@ -185,7 +185,9 @@ _WORKFLOW_MIGRATION_EXPECTED_OBJECTS = {
 
 
 def _workflow_migrations_root_path() -> Path:
-    return Path(__file__).resolve().parents[2] / "Databases" / "migrations" / "workflow"
+    from runtime.workspace_paths import workflow_migrations_root as _layout_workflow_migrations_root
+
+    return _layout_workflow_migrations_root()
 
 
 def _numbered_workflow_migration_filenames(root: Path) -> tuple[str, ...]:

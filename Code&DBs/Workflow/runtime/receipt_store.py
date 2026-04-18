@@ -926,11 +926,10 @@ def backfill_receipt_provenance(
     }
 
 
-def write_receipt(receipt_dict: dict[str, Any], *, conn=None) -> None:
+def write_receipt(receipt_dict: dict[str, Any], *, conn=None) -> dict[str, Any]:
     """Persist a receipt payload to the canonical ``receipts`` table."""
     normalized = normalize_receipt_payload(dict(receipt_dict))
     conn = conn or _conn()
-    repository = _repository(conn)
     now = datetime.now(timezone.utc)
 
     run_id = str(normalized.get("run_id") or "")
@@ -955,7 +954,26 @@ def write_receipt(receipt_dict: dict[str, Any], *, conn=None) -> None:
     outputs.setdefault("duration_ms", int(normalized.get("latency_ms") or outputs.get("duration_ms") or 0))
     outputs.setdefault("token_input", int(normalized.get("input_tokens") or outputs.get("token_input") or 0))
     outputs.setdefault("token_output", int(normalized.get("output_tokens") or outputs.get("token_output") or 0))
+    outputs.setdefault(
+        "cache_read_tokens",
+        int(normalized.get("cache_read_tokens") or outputs.get("cache_read_tokens") or 0),
+    )
+    outputs.setdefault(
+        "cache_creation_tokens",
+        int(
+            normalized.get("cache_creation_tokens")
+            or outputs.get("cache_creation_tokens")
+            or 0
+        ),
+    )
     outputs.setdefault("cost_usd", float(normalized.get("cost_usd") or normalized.get("total_cost_usd") or outputs.get("cost_usd") or 0.0))
+    outputs.setdefault(
+        "duration_api_ms",
+        int(normalized.get("duration_api_ms") or outputs.get("duration_api_ms") or 0),
+    )
+    outputs.setdefault("num_turns", int(normalized.get("num_turns") or outputs.get("num_turns") or 0))
+    if normalized.get("tool_use") is not None and "tool_use" not in outputs:
+        outputs["tool_use"] = normalized.get("tool_use")
     if normalized.get("stdout_preview") is not None and "stdout_preview" not in outputs:
         outputs["stdout_preview"] = normalized.get("stdout_preview")
     if normalized.get("failure_classification") is not None and "failure_classification" not in outputs:
@@ -1020,7 +1038,7 @@ def write_receipt(receipt_dict: dict[str, Any], *, conn=None) -> None:
         inputs=inputs,
         outputs=outputs,
         artifacts=artifacts,
-        failure_code=str(normalized.get("failure_code") or normalized.get("error_code") or ""),
+        failure_code=str(normalized.get("failure_code") or normalized.get("error_code") or "").strip() or None,
     )
     normalized["evidence_count"] = transition_seq
     _run_post_receipt_hooks(
@@ -1041,3 +1059,7 @@ def write_receipt(receipt_dict: dict[str, Any], *, conn=None) -> None:
         },
         conn=conn,
     )
+    return {
+        "receipt_id": receipt_id,
+        "transition_seq": transition_seq,
+    }

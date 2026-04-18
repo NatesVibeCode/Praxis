@@ -13,7 +13,9 @@ WORKFLOW_ROOT = Path(__file__).resolve().parents[1]
 if str(WORKFLOW_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKFLOW_ROOT))
 
-os.environ.setdefault("WORKFLOW_DATABASE_URL", "postgresql://test@localhost:5432/praxis_test")
+from _pg_test_conn import ensure_test_database_ready
+
+os.environ.setdefault("WORKFLOW_DATABASE_URL", ensure_test_database_ready())
 
 import runtime.compiler as compiler_module
 from runtime.compiler import compile_prose
@@ -23,8 +25,16 @@ from runtime.compiler import compile_prose
 def _stub_external_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep the smoke test bounded when DB or planner infrastructure is unavailable."""
 
-    def _raise_connection_error():
-        raise RuntimeError("compiler smoke test running without database context")
+    class _FakeConn:
+        def execute(self, *_args, **_kwargs):
+            return []
+
+    class _FakeArtifactStore:
+        def __init__(self, _conn) -> None:
+            pass
+
+        def load_reusable_artifact(self, **_kwargs):
+            return None
 
     def _fake_llm_compile(prose: str, context: str, *, conn=None) -> dict:
         return {
@@ -34,7 +44,20 @@ def _stub_external_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
             "sla": {},
         }
 
-    monkeypatch.setattr(compiler_module, "_get_connection", _raise_connection_error)
+    monkeypatch.setattr(compiler_module, "_get_connection", lambda: _FakeConn())
+    monkeypatch.setattr(
+        compiler_module,
+        "_load_compile_index_snapshot_with_auto_refresh",
+        lambda *_args, **_kwargs: compiler_module._fallback_compile_index_snapshot(
+            reason="compiler smoke test",
+        ),
+    )
+    monkeypatch.setattr(
+        compiler_module,
+        "_resolve_compiler_embedder",
+        lambda: (None, {"mode": "degraded", "reason": "compiler smoke test"}),
+    )
+    monkeypatch.setattr(compiler_module, "CompileArtifactStore", _FakeArtifactStore)
     monkeypatch.setattr(compiler_module, "_call_llm_compile", _fake_llm_compile)
 
 

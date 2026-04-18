@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from _pg_test_conn import ensure_test_database_ready
 from contracts.domain import (
     MINIMAL_WORKFLOW_EDGE_TYPE,
     MINIMAL_WORKFLOW_NODE_TYPE,
@@ -28,23 +29,20 @@ from runtime.instance import (
     NativeInstanceResolutionError,
     native_instance_contract,
 )
-from storage.postgres import PostgresConfigurationError, resolve_workflow_database_url
+from storage.postgres import resolve_workflow_database_url
 from surfaces.api import frontdoor as native_frontdoor
 from surfaces.cli import native_operator
 from surfaces.cli.main import main as workflow_cli_main
 
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
+_TEST_DATABASE_URL = ensure_test_database_ready()
 
 
 def _repo_local_env() -> dict[str, str]:
-    try:
-        database_url = resolve_workflow_database_url()
-    except PostgresConfigurationError as exc:
-        pytest.skip(
-            "WORKFLOW_DATABASE_URL is required for native operator CLI integration tests: "
-            f"{exc.reason_code}"
-        )
+    database_url = resolve_workflow_database_url(
+        env={"WORKFLOW_DATABASE_URL": _TEST_DATABASE_URL}
+    )
     return {
         "WORKFLOW_DATABASE_URL": database_url,
         PRAXIS_RUNTIME_PROFILES_CONFIG_ENV: str(REPO_ROOT / "config" / "runtime_profiles.json"),

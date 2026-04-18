@@ -23,6 +23,7 @@ from runtime.workflow.mcp_bridge import (
     workflow_mcp_workspace_overlays,
 )
 from runtime.workflow.decision_context import decision_workspace_overlays
+from runtime.workspace_paths import workflow_root
 
 
 _WORKFLOW_MODEL_NETWORK_ENV = "PRAXIS_WORKFLOW_MODEL_NETWORK"
@@ -188,7 +189,7 @@ def _build_execution_env(
             sandbox_env[key] = str(value)
         if overrides.get("set_home"):
             sandbox_env["HOME"] = os.path.expanduser("~")
-    sandbox_env["PYTHONPATH"] = "Code&DBs/Workflow"
+    sandbox_env["PYTHONPATH"] = str(workflow_root())
     sandbox_env["PATH"] = env["PATH"]
     ripgrep_config = _ripgrep_config_for_workdir(workdir)
     if ripgrep_config:

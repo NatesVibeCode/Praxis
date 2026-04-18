@@ -1,24 +1,22 @@
 from __future__ import annotations
 
 import asyncio
-import os
-import sys
 import uuid
 from datetime import datetime, timedelta, timezone
 
 import asyncpg
 import pytest
 
+from _pg_test_conn import ensure_test_database_ready
 from storage.migrations import workflow_bootstrap_migration_statements
 from storage.postgres import (
-    PostgresConfigurationError,
     connect_workflow_database,
-    resolve_workflow_database_url,
 )
 from surfaces.api import operator_write
 
 _SCHEMA_BOOTSTRAP_LOCK_ID = 741001
 _DUPLICATE_SQLSTATES = {"42P07", "42710"}
+_TEST_DATABASE_URL = ensure_test_database_ready()
 
 
 class _BorrowedConnection:
@@ -33,11 +31,6 @@ class _BorrowedConnection:
 
 
 def test_task_route_eligibility_write_supersedes_active_scope_window() -> None:
-    if sys.platform == "darwin":
-        pytest.xfail(
-            "macOS pytest harness hangs before task-route eligibility integration reaches "
-            "the repo-local database path; the async flow was validated separately via direct python execution"
-        )
     asyncio.run(_exercise_task_route_eligibility_write_supersedes_active_scope_window())
 
 
@@ -135,13 +128,4 @@ async def _bootstrap_workflow_migration(conn, filename: str) -> None:
 
 
 def _workflow_env() -> dict[str, str]:
-    try:
-        database_url = resolve_workflow_database_url(
-            env={"WORKFLOW_DATABASE_URL": os.environ.get("WORKFLOW_DATABASE_URL", "postgresql://127.0.0.1/postgres")}
-        )
-    except PostgresConfigurationError as exc:
-        pytest.skip(
-            "WORKFLOW_DATABASE_URL is required for task-route-eligibility integration test: "
-            f"{exc.reason_code}"
-        )
-    return {"WORKFLOW_DATABASE_URL": database_url}
+    return {"WORKFLOW_DATABASE_URL": _TEST_DATABASE_URL}

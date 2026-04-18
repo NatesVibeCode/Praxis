@@ -2,18 +2,21 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from _pg_test_conn import ensure_test_database_ready
 from registry.route_catalog_repository import PostgresRouteCatalogRepository
 from registry.provider_routing import (
     PostgresProviderRouteAuthorityRepository,
     load_provider_route_authority,
 )
-from storage.postgres import PostgresConfigurationError, connect_workflow_database
+from storage.postgres import connect_workflow_database
+
+
+_TEST_DATABASE_URL = ensure_test_database_ready()
 
 
 def _unique_suffix() -> str:
@@ -341,17 +344,10 @@ def test_provider_route_control_tower_repository_is_deterministic_and_fail_close
 
 
 async def _exercise_provider_route_control_tower_repository() -> None:
-    database_url = os.environ.get("WORKFLOW_DATABASE_URL", "postgresql://127.0.0.1/postgres")
     conn = None
-    try:
-        conn = await connect_workflow_database(
-            env={"WORKFLOW_DATABASE_URL": database_url},
-        )
-    except PostgresConfigurationError as exc:
-        pytest.skip(
-            "WORKFLOW_DATABASE_URL is required for provider route control tower integration test: "
-            f"{exc.reason_code}"
-        )
+    conn = await connect_workflow_database(
+        env={"WORKFLOW_DATABASE_URL": _TEST_DATABASE_URL},
+    )
 
     try:
         suffix = _unique_suffix()

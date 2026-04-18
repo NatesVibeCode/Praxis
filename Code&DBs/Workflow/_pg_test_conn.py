@@ -12,9 +12,10 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 from contextlib import contextmanager
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 import asyncpg
 
@@ -24,15 +25,31 @@ if _wf not in sys.path:
 
 _pool = None
 _conn = None
+_ready_database_url: str | None = None
+_ready_lock = threading.Lock()
 _AUTHORITY_UNAVAILABLE = "postgres.authority_unavailable"
 _DEFAULT_TEST_DATABASE = "praxis_test"
-_DEFAULT_TEST_DATABASE_URL = f"postgresql://localhost:5432/{_DEFAULT_TEST_DATABASE}"
-_DEFAULT_ADMIN_DATABASE_URL = "postgresql://localhost:5432/postgres"
+_DEFAULT_TEST_DATABASE_URL = f"postgresql://postgres@localhost:5432/{_DEFAULT_TEST_DATABASE}"
+_DEFAULT_ADMIN_DATABASE_URL = "postgresql://postgres@localhost:5432/postgres"
 
 
 def _database_name_from_url(database_url: str) -> str:
     parsed = urlsplit(database_url)
     return parsed.path.lstrip("/") or _DEFAULT_TEST_DATABASE
+
+
+def _admin_database_url_for(database_url: str) -> str:
+    parsed = urlsplit(database_url)
+    admin_path = "/postgres"
+    return urlunsplit((parsed.scheme, parsed.netloc, admin_path, parsed.query, parsed.fragment))
+
+
+async def _probe_database(database_url: str) -> None:
+    conn = await asyncpg.connect(database_url)
+    try:
+        await conn.fetchval("SELECT 1")
+    finally:
+        await conn.close()
 
 
 async def _create_database_if_missing(*, admin_database_url: str, database_name: str) -> None:
@@ -65,37 +82,56 @@ def _default_test_database_url() -> str:
 
 
 def ensure_test_database_ready() -> str:
-    from storage.postgres import ensure_postgres_available
-    from storage.postgres.connection import _run_sync, resolve_workflow_database_url
+    global _ready_database_url
+    if _ready_database_url is not None:
+        return _ready_database_url
 
-    database_url = _default_test_database_url()
-    admin_database_url = resolve_workflow_database_url(
-        env={"WORKFLOW_DATABASE_URL": _DEFAULT_ADMIN_DATABASE_URL},
-    )
-    database_name = _database_name_from_url(database_url)
-    create_database = _create_database_if_missing(
-        admin_database_url=admin_database_url,
-        database_name=database_name,
-    )
-    try:
-        _run_sync(create_database)
-        ensure_postgres_available(
-            env={"WORKFLOW_DATABASE_URL": database_url},
-        ).close()
-    except Exception as exc:
+    from storage.postgres import ensure_postgres_available
+    from storage.postgres.connection import _run_sync
+
+    with _ready_lock:
+        if _ready_database_url is not None:
+            return _ready_database_url
+
+        database_url = _default_test_database_url()
+        probe_database = _probe_database(database_url)
         try:
-            create_database.close()
-        except Exception:
-            pass
-        _skip_for_unavailable_authority(exc)
-        raise
-    return database_url
+            _run_sync(probe_database)
+            ensure_postgres_available(
+                env={"WORKFLOW_DATABASE_URL": database_url},
+            ).close()
+        except asyncpg.InvalidCatalogNameError:
+            admin_database_url = _admin_database_url_for(database_url)
+            database_name = _database_name_from_url(database_url)
+            create_database = _create_database_if_missing(
+                admin_database_url=admin_database_url,
+                database_name=database_name,
+            )
+            try:
+                _run_sync(create_database)
+                ensure_postgres_available(
+                    env={"WORKFLOW_DATABASE_URL": database_url},
+                ).close()
+            except Exception as exc:
+                try:
+                    create_database.close()
+                except Exception:
+                    pass
+                _skip_for_unavailable_authority(exc)
+                raise
+        except Exception as exc:
+            try:
+                probe_database.close()
+            except Exception:
+                pass
+            _skip_for_unavailable_authority(exc)
+            raise
+        _ready_database_url = database_url
+        return _ready_database_url
 
 
 def _resolve_test_env() -> dict[str, str]:
-    database_url = os.environ.get("WORKFLOW_DATABASE_URL")
-    if database_url is None or not str(database_url).strip():
-        database_url = ensure_test_database_ready()
+    database_url = ensure_test_database_ready()
     return {
         "WORKFLOW_DATABASE_URL": database_url,
         "PATH": os.environ.get("PATH", ""),

@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from _pg_test_conn import ensure_test_database_ready
 from policy.workflow_lanes import bootstrap_workflow_lane_catalog_schema
 from runtime.instance import NativeWorkflowInstance
 from runtime.recurring_review_repair_flow import (
@@ -22,6 +22,7 @@ import pathlib
 
 _REPO_ROOT = str(pathlib.Path(__file__).resolve().parents[4])
 _SCHEMA_BOOTSTRAP_LOCK_ID = 741001
+_TEST_DATABASE_URL = ensure_test_database_ready()
 
 
 def test_operator_path_adopts_recurring_review_repair_flow(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -596,8 +597,7 @@ def _jsonb(value: object) -> str:
 
 
 def _workflow_env() -> dict[str, str]:
-    database_url = os.environ.get("WORKFLOW_DATABASE_URL", "postgresql://127.0.0.1/postgres")
-    return {"WORKFLOW_DATABASE_URL": database_url}
+    return {"WORKFLOW_DATABASE_URL": _TEST_DATABASE_URL}
 
 
 def _native_instance() -> NativeWorkflowInstance:

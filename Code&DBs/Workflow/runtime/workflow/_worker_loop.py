@@ -12,6 +12,7 @@ import os
 import threading
 import time
 import uuid
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, Future
 from typing import TYPE_CHECKING
 
@@ -365,7 +366,50 @@ def run_worker_loop(
             return
         try:
             logger.info("Worker executing admitted graph run %s", run_id)
-            _execute_admitted_graph_run(thread_conn, run_id=run_id)
+            result = _execute_admitted_graph_run(thread_conn, run_id=run_id)
+            # Silent-failure guard: if execution returned without transitioning the
+            # run state out of claim_accepted (e.g. route.unhealthy, intake.rejected,
+            # or any early-exit failure_result), force it to 'failed' so operators
+            # aren't left with a run stuck in claim_accepted forever.
+            reason_code = None
+            if isinstance(result, Mapping):
+                status = str(result.get("status") or "").strip().lower()
+                if status in {"failed", "rejected", "error"}:
+                    reason_code = (
+                        str(result.get("reason_code") or "").strip()
+                        or str(result.get("failure_code") or "").strip()
+                        or "workflow.silent_failure"
+                    )
+            else:
+                status = str(getattr(result, "status", "") or "").strip().lower()
+                if status in {"failed", "rejected", "error"}:
+                    reason_code = (
+                        str(getattr(result, "reason_code", "") or "").strip()
+                        or str(getattr(result, "failure_code", "") or "").strip()
+                        or "workflow.silent_failure"
+                    )
+            if reason_code is None:
+                # Also catch "nothing happened" — result is None / empty, and
+                # current_state is still claim_accepted.
+                state_rows = thread_conn.execute(
+                    "SELECT current_state FROM workflow_runs WHERE run_id = $1",
+                    run_id,
+                )
+                if state_rows:
+                    current_state = str(dict(state_rows[0]).get("current_state") or "").strip()
+                    if current_state == "claim_accepted":
+                        reason_code = "workflow.silent_no_transition"
+            if reason_code:
+                synthetic = RuntimeError(reason_code)
+                setattr(synthetic, "failure_code", reason_code)
+                failure_code = _fail_graph_run_closed(
+                    thread_conn, run_id=run_id, exc=synthetic
+                )
+                logger.error(
+                    "Graph run %s force-failed after silent return (%s)",
+                    run_id,
+                    failure_code,
+                )
         except Exception as exc:
             failure_code = _fail_graph_run_closed(thread_conn, run_id=run_id, exc=exc)
             logger.error(

@@ -10,6 +10,8 @@ import json
 import re
 from typing import Any
 
+from runtime.workspace_paths import strip_workflow_prefix
+
 from ..subsystems import _subs
 
 
@@ -46,7 +48,7 @@ def tool_praxis_discover(params: dict, _progress_emitter=None) -> dict:
             entry: dict = {
                 "name": r.get("name", ""),
                 "kind": r.get("kind", ""),
-                "path": r.get("module_path", "").replace("Code&DBs/Workflow/", ""),
+                "path": strip_workflow_prefix(r.get("module_path", "")),
                 "similarity": round(r.get("cosine_similarity", 0), 2),
             }
             # Use docstring if available, fall back to summary

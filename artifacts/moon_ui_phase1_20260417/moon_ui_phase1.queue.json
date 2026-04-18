@@ -1,0 +1,190 @@
+{
+  "name": "Moon UI Phase One — Spec + Diff",
+  "workflow_id": "moon_ui_phase1_20260417",
+  "phase": "execute",
+  "workdir": "/Users/nate/Praxis",
+  "queue_id": "moon_ui_phase1_20260417",
+  "outcome_goal": "Produce (a) an architectural decomposition decision record for surfaces/app/src/moon/MoonBuildPage.tsx and (b) three shipped, typechecked, tested diffs against ToolResultRenderer.tsx, ChatPanel.tsx+useChat.ts, and MarkdownRenderer.tsx. Every shipped diff must pass tsc and vitest before persisting.",
+  "anti_requirements": [
+    "Do NOT touch MoonBuildPage.tsx code in this run — this run produces the decomposition plan only; the extraction happens in a follow-up run.",
+    "Do NOT edit any file outside the three targeted components + the decision record artifact.",
+    "Do NOT skip the verify_command on any diff job. A diff that fails validation must be rolled back (not shipped partial).",
+    "Do NOT introduce new runtime dependencies in the app package.json without justification in the decision record."
+  ],
+  "jobs": [
+    {
+      "label": "analyze_monolith",
+      "agent": "auto/architecture",
+      "task_type": "architecture",
+      "complexity": "high",
+      "description": "Architectural analysis of MoonBuildPage.tsx — identify layout regions, state ownership, coupling surfaces",
+      "outcome_goal": "A written analysis that names every top-level layout region in MoonBuildPage.tsx, enumerates which local state variables flow into which region, and identifies the 3-5 tightest coupling surfaces that make the file hard to modify.",
+      "prompt": "You are analyzing surfaces/app/src/moon/MoonBuildPage.tsx as the first step of an architectural decomposition plan. Do NOT write code. Do NOT propose the decomposition yet — that is the next job.\n\nRead the file fully. Produce a structured analysis with these sections:\n\n## 1. Layout Regions\nName every distinct visual/functional region rendered from the top-level return statement. For each: its approximate line range, its visual role, and which child components it composes.\n\n## 2. State Ownership Map\nFor each `useState`, `useReducer`, and top-level `useMemo`/`useCallback` in the component: name, type, which layout regions read it, which regions write to it, and whether it could be lifted, colocated, or extracted into a custom hook.\n\n## 3. Tightest Coupling Surfaces\nPick the 3-5 specific coupling surfaces that make this file hard to modify — e.g. \"MoonActionDock's open state is read by both the center panel and the release tray, causing cross-region re-renders\". Cite line ranges.\n\n## 4. Decomposition Hints (not yet a plan)\nList 5-10 observations that should inform the next job's decomposition proposal. Don't propose subcomponents yet — just surface what the next architect needs to know.\n\nWrite output to artifacts/moon_ui_phase1_20260417/01_analysis.md. Work from /workspace. Reference line numbers precisely — this document will feed the next two jobs.",
+      "read": [
+        "Code&DBs/Workflow/surfaces/app/src/moon/MoonBuildPage.tsx"
+      ],
+      "write": [
+        "artifacts/moon_ui_phase1_20260417/01_analysis.md"
+      ],
+      "verify_command": "test -s /Users/nate/Praxis/artifacts/moon_ui_phase1_20260417/01_analysis.md && grep -q '## 1. Layout Regions' /Users/nate/Praxis/artifacts/moon_ui_phase1_20260417/01_analysis.md && grep -q '## 2. State Ownership Map' /Users/nate/Praxis/artifacts/moon_ui_phase1_20260417/01_analysis.md && grep -q '## 3. Tightest Coupling Surfaces' /Users/nate/Praxis/artifacts/moon_ui_phase1_20260417/01_analysis.md"
+    },
+    {
+      "label": "propose_decomposition",
+      "agent": "auto/architecture",
+      "task_type": "architecture",
+      "complexity": "high",
+      "depends_on": ["analyze_monolith"],
+      "description": "Propose concrete subcomponent decomposition of MoonBuildPage.tsx",
+      "outcome_goal": "A structured decomposition plan naming every proposed subcomponent, its prop contract (TypeScript shapes), which state stays in the parent, and a migration path that can be executed one subcomponent at a time.",
+      "prompt": "Read artifacts/moon_ui_phase1_20260417/01_analysis.md (produced by the previous job) AND surfaces/app/src/moon/MoonBuildPage.tsx.\n\nPropose a concrete decomposition. Do NOT write code. Do NOT edit MoonBuildPage.tsx. Produce only a written plan.\n\nWrite output to artifacts/moon_ui_phase1_20260417/02_decomposition.md with these sections:\n\n## Proposed Subcomponents\nFor each proposed subcomponent (expect 4-8):\n- **Name** (e.g. `MoonActionDock`, `MoonCenter`, `MoonReleaseTray`)\n- **Responsibility** (one sentence)\n- **Props contract** (TypeScript interface — real types, not placeholders)\n- **Internal state** (what state lives inside vs. comes from props)\n- **File path** (where it should live, e.g. `surfaces/app/src/moon/components/MoonActionDock.tsx`)\n\n## State Ownership After Decomposition\nTable: for each state variable from the analysis, where it lives after decomposition (parent, which child, or hook).\n\n## Migration Order\nOrdered list of extractions — which subcomponent to extract first, second, etc. Each step must be individually shippable and not break the build. Justify the order.\n\n## Coupling Risks\nFor each tightest coupling surface identified in the analysis: how the decomposition handles it, or why it's acceptable to leave as-is.\n\n## Open Questions\nList design questions the reviewer should pressure-test. Don't hide trade-offs — surface them.\n\nWork from /workspace. Be opinionated. A vague plan fails this job.",
+      "read": [
+        "Code&DBs/Workflow/surfaces/app/src/moon/MoonBuildPage.tsx",
+        "artifacts/moon_ui_phase1_20260417/01_analysis.md"
+      ],
+      "write": [
+        "artifacts/moon_ui_phase1_20260417/02_decomposition.md"
+      ],
+      "verify_command": "test -s /Users/nate/Praxis/artifacts/moon_ui_phase1_20260417/02_decomposition.md && grep -q '## Proposed Subcomponents' /Users/nate/Praxis/artifacts/moon_ui_phase1_20260417/02_decomposition.md && grep -q '## Migration Order' /Users/nate/Praxis/artifacts/moon_ui_phase1_20260417/02_decomposition.md && grep -q 'interface' /Users/nate/Praxis/artifacts/moon_ui_phase1_20260417/02_decomposition.md"
+    },
+    {
+      "label": "adversarial_review_spec",
+      "agent": "auto/review",
+      "task_type": "review",
+      "complexity": "high",
+      "depends_on": ["propose_decomposition"],
+      "description": "Red-team the decomposition proposal",
+      "outcome_goal": "Every weakness, unspoken assumption, and speculative claim in the decomposition is called out with line references to the source or the proposal.",
+      "prompt": "You are red-teaming the decomposition plan in artifacts/moon_ui_phase1_20260417/02_decomposition.md. Read that file AND the source file (surfaces/app/src/moon/MoonBuildPage.tsx) AND the prior analysis (01_analysis.md).\n\nWrite output to artifacts/moon_ui_phase1_20260417/03_redteam.md.\n\nYour job is to find problems. Be direct. Do NOT rewrite the plan — critique it.\n\nAsks:\n\n## Decomposition Weaknesses\nFor each proposed subcomponent: does its props contract leak implementation details? Is the responsibility clean, or is it just a mechanical code move? Is internal state really local, or will it need to be lifted on the next extraction? Quote proposal text verbatim when calling out issues.\n\n## Migration Order Risks\nWalk the proposed extraction order. At each step: would the build pass? Would tests pass? Is there a hidden dependency (prop drilling, context reads, side effects) that breaks the \"individually shippable\" claim?\n\n## Unstated Assumptions\nWhat is the proposal assuming that isn't in the source? (e.g. about css coupling, about how parent callbacks are wired, about the shape of workflow data)\n\n## Coupling Surfaces Not Addressed\nCross-reference against 01_analysis.md Section 3. Is any coupling surface left unhandled?\n\n## Verdict\nOne of: `READY-TO-EXECUTE`, `READY-WITH-NOTES`, `CONTESTED-NEEDS-REVISION`. One paragraph justifying the verdict. If CONTESTED, name the single highest-priority revision needed.\n\nBe specific. Cite lines. No hedging. If the plan is solid, say so — but only after you've actually tried to break it.",
+      "read": [
+        "Code&DBs/Workflow/surfaces/app/src/moon/MoonBuildPage.tsx",
+        "artifacts/moon_ui_phase1_20260417/01_analysis.md",
+        "artifacts/moon_ui_phase1_20260417/02_decomposition.md"
+      ],
+      "write": [
+        "artifacts/moon_ui_phase1_20260417/03_redteam.md"
+      ],
+      "verify_command": "test -s /Users/nate/Praxis/artifacts/moon_ui_phase1_20260417/03_redteam.md && grep -qE 'READY-TO-EXECUTE|READY-WITH-NOTES|CONTESTED-NEEDS-REVISION' /Users/nate/Praxis/artifacts/moon_ui_phase1_20260417/03_redteam.md"
+    },
+    {
+      "label": "diff_A_tool_result_renderer",
+      "agent": "auto/refactor",
+      "task_type": "refactor",
+      "complexity": "medium",
+      "depends_on": ["adversarial_review_spec"],
+      "description": "Typed refactor of ToolResultRenderer.tsx — discriminated union, extracted subcomponents, empty/error boundaries, stable keys",
+      "outcome_goal": "ToolResultRenderer.tsx has a discriminated union ToolResultType, each branch is an isolated function component, empty and error states are handled for every branch, and keys are stable (not JSON.stringify or array index). tsc passes, vitest passes.",
+      "prompt": "Refactor surfaces/app/src/workspace/ToolResultRenderer.tsx.\n\nCurrent problems (from reconnaissance):\n1. Five `if (result.type === ...)` branches with no union types — all map/filter calls use `any[]`\n2. Missing empty-state and error-recovery handling for edge cases (table with 0 rows renders muted text, but status with 0 jobs renders silently)\n3. Cell/row keys use `JSON.stringify()` and array indices — causes re-render bugs on data update\n\nRequired changes:\n1. Define a discriminated union `ToolResultType` covering every branch currently handled. Use `type` as the discriminator.\n2. Extract each branch into an isolated function component (`ToolResultTable`, `ToolResultStatus`, etc.).\n3. Every branch must handle its empty state explicitly (0 rows, 0 jobs, etc.) with consistent visual treatment.\n4. Every branch must handle malformed/unexpected data with an error boundary that logs and renders a fallback.\n5. Keys for map() must be stable identifiers from the data (id, name, etc.) — not `JSON.stringify` or array index. If no stable id exists, explain why in a code comment.\n6. No `any` types in the refactored file. Use the discriminated union throughout.\n\nConstraints:\n- Do NOT change the public export or its prop shape. Upstream callers keep working.\n- Do NOT touch any file outside `surfaces/app/src/workspace/ToolResultRenderer.tsx` and an adjacent test file if you add one.\n- If a test file does not exist for this component, create `surfaces/app/src/workspace/ToolResultRenderer.test.tsx` with vitest tests covering: each branch's happy path, each branch's empty state, at least one malformed-data test.\n\nVerify locally before finishing by running:\n```\ncd Code&DBs/Workflow/surfaces/app && npm run typecheck && npm test -- ToolResultRenderer\n```\nBoth must pass. If they don't, fix and retry until they do.\n\nWork from /workspace.",
+      "read": [
+        "Code&DBs/Workflow/surfaces/app/src/workspace/ToolResultRenderer.tsx",
+        "Code&DBs/Workflow/surfaces/app/src/dashboard/ChatPanel.tsx",
+        "Code&DBs/Workflow/surfaces/app/package.json",
+        "Code&DBs/Workflow/surfaces/app/tsconfig.build.json"
+      ],
+      "write": [
+        "Code&DBs/Workflow/surfaces/app/src/workspace/ToolResultRenderer.tsx",
+        "Code&DBs/Workflow/surfaces/app/src/workspace/ToolResultRenderer.test.tsx"
+      ],
+      "verify_command": "cd /Users/nate/Praxis/Code\\&DBs/Workflow/surfaces/app && npm run typecheck 2>&1 | tail -20 && npx vitest run src/workspace/ToolResultRenderer --reporter=basic 2>&1 | tail -30"
+    },
+    {
+      "label": "diff_B_chat_panel",
+      "agent": "auto/build",
+      "task_type": "build",
+      "complexity": "medium",
+      "depends_on": ["adversarial_review_spec"],
+      "description": "Fix ChatPanel.tsx + useChat.ts keyboard UX and abort handling bugs",
+      "outcome_goal": "abortRef is actually wired to cleanup, Cmd+Enter sends, textarea has maxLength, Escape does not close when another modal has focus, SSE parser resets streamingText on error and has a fetch timeout. tsc passes, vitest passes.",
+      "prompt": "Fix the bugs in surfaces/app/src/dashboard/ChatPanel.tsx and surfaces/app/src/workspace/useChat.ts.\n\nKnown issues (from reconnaissance):\n1. `ChatPanel.tsx` (~line 34-43) listens to global `keydown` for Escape but doesn't check whether another modal/dialog has focus — user can trash workflows by hitting Escape in a nested dialog.\n2. `useChat.ts` (~line 109, 194) declares `abortRef` but the comment \"Abort any previous request\" is a lie — the ref is never called. Fix: actually call `abortRef.current?.abort()` on new send and on unmount cleanup.\n3. `ChatPanel.tsx` textarea has no `maxLength` — long inputs silently overflow. Set a reasonable limit (8000 chars) and show a counter when within 200 of the limit.\n4. No Cmd+Enter keyboard shortcut to send — add it. Plain Enter inserts newline (current behavior), Cmd+Enter (or Ctrl+Enter on non-mac) submits.\n5. `useChat.ts` (~line 28-101) SSE parser doesn't reset `streamingText` state on error — stale text remains after network failure. Fix: on fetch error or stream error, reset streamingText to '' and surface the error in the messages list as an error-flavored assistant message.\n6. `useChat.ts` fetch call has no timeout — add an AbortController-based timeout (60s) so long-hung requests don't leave the UI in limbo.\n\nConstraints:\n- Do NOT change the public export or hook return shape. Upstream callers keep working.\n- Do NOT touch any file outside the two listed.\n- If test files do not exist, create them at adjacent paths with vitest.\n- Use `navigator.platform` or `e.metaKey || e.ctrlKey` for cross-platform Cmd/Ctrl detection — don't hardcode mac.\n\nVerify locally by running:\n```\ncd Code&DBs/Workflow/surfaces/app && npm run typecheck && npm test -- ChatPanel useChat\n```\nBoth must pass.\n\nWork from /workspace.",
+      "read": [
+        "Code&DBs/Workflow/surfaces/app/src/dashboard/ChatPanel.tsx",
+        "Code&DBs/Workflow/surfaces/app/src/workspace/useChat.ts",
+        "Code&DBs/Workflow/surfaces/app/package.json"
+      ],
+      "write": [
+        "Code&DBs/Workflow/surfaces/app/src/dashboard/ChatPanel.tsx",
+        "Code&DBs/Workflow/surfaces/app/src/dashboard/ChatPanel.test.tsx",
+        "Code&DBs/Workflow/surfaces/app/src/workspace/useChat.ts",
+        "Code&DBs/Workflow/surfaces/app/src/workspace/useChat.test.ts"
+      ],
+      "verify_command": "cd /Users/nate/Praxis/Code\\&DBs/Workflow/surfaces/app && npm run typecheck 2>&1 | tail -20 && npx vitest run ChatPanel useChat --reporter=basic 2>&1 | tail -30"
+    },
+    {
+      "label": "diff_C_markdown_renderer",
+      "agent": "auto/build",
+      "task_type": "build",
+      "complexity": "high",
+      "depends_on": ["adversarial_review_spec"],
+      "description": "Fix MarkdownRenderer.tsx parser correctness (nested lists, code indentation) and security (link sanitization)",
+      "outcome_goal": "Nested lists wrap correctly in ul/ol, code blocks preserve leading whitespace, external links get rel='noreferrer', no dangerouslySetInnerHTML with unescaped input. tsc passes, vitest passes including new fixture tests.",
+      "prompt": "Fix surfaces/app/src/workspace/MarkdownRenderer.tsx. This component currently uses regex-based markdown parsing with known correctness and security bugs.\n\nKnown issues (from reconnaissance):\n1. Uses `dangerouslySetInnerHTML` with regex-based markdown parsing — attack surface and fragile.\n2. Nested lists (bulleted inside numbered) don't wrap in `<ul>/<ol>` tags — each line becomes an orphan `<li>`.\n3. Links open in `_blank` but no `rel=\"noreferrer\"` — cross-origin reference leak (security issue).\n4. Code blocks lose leading whitespace (escapeHtml strips it at line ~38) — indented code examples become unreadable.\n\nApproach choice: this is a correctness-critical component. You have two options:\n\n**Option A (preferred if package already has a parser dep):** check if the app already depends on `marked`, `markdown-it`, or similar. If so, use it. Sanitize output with `DOMPurify` or strip dangerous tags manually. This is safer than hand-rolled regex.\n\n**Option B:** if no parser dep exists, improve the current regex-based parser: track list nesting state, preserve code block whitespace, add rel='noreferrer' to all links with href starting with http(s)://. Do NOT introduce a new runtime dependency without justifying it in the output.\n\nRequirements for either option:\n- Nested lists (bulleted inside numbered and vice versa) must wrap correctly.\n- Code blocks preserve exact leading whitespace (tabs and spaces).\n- External links (`href` starts with `http://` or `https://`) must have `rel=\"noopener noreferrer\"` and `target=\"_blank\"`.\n- Internal links (relative hrefs) do NOT get `noreferrer` (they're same-origin).\n- The rendered output must still accept plain text and produce a sensible render (no crash on empty or non-markdown input).\n\nCreate/extend `surfaces/app/src/workspace/MarkdownRenderer.test.tsx` with vitest fixtures covering:\n- Nested bullet-in-numbered list\n- Code block with 4-space indentation preserved\n- External link gets rel='noreferrer'\n- Internal link does NOT get rel='noreferrer'\n- Empty string renders without error\n- Plain text with no markdown renders as-is\n\nConstraints:\n- Do NOT change the public prop shape.\n- Do NOT touch any file outside MarkdownRenderer.tsx and its test.\n- If you add a runtime dependency, document why in a comment at the top of the file.\n\nVerify:\n```\ncd Code&DBs/Workflow/surfaces/app && npm run typecheck && npm test -- MarkdownRenderer\n```\n\nWork from /workspace. This is the hardest of the three diffs — take the time to do it right.",
+      "read": [
+        "Code&DBs/Workflow/surfaces/app/src/workspace/MarkdownRenderer.tsx",
+        "Code&DBs/Workflow/surfaces/app/package.json",
+        "Code&DBs/Workflow/surfaces/app/package-lock.json"
+      ],
+      "write": [
+        "Code&DBs/Workflow/surfaces/app/src/workspace/MarkdownRenderer.tsx",
+        "Code&DBs/Workflow/surfaces/app/src/workspace/MarkdownRenderer.test.tsx"
+      ],
+      "verify_command": "cd /Users/nate/Praxis/Code\\&DBs/Workflow/surfaces/app && npm run typecheck 2>&1 | tail -20 && npx vitest run src/workspace/MarkdownRenderer --reporter=basic 2>&1 | tail -30"
+    },
+    {
+      "label": "final_validation",
+      "agent": "auto/build",
+      "task_type": "test",
+      "complexity": "medium",
+      "depends_on": ["diff_A_tool_result_renderer", "diff_B_chat_panel", "diff_C_markdown_renderer"],
+      "description": "Run whole-app typecheck + test suite against all three diffs as a final gate",
+      "outcome_goal": "The whole app typechecks and the whole test suite passes with all three diffs in place. If any diff broke something outside its own scope, the failure is captured as structured output.",
+      "prompt": "All three diff jobs have shipped. Run a whole-app validation pass to catch any cross-file regressions.\n\nRun (from /workspace):\n```bash\ncd Code&DBs/Workflow/surfaces/app\nnpm run typecheck 2>&1 | tee /tmp/moon_ui_phase1_typecheck.log\nTC=$?\nnpm test 2>&1 | tee /tmp/moon_ui_phase1_tests.log\nTS=$?\nexit $((TC + TS))\n```\n\nIf typecheck or tests fail:\n1. Extract the specific failure messages\n2. Identify which of the three diffs introduced the failure (diff_A, diff_B, diff_C, or \"cross-diff interaction\")\n3. Write a structured failure report to `artifacts/moon_ui_phase1_20260417/05_validation_failures.md` with sections: `## Failing Checks`, `## Root Cause`, `## Suggested Revert Scope`\n\nIf everything passes, write `artifacts/moon_ui_phase1_20260417/05_validation_success.md` with a summary of what shipped and the test counts.\n\nDo NOT revert any files from this job. Capturing the failure and leaving the diff in place is the correct behavior — the follow-up bug-filing job consumes this report.",
+      "read": [],
+      "write": [
+        "artifacts/moon_ui_phase1_20260417/05_validation_failures.md",
+        "artifacts/moon_ui_phase1_20260417/05_validation_success.md"
+      ],
+      "verify_command": "test -s /Users/nate/Praxis/artifacts/moon_ui_phase1_20260417/05_validation_failures.md || test -s /Users/nate/Praxis/artifacts/moon_ui_phase1_20260417/05_validation_success.md"
+    },
+    {
+      "label": "file_followup_bugs",
+      "agent": "auto/build",
+      "task_type": "build",
+      "complexity": "low",
+      "depends_on": ["final_validation"],
+      "description": "File bugs in Praxis.db for any validation failures or deferred work surfaced by the run",
+      "outcome_goal": "Every validation failure surfaced in node 05 has a corresponding OPEN bug in Praxis.db with severity, category, and evidence ref to this run_id. Deferred work from the decomposition plan is filed as follow-up P3 bugs.",
+      "prompt": "Read the validation report at either `artifacts/moon_ui_phase1_20260417/05_validation_failures.md` or `05_validation_success.md` (whichever exists).\n\nAlso read `artifacts/moon_ui_phase1_20260417/02_decomposition.md` and `03_redteam.md` — these contain deferred work that should be filed as follow-up bugs.\n\n**Required actions:**\n\n1. If `05_validation_failures.md` exists: for each failing check, file a bug using the praxis_bugs tool. Use the PRAXIS_EXECUTION_BUNDLE environment variable to get the run_id for evidence linking.\n\n```bash\nexport WORKFLOW_DATABASE_URL=\"postgresql://localhost:5432/praxis\"\ncd /workspace\n./scripts/praxis workflow tools call praxis_bugs --input-json '{\n  \"action\": \"file\",\n  \"severity\": \"P2\",\n  \"category\": \"UI\",\n  \"title\": \"<short title>\",\n  \"description\": \"<failure details + run_id reference>\",\n  \"repro_steps\": \"<from the validation log>\"\n}' --yes\n```\n\n2. Regardless of validation outcome: for the MoonBuildPage.tsx decomposition (from 02_decomposition.md), file ONE P3 bug titled `Execute MoonBuildPage.tsx decomposition per moon_ui_phase1_20260417 plan`. Description references the decision record path, lists the proposed subcomponents, and cites this run_id as the planning evidence.\n\n3. For each unresolved `CONTESTED-NEEDS-REVISION` item in 03_redteam.md (if verdict was contested): file ONE P3 bug with the revision need.\n\nWrite a summary of all filed bugs (with their BUG-IDs) to `artifacts/moon_ui_phase1_20260417/06_filed_bugs.md`.\n\nDo NOT fabricate bug IDs. Parse them from the tool call output.",
+      "read": [
+        "artifacts/moon_ui_phase1_20260417/02_decomposition.md",
+        "artifacts/moon_ui_phase1_20260417/03_redteam.md",
+        "artifacts/moon_ui_phase1_20260417/05_validation_failures.md",
+        "artifacts/moon_ui_phase1_20260417/05_validation_success.md"
+      ],
+      "write": [
+        "artifacts/moon_ui_phase1_20260417/06_filed_bugs.md"
+      ],
+      "verify_command": "test -s /Users/nate/Praxis/artifacts/moon_ui_phase1_20260417/06_filed_bugs.md"
+    },
+    {
+      "label": "register_decision_record",
+      "agent": "auto/build",
+      "task_type": "build",
+      "complexity": "low",
+      "depends_on": ["file_followup_bugs"],
+      "description": "Finalize and register the Moon UI Phase One decision record",
+      "outcome_goal": "A single consolidated decision record exists at artifacts/moon_ui_phase1_20260417/00_decision_record.md citing analysis, decomposition, redteam, validation outcome, and filed bugs. A decisions ledger entry is registered.",
+      "prompt": "Produce the canonical decision record for this workflow run by consolidating the prior artifacts.\n\nRead:\n- artifacts/moon_ui_phase1_20260417/01_analysis.md\n- artifacts/moon_ui_phase1_20260417/02_decomposition.md\n- artifacts/moon_ui_phase1_20260417/03_redteam.md\n- artifacts/moon_ui_phase1_20260417/05_validation_failures.md OR 05_validation_success.md\n- artifacts/moon_ui_phase1_20260417/06_filed_bugs.md\n\nWrite `artifacts/moon_ui_phase1_20260417/00_decision_record.md` with these sections:\n\n```markdown\n# Moon UI Phase One — Decision Record\n\n**Run ID:** <from PRAXIS_EXECUTION_BUNDLE>\n**Date:** 2026-04-17\n**Status:** <SHIPPED | SHIPPED-WITH-FAILURES | BLOCKED>\n\n## Outcome Summary\n<2-3 sentence narrative — what shipped, what was deferred, what failed>\n\n## Ships (this run)\n- ToolResultRenderer.tsx refactor — <status from validation>\n- ChatPanel.tsx + useChat.ts bug fixes — <status>\n- MarkdownRenderer.tsx correctness + security — <status>\n\n## Plans (follow-up runs)\n- MoonBuildPage.tsx decomposition — filed as BUG-<id>\n- <any contested redteam items> — filed as BUG-<id>\n\n## Evidence\n- Analysis: artifacts/moon_ui_phase1_20260417/01_analysis.md\n- Decomposition: artifacts/moon_ui_phase1_20260417/02_decomposition.md\n- Red-team: artifacts/moon_ui_phase1_20260417/03_redteam.md (verdict: <...>)\n- Validation: <path to 05_*.md>\n- Filed bugs: artifacts/moon_ui_phase1_20260417/06_filed_bugs.md\n\n## Replay\n`praxis workflow run-lineage <run_id>`\n```\n\nPopulate every <placeholder> from the actual artifacts. Do NOT register a decisions ledger entry if the praxis_operator_write tool isn't available — if it errors, note that in the record and continue.\n\nOptionally register the decision via:\n```bash\n./scripts/praxis workflow tools call praxis_operator_write --input-json '{\"action\":\"register_decision\",\"decision_title\":\"Moon UI Phase One\",\"artifact_path\":\"artifacts/moon_ui_phase1_20260417/00_decision_record.md\"}' --yes\n```\nIf that tool is not registered, skip step silently and note in the record.",
+      "read": [
+        "artifacts/moon_ui_phase1_20260417/01_analysis.md",
+        "artifacts/moon_ui_phase1_20260417/02_decomposition.md",
+        "artifacts/moon_ui_phase1_20260417/03_redteam.md",
+        "artifacts/moon_ui_phase1_20260417/05_validation_failures.md",
+        "artifacts/moon_ui_phase1_20260417/05_validation_success.md",
+        "artifacts/moon_ui_phase1_20260417/06_filed_bugs.md"
+      ],
+      "write": [
+        "artifacts/moon_ui_phase1_20260417/00_decision_record.md"
+      ],
+      "verify_command": "test -s /Users/nate/Praxis/artifacts/moon_ui_phase1_20260417/00_decision_record.md && grep -qE '^\\*\\*Status:\\*\\* (SHIPPED|SHIPPED-WITH-FAILURES|BLOCKED)' /Users/nate/Praxis/artifacts/moon_ui_phase1_20260417/00_decision_record.md"
+    }
+  ]
+}

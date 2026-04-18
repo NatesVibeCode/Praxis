@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
 import asyncpg
 import pytest
 
+from _pg_test_conn import ensure_test_database_ready
 from policy.workflow_lanes import (
     admit_native_workflow_lane_catalog,
     bootstrap_workflow_lane_catalog_schema,
@@ -21,9 +21,10 @@ from runtime.default_path_pilot import (
     resolve_default_path_pilot,
 )
 from storage.migrations import workflow_migration_statements
-from storage.postgres import PostgresConfigurationError, connect_workflow_database
+from storage.postgres import connect_workflow_database
 
 _SCHEMA_BOOTSTRAP_LOCK_ID = 741001
+_TEST_DATABASE_URL = ensure_test_database_ready()
 
 
 def _is_duplicate_object_error(error: BaseException) -> bool:
@@ -331,6 +332,13 @@ async def _seed_route_catalog_prereqs(
     )
     await conn.execute(
         """
+        DELETE FROM model_profile_candidate_bindings
+        WHERE candidate_ref = ANY($1::text[])
+        """,
+        [candidate_ref],
+    )
+    await conn.execute(
+        """
         INSERT INTO model_profile_candidate_bindings (
             model_profile_candidate_binding_id,
             model_profile_id,
@@ -602,14 +610,9 @@ def test_default_path_pilot_wires_one_bounded_native_default_path() -> None:
 
 
 async def _exercise_default_path_pilot_wiring() -> None:
-    database_url = os.environ.get("WORKFLOW_DATABASE_URL", "postgresql://127.0.0.1/postgres")
-    try:
-        conn = await connect_workflow_database(env={"WORKFLOW_DATABASE_URL": database_url})
-    except PostgresConfigurationError as exc:
-        pytest.skip(
-            "WORKFLOW_DATABASE_URL is required for default-path pilot wiring integration test: "
-            f"{exc.reason_code}"
-        )
+    conn = await connect_workflow_database(
+        env={"WORKFLOW_DATABASE_URL": _TEST_DATABASE_URL}
+    )
 
     transaction = conn.transaction()
     await transaction.start()

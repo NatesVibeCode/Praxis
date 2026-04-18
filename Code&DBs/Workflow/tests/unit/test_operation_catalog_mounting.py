@@ -413,14 +413,18 @@ def test_mount_capabilities_flattens_post_body_for_models_without_body_field(mon
 
 def test_provider_onboarding_has_no_static_route_owner() -> None:
     assert not any(
-        isinstance(route, APIRoute) and route.path == "/api/operator/provider-onboarding"
+        isinstance(route, APIRoute)
+        and route.path == "/api/operator/provider-onboarding"
+        and (route.openapi_extra or {}).get("x-praxis-binding-source") != "operation_catalog"
         for route in rest.app.routes
     )
 
 
 def test_circuits_has_no_static_route_owner() -> None:
     assert not any(
-        isinstance(route, APIRoute) and route.path == "/api/circuits"
+        isinstance(route, APIRoute)
+        and route.path == "/api/circuits"
+        and (route.openapi_extra or {}).get("x-praxis-binding-source") != "operation_catalog"
         for route in rest.app.routes
     )
 
@@ -437,7 +441,9 @@ def test_status_has_no_static_route_owner() -> None:
 def test_operator_view_has_no_static_route_owner() -> None:
     assert "/operator_view" not in workflow_query_routes.QUERY_ROUTES
     assert not any(
-        isinstance(route, APIRoute) and route.path == "/operator_view"
+        isinstance(route, APIRoute)
+        and route.path == "/operator_view"
+        and (route.openapi_extra or {}).get("x-praxis-binding-source") != "operation_catalog"
         for route in rest.app.routes
     )
 

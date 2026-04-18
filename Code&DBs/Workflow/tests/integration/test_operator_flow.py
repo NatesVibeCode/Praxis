@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from _pg_test_conn import get_test_env
 from registry.domain import RegistryResolver, RuntimeProfileAuthorityRecord, WorkspaceAuthorityRecord
 from runtime.instance import (
     PRAXIS_RECEIPTS_DIR_ENV,
@@ -50,11 +51,14 @@ def _runtime_env(smoke_contract: dict[str, object]) -> dict[str, str]:
     assert isinstance(raw_env, dict)
 
     repo_root = _repo_root()
+    test_env = get_test_env()
     resolved: dict[str, str] = {}
     for name, value in raw_env.items():
         assert isinstance(name, str)
         assert isinstance(value, str)
-        if name in _PATH_ENV_NAMES:
+        if name == "WORKFLOW_DATABASE_URL":
+            resolved[name] = test_env["WORKFLOW_DATABASE_URL"]
+        elif name in _PATH_ENV_NAMES:
             resolved[name] = str((repo_root / value).resolve())
         else:
             resolved[name] = value
@@ -421,6 +425,7 @@ def test_native_self_hosted_smoke_packages_the_checked_in_queue_contract(
 def test_load_native_self_hosted_smoke_contract_fails_closed_on_missing_definition_row(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("WORKFLOW_DATABASE_URL", "postgresql://127.0.0.1/postgres")
     fake_conn = _FakeSmokeDatabaseConnection(row=None)
     seen: dict[str, dict[str, str]] = {}
 
@@ -450,6 +455,7 @@ def test_load_native_self_hosted_smoke_contract_fails_closed_on_missing_definiti
 def test_load_native_self_hosted_smoke_contract_accepts_admitted_definition_row(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("WORKFLOW_DATABASE_URL", "postgresql://127.0.0.1/postgres")
     queue_payload = _load_queue()
     smoke_contract = _native_smoke_contract(queue_payload)
     request_payload = _request_payload(smoke_contract)

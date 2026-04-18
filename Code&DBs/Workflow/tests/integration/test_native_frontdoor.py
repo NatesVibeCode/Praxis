@@ -117,8 +117,8 @@ class _FakeStatus:
 
     def to_json(self) -> dict[str, object]:
         return {
-            "data_dir": f"{_REPO_ROOT}/Code&DBs/Databases/postgres-dev/data",
-            "log_file": f"{_REPO_ROOT}/Code&DBs/Databases/postgres-dev/log/postgres.log",
+            "data_dir": f"{_REPO_ROOT}/CodeDBs/Databases/postgres-dev/data",
+            "log_file": f"{_REPO_ROOT}/CodeDBs/Databases/postgres-dev/log/postgres.log",
             "database_url": "postgresql://workflow@127.0.0.1:5432/workflow",
             "pid": 1234,
             "port": 5432,

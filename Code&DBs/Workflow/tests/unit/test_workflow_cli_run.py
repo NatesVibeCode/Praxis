@@ -301,6 +301,8 @@ def test_detached_launch_failure_does_not_claim_result_file(
     spec_path = _write_spec(tmp_path)
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
+    (repo_root / "Code&DBs").mkdir()
+    (repo_root / "CodeDBs").symlink_to(repo_root / "Code&DBs")
     stdout = StringIO()
     captured: dict[str, object] = {}
 
@@ -352,6 +354,8 @@ def test_detached_spawn_launch_reads_result_file_and_reports_authority(
     spec_path = _write_spec(tmp_path)
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
+    (repo_root / "Code&DBs").mkdir()
+    (repo_root / "CodeDBs").symlink_to(repo_root / "Code&DBs")
     stdout = StringIO()
     captured: dict[str, object] = {}
 
@@ -409,7 +413,7 @@ def test_detached_spawn_launch_reads_result_file_and_reports_authority(
     assert "Result file:" in rendered
     assert "--foreground-submit" in captured["command"]
     assert captured["env"]["WORKFLOW_DATABASE_AUTHORITY_SOURCE"] == "process_env"
-    assert "Code&DBs/Workflow" in captured["env"]["PYTHONPATH"]
+    assert "CodeDBs/Workflow" in captured["env"]["PYTHONPATH"]
 
 
 def test_cmd_spawn_writes_async_result_file(

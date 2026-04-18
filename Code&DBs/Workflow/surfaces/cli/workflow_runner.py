@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 import uuid
@@ -23,10 +24,9 @@ from runtime._workflow_database import resolve_runtime_database_url
 from runtime.notifications import dispatch_notification_payload
 from runtime.workflow.receipt_writer import prepare_output_artifact
 from runtime.workflow.execution_backends import execute_api as execute_api_in_sandbox
-from runtime.workflow.evidence_sequence_allocator import (
-    insert_receipt_if_absent_with_deterministic_seq,
-)
 from runtime.workflow_spec import WorkflowSpec, WorkflowSpecError
+
+_log = logging.getLogger("workflow_runner")
 
 # ---------------------------------------------------------------------------
 # Data classes
@@ -83,6 +83,19 @@ class RunResult:
     job_results: tuple
     duration_seconds: float
     receipts_written: tuple
+
+
+class WorkflowReceiptPersistenceError(RuntimeError):
+    """Raised when canonical receipt persistence fails for a workflow job."""
+
+    def __init__(self, *, run_id: str, job_label: str, reason_code: str | None = None) -> None:
+        detail = f"canonical receipt persistence failed for job '{job_label}' in run '{run_id}'"
+        if reason_code:
+            detail = f"{detail} ({reason_code})"
+        super().__init__(detail)
+        self.run_id = run_id
+        self.job_label = job_label
+        self.reason_code = reason_code or ""
 
 
 # ---------------------------------------------------------------------------
@@ -162,6 +175,35 @@ class WorkflowRunner:
 
         # Ensure receipts directory exists
         os.makedirs(self._receipts_dir, exist_ok=True)
+
+    def _log_advisory_failure(
+        self,
+        *,
+        component: str,
+        reason_code: str,
+        job_label: str,
+        exc: Exception,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        payload = {
+            "component": component,
+            "reason_code": reason_code,
+            "run_id": str(getattr(self, "_run_id", "") or ""),
+            "job_label": job_label,
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+        }
+        if details:
+            payload.update(details)
+        _log.debug(
+            "workflow_runner.advisory_failure component=%s reason_code=%s run_id=%s job_label=%s",
+            component,
+            reason_code,
+            payload["run_id"],
+            job_label,
+            extra={"workflow_runner_advisory_failure": payload},
+            exc_info=True,
+        )
 
     def _run_verify(self, verify_commands: list[object], workdir: str) -> list[VerifyResult]:
         """Run verification bindings sequentially using verification_registry authority."""
@@ -843,6 +885,7 @@ class WorkflowRunner:
     def _write_receipt(self, result: JobExecution, spec: WorkflowSpec) -> str:
         """Persist a receipt to Postgres and return a logical receipt reference."""
         now = datetime.now(timezone.utc)
+        started_at = now - timedelta(seconds=result.duration_seconds)
         t = result.telemetry or Telemetry()
         failure_code = self._classify_failure(result) if result.status in ("failed", "error") else None
         provider_slug, _, model_slug = result.agent_slug.partition("/")
@@ -924,71 +967,26 @@ class WorkflowRunner:
             "mutation_provenance": mutation_provenance,
         }
 
-        # Canonical receipt persistence is Postgres-only.
-        try:
+        receipt_ref = f"rcpt_{uuid.uuid4().hex[:12]}"
+        receipt["receipt_id"] = receipt_ref
+        receipt["attempt_no"] = max(1, int(result.retry_count) + 1)
+        receipt["started_at"] = started_at.isoformat()
+        if self._pg_conn is not None and hasattr(self, '_run_id'):
             from runtime.receipt_store import write_receipt as _write_pg_receipt
 
-            _write_pg_receipt(receipt, conn=self._pg_conn)
-        except Exception:
-            pass  # Postgres write failure is non-fatal
-
-        # Write to authority receipts table (fires outbox trigger)
-        receipt_ref = f"workflow_receipt:{result.job_label}:{uuid.uuid4().hex[:8]}"
-        if self._pg_conn is not None and hasattr(self, '_run_id'):
             try:
-                receipt_id = f"rcpt_{uuid.uuid4().hex[:12]}"
-                started_at = now - timedelta(seconds=result.duration_seconds)
-                transition_seq = insert_receipt_if_absent_with_deterministic_seq(
-                    self._pg_conn,
-                    receipt_id=receipt_id,
-                    executor_type="workflow_runner",
-                    workflow_id=self._workflow_id,
-                    run_id=self._run_id,
-                    request_id=self._request_id,
-                    node_id=result.job_label,
-                    attempt_no=max(1, int(result.retry_count) + 1),
-                    started_at=started_at,
-                    finished_at=now,
-                    status=result.status,
-                    inputs={
-                        "job_label": result.job_label,
-                        "agent_slug": result.agent_slug,
-                        "spec_name": spec.name,
-                        "workflow_id": spec.workflow_id,
-                        "phase": spec.phase,
-                        "workspace_root": workspace_root,
-                        "workspace_ref": workspace_ref,
-                        "runtime_profile_ref": runtime_profile_ref,
-                        "write_scope": write_scope,
-                    },
-                    outputs={
-                        "exit_code": result.exit_code,
-                        "duration_seconds": result.duration_seconds,
-                        "verify_passed": result.verify_passed,
-                        "retry_count": result.retry_count,
-                        "input_tokens": t.input_tokens,
-                        "output_tokens": t.output_tokens,
-                        "cache_read_tokens": t.cache_read_tokens,
-                        "cache_creation_tokens": t.cache_creation_tokens,
-                        "cost_usd": t.cost_usd,
-                        "model": t.model,
-                        "num_turns": t.num_turns,
-                        "duration_api_ms": t.duration_api_ms,
-                        "tool_use": t.tool_use,
-                        "workspace_provenance": workspace_provenance,
-                        "git_provenance": git_provenance,
-                        "write_manifest": write_manifest,
-                        "mutation_provenance": mutation_provenance,
-                    },
-                    artifacts={},
-                    failure_code=receipt["failure_code"] or None,
-                )
-                receipt_ref = receipt_id
-                if transition_seq:
-                    receipt["transition_seq"] = transition_seq
-            except Exception:
-                # Authority receipt write is non-fatal — search tables still have the data
-                pass
+                receipt_write = _write_pg_receipt(receipt, conn=self._pg_conn)
+            except Exception as exc:
+                reason_code = str(getattr(exc, "reason_code", "") or "").strip() or None
+                raise WorkflowReceiptPersistenceError(
+                    run_id=str(getattr(self, "_run_id", "") or ""),
+                    job_label=result.job_label,
+                    reason_code=reason_code,
+                ) from exc
+            transition_seq = int(receipt_write.get("transition_seq") or 0)
+            if transition_seq:
+                receipt["transition_seq"] = transition_seq
+            receipt_ref = str(receipt_write.get("receipt_id") or receipt_ref)
 
         # Write output to file if job produced stdout
         output_path = None
@@ -1014,15 +1012,29 @@ class WorkflowRunner:
                     rid, result.job_label, spec.phase, output_text,
                     json.dumps(receipt), output_path or "", now, now,
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                self._log_advisory_failure(
+                    component="platform_registry",
+                    reason_code="workflow_runner.platform_registry_write_failed",
+                    job_label=result.job_label,
+                    exc=exc,
+                    details={
+                        "registry_kind": "dispatch_output",
+                        "output_path": output_path or "",
+                    },
+                )
 
         obs_hub = getattr(self, "_obs_hub", None)
         if obs_hub is not None:
             try:
                 obs_hub.ingest_receipt(receipt)
-            except Exception:
+            except Exception as exc:
                 # Observability is advisory; receipt durability already happened.
-                pass
+                self._log_advisory_failure(
+                    component="observability_ingest",
+                    reason_code="workflow_runner.observability_ingest_failed",
+                    job_label=result.job_label,
+                    exc=exc,
+                )
 
         return receipt_ref

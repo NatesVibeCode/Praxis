@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+
+_log = logging.getLogger(__name__)
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
@@ -200,6 +203,12 @@ def execute_admitted_workflow_request(
             failure_code="workflow.timeout",
         )
     except Exception as exc:
+        _log.exception(
+            "workflow execution crashed for run %s: %s | details=%r",
+            intake_outcome.run_id,
+            exc,
+            getattr(exc, "details", None),
+        )
         return None, context.failure_result(
             run_id=intake_outcome.run_id,
             reason_code="workflow.execution_crash",

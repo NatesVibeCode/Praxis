@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import asyncpg
 import json
-import sys
+import os
 import uuid
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -39,6 +39,15 @@ _SCHEMA_BOOTSTRAP_LOCK_ID = 741001
 
 def _unique_suffix() -> str:
     return uuid.uuid4().hex[:10]
+
+
+def _workflow_env() -> dict[str, str]:
+    return {
+        "WORKFLOW_DATABASE_URL": os.environ.get(
+            "WORKFLOW_DATABASE_URL",
+            "postgresql://127.0.0.1/postgres",
+        )
+    }
 
 
 def _clear_workflow_migration_caches() -> None:
@@ -251,11 +260,6 @@ async def _seed_workflow_definition(conn, *, submission: WorkflowAdmissionSubmis
 
 
 def test_claim_lease_proposal_runtime_shared_sandbox_reuse_is_concurrent_canonical_and_fail_closed() -> None:
-    if sys.platform == "darwin":
-        pytest.xfail(
-            "macOS pytest harness hangs before the shared-sandbox reuse integration path "
-            "enters stable database execution; the claims runtime path was validated separately via direct python execution"
-        )
     asyncio.run(_exercise_runtime_path())
 
 
@@ -312,36 +316,22 @@ def test_claim_lease_proposal_runtime_schema_resolution_reads_live_canonical_aut
 
 
 def test_claim_lifecycle_transition_authority_round_trips_from_postgres() -> None:
-    if sys.platform == "darwin":
-        pytest.xfail(
-            "macOS pytest harness hangs before claim-lifecycle async integration reaches "
-            "stable database execution; the authority path was validated separately via direct python execution"
-        )
     asyncio.run(_exercise_claim_lifecycle_authority())
 
 
 def test_runtime_bootstrap_does_not_overwrite_claim_lifecycle_authority_rows() -> None:
-    if sys.platform == "darwin":
-        pytest.xfail(
-            "macOS pytest harness hangs before claim-lifecycle bootstrap preservation integration "
-            "reaches stable database execution; the authority path was validated separately via direct python execution"
-        )
     asyncio.run(_exercise_runtime_bootstrap_preserves_claim_lifecycle_authority())
 
 
 def test_claim_lifecycle_transition_authority_fails_closed_on_ambiguous_active_rows() -> None:
-    if sys.platform == "darwin":
-        pytest.xfail(
-            "macOS pytest harness hangs before claim-lifecycle ambiguity integration reaches "
-            "stable database execution; the authority path was validated separately via direct python execution"
-        )
     asyncio.run(_exercise_claim_lifecycle_authority_ambiguity())
 
 
 async def _exercise_claim_lifecycle_authority() -> None:
     runtime = ClaimLeaseProposalRuntime()
+    env = _workflow_env()
     try:
-        conn = await connect_workflow_database()
+        conn = await connect_workflow_database(env=env)
     except PostgresConfigurationError as exc:
         pytest.skip(
             "WORKFLOW_DATABASE_URL is required for claim lifecycle authority integration test: "
@@ -369,8 +359,9 @@ async def _exercise_claim_lifecycle_authority() -> None:
 
 async def _exercise_runtime_bootstrap_preserves_claim_lifecycle_authority() -> None:
     runtime = ClaimLeaseProposalRuntime()
+    env = _workflow_env()
     try:
-        conn = await connect_workflow_database()
+        conn = await connect_workflow_database(env=env)
     except PostgresConfigurationError as exc:
         pytest.skip(
             "WORKFLOW_DATABASE_URL is required for claim lifecycle authority integration test: "
@@ -411,8 +402,9 @@ async def _exercise_runtime_bootstrap_preserves_claim_lifecycle_authority() -> N
 
 async def _exercise_claim_lifecycle_authority_ambiguity() -> None:
     runtime = ClaimLeaseProposalRuntime()
+    env = _workflow_env()
     try:
-        conn = await connect_workflow_database()
+        conn = await connect_workflow_database(env=env)
     except PostgresConfigurationError as exc:
         pytest.skip(
             "WORKFLOW_DATABASE_URL is required for claim lifecycle authority integration test: "
@@ -464,10 +456,11 @@ async def _exercise_claim_lifecycle_authority_ambiguity() -> None:
 
 async def _exercise_runtime_path() -> None:
     runtime = ClaimLeaseProposalRuntime()
+    env = _workflow_env()
     try:
-        primary = await connect_workflow_database()
-        rival = await connect_workflow_database()
-        auxiliary = await connect_workflow_database()
+        primary = await connect_workflow_database(env=env)
+        rival = await connect_workflow_database(env=env)
+        auxiliary = await connect_workflow_database(env=env)
     except PostgresConfigurationError as exc:
         pytest.skip(
             "WORKFLOW_DATABASE_URL is required for claim/lease/proposal runtime integration test: "

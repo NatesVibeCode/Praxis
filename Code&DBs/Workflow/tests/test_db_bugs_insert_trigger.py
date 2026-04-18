@@ -8,10 +8,11 @@ import uuid
 
 import pytest
 
+from _pg_test_conn import ensure_test_database_ready
 from storage.postgres import SyncPostgresConnection, get_workflow_pool
 
 
-os.environ.setdefault("WORKFLOW_DATABASE_URL", "postgresql://test@localhost:5432/praxis_test")
+os.environ.setdefault("WORKFLOW_DATABASE_URL", ensure_test_database_ready())
 
 
 @pytest.fixture

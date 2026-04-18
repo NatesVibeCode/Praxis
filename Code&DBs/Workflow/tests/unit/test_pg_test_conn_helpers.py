@@ -8,12 +8,19 @@ import storage.postgres.connection as pg_connection
 from storage.postgres.validators import PostgresConfigurationError
 
 
-def test_resolve_test_env_prefers_runtime_override(monkeypatch) -> None:
+def test_resolve_test_env_uses_canonical_test_database_even_when_runtime_env_is_set(
+    monkeypatch,
+) -> None:
     monkeypatch.setenv("WORKFLOW_DATABASE_URL", "postgresql:///praxis?host=/tmp&port=5432")
+    monkeypatch.setattr(
+        pg_test_conn,
+        "ensure_test_database_ready",
+        lambda: "postgresql://postgres@localhost:5432/praxis_test",
+    )
 
     env = pg_test_conn._resolve_test_env()
 
-    assert env["WORKFLOW_DATABASE_URL"] == "postgresql:///praxis?host=/tmp&port=5432"
+    assert env["WORKFLOW_DATABASE_URL"] == "postgresql://postgres@localhost:5432/praxis_test"
     assert "PATH" in env
 
 

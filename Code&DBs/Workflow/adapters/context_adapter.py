@@ -8,6 +8,7 @@ prompt — it never reads files itself.
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Mapping
 from datetime import datetime, timezone
@@ -16,6 +17,8 @@ from typing import Any
 from runtime._helpers import _fail
 
 from .deterministic import DeterministicTaskRequest, DeterministicTaskResult
+
+_log = logging.getLogger(__name__)
 
 
 def _utc_now() -> datetime:
@@ -55,6 +58,11 @@ class ContextCompilerAdapter:
         resolved_scope_read: list[str] = []
         resolved_test_scope: list[str] = []
         resolved_blast_radius: list[str] = []
+        # Track every issue that reduced the quality of the compiled context so
+        # downstream consumers (receipt viewers, agents, verifiers) can see
+        # what went wrong instead of inferring it from an empty prompt.
+        # Each entry: {"kind": str, "detail": str, "path": str | None}
+        context_compile_warnings: list[dict[str, str | None]] = []
 
         # Resolve scope: read target files + their imports
         if scope_write and workdir:
@@ -67,8 +75,19 @@ class ContextCompilerAdapter:
                 if resolution.context_sections:
                     context_sections = list(resolution.context_sections)
             except Exception as exc:
-                import sys
-                print(f"[context] scope resolution failed: {exc}", file=sys.stderr)
+                # Previously this printed to stderr and silently continued, so
+                # an operator with a broken scope resolver would get a prompt
+                # with zero context and no signal in the receipt that anything
+                # went wrong. Now surfaced both in logs and outputs.
+                _log.warning(
+                    "[context] scope resolution failed for node=%s scope_write=%r: %s",
+                    request.node_id, list(scope_write), exc,
+                )
+                context_compile_warnings.append({
+                    "kind": "scope_resolver_failed",
+                    "detail": str(exc),
+                    "path": None,
+                })
 
         # If no context from scope resolver, read files directly
         if not context_sections and scope_write and workdir:
@@ -81,8 +100,17 @@ class ContextCompilerAdapter:
                             "content": fh.read(),
                         })
                         resolved_scope_read.append(fpath)
-                except OSError:
-                    pass
+                except OSError as exc:
+                    # A target scope_write file that doesn't exist yet is the
+                    # common case (we're asking the LLM to create it), so we
+                    # don't fail closed. But we do record the miss so a later
+                    # consumer can tell "context compiled successfully" from
+                    # "context is empty because every target file was missing".
+                    context_compile_warnings.append({
+                        "kind": "scope_write_read_failed",
+                        "detail": f"{type(exc).__name__}: {exc}",
+                        "path": fpath,
+                    })
 
         # Render the prompt with context
         from runtime.prompt_renderer import render_prompt
@@ -114,6 +142,10 @@ class ContextCompilerAdapter:
                 [str(path).strip() for path in resolved_blast_radius if str(path).strip()]
             ),
         }
+        if context_compile_warnings:
+            outputs["context_compile_warnings"] = context_compile_warnings
+            # Flag an empty-context case so it's trivially queryable.
+            outputs["context_is_empty"] = not rendered.context_sections
         if self._shadow_packet_config is None:
             outputs["system_message"] = rendered.system_message
             outputs["user_message"] = rendered.user_message

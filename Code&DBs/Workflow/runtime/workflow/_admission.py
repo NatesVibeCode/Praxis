@@ -754,14 +754,20 @@ def _graph_registry_for_request(request: WorkflowRequest) -> RegistryResolver:
     runtime_profile_ref = request.runtime_profile_ref or _default_runtime_profile_ref()
     config = resolve_native_runtime_profile_config(runtime_profile_ref)
     workspace_ref = request.workspace_ref or config.workspace_ref or _default_workspace_ref()
-    workdir = config.workdir or os.getcwd()
+    # The bundle_hash must be stable across admission (host CLI) and execution
+    # (docker worker). repo_root/workdir resolve to different absolute paths on
+    # different hosts even when they point at the same logical workspace, which
+    # would otherwise cause route_identity.authority_context_digest to diverge
+    # mid-run. Use the workspace_ref itself as the canonical path identity —
+    # actual filesystem paths come from NativeRuntimeProfileConfig at the point
+    # of execution, not from this authority record.
     return RegistryResolver(
         workspace_records={
             workspace_ref: [
                 WorkspaceAuthorityRecord(
                     workspace_ref=workspace_ref,
-                    repo_root=workdir,
-                    workdir=workdir,
+                    repo_root=workspace_ref,
+                    workdir=workspace_ref,
                 ),
             ],
         },
@@ -1711,6 +1717,56 @@ def _assert_dependency_edges_persisted(
         )
 
 
+class WorkflowSubmitConflict(RuntimeError):
+    """Raised when an otherwise-valid spec collides with state already in the
+    admission tables (typically: same workflow_id already has a registered
+    definition). Carries the offending workflow_id plus a remediation hint so
+    CLI/MCP surfaces can show something actionable instead of a psycopg
+    UniqueViolation with a constraint name.
+    """
+
+    def __init__(self, *, workflow_id: str, remediation: str, underlying: Exception | None = None) -> None:
+        super().__init__(remediation)
+        self.workflow_id = workflow_id
+        self.remediation = remediation
+        self.reason_code = "workflow.submit.definition_collision"
+        self.underlying = underlying
+
+
+def _translate_definition_collision(
+    exc: Exception,
+    *,
+    workflow_id: str,
+) -> WorkflowSubmitConflict | None:
+    """Detect the `(workflow_id, definition_version)` unique-violation and turn
+    it into an actionable error. Returns None if the exception is unrelated
+    so the caller can re-raise unchanged.
+
+    Matches on constraint name (psycopg3) and falls back to substring search
+    on the message so the translation survives driver-version churn.
+    """
+    constraint = ""
+    diag = getattr(exc, "diag", None)
+    if diag is not None:
+        constraint = str(getattr(diag, "constraint_name", "") or "")
+    message = str(exc)
+    marker = "workflow_definitions_workflow_id_definition_version_key"
+    if marker not in constraint and marker not in message:
+        return None
+    remediation = (
+        f"workflow_id {workflow_id!r} already has a registered definition; "
+        "the admission tables treat (workflow_id, definition_version) as unique. "
+        "Either bump the workflow_id in the spec (e.g. append '_v2') or drop the "
+        f"existing definition with: DELETE FROM workflow_definitions WHERE "
+        f"workflow_id = '{workflow_id}';"
+    )
+    return WorkflowSubmitConflict(
+        workflow_id=workflow_id,
+        remediation=remediation,
+        underlying=exc,
+    )
+
+
 def submit_workflow(
     conn: SyncPostgresConnection,
     spec_path: str,
@@ -1732,6 +1788,7 @@ def submit_workflow(
 
     force_fresh_run = bool(force_fresh_run or run_id is not None)
     run_id = run_id or f"workflow_{uuid.uuid4().hex[:12]}"
+    workflow_id_hint = _workflow_id_for_spec(spec)
     if spec_uses_graph_runtime(spec._raw):
         try:
             return _submit_graph_workflow_inline(
@@ -1749,23 +1806,34 @@ def submit_workflow(
             raise RuntimeError(
                 f"graph-capable workflow submit failed closed: {exc}",
             ) from exc
+        except Exception as exc:
+            translated = _translate_definition_collision(exc, workflow_id=workflow_id_hint)
+            if translated is not None:
+                raise translated from exc
+            raise
     with _submit_transaction(conn) as submit_conn:
-        return _do_submit_workflow(
-            submit_conn,
-            spec,
-            run_id,
-            force_fresh_run=force_fresh_run,
-            parent_run_id=parent_run_id,
-            parent_job_label=parent_job_label,
-            dispatch_reason=dispatch_reason,
-            lineage_depth=lineage_depth,
-            packet_provenance={
-                "source_kind": "file_submit",
-                "spec_path": full_path,
-                "repo_root": repo_root,
-                "file_inputs": spec._raw,
-            },
-        )
+        try:
+            return _do_submit_workflow(
+                submit_conn,
+                spec,
+                run_id,
+                force_fresh_run=force_fresh_run,
+                parent_run_id=parent_run_id,
+                parent_job_label=parent_job_label,
+                dispatch_reason=dispatch_reason,
+                lineage_depth=lineage_depth,
+                packet_provenance={
+                    "source_kind": "file_submit",
+                    "spec_path": full_path,
+                    "repo_root": repo_root,
+                    "file_inputs": spec._raw,
+                },
+            )
+        except Exception as exc:
+            translated = _translate_definition_collision(exc, workflow_id=workflow_id_hint)
+            if translated is not None:
+                raise translated from exc
+            raise
 
 
 def submit_workflow_inline(

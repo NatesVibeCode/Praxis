@@ -42,6 +42,7 @@ _RUNTIME_SCHEMA_FILENAMES = (
     "135_claim_lifecycle_transition_authority.sql",
 )
 _DUPLICATE_SQLSTATES = {"42P07", "42710"}
+_CLAIM_RUNTIME_SCHEMA_BOOTSTRAP_LOCK_ID = 741001
 _VALID_SHARE_MODES = frozenset({"exclusive", "shared"})
 _BOUNDED_FORK_OWNERSHIP_REUSE_REASON_CODE = "packet.authoritative_fork"
 _TERMINAL_STATES = frozenset(
@@ -211,6 +212,11 @@ def _statement_mutates_claim_lifecycle_authority_rows(statement: str) -> bool:
     return normalized.startswith("insert into workflow_claim_lifecycle_transition_authority")
 
 
+def _is_transaction_wrapper_statement(statement: str) -> bool:
+    normalized = _strip_leading_sql_comments(statement).strip().rstrip(";").strip().lower()
+    return normalized in {"begin", "begin transaction", "commit"}
+
+
 @lru_cache(maxsize=1)
 def _schema_statements() -> tuple[str, ...]:
     statements: list[str] = []
@@ -234,6 +240,7 @@ def _bootstrap_schema_statements() -> tuple[str, ...]:
         statement
         for statement in _schema_statements()
         if not _statement_mutates_claim_lifecycle_authority_rows(statement)
+        and not _is_transaction_wrapper_statement(statement)
     )
 
 
@@ -356,6 +363,10 @@ class ClaimLeaseProposalRuntime:
 
     async def bootstrap_schema(self, conn: asyncpg.Connection) -> None:
         async with conn.transaction():
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock($1::bigint)",
+                _CLAIM_RUNTIME_SCHEMA_BOOTSTRAP_LOCK_ID,
+            )
             for statement in _bootstrap_schema_statements():
                 try:
                     async with conn.transaction():

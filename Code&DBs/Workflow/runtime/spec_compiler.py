@@ -33,6 +33,7 @@ from runtime.capability_catalog import (
     select_capability_catalog_entries,
     sync_capability_catalog,
 )
+from runtime.compile_reuse import stable_hash
 from runtime.native_authority import default_native_authority_refs
 from runtime.definition_compile_kernel import build_definition as build_definition_kernel
 from runtime.verification import sync_verify_refs
@@ -157,15 +158,25 @@ class PromptLaunchSpec:
     phase: str
     graph_runtime_submit: bool
     jobs: list[dict[str, Any]]
+    definition_revision: str | None = None
+    plan_revision: str | None = None
+    packet_provenance: dict[str, Any] | None = None
 
     def to_inline_spec_dict(self) -> dict[str, Any]:
-        return {
+        spec_dict = {
             "name": self.name,
             "workflow_id": self.workflow_id,
             "phase": self.phase,
             "graph_runtime_submit": self.graph_runtime_submit,
             "jobs": self.jobs,
         }
+        if self.definition_revision is not None:
+            spec_dict["definition_revision"] = self.definition_revision
+        if self.plan_revision is not None:
+            spec_dict["plan_revision"] = self.plan_revision
+        if self.packet_provenance is not None:
+            spec_dict["packet_provenance"] = self.packet_provenance
+        return spec_dict
 
 
 # ---------------------------------------------------------------------------
@@ -521,24 +532,46 @@ def compile_prompt_launch_spec(
     if workflow_id == "workflow_cli_prompt":
         resolved_workflow_id = f"workflow_cli_prompt.{uuid.uuid4().hex[:12]}"
 
+    launch_job = {
+        "label": "run",
+        "agent": f"{provider_slug}/{resolved_model_slug}" if resolved_model_slug else provider_slug,
+        "prompt": compiled_prompt,
+        "adapter_type": adapter_type,
+        "tier": tier,
+        "timeout": timeout,
+        "write_scope": list(scope_write or []),
+        "workdir": workdir,
+        "context_sections": context_sections,
+        "system_prompt": system_prompt,
+        "task_type": task_type,
+    }
+    definition_revision = f"def_{stable_hash({
+        'graph_runtime_submit': True,
+        'phase': 'execute',
+        'jobs': [launch_job],
+    })[:16]}"
+    plan_revision = f"plan_{stable_hash({
+        'definition_revision': definition_revision,
+        'graph_runtime_submit': True,
+        'phase': 'execute',
+        'jobs': [launch_job],
+    })[:16]}"
+    packet_provenance = {
+        "source_kind": "prompt_launch",
+        "definition_row": {"definition_revision": definition_revision},
+        "compiled_spec_row": {
+            "definition_revision": definition_revision,
+            "plan_revision": plan_revision,
+        },
+    }
+
     return PromptLaunchSpec(
         name=compiled_prompt[:80] or "workflow cli prompt",
         workflow_id=resolved_workflow_id,
         phase="execute",
         graph_runtime_submit=True,
-        jobs=[
-            {
-                "label": "run",
-                "agent": f"{provider_slug}/{resolved_model_slug}" if resolved_model_slug else provider_slug,
-                "prompt": compiled_prompt,
-                "adapter_type": adapter_type,
-                "tier": tier,
-                "timeout": timeout,
-                "write_scope": list(scope_write or []),
-                "workdir": workdir,
-                "context_sections": context_sections,
-                "system_prompt": system_prompt,
-                "task_type": task_type,
-            }
-        ],
+        jobs=[launch_job],
+        definition_revision=definition_revision,
+        plan_revision=plan_revision,
+        packet_provenance=packet_provenance,
     )

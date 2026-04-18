@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from _pg_test_conn import ensure_test_database_ready
 from observability.operator_topology import NativeCutoverGraphStatusReadModel
 from observability.operator_dashboard import (
     NativeOperatorCockpitFailoverSelectorContract,
@@ -29,7 +29,10 @@ from registry.provider_routing import (
     ProviderRouteHealthWindowAuthorityRecord,
     RouteEligibilityStateAuthorityRecord,
 )
-from storage.postgres import PostgresConfigurationError, connect_workflow_database
+from storage.postgres import connect_workflow_database
+
+
+_TEST_DATABASE_URL = ensure_test_database_ready()
 
 
 def _unique_suffix() -> str:
@@ -350,14 +353,9 @@ def _cutover_status(*, as_of: datetime, run_id: str) -> NativeCutoverGraphStatus
 
 
 async def _exercise_failover_freshness_operator_surface() -> None:
-    database_url = os.environ.get("WORKFLOW_DATABASE_URL", "postgresql://127.0.0.1/postgres")
-    try:
-        conn = await connect_workflow_database(env={"WORKFLOW_DATABASE_URL": database_url})
-    except PostgresConfigurationError as exc:
-        pytest.skip(
-            "WORKFLOW_DATABASE_URL is required for the failover freshness operator surface test: "
-            f"{exc.reason_code}"
-        )
+    conn = await connect_workflow_database(
+        env={"WORKFLOW_DATABASE_URL": _TEST_DATABASE_URL}
+    )
 
     try:
         as_of = _fixed_clock()

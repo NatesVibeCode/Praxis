@@ -7,19 +7,19 @@ from datetime import datetime, timedelta, timezone
 import asyncpg
 import pytest
 
+from _pg_test_conn import ensure_test_database_ready
 from runtime.event_log import CHANNEL_SEMANTIC_ASSERTION
 from runtime.operator_object_relations import operator_object_relation_id
 from runtime.semantic_assertions import semantic_assertion_id
 from storage.migrations import workflow_bootstrap_migration_statements
 from storage.postgres import (
-    PostgresConfigurationError,
     bootstrap_control_plane_schema,
     connect_workflow_database,
-    resolve_workflow_database_url,
 )
 from surfaces.api import operator_write
 
 _SCHEMA_BOOTSTRAP_LOCK_ID = 741001
+_TEST_DATABASE_URL = ensure_test_database_ready()
 
 
 def test_operator_decision_write_bridges_scoped_decisions_only() -> None:
@@ -847,11 +847,4 @@ async def _seed_operator_object_relation(
 
 
 def _workflow_env() -> dict[str, str]:
-    try:
-        database_url = resolve_workflow_database_url()
-    except PostgresConfigurationError as exc:
-        pytest.skip(
-            "WORKFLOW_DATABASE_URL is required for operator semantic bridge integration tests: "
-            f"{exc.reason_code}"
-        )
-    return {"WORKFLOW_DATABASE_URL": database_url}
+    return {"WORKFLOW_DATABASE_URL": _TEST_DATABASE_URL}

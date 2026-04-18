@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from _pg_test_conn import ensure_test_database_ready
 from registry.domain import RuntimeProfile
 from registry.provider_routing import PostgresProviderRouteAuthorityRepository
 from registry.route_catalog_repository import PostgresRouteCatalogRepository
@@ -15,7 +15,10 @@ from runtime.provider_route_runtime import (
     ProviderRouteRuntimeError,
     resolve_provider_route_runtime,
 )
-from storage.postgres import PostgresConfigurationError, connect_workflow_database
+from storage.postgres import connect_workflow_database
+
+
+_TEST_DATABASE_URL = ensure_test_database_ready()
 
 
 def _unique_suffix() -> str:
@@ -207,6 +210,16 @@ async def _seed_route_catalog(
             f"decision:{candidate_ref}",
             as_of,
         )
+
+    # Migration 095 auto-seeds a primary binding for each candidate insert.
+    # This test needs explicit handcrafted binding roles/ordering instead.
+    await conn.execute(
+        """
+        DELETE FROM model_profile_candidate_bindings
+        WHERE candidate_ref = ANY($1::text[])
+        """,
+        [primary_candidate_ref, fallback_candidate_ref],
+    )
 
     for binding_id, candidate_ref, binding_role, position_index in (
         (
@@ -440,14 +453,9 @@ def test_bounded_failover_runtime_selection_adopts_failover_authority_on_one_rou
 
 
 async def _exercise_bounded_failover_runtime_selection() -> None:
-    database_url = os.environ.get("WORKFLOW_DATABASE_URL", "postgresql://127.0.0.1/postgres")
-    try:
-        conn = await connect_workflow_database(env={"WORKFLOW_DATABASE_URL": database_url})
-    except PostgresConfigurationError as exc:
-        pytest.skip(
-            "WORKFLOW_DATABASE_URL is required for bounded failover runtime selection integration test: "
-            f"{exc.reason_code}"
-        )
+    conn = await connect_workflow_database(
+        env={"WORKFLOW_DATABASE_URL": _TEST_DATABASE_URL}
+    )
 
     transaction = conn.transaction()
     await transaction.start()

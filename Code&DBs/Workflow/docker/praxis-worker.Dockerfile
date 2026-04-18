@@ -57,5 +57,13 @@ RUN python3 /opt/praxis/workflow/scripts/export_dependency_scope.py \
 # ── workspace mount point ───────────────────────────────────────────
 WORKDIR /workspace
 
+# ── non-root agent user ─────────────────────────────────────────────
+# Claude's --permission-mode bypassPermissions (and --dangerously-skip-permissions)
+# refuse to run as root for security. Agent subprocesses spawned by the cli_llm
+# adapter run as this user inside the ephemeral CLI container.
+RUN useradd -m -u 1100 -s /bin/bash praxis-agent \
+    && mkdir -p /home/praxis-agent/.claude \
+    && chown -R 1100:1100 /home/praxis-agent
+
 # Smoke test — verify tools are reachable from login shell
-RUN bash -lc "node --version && python3 --version && git --version && which claude && which codex && which gemini && which cursor-agent"
+RUN bash -lc "node --version && python3 --version && git --version && which claude && which codex && which gemini && which cursor-agent && id praxis-agent"

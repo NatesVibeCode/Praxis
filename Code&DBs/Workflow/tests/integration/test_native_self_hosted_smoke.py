@@ -9,6 +9,7 @@ import uuid
 
 import pytest
 
+from _pg_test_conn import get_test_env
 from registry.domain import RuntimeProfileAuthorityRecord, WorkspaceAuthorityRecord
 from registry.repository import (
     PostgresRegistryAuthorityRepository,
@@ -61,11 +62,14 @@ def _runtime_env(smoke_contract: dict[str, object]) -> dict[str, str]:
     assert isinstance(raw_env, dict)
 
     repo_root = _repo_root()
+    test_env = get_test_env()
     resolved: dict[str, str] = {}
     for name, value in raw_env.items():
         assert isinstance(name, str)
         assert isinstance(value, str)
-        if name in _PATH_ENV_NAMES:
+        if name == "WORKFLOW_DATABASE_URL":
+            resolved[name] = test_env["WORKFLOW_DATABASE_URL"]
+        elif name in _PATH_ENV_NAMES:
             resolved[name] = str((repo_root / value).resolve())
         else:
             resolved[name] = value

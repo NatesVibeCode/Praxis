@@ -5,7 +5,7 @@ Replays all evidence from Postgres and verifies chain invariants.
 Exit code 0 if all invariants pass, 1 if any fail.
 
 Usage:
-    PYTHONPATH='Code&DBs/Workflow' python3 scripts/verify_evidence_chain.py
+    PYTHONPATH='CodeDBs/Workflow' python3 scripts/verify_evidence_chain.py
     
     Options:
         --verbose    Show detailed per-row checks
@@ -19,7 +19,7 @@ import asyncio
 from datetime import datetime, timezone
 
 # Add workflow root to path if needed
-_WORKFLOW_ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Code&DBs", "Workflow")
+_WORKFLOW_ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "CodeDBs", "Workflow")
 if _WORKFLOW_ROOT not in sys.path:
     sys.path.insert(0, _WORKFLOW_ROOT)
 

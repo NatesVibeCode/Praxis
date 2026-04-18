@@ -27,6 +27,7 @@ from runtime._workflow_database import (
     WorkflowDatabaseAuthority,
     resolve_runtime_database_authority,
 )
+from runtime.workspace_paths import code_tree_root, log_path as _layout_log_path, to_repo_ref
 from storage.postgres.validators import PostgresConfigurationError
 
 LOG = logging.getLogger(__name__)
@@ -67,7 +68,7 @@ COMPONENT_SPECS = (
         key="postgres",
         display_name="postgres",
         compatibility_label="com.praxis.postgres",
-        log_path="Code&DBs/Databases/postgres-dev/log/postgres.log",
+        log_path=to_repo_ref(_layout_log_path("postgres")),
         port=5432,
     ),
     ComponentSpec(
@@ -192,7 +193,8 @@ def discover_database_url(repo_root: Path) -> str:
 
 def build_paths(repo_root: Path, database_url: str | None = None) -> SupervisorPaths:
     repo_root = repo_root.resolve()
-    workflow_dir = repo_root / "Code&DBs" / "Workflow"
+    code_root = code_tree_root(repo_root)
+    workflow_dir = code_root / "Workflow"
     launch_agents_dir = Path.home() / "Library" / "LaunchAgents"
     authority = (
         resolve_runtime_database_authority(database_url=database_url, required=True)
@@ -204,8 +206,8 @@ def build_paths(repo_root: Path, database_url: str | None = None) -> SupervisorP
     return SupervisorPaths(
         repo_root=repo_root,
         workflow_dir=workflow_dir,
-        pgdata=repo_root / "Code&DBs" / "Databases" / "postgres-dev" / "data",
-        pg_log=repo_root / "Code&DBs" / "Databases" / "postgres-dev" / "log" / "postgres.log",
+        pgdata=code_root / "Databases" / "postgres-dev" / "data",
+        pg_log=code_root / "Databases" / "postgres-dev" / "log" / "postgres.log",
         launch_agents_dir=launch_agents_dir,
         launch_agent_plist=launch_agents_dir / f"{SUPERVISOR_LABEL}.plist",
         wrapper_program=repo_root / "scripts" / SUPERVISOR_PROGRAM_NAME,

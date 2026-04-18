@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import sys
 import uuid
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -363,11 +362,6 @@ async def _seed_active_fork_binding(
 
 
 def test_bounded_fork_ownership_adoption_requires_active_authority_and_reuses_the_authoritative_session() -> None:
-    if sys.platform == "darwin":
-        pytest.xfail(
-            "macOS pytest harness hangs before bounded fork ownership adoption integration "
-            "enters Postgres; the async path was validated separately via direct python execution"
-        )
     asyncio.run(_exercise_bounded_fork_ownership_adoption())
 
 

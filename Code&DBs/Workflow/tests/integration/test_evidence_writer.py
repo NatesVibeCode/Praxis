@@ -6,11 +6,15 @@ import uuid
 
 import pytest
 
+from _pg_test_conn import get_test_env
 from adapters import build_claim_received_proof, build_transition_proof
 from receipts import AppendOnlyWorkflowEvidenceWriter, EvidenceAppendError, LifecycleTransition, RunState
 from runtime import RouteIdentity
 from runtime.domain import RuntimeBoundaryError
-from runtime.persistent_evidence import PostgresEvidenceWriter, query_run_detail
+from runtime.persistent_evidence import PostgresEvidenceWriter
+
+
+_TEST_DATABASE_URL = get_test_env()["WORKFLOW_DATABASE_URL"]
 
 
 def _fail_persistence_run(coro) -> None:
@@ -187,7 +191,7 @@ def test_postgres_commit_submission_raises_when_persistence_fails(
     admitted_definition_hash,
     monkeypatch,
 ) -> None:
-    writer = PostgresEvidenceWriter()
+    writer = PostgresEvidenceWriter(database_url=_TEST_DATABASE_URL)
     monkeypatch.setattr(writer, "_run", _fail_persistence_run)
 
     with pytest.raises(RuntimeBoundaryError, match="persistent evidence submission failed"):
@@ -204,7 +208,7 @@ def test_postgres_commit_transition_raises_when_persistence_fails(
     occurred_at,
     monkeypatch,
 ) -> None:
-    writer = PostgresEvidenceWriter()
+    writer = PostgresEvidenceWriter(database_url=_TEST_DATABASE_URL)
     monkeypatch.setattr(writer, "_run", _fail_persistence_run)
 
     transition = LifecycleTransition(
@@ -226,7 +230,7 @@ def test_postgres_append_transition_proof_raises_when_persistence_fails(
     claim_received_proof,
     monkeypatch,
 ) -> None:
-    writer = PostgresEvidenceWriter()
+    writer = PostgresEvidenceWriter(database_url=_TEST_DATABASE_URL)
     monkeypatch.setattr(writer, "_run", _fail_persistence_run)
 
     with pytest.raises(RuntimeBoundaryError, match="persistent evidence proof append failed"):
@@ -258,7 +262,7 @@ def test_postgres_append_claim_received_proof_bootstraps_run_state(
         admitted_definition_hash=admitted_definition_hash,
         occurred_at=occurred_at,
     )
-    writer = PostgresEvidenceWriter()
+    writer = PostgresEvidenceWriter(database_url=_TEST_DATABASE_URL)
 
     try:
         result = writer.append_transition_proof(proof)
@@ -267,7 +271,9 @@ def test_postgres_append_claim_received_proof_bootstraps_run_state(
         assert writer._run(
             writer._load_current_state(run_id=unique_route_identity.run_id)
         ) == RunState.CLAIM_RECEIVED.value
-        detail = query_run_detail(unique_route_identity.run_id)
+        detail = writer._run(
+            writer._repository().load_run_detail(run_id=unique_route_identity.run_id)
+        )
         assert detail is not None
         assert detail["last_event_id"] == f"workflow_event:{unique_route_identity.run_id}:1"
         timeline = writer.evidence_timeline(unique_route_identity.run_id)
@@ -290,7 +296,7 @@ def test_postgres_append_node_proof_does_not_mutate_workflow_run_state(
         request_id=f"request-node-{suffix}",
         claim_id=f"claim-node-{suffix}",
     )
-    writer = PostgresEvidenceWriter()
+    writer = PostgresEvidenceWriter(database_url=_TEST_DATABASE_URL)
 
     try:
         submission_proof = build_claim_received_proof(
@@ -330,7 +336,9 @@ def test_postgres_append_node_proof_does_not_mutate_workflow_run_state(
         assert writer._run(
             writer._load_current_state(run_id=unique_route_identity.run_id)
         ) == RunState.CLAIM_RECEIVED.value
-        detail = query_run_detail(unique_route_identity.run_id)
+        detail = writer._run(
+            writer._repository().load_run_detail(run_id=unique_route_identity.run_id)
+        )
         assert detail is not None
         assert detail["last_event_id"] == f"workflow_event:{unique_route_identity.run_id}:3"
         timeline = writer.evidence_timeline(unique_route_identity.run_id)

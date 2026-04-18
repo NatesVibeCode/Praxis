@@ -9,6 +9,7 @@ from pathlib import Path
 import asyncpg
 import pytest
 
+from _pg_test_conn import ensure_test_database_ready
 from policy.workflow_lanes import bootstrap_workflow_lane_catalog_schema
 from runtime.instance import (
     PRAXIS_RECEIPTS_DIR_ENV,
@@ -20,15 +21,14 @@ from runtime.instance import (
 from runtime.work_item_workflow_bindings import work_item_workflow_binding_id
 from storage.migrations import workflow_migration_statements
 from storage.postgres import (
-    PostgresConfigurationError,
     bootstrap_control_plane_schema,
     connect_workflow_database,
-    resolve_workflow_database_url,
 )
 from surfaces.api import operator_read
 
 _SCHEMA_BOOTSTRAP_LOCK_ID = 741001
 REPO_ROOT = Path(__file__).resolve().parents[4]
+_TEST_DATABASE_URL = ensure_test_database_ready()
 
 
 def test_native_operator_query_surface_reads_canonical_rows_without_mutation() -> None:
@@ -911,15 +911,8 @@ async def _seed_binding(
 
 
 def _operator_query_env() -> dict[str, str]:
-    try:
-        database_url = resolve_workflow_database_url()
-    except PostgresConfigurationError as exc:
-        pytest.skip(
-            "WORKFLOW_DATABASE_URL is required for the native operator query integration test: "
-            f"{exc.reason_code}"
-        )
     return {
-        "WORKFLOW_DATABASE_URL": database_url,
+        "WORKFLOW_DATABASE_URL": _TEST_DATABASE_URL,
         PRAXIS_RECEIPTS_DIR_ENV: str(REPO_ROOT / "artifacts" / "runtime_receipts"),
         PRAXIS_RUNTIME_PROFILE_ENV: "praxis",
         PRAXIS_RUNTIME_PROFILES_CONFIG_ENV: str(REPO_ROOT / "config" / "runtime_profiles.json"),

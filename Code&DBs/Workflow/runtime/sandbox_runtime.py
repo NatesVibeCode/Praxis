@@ -54,12 +54,15 @@ _IGNORED_MANIFEST_DIRS = frozenset({".git", "__pycache__", ".pytest_cache", ".my
 
 # CLI auth files to mount read-only into Docker containers.
 # Each entry: (provider slugs, host_path_relative_to_home, container_path).
+# Container paths target /home/praxis-agent because the ephemeral CLI container
+# runs as uid 1100 (praxis-agent), which is required for claude's
+# --permission-mode bypassPermissions (blocked under root).
 _CLI_AUTH_MOUNTS: tuple[tuple[frozenset[str], str, str], ...] = (
-    (frozenset({"openai"}), ".codex/auth.json", "/root/.codex/auth.json"),
-    (frozenset({"anthropic"}), ".claude.json", "/root/.claude.json"),
-    (frozenset({"google", "gemini"}), ".gemini/oauth_creds.json", "/root/.gemini/oauth_creds.json"),
-    (frozenset({"google", "gemini"}), ".gemini/google_accounts.json", "/root/.gemini/google_accounts.json"),
-    (frozenset({"google", "gemini"}), ".gemini/settings.json", "/root/.gemini/settings.json"),
+    (frozenset({"openai"}), ".codex/auth.json", "/home/praxis-agent/.codex/auth.json"),
+    (frozenset({"anthropic"}), ".claude.json", "/home/praxis-agent/.claude.json"),
+    (frozenset({"google", "gemini"}), ".gemini/oauth_creds.json", "/home/praxis-agent/.gemini/oauth_creds.json"),
+    (frozenset({"google", "gemini"}), ".gemini/google_accounts.json", "/home/praxis-agent/.gemini/google_accounts.json"),
+    (frozenset({"google", "gemini"}), ".gemini/settings.json", "/home/praxis-agent/.gemini/settings.json"),
 )
 
 

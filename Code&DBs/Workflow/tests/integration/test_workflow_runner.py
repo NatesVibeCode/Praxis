@@ -5,6 +5,7 @@ from __future__ import annotations
 import concurrent.futures
 import itertools
 import json
+import logging
 import os
 import sys
 import tempfile
@@ -47,6 +48,7 @@ RunResult = _workflow_runner.RunResult
 JobExecution = _workflow_runner.JobExecution
 VerifyResult = _workflow_runner.VerifyResult
 Telemetry = _workflow_runner.Telemetry
+WorkflowReceiptPersistenceError = _workflow_runner.WorkflowReceiptPersistenceError
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -417,6 +419,111 @@ class TestReceiptWriting:
         assert len(result.receipts_written) == result.total_jobs
         assert all(receipt_ref for receipt_ref in result.receipts_written)
 
+    def test_write_receipt_fails_closed_when_canonical_persistence_fails(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        runner = _RaceyEvidenceSeqRunner(1, _RecordingPgConn())
+        spec = WorkflowSpec(
+            name="Test Spec",
+            workflow_id="test_spec_001",
+            phase="TEST",
+            jobs=[],
+            verify_refs=[],
+            outcome_goal="",
+            anti_requirements=[],
+            raw={},
+        )
+
+        class _ReceiptBoom(RuntimeError):
+            reason_code = "receipt_store.unavailable"
+
+        monkeypatch.setattr(
+            "runtime.receipt_store.write_receipt",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(_ReceiptBoom("boom")),
+        )
+
+        with pytest.raises(WorkflowReceiptPersistenceError) as excinfo:
+            runner._write_receipt(
+                JobExecution(
+                    job_label="job_1",
+                    agent_slug="anthropic/claude-sonnet-4",
+                    status="succeeded",
+                    exit_code=0,
+                    stdout="",
+                    stderr="",
+                    duration_seconds=0.01,
+                    verify_passed=True,
+                    retry_count=0,
+                ),
+                spec,
+            )
+
+        assert excinfo.value.run_id == "dispatch_test_run"
+        assert excinfo.value.job_label == "job_1"
+        assert excinfo.value.reason_code == "receipt_store.unavailable"
+        assert isinstance(excinfo.value.__cause__, _ReceiptBoom)
+
+    def test_write_receipt_logs_advisory_failures_for_non_authoritative_paths(
+        self,
+        caplog,
+    ):
+        runner = _RaceyEvidenceSeqRunner(1, _PlatformRegistryFailingPgConn())
+        spec = WorkflowSpec(
+            name="Test Spec",
+            workflow_id="test_spec_001",
+            phase="TEST",
+            jobs=[],
+            verify_refs=[],
+            outcome_goal="",
+            anti_requirements=[],
+            raw={},
+        )
+
+        class _ObsHub:
+            def ingest_receipt(self, _receipt):
+                raise RuntimeError("observability sink unavailable")
+
+        runner._obs_hub = _ObsHub()
+
+        with caplog.at_level(logging.DEBUG, logger="workflow_runner"):
+            receipt_ref = runner._write_receipt(
+                JobExecution(
+                    job_label="job_1",
+                    agent_slug="anthropic/claude-sonnet-4",
+                    status="succeeded",
+                    exit_code=0,
+                    stdout="rendered output",
+                    stderr="",
+                    duration_seconds=0.01,
+                    verify_passed=True,
+                    retry_count=0,
+                ),
+                spec,
+            )
+
+        assert receipt_ref.startswith("rcpt_")
+        advisory_payloads = [
+            record.workflow_runner_advisory_failure
+            for record in caplog.records
+            if hasattr(record, "workflow_runner_advisory_failure")
+        ]
+        assert len(advisory_payloads) == 2
+        platform_payload = next(
+            payload for payload in advisory_payloads if payload["component"] == "platform_registry"
+        )
+        observability_payload = next(
+            payload for payload in advisory_payloads if payload["component"] == "observability_ingest"
+        )
+        assert platform_payload["reason_code"] == "workflow_runner.platform_registry_write_failed"
+        assert platform_payload["run_id"] == "dispatch_test_run"
+        assert platform_payload["job_label"] == "job_1"
+        assert platform_payload["output_path"]
+        assert observability_payload["reason_code"] == "workflow_runner.observability_ingest_failed"
+        assert observability_payload["run_id"] == "dispatch_test_run"
+        assert observability_payload["job_label"] == "job_1"
+
 
 class TestBatchNotifications:
     """Tests for run-level notification wiring."""
@@ -491,6 +598,13 @@ class _RecordingPgConn:
                 })
                 return [{"evidence_seq": evidence_seq}]
         return []
+
+
+class _PlatformRegistryFailingPgConn(_RecordingPgConn):
+    def execute(self, query, *args):
+        if "INSERT INTO platform_registry" in query:
+            raise RuntimeError("platform registry unavailable")
+        return super().execute(query, *args)
 
 
 class _RaceyEvidenceSeqRunner(WorkflowRunner):

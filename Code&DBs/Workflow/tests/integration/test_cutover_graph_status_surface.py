@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import uuid
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -10,6 +9,7 @@ from datetime import datetime, timezone
 import asyncpg
 import pytest
 
+from _pg_test_conn import ensure_test_database_ready
 from contracts.domain import (
     MINIMAL_WORKFLOW_EDGE_TYPE,
     MINIMAL_WORKFLOW_NODE_TYPE,
@@ -33,9 +33,10 @@ from registry.domain import (
 from runtime import RuntimeOrchestrator, WorkflowIntakePlanner
 from runtime.work_item_workflow_bindings import WorkItemWorkflowBindingRecord
 from storage.migrations import workflow_migration_statements
-from storage.postgres import PostgresConfigurationError, connect_workflow_database
+from storage.postgres import connect_workflow_database
 
 _SCHEMA_BOOTSTRAP_LOCK_ID = 741001
+_TEST_DATABASE_URL = ensure_test_database_ready()
 
 
 def _unique_suffix() -> str:
@@ -223,14 +224,9 @@ def test_cutover_graph_status_surface_is_deterministic_and_surface_only() -> Non
 async def _exercise_cutover_graph_status_surface_is_deterministic_and_surface_only() -> None:
     run_id, canonical_evidence = _successful_run()
     as_of = datetime(2026, 4, 2, 20, 0, tzinfo=timezone.utc)
-    database_url = os.environ.get("WORKFLOW_DATABASE_URL", "postgresql://127.0.0.1/postgres")
-    try:
-        conn = await connect_workflow_database(env={"WORKFLOW_DATABASE_URL": database_url})
-    except PostgresConfigurationError as exc:
-        pytest.skip(
-            "WORKFLOW_DATABASE_URL is required for cutover graph status integration test: "
-            f"{exc.reason_code}"
-        )
+    conn = await connect_workflow_database(
+        env={"WORKFLOW_DATABASE_URL": _TEST_DATABASE_URL}
+    )
 
     transaction = conn.transaction()
     await transaction.start()

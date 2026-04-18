@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 
+from _pg_test_conn import get_test_env
 from contracts.domain import (
     MINIMAL_WORKFLOW_EDGE_TYPE,
     MINIMAL_WORKFLOW_NODE_TYPE,
@@ -24,6 +25,9 @@ from registry.repository import (
 )
 from runtime import RunState, WorkflowIntakePlanner
 from storage.postgres import connect_workflow_database
+
+
+_TEST_ENV = get_test_env()
 
 
 def _unique_suffix() -> str:
@@ -97,7 +101,7 @@ def test_registry_authority_rows_drive_intake_resolution_and_fail_closed_for_unk
 
 
 async def _exercise_registry_authority_path() -> None:
-    conn = await connect_workflow_database()
+    conn = await connect_workflow_database(env=_TEST_ENV)
     try:
         await bootstrap_registry_authority_schema(conn)
         suffix = _unique_suffix()

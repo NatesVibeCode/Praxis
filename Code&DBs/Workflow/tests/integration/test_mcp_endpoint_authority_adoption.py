@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -10,13 +9,17 @@ from datetime import datetime, timedelta, timezone
 import asyncpg
 import pytest
 
+from _pg_test_conn import ensure_test_database_ready
 from adapters.protocol_endpoint_runtime import (
     MCPProtocolEndpointRequest,
     ProtocolEndpointRuntimeError,
     resolve_mcp_protocol_endpoint,
 )
 from adapters.protocol_events import ProtocolMessage, ProtocolMetadata
-from storage.postgres import PostgresConfigurationError, connect_workflow_database
+from storage.postgres import connect_workflow_database
+
+
+_TEST_DATABASE_URL = ensure_test_database_ready()
 
 
 def _unique_suffix() -> str:
@@ -137,16 +140,9 @@ def _mcp_tools_call_message() -> ProtocolMessage:
 
 
 async def _with_seeded_connection(exercise) -> None:
-    database_url = os.environ.get("WORKFLOW_DATABASE_URL", "postgresql://127.0.0.1/postgres")
-    try:
-        conn = await connect_workflow_database(
-            env={"WORKFLOW_DATABASE_URL": database_url},
-        )
-    except PostgresConfigurationError as exc:
-        pytest.skip(
-            "WORKFLOW_DATABASE_URL is required for MCP endpoint authority integration test: "
-            f"{exc.reason_code}"
-        )
+    conn = await connect_workflow_database(
+        env={"WORKFLOW_DATABASE_URL": _TEST_DATABASE_URL},
+    )
 
     try:
         await _create_authority_tables(conn)

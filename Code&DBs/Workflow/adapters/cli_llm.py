@@ -56,6 +56,71 @@ class CLIAdapterError(RuntimeError):
         self.reason_code = reason_code
 
 
+# Polite-refusal signatures the CLI returns inside a successful JSON envelope
+# (is_error:true, exit 0). When any of these appear we must surface the refusal
+# as an adapter failure rather than pretend the turn succeeded.
+_REFUSAL_RESULT_SUBSTRINGS: tuple[str, ...] = (
+    "not logged in",
+    "please run /login",
+    "requires user approval",
+    "requires permission",
+    "requires permissions",
+    "invalid api key",
+    "fix external api key",
+    "failed to authenticate",
+    "invalid authentication credentials",
+)
+
+
+def _raise_if_cli_refused(
+    *,
+    stdout: str,
+    exit_code: int,
+    binary: str,
+) -> None:
+    """Translate a polite CLI refusal (exit 0, is_error:true in JSON) into an
+    adapter-level error so the node fails closed. Silent on non-JSON stdout.
+
+    Detected patterns:
+      - `is_error: true` in the CLI JSON envelope
+      - Result text matching a known refusal substring
+    """
+    if exit_code != 0:
+        # Non-zero already surfaces as cli_adapter.nonzero_exit upstream.
+        return
+    stripped = (stdout or "").strip()
+    if not stripped:
+        return
+    try:
+        parsed = json.loads(stripped)
+    except (json.JSONDecodeError, TypeError):
+        # Not all CLIs emit JSON; plain-text output is forwarded as-is.
+        return
+    if not isinstance(parsed, Mapping):
+        return
+    is_error = bool(parsed.get("is_error"))
+    result_text = str(parsed.get("result") or "")
+    lowered = result_text.lower()
+    matched_pattern = next(
+        (p for p in _REFUSAL_RESULT_SUBSTRINGS if p in lowered),
+        None,
+    )
+    if not (is_error or matched_pattern):
+        return
+    reason = "cli_adapter.refusal"
+    if matched_pattern in {"not logged in", "please run /login"}:
+        reason = "cli_adapter.not_authenticated"
+    elif matched_pattern in {"invalid api key", "fix external api key", "failed to authenticate", "invalid authentication credentials"}:
+        reason = "cli_adapter.auth_rejected"
+    snippet = result_text if result_text else "is_error=true with empty result"
+    if len(snippet) > 400:
+        snippet = snippet[:400] + "…"
+    raise CLIAdapterError(
+        reason,
+        f"{binary} declined to act: {snippet}",
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class CLILLMResult:
     content: str
@@ -203,6 +268,8 @@ def _invoke_cli(
     prefer_docker: bool = True,
     network: bool = False,
     auth_mount_policy: str = "provider_scoped",
+    workdir: str | None = None,
+    docker_network: str | None = None,
     execution_control: DeterministicExecutionControl | None = None,
 ) -> CLILLMResult:
     """Invoke a provider CLI through the registry-declared prompt channel."""
@@ -234,6 +301,14 @@ def _invoke_cli(
     except (ValueError, RuntimeError) as exc:
         raise CLIAdapterError("cli_adapter.provider_unmapped", str(exc))
 
+    # Anthropic's Claude CLI requires --permission-mode bypassPermissions to use
+    # its Write tool when run non-interactively under the praxis-agent user.
+    # We inject here (adapter-level) rather than the DB profile to avoid
+    # perturbing the registry authority digest used by route-identity lineage.
+    if profile.binary == "claude" and "--permission-mode" not in cmd_parts:
+        # Insert after the base binary (cmd_parts[0]) so flag ordering is stable.
+        cmd_parts = [cmd_parts[0], "--permission-mode", "bypassPermissions", *cmd_parts[1:]]
+
     prompt_mode = (profile.prompt_mode or "stdin").strip().lower() or "stdin"
     stdin_text = prompt
     if prompt_mode == "argv":
@@ -251,6 +326,8 @@ def _invoke_cli(
             network=network,
             provider_slug=provider_slug,
             auth_mount_policy=auth_mount_policy,
+            workdir=workdir,
+            docker_network=docker_network,
             execution_control=execution_control,
         )
     except OSError as exc:
@@ -269,6 +346,16 @@ def _invoke_cli(
             "cli_adapter.timeout",
             f"{profile.binary} timed out after {timeout}s",
         )
+
+    # Refusal detection — CLI returns exit 0 with a polite-refusal payload when
+    # the agent declines to act (e.g. "Not logged in", "requires user approval").
+    # We must translate these into an adapter-level failure so upstream logic
+    # doesn't report green receipts over phantom work.
+    _raise_if_cli_refused(
+        stdout=exec_result.stdout,
+        exit_code=exec_result.exit_code,
+        binary=profile.binary,
+    )
 
     # Return raw stdout as completion — the parser node handles parsing
     return CLILLMResult(
@@ -531,6 +618,15 @@ class CLILLMAdapter(BaseNodeAdapter):
                 },
             )
 
+        workdir_value = payload.get("workdir")
+        workdir_arg = workdir_value.strip() if isinstance(workdir_value, str) and workdir_value.strip() else None
+        docker_network_value = payload.get("docker_network")
+        docker_network_arg = (
+            docker_network_value.strip()
+            if isinstance(docker_network_value, str) and docker_network_value.strip()
+            else None
+        )
+
         try:
             result = _invoke_cli(
                 provider_slug=provider_slug,
@@ -543,6 +639,8 @@ class CLILLMAdapter(BaseNodeAdapter):
                 prefer_docker=self._prefer_docker,
                 network=execution_policy.network_enabled,
                 auth_mount_policy=execution_policy.auth_mount_policy,
+                workdir=workdir_arg,
+                docker_network=docker_network_arg,
                 execution_control=request.execution_control,
             )
         except CLIAdapterError as exc:

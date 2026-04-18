@@ -1,0 +1,6 @@
+id,severity,topic
+rec_001,high,database_connectivity
+rec_002,medium,api_rate_limiting
+rec_003,low,ui_rendering
+rec_004,high,authentication_timeout
+rec_005,medium,cache_invalidation

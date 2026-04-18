@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from copy import deepcopy
 from dataclasses import replace
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -20,7 +20,30 @@ from adapters.protocol_events import (
     normalize_protocol_egress,
     normalize_protocol_ingress,
 )
+from runtime import RouteIdentity
 from receipts.evidence import WorkflowEventV1
+
+
+@pytest.fixture
+def route_identity() -> RouteIdentity:
+    return RouteIdentity(
+        workflow_id="workflow-1",
+        run_id="run-1",
+        request_id="request-1",
+        authority_context_ref="authority-context-1",
+        authority_context_digest="authority-digest-1",
+        claim_id="claim-1",
+        lease_id=None,
+        proposal_id=None,
+        promotion_decision_id=None,
+        attempt_no=1,
+        transition_seq=1,
+    )
+
+
+@pytest.fixture
+def occurred_at() -> datetime:
+    return datetime(2026, 4, 1, 12, 0, tzinfo=timezone.utc)
 
 
 def _protocol_cases():

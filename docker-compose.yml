@@ -8,6 +8,12 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    command:
+      - postgres
+      - -c
+      - max_connections=400
+      - -c
+      - shared_buffers=256MB
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d praxis"]
       interval: 5s
@@ -139,12 +145,16 @@ services:
       CURSOR_API_KEY: ${CURSOR_API_KEY:-}
       PYTHONPATH: "/workspace/Code&DBs/Workflow"
       PRAXIS_CLI_AUTH_HOME: /Users/nate
+      ANTHROPIC_API_KEY: ""
+      ANTHROPIC_AUTH_TOKEN: ""
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
     working_dir: /workspace
     volumes:
       - .:/workspace
       - /Users/nate/.codex:/root/.codex:ro
       - /Users/nate/.gemini:/root/.gemini:ro
       - /Users/nate/.claude.json:/root/.claude.json:ro
+      - /Users/nate/.claude/.credentials.json:/root/.claude/.credentials.json
       - /var/run/docker.sock:/var/run/docker.sock
     command:
       - python3

@@ -2,22 +2,23 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
 import asyncpg
 import pytest
 
+from _pg_test_conn import ensure_test_database_ready
 from policy.workflow_lanes import bootstrap_workflow_lane_catalog_schema
 from runtime.scheduler_window_repository import (
     PostgresSchedulerWindowAuthorityRepository,
     SchedulerWindowRepositoryError,
 )
 from storage.migrations import workflow_migration_statements
-from storage.postgres import PostgresConfigurationError, connect_workflow_database
+from storage.postgres import connect_workflow_database
 
 _SCHEMA_BOOTSTRAP_LOCK_ID = 741001
+_TEST_DATABASE_URL = ensure_test_database_ready()
 
 
 def _is_duplicate_object_error(error: BaseException) -> bool:
@@ -220,16 +221,9 @@ def test_scheduler_window_authority_repository_is_deterministic_and_fail_closed(
 
 
 async def _exercise_scheduler_window_authority_repository_is_deterministic_and_fail_closed() -> None:
-    database_url = os.environ.get("WORKFLOW_DATABASE_URL", "postgresql://127.0.0.1/postgres")
-    try:
-        conn = await connect_workflow_database(
-            env={"WORKFLOW_DATABASE_URL": database_url},
-        )
-    except PostgresConfigurationError as exc:
-        pytest.skip(
-            "WORKFLOW_DATABASE_URL is required for scheduler window authority repository integration test: "
-            f"{exc.reason_code}"
-        )
+    conn = await connect_workflow_database(
+        env={"WORKFLOW_DATABASE_URL": _TEST_DATABASE_URL},
+    )
 
     transaction = conn.transaction()
     await transaction.start()

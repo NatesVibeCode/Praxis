@@ -6,7 +6,9 @@ from types import SimpleNamespace
 
 import pytest
 
-os.environ.setdefault("WORKFLOW_DATABASE_URL", "postgresql://test@localhost:5432/praxis_test")
+from _pg_test_conn import ensure_test_database_ready
+
+os.environ.setdefault("WORKFLOW_DATABASE_URL", ensure_test_database_ready())
 
 from runtime.domain import RuntimeBoundaryError
 from runtime.workflow import orchestrator

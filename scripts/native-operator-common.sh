@@ -6,12 +6,12 @@
 
 native_operator_common_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 native_operator_repo_root="$(cd "$native_operator_common_dir/.." && pwd)"
-native_operator_workflow_root="$native_operator_repo_root/Code&DBs/Workflow"
+native_operator_workflow_root="$native_operator_repo_root/CodeDBs/Workflow"
 native_operator_runtime_profiles_config="$native_operator_repo_root/config/runtime_profiles.json"
 native_operator_runtime_profile_ref="praxis"
 native_operator_instance_name="praxis"
 native_operator_workflow_database_url="postgresql://postgres@localhost:5432/praxis"
-native_operator_local_postgres_data_dir="$native_operator_repo_root/Code&DBs/Databases/postgres-dev/data"
+native_operator_local_postgres_data_dir="$native_operator_repo_root/CodeDBs/Databases/postgres-dev/data"
 native_operator_receipts_dir="$native_operator_repo_root/artifacts/runtime_receipts"
 native_operator_topology_dir="$native_operator_repo_root/artifacts/runtime_topology"
 

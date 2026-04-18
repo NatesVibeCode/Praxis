@@ -39,7 +39,20 @@ def test_compile_prompt_launch_spec_uses_provider_default_model_when_model_missi
     assert spec.jobs[0]["write_scope"] == ["greeting.py"]
     assert spec.jobs[0]["workdir"] == "/repo"
     assert spec.workflow_id.startswith("workflow_cli_prompt.")
-    assert spec.to_inline_spec_dict()["graph_runtime_submit"] is True
+    assert spec.definition_revision.startswith("def_")
+    assert spec.plan_revision.startswith("plan_")
+    inline_spec = spec.to_inline_spec_dict()
+    assert inline_spec["graph_runtime_submit"] is True
+    assert inline_spec["definition_revision"] == spec.definition_revision
+    assert inline_spec["plan_revision"] == spec.plan_revision
+    assert inline_spec["packet_provenance"] == {
+        "source_kind": "prompt_launch",
+        "definition_row": {"definition_revision": spec.definition_revision},
+        "compiled_spec_row": {
+            "definition_revision": spec.definition_revision,
+            "plan_revision": spec.plan_revision,
+        },
+    }
 
 
 def test_compile_prompt_launch_spec_prefers_provider_specific_adapter_when_unspecified(monkeypatch) -> None:

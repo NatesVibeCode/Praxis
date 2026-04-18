@@ -17,6 +17,7 @@ from surfaces.cli._db import cli_repo_root, cli_sync_conn
 from surfaces.cli.mcp_tools import load_json_file, print_json, run_cli_tool
 from surfaces._workflow_database import workflow_database_authority_for_repo
 from runtime.spec_compiler import compile_prompt_launch_spec
+from runtime.workspace_paths import workflow_root
 
 _DETACHED_WAIT_ATTEMPTS = 5
 _FOREGROUND_SUBMIT_FLAG = "--foreground-submit"
@@ -185,7 +186,7 @@ def _extract_common_run_options(
 
 
 def _workflow_root(repo_root: Path) -> Path:
-    return repo_root / "Code&DBs" / "Workflow"
+    return workflow_root(repo_root)
 
 
 def _detached_result_file(repo_root: Path, result_file_base: str) -> Path:

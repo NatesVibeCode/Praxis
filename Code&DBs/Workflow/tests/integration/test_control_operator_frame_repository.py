@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 import json
-import os
 import threading
 import time
 from typing import Any
@@ -11,6 +10,7 @@ import uuid
 
 import pytest
 
+from _pg_test_conn import get_test_env
 from adapters.deterministic import AdapterRegistry, DeterministicTaskRequest, DeterministicTaskResult
 from contracts.domain import (
     MINIMAL_WORKFLOW_EDGE_TYPE,
@@ -40,12 +40,7 @@ from storage.postgres import (
     persist_workflow_admission,
 )
 
-_TEST_ENV = {
-    "WORKFLOW_DATABASE_URL": os.environ.get(
-        "WORKFLOW_DATABASE_URL",
-        "postgresql://127.0.0.1/postgres",
-    )
-}
+_TEST_ENV = get_test_env()
 
 
 def _unique_suffix() -> str:

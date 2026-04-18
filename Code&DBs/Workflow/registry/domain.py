@@ -150,22 +150,6 @@ class RegistryResolver:
         }
 
     @staticmethod
-    def _local_repo_root() -> Path:
-        return Path(__file__).resolve().parents[3]
-
-    @classmethod
-    def _normalize_workspace_path(
-        cls,
-        raw_value: str,
-        *,
-        base: Path,
-    ) -> str:
-        path = Path(raw_value).expanduser()
-        if not path.is_absolute():
-            path = (base / path).resolve()
-        return str(path)
-
-    @staticmethod
     def _select_one(
         *,
         reason_code: str,
@@ -211,18 +195,14 @@ class RegistryResolver:
                 "registry.boundary_violation",
                 f"workspace boundary incomplete for ref={workspace_ref!r}",
             )
-        repo_root = self._normalize_workspace_path(
-            candidate.repo_root,
-            base=self._local_repo_root(),
-        )
-        workdir = self._normalize_workspace_path(
-            candidate.workdir,
-            base=Path(repo_root),
-        )
+        # Authority identity is host-agnostic: repo_root/workdir are returned
+        # verbatim so the bundle_hash stays stable across admission (host CLI)
+        # and execution (docker worker). Translation to a concrete filesystem
+        # path belongs to execution (sandbox config, adapter workdir input).
         return WorkspaceIdentity(
             workspace_ref=candidate.workspace_ref,
-            repo_root=repo_root,
-            workdir=workdir,
+            repo_root=candidate.repo_root,
+            workdir=candidate.workdir,
         )
 
     def resolve_runtime_profile(

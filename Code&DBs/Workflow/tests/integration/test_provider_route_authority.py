@@ -2,18 +2,21 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import uuid
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from _pg_test_conn import ensure_test_database_ready
 from registry.domain import RuntimeProfile
 from registry.model_routing import ModelRouter, ModelRoutingError
 from registry.provider_routing import PostgresProviderRouteAuthorityRepository
 from registry.route_catalog_repository import PostgresRouteCatalogRepository
 from storage.postgres import connect_workflow_database
+
+
+_TEST_DATABASE_URL = ensure_test_database_ready()
 
 
 def _unique_suffix() -> str:
@@ -286,6 +289,13 @@ async def _seed_route_catalog(conn, *, suffix: str) -> tuple[str, str, tuple[str
     )
     await conn.execute(
         """
+        DELETE FROM model_profile_candidate_bindings
+        WHERE candidate_ref = ANY($1::text[])
+        """,
+        candidate_refs,
+    )
+    await conn.execute(
+        """
         INSERT INTO model_profile_candidate_bindings (
             model_profile_candidate_binding_id,
             model_profile_id,
@@ -555,8 +565,9 @@ def test_provider_route_authority_is_deterministic_and_fail_closed() -> None:
 
 
 async def _exercise_provider_route_authority() -> None:
-    database_url = os.environ.get("WORKFLOW_DATABASE_URL", "postgresql://127.0.0.1/postgres")
-    conn = await connect_workflow_database(env={"WORKFLOW_DATABASE_URL": database_url})
+    conn = await connect_workflow_database(
+        env={"WORKFLOW_DATABASE_URL": _TEST_DATABASE_URL}
+    )
     try:
         suffix = _unique_suffix()
         catalog_repository = PostgresRouteCatalogRepository(conn)

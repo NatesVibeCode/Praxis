@@ -9,9 +9,49 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 import importlib
+import logging
 import threading
 from typing import Any, Callable, Protocol
+
+_log = logging.getLogger(__name__)
+
+
+# Host paths (e.g. `/Users/nate/Praxis/...`) are encoded into workflow specs at
+# admission time by the host CLI, but deterministic builders run in-process in
+# the worker container where only `/workspace/...` exists. Translate at this one
+# boundary so individual builders never have to care about the split.
+_HOST_WORKSPACE_ROOT = Path("/Users/nate/Praxis")
+_CONTAINER_WORKSPACE_ROOT = Path("/workspace")
+
+
+def _translate_host_path_to_container(value: Any) -> Any:
+    if not isinstance(value, str) or not value:
+        return value
+    path = Path(value)
+    try:
+        relative = path.relative_to(_HOST_WORKSPACE_ROOT)
+    except ValueError:
+        return value
+    if _HOST_WORKSPACE_ROOT.exists() or not _CONTAINER_WORKSPACE_ROOT.exists():
+        return value
+    return str(_CONTAINER_WORKSPACE_ROOT / relative)
+
+
+def _normalize_payload_for_container(payload: dict[str, Any]) -> dict[str, Any]:
+    """Translate host-view workspace paths to container-view paths in place.
+
+    The deterministic adapter runs in the worker container; admission on the
+    host encodes paths from its filesystem view. Only `workspace_root` is
+    translated — other keys are resolved relative to it by the builder.
+    """
+
+    value = payload.get("workspace_root")
+    translated = _translate_host_path_to_container(value)
+    if translated is not value:
+        payload["workspace_root"] = translated
+    return payload
 
 
 class AdapterResolutionError(RuntimeError):
@@ -114,7 +154,7 @@ def _deterministic_builder_outputs(input_payload: Mapping[str, Any]) -> dict[str
     builder = getattr(module, function_name, None)
     if not callable(builder):
         raise ValueError(f"deterministic builder not found: {builder_path}")
-    outputs = builder(dict(input_payload))
+    outputs = builder(_normalize_payload_for_container(dict(input_payload)))
     if not isinstance(outputs, Mapping):
         raise ValueError(f"deterministic builder must return a mapping: {builder_path}")
     return dict(outputs)
@@ -228,14 +268,41 @@ class DeterministicTaskAdapter:
                 finished_at=_utc_now(),
                 failure_code="adapter.deterministic_builder_failed",
             )
-        if outputs is None:
+
+        # Passthrough-echo path: no `deterministic_builder` provided. We echo
+        # `expected_outputs` back. This is useful for smoke tests and wiring
+        # validation but is the single biggest source of "green receipts over
+        # phantom work" in the system — an operator writing a real spec that
+        # forgets the builder will see their node succeed without doing any
+        # work at all. We surface three signals so this is never silent again:
+        #   1. A distinct reason_code so receipts can be queried/filtered.
+        #   2. An output annotation (`passthrough_echo: true`) so downstream
+        #      adapters, verifiers, and UIs can detect the echo.
+        #   3. A WARN log including node_id + task_name + a hint to register
+        #      a builder. Operators tailing worker logs see this immediately.
+        passthrough_echo = outputs is None
+        if passthrough_echo:
             outputs = dict(request.expected_outputs)
+            outputs.setdefault("passthrough_echo", True)
+            _log.warning(
+                "deterministic_task passthrough-echo: node_id=%s task_name=%s "
+                "has no 'deterministic_builder' in input_payload; echoing "
+                "expected_outputs back as the task result. This is almost "
+                "always a spec error — register a builder or rename the task "
+                "to make the passthrough explicit.",
+                request.node_id,
+                request.task_name,
+            )
 
         return DeterministicTaskResult(
             node_id=request.node_id,
             task_name=request.task_name,
             status="succeeded",
-            reason_code="adapter.execution_succeeded",
+            reason_code=(
+                "adapter.execution_passthrough_echo"
+                if passthrough_echo
+                else "adapter.execution_succeeded"
+            ),
             executor_type=self.executor_type,
             inputs=normalized_inputs,
             outputs=outputs,

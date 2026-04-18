@@ -14,6 +14,7 @@ import pytest
 import importlib
 import sys
 
+from _pg_test_conn import get_test_env
 from storage.postgres import ensure_postgres_available
 
 # Import the module directly to avoid runtime/__init__.py which requires
@@ -32,9 +33,12 @@ LeaseManager = _mod.LeaseManager
 PostgresLeaseBackend = _mod.PostgresLeaseBackend
 
 
+_TEST_ENV = get_test_env()
+
+
 @pytest.fixture()
 def backend() -> PostgresLeaseBackend:
-    conn = ensure_postgres_available()
+    conn = ensure_postgres_available(env=_TEST_ENV)
     conn.execute_script(
         """
         CREATE TABLE IF NOT EXISTS execution_leases (

@@ -20,11 +20,16 @@ def test_deterministic_task_adapter_returns_declared_outputs() -> None:
         )
     )
 
+    # Passthrough-echo contract: no `deterministic_builder` in input_payload
+    # means the adapter echoes `expected_outputs` back. This path MUST be
+    # observable — status stays "succeeded" for backward compatibility, but
+    # the reason_code is distinct and the outputs carry a `passthrough_echo`
+    # annotation so downstream consumers can detect that no real work ran.
     assert result.status == "succeeded"
-    assert result.reason_code == "adapter.execution_succeeded"
+    assert result.reason_code == "adapter.execution_passthrough_echo"
     assert result.inputs["task_name"] == "prepare"
     assert result.inputs["input_payload"] == {"answer": 42}
-    assert result.outputs == {"result": "prepared"}
+    assert result.outputs == {"result": "prepared", "passthrough_echo": True}
     assert result.failure_code is None
 
 
@@ -43,9 +48,10 @@ def test_deterministic_task_adapter_preserves_dependency_inputs_in_normalized_re
     )
 
     assert result.status == "succeeded"
+    assert result.reason_code == "adapter.execution_passthrough_echo"
     assert result.inputs["dependency_inputs"] == {"prepared_result": "prepared"}
     assert result.inputs["execution_boundary_ref"] == "workspace.alpha"
-    assert result.outputs == {"result": "admitted"}
+    assert result.outputs == {"result": "admitted", "passthrough_echo": True}
 
 
 def test_deterministic_task_adapter_fails_closed_on_invalid_input() -> None:
@@ -121,8 +127,13 @@ def test_deterministic_task_adapter_executes_builder_with_dependency_inputs() ->
     finally:
         sys.modules.pop(module.__name__, None)
 
+    # Real-builder path: reason_code distinguishes from passthrough-echo so
+    # receipts can be filtered ("show me all nodes that actually ran work
+    # vs. the ones that echoed expected_outputs").
     assert result.status == "succeeded"
+    assert result.reason_code == "adapter.execution_succeeded"
     assert result.outputs == {"review": 5}
+    assert "passthrough_echo" not in result.outputs
     assert calls == [
         {
             "seed": 2,

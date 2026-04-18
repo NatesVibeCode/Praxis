@@ -97,8 +97,8 @@ class WorkflowSpec:
     max_tokens: int = 4096
     temperature: float = 0.0
     label: str | None = None
-    workspace_ref: str = field(default_factory=_default_workspace)
-    runtime_profile_ref: str = field(default_factory=_default_runtime_profile)
+    workspace_ref: str | None = None
+    runtime_profile_ref: str | None = None
     system_prompt: str | None = None
     context_sections: list[dict[str, str]] | None = None
     max_retries: int = 0
@@ -295,6 +295,20 @@ def _attach_spec_metadata(result: WorkflowResult, spec: WorkflowSpec) -> Workflo
     return replace(result, **updates)
 
 
+def _resolve_execution_authority(spec: WorkflowSpec) -> WorkflowSpec:
+    """Resolve native authority only at the execution boundary."""
+
+    if spec.workspace_ref and spec.runtime_profile_ref:
+        return spec
+
+    workspace_ref, runtime_profile_ref = default_native_authority_refs()
+    return replace(
+        spec,
+        workspace_ref=spec.workspace_ref or workspace_ref,
+        runtime_profile_ref=spec.runtime_profile_ref or runtime_profile_ref,
+    )
+
+
 def _run_workflow_core(spec: WorkflowSpec) -> WorkflowResult:
     """Execute a single workflow through the graph.
 
@@ -317,11 +331,13 @@ def _run_workflow_core(spec: WorkflowSpec) -> WorkflowResult:
     if preflight_result is not None:
         return _finalize_workflow_result(_attach_spec_metadata(preflight_result, spec))
 
+    resolved_spec = _resolve_execution_authority(spec)
+
     # 1. Build the workflow graph — each step is a node
-    request = _build_workflow_graph(spec)
+    request = _build_workflow_graph(resolved_spec)
 
     # 2. Plan intake (validate + admit)
-    runtime_setup = build_workflow_runtime_setup(spec)
+    runtime_setup = build_workflow_runtime_setup(resolved_spec)
     intake_outcome, failure = plan_workflow_request(
         request=request,
         registry=runtime_setup.registry,
@@ -345,13 +361,13 @@ def _run_workflow_core(spec: WorkflowSpec) -> WorkflowResult:
         )
 
     result = project_single_workflow_result(
-        spec=spec,
+        spec=resolved_spec,
         intake_outcome=intake_outcome,
         evidence_writer=runtime_setup.evidence_writer,
     )
-    result = _attach_spec_metadata(result, spec)
+    result = _attach_spec_metadata(result, resolved_spec)
 
-    cache_workflow_result(spec, result)
+    cache_workflow_result(resolved_spec, result)
 
     return _finalize_workflow_result(result, evidence_writer=runtime_setup.evidence_writer)
 

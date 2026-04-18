@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from _pg_test_conn import ensure_test_database_ready
 from authority.workflow_class_resolution import (
     WorkflowClassResolutionError,
     load_workflow_class_resolution_runtime,
@@ -13,12 +14,11 @@ from authority.workflow_class_resolution import (
 from policy.workflow_lanes import bootstrap_workflow_lane_catalog_schema
 from storage.migrations import workflow_migration_statements
 from storage.postgres import (
-    PostgresConfigurationError,
     connect_workflow_database,
-    resolve_workflow_database_url,
 )
 
 _SCHEMA_BOOTSTRAP_LOCK_ID = 741001
+_TEST_DATABASE_URL = ensure_test_database_ready()
 
 
 def test_workflow_class_resolution_runtime_is_deterministic_and_fail_closed() -> None:
@@ -364,11 +364,4 @@ async def _seed_workflow_class(
 
 
 def _workflow_env() -> dict[str, str]:
-    try:
-        database_url = resolve_workflow_database_url()
-    except PostgresConfigurationError as exc:
-        pytest.skip(
-            "WORKFLOW_DATABASE_URL is required for workflow-class resolution runtime integration test: "
-            f"{exc.reason_code}"
-        )
-    return {"WORKFLOW_DATABASE_URL": database_url}
+    return {"WORKFLOW_DATABASE_URL": _TEST_DATABASE_URL}

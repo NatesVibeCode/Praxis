@@ -9,6 +9,7 @@ import uuid
 
 import pytest
 
+from _pg_test_conn import get_test_env
 from contracts.domain import (
     MINIMAL_WORKFLOW_EDGE_TYPE,
     MINIMAL_WORKFLOW_NODE_TYPE,
@@ -35,6 +36,9 @@ from storage.postgres import (
     persist_workflow_admission,
 )
 from surfaces.cli.main import main as workflow_cli_main
+
+
+_TEST_ENV = get_test_env()
 
 
 def _unique_suffix() -> str:
@@ -256,8 +260,8 @@ def test_first_slice_is_runnable_inspectable_and_replayable_from_postgres() -> N
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    conn = loop.run_until_complete(connect_workflow_database())
-    writer = PostgresEvidenceWriter()
+    conn = loop.run_until_complete(connect_workflow_database(env=_TEST_ENV))
+    writer = PostgresEvidenceWriter(database_url=_TEST_ENV["WORKFLOW_DATABASE_URL"])
     try:
         loop.run_until_complete(bootstrap_control_plane_schema(conn))
         loop.run_until_complete(
@@ -300,7 +304,7 @@ def test_first_slice_is_runnable_inspectable_and_replayable_from_postgres() -> N
         loop.close()
         asyncio.set_event_loop(None)
 
-    reader = PostgresEvidenceReader()
+    reader = PostgresEvidenceReader(env=_TEST_ENV)
     persisted_runtime = RuntimeOrchestrator(evidence_reader=reader)
     canonical_evidence = reader.evidence_timeline(outcome.run_id)
 
@@ -393,8 +397,8 @@ def test_first_slice_duplicate_submit_reuses_stable_run_without_second_evidence_
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    conn = loop.run_until_complete(connect_workflow_database())
-    writer = PostgresEvidenceWriter()
+    conn = loop.run_until_complete(connect_workflow_database(env=_TEST_ENV))
+    writer = PostgresEvidenceWriter(database_url=_TEST_ENV["WORKFLOW_DATABASE_URL"])
     try:
         loop.run_until_complete(bootstrap_control_plane_schema(conn))
         first_result = loop.run_until_complete(
@@ -459,7 +463,9 @@ def test_first_slice_duplicate_submit_reuses_stable_run_without_second_evidence_
         loop.close()
         asyncio.set_event_loop(None)
 
-    canonical_evidence = PostgresEvidenceReader().evidence_timeline(first_outcome.run_id)
+    canonical_evidence = PostgresEvidenceReader(env=_TEST_ENV).evidence_timeline(
+        first_outcome.run_id
+    )
     assert execution_result.current_state.value == "succeeded"
     assert len(canonical_evidence) == 18
     assert {row.route_identity.run_id for row in canonical_evidence} == {

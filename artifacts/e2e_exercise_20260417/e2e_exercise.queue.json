@@ -1,0 +1,67 @@
+{
+  "name": "End-to-End Capability Exercise 20260417",
+  "workflow_id": "e2e_capability_exercise_20260417_o",
+  "phase": "execute",
+  "workdir": "/Users/nate/Praxis/artifacts/e2e_exercise_20260417",
+  "outcome_goal": "Exercise agent execution, information handoff, deterministic transformation, search/retrieval, and a database action in one run.",
+  "jobs": [
+    {
+      "label": "step1_generate_raw_data",
+      "agent": "anthropic/claude-haiku-4-5-20251001",
+      "adapter_type": "cli_llm",
+      "workdir": "/Users/nate/Praxis/artifacts/e2e_exercise_20260417",
+      "prompt": "Write outputs/raw_data.json containing a JSON object with keys `dataset` (\"praxis_e2e_exercise_20260417\"), `generated_by` (\"anthropic/claude-haiku-4-5-20251001\"), and `records` (array of 5 objects with `id`, `severity` low|medium|high, `topic`). Then reply with exactly: {\"step\":\"step1_generate_raw_data\",\"status\":\"ok\",\"file\":\"outputs/raw_data.json\"}",
+      "timeout": 300,
+      "write_scope": [
+        "outputs/raw_data.json"
+      ]
+    },
+    {
+      "label": "step2_search_and_handoff",
+      "agent": "anthropic/claude-haiku-4-5-20251001",
+      "adapter_type": "cli_llm",
+      "workdir": "/Users/nate/Praxis/artifacts/e2e_exercise_20260417",
+      "depends_on": [
+        "step1_generate_raw_data"
+      ],
+      "prompt": "Read outputs/raw_data.json and write outputs/search_results.md with the dataset name, record count, a bullet list of the 3 most-severe record topics, and a final `Handoff: OK` line. Then reply with: {\"step\":\"step2_search_and_handoff\",\"status\":\"ok\",\"file\":\"outputs/search_results.md\"}",
+      "timeout": 300,
+      "write_scope": [
+        "outputs/search_results.md"
+      ]
+    },
+    {
+      "label": "step3_deterministic_transform",
+      "adapter_type": "deterministic_task",
+      "depends_on": [
+        "step2_search_and_handoff"
+      ],
+      "inputs": {
+        "task_name": "transform_raw_data_to_csv",
+        "input_payload": {
+          "deterministic_builder": "runtime.workflow_eval.transform_json_records_to_csv_sideeffect",
+          "workspace_root": "/Users/nate/Praxis/artifacts/e2e_exercise_20260417",
+          "input_path": "outputs/raw_data.json",
+          "output_path": "outputs/records.csv"
+        }
+      },
+      "expected_outputs": {
+        "result": "transformed"
+      }
+    },
+    {
+      "label": "step4_database_action",
+      "agent": "anthropic/claude-haiku-4-5-20251001",
+      "adapter_type": "cli_llm",
+      "workdir": "/Users/nate/Praxis/artifacts/e2e_exercise_20260417",
+      "depends_on": [
+        "step3_deterministic_transform"
+      ],
+      "prompt": "Write outputs/bug_receipt.json with content {\"bug_id\":\"deferred\",\"note\":\"Database action deferred — engine filed the bug out-of-band.\"}. Then reply with: {\"step\":\"step4_database_action\",\"status\":\"ok\",\"file\":\"outputs/bug_receipt.json\"}",
+      "timeout": 300,
+      "write_scope": [
+        "outputs/bug_receipt.json"
+      ]
+    }
+  ]
+}

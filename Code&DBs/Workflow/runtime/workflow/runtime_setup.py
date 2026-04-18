@@ -58,15 +58,17 @@ def _build_workflow_graph(spec: "WorkflowSpec") -> WorkflowRequest:
 
     import hashlib as _hashlib
 
+    workspace_ref = spec.workspace_ref or _default_workspace()
+    runtime_profile_ref = spec.runtime_profile_ref or _default_runtime_profile()
     suffix = _unique_id()
     workflow_id = f"workflow.run.{suffix}"
     request_id = f"request.run.{suffix}"
 
     authority_requirements = {
-        "workspace_ref": spec.workspace_ref,
-        "runtime_profile_ref": spec.runtime_profile_ref,
+        "workspace_ref": workspace_ref,
+        "runtime_profile_ref": runtime_profile_ref,
     }
-    execution_boundary = {"workspace_ref": spec.workspace_ref}
+    execution_boundary = {"workspace_ref": workspace_ref}
 
     nodes: list[WorkflowNodeContract] = []
     edges: list[WorkflowEdgeContract] = []
@@ -196,8 +198,8 @@ def _build_workflow_graph(spec: "WorkflowSpec") -> WorkflowRequest:
         request_id=request_id,
         workflow_definition_id=definition_id,
         definition_hash=definition_hash,
-        workspace_ref=spec.workspace_ref,
-        runtime_profile_ref=spec.runtime_profile_ref,
+        workspace_ref=workspace_ref,
+        runtime_profile_ref=runtime_profile_ref,
         nodes=tuple(nodes),
         edges=tuple(edges),
         requested_at=_utc_now(),

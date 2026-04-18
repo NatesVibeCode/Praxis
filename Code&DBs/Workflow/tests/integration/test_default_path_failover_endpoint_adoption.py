@@ -275,6 +275,14 @@ async def _seed_route_catalog(
 
     await conn.execute(
         """
+        DELETE FROM model_profile_candidate_bindings
+        WHERE candidate_ref = ANY($1::text[])
+        """,
+        [requested_candidate_ref, fallback_candidate_ref],
+    )
+
+    await conn.execute(
+        """
         INSERT INTO model_profile_candidate_bindings (
             model_profile_candidate_binding_id,
             model_profile_id,

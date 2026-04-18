@@ -33,6 +33,36 @@ if TYPE_CHECKING:
 _PRAXIS_DOCKER_MEMORY_ENV = "PRAXIS_DOCKER_MEMORY"
 _PRAXIS_DOCKER_CPUS_ENV = "PRAXIS_DOCKER_CPUS"
 
+# CLI auth env vars that must be forwarded into ephemeral CLI containers.
+# File-based auth is mounted via _cli_auth_volume_flags; these cover the
+# token-env-var case (e.g. CLAUDE_CODE_OAUTH_TOKEN for non-interactive auth).
+_CLI_AUTH_ENV_ALLOWLIST: tuple[str, ...] = (
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    "OPENAI_API_KEY",
+    "OPENAI_BASE_URL",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "GOOGLE_GENAI_API_KEY",
+    "CURSOR_API_KEY",
+)
+
+
+def _cli_auth_env_forward(provider_slug: str | None) -> dict[str, str]:
+    """Return a dict of CLI auth env vars present in os.environ, to forward
+    into the ephemeral CLI container. Empty values are skipped so that an
+    explicitly-cleared ANTHROPIC_API_KEY in the outer env doesn't override
+    OAuth-token auth in the inner container."""
+    del provider_slug  # Allowlist is provider-agnostic; vars only apply where recognized.
+    forwarded: dict[str, str] = {}
+    for key in _CLI_AUTH_ENV_ALLOWLIST:
+        value = os.environ.get(key)
+        if value:
+            forwarded[key] = value
+    return forwarded
+
 
 def _docker_image() -> str:
     image, _metadata = resolve_docker_image(
@@ -176,6 +206,9 @@ def run_in_docker(
     cpus: str | None = None,
     provider_slug: str | None = None,
     auth_mount_policy: str = "provider_scoped",
+    workdir: str | None = None,
+    user: str | None = "1100:1100",
+    docker_network: str | None = None,
     execution_control: DeterministicExecutionControl | None = None,
 ) -> ExecutionResult:
     """Run a command in a Docker container with stdin/stdout only.
@@ -219,6 +252,21 @@ def run_in_docker(
         "--cpus", docker_cpus,
     ]
 
+    # Run as non-root so CLIs can use --permission-mode bypassPermissions.
+    # HOME is set via env below to match the user's home directory.
+    if user:
+        docker_cmd.extend(["--user", user])
+
+    # Narrow per-run workdir bind: exposes ONLY the job's artifact directory
+    # (not /workspace, not the repo source). Agent file writes persist to the
+    # host via this mount; nothing else is reachable.
+    if workdir:
+        resolved_workdir = os.path.abspath(workdir)
+        docker_cmd.extend([
+            "-v", f"{resolved_workdir}:/workdir",
+            "--workdir", "/workdir",
+        ])
+
     normalized_auth_policy = validate_auth_mount_policy(auth_mount_policy)
     if normalized_auth_policy != "none":
         docker_cmd.extend(
@@ -227,10 +275,21 @@ def run_in_docker(
             ),
         )
 
-    for key, value in sorted((env or {}).items()):
+    forwarded_auth_env = _cli_auth_env_forward(provider_slug)
+    # HOME forced to /home/praxis-agent so CLIs resolve config/creds from the
+    # mounted auth files (which target /home/praxis-agent/... by policy).
+    default_home_env = {"HOME": "/home/praxis-agent"} if user else {}
+    merged_env: dict[str, str] = {
+        **default_home_env,
+        **forwarded_auth_env,
+        **(dict(env) if env else {}),
+    }
+    for key, value in sorted(merged_env.items()):
         docker_cmd.extend(["-e", f"{key}={value}"])
 
-    if not network:
+    if docker_network:
+        docker_cmd.append(f"--network={docker_network}")
+    elif not network:
         docker_cmd.append("--network=none")
 
     docker_cmd.extend([docker_image, "bash", "-c", command])
@@ -395,6 +454,8 @@ def run_model(
     workdir: str | None = None,
     provider_slug: str | None = None,
     auth_mount_policy: str = "provider_scoped",
+    docker_network: str | None = None,
+    docker_user: str | None = "1100:1100",
     execution_control: DeterministicExecutionControl | None = None,
 ) -> ExecutionResult:
     """Run a model command via Docker or host execution.
@@ -451,6 +512,9 @@ def run_model(
             image=image,
             provider_slug=provider_slug,
             auth_mount_policy=auth_mount_policy,
+            workdir=workdir,
+            user=docker_user,
+            docker_network=docker_network,
             execution_control=execution_control,
         )
 

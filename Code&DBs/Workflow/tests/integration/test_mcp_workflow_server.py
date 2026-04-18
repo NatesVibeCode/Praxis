@@ -26,9 +26,14 @@ _WORKFLOW_ROOT = Path(__file__).resolve().parents[2]
 if str(_WORKFLOW_ROOT) not in sys.path:
     sys.path.insert(0, str(_WORKFLOW_ROOT))
 
+from _pg_test_conn import ensure_test_database_ready
 from runtime import bug_tracker as _bug_tracker_mod
 from surfaces.mcp.protocol import handle_request
 from surfaces.mcp.subsystems import _subs
+from storage.postgres.connection import shutdown_workflow_pool
+
+
+_TEST_DATABASE_URL = ensure_test_database_ready()
 
 
 class _ServerModule:
@@ -855,6 +860,8 @@ def _isolated_subsystems(tmp_path, monkeypatch):
     """Point all subsystem paths to temp directories so tests are isolated."""
     subs = server._subs
     fake_bug_tracker = _FakeBugTracker()
+    monkeypatch.setenv("WORKFLOW_DATABASE_URL", _TEST_DATABASE_URL)
+    shutdown_workflow_pool()
 
     # Reset all cached instances
     subs._initialized = False
@@ -895,6 +902,7 @@ def _isolated_subsystems(tmp_path, monkeypatch):
 
     # Reset for next test
     subs._initialized = False
+    shutdown_workflow_pool()
 
 
 @pytest.fixture

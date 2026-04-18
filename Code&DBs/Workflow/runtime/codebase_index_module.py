@@ -14,6 +14,7 @@ import re
 import time
 from pathlib import Path
 
+from runtime.workspace_paths import code_tree_root
 from runtime.heartbeat import HeartbeatModule, HeartbeatModuleResult, _ok, _fail
 
 
@@ -164,7 +165,7 @@ class CodebaseIndexModule(HeartbeatModule):
     def __init__(self, conn, repo_root: str, *, knowledge_graph=None) -> None:
         self._conn = conn
         self._repo_root = repo_root
-        self._workflow_root = os.path.join(repo_root, "Code&DBs", "Workflow")
+        self._workflow_root = str(code_tree_root(Path(repo_root)) / "Workflow")
         self._kg = knowledge_graph
         self._last_graph_hash: str | None = None
 

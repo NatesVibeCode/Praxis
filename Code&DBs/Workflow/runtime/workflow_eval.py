@@ -164,4 +164,108 @@ def build_runtime_regression_probe_review(payload: dict[str, Any]) -> dict[str, 
     }
 
 
-__all__ = ["build_runtime_regression_probe_review"]
+def transform_json_records_to_csv(payload: dict[str, Any]) -> dict[str, Any]:
+    """Read a JSON file of records and emit a CSV artifact via code_blocks.
+
+    Expected input_payload keys (spec-provided):
+      - workspace_root: absolute path to the job workdir
+      - input_path:  path to the JSON file, relative to workspace_root
+      - output_path: path to the CSV to emit, relative to workspace_root
+    The JSON is expected to contain a top-level `records` array of objects.
+
+    Output: `{"code_blocks": [...], "result": "transformed", "record_count": N}`.
+    A downstream `file_writer` node applies the code_blocks to disk.
+    """
+
+    workspace_root = Path(str(payload.get("workspace_root") or ".")).resolve()
+    input_rel = str(payload.get("input_path") or "").strip()
+    output_rel = str(payload.get("output_path") or "").strip()
+    if not input_rel or not output_rel:
+        raise ValueError("transform_json_records_to_csv requires input_path and output_path")
+
+    source = workspace_root / input_rel
+    if not source.is_file():
+        raise ValueError(f"input_path not found: {source}")
+    raw_text = source.read_text(encoding="utf-8")
+    document = json.loads(raw_text)
+    if not isinstance(document, dict):
+        raise ValueError("input JSON must be a top-level object")
+    records = document.get("records")
+    if not isinstance(records, list):
+        raise ValueError("input JSON must contain a top-level `records` array")
+
+    column_order: list[str] = []
+    seen: set[str] = set()
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        for key in record.keys():
+            if key not in seen:
+                seen.add(key)
+                column_order.append(str(key))
+
+    def _csv_escape(value: Any) -> str:
+        text = "" if value is None else str(value)
+        needs_quoting = any(ch in text for ch in (",", '"', "\n", "\r"))
+        if needs_quoting:
+            return '"' + text.replace('"', '""') + '"'
+        return text
+
+    lines: list[str] = [",".join(_csv_escape(c) for c in column_order)]
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        lines.append(",".join(_csv_escape(record.get(col)) for col in column_order))
+    csv_text = "\n".join(lines) + "\n"
+
+    relative_output = _normalize_path(output_rel, workspace_root=workspace_root)
+    return {
+        "result": "transformed",
+        "record_count": len(records),
+        "columns": column_order,
+        "code_blocks": [
+            {
+                "file_path": relative_output,
+                "content": csv_text,
+                "language": "csv",
+                "action": "replace",
+            }
+        ],
+    }
+
+
+def transform_json_records_to_csv_sideeffect(payload: dict[str, Any]) -> dict[str, Any]:
+    """Read a JSON `records` array and write a CSV file directly as a side effect.
+
+    Unlike `transform_json_records_to_csv` (which returns `code_blocks` for a
+    downstream file_writer), this builder opens the output file in-process and
+    writes it immediately. This keeps the workflow graph flat when a separate
+    file_writer node would complicate lineage/digest state.
+
+    Expected input_payload keys:
+      - workspace_root: absolute path visible from the worker container
+      - input_path:  path to the JSON file, relative to workspace_root
+      - output_path: path to the CSV to write, relative to workspace_root
+    """
+
+    built = transform_json_records_to_csv(payload)
+    workspace_root = Path(str(payload.get("workspace_root") or ".")).resolve()
+    target_rel = built["code_blocks"][0]["file_path"]
+    csv_text = built["code_blocks"][0]["content"]
+    target_path = workspace_root / target_rel
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text(csv_text, encoding="utf-8")
+
+    return {
+        "result": built["result"],
+        "record_count": built["record_count"],
+        "columns": built["columns"],
+        "output_path": target_rel,
+    }
+
+
+__all__ = [
+    "build_runtime_regression_probe_review",
+    "transform_json_records_to_csv",
+    "transform_json_records_to_csv_sideeffect",
+]

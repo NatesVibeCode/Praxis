@@ -2,22 +2,23 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import uuid
 from datetime import datetime, timezone
 
 import asyncpg
 import pytest
 
+from _pg_test_conn import ensure_test_database_ready
 from storage.migrations import (
     workflow_bootstrap_migration_statements,
     workflow_migration_statements,
 )
-from storage.postgres import PostgresConfigurationError, connect_workflow_database
+from storage.postgres import connect_workflow_database
 from surfaces.api import operator_write
 
 _DUPLICATE_SQLSTATES = {"42P07", "42710"}
 _SCHEMA_BOOTSTRAP_LOCK_ID = 741002
+_TEST_DATABASE_URL = ensure_test_database_ready()
 
 
 def _unique_suffix() -> str:
@@ -134,16 +135,9 @@ def test_roadmap_write_gate_previews_and_commits_package() -> None:
 
 
 async def _exercise_roadmap_write_gate_previews_and_commits_package() -> None:
-    database_url = os.environ.get("WORKFLOW_DATABASE_URL", "postgresql://127.0.0.1/postgres")
-    try:
-        conn = await connect_workflow_database(
-            env={"WORKFLOW_DATABASE_URL": database_url},
-        )
-    except PostgresConfigurationError as exc:
-        pytest.skip(
-            "WORKFLOW_DATABASE_URL is required for roadmap write gate integration test: "
-            f"{exc.reason_code}"
-        )
+    conn = await connect_workflow_database(
+        env={"WORKFLOW_DATABASE_URL": _TEST_DATABASE_URL},
+    )
 
     transaction = conn.transaction()
     await transaction.start()

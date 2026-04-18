@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from _pg_test_conn import ensure_test_database_ready
 
 from registry.context_bundle_repository import (
     ContextBundleRepositoryError,
@@ -242,7 +242,7 @@ async def _prepare_context_bundle_authority(
 
 
 def test_context_bundle_repository_persists_and_replays_canonical_bundle_rows() -> None:
-    database_url = os.environ.get("WORKFLOW_DATABASE_URL", "postgresql://127.0.0.1/postgres")
+    database_url = ensure_test_database_ready()
     workspace, runtime_profile, route_decision, suffix = asyncio.run(
         _prepare_context_bundle_authority(database_url=database_url),
     )

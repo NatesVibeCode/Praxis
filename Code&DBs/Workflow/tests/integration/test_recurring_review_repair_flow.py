@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
 import asyncpg
 import pytest
 
+from _pg_test_conn import ensure_test_database_ready
 from policy.workflow_lanes import bootstrap_workflow_lane_catalog_schema
 from runtime.recurring_review_repair_flow import (
     RecurringReviewRepairFlowError,
@@ -19,6 +19,7 @@ from storage.migrations import workflow_migration_statements
 from storage.postgres import connect_workflow_database
 
 _SCHEMA_BOOTSTRAP_LOCK_ID = 741001
+_TEST_DATABASE_URL = ensure_test_database_ready()
 
 
 def test_recurring_review_repair_flow_is_deterministic_and_fail_closed() -> None:
@@ -481,5 +482,4 @@ async def _seed_recurring_run_window(
 
 
 def _workflow_env() -> dict[str, str]:
-    database_url = os.environ.get("WORKFLOW_DATABASE_URL", "postgresql://127.0.0.1/postgres")
-    return {"WORKFLOW_DATABASE_URL": database_url}
+    return {"WORKFLOW_DATABASE_URL": _TEST_DATABASE_URL}
