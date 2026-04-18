@@ -92,6 +92,27 @@ def render_recall_payload(payload: dict[str, Any], *, stdout: TextIO) -> None:
     stdout.write(f"\n{len(results)} result(s)\n")
 
 
+def render_discover_stale_payload(payload: dict[str, Any], *, stdout: TextIO) -> None:
+    stale = int(payload.get("stale_count") or 0)
+    missing = int(payload.get("missing_count") or 0)
+    checked = int(payload.get("checked") or 0)
+    stdout.write(
+        f"checked={checked}  stale={stale}  missing={missing}\n"
+    )
+    stale_paths = payload.get("stale_paths") or ()
+    missing_paths = payload.get("missing_paths") or ()
+    if stale_paths:
+        stdout.write("\nstale (source drifted from index):\n")
+        for path in stale_paths:
+            stdout.write(f"  {path}\n")
+    if missing_paths:
+        stdout.write("\nmissing (indexed file deleted on disk):\n")
+        for path in missing_paths:
+            stdout.write(f"  {path}\n")
+    if stale or missing:
+        stdout.write("\nrun `workflow discover reindex --yes` to refresh.\n")
+
+
 def render_discover_payload(payload: dict[str, Any], *, stdout: TextIO) -> None:
     results = payload.get("results")
     if not isinstance(results, list):

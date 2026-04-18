@@ -111,6 +111,13 @@ def tool_praxis_discover(params: dict, _progress_emitter=None) -> dict:
             **indexer.stats(),
         }
 
+    elif action == "stale-check":
+        sample = int(params.get("sample_limit", 50))
+        return {
+            "action": "stale-check",
+            **indexer.stale_check(sample_limit=sample),
+        }
+
     return {"error": f"Unknown action: {action}"}
 
 
@@ -151,9 +158,10 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         "description": (
                             "'search' (find similar code), "
                             "'reindex' (re-index codebase after changes), "
-                            "'stats' (show index statistics)."
+                            "'stats' (show index statistics), "
+                            "'stale-check' (count files whose source has drifted from the index)."
                         ),
-                        "enum": ["search", "reindex", "stats"],
+                        "enum": ["search", "reindex", "stats", "stale-check"],
                         "default": "search",
                     },
                     "query": {
@@ -189,6 +197,11 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                         "type": "array",
                         "items": {"type": "string"},
                         "description": "Directories to scan (relative to repo root, for reindex action).",
+                    },
+                    "sample_limit": {
+                        "type": "integer",
+                        "description": "Max stale/missing paths to include in stale-check output (default 50).",
+                        "default": 50,
                     },
                 },
             },

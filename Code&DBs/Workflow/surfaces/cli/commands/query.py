@@ -16,6 +16,7 @@ from surfaces.cli.mcp_tools import (
     render_artifacts_payload,
     render_bug_payload,
     render_discover_payload,
+    render_discover_stale_payload,
     render_recall_payload,
     run_cli_tool,
 )
@@ -1176,6 +1177,7 @@ def _discover_command(args: list[str], *, stdout: TextIO) -> int:
             "  workflow discover 'Postgres connection pooling' --kind module\n"
             "  workflow discover reindex --yes   (re-index the codebase)\n"
             "  workflow discover stats     (index statistics)\n"
+            "  workflow discover stale-check [--json]   (count files whose source drifted from the index)\n"
         )
         return 2
 
@@ -1200,6 +1202,14 @@ def _discover_command(args: list[str], *, stdout: TextIO) -> int:
     if args[0] == "stats":
         exit_code, payload = run_cli_tool("praxis_discover", {"action": "stats"})
         print_json(stdout, payload)
+        return exit_code
+    if args[0] == "stale-check":
+        as_json = "--json" in args[1:]
+        exit_code, payload = run_cli_tool("praxis_discover", {"action": "stale-check"})
+        if as_json:
+            print_json(stdout, payload)
+            return exit_code
+        render_discover_stale_payload(payload, stdout=stdout)
         return exit_code
 
     query_parts: list[str] = []

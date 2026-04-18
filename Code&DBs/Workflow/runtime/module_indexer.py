@@ -22,6 +22,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
+from runtime.workspace_paths import to_repo_ref
+
 # ---------------------------------------------------------------------------
 # Data structures
 # ---------------------------------------------------------------------------
@@ -320,7 +322,11 @@ def extract_code_units(filepath: str, repo_root: str) -> list[CodeUnit]:
     except SyntaxError:
         return []
 
-    rel_path = os.path.normpath(os.path.relpath(os.path.realpath(filepath), os.path.realpath(repo_root)))
+    rel_path = to_repo_ref(
+        os.path.normpath(
+            os.path.relpath(os.path.realpath(filepath), os.path.realpath(repo_root))
+        )
+    )
     src_hash = _source_hash(source)
     units: list[CodeUnit] = []
 
@@ -602,7 +608,11 @@ def extract_ts_code_units(filepath: str, repo_root: str) -> list[CodeUnit]:
     if not source.strip():
         return []
 
-    rel_path = os.path.normpath(os.path.relpath(os.path.realpath(filepath), os.path.realpath(repo_root)))
+    rel_path = to_repo_ref(
+        os.path.normpath(
+            os.path.relpath(os.path.realpath(filepath), os.path.realpath(repo_root))
+        )
+    )
     src_hash = _source_hash(source)
     units: list[CodeUnit] = []
     behavior = _extract_ts_behavior(source)
@@ -722,6 +732,48 @@ class ModuleIndexer:
         if not units:
             return {"indexed": 0, "skipped": 0, "total": 0}
 
+        walked_paths: set[str] = {u.module_path for u in units}
+        walked_ids_by_path: dict[str, set[str]] = {}
+        for u in units:
+            walked_ids_by_path.setdefault(u.module_path, set()).add(u.module_id)
+
+        pruned_orphans = 0
+        pruned_missing = 0
+        try:
+            for path, ids in walked_ids_by_path.items():
+                stale_rows = self._conn.execute(
+                    "SELECT module_id FROM module_embeddings "
+                    "WHERE module_path = $1 AND module_id <> ALL($2::text[])",
+                    path,
+                    list(ids),
+                )
+                for row in stale_rows:
+                    self._conn.execute(
+                        "DELETE FROM module_embeddings WHERE module_id = $1",
+                        row["module_id"],
+                    )
+                    pruned_orphans += 1
+
+            for subdir in subdirs:
+                like = f"{to_repo_ref(subdir)}/%"
+                candidate_rows = self._conn.execute(
+                    "SELECT DISTINCT module_path FROM module_embeddings WHERE module_path LIKE $1",
+                    like,
+                )
+                for row in candidate_rows:
+                    candidate_path = row["module_path"]
+                    if candidate_path in walked_paths:
+                        continue
+                    self._conn.execute(
+                        "DELETE FROM module_embeddings WHERE module_path = $1",
+                        candidate_path,
+                    )
+                    pruned_missing += 1
+        except Exception as exc:
+            import sys
+
+            print(f"[module_indexer] prune failed: {exc}", file=sys.stderr)
+
         # Check which units need re-indexing
         existing_hashes = {}
         if not force:
@@ -746,6 +798,8 @@ class ModuleIndexer:
             return {
                 "indexed": 0,
                 "skipped": skipped,
+                "pruned_orphans": pruned_orphans,
+                "pruned_missing": pruned_missing,
                 "total": len(units),
                 "observability_state": "complete",
                 "errors": (),
@@ -821,6 +875,8 @@ class ModuleIndexer:
         return {
             "indexed": indexed,
             "skipped": skipped,
+            "pruned_orphans": pruned_orphans,
+            "pruned_missing": pruned_missing,
             "total": len(units),
             "observability_state": "degraded" if errors else "complete",
             "errors": tuple(errors),
@@ -976,3 +1032,62 @@ class ModuleIndexer:
                     ),
                 ),
             }
+
+    def stale_check(self, *, sample_limit: int = 50) -> dict[str, Any]:
+        """Compare on-disk source against indexed source_hash for every module_path.
+
+        For each distinct module_path in the index, hash the file on disk and
+        compare against the stored hash. Returns counts plus a small sample of
+        stale and missing paths so operators can spot what drifted.
+        """
+
+        try:
+            rows = self._conn.execute(
+                "SELECT module_path, MIN(source_hash) AS source_hash "
+                "FROM module_embeddings GROUP BY module_path"
+            )
+        except Exception as exc:
+            return {
+                "stale_count": 0,
+                "missing_count": 0,
+                "checked": 0,
+                "stale_paths": (),
+                "missing_paths": (),
+                "observability_state": "degraded",
+                "errors": (
+                    _index_error_record(
+                        scope="stale_check",
+                        code="module_indexer.stale_check_failed",
+                        error=exc,
+                    ),
+                ),
+            }
+
+        stale: list[str] = []
+        missing: list[str] = []
+        checked = 0
+        for row in rows:
+            module_path = row["module_path"]
+            checked += 1
+            absolute = os.path.join(self._repo_root, module_path)
+            if not os.path.isfile(absolute):
+                missing.append(module_path)
+                continue
+            try:
+                with open(absolute, "r", encoding="utf-8", errors="replace") as fh:
+                    source = fh.read()
+            except OSError:
+                missing.append(module_path)
+                continue
+            if _source_hash(source) != row["source_hash"]:
+                stale.append(module_path)
+
+        return {
+            "stale_count": len(stale),
+            "missing_count": len(missing),
+            "checked": checked,
+            "stale_paths": tuple(sorted(stale)[:sample_limit]),
+            "missing_paths": tuple(sorted(missing)[:sample_limit]),
+            "observability_state": "complete",
+            "errors": (),
+        }
