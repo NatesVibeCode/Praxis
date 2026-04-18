@@ -1,0 +1,297 @@
+"""Preflight helpers that catch friction-class errors *before* submission.
+
+Each check below corresponds to a class of error that silently wasted
+operator time this session: builder typos surfaced as phantom-work green
+receipts, admission gaps surfaced as `adapter.transport_unsupported`
+mid-run, workflow_id collisions surfaced as raw psycopg UniqueViolations.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from runtime.workflow_validation import (
+    _preflight_deterministic_builders,
+    _preflight_provider_admissions,
+    _preflight_workdir_drift,
+    _preflight_workflow_id_collision,
+)
+
+
+class _FakeSpec:
+    """Minimal spec double — tests exercise the preflight helpers directly."""
+
+    def __init__(self, *, jobs: list[dict[str, Any]] | None = None,
+                 workflow_id: str | None = None,
+                 raw: dict[str, Any] | None = None) -> None:
+        self.jobs = jobs or []
+        self.workflow_id = workflow_id
+        self._raw = raw or {}
+
+
+# ----- Deterministic builder checks --------------------------------------
+
+
+def test_deterministic_missing_builder_is_warning_not_error() -> None:
+    # Passthrough-echo is legal for smoke runs, so this is only a warning.
+    spec = _FakeSpec(jobs=[{
+        "label": "step_smoke",
+        "adapter_type": "deterministic_task",
+        "inputs": {"input_path": "data.json"},
+    }])
+
+    warnings = _preflight_deterministic_builders(spec)
+
+    assert len(warnings) == 1
+    assert warnings[0]["kind"] == "deterministic_builder_missing"
+    assert warnings[0]["severity"] == "warning"
+    assert warnings[0]["label"] == "step_smoke"
+    assert "echo expected_outputs" in warnings[0]["message"]
+
+
+def test_deterministic_builder_import_failure_is_error() -> None:
+    spec = _FakeSpec(jobs=[{
+        "label": "step_bad",
+        "adapter_type": "deterministic_task",
+        "inputs": {"deterministic_builder": "nonexistent_module_xyz.build"},
+    }])
+
+    warnings = _preflight_deterministic_builders(spec)
+
+    assert len(warnings) == 1
+    assert warnings[0]["kind"] == "deterministic_builder_import_failed"
+    assert warnings[0]["severity"] == "error"
+    assert "cannot import builder module" in warnings[0]["message"]
+
+
+def test_deterministic_builder_malformed_path_is_error() -> None:
+    spec = _FakeSpec(jobs=[{
+        "label": "step_mf",
+        "adapter_type": "deterministic_task",
+        "inputs": {"deterministic_builder": "noDotHere"},
+    }])
+
+    warnings = _preflight_deterministic_builders(spec)
+
+    assert len(warnings) == 1
+    assert warnings[0]["kind"] == "deterministic_builder_malformed"
+    assert warnings[0]["severity"] == "error"
+
+
+def test_deterministic_builder_not_callable_is_error() -> None:
+    # json.__name__ is a string attribute, not callable.
+    spec = _FakeSpec(jobs=[{
+        "label": "step_attr",
+        "adapter_type": "deterministic_task",
+        "inputs": {"deterministic_builder": "json.__name__"},
+    }])
+
+    warnings = _preflight_deterministic_builders(spec)
+
+    assert len(warnings) == 1
+    assert warnings[0]["kind"] == "deterministic_builder_not_callable"
+    assert warnings[0]["severity"] == "error"
+
+
+def test_deterministic_builder_resolving_callable_passes_clean() -> None:
+    spec = _FakeSpec(jobs=[{
+        "label": "step_ok",
+        "adapter_type": "deterministic_task",
+        "inputs": {"deterministic_builder": "json.dumps"},
+    }])
+
+    assert _preflight_deterministic_builders(spec) == []
+
+
+def test_non_deterministic_jobs_are_skipped() -> None:
+    spec = _FakeSpec(jobs=[
+        {"label": "cli_step", "adapter_type": "cli_llm", "agent": "anthropic/claude-x"},
+        {"label": "llm_step", "adapter_type": "llm_task", "agent": "anthropic/claude-y"},
+        {"label": "ctrl_step", "adapter_type": "control_operator"},
+    ])
+
+    assert _preflight_deterministic_builders(spec) == []
+
+
+# ----- Provider admission checks -----------------------------------------
+
+
+class _FakeCursor:
+    def __init__(self, rows: list[tuple]) -> None:
+        self._rows = rows
+
+    def execute(self, _sql: str, _params: tuple) -> None:
+        # The real query filters by (provider_slug, adapter_type); the fake
+        # returns whatever was preloaded regardless.
+        pass
+
+    def fetchall(self) -> list[tuple]:
+        return self._rows
+
+
+class _FakeConn:
+    def __init__(self, rows: list[tuple]) -> None:
+        self._rows = rows
+
+    def cursor(self) -> _FakeCursor:
+        return _FakeCursor(self._rows)
+
+
+class _ExplodingConn:
+    def cursor(self):  # type: ignore[no-untyped-def]
+        raise RuntimeError("DB is on fire")
+
+
+def test_provider_admission_admitted_is_quiet() -> None:
+    spec = _FakeSpec(jobs=[{
+        "label": "agent_step",
+        "adapter_type": "cli_llm",
+        "agent": "anthropic/claude-haiku",
+    }])
+    conn = _FakeConn([("anthropic", "cli_llm", True, "")])
+
+    warnings = _preflight_provider_admissions(spec, pg_conn=conn)
+
+    assert warnings == []
+
+
+def test_provider_admission_denied_is_error() -> None:
+    spec = _FakeSpec(jobs=[{
+        "label": "agent_step",
+        "adapter_type": "llm_task",
+        "agent": "openai/gpt-x",
+    }])
+    conn = _FakeConn([("openai", "llm_task", False, "credential missing")])
+
+    warnings = _preflight_provider_admissions(spec, pg_conn=conn)
+
+    assert len(warnings) == 1
+    assert warnings[0]["kind"] == "provider_admission_denied"
+    assert warnings[0]["severity"] == "error"
+    assert "credential missing" in warnings[0]["message"]
+    assert "praxis_provider_onboard" in warnings[0]["message"]
+
+
+def test_provider_admission_missing_row_is_error() -> None:
+    spec = _FakeSpec(jobs=[{
+        "label": "agent_step",
+        "adapter_type": "cli_llm",
+        "agent": "unknownprovider/some-model",
+    }])
+    conn = _FakeConn([])
+
+    warnings = _preflight_provider_admissions(spec, pg_conn=conn)
+
+    assert len(warnings) == 1
+    assert warnings[0]["kind"] == "provider_admission_missing"
+    assert warnings[0]["severity"] == "error"
+
+
+def test_provider_admission_db_failure_is_non_fatal_warning() -> None:
+    spec = _FakeSpec(jobs=[{
+        "label": "agent_step",
+        "adapter_type": "cli_llm",
+        "agent": "anthropic/x",
+    }])
+
+    warnings = _preflight_provider_admissions(spec, pg_conn=_ExplodingConn())
+
+    assert len(warnings) == 1
+    assert warnings[0]["kind"] == "provider_admission_query_failed"
+    # DB-level preflight outages must not block submission.
+    assert warnings[0]["severity"] == "warning"
+
+
+def test_provider_admission_ignores_non_agent_jobs() -> None:
+    spec = _FakeSpec(jobs=[{
+        "label": "deterministic_step",
+        "adapter_type": "deterministic_task",
+    }])
+    conn = _FakeConn([])
+
+    assert _preflight_provider_admissions(spec, pg_conn=conn) == []
+
+
+# ----- workflow_id collision check ---------------------------------------
+
+
+def test_workflow_id_collision_emits_warning() -> None:
+    spec = _FakeSpec(workflow_id="e2e_sample")
+    conn = _FakeConn([(1, "active")])
+
+    warnings = _preflight_workflow_id_collision(spec, pg_conn=conn)
+
+    assert len(warnings) == 1
+    assert warnings[0]["kind"] == "workflow_id_already_registered"
+    # Pre-submit advisory, not a hard block — the submit-time translator
+    # already surfaces an actionable error.
+    assert warnings[0]["severity"] == "warning"
+    assert "bump workflow_id" in warnings[0]["message"]
+
+
+def test_workflow_id_without_existing_row_is_quiet() -> None:
+    spec = _FakeSpec(workflow_id="brand_new_id")
+    conn = _FakeConn([])
+
+    assert _preflight_workflow_id_collision(spec, pg_conn=conn) == []
+
+
+def test_workflow_id_from_raw_dict_is_detected() -> None:
+    # Some spec loaders leave workflow_id only in the raw dict.
+    spec = _FakeSpec(workflow_id=None, raw={"workflow_id": "from_raw"})
+    conn = _FakeConn([(7, "active")])
+
+    warnings = _preflight_workflow_id_collision(spec, pg_conn=conn)
+
+    assert len(warnings) == 1
+    assert "from_raw" in warnings[0]["message"]
+
+
+# ----- workdir drift -----------------------------------------------------
+
+
+def test_workdir_drift_warns_on_missing_host_path_with_suggestion(tmp_path) -> None:
+    # /Users/nate/Praxis/... is a known host mount prefix. If the process
+    # can't see that path, we suggest the /workspace/... rebase.
+    missing = "/Users/nate/Praxis/artifacts/e2e_exercise_99999999"
+    assert not (tmp_path / missing).exists()  # sanity
+    spec = _FakeSpec(jobs=[], raw={"workdir": missing})
+
+    warnings = _preflight_workdir_drift(spec)
+
+    assert len(warnings) == 1
+    assert warnings[0]["kind"] == "workdir_path_missing"
+    assert warnings[0]["severity"] == "warning"
+    assert "/workspace/artifacts/e2e_exercise_99999999" in warnings[0]["message"]
+
+
+def test_workdir_drift_quiet_when_path_exists(tmp_path) -> None:
+    spec = _FakeSpec(raw={"workdir": str(tmp_path)})
+
+    assert _preflight_workdir_drift(spec) == []
+
+
+def test_workdir_drift_quiet_when_relative_path() -> None:
+    # Relative paths are resolved at submission time by the surface layer;
+    # the preflight intentionally does not speculate about them.
+    spec = _FakeSpec(raw={"workdir": "artifacts/foo"})
+
+    assert _preflight_workdir_drift(spec) == []
+
+
+def test_workdir_drift_covers_per_job_workdirs(tmp_path) -> None:
+    spec_workdir = str(tmp_path)  # exists
+    missing_job_workdir = "/Users/nate/Praxis/elsewhere/nope"
+    spec = _FakeSpec(
+        raw={"workdir": spec_workdir},
+        jobs=[
+            {"label": "step_ok", "workdir": spec_workdir},
+            {"label": "step_bad", "workdir": missing_job_workdir},
+        ],
+    )
+
+    warnings = _preflight_workdir_drift(spec)
+
+    assert len(warnings) == 1
+    assert warnings[0]["label"] == "step_bad"
+    assert "job.workdir" in warnings[0]["message"]
