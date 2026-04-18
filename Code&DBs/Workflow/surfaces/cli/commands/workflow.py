@@ -763,6 +763,51 @@ def _inspect_job_command(args: list[str], *, stdout: TextIO) -> int:
     return 0 if not payload.get("error") else 1
 
 
+def _authority_index_command(args: list[str], *, stdout: TextIO) -> int:
+    """Handle `workflow authority-index` — print the concept→code→DB→surface index."""
+
+    if args and args[0] in {"-h", "--help"}:
+        stdout.write(
+            "usage: workflow authority-index [--json]\n"
+            "Prints the curated authority index from config/authority_index.yaml.\n"
+        )
+        return 0
+
+    from runtime.authority_index import load_authority_index
+
+    as_json = "--json" in args
+    try:
+        entries = load_authority_index()
+    except FileNotFoundError as exc:
+        stdout.write(f"authority_index missing: {exc}\n")
+        return 1
+
+    if as_json:
+        print_json(stdout, {"entries": [entry.as_dict() for entry in entries]})
+        return 0
+
+    header = ("CONCEPT", "MODULE", "TABLES", "CLI", "MCP", "TESTS")
+    rows = [header]
+    for entry in entries:
+        rows.append(
+            (
+                entry.concept,
+                entry.authority_module,
+                ",".join(entry.storage_tables) or "-",
+                entry.cli or "-",
+                entry.mcp or "-",
+                ";".join(entry.proving_tests) or "-",
+            )
+        )
+    widths = [max(len(row[i]) for row in rows) for i in range(len(header))]
+    for row in rows:
+        stdout.write(
+            "  ".join(cell.ljust(width) for cell, width in zip(row, widths)).rstrip()
+            + "\n"
+        )
+    return 0
+
+
 def _proof_command(args: list[str], *, stdout: TextIO) -> int:
     """Handle `workflow proof` — inspect or backfill proof completeness."""
 

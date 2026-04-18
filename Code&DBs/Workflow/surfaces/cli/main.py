@@ -360,6 +360,7 @@ def _workflow_arg_commands() -> dict[str, ArgsCommandHandler]:
         "receipts": _receipts_command,
         "diagnose": _lazy_workflow_args_command("_diagnose_command"),
         "inspect-job": _lazy_workflow_args_command("_inspect_job_command"),
+        "authority-index": _lazy_workflow_args_command("_authority_index_command"),
         "leaderboard": _leaderboard_command,
         "manifest": _lazy_workflow_args_command("_manifest_command"),
         "trust": _trust_command,

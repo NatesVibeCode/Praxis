@@ -1,0 +1,88 @@
+# Authority index — concept → module → tables → operator surface → proving tests.
+#
+# Maintained by hand. Tested by `tests/unit/test_authority_index_contract.py`,
+# which fails CI if any path or test reference goes stale.
+#
+# Add a row when you introduce a new domain concept that operators or future
+# readers might need to find. Keep entries terse — this is an index, not docs.
+#
+- concept: workflow_runs
+  authority_module: Code&DBs/Workflow/runtime/workflow/orchestrator.py
+  storage_tables: [workflow_runs, workflow_jobs]
+  cli: praxis workflow run
+  mcp: praxis_workflow
+  proving_tests:
+    - Code&DBs/Workflow/tests/integration/test_first_slice_end_to_end.py
+
+- concept: evidence
+  authority_module: Code&DBs/Workflow/receipts/evidence.py
+  storage_tables: [workflow_events, receipts]
+  cli: praxis workflow inspect-job
+  mcp: praxis_workflow
+  proving_tests:
+    - Code&DBs/Workflow/tests/contracts/test_evidence_contracts.py
+    - Code&DBs/Workflow/tests/contracts/test_inspect_replay_contracts.py
+
+- concept: claims
+  authority_module: Code&DBs/Workflow/runtime/claims.py
+  storage_tables: [workflow_runs]
+  cli: praxis workflow run-status
+  mcp: praxis_workflow
+  proving_tests:
+    - Code&DBs/Workflow/tests/integration/test_claim_lease_proposal_runtime.py
+
+- concept: leases
+  authority_module: Code&DBs/Workflow/runtime/execution_leases.py
+  storage_tables: [execution_leases]
+  cli: praxis workflow run-status
+  mcp: praxis_workflow
+  proving_tests:
+    - Code&DBs/Workflow/tests/integration/test_execution_leases.py
+
+- concept: bugs
+  authority_module: Code&DBs/Workflow/runtime/bug_tracker.py
+  storage_tables: [bugs, bug_evidence_links]
+  cli: praxis workflow bugs
+  mcp: praxis_bugs
+  proving_tests:
+    - Code&DBs/Workflow/tests/integration/test_first_slice_end_to_end.py
+
+- concept: friction
+  authority_module: Code&DBs/Workflow/runtime/friction_ledger.py
+  storage_tables: [bugs]
+  cli: praxis workflow bugs
+  mcp: praxis_friction
+  proving_tests:
+    - Code&DBs/Workflow/tests/integration/test_first_slice_end_to_end.py
+
+- concept: discover_index
+  authority_module: Code&DBs/Workflow/runtime/module_indexer.py
+  storage_tables: [module_embeddings]
+  cli: praxis workflow discover
+  mcp: praxis_discover
+  proving_tests:
+    - Code&DBs/Workflow/tests/unit/test_repo_ref_normalizer.py
+
+- concept: workspace_layout
+  authority_module: Code&DBs/Workflow/runtime/workspace_paths.py
+  storage_tables: []
+  cli: praxis workflow tools call praxis_workflow
+  mcp: praxis_workflow
+  proving_tests:
+    - Code&DBs/Workflow/tests/unit/test_workspace_layout_authority.py
+
+- concept: routing_authority
+  authority_module: Code&DBs/Workflow/runtime/route_authority_snapshot.py
+  storage_tables: [route_eligibility_states, provider_failover_bindings]
+  cli: praxis workflow run-status
+  mcp: praxis_workflow
+  proving_tests:
+    - Code&DBs/Workflow/tests/integration/test_default_path_route_runtime_adoption.py
+
+- concept: context_bundles
+  authority_module: Code&DBs/Workflow/runtime/workflow/_context_building.py
+  storage_tables: [context_bundles, context_bundle_anchors]
+  cli: praxis workflow inspect-job
+  mcp: praxis_context_shard
+  proving_tests:
+    - Code&DBs/Workflow/tests/integration/test_context_bundle_repository.py
