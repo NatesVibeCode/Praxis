@@ -64,6 +64,21 @@ class RouteIdentity:
 
 
 @dataclass(frozen=True, slots=True)
+class DataQualityIssue:
+    """A non-fatal data-shape problem detected when reading persisted evidence.
+
+    Surfaced through ``EvidenceRow.data_quality_issues`` so operators can see
+    *which* row is malformed and *why* without inspect commands hard-failing.
+    """
+
+    reason_code: str
+    kind: str
+    row_id: str
+    evidence_seq: int
+    hint: str
+
+
+@dataclass(frozen=True, slots=True)
 class LifecycleTransition:
     """A single authoritative runtime state change."""
 

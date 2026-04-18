@@ -257,6 +257,9 @@ def get_run_status(conn: SyncPostgresConnection, run_id: str) -> dict | None:
         status_value=status_value,
     )
 
+    data_quality = run_row.pop("_data_quality", None)
+    if data_quality:
+        run_row["data_quality"] = data_quality
     return run_row
 
 
@@ -275,6 +278,7 @@ def _graph_job_rows_from_evidence(*, run_row: dict, run_id: str) -> list[dict]:
         return []
 
     latest_receipt_by_node: dict[str, object] = {}
+    data_quality: list[dict[str, object]] = []
     try:
         from receipts import ReceiptV1
         from runtime._workflow_database import resolve_runtime_database_url
@@ -284,6 +288,16 @@ def _graph_job_rows_from_evidence(*, run_row: dict, run_id: str) -> list[dict]:
             database_url=resolve_runtime_database_url(required=True),
         )
         for evidence_row in reader.evidence_timeline(run_id):
+            for issue in evidence_row.data_quality_issues:
+                data_quality.append(
+                    {
+                        "reason_code": issue.reason_code,
+                        "kind": issue.kind,
+                        "row_id": issue.row_id,
+                        "evidence_seq": issue.evidence_seq,
+                        "hint": issue.hint,
+                    }
+                )
             record = evidence_row.record
             if (
                 evidence_row.kind == "receipt"
@@ -294,6 +308,7 @@ def _graph_job_rows_from_evidence(*, run_row: dict, run_id: str) -> list[dict]:
                 latest_receipt_by_node[record.node_id] = record
     except Exception:
         latest_receipt_by_node = {}
+    run_row.setdefault("_data_quality", []).extend(data_quality)
 
     ordered_nodes = sorted(nodes, key=lambda node: int(node.get("position_index") or 0))
     job_rows: list[dict] = []
@@ -1033,12 +1048,17 @@ def inspect_job(conn: SyncPostgresConnection, run_id: str, label: str | None = N
         run_rows = conn.execute('SELECT * FROM workflow_runs WHERE run_id = $1', run_id)
         if not run_rows:
             return {'error': 'not_found'}
-        graph_jobs = _graph_job_rows_from_evidence(run_row=dict(run_rows[0]), run_id=run_id)
+        run_row = dict(run_rows[0])
+        graph_jobs = _graph_job_rows_from_evidence(run_row=run_row, run_id=run_id)
         if label:
             graph_jobs = [job for job in graph_jobs if str(job.get("label") or "").strip() == label]
         if not graph_jobs:
             return {'error': 'not_found'}
-        return {'run_id': run_id, 'jobs': graph_jobs}
+        result: dict[str, Any] = {'run_id': run_id, 'jobs': graph_jobs}
+        data_quality = run_row.pop("_data_quality", None) or []
+        if data_quality:
+            result['data_quality'] = data_quality
+        return result
     submission_by_label = _submission_state_by_job_label(conn, run_id=run_id)
     jobs = []
     for r in rows:

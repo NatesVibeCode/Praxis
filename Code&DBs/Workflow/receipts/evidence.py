@@ -21,7 +21,14 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
-from runtime.domain import AtomicEvidenceWriter, EvidenceCommitResult, LifecycleTransition, RouteIdentity, RunState
+from runtime.domain import (
+    AtomicEvidenceWriter,
+    DataQualityIssue,
+    EvidenceCommitResult,
+    LifecycleTransition,
+    RouteIdentity,
+    RunState,
+)
 
 V1_SCHEMA_VERSION = 1
 _RESERVED_LINEAGE_KEYS = frozenset(
@@ -687,6 +694,7 @@ class EvidenceRow:
     route_identity: RouteIdentity
     transition_seq: int
     record: WorkflowEventV1 | ReceiptV1
+    data_quality_issues: tuple[DataQualityIssue, ...] = ()
 
 
 @dataclass(slots=True)

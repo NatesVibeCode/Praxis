@@ -1,6 +1,12 @@
 """Append-only workflow evidence authority."""
 
-from runtime.domain import EvidenceCommitResult, LifecycleTransition, RouteIdentity, RunState
+from runtime.domain import (
+    DataQualityIssue,
+    EvidenceCommitResult,
+    LifecycleTransition,
+    RouteIdentity,
+    RunState,
+)
 
 from .evidence import (
     AppendOnlyWorkflowEvidenceWriter,
@@ -18,6 +24,7 @@ from .evidence import (
 __all__ = [
     "AppendOnlyWorkflowEvidenceWriter",
     "ArtifactRef",
+    "DataQualityIssue",
     "DecisionRef",
     "EvidenceAppendError",
     "EvidenceCommitResult",
