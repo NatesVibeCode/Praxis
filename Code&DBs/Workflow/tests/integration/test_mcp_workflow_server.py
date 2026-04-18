@@ -1510,6 +1510,7 @@ class TestDagHealth:
         assert "lane_recommendation" in result
         assert "context_cache" in result
         assert "content_health" in result
+        assert "projection_freshness" in result
         assert result["preflight"]["overall"] in ("healthy", "degraded", "unhealthy", "unknown")
         assert "recommended_posture" in result["lane_recommendation"]
         assert "hit_rate" in result["context_cache"]

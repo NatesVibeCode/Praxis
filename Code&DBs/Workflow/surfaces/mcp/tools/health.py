@@ -109,6 +109,14 @@ def tool_praxis_health(params: dict, _progress_emitter=None) -> dict:
     except Exception as exc:
         content_health = {"status": "error", "reason": str(exc)}
 
+    try:
+        from runtime.projection_freshness import collect_projection_freshness_sync
+
+        freshness_samples = collect_projection_freshness_sync(_subs.get_pg_conn())
+        projection_freshness: Any = [sample.to_json() for sample in freshness_samples]
+    except Exception as exc:
+        projection_freshness = {"status": "error", "reason": str(exc)}
+
     return {
         "preflight": {
             "overall": preflight.overall.value,
@@ -136,6 +144,7 @@ def tool_praxis_health(params: dict, _progress_emitter=None) -> dict:
         "context_cache": cache_stats,
         "content_health": content_health,
         "trend_observability": trend_observability,
+        "projection_freshness": projection_freshness,
     }
 
 
@@ -186,7 +195,8 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
         {
             "description": (
                 "Full system health check — Postgres connectivity, disk space, operator panel state, "
-                "workflow lane recommendations, context cache stats, and memory graph health.\n\n"
+                "workflow lane recommendations, context cache stats, memory graph health, and "
+                "projection freshness (event-log cursors + process-cache refresh lag).\n\n"
                 "USE WHEN: starting a session, things seem broken, or you want to verify the platform "
                 "is ready before dispatching work. No parameters needed.\n\n"
                 "EXAMPLE: praxis_health()\n\n"

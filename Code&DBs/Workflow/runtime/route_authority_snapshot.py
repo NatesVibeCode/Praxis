@@ -12,7 +12,12 @@ from __future__ import annotations
 import threading
 import weakref
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Callable
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 @dataclass(frozen=True)
@@ -41,6 +46,7 @@ class RouteAuthoritySnapshotStore:
         self._strong_snapshots: dict[str, tuple[int, RouteAuthoritySnapshot]] = {}
         self._strong_task_policies: dict[str, tuple[int, dict[str, Any]]] = {}
         self._strong_epochs: dict[str, int] = {}
+        self._strong_refreshed_at: dict[str, datetime] = {}
 
     @staticmethod
     def authority_scope(conn: object) -> object:
@@ -94,6 +100,7 @@ class RouteAuthoritySnapshotStore:
                     if current_epoch != epoch:
                         continue
                     self._strong_snapshots[cache_key] = (epoch, snapshot)
+                    self._strong_refreshed_at[cache_key] = _utc_now()
                     policies = self._strong_task_policies.get(cache_key)
                     if policies is None or policies[0] != epoch:
                         self._strong_task_policies[cache_key] = (epoch, {})
@@ -214,6 +221,21 @@ class RouteAuthoritySnapshotStore:
             self._strong_snapshots = {}
             self._strong_task_policies = {}
             self._strong_epochs = {}
+            self._strong_refreshed_at = {}
+
+    def iter_strong_cache_states(self) -> list[tuple[str, int, datetime | None]]:
+        """Snapshot ``(cache_key, epoch, last_refreshed_at)`` for explicit keys."""
+
+        with self._lock:
+            keys = set(self._strong_epochs) | set(self._strong_refreshed_at)
+            return [
+                (
+                    cache_key,
+                    int(self._strong_epochs.get(cache_key, 0)),
+                    self._strong_refreshed_at.get(cache_key),
+                )
+                for cache_key in sorted(keys)
+            ]
 
 
 _store = RouteAuthoritySnapshotStore()
@@ -246,3 +268,14 @@ def invalidate_route_authority_cache_key(cache_key: str) -> None:
 
 def invalidate_all_route_authority_snapshots() -> None:
     _store.invalidate_all()
+
+
+def iter_route_authority_cache_states() -> list[tuple[str, int, datetime | None]]:
+    """List ``(cache_key, epoch, last_refreshed_at)`` for explicitly-keyed caches.
+
+    Only string-keyed caches are reported. Weakref-keyed caches are not
+    observable here because they are anonymous to operator writes and
+    have no stable identifier for downstream dashboards.
+    """
+
+    return _store.iter_strong_cache_states()

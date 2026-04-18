@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 
 from contracts.domain import (
     MINIMAL_WORKFLOW_NODE_TYPE,
+    SUPPORTED_ADAPTER_TYPES,
     SUPPORTED_SCHEMA_VERSION,
     WorkflowEdgeContract,
     WorkflowNodeContract,
@@ -29,19 +30,7 @@ from runtime.native_authority import default_native_authority_refs
 if TYPE_CHECKING:
     from storage.postgres.connection import SyncPostgresConnection
 
-_GRAPH_SUPPORTED_ADAPTER_TYPES = frozenset({
-    "llm_task",
-    "api_task",
-    "deterministic_task",
-    "control_operator",
-    "cli_llm",
-    "mcp_task",
-    "context_compiler",
-    "output_parser",
-    "file_writer",
-    "verifier",
-})
-_GRAPH_RUNTIME_TRIGGER_ADAPTER_TYPES = _GRAPH_SUPPORTED_ADAPTER_TYPES - frozenset({
+_GRAPH_RUNTIME_TRIGGER_ADAPTER_TYPES = SUPPORTED_ADAPTER_TYPES - frozenset({
     "cli_llm",
     "llm_task",
 })
@@ -354,7 +343,7 @@ def _graph_adapter_type(job: Mapping[str, Any]) -> str:
     if explicit == "control_operator" or _is_mapping(operator):
         return "control_operator"
     if explicit:
-        if explicit not in _GRAPH_SUPPORTED_ADAPTER_TYPES:
+        if explicit not in SUPPORTED_ADAPTER_TYPES:
             raise GraphWorkflowCompileError(
                 "workflow.graph_job_unsupported",
                 f"graph runtime does not support adapter_type={explicit!r}",

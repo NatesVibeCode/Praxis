@@ -20,7 +20,7 @@ describe('shell state helpers', () => {
     });
   });
 
-  test('builds run detail urls from the active dynamic tab', () => {
+  test('builds run detail urls from the active dynamic tab (legacy compat)', () => {
     const state = {
       ...createDefaultShellState(),
       activeTabId: runDetailShellId('run_123'),
@@ -36,6 +36,43 @@ describe('shell state helpers', () => {
     };
 
     expect(buildShellUrl(state, false)).toBe('/app/run/run_123');
+  });
+
+  test('routes /app/run/:id into Moon (moonRunId set, build surface active)', () => {
+    const payload = parseShellLocationState('', '/app/run/workflow_abc');
+
+    expect(payload.shellState.activeTabId).toBe('build');
+    expect(payload.shellState.buildView).toBe('moon');
+    expect(payload.shellState.moonRunId).toBe('workflow_abc');
+    // No run-detail dynamic tab should be created anymore.
+    expect(payload.shellState.dynamicTabs).toEqual([]);
+  });
+
+  test('routes legacy ?page=run-detail&run=... into Moon', () => {
+    const payload = parseShellLocationState('?page=run-detail&run=workflow_abc');
+
+    expect(payload.shellState.activeTabId).toBe('build');
+    expect(payload.shellState.buildView).toBe('moon');
+    expect(payload.shellState.moonRunId).toBe('workflow_abc');
+  });
+
+  test('builds /app/run/:id when Moon has moonRunId set', () => {
+    const state = {
+      ...createDefaultShellState(),
+      activeTabId: 'build' as const,
+      moonRunId: 'workflow_xyz',
+    };
+
+    expect(buildShellUrl(state, false)).toBe('/app/run/workflow_xyz');
+  });
+
+  test('builds /app/build when Moon has no moonRunId', () => {
+    const state = {
+      ...createDefaultShellState(),
+      activeTabId: 'build' as const,
+    };
+
+    expect(buildShellUrl(state, false)).toBe('/app/build');
   });
 
   test('parses build query params into the build tab', () => {

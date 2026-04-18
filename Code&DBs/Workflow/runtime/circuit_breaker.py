@@ -398,6 +398,8 @@ class CircuitBreakerRegistry:
         self._override_lock = threading.Lock()
         self._manual_overrides: dict[str, ManualCircuitOverride] = {}
         self._manual_override_cache_until = 0.0
+        self._manual_override_epoch = 0
+        self._manual_override_last_refreshed_at: datetime | None = None
 
     def _make_breaker(self, provider_slug: str) -> CircuitBreaker:
         return CircuitBreaker(
@@ -421,6 +423,13 @@ class CircuitBreakerRegistry:
         with self._override_lock:
             self._manual_overrides = {}
             self._manual_override_cache_until = 0.0
+            self._manual_override_epoch += 1
+
+    def manual_override_cache_refresh_state(self) -> tuple[int, datetime | None]:
+        """Return the manual-override cache epoch and last refresh wall-clock."""
+
+        with self._override_lock:
+            return (self._manual_override_epoch, self._manual_override_last_refreshed_at)
 
     def _query_manual_overrides(self) -> dict[str, ManualCircuitOverride]:
         database_url = resolve_runtime_database_url(required=False)
@@ -492,6 +501,7 @@ class CircuitBreakerRegistry:
         with self._override_lock:
             self._manual_overrides = dict(overrides)
             self._manual_override_cache_until = now + _OVERRIDE_CACHE_TTL_S
+            self._manual_override_last_refreshed_at = _utc_now()
             return dict(self._manual_overrides)
 
     def record_outcome(
@@ -573,3 +583,18 @@ def invalidate_circuit_breaker_override_cache() -> None:
     registry = _CIRCUIT_BREAKERS
     if registry is not None:
         registry.invalidate_manual_override_cache()
+
+
+def manual_override_cache_refresh_state() -> tuple[int, datetime | None]:
+    """Return the (epoch, last_refreshed_at) pair for the manual-override cache.
+
+    Epoch increments on every explicit invalidation. ``last_refreshed_at``
+    is the wall-clock time the cache was most recently populated from the
+    operator_decisions authority, or ``None`` if it has not been populated
+    since process start.
+    """
+
+    registry = _CIRCUIT_BREAKERS
+    if registry is None:
+        return (0, None)
+    return registry.manual_override_cache_refresh_state()

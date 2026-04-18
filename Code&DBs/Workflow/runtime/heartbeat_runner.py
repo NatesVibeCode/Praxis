@@ -387,6 +387,82 @@ class _SemanticProjectionRefreshModule(HeartbeatModule):
         return _ok(self.name, t0)
 
 
+class _DatasetCandidateRefreshModule(HeartbeatModule):
+    """Heartbeat adapter for dataset_raw_candidates ingestion."""
+
+    def __init__(
+        self,
+        *,
+        workflow_env: Mapping[str, str] | None = None,
+        limit: int = 100,
+    ) -> None:
+        self._workflow_env = None if workflow_env is None else dict(workflow_env)
+        self._limit = max(1, int(limit or 100))
+
+    @property
+    def name(self) -> str:
+        return "dataset_candidate_refresh"
+
+    def _has_workflow_authority(self) -> bool:
+        if self._workflow_env and str(self._workflow_env.get("WORKFLOW_DATABASE_URL") or "").strip():
+            return True
+        return bool(str(os.environ.get("WORKFLOW_DATABASE_URL") or "").strip())
+
+    def run(self) -> HeartbeatModuleResult:
+        t0 = time.monotonic()
+        if not self._has_workflow_authority():
+            return _ok(self.name, t0)
+        try:
+            from runtime.dataset_candidate_subscriber import DatasetCandidateSubscriber
+
+            DatasetCandidateSubscriber().consume_available(
+                limit=self._limit,
+                env=self._workflow_env,
+            )
+        except Exception as exc:
+            return _fail(self.name, t0, str(exc))
+        return _ok(self.name, t0)
+
+
+class _DatasetCurationRefreshModule(HeartbeatModule):
+    """Heartbeat adapter for curated-dataset projection refresh."""
+
+    def __init__(
+        self,
+        *,
+        workflow_env: Mapping[str, str] | None = None,
+        limit: int = 100,
+    ) -> None:
+        self._workflow_env = None if workflow_env is None else dict(workflow_env)
+        self._limit = max(1, int(limit or 100))
+
+    @property
+    def name(self) -> str:
+        return "dataset_curation_refresh"
+
+    def _has_workflow_authority(self) -> bool:
+        if self._workflow_env and str(self._workflow_env.get("WORKFLOW_DATABASE_URL") or "").strip():
+            return True
+        return bool(str(os.environ.get("WORKFLOW_DATABASE_URL") or "").strip())
+
+    def run(self) -> HeartbeatModuleResult:
+        t0 = time.monotonic()
+        if not self._has_workflow_authority():
+            return _ok(self.name, t0)
+        try:
+            from runtime.dataset_curation_projection_subscriber import (
+                DatasetCurationProjectionSubscriber,
+            )
+
+            DatasetCurationProjectionSubscriber().consume_available(
+                limit=self._limit,
+                env=self._workflow_env,
+            )
+        except Exception as exc:
+            return _fail(self.name, t0, str(exc))
+        return _ok(self.name, t0)
+
+
 class _RateLimitProbeModule(HeartbeatModule):
     """Heartbeat adapter for provider rate-limit health probes."""
 
@@ -486,6 +562,8 @@ class HeartbeatRunner:
                 RollupGenerator(self._conn, self._engine),
                 SystemEventsCleanupModule(self._conn),
                 _SemanticProjectionRefreshModule(workflow_env=self._workflow_env),
+                _DatasetCandidateRefreshModule(workflow_env=self._workflow_env),
+                _DatasetCurationRefreshModule(workflow_env=self._workflow_env),
             ])
             if self._embedder is not None:
                 from runtime.codebase_index_module import CodebaseIndexModule

@@ -2,7 +2,6 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { useLiveRunSnapshot } from '../dashboard/useLiveRunSnapshot';
 import type { RunJob, RunStatus, RecentRun, RunDetail } from '../dashboard/useLiveRunSnapshot';
 import { triggerWorkflow } from '../shared/buildController';
-import { RunGraphView } from '../shared/RunGraphView';
 
 interface Props {
   runId: string;
@@ -159,14 +158,6 @@ export function MoonRunPanel({ runId, workflowId, onClose, onSwitchRun }: Props)
     } catch { /* ignore */ }
   }, [runId, expandedJob]);
 
-  const handleGraphSelect = useCallback((label: string) => {
-    const job = liveRun?.jobs.find((candidate) => candidate.label === label);
-    if (!job) {
-      return;
-    }
-    void handleJobClick(job);
-  }, [handleJobClick, liveRun]);
-
   const statusColor = liveRun ? STATUS_DOT[liveRun.status] || '#484f58' : '#484f58';
 
   return (
@@ -196,13 +187,6 @@ export function MoonRunPanel({ runId, workflowId, onClose, onSwitchRun }: Props)
             {liveRun.total_cost > 0 && <span> &middot; ${liveRun.total_cost.toFixed(4)}</span>}
             {liveRun.finished_at && <span> &middot; done</span>}
           </div>
-
-          {liveRun.graph && liveRun.graph.nodes?.length > 0 && (
-            <div className="moon-run__graph">
-              <div className="moon-dock__section-label">Dependency graph</div>
-              <RunGraphView graph={liveRun.graph} onSelectJob={handleGraphSelect} />
-            </div>
-          )}
 
           <div className="moon-run__jobs">
             {liveRun.jobs.map((job: RunJob) => (

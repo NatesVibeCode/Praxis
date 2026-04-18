@@ -22,6 +22,8 @@ Code&DBs/Databases/dispatch-state/
 artifacts/sandboxes/
 artifacts/dispatch_outputs/
 artifacts/workflow_outputs/
+artifacts/*.log
+artifacts/*.err
 artifacts/workflow_results/
 artifacts/workflow_run_result.*.json
 artifacts/quality_log.jsonl

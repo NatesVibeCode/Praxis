@@ -150,6 +150,15 @@ def test_set_circuit_breaker_override_records_force_open(monkeypatch) -> None:
     assert invalidations == ["invalidated"]
     assert payload["circuit_breaker_override"]["provider_slug"] == "openai"
     assert payload["circuit_breaker_override"]["override_state"] == "open"
+    cache_events = [e for e in conn.event_rows if e["channel"] == "cache_invalidation"]
+    assert len(cache_events) == 1
+    cache_event = cache_events[0]
+    assert cache_event["event_type"] == "cache_invalidated"
+    assert cache_event["entity_kind"] == "circuit_breaker_manual_override"
+    assert cache_event["entity_id"] == "openai"
+    assert cache_event["emitted_by"] == "operator_write.set_circuit_breaker_override"
+    assert cache_event["payload"]["reason"] == "circuit_breaker_override_open"
+    assert cache_event["payload"]["decision_ref"] == recorded.operator_decision_id
 
 
 def test_set_circuit_breaker_override_reset_marks_decision_inactive(monkeypatch) -> None:

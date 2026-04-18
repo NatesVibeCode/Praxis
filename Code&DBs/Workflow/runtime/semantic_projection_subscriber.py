@@ -24,6 +24,8 @@ from .event_log import (
 )
 
 _DEFAULT_SUBSCRIBER_ID = "semantic_projection_refresher"
+DEFAULT_SUBSCRIBER_ID = _DEFAULT_SUBSCRIBER_ID
+SEMANTIC_PROJECTION_ID = "semantic_current_assertions"
 _RELEVANT_EVENT_TYPES = frozenset(
     {
         "semantic_assertion_recorded",
@@ -228,9 +230,35 @@ async def aconsume_semantic_projection_events(
     )
 
 
+async def sample_semantic_projection_freshness(
+    conn: Any,
+    *,
+    subscriber_id: str = _DEFAULT_SUBSCRIBER_ID,
+    observed_at: datetime | None = None,
+) -> Any:
+    """Measure how far the semantic_current_assertions projection trails.
+
+    Thin async helper so callers do not need to know the channel or
+    projection identifier. Returns a :class:`ProjectionFreshness`.
+    """
+
+    from .projection_freshness import sample_event_log_cursor_freshness
+
+    return await sample_event_log_cursor_freshness(
+        conn,
+        channel=CHANNEL_SEMANTIC_ASSERTION,
+        subscriber_id=subscriber_id,
+        projection_id=SEMANTIC_PROJECTION_ID,
+        observed_at=observed_at,
+    )
+
+
 __all__ = [
+    "DEFAULT_SUBSCRIBER_ID",
+    "SEMANTIC_PROJECTION_ID",
     "SemanticProjectionRefreshResult",
     "SemanticProjectionSubscriber",
     "aconsume_semantic_projection_events",
     "consume_semantic_projection_events",
+    "sample_semantic_projection_freshness",
 ]

@@ -58,6 +58,46 @@ def _normalize_optional_number(value: object, *, field_name: str) -> int | float
     return value
 
 
+EVENT_RECEIPT_RECORDED = "receipt_recorded"
+
+
+def _emit_receipt_recorded(
+    conn: Any,
+    *,
+    receipt_id: str,
+    receipt_type: str,
+    run_id: str,
+    workflow_id: str,
+    node_id: str,
+    attempt_no: int,
+    status: str,
+    failure_code: str | None,
+    evidence_seq: int,
+) -> None:
+    """Emit a ``receipt_recorded`` event so cursor-based subscribers can consume."""
+    from runtime.event_log import CHANNEL_RECEIPT, emit
+
+    emit(
+        conn,
+        channel=CHANNEL_RECEIPT,
+        event_type=EVENT_RECEIPT_RECORDED,
+        entity_id=receipt_id,
+        entity_kind="receipt",
+        payload={
+            "receipt_id": receipt_id,
+            "receipt_type": receipt_type,
+            "run_id": run_id,
+            "workflow_id": workflow_id,
+            "node_id": node_id,
+            "attempt_no": attempt_no,
+            "status": status,
+            "failure_code": failure_code,
+            "evidence_seq": evidence_seq,
+        },
+        emitted_by="receipt_repository.insert_receipt_if_absent_with_deterministic_seq",
+    )
+
+
 class PostgresReceiptRepository:
     """Owns canonical receipt, workflow-notification, and runtime-context writes."""
 
@@ -361,9 +401,9 @@ class PostgresReceiptRepository:
                 ON CONFLICT (receipt_id) DO NOTHING
                 RETURNING evidence_seq
             )
-            SELECT evidence_seq FROM inserted
+            SELECT evidence_seq, TRUE AS was_inserted FROM inserted
             UNION ALL
-            SELECT evidence_seq FROM existing
+            SELECT evidence_seq, FALSE AS was_inserted FROM existing
             LIMIT 1;
             """,
             normalized_receipt_id,
@@ -404,16 +444,33 @@ class PostgresReceiptRepository:
 
         if isinstance(row, Mapping):
             evidence_seq = row.get("evidence_seq")
+            was_inserted = bool(row.get("was_inserted"))
         elif isinstance(row, (list, tuple)):
             evidence_seq = row[0] if row else None
+            was_inserted = bool(row[1]) if len(row) > 1 else False
         else:
             evidence_seq = row["evidence_seq"]
+            was_inserted = bool(row["was_inserted"])
 
         if evidence_seq is None:
             raise PostgresWriteError(
                 "receipt_repository.invalid_evidence_seq",
                 "evidence sequence allocation returned empty result",
                 details={"receipt_id": normalized_receipt_id},
+            )
+
+        if was_inserted:
+            _emit_receipt_recorded(
+                self._conn,
+                receipt_id=normalized_receipt_id,
+                receipt_type=_require_text(receipt_type, field_name="receipt_type"),
+                run_id=normalized_run_id,
+                workflow_id=_require_text(workflow_id, field_name="workflow_id"),
+                node_id=_require_text(node_id, field_name="node_id"),
+                attempt_no=int(_require_positive_int(attempt_no, field_name="attempt_no")),
+                status=_require_text(status, field_name="status"),
+                failure_code=_optional_text(failure_code, field_name="failure_code"),
+                evidence_seq=int(evidence_seq),
             )
 
         return int(evidence_seq)

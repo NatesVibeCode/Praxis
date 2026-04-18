@@ -2042,32 +2042,30 @@
 .moon-run__content {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
+  padding: 4px 8px 16px;
 }
 .moon-run__summary {
   font-size: 12px;
   color: var(--moon-fg-dim);
-}
-.moon-run__graph {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  padding: 0 8px;
 }
 .moon-run__jobs {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
+  padding: 4px 0;
 }
 .moon-run__job {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 8px;
+  gap: 12px;
+  padding: 8px 12px;
   border-radius: 6px;
   font-size: 12px;
 }
 .moon-run__job:hover {
-  background: var(--moon-surface-hover));
+  background: var(--moon-surface-hover);
 }
 .moon-run__dot {
   width: 8px;
@@ -2121,9 +2119,7 @@
   cursor: pointer;
 }
 .moon-run__history-item:hover {
-  background: var(--moon-surface-hover));
-}
-
+  background: var(--moon-surface-hover);
 }
 
 /* Moon uses layered component CSS, but the global unlayered reset zeroes padding on every
@@ -2185,4 +2181,230 @@ button.moon-dock-form__btn--small {
 
 button.moon-release__dispatch-btn {
   padding: 10px 14px !important;
+}
+
+/* ==========================================================================
+   Run view overlay (Moon rendering /app/run/:id)
+   ========================================================================== */
+
+.moon-page--run-view {
+  /* reserve the top band for the run header so it doesn't overlap the canvas */
+}
+
+.moon-run-overlay__header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: var(--moon-z-chrome, 10);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 20px;
+  background: rgba(13, 17, 23, 0.92);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--moon-muted-slate, #30363d);
+  font-size: 13px;
+  color: var(--moon-color-white, #f0f6fc);
+}
+
+.moon-run-overlay__back {
+  background: transparent;
+  color: inherit;
+  border: 1px solid var(--moon-muted-slate, #30363d);
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font: inherit;
+}
+.moon-run-overlay__back:hover { background: rgba(255,255,255,0.05); }
+
+.moon-run-overlay__title {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.moon-run-overlay__spec-name {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.moon-run-overlay__run-id {
+  font-size: 11px;
+  color: var(--moon-text-muted, #8b949e);
+  font-family: ui-monospace, "SF Mono", Monaco, monospace;
+}
+
+.moon-run-overlay__chip {
+  padding: 3px 10px;
+  border-radius: 12px;
+  color: #fff;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+
+.moon-run-overlay__metrics {
+  display: flex;
+  gap: 14px;
+  color: var(--moon-text-muted, #8b949e);
+  margin-left: auto;
+}
+.moon-run-overlay__metrics span {
+  font-variant-numeric: tabular-nums;
+}
+
+.moon-run-overlay__cancel {
+  background: rgba(248, 81, 73, 0.15);
+  color: #f85149;
+  border: 1px solid #f85149;
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+}
+.moon-run-overlay__cancel:hover { background: rgba(248, 81, 73, 0.25); }
+
+.moon-run-overlay__loading,
+.moon-run-overlay__error {
+  position: fixed;
+  top: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 16px;
+  background: rgba(13, 17, 23, 0.92);
+  border: 1px solid var(--moon-muted-slate, #30363d);
+  border-radius: 6px;
+  color: var(--moon-text-muted, #8b949e);
+  font-size: 12px;
+  z-index: var(--moon-z-chrome, 10);
+}
+.moon-run-overlay__error { color: #f85149; border-color: #f85149; }
+
+/* Receipt drawer (right side when a job is selected) */
+.moon-run-overlay__receipt {
+  position: fixed;
+  top: 56px;
+  right: 16px;
+  bottom: 16px;
+  width: 420px;
+  max-width: 90vw;
+  background: rgba(13, 17, 23, 0.96);
+  border: 1px solid var(--moon-muted-slate, #30363d);
+  border-radius: 8px;
+  padding: 16px;
+  z-index: var(--moon-z-chrome, 10);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  color: var(--moon-color-white, #f0f6fc);
+  font-size: 13px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+}
+
+.moon-run-overlay__receipt-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--moon-muted-slate, #30363d);
+}
+
+.moon-run-overlay__receipt-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.moon-run-overlay__receipt-label {
+  font-weight: 600;
+  flex: 1;
+  font-family: ui-monospace, "SF Mono", Monaco, monospace;
+  font-size: 13px;
+}
+
+.moon-run-overlay__receipt-close {
+  background: transparent;
+  color: inherit;
+  border: none;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.moon-run-overlay__receipt-close:hover { color: #f85149; }
+
+.moon-run-overlay__receipt-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 16px;
+  margin: 0 0 12px 0;
+}
+.moon-run-overlay__receipt-meta div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.moon-run-overlay__receipt-meta dt {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--moon-text-muted, #8b949e);
+  margin: 0;
+}
+.moon-run-overlay__receipt-meta dd {
+  font-size: 12px;
+  margin: 0;
+  font-family: ui-monospace, "SF Mono", Monaco, monospace;
+}
+
+.moon-run-overlay__receipt-output {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.moon-run-overlay__receipt-output-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--moon-text-muted, #8b949e);
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+
+.moon-run-overlay__receipt-output-toggle {
+  background: transparent;
+  color: var(--moon-accent, #58a6ff);
+  border: none;
+  font: inherit;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.moon-run-overlay__receipt-pre {
+  flex: 1;
+  margin: 0;
+  overflow: auto;
+  background: rgba(0,0,0,0.35);
+  border: 1px solid var(--moon-muted-slate, #30363d);
+  border-radius: 6px;
+  padding: 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+}
+.moon-run-overlay__receipt-pre--expanded {
+  max-height: none;
 }

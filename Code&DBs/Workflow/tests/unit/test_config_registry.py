@@ -48,6 +48,18 @@ class _FakeAsyncPGModule:
 
 def test_get_requires_explicit_workflow_database_url(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("WORKFLOW_DATABASE_URL", raising=False)
+    # Force the canonical runtime resolver to fail closed (no launchd/docker/repo env fallback).
+    from storage.postgres.validators import PostgresConfigurationError
+
+    def _no_authority(*_args, **_kwargs):
+        raise PostgresConfigurationError(
+            "postgres.config_missing",
+            "WORKFLOW_DATABASE_URL must be set",
+        )
+
+    monkeypatch.setattr(
+        "registry.config_registry.resolve_runtime_database_url", _no_authority
+    )
     registry = ConfigRegistry()
 
     with pytest.raises(RuntimeError, match="requires explicit WORKFLOW_DATABASE_URL"):
@@ -66,6 +78,17 @@ def test_get_rejects_non_postgres_workflow_database_url(
 
 def test_set_requires_explicit_workflow_database_url(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("WORKFLOW_DATABASE_URL", raising=False)
+    from storage.postgres.validators import PostgresConfigurationError
+
+    def _no_authority(*_args, **_kwargs):
+        raise PostgresConfigurationError(
+            "postgres.config_missing",
+            "WORKFLOW_DATABASE_URL must be set",
+        )
+
+    monkeypatch.setattr(
+        "registry.config_registry.resolve_runtime_database_url", _no_authority
+    )
     registry = ConfigRegistry()
 
     with pytest.raises(RuntimeError, match="requires explicit WORKFLOW_DATABASE_URL"):

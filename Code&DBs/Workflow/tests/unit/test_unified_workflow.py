@@ -4196,7 +4196,7 @@ def test_claim_one_quarantines_ready_job_with_missing_runtime_profile_authority(
 
     class _ClaimConn:
         def execute(self, query: str, *args):
-            if "FROM workflow_jobs j" in query and "ORDER BY r.requested_at DESC" in query:
+            if "FROM workflow_jobs j" in query and "r.requested_at DESC" in query:
                 return [
                     {
                         "id": 7,

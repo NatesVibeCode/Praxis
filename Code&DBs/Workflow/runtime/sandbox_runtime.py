@@ -725,12 +725,17 @@ class DockerLocalSandboxProvider:
                 + (f" {detail}" if detail else "")
             )
         container_name = f"praxis-{uuid4().hex[:12]}"
+        # Match the uid used by the cli_llm/docker_runner path: claude CLI
+        # rejects --permission-mode bypassPermissions when run as root, and
+        # the auth-file mounts target /home/praxis-agent (uid 1100). HOME is
+        # set below via env so CLIs resolve config from the mounted files.
         docker_cmd = [
             "docker",
             "run",
             "--rm",
             "-i",
             "--name", container_name,
+            "--user", "1100:1100",
             "--memory",
             _docker_memory(session.metadata),
             "--cpus",
@@ -749,10 +754,32 @@ class DockerLocalSandboxProvider:
                 if auth_mount_policy == "provider_scoped"
                 else None
             )
+            # Writable scratch dirs for each CLI's own bookkeeping (projects.json,
+            # PATH updates, session state). The :ro file mounts below layer their
+            # specific files into these tmpfs dirs. Without this, the container
+            # auto-creates parent dirs owned by root:755 when mounting individual
+            # files, blocking uid-1100 writes and breaking gemini/codex CLIs.
+            for _home_subdir in (".claude", ".codex", ".gemini"):
+                docker_cmd.extend(
+                    ["--tmpfs", f"/home/praxis-agent/{_home_subdir}:uid=1100,gid=1100,mode=755"],
+                )
             docker_cmd.extend(
                 _cli_auth_volume_flags(provider_slug=provider_slug)
             )
-        for key, value in sorted(request.env.items()):
+        # HOME must match the uid-1100 user so CLIs resolve their config files
+        # from the mounted auth targets at /home/praxis-agent/... . Force after
+        # request.env so upstream defaults (e.g. HOME=/root inherited from the
+        # worker container) do not override it.
+        env_items = {**dict(request.env), "HOME": "/home/praxis-agent"}
+        for key, value in sorted(env_items.items()):
+            docker_cmd.extend(["-e", f"{key}={value}"])
+        # Forward host-shell auth env vars (CLAUDE_CODE_OAUTH_TOKEN etc.) that
+        # the worker inherited — the ephemeral CLI container needs them for
+        # non-file auth paths (Keychain-backed OAuth).
+        from adapters.docker_runner import _cli_auth_env_forward
+        for key, value in sorted(_cli_auth_env_forward(None).items()):
+            if key in env_items:
+                continue
             docker_cmd.extend(["-e", f"{key}={value}"])
         if session.network_policy == "disabled":
             docker_cmd.append("--network=none")
@@ -786,6 +813,28 @@ class DockerLocalSandboxProvider:
         stats_thread = threading.Thread(target=_poll_stats, daemon=True, name=f"docker-stats-{container_name}")
         stats_thread.start()
 
+        # DEBUG: log the exact command + env keys + stdin size for root-causing
+        # silent hangs. Remove once the sandbox auth path stabilizes.
+        try:
+            _env_keys = sorted({part.split("=", 1)[0] for flag_idx, part in enumerate(docker_cmd) if flag_idx > 0 and docker_cmd[flag_idx - 1] == "-e"})
+            _stdin_size = len(request.stdin_text or "")
+            _redacted_cmd = [
+                ("<redacted>" if p.startswith("CLAUDE_CODE_OAUTH_TOKEN=") or p.startswith("ANTHROPIC_API_KEY=") else p)
+                for p in docker_cmd
+            ]
+            import logging as _lg
+            _lg.getLogger("runtime.sandbox_runtime").info(
+                "sandbox_docker_spawn container=%s user=%s workdir=%s network=%s stdin_bytes=%d env_keys=%s cmd=%s",
+                container_name,
+                "1100:1100",
+                "/workspace",
+                "disabled" if session.network_policy == "disabled" else "default",
+                _stdin_size,
+                _env_keys,
+                " ".join(_redacted_cmd),
+            )
+        except Exception:
+            pass
         start = _utc_now()
         start_monotonic = time.monotonic_ns()
         proc = subprocess.Popen(
@@ -1104,6 +1153,22 @@ class SandboxRuntime:
                     overlay_files=workspace_overlays,
                 ),
             )
+            # The hydrated workspace is owned by the worker uid (root). The
+            # ephemeral CLI container runs as uid 1100 and cannot write into
+            # root-owned directories; Write-tool calls silently fail and the
+            # agent summarizes as "written" without checking. Make the
+            # materialized tree writable by any container uid.
+            if getattr(provider, "execution_lane", "") == "local":
+                import subprocess as _sp
+                try:
+                    _sp.run(
+                        ["chmod", "-R", "a+rwX", session.workspace_root],
+                        check=False,
+                        capture_output=True,
+                        timeout=30,
+                    )
+                except Exception:
+                    pass
             before_manifest = _workspace_manifest(session.workspace_root)
             result = provider.exec(
                 session,

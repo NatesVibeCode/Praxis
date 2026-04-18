@@ -416,8 +416,16 @@ class AdapterRegistry:
             self.register("api_task", api_task_adapter)
 
     def register(self, adapter_type: str, adapter: TaskAdapter) -> None:
-        """Register an adapter for a given type. Overwrites if already registered."""
-        self._registry[adapter_type] = adapter
+        """Register an adapter for a given type. Overwrites if already registered.
+
+        Each adapter is composed with the default middleware chain at
+        registration so cross-cutting behavior (entry cancellation guard,
+        etc.) applies uniformly without the dispatcher needing to know.
+        """
+
+        from .middleware import compose_middleware
+
+        self._registry[adapter_type] = compose_middleware(adapter)
 
     def resolve(self, *, adapter_type: str) -> TaskAdapter:
         adapter = self._registry.get(adapter_type)

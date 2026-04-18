@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 
-from storage.postgres.connection import resolve_workflow_database_url
+from runtime._workflow_database import resolve_runtime_database_url
 from storage.postgres.validators import PostgresConfigurationError
 
 _log = logging.getLogger(__name__)
@@ -33,11 +33,16 @@ _model_profiles_loaded: bool = False
 
 def _require_database_url() -> str:
     try:
-        return resolve_workflow_database_url()
+        dsn = resolve_runtime_database_url(required=True)
     except PostgresConfigurationError as exc:
         raise RuntimeError(
             "model_context_limits requires explicit WORKFLOW_DATABASE_URL Postgres authority"
         ) from exc
+    if dsn is None:
+        raise RuntimeError(
+            "model_context_limits requires explicit WORKFLOW_DATABASE_URL Postgres authority"
+        )
+    return dsn
 
 
 def _load_model_profiles_context_windows() -> dict[tuple[str, str], int]:

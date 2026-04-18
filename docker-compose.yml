@@ -156,6 +156,11 @@ services:
       - /Users/nate/.claude.json:/root/.claude.json:ro
       - /Users/nate/.claude/.credentials.json:/root/.claude/.credentials.json
       - /var/run/docker.sock:/var/run/docker.sock
+      # Share host /tmp with worker so sandbox temp dirs (created by the
+      # worker via tempfile.mkdtemp) are visible both sides: host-side
+      # ephemeral CLI containers bind-mount from these paths, and worker
+      # must read them back for _dehydrate_copy after exec.
+      - /tmp:/tmp
     command:
       - python3
       - -m

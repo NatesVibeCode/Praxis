@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 
 export interface ChatMessage {
   id: string;
@@ -8,6 +8,8 @@ export interface ChatMessage {
   model_used?: string;
   latency_ms?: number;
   created_at?: string;
+  /** True when this message is an error surfaced as an inline assistant bubble. */
+  isError?: boolean;
 }
 
 export interface Conversation {
@@ -19,6 +21,7 @@ export interface Conversation {
 }
 
 const EVENT_STREAM_CONTENT_TYPE = 'text/event-stream';
+const FETCH_TIMEOUT_MS = 60_000;
 
 interface ParsedSseEvent {
   event: string;
@@ -108,6 +111,13 @@ export function useChat() {
   const [streamingText, setStreamingText] = useState('');
   const abortRef = useRef<AbortController | null>(null);
 
+  // FIX #2 (unmount cleanup): abort any in-flight request when the hook unmounts.
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
+
   const createConversation = useCallback(async (title?: string) => {
     try {
       const res = await fetch('/api/chat/conversations', {
@@ -191,9 +201,18 @@ export function useChat() {
     setStreamingText('');
     setError(null);
 
-    // Abort any previous request
-    if (abortRef.current) abortRef.current.abort();
-    abortRef.current = new AbortController();
+    // FIX #2 (new-send abort): abort any previous in-flight request.
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    // FIX #6: 60-second AbortController-based timeout.
+    // Track whether the abort came from the timeout so we can surface a useful message.
+    let timedOut = false;
+    const timeoutId = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, FETCH_TIMEOUT_MS);
 
     try {
       const res = await fetch(`/api/chat/conversations/${conversationId}/messages`, {
@@ -203,7 +222,7 @@ export function useChat() {
           'Accept': EVENT_STREAM_CONTENT_TYPE,
         },
         body: JSON.stringify({ content, selection_context: selectionContext }),
-        signal: abortRef.current.signal,
+        signal: controller.signal,
       });
 
       if (!res.ok) {
@@ -214,7 +233,6 @@ export function useChat() {
       const contentType = res.headers.get('content-type') ?? '';
       if (!contentType.includes(EVENT_STREAM_CONTENT_TYPE) || !res.body) {
         appendChatResponse(await res.json());
-        setStreamingText('');
         return;
       }
 
@@ -254,6 +272,7 @@ export function useChat() {
         }
 
         if (event === 'error') {
+          // FIX #5: capture SSE-level error; streamingText is reset in finally.
           streamError = typeof data?.message === 'string' ? data.message : 'Streaming request failed';
         }
       });
@@ -274,13 +293,42 @@ export function useChat() {
         ]);
       }
 
-      setStreamingText('');
       return;
     } catch (err: any) {
-      if (err.name !== 'AbortError') {
-        setError(err.message);
+      if (err.name === 'AbortError') {
+        // FIX #6: timeout abort — surface a user-readable error message.
+        if (timedOut) {
+          const msg = 'Request timed out. Please try again.';
+          setError(msg);
+          // FIX #5: surface error as an error-flavored assistant message.
+          setMessages(prev => [
+            ...prev,
+            {
+              id: `err-${Date.now()}`,
+              role: 'assistant',
+              content: msg,
+              isError: true,
+            },
+          ]);
+        }
+        // User-initiated abort (new send or unmount): stay silent.
+      } else {
+        const msg = err.message ?? 'Something went wrong.';
+        setError(msg);
+        // FIX #5: surface network/SSE errors as an error-flavored assistant message.
+        setMessages(prev => [
+          ...prev,
+          {
+            id: `err-${Date.now()}`,
+            role: 'assistant',
+            content: msg,
+            isError: true,
+          },
+        ]);
       }
     } finally {
+      clearTimeout(timeoutId);
+      // FIX #5: always reset streamingText on completion or error.
       setStreamingText('');
       setLoading(false);
     }

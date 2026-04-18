@@ -1,12 +1,33 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime, timezone
 
 from surfaces.api import operator_write
 
 
 class _FakeConn:
+    def __init__(self) -> None:
+        self.event_rows: list[dict[str, object]] = []
+
+    async def fetchrow(self, query: str, *args: object):
+        if "INSERT INTO event_log" in query:
+            row = {
+                "channel": args[0],
+                "event_type": args[1],
+                "entity_id": args[2],
+                "entity_kind": args[3],
+                "payload": json.loads(args[4]),
+                "emitted_by": args[5],
+            }
+            self.event_rows.append(row)
+            return {"id": len(self.event_rows)}
+        return None
+
+    async def execute(self, _query: str, *_args: object) -> str:
+        return "OK"
+
     async def close(self) -> None:
         return None
 
@@ -34,8 +55,9 @@ class _FakeRepository:
 
 def test_task_route_write_invalidates_target_authority_cache(monkeypatch) -> None:
     invalidated: list[str] = []
+    conn = _FakeConn()
     frontdoor = operator_write.OperatorControlFrontdoor(
-        connect_database=lambda _env: asyncio.sleep(0, result=_FakeConn()),
+        connect_database=lambda _env: asyncio.sleep(0, result=conn),
         task_route_eligibility_repository_factory=lambda _conn: _FakeRepository(),
     )
     monkeypatch.setattr(
@@ -66,3 +88,12 @@ def test_task_route_write_invalidates_target_authority_cache(monkeypatch) -> Non
 
     assert result.task_route_eligibility.provider_slug == "anthropic"
     assert invalidated == ["workflow_pool:postgresql://localhost:5432/praxis"]
+    cache_events = [e for e in conn.event_rows if e["channel"] == "cache_invalidation"]
+    assert len(cache_events) == 1
+    event = cache_events[0]
+    assert event["event_type"] == "cache_invalidated"
+    assert event["entity_kind"] == "route_authority_snapshot"
+    assert event["entity_id"] == "workflow_pool:postgresql://localhost:5432/praxis"
+    assert event["emitted_by"] == "operator_write.set_task_route_eligibility"
+    assert event["payload"]["reason"] == "task_route_eligibility_window_write"
+    assert event["payload"]["decision_ref"] == "decision.route.allow"

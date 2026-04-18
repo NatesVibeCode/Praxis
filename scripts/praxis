@@ -33,6 +33,7 @@ Authoritative namespaces:
   objects ...             Object record authority
   catalog ...             Surface catalog authority
   data ...                Data shaping plans plus workflow data actions
+  dataset ...             Dataset refinery (curated training data for specialist SLMs)
   page ...                App/page scaffolds
   hierarchy ...           Hierarchy scaffolds
   reload                  Runtime reload authority
@@ -611,7 +612,7 @@ if [ "${1:-}" = "workflow" ]; then
 fi
 
 case "${1:-}" in
-    db|registry|object-type|objects|object|catalog|data|page|hierarchy|reload|reconcile)
+    db|registry|object-type|objects|object|catalog|data|dataset|page|hierarchy|reload|reconcile)
         export PYTHONPATH="$WORKFLOW_DIR${PYTHONPATH:+:$PYTHONPATH}"
         PYTHON_BIN="${PYTHON_BIN:-$(command -v python3.14 || command -v python3.13 || command -v python3)}"
         exec "$PYTHON_BIN" -m surfaces.cli.praxis "$@"

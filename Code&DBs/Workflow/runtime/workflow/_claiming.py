@@ -207,12 +207,17 @@ def _update_terminal_job(
     return bool(updated)
 
 
+_STALE_READY_PROMOTION_INTERVAL_SECONDS = 600
+
+
 def claim_one(conn: SyncPostgresConnection, worker_id: str) -> dict | None:
     """Claim the next ready job after route and touch-key admission checks.
 
-    Ordering: newer runs first (by run requested_at DESC), then oldest job
-    within each run (by job created_at ASC).  This prevents ancient stale
-    runs from starving newer work.
+    Ordering is tiered:
+      Tier 0 (promoted): retries (attempt > 0) OR jobs ready longer than
+        _STALE_READY_PROMOTION_INTERVAL_SECONDS. Keeps in-flight work
+        moving and prevents cross-run starvation.
+      Tier 1 (normal): newer runs first, then oldest job within the run.
     """
     candidates = conn.execute(
         """SELECT j.*
@@ -220,8 +225,16 @@ def claim_one(conn: SyncPostgresConnection, worker_id: str) -> dict | None:
            JOIN workflow_runs r ON r.run_id = j.run_id
            WHERE j.status = 'ready'
              AND (j.next_retry_at IS NULL OR j.next_retry_at <= now())
-           ORDER BY r.requested_at DESC, j.created_at ASC
+           ORDER BY
+               CASE
+                   WHEN j.attempt > 0 THEN 0
+                   WHEN COALESCE(j.ready_at, j.created_at) < now() - ($1 || ' seconds')::interval THEN 0
+                   ELSE 1
+               END ASC,
+               r.requested_at DESC,
+               j.created_at ASC
            LIMIT 50""",
+        str(_STALE_READY_PROMOTION_INTERVAL_SECONDS),
     )
     for candidate in candidates or []:
         job = dict(candidate)

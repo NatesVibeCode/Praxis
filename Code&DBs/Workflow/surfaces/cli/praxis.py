@@ -6,6 +6,7 @@ from difflib import SequenceMatcher
 from typing import TextIO
 
 from surfaces.cli.commands.authority import _reconcile_command, _reload_command
+from surfaces.cli.commands.dataset import _dataset_command
 from surfaces.cli.commands.praxis_authoring import (
     _catalog_command_passthrough,
     _data_command,
@@ -40,6 +41,7 @@ def _help_text() -> str:
             "  praxis object-type <action>                   Object-type authority",
             "  praxis objects <action>                       Object record authority",
             "  praxis catalog <action>                       Surface catalog authority",
+            "  praxis dataset <action>                       Dataset refinery (curated training data)",
             "  praxis reload                                 Runtime reload authority",
             "  praxis reconcile                              Data reconcile authority",
             "",
@@ -115,6 +117,8 @@ def main(argv: list[str] | None = None, *, stdout: TextIO | None = None) -> int:
         return _catalog_command_passthrough(tail, stdout=stdout)
     if namespace == "data":
         return _data_command(tail, stdout=stdout)
+    if namespace == "dataset":
+        return _dataset_command(tail, stdout=stdout)
     if namespace == "page":
         return _page_command(tail, stdout=stdout)
     if namespace == "hierarchy":
@@ -135,6 +139,7 @@ def main(argv: list[str] | None = None, *, stdout: TextIO | None = None) -> int:
             "objects",
             "catalog",
             "data",
+            "dataset",
             "page",
             "hierarchy",
             "reload",

@@ -25,6 +25,17 @@ def test_context_window_requires_explicit_workflow_database_url(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("WORKFLOW_DATABASE_URL", raising=False)
+    from storage.postgres.validators import PostgresConfigurationError
+
+    def _no_authority(*_args, **_kwargs):
+        raise PostgresConfigurationError(
+            "postgres.config_missing",
+            "WORKFLOW_DATABASE_URL must be set",
+        )
+
+    monkeypatch.setattr(
+        "registry.model_context_limits.resolve_runtime_database_url", _no_authority
+    )
 
     with pytest.raises(RuntimeError, match="requires explicit WORKFLOW_DATABASE_URL"):
         model_context_limits.context_window_for_model("openai", "gpt-5.4")

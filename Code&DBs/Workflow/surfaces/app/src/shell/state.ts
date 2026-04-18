@@ -23,6 +23,8 @@ export interface ShellState {
   buildIntent: string | null;
   builderSeed: unknown | null;
   buildView: BuildView;
+  /** When set, Moon renders a run-view over its canvas using this run_id. */
+  moonRunId: string | null;
 }
 
 export interface ShellHistoryPayload {
@@ -82,6 +84,7 @@ export function createDefaultShellState(): ShellState {
     buildIntent: null,
     builderSeed: null,
     buildView: 'moon',
+    moonRunId: null,
   };
 }
 
@@ -99,6 +102,7 @@ export function parseShellHistoryPayload(value: unknown): ShellHistoryPayload | 
       buildIntent: asString(shellState.buildIntent),
       builderSeed: (shellState.builderSeed as unknown | null) ?? null,
       buildView: 'moon' as const,
+      moonRunId: asString(shellState.moonRunId),
     },
     chatOpen: Boolean(value.chatOpen),
   };
@@ -113,15 +117,15 @@ export function parseShellLocationState(search: string, pathname: string = windo
   const runMatch = appRelative.match(/^run\/(.+)/);
   if (runMatch) {
     const runId = runMatch[1];
-    const dynamicTab: DynamicTab = {
-      id: runDetailShellId(runId),
-      kind: 'run-detail',
-      label: `Run ${runId}`,
-      closable: true,
-      runId,
-    };
+    // Moon owns run rendering — route into Moon's canvas with moonRunId set.
+    // The legacy dashboard run-detail surface is deprecated.
     return {
-      shellState: { ...shellState, activeTabId: dynamicTab.id, dynamicTabs: [dynamicTab] },
+      shellState: {
+        ...shellState,
+        activeTabId: 'build',
+        buildView: 'moon',
+        moonRunId: runId,
+      },
       chatOpen: false,
     };
   }
@@ -237,18 +241,13 @@ export function parseShellLocationState(search: string, pathname: string = windo
   if (page === 'run-detail') {
     const runId = asString(params.get('run'));
     if (runId) {
-      const dynamicTab: DynamicTab = {
-        id: runDetailShellId(runId),
-        kind: 'run-detail',
-        label: `Run ${runId}`,
-        closable: true,
-        runId,
-      };
+      // Legacy query form — also routes into Moon for consistency.
       return {
         shellState: {
           ...shellState,
-          activeTabId: dynamicTab.id,
-          dynamicTabs: [dynamicTab],
+          activeTabId: 'build',
+          buildView: 'moon',
+          moonRunId: runId,
         },
         chatOpen: false,
       };
@@ -277,6 +276,10 @@ export function parseShellLocationState(search: string, pathname: string = windo
 export function buildShellUrl(state: ShellState, chatOpen: boolean): string {
   // Path-based routes for clean URLs
   if (state.activeTabId === 'build') {
+    // Moon-owned run view: /app/run/{runId}
+    if (state.moonRunId) {
+      return `/app/run/${state.moonRunId}`;
+    }
     const params = new URLSearchParams();
     if (state.buildWorkflowId) params.set('workflow', state.buildWorkflowId);
     if (state.buildIntent) params.set('intent', state.buildIntent);

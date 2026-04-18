@@ -1,6 +1,17 @@
 export type DragDropKind = 'node' | 'edge' | 'append';
 
+/**
+ * Moon's view mode:
+ *   - 'build' (default): user is composing / editing a workflow graph.
+ *   - 'run': user is observing a specific workflow run. The canvas renders
+ *     the run's DAG, rings are tinted by job status, and the dock shows
+ *     receipts + health. Entered via ENTER_RUN_VIEW (from URL /app/run/:id
+ *     or DISPATCH_SUCCESS after a build-mode dispatch).
+ */
+export type MoonViewMode = 'build' | 'run';
+
 export interface MoonBuildState {
+  viewMode: MoonViewMode;
   activeNodeId: string | null;
   selectedNodeId: string | null;
   selectedEdgeId: string | null;
@@ -18,7 +29,15 @@ export interface MoonBuildState {
   emptyMode: 'choice' | 'selection' | 'trigger-picker' | 'compose' | null;
   selectedTrigger: { id: string; label: string; icon: string; actionValue: string } | null;
   activeRunId: string | null;
+  /** How Moon entered run-view: via URL (external) or DISPATCH_SUCCESS. */
+  runViewSource: 'url' | 'dispatch' | null;
   runViewOpen: boolean;
+  /**
+   * Which run job is selected in run-view mode. Separate from selectedNodeId
+   * so the build-mode reducer state (OrbitNode selection) and run-mode
+   * reducer state (RunJob selection) don't collide.
+   */
+  selectedRunJobId: string | null;
 }
 
 export type MoonBuildAction =
@@ -46,11 +65,15 @@ export type MoonBuildAction =
   | { type: 'EMPTY_RESET' }
   | { type: 'SELECT_TRIGGER'; trigger: { id: string; label: string; icon: string; actionValue: string } }
   | { type: 'DISPATCH_SUCCESS'; runId: string }
+  | { type: 'ENTER_RUN_VIEW'; runId: string; source: 'url' | 'dispatch' }
+  | { type: 'EXIT_RUN_VIEW' }
+  | { type: 'SELECT_RUN_JOB'; jobId: string | null }
   | { type: 'CLOSE_RUN' }
   | { type: 'TOGGLE_RUN_VIEW' }
   | { type: 'RESET' };
 
 export const initialMoonBuildState: MoonBuildState = {
+  viewMode: 'build',
   activeNodeId: null,
   selectedNodeId: null,
   selectedEdgeId: null,
@@ -68,7 +91,9 @@ export const initialMoonBuildState: MoonBuildState = {
   emptyMode: 'choice',
   selectedTrigger: null,
   activeRunId: null,
+  runViewSource: null,
   runViewOpen: false,
+  selectedRunJobId: null,
 };
 
 export function moonBuildReducer(state: MoonBuildState, action: MoonBuildAction): MoonBuildState {
@@ -132,9 +157,50 @@ export function moonBuildReducer(state: MoonBuildState, action: MoonBuildAction)
     case 'SELECT_TRIGGER':
       return { ...state, selectedTrigger: action.trigger, emptyMode: null };
     case 'DISPATCH_SUCCESS':
-      return { ...state, activeRunId: action.runId, runViewOpen: true, releaseOpen: false };
+      // Delegate to ENTER_RUN_VIEW so build→run transition is one codepath.
+      return moonBuildReducer(state, { type: 'ENTER_RUN_VIEW', runId: action.runId, source: 'dispatch' });
+    case 'ENTER_RUN_VIEW':
+      return {
+        ...state,
+        viewMode: 'run',
+        activeRunId: action.runId,
+        runViewSource: action.source,
+        runViewOpen: true,
+        // Clear build-mode transient state that doesn't apply in run view.
+        selectedNodeId: null,
+        selectedEdgeId: null,
+        dragItemId: null,
+        dragDropKind: null,
+        previewTarget: null,
+        pendingCatalogId: null,
+        releaseOpen: false,
+        popoutOpen: false,
+        openDock: null,
+        selectedRunJobId: null,
+        emptyMode: null,
+      };
+    case 'EXIT_RUN_VIEW':
+      return {
+        ...state,
+        viewMode: 'build',
+        activeRunId: null,
+        runViewSource: null,
+        runViewOpen: false,
+        selectedRunJobId: null,
+        // Restore build-mode default empty state on exit.
+        emptyMode: 'choice',
+      };
+    case 'SELECT_RUN_JOB':
+      return { ...state, selectedRunJobId: action.jobId };
     case 'CLOSE_RUN':
-      return { ...state, activeRunId: null, runViewOpen: false };
+      return {
+        ...state,
+        viewMode: 'build',
+        activeRunId: null,
+        runViewSource: null,
+        runViewOpen: false,
+        selectedRunJobId: null,
+      };
     case 'TOGGLE_RUN_VIEW':
       return { ...state, runViewOpen: !state.runViewOpen };
     case 'RESET':

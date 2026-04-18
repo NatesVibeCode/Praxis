@@ -16,6 +16,7 @@ from adapters.context_adapter import ContextCompilerAdapter
 from adapters.file_writer_adapter import FileWriterAdapter
 from adapters.output_parser_adapter import OutputParserAdapter
 from adapters.verify_adapter import VerifyAdapter
+from contracts.domain import SUPPORTED_ADAPTER_TYPES
 
 _WORKFLOW_TRANSPORT_ADAPTER_TYPES: tuple[str, ...] = (
     "api_task",
@@ -33,13 +34,15 @@ _WORKFLOW_CORE_ADAPTER_TYPES: tuple[str, ...] = (
     "deterministic_task",
     "control_operator",
 )
-_WORKFLOW_RUNTIME_ADAPTER_TYPES: frozenset[str] = frozenset(
+_WORKFLOW_RUNTIME_ADAPTER_TYPES: frozenset[str] = SUPPORTED_ADAPTER_TYPES
+
+assert _WORKFLOW_RUNTIME_ADAPTER_TYPES == frozenset(
     (
         *_WORKFLOW_CORE_ADAPTER_TYPES,
         *_WORKFLOW_TRANSPORT_ADAPTER_TYPES,
         *_WORKFLOW_AUXILIARY_ADAPTER_TYPES,
     )
-)
+), "runtime adapter tuples drifted from contracts.SUPPORTED_ADAPTER_TYPES"
 
 
 def workflow_runtime_adapter_types() -> tuple[str, ...]:

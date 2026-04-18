@@ -94,8 +94,7 @@
   }
 
   .moon-run--loading,
-  .is-loading .moon-run__job-output,
-  .is-loading .moon-run__graph {
+  .is-loading .moon-run__job-output {
     opacity: 0.85;
   }
 

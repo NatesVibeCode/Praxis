@@ -47,7 +47,10 @@ logger = logging.getLogger(__name__)
 
 # Channels
 CHANNEL_BUILD_STATE = "build_state"
+CHANNEL_CACHE_INVALIDATION = "cache_invalidation"
+CHANNEL_DATASET = "dataset_curation"
 CHANNEL_JOB_LIFECYCLE = "job_lifecycle"
+CHANNEL_RECEIPT = "receipt"
 CHANNEL_SEMANTIC_ASSERTION = "semantic_assertion"
 CHANNEL_SYSTEM = "system"
 CHANNEL_WEBHOOK = "webhook"

@@ -12,6 +12,7 @@ import asyncio
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -247,6 +248,37 @@ def clear_workflow_outbox_schema_cache() -> None:
     _schema_sql_text.cache_clear()
 
 
+async def sample_workflow_outbox_freshness(
+    conn: asyncpg.Connection,
+    *,
+    run_id: str,
+    consumer_evidence_seq: int | None = None,
+    projection_id: str = "workflow_outbox_run",
+    observed_at: datetime | None = None,
+) -> Any:
+    """Measure subscriber lag against the outbox head for one run.
+
+    ``consumer_evidence_seq`` is the subscriber's own watermark from
+    :class:`WorkflowOutboxCursor`. ``None`` is treated as ``0`` — i.e.
+    the subscriber has not consumed anything yet.
+    """
+
+    from .projection_freshness import sample_outbox_cursor_freshness
+
+    normalized_run_id = _require_text(run_id, field_name="run_id")
+    normalized_consumer = _optional_non_negative_int(
+        consumer_evidence_seq,
+        field_name="consumer_evidence_seq",
+    )
+    return await sample_outbox_cursor_freshness(
+        conn,
+        run_id=normalized_run_id,
+        consumer_evidence_seq=normalized_consumer,
+        projection_id=projection_id,
+        observed_at=observed_at,
+    )
+
+
 __all__ = [
     "PostgresWorkflowOutboxSubscriber",
     "WorkflowOutboxBatch",
@@ -255,4 +287,5 @@ __all__ = [
     "bootstrap_workflow_outbox_schema",
     "clear_workflow_outbox_schema_cache",
     "fetch_workflow_outbox_batch",
+    "sample_workflow_outbox_freshness",
 ]

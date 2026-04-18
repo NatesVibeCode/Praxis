@@ -160,25 +160,39 @@ def _build_clean_env() -> dict[str, str]:
 
 
 def normalize_command_parts_for_docker(command_parts: list[str]) -> list[str]:
-    """Normalize CLI arguments for Docker-sandboxed execution."""
+    """Normalize CLI arguments for Docker-sandboxed execution.
+
+    Adds the flags each CLI requires to run non-interactively and write files
+    without prompting. Called from both cli_llm and execution_backends so the
+    same behavior applies regardless of dispatch path.
+    """
     if not command_parts:
         return []
 
     normalized = list(command_parts)
     cmd0_name = os.path.basename(normalized[0]).strip().lower()
-    if cmd0_name != "codex":
+
+    if cmd0_name == "claude":
+        # Claude CLI refuses file writes without `--permission-mode bypassPermissions`
+        # when run non-interactively. Inject immediately after the binary so flag
+        # ordering is stable and idempotent.
+        if "--permission-mode" not in normalized:
+            normalized = [normalized[0], "--permission-mode", "bypassPermissions", *normalized[1:]]
         return normalized
 
-    try:
-        exec_idx = [part.strip().lower() for part in normalized].index("exec")
-    except ValueError:
+    if cmd0_name == "codex":
+        try:
+            exec_idx = [part.strip().lower() for part in normalized].index("exec")
+        except ValueError:
+            return normalized
+
+        normalized = [part for part in normalized if part != "--full-auto"]
+        if "--skip-git-repo-check" not in normalized:
+            normalized.insert(exec_idx + 1, "--skip-git-repo-check")
+        if "--dangerously-bypass-approvals-and-sandbox" not in normalized:
+            normalized.insert(exec_idx + 1, "--dangerously-bypass-approvals-and-sandbox")
         return normalized
 
-    normalized = [part for part in normalized if part != "--full-auto"]
-    if "--skip-git-repo-check" not in normalized:
-        normalized.insert(exec_idx + 1, "--skip-git-repo-check")
-    if "--dangerously-bypass-approvals-and-sandbox" not in normalized:
-        normalized.insert(exec_idx + 1, "--dangerously-bypass-approvals-and-sandbox")
     return normalized
 
 

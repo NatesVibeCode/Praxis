@@ -3,6 +3,7 @@ import { useBuildPayload } from '../shared/hooks/useBuildPayload';
 import { compileDefinition } from '../shared/buildController';
 import { presentBuild } from './moonBuildPresenter';
 import type { OrbitNode, OrbitEdge, RunJobStatus } from './moonBuildPresenter';
+import { presentRun } from './moonRunPresenter';
 import { useLiveRunSnapshot } from '../dashboard/useLiveRunSnapshot';
 import { moonBuildReducer, initialMoonBuildState } from './moonBuildReducer';
 import { MoonGlyph } from './MoonGlyph';
@@ -11,6 +12,7 @@ import { MoonNodeDetail, type AuthorityActionMeta } from './MoonNodeDetail';
 import { MoonActionDock } from './MoonActionDock';
 import { MoonReleaseTray } from './MoonReleaseTray';
 import { MoonRunPanel } from './MoonRunPanel';
+import { MoonRunOverlay } from './MoonRunOverlay';
 import { MoonDragGhost } from './MoonDragGhost';
 import { MoonEdges, getEdgeGeometry } from './MoonEdges';
 import { useMoonDrag } from './useMoonDrag';
@@ -53,6 +55,11 @@ const EXAMPLE_PROMPTS = [
 
 interface Props {
   workflowId: string | null;
+  /**
+   * When set, Moon renders a run-view over its canvas for this run_id.
+   * The URL `/app/run/:id` routes here via shell state.
+   */
+  runId?: string | null;
   onBack?: () => void;
   onWorkflowCreated?: (id: string) => void;
   onViewRun?: (runId: string) => void;
@@ -296,7 +303,7 @@ function shouldKeepEdgeMenusOpen(target: EventTarget | null): boolean {
   );
 }
 
-export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun, onDraftStateChange, initialMode }: Props) {
+export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, onViewRun, onDraftStateChange, initialMode }: Props) {
   const { payload, loading, error, mutate, reload, setPayload } = useBuildPayload(workflowId);
   const [state, dispatch] = useReducer(moonBuildReducer, {
     ...initialMoonBuildState,
@@ -397,16 +404,43 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
     setMutationError((current) => current ?? error);
   }, [error]);
 
-  // Live run snapshot — active when a dispatch has produced a run
-  const { run: activeRun } = useLiveRunSnapshot(state.activeRunId);
+  // Sync external runId prop (from URL /app/run/:id) with reducer state.
+  // Enter run view when the URL brings in a new run_id; exit when it clears.
+  useEffect(() => {
+    if (runId && runId !== state.activeRunId) {
+      dispatch({ type: 'ENTER_RUN_VIEW', runId, source: 'url' });
+    } else if (!runId && state.viewMode === 'run' && state.runViewSource === 'url') {
+      dispatch({ type: 'EXIT_RUN_VIEW' });
+    }
+    // Intentionally depend only on the prop — internal DISPATCH_SUCCESS
+    // paths manage their own state transitions.
+  }, [runId]);
+
+  // Live run snapshot — active when a dispatch has produced a run OR when
+  // the URL route is showing an existing run via /app/run/:id.
+  const { run: activeRun, loading: activeRunLoading, error: activeRunError } = useLiveRunSnapshot(state.activeRunId);
   const runJobs: RunJobStatus[] | undefined = useMemo(() => {
     if (!activeRun?.jobs?.length) return undefined;
     return activeRun.jobs.map(j => ({ label: j.label, status: j.status }));
   }, [activeRun]);
 
   const viewModel = useMemo(
-    () => presentBuild(payload, state.selectedNodeId, state.activeNodeId, runJobs),
-    [payload, state.selectedNodeId, state.activeNodeId, runJobs],
+    () => {
+      if (state.viewMode === 'run') {
+        // Run mode: render the run's DAG with status-tinted rings.
+        return presentRun(activeRun, state.selectedRunJobId);
+      }
+      return presentBuild(payload, state.selectedNodeId, state.activeNodeId, runJobs);
+    },
+    [
+      state.viewMode,
+      activeRun,
+      state.selectedRunJobId,
+      payload,
+      state.selectedNodeId,
+      state.activeNodeId,
+      runJobs,
+    ],
   );
 
   const contractSuggestionExtras = useMemo(
@@ -588,7 +622,11 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
   // - after compile (advanceQueued=true)
   // - after node action changes firstUnresolvedId
   // - initial load when no active node set
+  //
+  // Skipped entirely in run view — run-mode selection is user-driven via
+  // SELECT_RUN_JOB; the build-mode "next unresolved step" concept doesn't apply.
   useEffect(() => {
+    if (state.viewMode === 'run') return;
     if (pinnedSelectionRef.current) {
       const pinnedNodeId = pinnedSelectionRef.current;
       if (state.selectedNodeId === pinnedNodeId) {
@@ -612,7 +650,7 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
     if (!state.activeNodeId && viewModel.firstUnresolvedId) {
       dispatch({ type: 'ADVANCE_ACTIVE', nextUnresolvedId: viewModel.firstUnresolvedId });
     }
-  }, [state.advanceQueued, state.activeNodeId, viewModel.firstUnresolvedId, viewModel.nodes]);
+  }, [state.viewMode, state.advanceQueued, state.activeNodeId, viewModel.firstUnresolvedId, viewModel.nodes]);
 
   // Apply action to a node — local mutation for UI-built chains, API for compiled chains
   const handleNodeAction = useCallback(async (nodeId: string, actionValue: string) => {
@@ -972,8 +1010,14 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
     }
   }, [catalog, handleApplyGate]);
 
-  // Click fallback: if a catalog item is staged, clicking a node applies it
+  // Click fallback: if a catalog item is staged, clicking a node applies it.
+  // In run-view mode, clicking a node selects the run job for the detail dock
+  // (no catalog/build mutations apply).
   const handleNodeClick = useCallback((nodeId: string, isSelected: boolean) => {
+    if (state.viewMode === 'run') {
+      dispatch({ type: 'SELECT_RUN_JOB', jobId: isSelected ? null : nodeId });
+      return;
+    }
     if (state.pendingCatalogId) {
       const catalogId = state.pendingCatalogId;
       dispatch({ type: 'CLEAR_CATALOG' });
@@ -986,7 +1030,7 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
     } else {
       dispatch({ type: 'SELECT_NODE', nodeId });
     }
-  }, [state.pendingCatalogId, state.activeNodeId, applyCatalogToNode]);
+  }, [state.viewMode, state.pendingCatalogId, state.activeNodeId, applyCatalogToNode]);
 
   const appendNode = useCallback(async (label?: string) => {
     if (!payload?.build_graph) return;
@@ -1217,8 +1261,29 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
     releaseOpen ? 'moon-middle--release-open' : '',
   ].filter(Boolean).join(' ');
 
+  // Run-view cancel: fires the public v1 cancel endpoint. The run's next
+  // SSE event will reflect the terminal status automatically.
+  const handleRunCancel = useCallback(async () => {
+    const runIdToCancel = state.activeRunId;
+    if (!runIdToCancel) return;
+    try {
+      await fetch(`/v1/runs/${encodeURIComponent(runIdToCancel)}:cancel`, { method: 'POST' });
+    } catch (err) {
+      setMutationError(err instanceof Error ? err.message : 'Cancel failed');
+    }
+  }, [state.activeRunId]);
+
+  const handleRunExit = useCallback(() => {
+    dispatch({ type: 'EXIT_RUN_VIEW' });
+    if (onBack) onBack();
+  }, [onBack]);
+
   return (
-    <div className="moon-page" style={MOON_LAYOUT_CSS_VARS} data-moon-glow-profile={moonGlowProfile}>
+    <div
+      className={`moon-page${state.viewMode === 'run' ? ' moon-page--run-view' : ''}`}
+      style={MOON_LAYOUT_CSS_VARS}
+      data-moon-glow-profile={moonGlowProfile}
+    >
       {mutationError && (
         <div className="moon-error-toast" role="alert" aria-live="polite">
           {mutationError}
@@ -1226,6 +1291,17 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
             &times;
           </button>
         </div>
+      )}
+      {state.viewMode === 'run' && (
+        <MoonRunOverlay
+          run={activeRun}
+          loading={activeRunLoading}
+          error={activeRunError}
+          selectedJobId={state.selectedRunJobId}
+          onSelectJob={(jobId) => dispatch({ type: 'SELECT_RUN_JOB', jobId })}
+          onExit={handleRunExit}
+          onCancel={handleRunCancel}
+        />
       )}
       <div className="moon-body">
         {/* Middle row */}
@@ -1456,7 +1532,9 @@ export function MoonBuildPage({ workflowId, onBack, onWorkflowCreated, onViewRun
                     );
                   })}
                   {viewModel.nodes.map((node) => {
-                    const isSelected = node.id === state.selectedNodeId;
+                    const isSelected = state.viewMode === 'run'
+                      ? node.id === state.selectedRunJobId
+                      : node.id === state.selectedNodeId;
                     const position = getMoonNodeCanvasPosition(node);
                     return (
                       <div

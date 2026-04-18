@@ -4,7 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from runtime._workflow_database import resolve_runtime_database_url
+from runtime import _workflow_database as workflow_database_module
+from runtime._workflow_database import (
+    _try_resolve_docker_database_url,
+    resolve_runtime_database_url,
+)
 from storage.postgres.validators import PostgresConfigurationError
 
 
@@ -90,3 +94,43 @@ def test_resolve_runtime_database_url_fails_closed_when_required_and_unconfigure
 
     with pytest.raises(PostgresConfigurationError, match="WORKFLOW_DATABASE_URL must be set"):
         resolve_runtime_database_url(repo_root=tmp_path, required=True)
+
+
+def test_docker_database_url_includes_explicit_postgres_role(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Guard against libpq falling back to the OS user when the DSN omits a role."""
+
+    compose_file = tmp_path / "docker-compose.yml"
+    compose_file.write_text("services:\n  postgres:\n", encoding="utf-8")
+
+    class _StubCompletedProcess:
+        def __init__(self, stdout: str) -> None:
+            self.stdout = stdout
+
+    docker_outputs = iter(
+        [
+            _StubCompletedProcess("abc123\n"),
+            _StubCompletedProcess("healthy\n"),
+            _StubCompletedProcess("0.0.0.0:5432\n"),
+        ]
+    )
+
+    def _fake_subprocess_run(*_args, **_kwargs):
+        return next(docker_outputs)
+
+    monkeypatch.setattr(
+        workflow_database_module.subprocess,
+        "run",
+        _fake_subprocess_run,
+    )
+
+    resolved = _try_resolve_docker_database_url(tmp_path)
+
+    assert resolved == "postgresql://postgres@127.0.0.1:5432/praxis"
+    assert resolved is not None
+    assert "postgres@" in resolved, (
+        "docker-resolved DSN must pin the canonical postgres role so libpq "
+        "never falls back to the OS user (see BUG-5A367F0C)"
+    )

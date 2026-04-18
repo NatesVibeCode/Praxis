@@ -250,7 +250,9 @@ export function AppShell() {
 
   const activateTab = useCallback((tabId: string, historyMode: HistoryMode = 'push', options?: ShellTransitionOptions) => {
     const current = stateRef.current;
-    const nextState = { ...current, activeTabId: tabId };
+    // Clearing moonRunId on any tab switch: the run view is URL-addressable
+    // via /app/run/:id; leaving the surface exits run mode.
+    const nextState: ShellState = { ...current, activeTabId: tabId, moonRunId: null };
     if (tabId === 'build' && !current.buildWorkflowId) {
       nextState.buildView = 'moon';
     }
@@ -272,6 +274,7 @@ export function AppShell() {
       buildIntent: opts?.intent ?? null,
       builderSeed: opts?.seed ?? null,
       buildView: opts?.view ?? current.buildView,
+      moonRunId: null,
     };
     if (shouldBlockBuildDraftExit(current, nextState, options)) return;
     commitShellState(nextState, historyMode);
@@ -282,18 +285,14 @@ export function AppShell() {
   }, [openBuild]);
 
   const openRunDetail = useCallback((runId: string, historyMode: HistoryMode = 'push') => {
-    const nextTab: DynamicTab = {
-      id: runDetailShellId(runId),
-      kind: 'run-detail',
-      label: `Run ${runId}`,
-      closable: true,
-      runId,
-    };
+    // Moon owns run rendering — route into the static build surface with
+    // moonRunId set rather than creating a legacy run-detail dynamic tab.
     const current = stateRef.current;
     const nextState: ShellState = {
       ...current,
-      activeTabId: nextTab.id,
-      dynamicTabs: upsertDynamicTab(current.dynamicTabs, nextTab),
+      activeTabId: 'build',
+      buildView: 'moon',
+      moonRunId: runId,
     };
     if (shouldBlockBuildDraftExit(current, nextState)) return;
     commitShellState(nextState, historyMode);
@@ -513,6 +512,7 @@ export function AppShell() {
       return (
         <MoonBuildPage
           workflowId={state.buildWorkflowId}
+          runId={state.moonRunId}
           onBack={() => activateTab('dashboard')}
           onWorkflowCreated={(wfId) => openBuild(
             { workflowId: wfId, intent: null, seed: null, view: 'moon' },

@@ -1,16 +1,18 @@
 """Rate-limit prober — lightweight CLI pings to detect provider availability.
 
-Sends a trivial prompt to the cheapest model per provider and records the
-outcome to the circuit breaker. This lets the system detect rate-limit
-recovery without waiting for real jobs to fail.
+Dispatches a trivial prompt to the cheapest model per provider through the
+sandbox docker runner (``run_in_docker``) and records the outcome to the
+circuit breaker. Running through the sandbox means probes always execute in
+a fresh ephemeral container with the canonical image, mounted CLI auth, and
+no host session env (``CLAUDECODE``) leakage — regardless of whether the
+heartbeat runs on the host or inside the worker container.
 
 Designed to run as a heartbeat module a few times per day.
 """
 from __future__ import annotations
 
 import logging
-import os
-import subprocess
+import shlex
 import time
 from dataclasses import dataclass
 from typing import Literal
@@ -22,7 +24,7 @@ _log = logging.getLogger(__name__)
 _PROBE_MODELS: tuple[tuple[str, str], ...] = (
     ("google", "gemini-2.5-flash"),
     ("openai", "gpt-5.4-mini"),
-    ("anthropic", "claude-haiku-4-5"),
+    ("anthropic", "claude-haiku-4-5-20251001"),
 )
 
 _PROBE_PROMPT = "Reply with the single word OK."
@@ -40,16 +42,11 @@ class ProbeResult:
 
 def _get_cmd_template(provider_slug: str, model_slug: str) -> list[str] | None:
     """Load CLI command template from provider_model_candidates."""
-    try:
-        from storage.postgres.connection import (
-            SyncPostgresConnection,
-            get_workflow_pool,
-            resolve_workflow_database_url,
-        )
+    from runtime._workflow_database import resolve_runtime_database_url
+    from storage.postgres.connection import SyncPostgresConnection, get_workflow_pool
 
-        conn_url = os.environ.get("WORKFLOW_DATABASE_URL")
-        if not conn_url:
-            conn_url = resolve_workflow_database_url()
+    try:
+        conn_url = resolve_runtime_database_url(required=True)
         conn = SyncPostgresConnection(get_workflow_pool(env={"WORKFLOW_DATABASE_URL": conn_url}))
         rows = conn.execute(
             """SELECT cli_config FROM provider_model_candidates
@@ -73,7 +70,7 @@ def _get_cmd_template(provider_slug: str, model_slug: str) -> list[str] | None:
 
 
 def probe_provider(provider_slug: str, model_slug: str) -> ProbeResult:
-    """Send a minimal CLI prompt and classify the result."""
+    """Send a minimal CLI prompt via the sandbox docker runner and classify."""
     cmd = _get_cmd_template(provider_slug, model_slug)
     if cmd is None:
         return ProbeResult(
@@ -81,52 +78,20 @@ def probe_provider(provider_slug: str, model_slug: str) -> ProbeResult:
             status="error", detail="no CLI config found", latency_ms=0,
         )
 
-    env = dict(os.environ)
-    # Ensure all declared API key env vars are populated from available aliases
-    try:
-        from registry.provider_execution_registry import get_profile
-        profile = get_profile(provider_slug)
-        if profile and profile.api_key_env_vars:
-            # If any declared key var has a value, copy it to all others
-            resolved = next((env[k] for k in profile.api_key_env_vars if k in env), None)
-            if resolved:
-                for k in profile.api_key_env_vars:
-                    if k not in env:
-                        env[k] = resolved
-    except Exception:
-        pass
+    from adapters.docker_runner import normalize_command_parts_for_docker, run_in_docker
+
+    normalized = normalize_command_parts_for_docker(cmd)
+    command = shlex.join(normalized)
 
     start = time.monotonic()
     try:
-        proc = subprocess.run(
-            cmd, input=_PROBE_PROMPT, capture_output=True, text=True,
-            timeout=_PROBE_TIMEOUT_S, env=env,
-        )
-        latency = int((time.monotonic() - start) * 1000)
-
-        if proc.returncode == 0:
-            return ProbeResult(
-                provider_slug=provider_slug, model_slug=model_slug,
-                status="ok", detail="probe succeeded", latency_ms=latency,
-            )
-
-        stderr = proc.stderr or ""
-        stderr_lower = stderr.lower()
-        if "429" in stderr or "rate limit" in stderr_lower or "quota" in stderr_lower:
-            return ProbeResult(
-                provider_slug=provider_slug, model_slug=model_slug,
-                status="rate_limited", detail=stderr[:200], latency_ms=latency,
-            )
-
-        return ProbeResult(
-            provider_slug=provider_slug, model_slug=model_slug,
-            status="error", detail=f"exit {proc.returncode}: {stderr[:200]}", latency_ms=latency,
-        )
-    except subprocess.TimeoutExpired:
-        latency = int((time.monotonic() - start) * 1000)
-        return ProbeResult(
-            provider_slug=provider_slug, model_slug=model_slug,
-            status="error", detail="timeout", latency_ms=latency,
+        result = run_in_docker(
+            command=command,
+            stdin_text=_PROBE_PROMPT,
+            timeout=_PROBE_TIMEOUT_S,
+            network=True,
+            provider_slug=provider_slug,
+            auth_mount_policy="provider_scoped",
         )
     except Exception as exc:
         latency = int((time.monotonic() - start) * 1000)
@@ -134,6 +99,33 @@ def probe_provider(provider_slug: str, model_slug: str) -> ProbeResult:
             provider_slug=provider_slug, model_slug=model_slug,
             status="error", detail=str(exc)[:200], latency_ms=latency,
         )
+
+    latency = result.latency_ms or int((time.monotonic() - start) * 1000)
+
+    if result.timed_out:
+        return ProbeResult(
+            provider_slug=provider_slug, model_slug=model_slug,
+            status="error", detail="timeout", latency_ms=latency,
+        )
+
+    if result.exit_code == 0:
+        return ProbeResult(
+            provider_slug=provider_slug, model_slug=model_slug,
+            status="ok", detail="probe succeeded", latency_ms=latency,
+        )
+
+    stderr = result.stderr or ""
+    stderr_lower = stderr.lower()
+    if "429" in stderr or "rate limit" in stderr_lower or "quota" in stderr_lower:
+        return ProbeResult(
+            provider_slug=provider_slug, model_slug=model_slug,
+            status="rate_limited", detail=stderr[:200], latency_ms=latency,
+        )
+
+    return ProbeResult(
+        provider_slug=provider_slug, model_slug=model_slug,
+        status="error", detail=f"exit {result.exit_code}: {stderr[:200]}", latency_ms=latency,
+    )
 
 
 def probe_all() -> list[ProbeResult]:

@@ -14,14 +14,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from storage.postgres.connection import resolve_workflow_database_url
+from runtime._workflow_database import resolve_runtime_database_url
 from storage.postgres.validators import PostgresConfigurationError
 
 _log = logging.getLogger(__name__)
@@ -71,19 +70,25 @@ def _value_type_label(value: Any) -> str:
 
 
 def _resolve_database_url() -> str | None:
-    """Return the Postgres DSN for configuration authority."""
-    raw = os.environ.get(_DATABASE_URL_ENV)
-    if raw is None:
-        return None
+    """Return the Postgres DSN for configuration authority.
+
+    Uses the canonical runtime resolver so process env, launchd plist, repo
+    .env, and docker-compose fallbacks all share one code path.
+    """
     try:
-        return resolve_workflow_database_url(env={_DATABASE_URL_ENV: raw})
+        return resolve_runtime_database_url(required=False)
     except PostgresConfigurationError:
         return None
 
 
 def _require_database_url() -> str:
     """Return the authoritative Postgres DSN or fail closed."""
-    dsn = _resolve_database_url()
+    try:
+        dsn = resolve_runtime_database_url(required=True)
+    except PostgresConfigurationError as exc:
+        raise RuntimeError(
+            f"config_registry requires explicit {_DATABASE_URL_ENV} Postgres authority"
+        ) from exc
     if dsn is None:
         raise RuntimeError(
             f"config_registry requires explicit {_DATABASE_URL_ENV} Postgres authority"

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.praxis.authority-memory-refresh</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/python3</string>
+        <string>/Users/nate/Praxis/scripts/refresh_authority_memory.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/nate/Praxis</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PYTHONPATH</key>
+        <string>/Users/nate/Praxis/Code&amp;DBs/Workflow</string>
+        <key>WORKFLOW_DATABASE_URL</key>
+        <string>postgresql://postgres@praxis-postgres-1.orb.local:5432/praxis</string>
+    </dict>
+
+    <key>StartInterval</key>
+    <integer>1800</integer>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/nate/Praxis/artifacts/authority_memory_refresh.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/nate/Praxis/artifacts/authority_memory_refresh.err</string>
+</dict>
+</plist>

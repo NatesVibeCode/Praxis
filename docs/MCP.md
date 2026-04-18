@@ -1,6 +1,6 @@
 # Praxis MCP Tools
 
-Praxis exposes 59 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
+Praxis exposes 61 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
 
 CLI discovery is generated from the same catalog metadata:
 
@@ -29,10 +29,12 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_ingest` | `knowledge` | `advanced` | - | `write` | Store new information in the knowledge graph so it can be recalled later via praxis_recall. Content is automatically entity-extracted, deduplicated, and embedded for vector search. |
 | `praxis_recall` | `knowledge` | `stable` | `workflow recall` | `read` | Search the platform's knowledge graph for information about modules, functions, decisions, patterns, bugs, constraints, people, or any previously ingested content. Returns ranked results with confidence scores and how each result was found (text match, graph traversal, or vector similarity). |
 | `praxis_research` | `knowledge` | `stable` | - | `read` | Search the knowledge graph specifically for research findings and analysis results. Lighter-weight than praxis_recall — focused on retrieving prior research. |
+| `praxis_authority_memory_refresh` | `operations` | `advanced` | - | `write` | Project authority FKs into memory_edges so the knowledge graph reflects actual structure. Upserts canonical-class edges for roadmap parent_of, roadmap resolves_bug, operator_object_relations mirror, and workflow_build_intent implements_build. Idempotent; safe to re-run. |
 | `praxis_bug_replay_provenance_backfill` | `operations` | `advanced` | - | `write` | Backfill replay provenance from canonical bug and receipt authority. |
 | `praxis_circuits` | `operations` | `stable` | `workflow circuits` | `read`, `write` | Inspect effective circuit-breaker state or apply a durable manual override for one provider. |
+| `praxis_dataset` | `operations` | `stable` | `workflow dataset` | `read`, `write` | Praxis dataset refinery: turn evidence-linked execution receipts into curated, lineage-preserving training and eval data for specialist SLMs (slm/review first). |
 | `praxis_diagnose` | `operations` | `stable` | `workflow diagnose` | `read` | Diagnose one workflow run by id. Combines the receipt, failure classification, and provider health into a single operator-facing report. |
-| `praxis_health` | `operations` | `stable` | `workflow health` | `read` | Full system health check — Postgres connectivity, disk space, operator panel state, workflow lane recommendations, context cache stats, and memory graph health. |
+| `praxis_health` | `operations` | `stable` | `workflow health` | `read` | Full system health check — Postgres connectivity, disk space, operator panel state, workflow lane recommendations, context cache stats, memory graph health, and projection freshness (event-log cursors + process-cache refresh lag). |
 | `praxis_heartbeat` | `operations` | `advanced` | - | `read`, `write` | Run or check the knowledge graph maintenance cycle. The heartbeat syncs receipts, bugs, constraints, and friction events into the knowledge graph, mines relationships between entities, generates daily/weekly rollups, and archives stale nodes. |
 | `praxis_metrics_reset` | `operations` | `advanced` | - | `write` | Reset observability metrics through explicit operator maintenance authority. |
 | `praxis_reload` | `operations` | `advanced` | - | `write` | Clear all in-process caches so DB and config changes take effect without restarting Claude Desktop. |
@@ -89,7 +91,7 @@ CLI discovery is generated from the same catalog metadata:
 - When to use: Search for existing code by behavior with hybrid retrieval before building something new.
 - When not to use: Do not use it for architectural decisions or receipt analytics.
 - Recommended alias: `workflow discover`
-- Selector: `action`; default `search`; values `search`, `reindex`, `stats`
+- Selector: `action`; default `search`; values `search`, `reindex`, `stats`, `stale_check`
 - Required args: (none)
 
 Example input:
@@ -424,6 +426,25 @@ Example input:
 
 ### Operations
 
+#### `praxis_authority_memory_refresh`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`, `mutates-state`
+- Risks: `write`
+- CLI entrypoint: `workflow tools call praxis_authority_memory_refresh`
+- CLI schema help: `workflow tools describe praxis_authority_memory_refresh`
+- When to use: Refresh the authority-to-memory projection after bulk authority writes so discover and recall see current structure.
+- When not to use: Do not use it for reading the graph; use praxis_discover or praxis_recall.
+- Selector: none
+- Required args: (none)
+
+Example input:
+
+```json
+{}
+```
+
 #### `praxis_bug_replay_provenance_backfill`
 
 - Surface: `operations`
@@ -464,6 +485,31 @@ Example input:
 ```json
 {
   "action": "list"
+}
+```
+
+#### `praxis_dataset`
+
+- Surface: `operations`
+- Tier: `stable`
+- Badges: `stable`, `operations`, `alias:dataset`, `mutates-state`
+- Risks: `read`, `write`
+- CLI entrypoint: `workflow dataset`
+- CLI schema help: `workflow tools describe praxis_dataset`
+- When to use: Curate, score, and promote evidence-linked training/eval data per specialist; export reproducible JSONL with manifest hashes.
+- When not to use: Do not use for raw SQL or for writing receipts/decisions directly — those have their own surfaces.
+- Recommended alias: `workflow dataset`
+- Selector: `action`; default `summary`; values `summary`, `candidates_scan`, `candidates_list`, `candidate_inspect`, `candidate_promote`, `candidate_reject`, `preference_suggest`, `preference_create`, `eval_add`, `promotion_supersede`, `promotions_list`, `policy_list`, `policy_show`, `policy_record`, `lineage`, `manifests_list`, `export`, `stale_reconcile`, `projection_refresh`
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "action": "candidates_list",
+  "candidate_kind": "review",
+  "eligibility": "sft_eligible",
+  "limit": 10
 }
 ```
 

@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import uuid
 from collections.abc import AsyncIterator
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Protocol, cast
@@ -26,8 +27,13 @@ from policy.native_primary_cutover import (
     NativePrimaryCutoverRuntime,
     PostgresNativePrimaryCutoverRepository,
 )
+from runtime.cache_invalidation import (
+    CACHE_KIND_CIRCUIT_BREAKER_OVERRIDE,
+    CACHE_KIND_ROUTE_AUTHORITY_SNAPSHOT,
+    aemit_cache_invalidation,
+)
 from runtime.circuit_breaker import invalidate_circuit_breaker_override_cache
-from runtime.event_log import CHANNEL_SEMANTIC_ASSERTION, aemit
+from runtime.event_log import CHANNEL_DATASET, CHANNEL_SEMANTIC_ASSERTION, aemit
 from runtime.instance import NativeWorkflowInstance, resolve_native_instance
 from runtime.operator_object_relations import (
     FunctionalAreaRecord,
@@ -2276,9 +2282,16 @@ class OperatorControlFrontdoor:
                 )
             if inserted_row is None:
                 raise RuntimeError("failed to read inserted task route eligibility row")
-            invalidate_route_authority_cache_key(
-                resolve_workflow_authority_cache_key(env=env),
+            route_cache_key = resolve_workflow_authority_cache_key(env=env)
+            await aemit_cache_invalidation(
+                conn,
+                cache_kind=CACHE_KIND_ROUTE_AUTHORITY_SNAPSHOT,
+                cache_key=route_cache_key,
+                reason="task_route_eligibility_window_write",
+                invalidated_by="operator_write.set_task_route_eligibility",
+                decision_ref=normalized_decision_ref,
             )
+            invalidate_route_authority_cache_key(route_cache_key)
             return TaskRouteEligibilityWriteResult(
                 task_route_eligibility=_task_route_eligibility_record_from_row(
                     inserted_row,
@@ -3894,6 +3907,14 @@ class OperatorControlFrontdoor:
                     conn,
                     decision=persisted,
                     emitted_by="operator_write.set_circuit_breaker_override",
+                )
+                await aemit_cache_invalidation(
+                    conn,
+                    cache_kind=CACHE_KIND_CIRCUIT_BREAKER_OVERRIDE,
+                    cache_key=persisted.decision_scope_ref or normalized_provider_slug,
+                    reason=f"circuit_breaker_override_{normalized_override_state}",
+                    invalidated_by="operator_write.set_circuit_breaker_override",
+                    decision_ref=persisted.operator_decision_id,
                 )
         finally:
             await conn.close()
@@ -6218,6 +6239,368 @@ def inspect_recurring_review_repair_flow(
     )
 
 
+# --------------------------------------------------------------------------
+# Dataset refinery write helpers.
+#
+# These helpers are the only sanctioned write path for the dataset refinery
+# authority tables (dataset_scoring_policies, dataset_promotions). Reads go
+# through surfaces/api/dataset_read.py; subscribers may write to
+# dataset_raw_candidates and dataset_candidate_scores (those rows are
+# derived, not human-decided). Each helper:
+#   * validates inputs against contracts/dataset.py
+#   * inserts in a single transaction
+#   * emits on CHANNEL_DATASET so the curation projection subscriber and
+#     downstream observers wake up
+#   * calls aemit_cache_invalidation so any cached read paths drop their
+#     stale entries
+# --------------------------------------------------------------------------
+
+CACHE_KIND_DATASET_CURATED_PROJECTION = "dataset_curated_projection"
+CACHE_KIND_DATASET_SCORING_POLICY = "dataset_scoring_policy"
+EVENT_DATASET_POLICY_RECORDED = "dataset_policy_recorded"
+EVENT_DATASET_PROMOTION_RECORDED = "dataset_promotion_recorded"
+EVENT_DATASET_PROMOTION_SUPERSEDED = "dataset_promotion_superseded"
+EVENT_DATASET_CANDIDATE_REJECTED = "dataset_candidate_rejected"
+
+
+async def arecord_dataset_policy(
+    *,
+    policy_slug: str,
+    specialist_target: str,
+    rubric: Mapping[str, Any],
+    decided_by: str,
+    rationale: str,
+    auto_promote: bool = False,
+    policy_id: str | None = None,
+    supersedes_policy_id: str | None = None,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Record a new dataset scoring policy and (optionally) supersede a prior one."""
+
+    from contracts.dataset import DatasetScoringPolicy
+
+    pid = policy_id or f"pol_{uuid.uuid4().hex[:20]}"
+    # Round-trip through the contract so rubric shape is validated.
+    DatasetScoringPolicy(
+        policy_id=pid,
+        policy_slug=policy_slug,
+        specialist_target=specialist_target,
+        rubric=dict(rubric),
+        decided_by=decided_by,
+        rationale=rationale,
+        auto_promote=bool(auto_promote),
+    )
+
+    conn = await connect_workflow_database(env)
+    try:
+        async with conn.transaction():
+            await conn.execute(
+                """INSERT INTO dataset_scoring_policies (
+                        policy_id, policy_slug, specialist_target, rubric,
+                        auto_promote, decided_by, rationale
+                    ) VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)""",
+                pid,
+                policy_slug,
+                specialist_target,
+                json.dumps(dict(rubric)),
+                bool(auto_promote),
+                decided_by,
+                rationale,
+            )
+            if supersedes_policy_id:
+                await conn.execute(
+                    """UPDATE dataset_scoring_policies
+                          SET superseded_by = $1
+                        WHERE policy_id = $2 AND superseded_by IS NULL""",
+                    pid,
+                    supersedes_policy_id,
+                )
+            event_id = await aemit(
+                conn,
+                channel=CHANNEL_DATASET,
+                event_type=EVENT_DATASET_POLICY_RECORDED,
+                entity_id=pid,
+                entity_kind="dataset_scoring_policy",
+                payload={
+                    "policy_id": pid,
+                    "policy_slug": policy_slug,
+                    "specialist_target": specialist_target,
+                    "auto_promote": bool(auto_promote),
+                    "supersedes_policy_id": supersedes_policy_id,
+                    "decided_by": decided_by,
+                },
+                emitted_by="operator_write.arecord_dataset_policy",
+            )
+            await aemit_cache_invalidation(
+                conn,
+                cache_kind=CACHE_KIND_DATASET_SCORING_POLICY,
+                cache_key=specialist_target,
+                reason=f"new policy {pid}",
+                invalidated_by="operator_write.arecord_dataset_policy",
+            )
+    finally:
+        await conn.close()
+    return {
+        "policy_id": pid,
+        "policy_slug": policy_slug,
+        "specialist_target": specialist_target,
+        "auto_promote": bool(auto_promote),
+        "supersedes_policy_id": supersedes_policy_id,
+        "event_id": event_id,
+    }
+
+
+async def arecord_dataset_promotion(
+    *,
+    candidate_ids: Sequence[str],
+    dataset_family: str,
+    specialist_target: str,
+    policy_id: str,
+    payload: Mapping[str, Any],
+    promoted_by: str,
+    rationale: str,
+    promotion_kind: str = "manual",
+    split_tag: str | None = None,
+    decision_ref: str | None = None,
+    promotion_id: str | None = None,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Record one append-only promotion + emit the projection trigger event."""
+
+    from contracts.dataset import DatasetPromotion
+
+    pid = promotion_id or f"prom_{uuid.uuid4().hex[:20]}"
+    DatasetPromotion(
+        promotion_id=pid,
+        candidate_ids=tuple(candidate_ids),
+        dataset_family=dataset_family,
+        specialist_target=specialist_target,
+        policy_id=policy_id,
+        payload=dict(payload),
+        promoted_by=promoted_by,
+        promotion_kind=promotion_kind,
+        rationale=rationale,
+        split_tag=split_tag,
+        decision_ref=decision_ref,
+    )
+
+    conn = await connect_workflow_database(env)
+    try:
+        async with conn.transaction():
+            await conn.execute(
+                """INSERT INTO dataset_promotions (
+                        promotion_id, candidate_ids, dataset_family, specialist_target,
+                        policy_id, payload, split_tag, promoted_by, promotion_kind,
+                        rationale, decision_ref
+                    ) VALUES ($1, $2::text[], $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11)""",
+                pid,
+                list(candidate_ids),
+                dataset_family,
+                specialist_target,
+                policy_id,
+                json.dumps(dict(payload)),
+                split_tag,
+                promoted_by,
+                promotion_kind,
+                rationale,
+                decision_ref,
+            )
+            event_id = await aemit(
+                conn,
+                channel=CHANNEL_DATASET,
+                event_type=EVENT_DATASET_PROMOTION_RECORDED,
+                entity_id=pid,
+                entity_kind="dataset_promotion",
+                payload={
+                    "promotion_id": pid,
+                    "dataset_family": dataset_family,
+                    "specialist_target": specialist_target,
+                    "policy_id": policy_id,
+                    "promoted_by": promoted_by,
+                    "promotion_kind": promotion_kind,
+                    "split_tag": split_tag,
+                    "candidate_ids": list(candidate_ids),
+                },
+                emitted_by="operator_write.arecord_dataset_promotion",
+            )
+            await aemit_cache_invalidation(
+                conn,
+                cache_kind=CACHE_KIND_DATASET_CURATED_PROJECTION,
+                cache_key=f"{specialist_target}:{dataset_family}:{split_tag or 'none'}",
+                reason=f"new promotion {pid}",
+                invalidated_by="operator_write.arecord_dataset_promotion",
+            )
+    finally:
+        await conn.close()
+    return {
+        "promotion_id": pid,
+        "dataset_family": dataset_family,
+        "specialist_target": specialist_target,
+        "policy_id": policy_id,
+        "split_tag": split_tag,
+        "candidate_ids": list(candidate_ids),
+        "event_id": event_id,
+    }
+
+
+async def arecord_dataset_rejection(
+    *,
+    candidate_id: str,
+    rejected_by: str,
+    reason: str,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Record an operator's explicit rejection of a candidate.
+
+    Phase 1: this is an event-only marker. Promotions still go through
+    arecord_dataset_promotion; rejections are visible in the event log
+    so a follow-up promote attempt can be cross-checked. The candidate
+    row itself is left untouched (its score may already be 'rejected').
+    """
+
+    if not (reason or "").strip():
+        raise ValueError("rejection reason must be non-blank")
+    if not (rejected_by or "").strip():
+        raise ValueError("rejected_by must be non-blank")
+    if not (candidate_id or "").strip():
+        raise ValueError("candidate_id must be non-blank")
+
+    conn = await connect_workflow_database(env)
+    try:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT candidate_id FROM dataset_raw_candidates WHERE candidate_id = $1",
+                candidate_id,
+            )
+            if row is None:
+                raise ValueError(f"unknown candidate_id {candidate_id!r}")
+            event_id = await aemit(
+                conn,
+                channel=CHANNEL_DATASET,
+                event_type=EVENT_DATASET_CANDIDATE_REJECTED,
+                entity_id=candidate_id,
+                entity_kind="dataset_raw_candidate",
+                payload={
+                    "candidate_id": candidate_id,
+                    "rejected_by": rejected_by,
+                    "reason": reason,
+                },
+                emitted_by="operator_write.arecord_dataset_rejection",
+            )
+    finally:
+        await conn.close()
+    return {
+        "candidate_id": candidate_id,
+        "rejected_by": rejected_by,
+        "reason": reason,
+        "event_id": event_id,
+    }
+
+
+async def asupersede_dataset_promotion(
+    *,
+    promotion_id: str,
+    superseded_reason: str,
+    superseded_by: str | None = None,
+    superseded_by_operator: str,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Mark a promotion superseded.
+
+    If ``superseded_by`` is omitted, a tombstone promotion is created so the
+    constraint that ``superseded_by`` and ``superseded_reason`` are paired
+    is satisfied while still recording who/why.
+    """
+
+    if not (superseded_reason or "").strip():
+        raise ValueError("superseded_reason must be non-blank")
+    if not (superseded_by_operator or "").strip():
+        raise ValueError("superseded_by_operator must be non-blank")
+
+    conn = await connect_workflow_database(env)
+    try:
+        async with conn.transaction():
+            original = await conn.fetchrow(
+                """SELECT promotion_id, candidate_ids, dataset_family,
+                          specialist_target, policy_id, split_tag, superseded_by
+                     FROM dataset_promotions WHERE promotion_id = $1""",
+                promotion_id,
+            )
+            if original is None:
+                raise ValueError(f"unknown promotion_id {promotion_id!r}")
+            if original["superseded_by"] is not None:
+                raise ValueError(
+                    f"promotion {promotion_id!r} already superseded by "
+                    f"{original['superseded_by']!r}"
+                )
+            tombstone_id = superseded_by
+            if tombstone_id is None:
+                tombstone_id = f"prom_tomb_{uuid.uuid4().hex[:16]}"
+                await conn.execute(
+                    """INSERT INTO dataset_promotions (
+                            promotion_id, candidate_ids, dataset_family,
+                            specialist_target, policy_id, payload, split_tag,
+                            promoted_by, promotion_kind, rationale
+                        ) VALUES (
+                            $1, $2::text[], $3, $4, $5, $6::jsonb, $7, $8,
+                            'auto', $9
+                        )""",
+                    tombstone_id,
+                    list(original["candidate_ids"]),
+                    original["dataset_family"],
+                    original["specialist_target"],
+                    original["policy_id"],
+                    json.dumps(
+                        {
+                            "tombstone": True,
+                            "supersedes_promotion_id": promotion_id,
+                            "reason": superseded_reason,
+                        }
+                    ),
+                    original["split_tag"],
+                    f"system:operator_supersede:{superseded_by_operator}",
+                    f"superseded by {superseded_by_operator}: {superseded_reason}",
+                )
+            await conn.execute(
+                """UPDATE dataset_promotions
+                      SET superseded_by = $1, superseded_reason = $2
+                    WHERE promotion_id = $3 AND superseded_by IS NULL""",
+                tombstone_id,
+                superseded_reason,
+                promotion_id,
+            )
+            event_id = await aemit(
+                conn,
+                channel=CHANNEL_DATASET,
+                event_type=EVENT_DATASET_PROMOTION_SUPERSEDED,
+                entity_id=promotion_id,
+                entity_kind="dataset_promotion",
+                payload={
+                    "promotion_id": promotion_id,
+                    "tombstone_promotion_id": tombstone_id,
+                    "reason": superseded_reason,
+                    "superseded_by_operator": superseded_by_operator,
+                },
+                emitted_by="operator_write.asupersede_dataset_promotion",
+            )
+            await aemit_cache_invalidation(
+                conn,
+                cache_kind=CACHE_KIND_DATASET_CURATED_PROJECTION,
+                cache_key=f"{original['specialist_target']}:{original['dataset_family']}:{original['split_tag'] or 'none'}",
+                reason=f"superseded {promotion_id}",
+                invalidated_by="operator_write.asupersede_dataset_promotion",
+            )
+    finally:
+        await conn.close()
+    return {
+        "promotion_id": promotion_id,
+        "tombstone_promotion_id": tombstone_id,
+        "reason": superseded_reason,
+        "superseded_by_operator": superseded_by_operator,
+        "event_id": event_id,
+    }
+
+
 __all__ = [
     "ArchitecturePolicyDecisionRecord",
     "NativeWorkflowFlowCatalog",
@@ -6229,8 +6612,18 @@ __all__ = [
     "OperatorControlFrontdoor",
     "TaskRouteEligibilityRecord",
     "TaskRouteEligibilityWriteResult",
+    "CACHE_KIND_DATASET_CURATED_PROJECTION",
+    "CACHE_KIND_DATASET_SCORING_POLICY",
+    "EVENT_DATASET_CANDIDATE_REJECTED",
+    "EVENT_DATASET_POLICY_RECORDED",
+    "EVENT_DATASET_PROMOTION_RECORDED",
+    "EVENT_DATASET_PROMOTION_SUPERSEDED",
     "abackfill_semantic_bridges",
     "arecord_architecture_policy_decision",
+    "arecord_dataset_policy",
+    "arecord_dataset_promotion",
+    "arecord_dataset_rejection",
+    "asupersede_dataset_promotion",
     "arecord_functional_area",
     "arecord_issue",
     "arecord_operator_decision",

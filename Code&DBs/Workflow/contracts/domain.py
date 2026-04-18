@@ -32,7 +32,7 @@ _SUPPORTED_EDGE_TYPES = frozenset({
     "after_any",        # run regardless of upstream status
     "conditional",      # run if upstream output matches a predicate
 })
-_SUPPORTED_ADAPTER_TYPES = frozenset({
+SUPPORTED_ADAPTER_TYPES: frozenset[str] = frozenset({
     "deterministic_task",
     "llm_task",
     "cli_llm",
@@ -592,7 +592,7 @@ def validate_workflow_request(request: WorkflowRequest) -> WorkflowValidationRes
     for node in nodes:
         if node.node_type != MINIMAL_WORKFLOW_NODE_TYPE:
             graph_errors.append("request.graph_invalid")
-        if node.adapter_type not in _SUPPORTED_ADAPTER_TYPES:
+        if node.adapter_type not in SUPPORTED_ADAPTER_TYPES:
             graph_errors.append("request.graph_invalid")
         if not _is_non_empty_text(node.display_name):
             graph_errors.append("request.schema_invalid")
