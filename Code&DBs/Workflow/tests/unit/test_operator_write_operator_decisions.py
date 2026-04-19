@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
+import pytest
+
+import runtime.authority_memory_projection as authority_memory_projection
 from authority.operator_control import OperatorDecisionAuthorityRecord
 from runtime.semantic_assertions import (
     SemanticAssertionRecord,
@@ -301,8 +304,27 @@ def test_record_operator_decision_skips_semantic_bridge_for_unscoped_decision_ki
     assert conn.event_rows == []
 
 
-def test_backfill_semantic_bridges_replays_scoped_decisions_only() -> None:
+def test_backfill_semantic_bridges_replays_scoped_decisions_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     as_of = datetime(2026, 4, 15, 19, 0, tzinfo=timezone.utc)
+    expected_as_of = as_of
+    called = False
+
+    class _FakeRefreshResult:
+        def to_json(self) -> dict[str, object]:
+            return {
+                "projection_id": "authority_memory_projection",
+                "total_upserted": 2,
+                "total_deactivated": 0,
+            }
+
+    async def _fake_refresh_authority_memory_projection(*, env=None, as_of=None):
+        nonlocal called
+        called = True
+        assert as_of == expected_as_of
+        return _FakeRefreshResult()
+
     rows = (
         _decision(
             decision_key="architecture-policy::decision-tables::db-native-authority",
@@ -326,6 +348,11 @@ def test_backfill_semantic_bridges_replays_scoped_decisions_only() -> None:
         connect_database=_connect,
         operator_control_repository_factory=lambda _conn: repository,
         semantic_assertion_repository_factory=lambda _conn: semantic_repository,
+    )
+    monkeypatch.setattr(
+        authority_memory_projection,
+        "refresh_authority_memory_projection",
+        _fake_refresh_authority_memory_projection,
     )
 
     payload = frontdoor.backfill_semantic_bridges(
@@ -352,6 +379,12 @@ def test_backfill_semantic_bridges_replays_scoped_decisions_only() -> None:
         "recorded": 0,
         "retracted": 0,
     }
+    assert summary["authority_memory_refresh"] == {
+        "projection_id": "authority_memory_projection",
+        "total_upserted": 2,
+        "total_deactivated": 0,
+    }
+    assert called is True
     assert repository.as_of == as_of
     assert semantic_repository.upserted_predicates[0].predicate_slug == "architecture_policy"
     assert len(semantic_repository.recorded_assertions) == 1

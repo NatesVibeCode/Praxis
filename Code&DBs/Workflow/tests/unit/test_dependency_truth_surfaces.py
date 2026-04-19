@@ -541,23 +541,21 @@ def test_praxis_ctl_runtime_endpoints_use_runtime_binding_contract(monkeypatch) 
         },
     )
 
-    def _fake_runtime_binding_contract(*, workflow_env, native_instance, workflow_env_error=None):
+    def _fake_runtime_http_endpoints(*, workflow_env, native_instance, workflow_env_error=None):
         captured["workflow_env"] = dict(workflow_env)
         captured["native_instance"] = dict(native_instance)
         captured["workflow_env_error"] = workflow_env_error
         return {
-            "http_endpoints": {
-                "api_base_url": "https://runtime.example",
-                "launch_url": "https://runtime.example/app",
-                "dashboard_url": "https://runtime.example/app",
-                "api_docs_url": "https://runtime.example/docs",
-            }
+            "api_base_url": "https://runtime.example",
+            "launch_url": "https://runtime.example/app",
+            "dashboard_url": "https://runtime.example/app",
+            "api_docs_url": "https://runtime.example/docs",
         }
 
     monkeypatch.setattr(
         local_alpha,
-        "build_runtime_binding_contract",
-        _fake_runtime_binding_contract,
+        "resolve_runtime_http_endpoints",
+        _fake_runtime_http_endpoints,
     )
 
     endpoints = local_alpha._runtime_binding_http_endpoints({})
@@ -578,6 +576,7 @@ def test_praxis_ctl_runtime_endpoints_use_runtime_binding_contract(monkeypatch) 
 def test_probe_frontdoor_semantics_uses_ui_header_for_workflow_probes(monkeypatch) -> None:
     local_alpha = _load_local_alpha()
     calls: list[tuple[str, str, dict[str, str] | None]] = []
+    monkeypatch.setenv("PRAXIS_API_BASE_URL", "http://praxis.test:9555")
 
     def _fake_http_request(
         url: str,
@@ -606,6 +605,9 @@ def test_probe_frontdoor_semantics_uses_ui_header_for_workflow_probes(monkeypatc
 
     payload = local_alpha._probe_frontdoor_semantics()
 
+    assert payload["launch_url"] == "http://praxis.test:9555/app"
+    assert payload["dashboard_url"] == "http://praxis.test:9555/app"
+    assert payload["api_docs_url"] == "http://praxis.test:9555/docs"
     assert payload["workflow_api_ready"] is True
     assert payload["mcp_bridge_ready"] is True
     assert any(

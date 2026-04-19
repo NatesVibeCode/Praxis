@@ -15,6 +15,7 @@ import surfaces.api.rest as rest
 from surfaces.cli import workflow_cli as legacy_workflow_cli
 from surfaces.cli.main import main as workflow_cli_main
 from surfaces.cli.commands import authority as authority_commands
+from surfaces.cli.commands import query as query_commands
 from surfaces.cli.commands import operate as operate_commands
 from surfaces.cli.commands import workflow as workflow_commands
 
@@ -104,9 +105,13 @@ def test_top_level_help_mentions_routes_alias() -> None:
 
     assert workflow_cli_main(["--help"], stdout=stdout) == 0
     rendered = stdout.getvalue()
+    assert "workflow help commands" in rendered
+    assert "workflow help mcp" in rendered
     assert "workflow routes" in rendered
     assert "workflow integrations" in rendered
     assert "workflow integration list" in rendered
+    assert "workflow integration help" in rendered
+    assert "workflow research 'API auth drift'" in rendered
     assert "workflow records" not in rendered
     assert "workflow defs <create|update>" not in rendered
 
@@ -117,15 +122,28 @@ def test_commands_index_mentions_routes_alias() -> None:
     assert workflow_cli_main(["commands"], stdout=stdout) == 0
     rendered = stdout.getvalue()
     assert "workflow routes" in rendered
+    assert "workflow help commands" in rendered
+    assert "workflow help mcp" in rendered
     assert "Alias for workflow API route discovery" in rendered
     assert "workflow integrations" in rendered
     assert "workflow api integrations" in rendered
     assert "workflow api data-dictionary" in rendered
-    assert "workflow integration [list|describe|health|test|call|create|secret|reload]" in rendered
+    assert "workflow integration [list|describe|health|test|call|create|secret|reload|help]" in rendered
+    assert "workflow research [list|<topic>] [--workers N] [--agent SLUG] [--threshold N] [--json]" in rendered
     assert "workflow dictionary <list|describe|set-override|clear-override|reproject>" in rendered
     assert "workflow authority-memory refresh" in rendered
     assert "workflow records <create|update|rename>" in rendered
     assert "workflow defs <create|update>" not in rendered
+
+
+def test_integration_help_subcommand_is_discoverable() -> None:
+    stdout = StringIO()
+
+    assert workflow_cli_main(["integration", "help"], stdout=stdout) == 0
+    rendered = stdout.getvalue()
+    assert "usage: workflow integration [list|describe|health|test|call|create|secret|reload|help] [args]" in rendered
+    assert "workflow integration help" in rendered
+    assert "workflow integration call <integration_id> <integration_action>" in rendered
 
 
 def test_authority_memory_refresh_frontdoor_uses_projection_refresher(
@@ -213,6 +231,42 @@ def test_integration_frontdoor_lists_registered_integrations(monkeypatch: pytest
     assert "INTEGRATION" in rendered
     assert "ipify" in rendered
     assert "get_ip" in rendered
+
+
+def test_research_frontdoor_launches_parallel_workflow(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_run_cli_tool(tool_name: str, params: dict[str, object], **_kwargs):
+        captured["tool_name"] = tool_name
+        captured["params"] = dict(params)
+        return 0, {
+            "action": "run",
+            "topic": params.get("topic"),
+            "slug": "api_auth_drift",
+            "workers": params.get("workers"),
+            "agent": params.get("agent"),
+            "workflow": {"run_id": "run_123"},
+        }
+
+    monkeypatch.setattr(query_commands, "run_cli_tool", _fake_run_cli_tool)
+    stdout = StringIO()
+
+    assert workflow_cli_main(
+        ["research", "API", "auth", "drift", "--workers", "12", "--agent", "deepseek/deepseek-r3"],
+        stdout=stdout,
+    ) == 0
+    assert captured == {
+        "tool_name": "praxis_research_workflow",
+        "params": {
+            "action": "run",
+            "topic": "API auth drift",
+            "workers": 12,
+            "agent": "deepseek/deepseek-r3",
+        },
+    }
+    payload = json.loads(stdout.getvalue())
+    assert payload["action"] == "run"
+    assert payload["workflow"]["run_id"] == "run_123"
 
 
 def test_integration_create_requires_confirmation(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1242,7 +1296,9 @@ def test_root_help_is_discoverable() -> None:
     rendered = stdout.getvalue()
     assert "Most used:" in rendered
     assert "workflow run <spec.json>" in rendered
-    assert "workflow mcp" in rendered
+    assert "workflow run-status <run_id>" in rendered
+    assert "workflow mcp [list|search|describe|call|help]" in rendered
+    assert "workflow help mcp" in rendered
     assert "workflow integrations" in rendered
     assert "workflow commands --json" in rendered
     assert "workflow native-operator instance" in rendered
@@ -1263,7 +1319,11 @@ def test_commands_root_and_help_topic_show_the_command_index() -> None:
     assert commands_rendered == help_rendered
     assert "Command index:" in commands_rendered
     assert "workflow commands" in commands_rendered
+    assert "workflow help commands" in commands_rendered
+    assert "workflow run-status <run_id>" in commands_rendered
     assert "workflow mcp [list|search|describe|call|help]" in commands_rendered
+    assert "workflow help mcp" in commands_rendered
+    assert "workflow research [list|<topic>] [--workers N] [--agent SLUG] [--threshold N] [--json]" in commands_rendered
     assert "workflow tools [list|search|describe|call|help]" in commands_rendered
 
 
@@ -1275,10 +1335,16 @@ def test_commands_root_json_exposes_machine_readable_index() -> None:
     payload = json.loads(stdout.getvalue())
     assert payload["usage"] == "workflow commands"
     assert any(entry["command"] == "workflow commands" for entry in payload["entries"])
+    assert any(entry["command"] == "workflow help commands" for entry in payload["entries"])
     assert any(
         entry["command"] == "workflow tools [list|search|describe|call|help]"
         for entry in payload["entries"]
     )
+    assert any(
+        entry["command"] == "workflow research [list|<topic>] [--workers N] [--agent SLUG] [--threshold N] [--json]"
+        for entry in payload["entries"]
+    )
+    assert any(entry["command"] == "workflow help mcp" for entry in payload["entries"])
     assert "run `workflow commands --json` for machine-readable discovery" in payload["tips"]
 
 
@@ -1578,7 +1644,15 @@ def test_help_can_show_mcp_usage() -> None:
     assert workflow_cli_main(["tools"], stdout=tools_stdout) == 0
     assert workflow_cli_main(["help", "mcp"], stdout=mcp_stdout) == 0
 
-    assert mcp_stdout.getvalue() == tools_stdout.getvalue()
+    tools_rendered = tools_stdout.getvalue()
+    mcp_rendered = mcp_stdout.getvalue()
+    assert "Tool discovery quickstart:" in tools_rendered
+    assert "Tool discovery quickstart:" in mcp_rendered
+    assert "usage: workflow mcp [list|search|describe|call|help]" in mcp_rendered
+    assert "Alias for workflow tools discovery." in mcp_rendered
+    assert "workflow tools list" in mcp_rendered
+    assert "workflow tools describe <tool|alias>" in mcp_rendered
+    assert tools_rendered in mcp_rendered
 
 
 def test_mcp_root_alias_routes_to_tools_quickstart() -> None:

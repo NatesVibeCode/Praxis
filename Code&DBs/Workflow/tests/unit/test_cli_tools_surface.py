@@ -138,6 +138,36 @@ def test_tools_search_single_match_prints_next_step(monkeypatch: pytest.MonkeyPa
     assert "workflow query" in rendered
 
 
+def test_tools_search_highlights_top_exact_match_even_with_competing_hits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        tools_commands,
+        "get_tool_catalog",
+        lambda: {
+            "praxis_alpha": _tool_definition(
+                "praxis_alpha",
+                description="Alpha tool that mentions query in passing.",
+                recommended_alias="alpha",
+            ),
+            "praxis_query": _tool_definition(
+                "praxis_query",
+                description="Primary query surface for operator questions.",
+                recommended_alias="query",
+            ),
+        },
+    )
+    stdout = StringIO()
+
+    assert workflow_cli_main(["tools", "search", "query"], stdout=stdout) == 0
+
+    rendered = stdout.getvalue()
+    assert rendered.index("praxis_query") < rendered.index("praxis_alpha")
+    assert "Best next step:" in rendered
+    assert "workflow tools describe praxis_query" in rendered
+    assert "workflow query" in rendered
+
+
 def test_tools_search_reports_no_matches_with_broadening_hints(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         tools_commands,

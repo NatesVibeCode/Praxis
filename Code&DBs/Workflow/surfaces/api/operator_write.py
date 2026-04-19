@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import uuid
@@ -83,6 +84,8 @@ from ._payload_contract import (
     require_text,
 )
 
+logger = logging.getLogger(__name__)
+
 
 class _Connection(Protocol):
     async def execute(self, query: str, *args: object) -> str:
@@ -153,6 +156,13 @@ _ROADMAP_DEFAULT_LIFECYCLE = "planned"
 _ROADMAP_CLAIMED_LIFECYCLE = "claimed"
 _ROADMAP_COMPLETED_LIFECYCLE = "completed"
 _BUG_CLOSEOUT_VERIFICATION_SUCCESS_STATUSES = frozenset({"passed", "succeeded", "success", "ok"})
+_ROADMAP_BUG_CLOSEOUT_RELATION_KINDS = frozenset(
+    {
+        "fixed_by",
+        "implemented_by_fix",
+        "resolves_bug",
+    }
+)
 
 
 _require_text = require_text
@@ -3488,6 +3498,47 @@ class OperatorControlFrontdoor:
             )
         )
 
+    async def _fetch_roadmap_bug_relation_rows_for_closeout(
+        self,
+        conn: _Connection,
+        *,
+        roadmap_item_ids: tuple[str, ...],
+        bug_ids: tuple[str, ...],
+    ) -> tuple[Mapping[str, Any], ...]:
+        if not roadmap_item_ids and not bug_ids:
+            return ()
+        return tuple(
+            await conn.fetch(
+                """
+                SELECT
+                    operator_object_relation_id,
+                    relation_kind,
+                    relation_status,
+                    source_ref AS roadmap_item_id,
+                    target_ref AS bug_id
+                FROM operator_object_relations
+                WHERE relation_status = 'active'
+                  AND source_kind = 'roadmap_item'
+                  AND target_kind = 'bug'
+                  AND relation_kind = ANY($1::text[])
+                  AND (
+                        (
+                            cardinality($2::text[]) > 0
+                            AND source_ref = ANY($2::text[])
+                        )
+                     OR (
+                            cardinality($3::text[]) > 0
+                            AND target_ref = ANY($3::text[])
+                        )
+                  )
+                ORDER BY source_ref, target_ref, relation_kind, operator_object_relation_id
+                """,
+                list(sorted(_ROADMAP_BUG_CLOSEOUT_RELATION_KINDS)),
+                list(roadmap_item_ids),
+                list(bug_ids),
+            )
+        )
+
     async def _reconcile_work_item_closeout(
         self,
         *,
@@ -3511,8 +3562,18 @@ class OperatorControlFrontdoor:
                     if row.get("source_bug_id") is not None
                 )
             )
+            scoped_relation_rows = await self._fetch_roadmap_bug_relation_rows_for_closeout(
+                conn,
+                roadmap_item_ids=tuple(
+                    str(row["roadmap_item_id"]) for row in scoped_roadmap_rows
+                ),
+                bug_ids=bug_ids,
+            )
+            supplemental_relation_bug_ids = tuple(
+                dict.fromkeys(str(row["bug_id"]) for row in scoped_relation_rows)
+            )
             scoped_bug_ids = tuple(
-                dict.fromkeys((*bug_ids, *supplemental_bug_ids))
+                dict.fromkeys((*bug_ids, *supplemental_bug_ids, *supplemental_relation_bug_ids))
             )
             bug_rows = await self._fetch_bug_rows_for_closeout(
                 conn,
@@ -3525,6 +3586,40 @@ class OperatorControlFrontdoor:
                     roadmap_item_ids=(),
                     source_bug_ids=proof_bug_ids,
                 )
+                scoped_relation_rows = await self._fetch_roadmap_bug_relation_rows_for_closeout(
+                    conn,
+                    roadmap_item_ids=(),
+                    bug_ids=proof_bug_ids,
+                )
+                existing_roadmap_item_ids = {
+                    str(row["roadmap_item_id"]) for row in scoped_roadmap_rows
+                }
+                relation_roadmap_item_ids = tuple(
+                    roadmap_item_id
+                    for roadmap_item_id in dict.fromkeys(
+                        str(row["roadmap_item_id"]) for row in scoped_relation_rows
+                    )
+                    if roadmap_item_id not in existing_roadmap_item_ids
+                )
+                if relation_roadmap_item_ids:
+                    relation_roadmap_rows = await self._fetch_roadmap_rows_for_closeout(
+                        conn,
+                        roadmap_item_ids=relation_roadmap_item_ids,
+                        source_bug_ids=(),
+                    )
+                    scoped_roadmap_rows = tuple((*scoped_roadmap_rows, *relation_roadmap_rows))
+
+            relation_rows_by_roadmap_item_id: dict[str, tuple[Mapping[str, Any], ...]] = {}
+            relation_rows_by_roadmap: dict[str, list[Mapping[str, Any]]] = {}
+            for relation_row in scoped_relation_rows:
+                relation_rows_by_roadmap.setdefault(
+                    str(relation_row["roadmap_item_id"]),
+                    [],
+                ).append(dict(relation_row))
+            relation_rows_by_roadmap_item_id = {
+                roadmap_item_id: tuple(rows)
+                for roadmap_item_id, rows in relation_rows_by_roadmap.items()
+            }
 
             evidence_by_bug_id = await self._fetch_bug_evidence_for_closeout(
                 conn,
@@ -3600,17 +3695,40 @@ class OperatorControlFrontdoor:
                     if row.get("source_bug_id") is not None
                     else None
                 )
+                source_bug_link_source = (
+                    "roadmap_items.source_bug_id" if source_bug_id is not None else None
+                )
+                source_bug_relation_id: str | None = None
+                relation_rows = relation_rows_by_roadmap_item_id.get(roadmap_item_id, ())
+                if source_bug_id is None and relation_rows:
+                    relation_row = next(
+                        (
+                            candidate
+                            for candidate in relation_rows
+                            if str(candidate["bug_id"]) in proof_bug_ids
+                        ),
+                        relation_rows[0],
+                    )
+                    source_bug_id = str(relation_row["bug_id"])
+                    source_bug_link_source = "operator_object_relations"
+                    source_bug_relation_id = str(relation_row["operator_object_relation_id"])
                 if row.get("completed_at") is None and source_bug_id in proof_bug_ids:
                     roadmap_candidates.append(
                         {
                             "roadmap_item_id": roadmap_item_id,
                             "source_bug_id": source_bug_id,
+                            "source_bug_link_source": source_bug_link_source,
+                            "source_bug_relation_id": source_bug_relation_id,
                             "current_status": str(row["status"]),
                             "current_lifecycle": str(row["lifecycle"]),
                             "next_status": _ROADMAP_COMPLETED_STATUS,
                             "next_lifecycle": _ROADMAP_COMPLETED_LIFECYCLE,
                             "reason_codes": [
-                                "source_bug_has_explicit_passed_fix_proof",
+                                (
+                                    "relation_bug_has_explicit_passed_fix_proof"
+                                    if source_bug_link_source == "operator_object_relations"
+                                    else "source_bug_has_explicit_passed_fix_proof"
+                                ),
                             ],
                             "evidence_refs": [
                                 {
@@ -3639,12 +3757,18 @@ class OperatorControlFrontdoor:
                 if source_bug_id is None:
                     reason_codes.append("missing_source_bug")
                 elif source_bug_id not in proof_bug_ids:
-                    reason_codes.append("source_bug_missing_passed_fix_verification")
+                    reason_codes.append(
+                        "relation_bug_missing_passed_fix_verification"
+                        if source_bug_link_source == "operator_object_relations"
+                        else "source_bug_missing_passed_fix_verification"
+                    )
                 if reason_codes:
                     roadmap_skipped.append(
                         {
                             "roadmap_item_id": roadmap_item_id,
                             "source_bug_id": source_bug_id,
+                            "source_bug_link_source": source_bug_link_source,
+                            "source_bug_relation_id": source_bug_relation_id,
                             "current_status": str(row["status"]),
                             "current_lifecycle": str(row["lifecycle"]),
                             "reason_codes": reason_codes,
@@ -3657,6 +3781,11 @@ class OperatorControlFrontdoor:
                     "bug_requires_evidence_role": _BUG_CLOSEOUT_EVIDENCE_ROLE,
                     "bug_requires_passed_verification": True,
                     "roadmap_requires_source_bug_fix_proof": True,
+                    "roadmap_requires_bug_fix_proof": True,
+                    "roadmap_bug_link_authorities": [
+                        "roadmap_items.source_bug_id",
+                        "operator_object_relations.active_roadmap_item_to_bug",
+                    ],
                 },
                 "evaluated": {
                     "bug_ids": [str(row["bug_id"]) for row in bug_rows],
@@ -3710,6 +3839,9 @@ class OperatorControlFrontdoor:
                         completed_status=_ROADMAP_COMPLETED_STATUS,
                         completed_at=now,
                     )
+            roadmap_candidates_by_id = {
+                str(candidate["roadmap_item_id"]): candidate for candidate in roadmap_candidates
+            }
             payload["committed"] = True
             payload["applied"] = {
                 "bugs": [
@@ -3736,7 +3868,19 @@ class OperatorControlFrontdoor:
                         "status": str(row["status"]),
                         "lifecycle": str(row["lifecycle"]),
                         "completed_at": row["completed_at"].isoformat() if row["completed_at"] is not None else None,
-                        "source_bug_id": str(row["source_bug_id"]) if row["source_bug_id"] is not None else None,
+                        "source_bug_id": (
+                            str(row["source_bug_id"])
+                            if row["source_bug_id"] is not None
+                            else roadmap_candidates_by_id.get(
+                                str(row["roadmap_item_id"]), {}
+                            ).get("source_bug_id")
+                        ),
+                        "source_bug_link_source": roadmap_candidates_by_id.get(
+                            str(row["roadmap_item_id"]), {}
+                        ).get("source_bug_link_source"),
+                        "source_bug_relation_id": roadmap_candidates_by_id.get(
+                            str(row["roadmap_item_id"]), {}
+                        ).get("source_bug_relation_id"),
                     }
                     for row in applied_roadmap_rows
                 ],
@@ -4405,12 +4549,33 @@ class OperatorControlFrontdoor:
                 )
         finally:
             await conn.close()
+        authority_memory_refresh: dict[str, Any]
+        try:
+            from runtime.authority_memory_projection import (
+                refresh_authority_memory_projection,
+            )
+
+            refresh_result = await refresh_authority_memory_projection(
+                env=env,
+                as_of=projection_as_of,
+            )
+            authority_memory_refresh = refresh_result.to_json()
+        except Exception as exc:  # noqa: BLE001 - projection refresh is best-effort
+            logger.warning(
+                "authority memory projection refresh failed after semantic bridge backfill: %s",
+                exc,
+            )
+            authority_memory_refresh = {
+                "status": "failed",
+                "error": f"{type(exc).__name__}: {exc}",
+            }
         return {
             "semantic_bridge_backfill": {
                 "as_of": None if normalized_as_of is None else normalized_as_of.isoformat(),
                 "object_relations": relation_summary,
                 "operator_decisions": decision_summary,
                 "roadmap_items": roadmap_summary,
+                "authority_memory_refresh": authority_memory_refresh,
             }
         }
 

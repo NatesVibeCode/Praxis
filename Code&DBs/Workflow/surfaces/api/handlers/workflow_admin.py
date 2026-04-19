@@ -11,7 +11,10 @@ from runtime.engineering_observability import (
     build_platform_observability,
 )
 from runtime.instance import native_instance_contract
-from runtime.primitive_contracts import build_orient_primitive_contracts
+from runtime.primitive_contracts import (
+    bug_status_sql_in_literal,
+    build_orient_primitive_contracts,
+)
 from surfaces._boot import resolve_surface_env, workflow_database_status
 from surfaces.api.operator_read import (
     build_transport_support_summary,
@@ -163,11 +166,14 @@ def _build_orient_tool_guidance(
             "command_prefix": "workflow",
             "tool_count": tool_count,
             "generic_call": "workflow tools call <tool|alias> --input-json '{...}'",
+            "unified_http_call": "POST /api/operate",
+            "unified_http_catalog": "GET /api/operate/catalog",
         },
         "catalog": {
             "list_command": "workflow tools list",
             "search_command": "workflow tools search <text>",
             "schema_command": "workflow tools describe <tool|alias>",
+            "http_catalog": "GET /api/operate/catalog",
             "directive": "Inspect the live catalog before guessing tool names or schemas.",
         },
         "primary_reads": [
@@ -878,7 +884,8 @@ def _handle_platform_overview_get(request: Any, path: str) -> None:
                 "total_bugs": int(pg.fetchval("SELECT COUNT(*) FROM bugs")),
                 "open_bugs": int(
                     pg.fetchval(
-                        "SELECT COUNT(*) FROM bugs WHERE UPPER(status) IN ('OPEN', 'IN_PROGRESS')"
+                        "SELECT COUNT(*) FROM bugs WHERE "
+                        + bug_status_sql_in_literal("open")
                     )
                 ),
                 "total_workflow_runs": int(pg.fetchval("SELECT COUNT(*) FROM public.workflow_runs")),

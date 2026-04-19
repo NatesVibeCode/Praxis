@@ -16,6 +16,11 @@ if TYPE_CHECKING:
     from runtime.embedding_service import EmbeddingService
 
 from runtime import bug_evidence as _bug_evidence
+from runtime.primitive_contracts import (
+    bug_resolved_status_values_with_legacy,
+    bug_status_legacy_resolved_aliases,
+    bug_status_sql_in_literal,
+)
 from storage.postgres.vector_store import PostgresVectorStore, VectorFilter
 from runtime.payload_coercion import json_object as _json_object, json_list as _json_list, coerce_datetime as _coerce_datetime
 
@@ -233,7 +238,7 @@ class BugTracker:
             value_text = str(value.value).strip().upper().replace("-", "_")
         else:
             value_text = str(value).strip().upper().replace("-", "_") if value is not None else ""
-        if value_text in {"RESOLVED", "DONE", "CLOSED"}:
+        if value_text in bug_status_legacy_resolved_aliases():
             value_text = BugStatus.FIXED.value
         return BugTracker._safe_enum(BugStatus, value_text, default)
 
@@ -267,12 +272,7 @@ class BugTracker:
     @staticmethod
     def _status_filter_values(status: BugStatus) -> list[str]:
         if status == BugStatus.FIXED:
-            return [
-                BugStatus.FIXED.value,
-                "RESOLVED",
-                "DONE",
-                "CLOSED",
-            ]
+            return [BugStatus.FIXED.value, *bug_status_legacy_resolved_aliases()]
         return [status.value]
 
     @staticmethod
@@ -597,7 +597,7 @@ class BugTracker:
 
         clauses = [
             "bug_id <> $1",
-            "UPPER(status) IN ('FIXED', 'RESOLVED', 'DONE', 'CLOSED')",
+            bug_status_sql_in_literal("resolved_with_legacy"),
         ]
         params: list[object] = [bug.bug_id]
         next_idx = 2
@@ -1898,14 +1898,7 @@ class BugTracker:
             params.extend(status_values)
             idx += len(status_values)
         elif open_only:
-            excluded_status_values = [
-                BugStatus.FIXED.value,
-                BugStatus.WONT_FIX.value,
-                BugStatus.DEFERRED.value,
-                "RESOLVED",
-                "DONE",
-                "CLOSED",
-            ]
+            excluded_status_values = list(bug_resolved_status_values_with_legacy())
             placeholders = ", ".join(f"${idx + i}" for i in range(len(excluded_status_values)))
             clauses.append(
                 f"UPPER(status) NOT IN ({placeholders})"
@@ -2094,10 +2087,10 @@ class BugTracker:
 
         stats_errors: list[str] = []
         packet_ready_count, packet_ready_error = self._query_scalar_with_error(
-            """
+            f"""
             SELECT COUNT(*)
               FROM bugs AS b
-             WHERE UPPER(b.status) IN ('OPEN', 'IN_PROGRESS')
+             WHERE {bug_status_sql_in_literal("open", column="b.status")}
                AND (
                     b.discovered_in_run_id IS NOT NULL
                  OR b.discovered_in_receipt_id IS NOT NULL

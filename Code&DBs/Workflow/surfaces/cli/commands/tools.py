@@ -209,6 +209,7 @@ def _tools_help_text(topic: str | None = None) -> str:
                 "",
                 "Search by topic, alias, entrypoint, or describe-command text.",
                 "Tip: add --exact only when you already know the alias, tool name, or entrypoint.",
+                "Tip: the CLI prints a best-next-step block when the top match is an exact or prefix hit.",
             ]
         )
     if topic == "describe":
@@ -273,15 +274,15 @@ def _tools_quickstart_text() -> str:
         [
             f"Catalog size: {len(definitions)} tools",
             "Tip: run `workflow tools list --json` for machine-readable discovery.",
-        "Tip: run `workflow tools search --surface query --tier stable` to browse a filtered slice.",
-        "Tip: add `--exact` when you already know the alias, tool name, or entrypoint.",
-        "Tip: if a search returns no matches, the CLI prints broadening hints instead of leaving you at zero.",
-        "Tip: `workflow tools describe` and `workflow tools call` also accept a unique prefix of the alias, tool name, or entrypoint.",
-        "Tip: single-result searches print the direct describe and entrypoint commands next.",
-        "Tip: search results are relevance-ranked; exact alias and entrypoint matches rise first.",
-        "Tip: run `workflow help <alias>` or `workflow <alias> --help` for alias-specific usage.",
-        "Tip: `workflow mcp` is the root alias for the same tool-discovery surface.",
-    ]
+            "Tip: run `workflow tools search --surface query --tier stable` to browse a filtered slice.",
+            "Tip: add `--exact` when you already know the alias, tool name, or entrypoint.",
+            "Tip: if a search returns no matches, the CLI prints broadening hints instead of leaving you at zero.",
+            "Tip: `workflow tools describe` and `workflow tools call` also accept a unique prefix of the alias, tool name, or entrypoint.",
+            "Tip: single-result searches print the direct describe and entrypoint commands next, and the top exact or prefix hit does too.",
+            "Tip: search results are relevance-ranked; exact alias and entrypoint matches rise first.",
+            "Tip: run `workflow help <alias>` or `workflow <alias> --help` for alias-specific usage.",
+            "Tip: `workflow mcp` is the root alias for the same tool-discovery surface.",
+        ]
     )
     return "\n".join(lines)
 
@@ -488,11 +489,17 @@ def _tools_search_command(args: list[str], *, stdout: TextIO) -> int:
         stdout.write(f"  entrypoint: {definition.cli_entrypoint}\n")
         stdout.write(f"  describe: {definition.cli_describe_command}\n")
         stdout.write(f"  {definition.cli_when_to_use or definition.description.splitlines()[0]}\n")
+    best_definition = None
     if len(definitions) == 1:
-        definition = definitions[0]
+        best_definition = definitions[0]
+    elif query:
+        top_rank = _tool_search_rank(definitions[0], query)
+        if top_rank[0] <= 1:
+            best_definition = definitions[0]
+    if best_definition is not None:
         stdout.write("\nBest next step:\n")
-        stdout.write(f"  {definition.cli_describe_command}\n")
-        stdout.write(f"  {definition.cli_entrypoint}\n")
+        stdout.write(f"  {best_definition.cli_describe_command}\n")
+        stdout.write(f"  {best_definition.cli_entrypoint}\n")
     stdout.write(f"\n{len(definitions)} tool(s)\n")
     return 0
 

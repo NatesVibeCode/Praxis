@@ -7,14 +7,20 @@
 # `praxis workflow run` and records the run lifecycle.
 #
 # Usage (from anywhere):
-#   /Users/nate/Praxis/Code\&DBs/Workflow/scripts/fire_ready_specs.sh
-#   SEQUENTIAL=1 /Users/nate/Praxis/Code\&DBs/Workflow/scripts/fire_ready_specs.sh
+#   Code&DBs/Workflow/scripts/fire_ready_specs.sh
+#   SEQUENTIAL=1 Code&DBs/Workflow/scripts/fire_ready_specs.sh
 
 set -euo pipefail
 
-REPO_ROOT="/Users/nate/Praxis"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+
+# shellcheck source=../../../scripts/_workflow_env.sh
+source "$REPO_ROOT/scripts/_workflow_env.sh"
+workflow_load_repo_env
+
 READY_DIR="${REPO_ROOT}/Code&DBs/Workflow/artifacts/workflow/ready"
-DB="${WORKFLOW_DATABASE_URL:-postgresql://localhost:5432/praxis}"
+DB="${WORKFLOW_DATABASE_URL:?workflow database authority resolver returned no URL}"
 LOG_DIR="${REPO_ROOT}/Code&DBs/Workflow/artifacts/workflow/ready/.logs"
 
 mkdir -p "$LOG_DIR"

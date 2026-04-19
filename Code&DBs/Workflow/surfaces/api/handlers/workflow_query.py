@@ -2313,29 +2313,6 @@ def _handle_source_options_get(request: Any, path: str) -> None:
         request._send_json(500, {"error": str(exc)})
 
 
-def _handle_integrations_get(request: Any, path: str) -> None:
-    try:
-        pg = request.subsystems.get_pg_conn()
-        rows = pg.execute(
-            "SELECT id, name, description, provider, capabilities, auth_status, icon FROM integration_registry ORDER BY name"
-        )
-        integrations = []
-        for row in rows:
-            item = dict(row)
-            item["name"] = base_integration_name(item)
-            item["display_name"] = display_name_for_integration(item)
-            integrations.append(item)
-        request._send_json(
-            200,
-            {
-                "integrations": integrations,
-                "count": len(integrations),
-            },
-        )
-    except Exception as exc:
-        request._send_json(500, {"error": str(exc)})
-
-
 def _handle_catalog_get(request: Any, path: str) -> None:
     """Return live catalog items from platform registries + static primitives."""
     try:

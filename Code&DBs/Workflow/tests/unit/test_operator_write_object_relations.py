@@ -4,6 +4,9 @@ import json
 from dataclasses import replace
 from datetime import datetime, timezone
 
+import pytest
+
+import runtime.authority_memory_projection as authority_memory_projection
 from surfaces.api import operator_write
 from runtime.operator_object_relations import (
     OperatorObjectRelationRecord,
@@ -366,10 +369,29 @@ def test_record_operator_object_relation_records_tombstone_when_inactive_relatio
     assert payload["operator_object_relation"]["relation_status"] == "inactive"
 
 
-def test_backfill_semantic_bridges_replays_object_relation_rows() -> None:
+def test_backfill_semantic_bridges_replays_object_relation_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     created_at = datetime(2026, 4, 16, 22, 0, tzinfo=timezone.utc)
     updated_at = datetime(2026, 4, 16, 22, 5, tzinfo=timezone.utc)
     as_of = datetime(2026, 4, 16, 23, 0, tzinfo=timezone.utc)
+    expected_as_of = as_of
+    called = False
+
+    class _FakeRefreshResult:
+        def to_json(self) -> dict[str, object]:
+            return {
+                "projection_id": "authority_memory_projection",
+                "total_upserted": 4,
+                "total_deactivated": 0,
+            }
+
+    async def _fake_refresh_authority_memory_projection(*, env=None, as_of=None):
+        nonlocal called
+        called = True
+        assert as_of == expected_as_of
+        return _FakeRefreshResult()
+
     repository = _FakeObjectRelationRepository(
         rows=(
             _relation(
@@ -406,6 +428,11 @@ def test_backfill_semantic_bridges_replays_object_relation_rows() -> None:
         object_relation_repository_factory=lambda _conn: repository,
         semantic_assertion_repository_factory=lambda _conn: semantic_repository,
     )
+    monkeypatch.setattr(
+        authority_memory_projection,
+        "refresh_authority_memory_projection",
+        _fake_refresh_authority_memory_projection,
+    )
 
     payload = frontdoor.backfill_semantic_bridges(
         include_object_relations=True,
@@ -431,6 +458,12 @@ def test_backfill_semantic_bridges_replays_object_relation_rows() -> None:
         "recorded": 0,
         "retracted": 0,
     }
+    assert summary["authority_memory_refresh"] == {
+        "projection_id": "authority_memory_projection",
+        "total_upserted": 4,
+        "total_deactivated": 0,
+    }
+    assert called is True
     assert repository.as_of == as_of
     assert len(semantic_repository.recorded_assertions) == 2
     assert semantic_repository.recorded_assertions[1][0].assertion_status == "retracted"

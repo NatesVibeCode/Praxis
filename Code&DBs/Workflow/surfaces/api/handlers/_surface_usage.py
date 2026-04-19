@@ -12,6 +12,7 @@ from storage.postgres import PostgresWorkflowSurfaceUsageRepository
 _TRACKED_API_ROUTES = frozenset(
     {
         "/api/trigger/:workflow_id",
+        "/orient",
         "/query",
     }
 )

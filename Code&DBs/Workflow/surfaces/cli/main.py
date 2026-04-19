@@ -65,6 +65,7 @@ from .commands.query import (
     _fitness_command,
     _leaderboard_command,
     _query_command,
+    _research_command,
     _recall_command,
     _receipts_command,
     _reviews_command,
@@ -123,9 +124,11 @@ class GraphLineageCommand:
 
 _COMMAND_INDEX_ENTRIES: list[dict[str, str]] = [
     {"command": "workflow commands", "description": "Show this command index"},
+    {"command": "workflow help commands", "description": "Show this command index via root help"},
     {"command": "workflow routes", "description": "Alias for workflow API route discovery"},
     {"command": "workflow help routes", "description": "Same route discovery help from the root help system"},
     {"command": "workflow mcp [list|search|describe|call|help]", "description": "Alias for workflow tools discovery"},
+    {"command": "workflow help mcp", "description": "Same tool discovery help from the root help system"},
     {"command": "workflow run <spec.json>", "description": "Submit a workflow spec"},
     {
         "command": "workflow preview <spec.json>",
@@ -138,6 +141,7 @@ _COMMAND_INDEX_ENTRIES: list[dict[str, str]] = [
     {"command": "workflow validate <spec.json>", "description": "Validate a spec without running"},
     {"command": "workflow records <create|update|rename>", "description": "Persist canonical workflow records"},
     {"command": "workflow status [--since-hours N]", "description": "Show recent workflow status"},
+    {"command": "workflow run-status <run_id>", "description": "Inspect one run and explain idle recovery options"},
     {"command": "workflow active", "description": "Show active workflow runs"},
     {"command": "workflow stream <run_id>", "description": "Stream one workflow run"},
     {"command": "workflow retry <run_id> <label>", "description": "Retry one failed job"},
@@ -148,17 +152,21 @@ _COMMAND_INDEX_ENTRIES: list[dict[str, str]] = [
     {"command": "workflow integrations", "description": "Scoped route discovery for /api/integrations"},
     {"command": "workflow api integrations", "description": "Scoped route discovery for /api/integrations"},
     {"command": "workflow api data-dictionary", "description": "Scoped route discovery for /api/data-dictionary"},
-    {"command": "workflow integration [list|describe|health|test|call|create|secret|reload]", "description": "Integration management via the catalog-backed MCP tool"},
+    {"command": "workflow integration [list|describe|health|test|call|create|secret|reload|help]", "description": "Integration management via the catalog-backed MCP tool"},
     {"command": "workflow dictionary <list|describe|set-override|clear-override|reproject>", "description": "Unified data dictionary authority"},
     {"command": "workflow authority-memory refresh", "description": "Refresh authority FK projection into memory_edges"},
     {"command": "workflow data <action>", "description": "Deterministic data cleanup, validation, and workflow launch"},
+    {
+        "command": "workflow research [list|<topic>] [--workers N] [--agent SLUG] [--threshold N] [--json]",
+        "description": "Launch or inspect the parallel research workflow frontdoor",
+    },
     {
         "command": "workflow schema|registry|object-type|object-field|object|catalog|files|reload|reconcile",
         "description": "Direct database, file, and registry authority frontdoors",
     },
     {"command": "workflow handoff <latest|lineage|status|history>", "description": "CQRS handoff inspection surface"},
     {
-        "command": "workflow query|recall|discover|architecture|artifacts|bugs|costs|leaderboard|trust|fitness|trends|scope|risk|reviews|receipts",
+        "command": "workflow query|recall|discover|research|architecture|artifacts|bugs|costs|leaderboard|trust|fitness|trends|scope|risk|reviews|receipts",
         "description": "Derived search, analysis, and bug-tracker surfaces",
     },
     {
@@ -408,6 +416,7 @@ def _workflow_arg_commands() -> dict[str, ArgsCommandHandler]:
         "dry-run": _lazy_workflow_args_command("_dry_run_command"),
         "chain": _lazy_workflow_args_command("_chain_command"),
         "query": _query_command,
+        "research": _research_command,
         "data": _data_command,
         "files": _files_command,
         "handoff": _handoff_command,
@@ -552,7 +561,15 @@ def _api_help_text() -> str:
 
 
 def _mcp_help_text() -> str:
-    return _tools_quickstart_text()
+    return "\n".join(
+        [
+            "usage: workflow mcp [list|search|describe|call|help]",
+            "",
+            "Alias for workflow tools discovery.",
+            "",
+            _tools_quickstart_text(),
+        ]
+    )
 
 
 def _commands_index_text() -> str:
@@ -604,10 +621,13 @@ def _help_text() -> str:
             "  workflow run <spec.json>",
             "  workflow preview <spec.json>",
             "  workflow validate <spec.json>",
-            "  workflow mcp",
+            "  workflow run-status <run_id>",
+            "  workflow mcp [list|search|describe|call|help]",
+            "  workflow help mcp",
             "  workflow routes",
             "  workflow integrations",
             "  workflow integration list",
+            "  workflow integration help",
             "  workflow help routes",
             "  workflow tools list",
             "  workflow tools search <topic> [--exact] [--surface <surface>] [--tier <tier>] [--risk <risk>]",
@@ -618,6 +638,7 @@ def _help_text() -> str:
             "  workflow help api",
             "  workflow commands --json",
             "  workflow query <question>",
+            "  workflow research 'API auth drift'",
             "  workflow data profile artifacts/data/users.csv",
             "  workflow files list --scope instance",
             "  workflow handoff latest --artifact-kind packet_lineage --revision-ref <ref>",
@@ -634,12 +655,13 @@ def _help_text() -> str:
             "  workflow tools [list|search|describe|call|help]",
             "  workflow dictionary <list|describe|set-override|clear-override|reproject>",
             "  workflow authority-memory refresh",
-            "  workflow integration [list|describe|health|test|call|create|secret|reload]",
+            "  workflow integration [list|describe|health|test|call|create|secret|reload|help]",
             "  workflow data <action>",
+            "  workflow research [list|<topic>] [--workers N] [--agent SLUG] [--threshold N] [--json]",
             "  workflow files <list|get|content|upload|delete>",
             "  workflow handoff <latest|lineage|status|history>",
             "  workflow schema|registry|object-type|object-field|object|catalog|files|reload|reconcile",
-            "  workflow query|recall|discover|architecture|artifacts|bugs|costs|leaderboard|trust|fitness|trends|scope|risk|reviews|receipts",
+            "  workflow query|recall|discover|research|architecture|artifacts|bugs|costs|leaderboard|trust|fitness|trends|scope|risk|reviews|receipts",
             "  workflow run|preview|run-status|status|active|scheduler|loop|debate|runs|manifest|triggers|retry|cancel|repair|heal|verify|verify-platform|pipeline|proof|queue|diagnose|inspect-job",
             "  workflow inspect|replay|graph-topology|graph-lineage|topology|lineage",
             "  workflow health|health-map|metrics|events|cache|circuits|slots|params|config|notifications|dashboard|api [routes|--host|--port]|routes|supervisor|capabilities|work",
@@ -654,10 +676,11 @@ def _help_text() -> str:
             "Tip: run `workflow commands` or `workflow help commands` for the full command index.",
             "Tip: run `workflow commands --json` when you want machine-readable discovery.",
             "Tip: run `workflow help routes` or `workflow help api` for HTTP route discovery.",
+            "Tip: run `workflow help run-status` for per-run status and idle recovery.",
             "Tip: run `workflow integrations` or `workflow api integrations` for the integration route scope.",
             "Tip: run `workflow integration` for integration management.",
             "Tip: run `workflow api data-dictionary` for the data dictionary route scope.",
-            "Tip: run `workflow help tools` or `workflow mcp` for catalog-backed tool discovery.",
+            "Tip: run `workflow help tools`, `workflow help mcp`, or `workflow mcp` for catalog-backed tool discovery.",
             "Tip: run `workflow help <command>` or `workflow <command> --help` for command-specific usage.",
         ]
     )

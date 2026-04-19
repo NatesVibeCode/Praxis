@@ -41,6 +41,7 @@ from storage.postgres import connect_workflow_database
 from .cache_invalidation import aemit_cache_invalidation
 from .dataset_curation_projection_subscriber import EVENT_PROMOTION_SUPERSEDED
 from .event_log import CHANNEL_DATASET, aemit
+from .primitive_contracts import bug_status_sql_equals_literal
 
 
 EVENT_CANDIDATE_STALENESS_CHANGED = "dataset_candidate_staleness_changed"
@@ -107,8 +108,9 @@ async def reconcile_definition_staleness(conn: _Connection) -> list[str]:
 async def reconcile_evidence_staleness(conn: _Connection) -> list[str]:
     """Flip candidates to ``evidence_stale``. Returns affected candidate_ids."""
 
+    wontfix_predicate = bug_status_sql_equals_literal("WONT_FIX")
     rows = await conn.fetch(
-        """WITH retracted_assertions AS (
+        f"""WITH retracted_assertions AS (
                 SELECT semantic_assertion_id::text AS evidence_ref
                   FROM semantic_assertions
                  WHERE assertion_status = 'retracted'
@@ -116,7 +118,7 @@ async def reconcile_evidence_staleness(conn: _Connection) -> list[str]:
             wontfix_bugs AS (
                 SELECT bug_id::text AS evidence_ref
                   FROM bugs
-                 WHERE UPPER(status) = 'WONT_FIX'
+                 WHERE {wontfix_predicate}
             ),
             stale_links AS (
                 SELECT DISTINCT l.candidate_id

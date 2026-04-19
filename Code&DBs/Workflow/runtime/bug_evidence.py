@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from runtime.bug_tagging import stable_fingerprint
+from runtime.primitive_contracts import failure_identity_fields
 
 
 def _json_object(value: Any) -> dict[str, Any]:
@@ -48,15 +49,7 @@ _BUG_BLAST_RADIUS_WINDOW_SQL = "7 days"
 _ALLOWED_EVIDENCE_KINDS = frozenset({"receipt", "run", "verification_run", "healing_run"})
 _ALLOWED_EVIDENCE_ROLES = frozenset({"observed_in", "attempted_fix", "validates_fix"})
 _VERIFICATION_SUCCESS_STATUSES = frozenset({"passed", "succeeded", "success", "ok"})
-_SIGNATURE_ANCHOR_FIELDS = (
-    "failure_code",
-    "job_label",
-    "node_id",
-    "failure_category",
-    "agent",
-    "provider_slug",
-    "model_slug",
-)
+_SIGNATURE_ANCHOR_FIELDS = failure_identity_fields()
 
 
 def build_failure_signature(

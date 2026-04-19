@@ -50,6 +50,8 @@ from runtime.workflow._status import summarize_run_health
 from runtime.workflow_graph_compiler import compile_graph_workflow_request, spec_uses_graph_runtime
 from surfaces.api.catalog_authority import build_catalog_payload
 from surfaces.api.operation_catalog_authority import build_operation_catalog_payload
+from surfaces.mcp.catalog import McpToolDefinition, canonical_tool_name, get_tool_catalog
+from surfaces.mcp.invocation import ToolInvocationError, invoke_tool
 from storage.postgres import PostgresWorkflowSurfaceUsageRepository
 from .handlers._subsystems import _Subsystems
 from .handlers._surface_usage import record_api_route_usage as _record_api_route_usage
@@ -754,6 +756,224 @@ def _default_workflow_adapter_type() -> str:
         return "cli_llm"
 
 
+def _normalize_operate_mode(value: object) -> str:
+    mode = str(value or "call").strip().lower().replace("-", "_")
+    if mode in {"call", "command", "query"}:
+        return mode
+    raise HTTPException(
+        status_code=422,
+        detail={
+            "message": "mode must be one of: call, command, query",
+            "error_code": "operate.invalid_mode",
+        },
+    )
+
+
+def _split_operate_operation(
+    operation: str,
+    catalog: dict[str, McpToolDefinition],
+) -> tuple[McpToolDefinition, dict[str, Any], str]:
+    """Resolve an operation id to a catalog tool and selector patch.
+
+    Accepted forms:
+    - ``praxis_bugs`` -> call the tool as-is.
+    - ``praxis_bugs.file`` -> call ``praxis_bugs`` with ``{"action": "file"}``.
+    - ``praxis_query.operator_graph`` -> call ``praxis_query`` with the tool's
+      selector field when it declares one.
+    """
+
+    raw_operation = str(operation or "").strip()
+    if not raw_operation:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "operation is required",
+                "error_code": "operate.operation_required",
+            },
+        )
+
+    canonical_operation = canonical_tool_name(raw_operation)
+    direct = catalog.get(canonical_operation)
+    if direct is not None:
+        return direct, {}, direct.name
+
+    if "." not in canonical_operation:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "message": f"unknown operation: {raw_operation}",
+                "error_code": "operate.operation_not_found",
+            },
+        )
+
+    tool_name, selector_value = canonical_operation.rsplit(".", 1)
+    definition = catalog.get(tool_name)
+    if definition is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "message": f"unknown operation: {raw_operation}",
+                "error_code": "operate.operation_not_found",
+            },
+        )
+    selector_field = definition.selector_field
+    if selector_field is None:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": f"operation {raw_operation!r} names a sub-action, but {tool_name!r} has no selector field",
+                "error_code": "operate.selector_not_supported",
+            },
+        )
+    selector = selector_value.strip().replace("-", "_")
+    if definition.selector_enum and selector not in definition.selector_enum:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": f"unknown {selector_field} {selector!r} for operation {tool_name!r}",
+                "error_code": "operate.selector_not_found",
+                "allowed": list(definition.selector_enum),
+            },
+        )
+    return definition, {selector_field: selector}, f"{tool_name}.{selector}"
+
+
+def _operate_catalog_tool(definition: McpToolDefinition) -> dict[str, Any]:
+    return {
+        "name": definition.name,
+        "description": definition.description,
+        "entrypoint": definition.cli_entrypoint,
+        "describe_command": definition.cli_describe_command,
+        "badges": list(definition.cli_badges),
+        "surface": definition.cli_surface,
+        "tier": definition.cli_tier,
+        "selector_field": definition.selector_field,
+        "selector_default": definition.selector_default,
+        "selector_enum": list(definition.selector_enum),
+        "risk_levels": list(definition.risk_levels),
+        "requires_workflow_token": definition.requires_workflow_token,
+        "input_schema": definition.input_schema,
+        "example_input": definition.example_input(),
+    }
+
+
+def _operate_catalog_operation(definition: McpToolDefinition, action: str) -> dict[str, Any]:
+    selector_field = definition.selector_field
+    params = {selector_field: action} if selector_field else {}
+    operation_name = f"{definition.name}.{action}" if selector_field else definition.name
+    return {
+        "operation": operation_name,
+        "tool": definition.name,
+        "selector_field": selector_field,
+        "selector_value": action if selector_field else None,
+        "risk": definition.risk_for_params(params),
+        "surface": definition.cli_surface,
+        "tier": definition.cli_tier,
+        "description": definition.description,
+        "input_schema": definition.input_schema,
+    }
+
+
+def build_operate_catalog_payload() -> dict[str, Any]:
+    catalog = get_tool_catalog()
+    tools = [_operate_catalog_tool(definition) for _, definition in sorted(catalog.items())]
+    operations: list[dict[str, Any]] = []
+    for _, definition in sorted(catalog.items()):
+        capabilities = definition.capability_rows()
+        if not capabilities:
+            operations.append(_operate_catalog_operation(definition, definition.default_action))
+            continue
+        for capability in capabilities:
+            action = str(capability.get("action") or definition.default_action).strip()
+            if action:
+                operations.append(_operate_catalog_operation(definition, action))
+    return {
+        "ok": True,
+        "routed_to": "unified_operator_catalog",
+        "contract_version": 1,
+        "authority": "surfaces.mcp.catalog.get_tool_catalog",
+        "call_path": "/api/operate",
+        "catalog_path": "/api/operate/catalog",
+        "tool_count": len(tools),
+        "operation_count": len(operations),
+        "tools": tools,
+        "operations": operations,
+    }
+
+
+def execute_operate_request(
+    body: OperateRequest,
+    *,
+    header_workflow_token: str | None = None,
+) -> tuple[int, dict[str, Any]]:
+    catalog = get_tool_catalog()
+    definition, selector_patch, operation_name = _split_operate_operation(body.operation, catalog)
+    mode = _normalize_operate_mode(body.mode)
+    if body.input is None or not isinstance(body.input, dict):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "input must be a JSON object",
+                "error_code": "operate.invalid_input",
+            },
+        )
+    tool_input = {**dict(body.input), **selector_patch}
+    workflow_token = str(body.workflow_token or header_workflow_token or "").strip()
+    try:
+        result = invoke_tool(definition.name, tool_input, workflow_token=workflow_token)
+    except ToolInvocationError as exc:
+        status = 404 if exc.reason_code == "mcp.tool_not_found" else 400
+        return (
+            status,
+            {
+                "ok": False,
+                "routed_to": "unified_operator_gateway",
+                "operation": operation_name,
+                "tool": definition.name,
+                "error": exc.message,
+                "reason_code": exc.reason_code,
+                **({"details": exc.details} if exc.details else {}),
+            },
+        )
+    if isinstance(result, dict) and result.get("error"):
+        return (
+            400,
+            {
+                "ok": False,
+                "routed_to": "unified_operator_gateway",
+                "operation": operation_name,
+                "tool": definition.name,
+                "result": result,
+                "reason_code": str(result.get("reason_code") or "operate.tool_error"),
+            },
+        )
+    return (
+        200,
+        {
+            "ok": True,
+            "routed_to": "unified_operator_gateway",
+            "contract_version": 1,
+            "operation": operation_name,
+            "tool": definition.name,
+            "mode": mode,
+            "selector_field": definition.selector_field,
+            "risk": definition.risk_for_params(tool_input),
+            "idempotency_key": body.idempotency_key,
+            "trace": body.trace,
+            "result": result,
+            "operation_receipt": {
+                "operation_name": operation_name,
+                "tool_name": definition.name,
+                "authority_ref": "surfaces.mcp.invocation.invoke_tool",
+                "catalog_ref": "surfaces.mcp.catalog.get_tool_catalog",
+                "posture": "catalog_dispatched",
+                "idempotency_policy": "caller_supplied" if body.idempotency_key else "tool_defined",
+                "execution_status": "completed",
+            },
+        },
+    )
+
+
 # ---------------------------------------------------------------------------
 # Request / response models
 # ---------------------------------------------------------------------------
@@ -842,6 +1062,17 @@ class LauncherRecoverRequest(BaseModel):
     service: str | None = None
     run_id: str | None = None
     open_browser: bool = False
+
+
+class OperateRequest(BaseModel):
+    """Catalog-backed unified operator gateway request."""
+
+    operation: str
+    input: dict[str, Any] = Field(default_factory=dict)
+    mode: str = "call"
+    idempotency_key: str | None = None
+    workflow_token: str | None = None
+    trace: dict[str, Any] = Field(default_factory=dict)
 
 
 class PublicRunJobRequest(BaseModel):
@@ -3291,6 +3522,25 @@ def get_catalog() -> dict[str, Any]:
 def get_operation_catalog() -> dict[str, Any]:
     """Return DB-backed CQRS operation definitions and source policies."""
     return build_operation_catalog_payload(_shared_pg_conn())
+
+
+@app.get("/api/operate/catalog")
+def get_operate_catalog() -> dict[str, Any]:
+    """Return the unified operator gateway catalog."""
+    return build_operate_catalog_payload()
+
+
+@app.post("/api/operate")
+def post_operate(
+    body: OperateRequest,
+    x_workflow_token: str | None = Header(default=None, alias="X-Workflow-Token"),
+) -> JSONResponse:
+    """Call one catalog-backed operator operation through the unified gateway."""
+    status_code, payload = execute_operate_request(
+        body,
+        header_workflow_token=x_workflow_token,
+    )
+    return JSONResponse(status_code=status_code, content=jsonable_encoder(payload))
 
 
 @app.get("/api/catalog/review-decisions")

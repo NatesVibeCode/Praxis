@@ -1288,3 +1288,83 @@ def _artifacts_command(args: list[str], *, stdout: TextIO) -> int:
         return exit_code
     render_artifacts_payload(payload, stdout=stdout)
     return exit_code
+
+
+# ---------------------------------------------------------------------------
+# workflow research [list|<topic>] — parallel research workflow launcher
+# ---------------------------------------------------------------------------
+
+def _research_command(args: list[str], *, stdout: TextIO) -> int:
+    """Handle `workflow research [list|<topic>] [--workers N] [--agent SLUG] [--threshold N] [--json]`."""
+
+    if not args or args[0] in {"-h", "--help"}:
+        stdout.write(
+            "usage: workflow research [list|<topic>] [--workers N] [--agent SLUG] [--threshold N] [--json]\n"
+            "\n"
+            "  Launch or inspect the parallel research workflow frontdoor.\n"
+            "  list               Show recent research workflow runs\n"
+            "  <topic>            Build and launch a multi-angle research workflow\n"
+            "\n"
+            "  Examples:\n"
+            "    workflow research 'API auth drift'\n"
+            "    workflow research 'provider routing tradeoffs' --workers 20 --agent deepseek/deepseek-r3\n"
+            "    workflow research list --json\n"
+        )
+        return 2
+
+    action = "run"
+    topic_parts: list[str] = []
+    workers = 40
+    agent = "deepseek/deepseek-r3"
+    threshold = None
+    as_json = False
+    i = 0
+
+    if args[0] == "list":
+        action = "list"
+        i = 1
+
+    while i < len(args):
+        token = args[i]
+        if token == "--workers" and i + 1 < len(args):
+            workers = int(args[i + 1])
+            i += 2
+            continue
+        if token == "--agent" and i + 1 < len(args):
+            agent = args[i + 1]
+            i += 2
+            continue
+        if token == "--threshold" and i + 1 < len(args):
+            threshold = int(args[i + 1])
+            i += 2
+            continue
+        if token == "--json":
+            as_json = True
+            i += 1
+            continue
+        if token == "--yes":
+            i += 1
+            continue
+        topic_parts.append(token)
+        i += 1
+
+    params: dict[str, object] = {"action": action}
+    if action == "run":
+        topic = " ".join(topic_parts).strip()
+        if not topic:
+            stdout.write("error: topic is required\n")
+            return 2
+        params.update({
+            "topic": topic,
+            "workers": workers,
+            "agent": agent,
+        })
+        if threshold is not None:
+            params["threshold"] = threshold
+
+    exit_code, payload = run_cli_tool("praxis_research_workflow", params)
+    if as_json or action == "list":
+        print_json(stdout, payload)
+        return exit_code
+    print_json(stdout, payload)
+    return exit_code

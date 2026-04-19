@@ -8,7 +8,7 @@ CLI discovery is generated from the same catalog metadata:
 - `workflow tools search <text> [--exact]`
 - `workflow tools describe <tool|alias>`
 - `workflow tools call <tool|alias> --input-json '{...}'`
-- single-result searches print the direct describe and entrypoint commands
+- single-result searches and top exact/prefix matches print the direct describe and entrypoint commands
 
 ## Catalog Summary
 

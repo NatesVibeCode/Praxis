@@ -40,9 +40,10 @@ def _api_discovery_text() -> str:
 def _integration_help_text() -> str:
     return "\n".join(
         [
-            "usage: workflow integration [list|describe|health|test|call|create|secret|reload] [args]",
+            "usage: workflow integration [list|describe|health|test|call|create|secret|reload|help] [args]",
             "",
             "Integration authority:",
+            "  workflow integration help",
             "  workflow integration list [--json]",
             "  workflow integration describe <integration_id> [--json]",
             "  workflow integration health [--json]",
@@ -146,7 +147,7 @@ def _run_integration_tool(
 
 
 def _integrations_command(args: list[str], *, stdout: TextIO) -> int:
-    if not args or args[0] in {"-h", "--help"}:
+    if not args or args[0] in {"-h", "--help", "help"}:
         stdout.write(_integration_help_text() + "\n")
         return 0
 

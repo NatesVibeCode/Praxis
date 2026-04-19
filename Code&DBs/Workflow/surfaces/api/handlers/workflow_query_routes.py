@@ -78,7 +78,9 @@ QUERY_GET_ROUTES: list[RouteEntry] = [
     (_exact("/api/templates"), _handler._handle_templates_get),
     (_exact("/api/models"), _handler._handle_models_get),
     (_exact("/api/models/market"), _handler._handle_market_models_get),
-    (_exact("/api/integrations"), _handler._handle_integrations_get),
+    # /api/integrations is owned by INTEGRATIONS_GET_ROUTES — the old inline
+    # handler returned a different shape (no source/catalog_dispatch/actions)
+    # and conflicted with the admin handler. Removed to collapse to one authority.
     (_exact("/api/catalog"), _handler._handle_catalog_get),
     (_exact("/api/catalog/operations"), _handler._handle_operation_catalog_get),
     (_exact("/api/catalog/review-decisions"), _handler._handle_catalog_review_decisions_get),

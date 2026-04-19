@@ -101,7 +101,8 @@ WORKFLOW_MIGRATION_SEQUENCE = ('001_v1_control_plane.sql',
  '164_dataset_promotion_decision_bridge.sql',
  '165_integration_registry_updated_at.sql',
  '166_data_dictionary_authority.sql',
- '167_scratch_agent_runtime_lane.sql')
+ '167_scratch_agent_runtime_lane.sql',
+ '168_openrouter_provider_authority_repair.sql')
 
 WORKFLOW_FULL_BOOTSTRAP_SEQUENCE = ('001_v1_control_plane.sql',
  '002_registry_authority.sql',
@@ -295,7 +296,8 @@ WORKFLOW_FULL_BOOTSTRAP_SEQUENCE = ('001_v1_control_plane.sql',
  '164_dataset_promotion_decision_bridge.sql',
  '165_integration_registry_updated_at.sql',
  '166_data_dictionary_authority.sql',
- '167_scratch_agent_runtime_lane.sql')
+ '167_scratch_agent_runtime_lane.sql',
+ '168_openrouter_provider_authority_repair.sql')
 
 WORKFLOW_POLICY_BUCKETS = {'canonical': ('001_v1_control_plane.sql',
                '002_registry_authority.sql',
@@ -392,7 +394,8 @@ WORKFLOW_POLICY_BUCKETS = {'canonical': ('001_v1_control_plane.sql',
                '164_dataset_promotion_decision_bridge.sql',
                '165_integration_registry_updated_at.sql',
                '166_data_dictionary_authority.sql',
-               '167_scratch_agent_runtime_lane.sql'),
+               '167_scratch_agent_runtime_lane.sql',
+               '168_openrouter_provider_authority_repair.sql'),
  'bootstrap_only': ('012_execution_leases.sql',
                     '012_task_type_route_eligibility.sql',
                     '013_dispatch_control_tables.sql',
@@ -589,6 +592,7 @@ WORKFLOW_MIGRATION_POLICIES = {'001_v1_control_plane.sql': 'canonical',
  '165_integration_registry_updated_at.sql': 'canonical',
  '166_data_dictionary_authority.sql': 'canonical',
  '167_scratch_agent_runtime_lane.sql': 'canonical',
+ '168_openrouter_provider_authority_repair.sql': 'canonical',
  '012_execution_leases.sql': 'bootstrap_only',
  '012_task_type_route_eligibility.sql': 'bootstrap_only',
  '013_dispatch_control_tables.sql': 'bootstrap_only',
@@ -1602,7 +1606,15 @@ WORKFLOW_MIGRATION_EXPECTED_OBJECTS = {'001_v1_control_plane.sql': (('table', 'w
                                         ('row',
                                          'registry_runtime_profile_authority.scratch_agent'),
                                         ('row',
-                                         'registry_native_runtime_profile_authority.scratch_agent'))}
+                                         'registry_native_runtime_profile_authority.scratch_agent')),
+ '168_openrouter_provider_authority_repair.sql': (('row',
+                                                   'provider_cli_profiles.openrouter'),
+                                                  ('row',
+                                                   'provider_transport_admissions.provider_transport_admission.openrouter.llm_task'),
+                                                  ('row',
+                                                   'provider_lane_policy.openrouter'),
+                                                  ('row',
+                                                   'provider_model_candidates.candidate.openrouter.auto'))}
 
 WORKFLOW_SCHEMA_READINESS_SEQUENCE = (('001_v1_control_plane.sql',
   (('table', 'workflow_definitions'),
@@ -2289,5 +2301,11 @@ WORKFLOW_SCHEMA_READINESS_SEQUENCE = (('001_v1_control_plane.sql',
   (('row', 'registry_workspace_authority.scratch_agent'),
    ('row', 'registry_sandbox_profile_authority.sandbox_profile.scratch_agent.default'),
    ('row', 'registry_runtime_profile_authority.scratch_agent'),
-   ('row', 'registry_native_runtime_profile_authority.scratch_agent'))))
+   ('row', 'registry_native_runtime_profile_authority.scratch_agent'))),
+ ('168_openrouter_provider_authority_repair.sql',
+  (('row', 'provider_cli_profiles.openrouter'),
+   ('row',
+    'provider_transport_admissions.provider_transport_admission.openrouter.llm_task'),
+   ('row', 'provider_lane_policy.openrouter'),
+   ('row', 'provider_model_candidates.candidate.openrouter.auto'))))
 

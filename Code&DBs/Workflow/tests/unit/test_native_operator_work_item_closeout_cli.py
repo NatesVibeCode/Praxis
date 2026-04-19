@@ -178,6 +178,16 @@ class _NoSqlTransaction:
         return None
 
 
+async def _fetch_no_relation_rows_for_closeout(
+    self,
+    conn,
+    roadmap_item_ids: tuple[str, ...],
+    bug_ids: tuple[str, ...],
+) -> tuple[dict[str, object], ...]:
+    del self, conn, roadmap_item_ids, bug_ids
+    return ()
+
+
 class _CloseoutRepositorySpy:
     def __init__(self, *, resolved_at: datetime) -> None:
         self.resolved_at = resolved_at
@@ -300,6 +310,11 @@ def test_work_item_closeout_commit_delegates_to_closeout_repository(monkeypatch)
         "_fetch_bug_evidence_for_closeout",
         _fetch_bug_evidence_for_closeout,
     )
+    monkeypatch.setattr(
+        operator_write.OperatorControlFrontdoor,
+        "_fetch_roadmap_bug_relation_rows_for_closeout",
+        _fetch_no_relation_rows_for_closeout,
+    )
     monkeypatch.setattr(operator_write, "_now", lambda: resolved_at)
 
     frontdoor = operator_write.OperatorControlFrontdoor(
@@ -340,8 +355,149 @@ def test_work_item_closeout_commit_delegates_to_closeout_repository(monkeypatch)
             "lifecycle": "completed",
             "completed_at": resolved_at.isoformat(),
             "source_bug_id": "bug.closeout.1",
+            "source_bug_link_source": "roadmap_items.source_bug_id",
+            "source_bug_relation_id": None,
         }
     ]
+
+
+def test_work_item_closeout_accepts_operator_relation_as_roadmap_bug_link(monkeypatch) -> None:
+    resolved_at = datetime(2026, 4, 9, 17, 0, tzinfo=timezone.utc)
+
+    async def _fetch_bug_rows_for_closeout(self, conn, bug_ids):
+        del self, conn
+        assert bug_ids == ("bug.closeout.related",)
+        return (
+            {
+                "bug_id": "bug.closeout.related",
+                "resolved_at": resolved_at,
+                "status": "FIXED",
+            },
+        )
+
+    async def _fetch_roadmap_rows_for_closeout(
+        self,
+        conn,
+        roadmap_item_ids: tuple[str, ...],
+        source_bug_ids: tuple[str, ...],
+    ) -> tuple[dict[str, object], ...]:
+        del self, conn, source_bug_ids
+        if not roadmap_item_ids:
+            return ()
+        return (
+            {
+                "roadmap_item_id": roadmap_item_ids[0],
+                "title": "Closeout roadmap",
+                "status": "active",
+                "lifecycle": "claimed",
+                "source_bug_id": None,
+                "completed_at": None,
+                "updated_at": resolved_at,
+            },
+        )
+
+    async def _fetch_relation_rows_for_closeout(
+        self,
+        conn,
+        roadmap_item_ids: tuple[str, ...],
+        bug_ids: tuple[str, ...],
+    ) -> tuple[dict[str, object], ...]:
+        del self, conn
+        assert roadmap_item_ids == ("roadmap_item.closeout.related",)
+        assert bug_ids == ("bug.closeout.related",)
+        return (
+            {
+                "operator_object_relation_id": (
+                    "operator_object_relation:implemented-by-fix:roadmap_item:"
+                    "roadmap_item.closeout.related:bug:bug.closeout.related"
+                ),
+                "relation_kind": "implemented_by_fix",
+                "relation_status": "active",
+                "roadmap_item_id": "roadmap_item.closeout.related",
+                "bug_id": "bug.closeout.related",
+            },
+        )
+
+    async def _fetch_bug_evidence_for_closeout(
+        self,
+        conn,
+        bug_ids: tuple[str, ...],
+    ) -> dict[str, tuple[dict[str, str], ...]]:
+        del self, conn
+        assert bug_ids == ("bug.closeout.related",)
+        return {
+            "bug.closeout.related": (
+                {
+                    "evidence_kind": "verification_run",
+                    "evidence_ref": "verification_run.closeout.related",
+                    "evidence_role": "validates_fix",
+                    "verification_status": "passed",
+                },
+            )
+        }
+
+    monkeypatch.setattr(
+        operator_write.OperatorControlFrontdoor,
+        "_fetch_bug_rows_for_closeout",
+        _fetch_bug_rows_for_closeout,
+    )
+    monkeypatch.setattr(
+        operator_write.OperatorControlFrontdoor,
+        "_fetch_roadmap_rows_for_closeout",
+        _fetch_roadmap_rows_for_closeout,
+    )
+    monkeypatch.setattr(
+        operator_write.OperatorControlFrontdoor,
+        "_fetch_roadmap_bug_relation_rows_for_closeout",
+        _fetch_relation_rows_for_closeout,
+    )
+    monkeypatch.setattr(
+        operator_write.OperatorControlFrontdoor,
+        "_fetch_bug_evidence_for_closeout",
+        _fetch_bug_evidence_for_closeout,
+    )
+
+    frontdoor = operator_write.OperatorControlFrontdoor(
+        connect_database=lambda env=None: asyncio.sleep(0, result=_NoSqlConnectionProxy()),
+    )
+
+    payload = asyncio.run(
+        frontdoor.reconcile_work_item_closeout_async(
+            action="preview",
+            bug_ids=("bug.closeout.related",),
+            roadmap_item_ids=("roadmap_item.closeout.related",),
+        )
+    )
+
+    assert payload["proof_threshold"]["roadmap_bug_link_authorities"] == [
+        "roadmap_items.source_bug_id",
+        "operator_object_relations.active_roadmap_item_to_bug",
+    ]
+    assert payload["candidates"]["roadmap_items"] == [
+        {
+            "roadmap_item_id": "roadmap_item.closeout.related",
+            "source_bug_id": "bug.closeout.related",
+            "source_bug_link_source": "operator_object_relations",
+            "source_bug_relation_id": (
+                "operator_object_relation:implemented-by-fix:roadmap_item:"
+                "roadmap_item.closeout.related:bug:bug.closeout.related"
+            ),
+            "current_status": "active",
+            "current_lifecycle": "claimed",
+            "next_status": "completed",
+            "next_lifecycle": "completed",
+            "reason_codes": ["relation_bug_has_explicit_passed_fix_proof"],
+            "evidence_refs": [
+                {
+                    "kind": "verification_run",
+                    "ref": "verification_run.closeout.related",
+                    "role": "validates_fix",
+                    "verification_status": "passed",
+                }
+            ],
+        }
+    ]
+    assert payload["skipped"]["roadmap_items"] == []
 
 
 def test_work_item_closeout_requires_passed_fix_verification(monkeypatch) -> None:
@@ -396,6 +552,11 @@ def test_work_item_closeout_requires_passed_fix_verification(monkeypatch) -> Non
         operator_write.OperatorControlFrontdoor,
         "_fetch_bug_evidence_for_closeout",
         _fetch_bug_evidence_for_closeout,
+    )
+    monkeypatch.setattr(
+        operator_write.OperatorControlFrontdoor,
+        "_fetch_roadmap_bug_relation_rows_for_closeout",
+        _fetch_no_relation_rows_for_closeout,
     )
 
     frontdoor = operator_write.OperatorControlFrontdoor(

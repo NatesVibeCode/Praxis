@@ -449,6 +449,40 @@ def test_provider_onboarding_resolve_spec_infers_single_declared_api_transport(m
     assert authority_step.details["supported_transports"] == ["api"]
 
 
+def test_provider_onboarding_resolve_spec_uses_openrouter_api_authority(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        provider_onboarding.provider_registry_mod,
+        "get_profile",
+        lambda provider_slug: ProviderCLIProfile(
+            provider_slug="openrouter",
+            binary="openrouter-api",
+            default_model="openrouter/auto",
+            api_endpoint="https://openrouter.ai/api/v1/chat/completions",
+            api_protocol_family="openai_chat_completions",
+            api_key_env_vars=("OPENROUTER_API_KEY",),
+            adapter_economics={"llm_task": {"billing_mode": "metered_api"}},
+            lane_policies={"llm_task": {"admitted_by_policy": True}},
+        )
+        if provider_slug == "openrouter"
+        else None,
+    )
+
+    resolved, template, transport_template, authority_step = provider_onboarding._resolve_spec(
+        provider_onboarding.ProviderOnboardingSpec(provider_slug="openrouter")
+    )
+
+    assert resolved.selected_transport == "api"
+    assert resolved.default_model == "openrouter/auto"
+    assert resolved.api_endpoint == "https://openrouter.ai/api/v1/chat/completions"
+    assert resolved.api_key_env_vars == ("OPENROUTER_API_KEY",)
+    assert sorted(template.transports) == ["api"]
+    assert transport_template.api_protocol_family == "openai_chat_completions"
+    assert authority_step.details["supported_transports"] == ["api"]
+    assert "DEEPSEEK_API_KEY" not in authority_step.details["api_key_env_vars"]
+
+
 def test_post_onboarding_sync_updates_native_runtime_allowed_models(monkeypatch) -> None:
     class _FakeSyncConn:
         def __init__(self) -> None:

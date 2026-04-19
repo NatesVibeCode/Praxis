@@ -8,7 +8,7 @@ sidecar context.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlsplit, urlunsplit
 
 from contracts.operation_catalog import OPERATION_IDEMPOTENCY_POLICIES, OPERATION_POSTURES
@@ -27,6 +27,10 @@ _API_PORT_ENV = "PRAXIS_API_PORT"
 _DATABASE_URL_ENV = "WORKFLOW_DATABASE_URL"
 _DATABASE_AUTHORITY_SOURCE_ENV = "WORKFLOW_DATABASE_AUTHORITY_SOURCE"
 _DEFAULT_API_PORT = "8420"
+
+# Tolerated legacy status aliases produced by older tooling. Consumers must
+# accept them on read paths but never emit them as canonical values.
+_BUG_STATUS_LEGACY_RESOLVED_ALIASES: tuple[str, ...] = ("RESOLVED", "DONE", "CLOSED")
 
 _BUG_STATUS_SEMANTICS: dict[str, dict[str, bool]] = {
     "OPEN": {
@@ -107,6 +111,67 @@ def bug_resolved_status_values() -> tuple[str, ...]:
         for status, predicates in _BUG_STATUS_SEMANTICS.items()
         if predicates["is_resolved"]
     )
+
+
+def bug_resolved_status_values_with_legacy() -> tuple[str, ...]:
+    """Resolved status values plus tolerated legacy aliases for read paths."""
+
+    return bug_resolved_status_values() + _BUG_STATUS_LEGACY_RESOLVED_ALIASES
+
+
+def bug_status_legacy_resolved_aliases() -> tuple[str, ...]:
+    """Tolerated legacy resolved-status aliases (uppercase)."""
+
+    return _BUG_STATUS_LEGACY_RESOLVED_ALIASES
+
+
+def bug_status_sql_in_literal(
+    kind: Literal["open", "resolved", "resolved_with_legacy"],
+    *,
+    column: str = "status",
+) -> str:
+    """Return a ``UPPER(<column>) IN (...)`` SQL fragment from the state contract.
+
+    Callers should embed the returned fragment directly; no query parameters
+    are needed because every value is a fixed, contract-owned identifier.
+    """
+
+    if kind == "open":
+        values = bug_open_status_values()
+    elif kind == "resolved":
+        values = bug_resolved_status_values()
+    elif kind == "resolved_with_legacy":
+        values = bug_resolved_status_values_with_legacy()
+    else:  # pragma: no cover — exhaustive Literal guard
+        raise ValueError(f"unknown bug status predicate kind: {kind}")
+    column_text = str(column or "").strip() or "status"
+    rendered = ", ".join(f"'{value}'" for value in values)
+    return f"UPPER({column_text}) IN ({rendered})"
+
+
+def bug_status_sql_equals_literal(status: str, *, column: str = "status") -> str:
+    """Return a ``UPPER(<column>) = '<STATUS>'`` SQL fragment.
+
+    Raises ``ValueError`` if *status* is not a canonical status in the
+    state-semantics contract. This prevents consumers from drifting onto
+    non-authority status values.
+    """
+
+    status_text = str(status or "").strip().upper()
+    if status_text not in _BUG_STATUS_SEMANTICS:
+        raise ValueError(
+            f"{status_text!r} is not a canonical bug status; "
+            f"known: {sorted(_BUG_STATUS_SEMANTICS)}"
+        )
+    column_text = str(column or "").strip() or "status"
+    return f"UPPER({column_text}) = '{status_text}'"
+
+
+def failure_identity_fields() -> tuple[str, ...]:
+    """Return the canonical failure-identity field order from the contract."""
+
+    contract = build_failure_identity_contract()
+    return tuple(contract["identity_fields"])
 
 
 def build_operation_posture_contract() -> dict[str, Any]:
@@ -247,6 +312,13 @@ def build_state_semantics_contract() -> dict[str, Any]:
             },
             "open_statuses": list(bug_open_status_values()),
             "resolved_statuses": list(bug_resolved_status_values()),
+            "legacy_resolved_aliases": list(_BUG_STATUS_LEGACY_RESOLVED_ALIASES),
+            "resolved_statuses_with_legacy": list(
+                bug_resolved_status_values_with_legacy()
+            ),
+            "sql_predicate_helper": (
+                "runtime.primitive_contracts.bug_status_sql_in_literal"
+            ),
             "normalization": "strip, uppercase, replace '-' with '_'",
         },
     }
@@ -330,12 +402,17 @@ def build_orient_primitive_contracts(
 __all__ = [
     "bug_open_status_values",
     "bug_resolved_status_values",
+    "bug_resolved_status_values_with_legacy",
+    "bug_status_legacy_resolved_aliases",
+    "bug_status_sql_equals_literal",
+    "bug_status_sql_in_literal",
     "build_failure_identity_contract",
     "build_operation_posture_contract",
     "build_orient_primitive_contracts",
     "build_proof_ref_contract",
     "build_runtime_binding_contract",
     "build_state_semantics_contract",
+    "failure_identity_fields",
     "resolve_runtime_http_endpoints",
     "redact_url",
 ]

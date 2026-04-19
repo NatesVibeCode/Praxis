@@ -88,6 +88,52 @@ description = "Search deals. Body: {filterGroups, sorts, properties, limit, afte
 method = "POST"
 path = "https://api.hubapi.com/crm/v3/objects/deals/search"
 
+[[capabilities]]
+action = "batch_read_deals"
+description = "Batch read deals by id. Body: {inputs: [{id}], properties}"
+method = "POST"
+path = "https://api.hubapi.com/crm/v3/objects/deals/batch/read"
+
+[[capabilities]]
+action = "batch_read_companies"
+description = "Batch read companies by id. Body: {inputs: [{id}], properties}"
+method = "POST"
+path = "https://api.hubapi.com/crm/v3/objects/companies/batch/read"
+
+# ── Pipelines ───────────────────────────────────────────────────────────────
+
+[[capabilities]]
+action = "get_deal_pipelines"
+description = "Fetch deal pipelines with their stage definitions. No args."
+method = "GET"
+path = "https://api.hubapi.com/crm/v3/pipelines/deals"
+
+# ── Associations (v4 batch) ─────────────────────────────────────────────────
+
+[[capabilities]]
+action = "batch_read_deal_contact_associations"
+description = "Given deal IDs, return associated contacts. Body: {inputs: [{id}]}"
+method = "POST"
+path = "https://api.hubapi.com/crm/v4/associations/deals/contacts/batch/read"
+
+[[capabilities]]
+action = "batch_read_deal_company_associations"
+description = "Given deal IDs, return associated companies. Body: {inputs: [{id}]}"
+method = "POST"
+path = "https://api.hubapi.com/crm/v4/associations/deals/companies/batch/read"
+
+[[capabilities]]
+action = "batch_read_note_deal_associations"
+description = "Given note IDs, return associated deals. Body: {inputs: [{id}]}"
+method = "POST"
+path = "https://api.hubapi.com/crm/v4/associations/notes/deals/batch/read"
+
+[[capabilities]]
+action = "batch_read_note_contact_associations"
+description = "Given note IDs, return associated contacts. Body: {inputs: [{id}]}"
+method = "POST"
+path = "https://api.hubapi.com/crm/v4/associations/notes/contacts/batch/read"
+
 # ── Engagements ─────────────────────────────────────────────────────────────
 
 [[capabilities]]
@@ -95,6 +141,12 @@ action = "create_note"
 description = "Log a note engagement. Body: {properties: {hs_note_body, hs_timestamp}, associations: [...]}"
 method = "POST"
 path = "https://api.hubapi.com/crm/v3/objects/notes"
+
+[[capabilities]]
+action = "batch_read_notes"
+description = "Batch read notes by id. Body: {inputs: [{id}], properties}"
+method = "POST"
+path = "https://api.hubapi.com/crm/v3/objects/notes/batch/read"
 
 # ── Owners (for assignment lookups) ─────────────────────────────────────────
 

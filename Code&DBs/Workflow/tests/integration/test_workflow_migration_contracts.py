@@ -98,7 +98,8 @@ def test_workflow_migration_manifest_includes_provider_route_health_budget_migra
     assert "165_integration_registry_updated_at.sql" in filenames
     assert "166_data_dictionary_authority.sql" in filenames
     assert "167_scratch_agent_runtime_lane.sql" in filenames
-    assert filenames[-1] == "167_scratch_agent_runtime_lane.sql"
+    assert "168_openrouter_provider_authority_repair.sql" in filenames
+    assert filenames[-1] == "168_openrouter_provider_authority_repair.sql"
 
 
 def test_every_manifest_migration_has_expected_object_contract() -> None:
@@ -708,6 +709,33 @@ def test_notify_and_provider_transport_migration_expected_objects_are_registered
     assert "'cursor_local'" in cursor_local_sql
     assert "'cursor-agent'" in cursor_local_sql
     assert "'provider_transport_admission.cursor_local.cli_llm'" in cursor_local_sql
+
+
+def test_openrouter_provider_authority_repair_expected_objects_are_registered() -> None:
+    objects = workflow_migration_expected_objects(
+        "168_openrouter_provider_authority_repair.sql"
+    )
+    names = {item.object_name for item in objects}
+
+    assert names == {
+        "provider_cli_profiles.openrouter",
+        "provider_transport_admissions.provider_transport_admission.openrouter.llm_task",
+        "provider_lane_policy.openrouter",
+        "provider_model_candidates.candidate.openrouter.auto",
+    }
+
+
+def test_openrouter_provider_authority_repair_uses_openrouter_api_not_deepseek() -> None:
+    sql_text = workflow_migration_sql_text(
+        "168_openrouter_provider_authority_repair.sql"
+    )
+
+    assert "https://openrouter.ai/api/v1/chat/completions" in sql_text
+    assert "OPENROUTER_API_KEY" in sql_text
+    assert "provider_transport_admission.openrouter.llm_task" in sql_text
+    assert "ARRAY['llm_task']" in sql_text
+    assert "https://api.deepseek.com" not in sql_text
+    assert "DEEPSEEK_API_KEY" not in sql_text
 
 
 def test_stale_postgres_completion_prune_migration_is_resolvable_and_targeted() -> None:

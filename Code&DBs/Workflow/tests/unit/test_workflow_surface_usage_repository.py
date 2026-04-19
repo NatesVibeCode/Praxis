@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 
+from surfaces.api.handlers._surface_usage import record_api_route_usage
 from storage.postgres.workflow_surface_usage_repository import (
     PostgresWorkflowSurfaceUsageRepository,
 )
@@ -186,6 +187,32 @@ def test_surface_usage_repository_records_event_and_daily_rollup() -> None:
     assert event_args[27] == "def_123"
     assert event_args[28] == "research"
     assert event_args[29] is True
+    assert daily_sql.startswith("INSERT INTO workflow_surface_usage_daily (")
+
+
+def test_record_api_route_usage_tracks_orient_frontdoor() -> None:
+    class _FakeSubsystems:
+        def __init__(self, conn: _FakeConn) -> None:
+            self._conn = conn
+
+        def get_pg_conn(self) -> _FakeConn:
+            return self._conn
+
+    conn = _FakeConn()
+    record_api_route_usage(
+        _FakeSubsystems(conn),
+        path="/orient",
+        method="POST",
+        status_code=200,
+        response_payload={"kind": "orient_authority_envelope"},
+    )
+
+    assert len(conn.calls) == 2
+    event_sql, event_args = conn.calls[0]
+    daily_sql, _daily_args = conn.calls[1]
+    assert event_sql.startswith("INSERT INTO workflow_surface_usage_events (")
+    assert event_args[4] == "/orient"
+    assert event_args[8] == "ok"
     assert daily_sql.startswith("INSERT INTO workflow_surface_usage_daily (")
 
 

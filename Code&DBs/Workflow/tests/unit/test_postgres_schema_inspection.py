@@ -191,6 +191,73 @@ def test_inspect_workflow_schema_treats_expected_registry_rows_as_present(
     assert readiness.missing_by_migration == {}
 
 
+def test_inspect_workflow_schema_treats_expected_provider_authority_rows_as_present(
+    monkeypatch,
+) -> None:
+    expected = (
+        WorkflowMigrationExpectedObject(
+            object_type="row",
+            object_name="provider_cli_profiles.openrouter",
+        ),
+        WorkflowMigrationExpectedObject(
+            object_type="row",
+            object_name=(
+                "provider_transport_admissions."
+                "provider_transport_admission.openrouter.llm_task"
+            ),
+        ),
+        WorkflowMigrationExpectedObject(
+            object_type="row",
+            object_name="provider_lane_policy.openrouter",
+        ),
+        WorkflowMigrationExpectedObject(
+            object_type="row",
+            object_name="provider_model_candidates.candidate.openrouter.auto",
+        ),
+    )
+
+    class _Conn:
+        async def fetch(self, query: str, *args):
+            normalized = " ".join(query.split())
+            if "FROM provider_cli_profiles" in normalized:
+                assert args == (["openrouter"],)
+                return [{"row_key": "openrouter"}]
+            if "FROM provider_transport_admissions" in normalized:
+                assert args == (["provider_transport_admission.openrouter.llm_task"],)
+                return [{"row_key": "provider_transport_admission.openrouter.llm_task"}]
+            if "FROM provider_lane_policy" in normalized:
+                assert args == (["openrouter"],)
+                return [{"row_key": "openrouter"}]
+            if "FROM provider_model_candidates" in normalized:
+                assert args == (["candidate.openrouter.auto"],)
+                return [{"row_key": "candidate.openrouter.auto"}]
+            raise AssertionError(f"unexpected query: {query}")
+
+        async def fetchval(self, query: str, *args):
+            normalized = " ".join(query.split())
+            if normalized == "SELECT to_regclass($1::text) IS NOT NULL":
+                assert args[0] in {
+                    "public.provider_cli_profiles",
+                    "public.provider_transport_admissions",
+                    "public.provider_lane_policy",
+                    "public.provider_model_candidates",
+                }
+                return True
+            raise AssertionError(f"unexpected query: {query}")
+
+    monkeypatch.setattr(
+        postgres_schema,
+        "_workflow_schema_readiness_by_migration",
+        lambda: (("168_openrouter_provider_authority_repair.sql", expected),),
+    )
+
+    readiness = asyncio.run(postgres_schema.inspect_workflow_schema(_Conn()))
+
+    assert readiness.is_bootstrapped is True
+    assert readiness.missing_objects == ()
+    assert readiness.missing_by_migration == {}
+
+
 def test_inspect_workflow_schema_accepts_bare_constraint_names(monkeypatch) -> None:
     class _Conn:
         async def fetch(self, query: str, *args):

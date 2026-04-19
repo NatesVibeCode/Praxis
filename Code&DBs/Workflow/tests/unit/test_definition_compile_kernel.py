@@ -102,3 +102,45 @@ def test_split_sentences_breaks_need_to_connector_flow_into_steps() -> None:
         "then we need to make a skinny first-pass connector plan",
         "then that needs to get created and tested until it works.",
     ]
+
+
+def test_split_sentences_breaks_comma_imperatives_marked_by_then() -> None:
+    # Multi-step prose with comma-separated imperatives and a ", then" marker must
+    # decompose into one step per clause — not collapse into a single narrative block.
+    prose = (
+        "Read a transcript, summarize it, use it to create a fan out search, "
+        "then use that search to suggest roadmap items."
+    )
+
+    sentences = split_sentences(prose)
+
+    assert [sentence for sentence, _, _ in sentences] == [
+        "Read a transcript",
+        "summarize it",
+        "use it to create a fan out search",
+        "then use that search to suggest roadmap items.",
+    ]
+
+
+def test_split_sentences_leaves_relative_clauses_unsplit_without_then_marker() -> None:
+    # Prose that reads like one assertion with relative clauses must NOT be split
+    # on commas — the comma-imperative splitter requires an explicit ", then" marker.
+    prose = (
+        "Build a workflow that ingests bug reports, routes by severity, "
+        "and requires review before closure."
+    )
+
+    sentences = split_sentences(prose)
+
+    assert len(sentences) == 1
+    assert sentences[0][0] == prose
+
+
+def test_split_sentences_leaves_noun_lists_unsplit() -> None:
+    # Single-word comma lists (noun enumerations) must not trigger imperative split.
+    prose = "Apples, oranges, bananas."
+
+    sentences = split_sentences(prose)
+
+    assert len(sentences) == 1
+    assert sentences[0][0] == prose

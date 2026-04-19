@@ -325,13 +325,17 @@ def _resolve_job_prompt_authority(
 
 
 def _normalized_job_write_scope(job: dict[str, object]) -> list[str]:
+    # Accept all three authoring keys so raw spec_snapshot (top-level `write`)
+    # and normalized spec.jobs (`scope.write` or `write_scope`) resolve identically.
     write_scope = _normalize_paths(job.get("write_scope"))
     if write_scope:
         return write_scope
     scope = job.get("scope") or {}
     if isinstance(scope, dict):
-        return _normalize_paths(scope.get("write"))
-    return []
+        scoped = _normalize_paths(scope.get("write"))
+        if scoped:
+            return scoped
+    return _normalize_paths(job.get("write"))
 
 
 def _normalized_job_read_scope(job: dict[str, object]) -> list[str]:
@@ -346,8 +350,10 @@ def _normalized_job_read_scope(job: dict[str, object]) -> list[str]:
         return normalized
     scope = job.get("scope") or {}
     if isinstance(scope, dict):
-        return _normalize_paths(scope.get("read"))
-    return []
+        scoped = _normalize_paths(scope.get("read"))
+        if scoped:
+            return scoped
+    return _normalize_paths(job.get("read"))
 
 
 def _proof_metrics_snapshot(conn: SyncPostgresConnection) -> dict[str, object]:

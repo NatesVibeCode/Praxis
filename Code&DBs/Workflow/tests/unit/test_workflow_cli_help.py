@@ -47,7 +47,7 @@ def test_help_topic_routes_delegates_to_modern_discovery_frontdoor(capsys) -> No
 
     assert legacy_rc == modern_rc == 0
     assert legacy_rendered == modern_rendered
-    assert "workflow api [routes|--host HOST|--port PORT]" in legacy_rendered
+    assert "workflow api [routes|integrations|data-dictionary|--host HOST|--port PORT]" in legacy_rendered
     assert "workflow routes --json" in legacy_rendered
     assert "workflow help routes" in legacy_rendered
 
@@ -58,7 +58,7 @@ def test_help_topic_api_is_an_alias_for_routes(capsys) -> None:
 
     assert legacy_rc == modern_rc == 0
     assert legacy_rendered == modern_rendered
-    assert "workflow api [routes|--host HOST|--port PORT]" in legacy_rendered
+    assert "workflow api [routes|integrations|data-dictionary|--host HOST|--port PORT]" in legacy_rendered
     assert "Flat alias: workflow routes" in legacy_rendered
 
 
@@ -79,6 +79,8 @@ def test_help_topic_mcp_is_an_alias_for_tools(capsys) -> None:
 
     assert legacy_rc == modern_rc == 0
     assert legacy_rendered == modern_rendered
+    assert "usage: workflow mcp [list|search|describe|call|help]" in legacy_rendered
+    assert "Alias for workflow tools discovery." in legacy_rendered
     assert "workflow tools list" in legacy_rendered
     assert "workflow tools search <topic> [--exact]" in legacy_rendered
 
@@ -113,6 +115,7 @@ def test_top_level_help_delegates_to_modern_command_index(capsys) -> None:
     assert legacy_rc == modern_rc == 0
     assert legacy_rendered == modern_rendered
     assert "workflow help commands" in legacy_rendered
+    assert "workflow mcp [list|search|describe|call|help]" in legacy_rendered
 
 
 def test_modern_help_index_mentions_bug_tracker_surface() -> None:
