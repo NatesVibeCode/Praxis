@@ -10,5 +10,8 @@
   },
   "log_paths": {
     "postgres": "Databases/postgres-dev/log/postgres.log"
+  },
+  "execution_mounts": {
+    "container_workspace_root": "/workspace"
   }
 }

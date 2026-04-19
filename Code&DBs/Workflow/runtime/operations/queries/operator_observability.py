@@ -387,21 +387,23 @@ async def _load_run_scoped_view(
         cutover_scoreboard_run,
         graph_lineage_run,
         graph_topology_run,
+        inspect_run,
         load_native_operator_support,
         operator_status_run,
         render_cutover_scoreboard,
         render_operator_status,
     )
-    from runtime.execution import RuntimeOrchestrator
     from storage.postgres import PostgresEvidenceReader
     from surfaces.cli.render import render_graph_lineage, render_graph_topology
 
-    evidence_reader = PostgresEvidenceReader()
-    canonical_evidence = evidence_reader.evidence_timeline(query.run_id)
-    inspection = RuntimeOrchestrator(evidence_reader=evidence_reader).inspect_run(
-        run_id=query.run_id
+    env = _resolved_env(subsystems)
+    evidence_reader = PostgresEvidenceReader(env=env)
+    canonical_evidence = await evidence_reader.load_evidence_timeline(run_id=query.run_id)
+    inspection = inspect_run(
+        run_id=query.run_id,
+        canonical_evidence=canonical_evidence,
     )
-    support = await load_native_operator_support(run_id=query.run_id)
+    support = await load_native_operator_support(run_id=query.run_id, env=env)
 
     if view_kind == "status":
         read_model = operator_status_run(

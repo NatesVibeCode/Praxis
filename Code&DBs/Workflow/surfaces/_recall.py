@@ -4,6 +4,8 @@ from collections.abc import Mapping
 from typing import Any
 import re
 
+from memory.federated_retrieval import FederatedRetriever
+from memory.types import EntityType
 from surfaces.api import operator_write as operator_control
 
 _DECISION_ENTITY_TYPES = {"", "decision", "architecture_policy", "operator_decision"}
@@ -156,6 +158,45 @@ def _search_operator_decisions(
     return [row for _score, row in scored_rows[:limit]]
 
 
+def _search_federated_memory_results(
+    subsystems: Any,
+    *,
+    query: str,
+    entity_type: str | None,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Search the memory graph through the federated retriever first."""
+    try:
+        engine = subsystems.get_memory_engine()
+    except Exception:
+        return []
+
+    try:
+        retriever = FederatedRetriever(engine)
+        memory_entity_type = None
+        if entity_type:
+            try:
+                memory_entity_type = EntityType(entity_type)
+            except ValueError:
+                memory_entity_type = None
+
+        results = retriever.search(
+            query,
+            entity_type=memory_entity_type,
+            limit=limit,
+        )
+    except Exception:
+        return []
+
+    normalized: list[dict[str, Any]] = []
+    for result in results:
+        try:
+            normalized.append(_normalize_knowledge_result(result))
+        except Exception:
+            continue
+    return normalized
+
+
 def search_recall_results(
     subsystems: Any,
     *,
@@ -164,9 +205,17 @@ def search_recall_results(
     limit: int = 20,
 ) -> list[dict[str, Any]]:
     normalized_limit = max(1, int(limit or 20))
-    kg = subsystems.get_knowledge_graph()
     merged: dict[str, dict[str, Any]] = {}
 
+    for result in _search_federated_memory_results(
+        subsystems,
+        query=query,
+        entity_type=entity_type,
+        limit=normalized_limit,
+    ):
+        merged[result["entity_id"]] = result
+
+    kg = subsystems.get_knowledge_graph()
     for result in kg.search(query, entity_type=entity_type, limit=normalized_limit):
         normalized = _normalize_knowledge_result(result)
         merged[normalized["entity_id"]] = normalized

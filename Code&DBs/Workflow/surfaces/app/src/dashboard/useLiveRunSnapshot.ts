@@ -10,7 +10,9 @@ export type JobStatus =
   | 'succeeded'
   | 'failed'
   | 'dead_letter'
-  | 'cancelled';
+  | 'blocked'
+  | 'cancelled'
+  | 'parent_failed';
 
 export interface RecentRun {
   run_id: string;

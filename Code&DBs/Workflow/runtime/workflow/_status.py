@@ -458,7 +458,7 @@ def _scan_jobs_for_health(
 
     for job in jobs:
         job_status = job.get("status")
-        if job_status in ("succeeded", "failed", "dead_letter", "cancelled"):
+        if job_status in _TERMINAL_JOB_STATUSES:
             completed_jobs += 1
             terminal_jobs += 1
         if job_status in ("claimed", "running"):

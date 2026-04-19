@@ -1,0 +1,68 @@
+{
+  "name": "Fix Migration Authority Drift and File Standing-Order Policy",
+  "phase": "W",
+  "queue_id": "authority_drift_fix_and_standing_order_20260418",
+  "outcome_goal": "praxis workflow schema status --json succeeds with no drift; operation_catalog_registry is populated from migrations 140+; operator_decisions contains an architecture_policy row with policy_slug=file-decisions-inline scoped to authority_domain=decision_hygiene.",
+  "anti_requirements": [
+    "Do NOT edit any migration SQL file under Code&DBs/Databases/migrations/workflow/ — authority drift is fixed at the JSON classification layer, not by changing SQL.",
+    "Do NOT reorder existing entries in canonical_manifest — only append the 8 new filenames in numeric order.",
+    "Do NOT change any bucket other than canonical — files 155-162 are canonical migrations.",
+    "Do NOT modify storage/_generated_workflow_migration_authority.py by hand — regenerate it from the JSON via the generator script.",
+    "Do NOT invent decision_key or operator_decision_id fields — let the operator authority tool mint them."
+  ],
+  "jobs": [
+    {
+      "label": "authority_classify_and_regen",
+      "agent": "auto/build",
+      "task_type": "build",
+      "description": "Classify 8 orphan migration files in workflow_migration_authority.json and regenerate the Python module",
+      "outcome_goal": "workflow_migration_authority.json contains canonical-bucket entries and expected_objects catalogs for files 155-162; storage/_generated_workflow_migration_authority.py is regenerated; praxis workflow schema status --json succeeds.",
+      "prompt": "Fix the workflow migration authority drift. The validator `_validate_generated_workflow_migration_policy` in `Code&DBs/Workflow/storage/migrations.py:244` rejects on-disk files not classified in the authority JSON. These 8 files are orphaned:\n\n- 155_dataset_refinery_authority.sql\n- 156_dataset_refinery_projections.sql\n- 157_dataset_refinery_indexes.sql\n- 158_authority_memory_projection_vocabulary.sql\n- 159_provider_lane_policy.sql\n- 160_pgvector_roadmap_and_decisions.sql\n- 161_workflow_spec_ready.sql\n- 162_rename_fanout_to_loop.sql\n\nFor EACH file:\n\n1. Read the SQL at `Code&DBs/Databases/migrations/workflow/<filename>`.\n2. Enumerate every object it creates. Types to catalog:\n   - `table` for `CREATE TABLE <name>` (object_name = table name)\n   - `index` for `CREATE INDEX <name>` (object_name = index name)\n   - `function` for `CREATE [OR REPLACE] FUNCTION <name>` (object_name = function name with argument signature if needed; follow the existing JSON's convention)\n   - `trigger` for `CREATE TRIGGER <name>`\n   - `constraint` for named constraints added via ALTER TABLE\n   - `row` for INSERT statements with a stable unique identity (object_name = `<table>.<identifying_value>`; follow the existing JSON's convention by inspecting similar bucket entries for inserts into operation_catalog_registry and capability_catalog)\n   - `column` for ALTER TABLE ADD COLUMN (object_name = `<table>.<column>`)\n   - `type` for CREATE TYPE\n   - `schema` for CREATE SCHEMA\n   - `extension` for CREATE EXTENSION\n\n3. Update `Code&DBs/Workflow/system_authority/workflow_migration_authority.json`:\n   (a) Append each filename to `canonical_manifest` in strict numeric order (155 before 156 before ... 162; do not reorder existing entries).\n   (b) Append each filename to `policy_buckets.canonical` in the same numeric order (do not reorder).\n   (c) Add an entry to `expected_objects` with key = filename and value = an array of `{\"object_type\":\"...\",\"object_name\":\"...\"}` objects reflecting step 2.\n\n4. Regenerate the Python module:\n   `cd /Users/nate/Praxis && /opt/homebrew/bin/python3 'Code&DBs/Workflow/system_authority/generate_workflow_migration_authority.py'`\n\n5. Verify by running `WORKFLOW_DATABASE_URL=postgresql://localhost:5432/praxis /Users/nate/.local/bin/praxis workflow schema status --json` from `/Users/nate/Praxis`. It must exit 0 and return status JSON without a WorkflowMigrationError.\n\nMatch the existing JSON style exactly. Study the existing `expected_objects` entries for nearby files (e.g. 151, 152, 153, 154) to confirm naming conventions for row identifiers, function signatures, and index ordering. When in doubt about a specific DDL form, follow the closest precedent already in the JSON rather than inventing a new convention.",
+      "read": [
+        "Code&DBs/Workflow/system_authority/workflow_migration_authority.json",
+        "Code&DBs/Workflow/system_authority/generate_workflow_migration_authority.py",
+        "Code&DBs/Workflow/storage/migrations.py",
+        "Code&DBs/Databases/migrations/workflow/155_dataset_refinery_authority.sql",
+        "Code&DBs/Databases/migrations/workflow/156_dataset_refinery_projections.sql",
+        "Code&DBs/Databases/migrations/workflow/157_dataset_refinery_indexes.sql",
+        "Code&DBs/Databases/migrations/workflow/158_authority_memory_projection_vocabulary.sql",
+        "Code&DBs/Databases/migrations/workflow/159_provider_lane_policy.sql",
+        "Code&DBs/Databases/migrations/workflow/160_pgvector_roadmap_and_decisions.sql",
+        "Code&DBs/Databases/migrations/workflow/161_workflow_spec_ready.sql",
+        "Code&DBs/Databases/migrations/workflow/162_rename_fanout_to_loop.sql"
+      ],
+      "write": [
+        "Code&DBs/Workflow/system_authority/workflow_migration_authority.json",
+        "Code&DBs/Workflow/storage/_generated_workflow_migration_authority.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && WORKFLOW_DATABASE_URL=postgresql://localhost:5432/praxis /Users/nate/.local/bin/praxis workflow schema status --json >/dev/null"
+    },
+    {
+      "label": "schema_apply_catch_up",
+      "agent": "auto/build",
+      "task_type": "build",
+      "depends_on": ["authority_classify_and_regen"],
+      "description": "Apply pending workflow migrations so the operation_catalog_registry is populated",
+      "outcome_goal": "operation_catalog_registry contains a row with operation_name='operator.architecture_policy_record', and schema status reports all manifest migrations applied.",
+      "prompt": "Catch the database up to the declared migration authority.\n\n1. From `/Users/nate/Praxis`, run:\n   `WORKFLOW_DATABASE_URL=postgresql://localhost:5432/praxis /Users/nate/.local/bin/praxis workflow schema apply --yes --json`\n   It must exit 0. If it fails on a specific migration, investigate that file only; do NOT skip or modify migrations to paper over errors.\n\n2. Re-run `WORKFLOW_DATABASE_URL=postgresql://localhost:5432/praxis /Users/nate/.local/bin/praxis workflow schema status --json` and confirm there is no outstanding work.\n\n3. Sanity-check the registry:\n   `psql postgresql://localhost:5432/praxis -c \"SELECT operation_name FROM operation_catalog_registry WHERE operation_name = 'operator.architecture_policy_record';\"`\n   Must return exactly one row.\n\nIf schema apply reports any error, do not proceed — return the error detail. The next job (file_standing_order_policy) depends on `operator.architecture_policy_record` being registered.",
+      "read": [],
+      "write": [],
+      "verify_command": "psql postgresql://localhost:5432/praxis -tAc \"SELECT COUNT(*) FROM operation_catalog_registry WHERE operation_name='operator.architecture_policy_record';\" | grep -qE '^1$'"
+    },
+    {
+      "label": "file_standing_order_policy",
+      "agent": "auto/build",
+      "task_type": "build",
+      "depends_on": ["schema_apply_catch_up"],
+      "description": "File the file-decisions-inline architecture policy in operator authority",
+      "outcome_goal": "operator_decisions contains exactly one row with decision_kind='architecture_policy', decision_scope_kind='authority_domain', decision_scope_ref='decision_hygiene', and policy slug file-decisions-inline embedded in decision_key.",
+      "prompt": "File the standing-order policy through the operator authority tool. Do NOT insert directly into operator_decisions — use the tool path so decision_key/operator_decision_id are minted and scope validation runs.\n\nFrom `/Users/nate/Praxis`, run:\n\n/Users/nate/.local/bin/praxis workflow tools call praxis_operator_architecture_policy --input-json '{\"authority_domain\":\"decision_hygiene\",\"policy_slug\":\"file-decisions-inline\",\"title\":\"File decisions inline, not at closeout\",\"rationale\":\"Durable decisions made in conversation must be persisted to operator authority immediately, not left as chat residue that may be lost to context compaction. Any harness (Claude, Codex, Gemini, Cursor) orienting via /orient or praxis workflow query must receive this as a standing order.\",\"decided_by\":\"nate\",\"decision_source\":\"conversation\"}' --yes\n\nIt must exit 0. If it returns an error, inspect the tool handler at `Code&DBs/Workflow/surfaces/mcp/tools/operator.py:457` and the corresponding command at `Code&DBs/Workflow/runtime/operations/commands/operator_control.py:259` — do not fall back to direct SQL.\n\nAfter the call, verify:\n`psql postgresql://localhost:5432/praxis -c \"SELECT decision_key, title FROM operator_decisions WHERE decision_kind='architecture_policy' AND decision_scope_ref='decision_hygiene';\"`\nMust return exactly one row.",
+      "read": [
+        "Code&DBs/Workflow/surfaces/mcp/tools/operator.py",
+        "Code&DBs/Workflow/runtime/operations/commands/operator_control.py"
+      ],
+      "write": [],
+      "verify_command": "psql postgresql://localhost:5432/praxis -tAc \"SELECT COUNT(*) FROM operator_decisions WHERE decision_kind='architecture_policy' AND decision_scope_ref='decision_hygiene';\" | grep -qE '^1$'"
+    }
+  ]
+}

@@ -189,6 +189,117 @@ def test_build_modules_include_semantic_projection_refresh_when_conn(tmp_path, m
     module_names = {getattr(module, "name", "") for module in runner.build_modules()}
 
     assert "semantic_projection_refresh" in module_names
+    assert "authority_memory_refresh" in module_names
+    assert "operator_decision_projection_refresh" in module_names
+    assert "bug_candidates_refresh" not in module_names
+
+
+def test_authority_memory_refresh_module_refreshes_projection(monkeypatch):
+    fake_projection = types.ModuleType("runtime.authority_memory_projection")
+    calls: list[dict[str, object]] = []
+
+    async def _refresh_authority_memory_projection(*, env=None, as_of=None):
+        calls.append({"env": dict(env or {}), "as_of": as_of})
+        return {"refreshed": True}
+
+    fake_projection.refresh_authority_memory_projection = _refresh_authority_memory_projection
+    monkeypatch.setitem(sys.modules, "runtime.authority_memory_projection", fake_projection)
+
+    result = heartbeat_runner._AuthorityMemoryProjectionRefreshModule(
+        workflow_env={"WORKFLOW_DATABASE_URL": "postgresql://example"},
+    ).run()
+
+    assert result.module_name == "authority_memory_refresh"
+    assert result.ok is True
+    assert calls == [{"env": {"WORKFLOW_DATABASE_URL": "postgresql://example"}, "as_of": None}]
+
+
+def test_authority_memory_refresh_module_skips_without_workflow_authority(monkeypatch):
+    fake_projection = types.ModuleType("runtime.authority_memory_projection")
+
+    async def _refresh_authority_memory_projection(*, env=None, as_of=None):
+        raise AssertionError("authority memory refresh should not run without workflow authority")
+
+    fake_projection.refresh_authority_memory_projection = _refresh_authority_memory_projection
+    monkeypatch.setitem(sys.modules, "runtime.authority_memory_projection", fake_projection)
+    monkeypatch.delenv("WORKFLOW_DATABASE_URL", raising=False)
+
+    result = heartbeat_runner._AuthorityMemoryProjectionRefreshModule(workflow_env={}).run()
+
+    assert result.module_name == "authority_memory_refresh"
+    assert result.ok is True
+
+
+def test_operator_decision_projection_refresh_module_refreshes_projection(monkeypatch):
+    fake_projection = types.ModuleType("runtime.operator_decision_projection_subscriber")
+    calls: list[dict[str, object]] = []
+
+    class _Subscriber:
+        def consume_available(self, *, limit=100, subscriber_id="operator_decision_projection_refresher", as_of=None, env=None):
+            calls.append(
+                {
+                    "limit": limit,
+                    "subscriber_id": subscriber_id,
+                    "as_of": as_of,
+                    "env": dict(env or {}),
+                }
+            )
+            return {"refreshed": True}
+
+    fake_projection.OperatorDecisionProjectionSubscriber = _Subscriber
+    monkeypatch.setitem(sys.modules, "runtime.operator_decision_projection_subscriber", fake_projection)
+
+    result = heartbeat_runner._OperatorDecisionProjectionRefreshModule(
+        workflow_env={"WORKFLOW_DATABASE_URL": "postgresql://example"},
+        limit=7,
+    ).run()
+
+    assert result.module_name == "operator_decision_projection_refresh"
+    assert result.ok is True
+    assert calls == [
+        {
+            "limit": 7,
+            "subscriber_id": "operator_decision_projection_refresher",
+            "as_of": None,
+            "env": {"WORKFLOW_DATABASE_URL": "postgresql://example"},
+        }
+    ]
+
+
+def test_bug_candidates_refresh_module_refreshes_projection(monkeypatch):
+    fake_projection = types.ModuleType("runtime.bug_candidates_projection_subscriber")
+    calls: list[dict[str, object]] = []
+
+    class _Subscriber:
+        def consume_available(self, *, limit=100, subscriber_id="bug_candidates_refresher", as_of=None, env=None):
+            calls.append(
+                {
+                    "limit": limit,
+                    "subscriber_id": subscriber_id,
+                    "as_of": as_of,
+                    "env": dict(env or {}),
+                }
+            )
+            return {"refreshed": True}
+
+    fake_projection.BugCandidatesProjectionSubscriber = _Subscriber
+    monkeypatch.setitem(sys.modules, "runtime.bug_candidates_projection_subscriber", fake_projection)
+
+    result = heartbeat_runner._BugCandidatesRefreshModule(
+        workflow_env={"WORKFLOW_DATABASE_URL": "postgresql://example"},
+        limit=9,
+    ).run()
+
+    assert result.module_name == "bug_candidates_refresh"
+    assert result.ok is True
+    assert calls == [
+        {
+            "limit": 9,
+            "subscriber_id": "bug_candidates_refresher",
+            "as_of": None,
+            "env": {"WORKFLOW_DATABASE_URL": "postgresql://example"},
+        }
+    ]
 
 
 def test_trigger_evaluator_module_runs_runtime_trigger_loop(monkeypatch):

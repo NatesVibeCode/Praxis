@@ -515,6 +515,10 @@ def split_sentences(text: str) -> list[tuple[str, int, int]]:
     if sequenced:
         return sequenced
 
+    imperative = split_comma_imperatives(text)
+    if imperative:
+        return imperative
+
     sentences: list[tuple[str, int, int]] = []
     start = 0
     for match in re.finditer(r"[.!?\n]+", text):
@@ -557,6 +561,54 @@ def split_sequential_clauses(text: str) -> list[tuple[str, int, int]]:
         clauses.append((item, *bounds))
 
     return clauses if len(clauses) >= 2 else []
+
+
+def split_comma_imperatives(text: str) -> list[tuple[str, int, int]]:
+    stripped = text.strip()
+    if not stripped:
+        return []
+    interior = stripped[:-1] if stripped[-1] in ".!?" else stripped
+    if re.search(r"[.!?\n]", interior):
+        return []
+    if not re.search(r",\s*then\b", stripped, flags=re.IGNORECASE):
+        return []
+
+    leading = text.find(stripped)
+    if leading < 0:
+        leading = 0
+    end_bound = leading + len(stripped)
+
+    segment_bounds: list[tuple[int, int]] = []
+    cursor = leading
+    for match in re.finditer(r",\s*", text[leading:end_bound]):
+        segment_bounds.append((cursor, leading + match.start()))
+        cursor = leading + match.end()
+    segment_bounds.append((cursor, end_bound))
+
+    if len(segment_bounds) < 3:
+        return []
+
+    clauses: list[tuple[str, int, int]] = []
+    for seg_start, seg_end in segment_bounds:
+        fragment = text[seg_start:seg_end].strip(" \t\r\n,;")
+        if not fragment:
+            return []
+        words = fragment.split()
+        if len(words) < 2:
+            return []
+        first = words[0].lower().strip(".,:;")
+        if first == "then":
+            if len(words) < 3:
+                return []
+            first = words[1].lower().strip(".,:;")
+        if not first.isalpha():
+            return []
+        frag_start = text.find(fragment, seg_start, seg_end)
+        if frag_start < 0:
+            frag_start = seg_start
+        clauses.append((fragment, frag_start, frag_start + len(fragment)))
+
+    return clauses if len(clauses) >= 3 else []
 
 
 def split_inline_numbered_items(text: str) -> list[tuple[str, int, int]]:

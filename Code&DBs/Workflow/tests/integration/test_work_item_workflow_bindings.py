@@ -254,23 +254,10 @@ def test_work_item_workflow_bindings_issue_binding_auto_promotes_issue_to_bug_an
 async def _exercise_work_item_workflow_bindings_issue_binding_auto_promotes_issue_to_bug_and_roadmap() -> None:
     env = _workflow_env()
     as_of = datetime(2026, 4, 16, 17, 0, tzinfo=timezone.utc)
-    promoted_bug_id = "bug.auto_issue.issue.dispatch.gap.1"
-    promoted_roadmap_item_id = (
-        "roadmap_item.auto_bug.bug.auto.issue.issue.dispatch.gap.1"
-    )
+    issue_id = "issue.dispatch-gap.1"
     issue_binding_id = work_item_workflow_binding_id(
         binding_kind="governed_by",
-        issue_id="issue.dispatch-gap.1",
-        workflow_class_id="workflow_class.review.binding",
-    )
-    bug_binding_id = work_item_workflow_binding_id(
-        binding_kind="governed_by",
-        bug_id=promoted_bug_id,
-        workflow_class_id="workflow_class.review.binding",
-    )
-    roadmap_binding_id = work_item_workflow_binding_id(
-        binding_kind="governed_by",
-        roadmap_item_id=promoted_roadmap_item_id,
+        issue_id=issue_id,
         workflow_class_id="workflow_class.review.binding",
     )
 
@@ -289,16 +276,37 @@ async def _exercise_work_item_workflow_bindings_issue_binding_auto_promotes_issu
         await _seed_workflow_class(conn, as_of=as_of)
         await _seed_operator_decision(conn, as_of=as_of)
         await _seed_issue(conn, as_of=as_of)
-        await _cleanup_promoted_roadmap_rows(
-            conn,
-            roadmap_item_id=promoted_roadmap_item_id,
-            binding_ids=(issue_binding_id, bug_binding_id, roadmap_binding_id),
+        existing_bug_rows = await conn.fetch(
+            "SELECT bug_id FROM bugs WHERE source_issue_id = $1",
+            issue_id,
         )
-        await conn.execute("DELETE FROM bugs WHERE bug_id = $1", promoted_bug_id)
+        existing_bug_ids = [str(row["bug_id"]) for row in existing_bug_rows]
+        existing_roadmap_ids = [
+            operator_write._auto_promoted_bug_roadmap_item_id(bug_id)
+            for bug_id in existing_bug_ids
+        ]
+        for roadmap_item_id in existing_roadmap_ids:
+            await _cleanup_promoted_roadmap_rows(
+                conn,
+                roadmap_item_id=roadmap_item_id,
+                binding_ids=(),
+            )
+        await conn.execute(
+            """
+            DELETE FROM work_item_workflow_bindings
+            WHERE issue_id = $1
+               OR bug_id = ANY($2::text[])
+               OR roadmap_item_id = ANY($3::text[])
+            """,
+            issue_id,
+            existing_bug_ids,
+            existing_roadmap_ids,
+        )
+        await conn.execute("DELETE FROM bugs WHERE source_issue_id = $1", issue_id)
 
         payload = await operator_write.arecord_work_item_workflow_binding(
             binding_kind="governed_by",
-            issue_id="issue.dispatch-gap.1",
+            issue_id=issue_id,
             workflow_class_id="workflow_class.review.binding",
             binding_status="active",
             bound_by_decision_id="operator_decision.dispatch-binding.1",
@@ -313,25 +321,30 @@ async def _exercise_work_item_workflow_bindings_issue_binding_auto_promotes_issu
         assert payload["binding"]["work_item_workflow_binding_id"] == issue_binding_id
         assert payload["binding"]["source"] == {
             "kind": "issue",
-            "id": "issue.dispatch-gap.1",
-            "issue_id": "issue.dispatch-gap.1",
+            "id": issue_id,
+            "issue_id": issue_id,
         }
         assert promoted_bug["created"] is True
-        assert promoted_bug["bug_id"] == "bug.auto_issue.issue.dispatch.gap.1"
+        assert promoted_bug["bug_id"].startswith("BUG-")
         assert promoted_bug["binding"]["source"] == {
             "kind": "bug",
-            "id": "bug.auto_issue.issue.dispatch.gap.1",
-            "bug_id": "bug.auto_issue.issue.dispatch.gap.1",
+            "id": promoted_bug["bug_id"],
+            "bug_id": promoted_bug["bug_id"],
         }
         assert promoted_roadmap["created"] is True
-        assert promoted_roadmap["roadmap_item_id"] == (
-            "roadmap_item.auto_bug.bug.auto.issue.issue.dispatch.gap.1"
+        assert promoted_roadmap["roadmap_item_id"] == operator_write._auto_promoted_bug_roadmap_item_id(
+            promoted_bug["bug_id"]
         )
         assert promoted_roadmap["semantic_bridge_summary"] == {
             "processed": 1,
             "recorded": 2,
             "retracted": 0,
         }
+        bug_binding_id = work_item_workflow_binding_id(
+            binding_kind="governed_by",
+            bug_id=promoted_bug["bug_id"],
+            workflow_class_id="workflow_class.review.binding",
+        )
 
         bug_row = await conn.fetchrow(
             """
@@ -349,12 +362,12 @@ async def _exercise_work_item_workflow_bindings_issue_binding_auto_promotes_issu
             promoted_bug["bug_id"],
         )
         assert bug_row is not None
-        assert bug_row["bug_key"] == "bug-auto_issue-issue-dispatch-gap-1"
+        assert bug_row["bug_key"] == promoted_bug["bug_id"].lower().replace("-", "_")
         assert bug_row["title"] == "Dispatch gap issue"
-        assert bug_row["status"] == "open"
-        assert bug_row["priority"] == "p1"
-        assert bug_row["source_issue_id"] == "issue.dispatch-gap.1"
-        assert bug_row["summary"] == "Auto-promoted from issue.dispatch-gap.1: Work started on upstream issue."
+        assert bug_row["status"] == "OPEN"
+        assert bug_row["priority"] == "P1"
+        assert bug_row["source_issue_id"] == issue_id
+        assert bug_row["summary"] == f"Auto-promoted from {issue_id}: Work started on upstream issue."
 
         bug_binding_row = await conn.fetchrow(
             """
@@ -405,7 +418,7 @@ async def _exercise_work_item_workflow_bindings_issue_binding_auto_promotes_issu
             for row in roadmap_semantic_rows
         ] == [
             ("governed_by_decision_ref", "decision_ref", "decision:issue:dispatch-gap.1"),
-            ("sourced_from_bug", "bug", "bug.auto_issue.issue.dispatch.gap.1"),
+            ("sourced_from_bug", "bug", promoted_bug["bug_id"]),
         ]
     finally:
         await conn.close()

@@ -1,24 +1,8 @@
 services:
-  postgres:
-    image: pgvector/pgvector:pg16
-    environment:
-      POSTGRES_DB: praxis
-      POSTGRES_HOST_AUTH_METHOD: trust
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    command:
-      - postgres
-      - -c
-      - max_connections=400
-      - -c
-      - shared_buffers=256MB
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d praxis"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+  # Canonical Postgres is the host's launchd instance at
+  # postgresql://nate@host.docker.internal:5432/praxis (data dir
+  # Code&DBs/Databases/postgres-dev/data). The old bundled postgres service
+  # has been removed because it split-brained with launchd.
   semantic-backend:
     build:
       context: ./Code&DBs/Workflow
@@ -58,14 +42,12 @@ services:
         PRAXIS_DEPENDENCY_SCOPE: api_server
     image: praxis-api:latest
     depends_on:
-      postgres:
-        condition: service_healthy
       semantic-backend:
         condition: service_healthy
     env_file:
       - .env
     environment:
-      WORKFLOW_DATABASE_URL: postgresql://postgres@postgres:5432/praxis
+      WORKFLOW_DATABASE_URL: postgresql://nate@host.docker.internal:5432/praxis
       WORKFLOW_EMBEDDING_BACKEND: service
       WORKFLOW_EMBEDDING_SERVICE_URL: http://semantic-backend:8421
       CURSOR_API_KEY: ${CURSOR_API_KEY:-}
@@ -77,18 +59,13 @@ services:
     volumes:
       - .:/workspace
     command:
-      - python3
-      - -m
-      - surfaces.api.server
-      - --host
-      - 0.0.0.0
-      - --port
-      - "8420"
-      - --no-reload
+      - sh
+      - -c
+      - exec python3 -m surfaces.api.server --host "$${PRAXIS_API_HOST}" --port "$${PRAXIS_API_PORT}" --no-reload
     ports:
       - "8420:8420"
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8420/api/health >/dev/null"]
+      test: ["CMD-SHELL", "curl -fsS \"http://127.0.0.1:$${PRAXIS_API_PORT}/api/health\" >/dev/null"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -100,13 +77,10 @@ services:
       args:
         PRAXIS_DEPENDENCY_SCOPE: scheduler
     image: praxis-scheduler:latest
-    depends_on:
-      postgres:
-        condition: service_healthy
     env_file:
       - .env
     environment:
-      WORKFLOW_DATABASE_URL: postgresql://postgres@postgres:5432/praxis
+      WORKFLOW_DATABASE_URL: postgresql://nate@host.docker.internal:5432/praxis
       PYTHONPATH: "/workspace/Code&DBs/Workflow"
     working_dir: /workspace
     volumes:
@@ -128,8 +102,6 @@ services:
         PRAXIS_DEPENDENCY_SCOPE: workflow_worker
     image: praxis-worker:latest
     depends_on:
-      postgres:
-        condition: service_healthy
       semantic-backend:
         condition: service_healthy
       api-server:
@@ -139,7 +111,7 @@ services:
     env_file:
       - .env
     environment:
-      WORKFLOW_DATABASE_URL: postgresql://postgres@postgres:5432/praxis
+      WORKFLOW_DATABASE_URL: postgresql://nate@host.docker.internal:5432/praxis
       WORKFLOW_EMBEDDING_BACKEND: service
       WORKFLOW_EMBEDDING_SERVICE_URL: http://semantic-backend:8421
       CURSOR_API_KEY: ${CURSOR_API_KEY:-}
@@ -166,5 +138,3 @@ services:
       - -m
       - runtime.workflow_worker
     restart: unless-stopped
-volumes:
-  pgdata:

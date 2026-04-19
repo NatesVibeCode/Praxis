@@ -275,7 +275,7 @@ if raw:
 if isinstance(services, dict):
     services = [services]
 
-required = {"postgres", "api-server", "workflow-worker"}
+required = {"api-server", "scheduler", "semantic-backend", "workflow-worker"}
 states = {}
 for service in services:
     name = str(service.get("Service") or service.get("Name") or "").strip()
@@ -315,7 +315,7 @@ doctor_ready() {
     local payload="${1:-}"
     doctor_field_is_true "$payload" "services_ready" \
         && doctor_field_is_true "$payload" "database_reachable" \
-        && doctor_field_is_true "$payload" "schema_bootstrapped" \
+        && doctor_field_is_true "$payload" "workflow_operational" \
         && doctor_field_is_true "$payload" "api_server_ready" \
         && doctor_field_is_true "$payload" "workflow_api_ready" \
         && doctor_field_is_true "$payload" "mcp_bridge_ready" \
@@ -377,6 +377,8 @@ payload = {
     "dependency_truth": doctor.get("dependency_truth"),
     "database_reachable": doctor.get("database_reachable"),
     "schema_bootstrapped": doctor.get("schema_bootstrapped"),
+    "workflow_operational": doctor.get("workflow_operational"),
+    "missing_schema_objects": doctor.get("missing_schema_objects"),
     "api_server_ready": doctor.get("api_server_ready"),
     "workflow_api_ready": doctor.get("workflow_api_ready"),
     "mcp_bridge_ready": doctor.get("mcp_bridge_ready"),
@@ -447,20 +449,91 @@ else:
         print(f"  - {name}: {state}{suffix}{port_suffix}")
 PY
 
-    if active_output="$(cd "$REPO_ROOT" && ./scripts/praxis workflow active 2>/dev/null)"; then
-        if [ -n "$active_output" ]; then
-        echo ""
-        echo "Active workflows:"
-        printf '%s\n' "$active_output"
+    local snapshot_output
+    if snapshot_output="$(cd "$REPO_ROOT" && ./scripts/praxis workflow tools call praxis_status_snapshot --input-json '{"since_hours":24}' 2>/dev/null)"; then
+        if [ -n "$snapshot_output" ]; then
+            echo ""
+            PRAXIS_STATUS_SNAPSHOT="$snapshot_output" "$PYTHON_BIN" - <<'PY'
+import json
+import os
+
+
+def pct(value):
+    try:
+        return f"{float(value) * 100:.1f}%"
+    except (TypeError, ValueError):
+        return "n/a"
+
+
+def seconds(value):
+    try:
+        total = float(value)
+    except (TypeError, ValueError):
+        return "n/a"
+    if total < 60:
+        return f"{total:.0f}s"
+    minutes = total / 60
+    if minutes < 60:
+        return f"{minutes:.1f}m"
+    return f"{minutes / 60:.1f}h"
+
+
+snapshot = json.loads(os.environ.get("PRAXIS_STATUS_SNAPSHOT") or "{}")
+print("Workflow snapshot:")
+print(
+    "  - 24h: "
+    f"{snapshot.get('total_workflows', 0)} runs, "
+    f"pass rate {pct(snapshot.get('pass_rate'))}, "
+    f"adjusted {pct(snapshot.get('adjusted_pass_rate'))}, "
+    f"observability {snapshot.get('observability_state', 'unknown')}"
+)
+print(
+    "  - queue: "
+    f"depth={snapshot.get('queue_depth', 0)} "
+    f"pending={snapshot.get('queue_depth_pending', 0)} "
+    f"ready={snapshot.get('queue_depth_ready', 0)} "
+    f"running={snapshot.get('queue_depth_running', 0)} "
+    f"status={snapshot.get('queue_depth_status', 'unknown')}"
+)
+runs = snapshot.get("in_flight_workflows")
+if not isinstance(runs, list):
+    runs = []
+print("Active workflows:")
+if not runs:
+    print("  - none")
+else:
+    for run in runs:
+        if not isinstance(run, dict):
+            continue
+        run_id = run.get("run_id", "unknown")
+        name = run.get("workflow_name") or run_id
+        completed = run.get("completed_jobs", 0)
+        total = run.get("total_jobs", 0)
+        elapsed = seconds(run.get("elapsed_seconds"))
+        print(f"  - {run_id}: {name} ({completed}/{total}, {elapsed})")
+PY
         fi
+    else
+        echo ""
+        echo "Workflow snapshot: unavailable"
     fi
 
-    if curl -fsS --max-time 2 http://127.0.0.1:8420/api/health >/dev/null 2>&1; then
-        echo ""
-        echo "Links:"
-        echo "  - App:  http://127.0.0.1:8420/app"
-        echo "  - Docs: http://127.0.0.1:8420/docs"
-    fi
+    echo ""
+    DOCTOR_JSON="$doctor_json" "$PYTHON_BIN" - <<'PY'
+import json
+import os
+
+doctor = json.loads(os.environ.get("DOCTOR_JSON") or "{}")
+ready = bool(doctor.get("api_server_ready")) and bool(doctor.get("ui_ready"))
+heading = "Links:" if ready else "Links (API/UI readiness degraded):"
+app_url = doctor.get("dashboard_url") or doctor.get("launch_url")
+docs_url = doctor.get("api_docs_url")
+print(heading)
+print(f"  - App:  {app_url or '(unavailable)'}")
+print(f"  - Docs: {docs_url or '(unavailable)'}")
+if not ready:
+    print(f"  - Diagnose: {os.environ.get('COMMAND_NAME', 'praxis')} doctor --json")
+PY
 }
 
 open_in_browser() {
@@ -502,7 +575,7 @@ import json
 import os
 
 payload = json.loads(os.environ.get("DOCTOR_JSON") or "{}")
-print(payload.get("launch_url") or "http://127.0.0.1:8420/app")
+print(payload.get("launch_url") or "")
 PY
 )"
 
@@ -522,7 +595,7 @@ ok = all(
     for field in (
         "services_ready",
         "database_reachable",
-        "schema_bootstrapped",
+        "workflow_operational",
         "api_server_ready",
         "workflow_api_ready",
         "mcp_bridge_ready",
@@ -536,9 +609,9 @@ payload = {
     "opened": os.environ.get("OPENED") == "true",
     "failure_reason": None if ok else "semantic_readiness_failed",
     "doctor": doctor,
-    "launch_url": doctor.get("launch_url", "http://127.0.0.1:8420/app"),
-    "dashboard_url": doctor.get("dashboard_url", "http://127.0.0.1:8420/app"),
-    "api_docs_url": doctor.get("api_docs_url", "http://127.0.0.1:8420/docs"),
+    "launch_url": doctor.get("launch_url"),
+    "dashboard_url": doctor.get("dashboard_url") or doctor.get("launch_url"),
+    "api_docs_url": doctor.get("api_docs_url"),
 }
 print(json.dumps(payload, indent=2, sort_keys=True))
 raise SystemExit(0 if ok else 1)
@@ -547,7 +620,11 @@ PY
     fi
 
     if doctor_ready "$doctor_json"; then
-        echo "Praxis launcher ready: $launch_url"
+        if [ -n "$launch_url" ]; then
+            echo "Praxis launcher ready: $launch_url"
+        else
+            echo "Praxis launcher ready"
+        fi
         return 0
     fi
 

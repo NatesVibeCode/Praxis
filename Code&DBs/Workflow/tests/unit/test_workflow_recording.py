@@ -166,11 +166,18 @@ def test_record_workflow_result_fans_out_to_platform_subsystems(monkeypatch):
     assert review_tracker.calls == [((result,), {})]
     assert obs_hub.receipts == [
         {
+            "receipt_id": "receipt:run_123:job-a:1",
+            "workflow_id": "run_123",
             "agent_slug": "anthropic/claude-test",
+            "provider_slug": "anthropic",
+            "model_slug": "claude-test",
             "status": "succeeded",
             "cost": 1.25,
             "latency_seconds": 5.0,
             "job_label": "job-a",
+            "label": "job-a",
+            "node_id": "job-a",
+            "attempt_no": 1,
             "timestamp": "2026-04-08T12:00:05+00:00",
             "failure_code": None,
             "run_id": "run_123",
@@ -234,11 +241,18 @@ def test_record_workflow_result_handles_failure_feedback_and_auto_review(monkeyp
     assert queue_auto_review.calls == [((result,), {"conn": "conn:pool"})]
     assert obs_hub.receipts == [
         {
+            "receipt_id": "receipt:run_123:job-a:1",
+            "workflow_id": "run_123",
             "agent_slug": "anthropic/claude-test",
+            "provider_slug": "anthropic",
+            "model_slug": "claude-test",
             "status": "failed",
             "cost": 0.0,
             "latency_seconds": 5.0,
             "job_label": "job-a",
+            "label": "job-a",
+            "node_id": "job-a",
+            "attempt_no": 1,
             "timestamp": "2026-04-08T12:00:05+00:00",
             "failure_code": "workflow.timeout",
             "failure_category": "rate_limited",

@@ -1,0 +1,40 @@
+{
+  "name": "authority-cleanup-program",
+  "outcome_goal": "Complete the authority-cleanup umbrella: make roadmap and operator authoring preview-first, auto-fixing, and single-gated through one canonical write surface shared by CLI and MCP. At the end of this workflow the operator writes roadmap items through one gate that validates, normalizes, auto-fixes deterministic issues, and blocks only on ambiguity. All 6 sub-items on the roadmap are landed: the shared validation gate, the authoring contract/template library, the CLI+MCP front doors, the canonical native_operator_binding projection, the validation review, and the derived views. Authority for dispatch, verification, compile, integration, and provider selection moves from code and startup bootstraps into the DB. Each phase ships as its own commit with its own tests.",
+  "task_type": "code_generation",
+  "agent": "anthropic/claude-sonnet-4-6",
+  "authoring_contract": {"artifact_kind": "code"},
+  "acceptance_contract": {
+    "verify_refs": [
+      "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/' -k 'operator_write or roadmap or validation_gate or authoring_contract or operator_decisions or native_operator_binding'",
+      "praxis workflow tools call praxis_operator_architecture_policy --input-json '{\"action\":\"validate\"}'"
+    ]
+  },
+  "anti_requirements": [
+    "No shims — consolidate rather than wrap. If two callers converge on the gate, delete the old call sites.",
+    "No partial drops. Every sub-item must land its tests before the next begins."
+  ],
+  "jobs": [
+    {"sprint": 1, "task_type": "code_generation",
+     "authoring_contract": {"artifact_kind": "code",
+       "summary": "Shared validation and normalization gate. Module runtime/operator_write_gate.py that takes a proposed authoring payload and returns a preview: normalized output, list of auto-fixes applied, list of blockers. Deterministic issues (missing timestamps, wrong case, missing decision_ref) are auto-fixed. Ambiguous issues block. Gate is called by every operator-write path, not duplicated."}},
+    {"sprint": 2, "task_type": "code_generation",
+     "authoring_contract": {"artifact_kind": "code",
+       "summary": "Canonical authoring contract and template pack. Typed dataclasses for roadmap item, operator decision, binding — one declaration per artifact kind. Template library so an operator can say 'auto-promoted roadmap item from bug' and get a filled shell. No more hand-building 15-field dicts."}},
+    {"sprint": 3, "task_type": "code_generation",
+     "authoring_contract": {"artifact_kind": "code",
+       "summary": "CLI and MCP operator-write front doors. `praxis workflow operator-write roadmap <payload>` and the equivalent MCP tool. Both route through the same validation gate from sprint 1 and use the same templates from sprint 2."}},
+    {"sprint": 4, "task_type": "code_edit",
+     "authoring_contract": {"artifact_kind": "refactor",
+       "summary": "Derive native operator bindings from one canonical projection. Stop re-validating and re-echoing work_item_workflow_bindings across surfaces/api/native_operator_surface.py and the other reader paths. Pick one projection, have every reader consult it."}},
+    {"sprint": 5, "task_type": "code_generation",
+     "authoring_contract": {"artifact_kind": "code",
+       "summary": "Validation proof. Preview parity tests (gate output matches the final written row after one commit cycle), transaction-safety tests (failures roll back), and representative roadmap scenarios (promote from bug, add child, supersede)."}},
+    {"sprint": 6, "task_type": "code_edit",
+     "authoring_contract": {"artifact_kind": "refactor",
+       "summary": "Derived views and roadmap export cleanup. Roadmap markdown and operator views are read from DB authority, not rebuilt from in-memory state. The export is a pure function over authority rows."}},
+    {"sprint": 7, "task_type": "code_review",
+     "authoring_contract": {"artifact_kind": "report",
+       "summary": "Authority cleanup validation and operational hardening. Walk every residual path that bypasses the gate, document it, and file a bug or patch it. Smoke coverage for the end-to-end flow. Failure surfacing that makes a blocked write obvious in logs and the CLI output."}}
+  ]
+}

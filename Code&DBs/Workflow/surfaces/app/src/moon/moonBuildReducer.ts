@@ -165,7 +165,7 @@ export function moonBuildReducer(state: MoonBuildState, action: MoonBuildAction)
         viewMode: 'run',
         activeRunId: action.runId,
         runViewSource: action.source,
-        runViewOpen: true,
+        runViewOpen: false,
         // Clear build-mode transient state that doesn't apply in run view.
         selectedNodeId: null,
         selectedEdgeId: null,

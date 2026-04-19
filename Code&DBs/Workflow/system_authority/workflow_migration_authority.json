@@ -92,7 +92,10 @@
     "161_workflow_spec_ready.sql",
     "162_split_fanout_and_loop.sql",
     "163_dataset_candidate_score_history.sql",
-    "164_dataset_promotion_decision_bridge.sql"
+    "164_dataset_promotion_decision_bridge.sql",
+    "165_integration_registry_updated_at.sql",
+    "166_data_dictionary_authority.sql",
+    "167_scratch_agent_runtime_lane.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -2504,6 +2507,60 @@
         "object_type": "row",
         "object_name": "operator_decisions.operator_decision.architecture_policy.decision_tables.dataset_refinery_authority"
       }
+    ],
+    "165_integration_registry_updated_at.sql": [
+      {
+        "object_type": "column",
+        "object_name": "integration_registry.updated_at"
+      }
+    ],
+    "166_data_dictionary_authority.sql": [
+      {
+        "object_type": "table",
+        "object_name": "data_dictionary_objects"
+      },
+      {
+        "object_type": "table",
+        "object_name": "data_dictionary_entries"
+      },
+      {
+        "object_type": "view",
+        "object_name": "data_dictionary_effective"
+      },
+      {
+        "object_type": "function",
+        "object_name": "touch_data_dictionary_updated_at"
+      },
+      {
+        "object_type": "function",
+        "object_name": "notify_data_dictionary_change"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "trg_data_dictionary_entries_notify"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_data_dictionary_entries_kind_order"
+      }
+    ],
+    "167_scratch_agent_runtime_lane.sql": [
+      {
+        "object_type": "row",
+        "object_name": "registry_workspace_authority.scratch_agent"
+      },
+      {
+        "object_type": "row",
+        "object_name": "registry_sandbox_profile_authority.sandbox_profile.scratch_agent.default"
+      },
+      {
+        "object_type": "row",
+        "object_name": "registry_runtime_profile_authority.scratch_agent"
+      },
+      {
+        "object_type": "row",
+        "object_name": "registry_native_runtime_profile_authority.scratch_agent"
+      }
     ]
   },
   "policy_buckets": {
@@ -2600,7 +2657,10 @@
       "161_workflow_spec_ready.sql",
       "162_split_fanout_and_loop.sql",
       "163_dataset_candidate_score_history.sql",
-      "164_dataset_promotion_decision_bridge.sql"
+      "164_dataset_promotion_decision_bridge.sql",
+      "165_integration_registry_updated_at.sql",
+      "166_data_dictionary_authority.sql",
+      "167_scratch_agent_runtime_lane.sql"
     ],
     "bootstrap_only": [
       "012_execution_leases.sql",

@@ -1080,7 +1080,11 @@ def preview_workflow_execution(
             ),
             None,
         )
-        job_workdir = str(job.get("workdir") or raw_snapshot.get("workdir") or preview_repo_root).strip()
+        job_workdir = str(job.get("workdir") or raw_snapshot.get("workdir") or "").strip()
+        if not job_workdir:
+            raise ValueError(
+                f"preview job {label!r} requires an explicit job.workdir or top-level workdir"
+            )
         verify_refs = list(
             dict.fromkeys(
                 [
@@ -1118,7 +1122,7 @@ def preview_workflow_execution(
             "completion_contract": dict(execution_bundle.get("completion_contract") or {}),
             "workspace": {
                 "repo_root": preview_repo_root,
-                "workdir": job_workdir or preview_repo_root,
+                "workdir": job_workdir,
                 "workspace_ref": workspace_ref,
                 "runtime_profile_ref": runtime_profile_ref,
             },

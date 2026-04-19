@@ -178,12 +178,19 @@ function branchSideScore(edge: BuildEdge): number {
 
 // --- Helpers ---
 
+const ROUTE_TO_GLYPH: Record<string, GlyphType> = {
+  'trigger': 'trigger',
+  'trigger/webhook': 'notify',
+  'trigger/schedule': 'metric',
+};
+
 function nodeToGlyph(node: BuildNode): GlyphType {
   if (node.kind === 'gate') return 'gate';
   if (node.kind === 'state') return 'state';
   const status = (node.status || '').toLowerCase();
   if (status === 'blocked' || status === 'error') return 'blocked';
   const route = (node.route || '').toLowerCase();
+  if (ROUTE_TO_GLYPH[route]) return ROUTE_TO_GLYPH[route];
   const label = ((node as { label?: string; title?: string }).label || (node as { title?: string }).title || '').toLowerCase();
   return glyphFromLabel(`${route} ${label}`) ?? 'step';
 }
@@ -231,7 +238,13 @@ function nodeToRingState(node: BuildNode, payload: BuildPayload, activeId: strin
 function runStatusToRingState(status: string | undefined): RingState | null {
   const jobStatus = (status || '').toLowerCase();
   if (jobStatus === 'succeeded') return 'run-succeeded';
-  if (jobStatus === 'failed' || jobStatus === 'dead_letter') return 'run-failed';
+  if (
+    jobStatus === 'failed'
+    || jobStatus === 'dead_letter'
+    || jobStatus === 'blocked'
+    || jobStatus === 'cancelled'
+    || jobStatus === 'parent_failed'
+  ) return 'run-failed';
   if (jobStatus === 'running' || jobStatus === 'claimed') return 'run-active';
   if (jobStatus === 'pending' || jobStatus === 'ready') return 'run-pending';
   return null;

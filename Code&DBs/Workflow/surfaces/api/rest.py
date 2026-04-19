@@ -1289,7 +1289,7 @@ def _launcher_index_response() -> FileResponse | JSONResponse:
                     "Launcher build missing. Rebuild Code&DBs/Workflow/surfaces/app "
                     "with `npm run build`."
                 ),
-                "launch_url": "http://127.0.0.1:8420/app",
+                "launch_url": None,
             },
         )
     return FileResponse(
@@ -1345,7 +1345,7 @@ def list_recent_runs(
                   COALESCE(NULLIF(r.request_envelope->>'total_jobs', ''), '0')::int AS total_jobs,
                   r.requested_at AS created_at,
                   r.finished_at,
-                  COUNT(j.id) FILTER (WHERE j.status IN ('succeeded','failed','dead_letter')) as completed_jobs,
+                  COUNT(j.id) FILTER (WHERE j.status IN ('succeeded','failed','dead_letter','blocked','cancelled')) as completed_jobs,
                   COALESCE(SUM(j.cost_usd), 0) as total_cost
            FROM workflow_runs r
            LEFT JOIN workflow_jobs j ON j.run_id = r.run_id
@@ -1382,7 +1382,7 @@ def get_run_detail(run_id: str) -> dict[str, Any]:
                   COALESCE(NULLIF(r.request_envelope->>'total_jobs', ''), '0')::int AS total_jobs,
                   r.requested_at AS created_at,
                   r.finished_at,
-                  COUNT(j.id) FILTER (WHERE j.status IN ('succeeded','failed','dead_letter')) as completed_jobs,
+                  COUNT(j.id) FILTER (WHERE j.status IN ('succeeded','failed','dead_letter','blocked','cancelled')) as completed_jobs,
                   COALESCE(SUM(j.cost_usd), 0) as total_cost,
                   COALESCE(SUM(j.duration_ms), 0) as total_duration_ms
            FROM workflow_runs r
@@ -1814,7 +1814,7 @@ def _build_run_summary(conn: Any, run_id: str, jobs: list[dict[str, Any]]) -> st
     # Fallback: status-based summary
     if not jobs:
         return None
-    done = [j for j in jobs if j.get("status") in ("succeeded", "failed", "dead_letter")]
+    done = [j for j in jobs if j.get("status") in ("succeeded", "failed", "dead_letter", "blocked", "cancelled")]
     if not done:
         return None
     succeeded = sum(1 for j in done if j.get("status") == "succeeded")
@@ -2298,6 +2298,47 @@ async def models_runs_path_get(request: Request, rest_of_path: str) -> Response:
 # -- Integrations --
 @app.get("/api/integrations")
 async def integrations_get(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+@app.post("/api/integrations")
+async def integrations_post(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+@app.post("/api/integrations/reload")
+async def integrations_reload_post(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+@app.get("/api/integrations/{integration_id}")
+async def integrations_describe_get(request: Request, integration_id: str) -> Response:
+    return await _route_to_handler(request)
+
+@app.put("/api/integrations/{integration_id}/secret")
+async def integrations_secret_put(request: Request, integration_id: str) -> Response:
+    return await _route_to_handler(request)
+
+@app.post("/api/integrations/{integration_id}/test")
+async def integrations_test_post(request: Request, integration_id: str) -> Response:
+    return await _route_to_handler(request)
+
+# -- Data Dictionary --
+@app.get("/api/data-dictionary")
+async def data_dictionary_list_get(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+@app.post("/api/data-dictionary/reproject")
+async def data_dictionary_reproject_post(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+@app.get("/api/data-dictionary/{object_kind:path}")
+async def data_dictionary_describe_get(request: Request, object_kind: str) -> Response:
+    return await _route_to_handler(request)
+
+@app.put("/api/data-dictionary/{object_kind}/{field_path:path}")
+async def data_dictionary_set_override_put(request: Request, object_kind: str, field_path: str) -> Response:
+    return await _route_to_handler(request)
+
+@app.delete("/api/data-dictionary/{object_kind}/{field_path:path}")
+async def data_dictionary_clear_override_delete(request: Request, object_kind: str, field_path: str) -> Response:
     return await _route_to_handler(request)
 
 # -- Chat --
@@ -3056,71 +3097,102 @@ def get_receipt(receipt_id: str) -> dict[str, Any]:
 # Operations endpoints
 # ---------------------------------------------------------------------------
 
+def _health_db_snapshot(*, timeout_s: float = 2.0) -> tuple[list[dict[str, Any]], str]:
+    """Fast health probe that does not depend on shared API subsystems."""
+    statement_timeout_ms = max(1, int(timeout_s * 1000))
+
+    async def _collect() -> tuple[list[dict[str, Any]], str]:
+        import asyncpg
+
+        from storage.postgres.connection import resolve_workflow_database_url
+
+        checks: list[dict[str, Any]] = []
+        overall = "healthy"
+        database_url = resolve_workflow_database_url()
+        conn = await asyncpg.connect(
+            database_url,
+            timeout=timeout_s,
+            command_timeout=timeout_s,
+        )
+        try:
+            await conn.execute(f"SET statement_timeout = {statement_timeout_ms}")
+            await conn.fetchval("SELECT 1")
+            checks.append({"name": "postgres", "ok": True})
+
+            active = int(
+                await conn.fetchval(
+                    "SELECT count(*) FROM workflow_jobs WHERE heartbeat_at > now() - interval '5 minutes'"
+                )
+                or 0
+            )
+            recent_claims = int(
+                await conn.fetchval(
+                    "SELECT count(*) FROM workflow_jobs WHERE claimed_at > now() - interval '10 minutes'"
+                )
+                or 0
+            )
+            ready_cnt = int(
+                await conn.fetchval("SELECT count(*) FROM workflow_jobs WHERE status = 'ready'") or 0
+            )
+            worker_alive = active > 0 or recent_claims > 0 or ready_cnt == 0
+            checks.append(
+                {
+                    "name": "worker",
+                    "ok": worker_alive,
+                    "active_jobs": active,
+                    "ready_jobs": ready_cnt,
+                }
+            )
+            if not worker_alive:
+                overall = "degraded"
+
+            row = await conn.fetchrow(
+                """
+                SELECT count(*) as total,
+                       count(*) FILTER (WHERE status = 'succeeded') as passed,
+                       count(*) FILTER (WHERE status IN ('failed', 'dead_letter')) as failed
+                FROM workflow_jobs
+                WHERE created_at > now() - interval '24 hours'
+                """
+            )
+            total = int(row["total"]) if row else 0
+            passed = int(row["passed"]) if row else 0
+            failed = int(row["failed"]) if row else 0
+            pass_rate = round(passed / total, 3) if total > 0 else 1.0
+            checks.append(
+                {
+                    "name": "workflow",
+                    "ok": True,
+                    "total": total,
+                    "passed": passed,
+                    "failed": failed,
+                    "pass_rate": pass_rate,
+                }
+            )
+            return checks, overall
+        finally:
+            await conn.close()
+
+    try:
+        from storage.postgres.connection import _run_sync
+
+        return _run_sync(_collect())
+    except Exception as exc:
+        return ([{"name": "postgres", "ok": False, "error": str(exc)[:200]}], "unhealthy")
+
+
 @app.get("/api/health")
 def health_check_endpoint() -> Any:
-    """Platform health from Postgres — the single source of truth.
-
-    Checks: DB connectivity, worker liveness (recent heartbeats),
-    workflow pass rate, and disk space.
-    """
+    """Platform health from bounded Postgres probes."""
     now = datetime.now(timezone.utc)
-    checks = []
-    overall = "healthy"
-
-    # 1. Postgres connectivity
-    try:
-        conn = _shared_pg_conn()
-        conn.execute("SELECT 1")
-        checks.append({"name": "postgres", "ok": True})
-    except Exception as exc:
-        checks.append({"name": "postgres", "ok": False, "error": str(exc)[:200]})
-        overall = "unhealthy"
+    checks, overall = _health_db_snapshot()
+    if overall == "unhealthy":
         return JSONResponse(status_code=503, content={
             "status": overall, "checks": checks, "timestamp": now.isoformat(),
         })
 
-    # 2. Worker liveness (any heartbeat in last 5 minutes?)
-    try:
-        rows = conn.execute(
-            "SELECT count(*) as cnt FROM workflow_jobs WHERE heartbeat_at > now() - interval '5 minutes'"
-        )
-        active = rows[0]["cnt"] if rows else 0
-        # Also check: any job claimed in the last 10 minutes?
-        claimed = conn.execute(
-            "SELECT count(*) as cnt FROM workflow_jobs WHERE claimed_at > now() - interval '10 minutes'"
-        )
-        recent_claims = claimed[0]["cnt"] if claimed else 0
-        # Worker is alive if either there are active heartbeats OR there are no ready jobs to claim
-        ready = conn.execute("SELECT count(*) as cnt FROM workflow_jobs WHERE status = 'ready'")
-        ready_cnt = ready[0]["cnt"] if ready else 0
-        worker_alive = active > 0 or recent_claims > 0 or ready_cnt == 0
-        checks.append({"name": "worker", "ok": worker_alive, "active_jobs": active, "ready_jobs": ready_cnt})
-        if not worker_alive:
-            overall = "degraded"
-    except Exception as exc:
-        checks.append({"name": "worker", "ok": False, "error": str(exc)[:200]})
-
-    # 3. Workflow pass rate (last 24h from workflow_jobs)
-    try:
-        rows = conn.execute("""
-            SELECT count(*) as total,
-                   count(*) FILTER (WHERE status = 'succeeded') as passed,
-                   count(*) FILTER (WHERE status IN ('failed', 'dead_letter')) as failed
-            FROM workflow_jobs
-            WHERE created_at > now() - interval '24 hours'
-        """)
-        r = rows[0] if rows else {"total": 0, "passed": 0, "failed": 0}
-        pass_rate = round(r["passed"] / r["total"], 3) if r["total"] > 0 else 1.0
-        checks.append({
-            "name": "workflow", "ok": True,
-            "total": r["total"], "passed": r["passed"], "failed": r["failed"],
-            "pass_rate": pass_rate,
-        })
-    except Exception as exc:
-        checks.append({"name": "workflow", "ok": False, "error": str(exc)[:200]})
-
-    # 4. Disk space
     import shutil
+
     usage = shutil.disk_usage(str(Path(__file__).resolve().parents[3]))
     free_gb = round(usage.free / (1024**3), 1)
     checks.append({"name": "disk", "ok": free_gb > 5, "free_gb": free_gb})

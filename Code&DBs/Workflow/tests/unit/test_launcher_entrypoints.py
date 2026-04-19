@@ -237,30 +237,58 @@ def test_launcher_status_payload_uses_fast_frontdoor_profile(monkeypatch) -> Non
                 "services_ready": True,
                 "database_reachable": True,
                 "schema_bootstrapped": True,
+                "workflow_operational": True,
                 "api_server_ready": True,
                 "workflow_api_ready": True,
                 "mcp_bridge_ready": True,
                 "ui_ready": True,
-                "launch_url": "http://127.0.0.1:8420/app",
-                "dashboard_url": "http://127.0.0.1:8420/app",
-                "api_docs_url": "http://127.0.0.1:8420/docs",
+                "launch_url": "https://praxis.example/app",
+                "dashboard_url": "https://praxis.example/app",
+                "api_docs_url": "https://praxis.example/docs",
                 "dependency_truth": {"ok": True},
             },
             "dependency_truth": {"ok": True},
-            "launch_url": "http://127.0.0.1:8420/app",
-            "dashboard_url": "http://127.0.0.1:8420/app",
-            "api_docs_url": "http://127.0.0.1:8420/docs",
+            "launch_url": "https://praxis.example/app",
+            "dashboard_url": "https://praxis.example/app",
+            "api_docs_url": "https://praxis.example/docs",
         }
 
     monkeypatch.setattr(workflow_launcher, "_run_launcher_json", _fake_run_launcher_json)
+    monkeypatch.setattr(
+        workflow_launcher,
+        "workflow_database_status_payload",
+        lambda: {"database_reachable": True, "schema_bootstrapped": False, "workflow_operational": True},
+    )
 
     payload = workflow_launcher.launcher_status_payload()
 
     assert payload["ready"] is True
+    assert payload["launch_url"] == "https://praxis.example/app"
+    assert payload["dashboard_url"] == "https://praxis.example/app"
+    assert payload["api_docs_url"] == "https://praxis.example/docs"
     assert [call[0] for call in calls] == [("status", "--json")]
     assert calls[0][1] is not None
     assert calls[0][1]["PRAXIS_ALPHA_TIMEOUT_API_HEALTH_S"] == "0.5"
     assert calls[0][2] == workflow_launcher._STATUS_TIMEOUT_S
+
+
+def test_launcher_status_payload_does_not_invent_local_urls(monkeypatch) -> None:
+    monkeypatch.setattr(
+        workflow_launcher,
+        "_run_launcher_json",
+        lambda *args, **kwargs: {"doctor": {}, "services": []},
+    )
+    monkeypatch.setattr(
+        workflow_launcher,
+        "workflow_database_status_payload",
+        lambda: {"database_reachable": True, "schema_bootstrapped": True},
+    )
+
+    payload = workflow_launcher.launcher_status_payload()
+
+    assert payload["launch_url"] is None
+    assert payload["dashboard_url"] is None
+    assert payload["api_docs_url"] is None
 
 
 def test_run_launcher_json_raises_structured_timeout(monkeypatch) -> None:

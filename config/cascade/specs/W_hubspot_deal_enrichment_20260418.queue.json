@@ -1,0 +1,105 @@
+{
+  "name": "HubSpot Deal Enrichment — Research + Outreach Notes",
+  "phase": "W",
+  "queue_id": "hubspot_deal_enrichment_20260418",
+  "outcome_goal": "Every active deal in the HubSpot `default` pipeline has a fresh research-backed outreach-angle note attached, with a roll-up at artifacts/hubspot_enrichment_20260418/06_summary.md proving each note landed in HubSpot (note id + deal id + contact id).",
+  "anti_requirements": [
+    "Do NOT route research jobs to non-research task_types — online-research steps must use task_type=research so the router picks a research-capable frontier model.",
+    "Do NOT hardcode HubSpot IDs into prompts — every downstream job reads the IDs captured by pull_crm_snapshot.",
+    "Do NOT invent facts about a company in the synthesis step. Every claim in an outreach angle must be traceable to a citation in the company's research brief; if the brief has no evidence, the angle must say so explicitly.",
+    "Do NOT write notes with body text that exceeds 1500 chars — HubSpot truncates silently.",
+    "Do NOT skip the verify phase. A run without confirmed note IDs is a failed run."
+  ],
+  "jobs": [
+    {
+      "label": "pull_crm_snapshot",
+      "task_type": "build",
+      "description": "Read open deals + associated contacts + companies from HubSpot; emit a normalized snapshot.",
+      "outcome_goal": "artifacts/hubspot_enrichment_20260418/00_crm_snapshot.json lists every deal not in Closed-won/Closed-lost, each with {deal_id, deal_name, stage_label, amount, primary_contact:{id,firstname,lastname,email,jobtitle}, company:{id,name,domain,industry}}.",
+      "prompt": "Build `artifacts/hubspot_enrichment_20260418/00_crm_snapshot.json` by reading the HubSpot portal through the praxis_integration MCP tool.\n\nSteps:\n\n1. List deals with their associations and properties. Run exactly:\n\n```bash\npraxis workflow tools call praxis_integration --input-json '{\"action\":\"call\",\"integration_id\":\"hubspot\",\"integration_action\":\"search_deals\",\"args\":{\"limit\":100,\"properties\":[\"dealname\",\"amount\",\"dealstage\",\"pipeline\",\"closedate\"],\"filterGroups\":[{\"filters\":[{\"propertyName\":\"pipeline\",\"operator\":\"EQ\",\"value\":\"default\"}]}]}}' --yes > artifacts/hubspot_enrichment_20260418/_deals.json\n```\n\n2. Fetch the pipeline stage map once so stage IDs can be resolved to human labels (\"Needs assessment\", \"Solution presentation\", …). Use the webhook integration to call `https://api.hubapi.com/crm/v3/pipelines/deals`.\n\n3. For each deal not in stage `3521087212` (Closed won) or `3521087213` (Closed lost), fetch associated contact + company IDs using the deal-associations endpoint (capability `batch_read_contacts` does not cover this — call `/crm/v3/objects/deals/{dealId}/associations/contacts` and `…/companies` via `praxis_integration` with `integration_action=\"webhook\"` or directly via the webhook tool). Keep ONE primary contact per deal (the first returned).\n\n4. Hydrate each contact with properties `firstname`, `lastname`, `email`, `jobtitle`; each company with `name`, `domain`, `industry`.\n\n5. Emit `00_crm_snapshot.json` as an array of deal records in the schema described in outcome_goal. Include a top-level `_generated_at` ISO timestamp.\n\nFail loudly if any deal lacks both a primary contact and a company — that deal cannot be enriched.",
+      "read": [
+        "Code&DBs/Integrations/manifests/hubspot.toml"
+      ],
+      "write": [
+        "artifacts/hubspot_enrichment_20260418/00_crm_snapshot.json"
+      ],
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -c \"import json; d=json.load(open('artifacts/hubspot_enrichment_20260418/00_crm_snapshot.json')); rows=d if isinstance(d,list) else d.get('deals',[]); assert rows, 'no deals captured'; [r for r in rows if r.get('company') and r.get('primary_contact')] and print(len(rows),'deals')\""
+    },
+    {
+      "label": "enumerate_companies",
+      "task_type": "build",
+      "depends_on": ["pull_crm_snapshot"],
+      "description": "Project the snapshot into a de-duplicated company research list.",
+      "outcome_goal": "artifacts/hubspot_enrichment_20260418/01_company_targets.json is a list of unique companies (id, name, domain, industry) sorted by name — one research brief per entry.",
+      "prompt": "Read `artifacts/hubspot_enrichment_20260418/00_crm_snapshot.json` and produce `artifacts/hubspot_enrichment_20260418/01_company_targets.json` — a JSON array deduplicated by company.id, sorted by name. Fields: `id, name, domain, industry, deal_ids` (list of deals tied to this company).\n\nThis is a pure file transform. Do not hit HubSpot again.",
+      "read": ["artifacts/hubspot_enrichment_20260418/00_crm_snapshot.json"],
+      "write": ["artifacts/hubspot_enrichment_20260418/01_company_targets.json"],
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -c \"import json; rows=json.load(open('artifacts/hubspot_enrichment_20260418/01_company_targets.json')); assert rows and all('id' in r and 'name' in r for r in rows)\""
+    },
+    {
+      "label": "research_companies",
+      "task_type": "research",
+      "depends_on": ["enumerate_companies"],
+      "description": "Parallel online research — one cited brief per target company.",
+      "outcome_goal": "For every company in 01_company_targets.json there is a file artifacts/hubspot_enrichment_20260418/research/<company.id>.md with sections: Recent signals, Tech stack signals, Hiring posture, Likely pain points, Sources. At least 3 distinct sources cited per brief.",
+      "prompt": "Read `artifacts/hubspot_enrichment_20260418/01_company_targets.json`. For EACH company in the list, launch a parallel online-research pass and emit `artifacts/hubspot_enrichment_20260418/research/<company.id>.md`.\n\nYou may fan out by calling `praxis workflow tools call praxis_research_workflow --input-json '{\"action\":\"run\",\"topic\":\"<company name> — go-to-market signals, hiring, tech stack, recent press — Q1-Q2 2026\",\"slug\":\"hubspot_enrich_<company.id>\",\"workers\":4}' --yes` and then synthesizing the run's output into the per-company file. If the research-workflow route is unavailable, fall back to a direct WebSearch-driven pass per company.\n\nEach brief must have these sections (markdown H2):\n- **Recent signals** — news, funding, leadership changes, product launches in the last 12 months. Every bullet cites `[source-N]`.\n- **Tech stack signals** — stated stack, job-post stack, vendor pages, BuiltWith-style inference. Cite sources.\n- **Hiring posture** — active roles, growth areas, team shape.\n- **Likely pain points** — 2-4 hypotheses grounded in the above, each tagged with a confidence label (high/medium/low) and the evidence reference.\n- **Sources** — numbered list with URL + one-line credibility note.\n\nRules: no invented facts, no unsourced claims. If the web yields nothing, write the brief with a single \"no public signals found\" section and confidence=low on all pain points.",
+      "read": ["artifacts/hubspot_enrichment_20260418/01_company_targets.json"],
+      "write": ["artifacts/hubspot_enrichment_20260418/research/"],
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -c \"import json,glob,os; targets=json.load(open('artifacts/hubspot_enrichment_20260418/01_company_targets.json')); missing=[c['id'] for c in targets if not os.path.exists(f'artifacts/hubspot_enrichment_20260418/research/{c[\\\"id\\\"]}.md')]; assert not missing, missing\""
+    },
+    {
+      "label": "synthesize_outreach",
+      "task_type": "analysis",
+      "depends_on": ["research_companies"],
+      "description": "Per-deal outreach angle tying the research brief to the contact's role and the deal's stage.",
+      "outcome_goal": "artifacts/hubspot_enrichment_20260418/03_outreach_angles.json is an array of {deal_id, contact_id, company_id, angle_markdown} where angle_markdown ≤ 1500 chars and every factual claim cites the company brief.",
+      "prompt": "Read `00_crm_snapshot.json` and each `research/<company.id>.md`. For each deal in the snapshot produce one outreach angle.\n\nEach angle is a markdown block with:\n- **Hook** (one sentence tying a specific research signal to the contact's role / the company's situation).\n- **Why now** (one sentence tied to the deal's current stage — \"Needs assessment\" vs \"Solution proposal\" vs \"Objection handling\" drives different framing).\n- **Recommended next step** (one concrete ask: demo, intro to a specific persona, a tailored case study).\n- **Evidence** — inline `[source-N]` citations pointing into the company brief's Sources list. Every factual claim must be traceable.\n\nLength budget: ≤ 1500 chars per angle including markdown. If the company's brief has no usable signals, produce a shorter angle explicitly labelled \"generic — no signals\" and skip the Evidence block.\n\nEmit the array to `artifacts/hubspot_enrichment_20260418/03_outreach_angles.json`. Fields per record: `deal_id`, `contact_id`, `company_id`, `deal_name`, `stage_label`, `angle_markdown`.",
+      "read": [
+        "artifacts/hubspot_enrichment_20260418/00_crm_snapshot.json",
+        "artifacts/hubspot_enrichment_20260418/research/"
+      ],
+      "write": ["artifacts/hubspot_enrichment_20260418/03_outreach_angles.json"],
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -c \"import json; rows=json.load(open('artifacts/hubspot_enrichment_20260418/03_outreach_angles.json')); assert rows and all(len(r.get('angle_markdown',''))<=1500 for r in rows)\""
+    },
+    {
+      "label": "push_notes_to_hubspot",
+      "task_type": "build",
+      "depends_on": ["synthesize_outreach"],
+      "description": "Write each outreach angle back to HubSpot as a note associated with the deal + primary contact.",
+      "outcome_goal": "For every record in 03_outreach_angles.json there is a HubSpot note created, with its id captured in artifacts/hubspot_enrichment_20260418/04_note_ids.json. Associations: note→deal (typeId 214) and note→contact (typeId 202).",
+      "prompt": "Read `03_outreach_angles.json`. For each record, POST to `/crm/v3/objects/notes` via the praxis_integration `create_note` capability with:\n\n```json\n{\n  \"properties\": {\n    \"hs_note_body\": \"<angle_markdown>\",\n    \"hs_timestamp\": \"<epoch_ms_now>\"\n  },\n  \"associations\": [\n    {\"to\":{\"id\":\"<deal_id>\"},\"types\":[{\"associationCategory\":\"HUBSPOT_DEFINED\",\"associationTypeId\":214}]},\n    {\"to\":{\"id\":\"<contact_id>\"},\"types\":[{\"associationCategory\":\"HUBSPOT_DEFINED\",\"associationTypeId\":202}]}\n  ]\n}\n```\n\nCall it with `praxis workflow tools call praxis_integration --input-json '{\"action\":\"call\",\"integration_id\":\"hubspot\",\"integration_action\":\"create_note\",\"args\":{...}}' --yes`.\n\nCapture the returned note id for each call and write the pairs to `artifacts/hubspot_enrichment_20260418/04_note_ids.json` as `[{deal_id, contact_id, note_id, hubspot_status}]`. On any failure, record the error body in the same row (`hubspot_status:\"failed\"`, `error_detail`) — do NOT abort the whole run for a single failed note.",
+      "read": ["artifacts/hubspot_enrichment_20260418/03_outreach_angles.json"],
+      "write": ["artifacts/hubspot_enrichment_20260418/04_note_ids.json"],
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -c \"import json; rows=json.load(open('artifacts/hubspot_enrichment_20260418/04_note_ids.json')); ok=[r for r in rows if r.get('note_id')]; assert ok, 'no notes created'; print(len(ok),'of',len(rows),'notes created')\""
+    },
+    {
+      "label": "verify_notes_live",
+      "task_type": "build",
+      "depends_on": ["push_notes_to_hubspot"],
+      "description": "Read back each created note from HubSpot and confirm its body matches and associations are present.",
+      "outcome_goal": "artifacts/hubspot_enrichment_20260418/05_verification.json has one row per created note with `live_exists:true`, associations confirmed to both the deal and the contact.",
+      "prompt": "For every row in `04_note_ids.json` with a `note_id`, read the note back via `https://api.hubapi.com/crm/v3/objects/notes/<id>?associations=contacts,deals&properties=hs_note_body,hs_timestamp` (call through the webhook integration).\n\nFor each, assert:\n- The note exists (HTTP 200).\n- The body matches the angle_markdown from `03_outreach_angles.json` (string equality after stripping trailing whitespace).\n- Associations include both the expected deal_id and contact_id.\n\nEmit `artifacts/hubspot_enrichment_20260418/05_verification.json`: `[{note_id, live_exists, body_matches, deal_assoc_ok, contact_assoc_ok}]`.",
+      "read": [
+        "artifacts/hubspot_enrichment_20260418/04_note_ids.json",
+        "artifacts/hubspot_enrichment_20260418/03_outreach_angles.json"
+      ],
+      "write": ["artifacts/hubspot_enrichment_20260418/05_verification.json"],
+      "verify_command": "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -c \"import json; rows=json.load(open('artifacts/hubspot_enrichment_20260418/05_verification.json')); bad=[r for r in rows if not (r.get('live_exists') and r.get('deal_assoc_ok') and r.get('contact_assoc_ok'))]; assert not bad, bad\""
+    },
+    {
+      "label": "summary_rollup",
+      "task_type": "build",
+      "depends_on": ["verify_notes_live"],
+      "description": "Human-readable roll-up of the run with links and counts.",
+      "outcome_goal": "artifacts/hubspot_enrichment_20260418/06_summary.md has: total deals enriched, companies researched, notes created, notes verified live, and a table of (deal, stage, note_id, company_brief).",
+      "prompt": "Read the prior artifacts and emit `artifacts/hubspot_enrichment_20260418/06_summary.md`:\n\n- **Counts** — deals in snapshot, companies researched, outreach angles generated, notes created, notes verified live.\n- **Table** — one row per deal: dealname, stage_label, company.name, note_id, path to the company research brief.\n- **Anomalies** — any failed note creates, any missing company briefs, any body mismatches.\n- **What to click next** — the top 3 deals (by amount × stage-probability) with a one-line reason per deal.",
+      "read": [
+        "artifacts/hubspot_enrichment_20260418/00_crm_snapshot.json",
+        "artifacts/hubspot_enrichment_20260418/04_note_ids.json",
+        "artifacts/hubspot_enrichment_20260418/05_verification.json"
+      ],
+      "write": ["artifacts/hubspot_enrichment_20260418/06_summary.md"],
+      "verify_command": "test -s artifacts/hubspot_enrichment_20260418/06_summary.md && grep -qi 'counts' artifacts/hubspot_enrichment_20260418/06_summary.md"
+    }
+  ]
+}

@@ -86,3 +86,29 @@
   mcp: praxis_context_shard
   proving_tests:
     - Code&DBs/Workflow/tests/integration/test_context_bundle_repository.py
+
+- concept: dataset_refinery
+  authority_module: Code&DBs/Workflow/runtime/dataset_candidate_subscriber.py
+  storage_tables:
+    - dataset_raw_candidates
+    - dataset_candidate_evidence_links
+    - dataset_scoring_policies
+    - dataset_candidate_scores
+    - dataset_candidate_score_history
+    - dataset_promotions
+  cli: praxis workflow tools call praxis_dataset
+  mcp: praxis_dataset
+  proving_tests:
+    - Code&DBs/Workflow/tests/unit/test_dataset_candidate_subscriber.py
+    - Code&DBs/Workflow/tests/unit/test_dataset_auto_promote.py
+    - Code&DBs/Workflow/tests/unit/test_dataset_staleness.py
+
+- concept: data_dictionary
+  authority_module: Code&DBs/Workflow/runtime/data_dictionary.py
+  storage_tables:
+    - data_dictionary_objects
+    - data_dictionary_entries
+  cli: praxis workflow tools call praxis_data_dictionary
+  mcp: praxis_data_dictionary
+  proving_tests:
+    - Code&DBs/Workflow/tests/unit/test_data_dictionary_authority.py

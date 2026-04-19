@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Fire every *.queue.json spec staged under artifacts/workflow/ready/.
+# Fire every due *.queue.json spec staged under artifacts/workflow/ready/.
 #
-# Default: fan out in parallel, one workflow run per spec, write run_id back
-# to workflow_spec_ready. Set SEQUENTIAL=1 to run one at a time.
+# The launcher keeps the directory as the discovery surface, but `workflow_spec_ready`
+# is the authority for when a spec is eligible to fire. Rows stay staged until their
+# `scheduled_at` is NULL or in the past, then the launcher fans them out through
+# `praxis workflow run` and records the run lifecycle.
 #
 # Usage (from anywhere):
 #   /Users/nate/Praxis/Code\&DBs/Workflow/scripts/fire_ready_specs.sh
@@ -22,48 +24,38 @@ shopt -s nullglob
 specs=("$READY_DIR"/*.queue.json)
 shopt -u nullglob
 
-if [ ${#specs[@]} -eq 0 ]; then
-  echo "no ready specs in $READY_DIR"
-  exit 0
-fi
-
-stage_row() {
+ensure_stage_row() {
   local spec_id="$1" spec_path="$2"
-  psql "$DB" -q <<SQL
+  psql "$DB" -q -v spec_id="$spec_id" -v spec_path="$spec_path" <<'SQL'
 INSERT INTO workflow_spec_ready (spec_id, spec_path, status)
-VALUES ('$spec_id', '$spec_path', 'firing')
+VALUES (:'spec_id', :'spec_path', 'staged')
 ON CONFLICT (spec_id) DO UPDATE SET
-  spec_path = EXCLUDED.spec_path,
-  status = 'firing',
-  last_error = NULL;
+  spec_path = EXCLUDED.spec_path;
 SQL
 }
 
 mark_fired() {
   local spec_id="$1" run_id="$2"
-  psql "$DB" -q <<SQL
+  psql "$DB" -q -v spec_id="$spec_id" -v run_id="$run_id" <<'SQL'
 UPDATE workflow_spec_ready
-SET status='fired', run_id='$run_id', fired_at=now(), last_error=NULL
-WHERE spec_id='$spec_id';
+SET status = 'fired', run_id = :'run_id', fired_at = now(), last_error = NULL
+WHERE spec_id = :'spec_id';
 SQL
 }
 
 mark_failed() {
   local spec_id="$1" err="$2"
-  psql "$DB" -q <<SQL
+  psql "$DB" -q -v spec_id="$spec_id" -v err="$err" <<'SQL'
 UPDATE workflow_spec_ready
-SET status='failed', last_error=\$err\$${err}\$err\$, fired_at=now()
-WHERE spec_id='$spec_id';
+SET status = 'failed', last_error = :'err', fired_at = now()
+WHERE spec_id = :'spec_id';
 SQL
 }
 
 fire_one() {
-  local spec_path="$1"
-  local spec_id
-  spec_id=$(basename "$spec_path" .queue.json)
+  local spec_id="$1" spec_path="$2"
   local log_file="$LOG_DIR/$spec_id.log"
 
-  stage_row "$spec_id" "$spec_path"
   echo "[$(date +%H:%M:%S)] firing $spec_id -> $log_file"
 
   if output=$(praxis workflow run "$spec_path" 2>&1 | tee "$log_file"); then
@@ -77,13 +69,45 @@ fire_one() {
   fi
 }
 
+for spec_path in "${specs[@]}"; do
+  spec_id=$(basename "$spec_path" .queue.json)
+  ensure_stage_row "$spec_id" "$spec_path"
+done
+
+load_due_specs() {
+  psql "$DB" -At -F $'\t' <<'SQL'
+SELECT spec_id, spec_path
+FROM workflow_spec_ready
+WHERE status = 'staged'
+  AND (scheduled_at IS NULL OR scheduled_at <= now())
+ORDER BY scheduled_at NULLS FIRST, created_at ASC;
+SQL
+}
+
+mapfile -t due_specs < <(load_due_specs)
+
+if [ ${#due_specs[@]} -eq 0 ]; then
+  if [ ${#specs[@]} -eq 0 ]; then
+    echo "no ready specs in $READY_DIR"
+  else
+    echo "no staged specs are due yet"
+  fi
+  exit 0
+fi
+
 if [ "${SEQUENTIAL:-0}" = "1" ]; then
-  for s in "${specs[@]}"; do fire_one "$s"; done
+  for row in "${due_specs[@]}"; do
+    IFS=$'\t' read -r spec_id spec_path <<< "$row"
+    fire_one "$spec_id" "$spec_path"
+  done
 else
-  for s in "${specs[@]}"; do fire_one "$s" & done
+  for row in "${due_specs[@]}"; do
+    IFS=$'\t' read -r spec_id spec_path <<< "$row"
+    fire_one "$spec_id" "$spec_path" &
+  done
   wait
 fi
 
 echo
 echo "=== summary ==="
-psql "$DB" -c "SELECT spec_id, status, run_id, fired_at FROM workflow_spec_ready ORDER BY fired_at DESC NULLS LAST LIMIT 20"
+psql "$DB" -c "SELECT spec_id, status, scheduled_at, run_id, fired_at FROM workflow_spec_ready ORDER BY fired_at DESC NULLS LAST, created_at DESC LIMIT 20"

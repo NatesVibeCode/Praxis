@@ -20,10 +20,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 WORKFLOW_ROOT = REPO_ROOT / "Code&DBs" / "Workflow"
 sys.path.insert(0, str(WORKFLOW_ROOT))
 
-DB_URL = os.environ.get(
-    "WORKFLOW_DATABASE_URL",
-    "postgresql://postgres@praxis-postgres-1.orb.local:5432/praxis",
-)
+from runtime._workflow_database import resolve_runtime_database_url
+
 HEURISTIC_MAP_PATH = Path("/tmp/atlas_heuristic_map.json")
 
 # One color per area — semantic palette, muted pastels.
@@ -155,8 +153,18 @@ def fetch_tools() -> list[dict]:
         return out
 
 
-def build_graph() -> dict:
-    conn = psycopg2.connect(DB_URL, cursor_factory=psycopg2.extras.RealDictCursor)
+def _workflow_database_url() -> str:
+    configured = str(os.environ.get("WORKFLOW_DATABASE_URL") or "").strip()
+    if configured:
+        return configured
+    return str(resolve_runtime_database_url(repo_root=REPO_ROOT))
+
+
+def build_graph(*, database_url: str | None = None) -> dict:
+    conn = psycopg2.connect(
+        database_url or _workflow_database_url(),
+        cursor_factory=psycopg2.extras.RealDictCursor,
+    )
     try:
         with conn.cursor() as cur:
             entities = fetch_entities(cur)
@@ -258,20 +266,24 @@ def build_graph() -> dict:
     # memory_entities via the authority-to-memory projection, so they flow in
     # through fetch_entities. No manual stubs needed — avoids prefix collisions.
 
-    # Only structural edges (memory_edges). Area membership is compound-parenting, not edges.
-    edge_rows = [
-        {
+    # Structural edges (memory_edges). Skip belongs_to_area — redundant with
+    # area membership and just contributes visual noise (~half of all edges).
+    edge_rows: list[dict] = []
+    for e in edges:
+        if e["source_id"] not in node_ids or e["target_id"] not in node_ids:
+            continue
+        rel = e["relation_type"]
+        if rel == "belongs_to_area":
+            continue
+        edge_rows.append({
             "data": {
-                "id": f"{e['source_id']}|{e['relation_type']}|{e['target_id']}",
+                "id": f"{e['source_id']}|{rel}|{e['target_id']}",
                 "source": e["source_id"],
                 "target": e["target_id"],
-                "label": e["relation_type"],
+                "label": rel,
                 "weight": float(e["weight"] or 1.0),
             }
-        }
-        for e in edges
-        if e["source_id"] in node_ids and e["target_id"] in node_ids
-    ]
+        })
 
     # Compute degree for node sizing.
     degree: dict[str, int] = {}
@@ -279,20 +291,22 @@ def build_graph() -> dict:
         degree[e["data"]["source"]] = degree.get(e["data"]["source"], 0) + 1
         degree[e["data"]["target"]] = degree.get(e["data"]["target"], 0) + 1
 
-    # Plus sibling count as pseudo-degree for compound children (so orphan tables in an area still get size).
-    parent_child_count: dict[str, int] = {}
+    # Area sizing: real member count of the area (not parent_child_count, which
+    # was always zero because no node sets `parent`).
+    area_member_count: dict[str, int] = {}
     for n in nodes:
-        p = n["data"].get("parent")
-        if p:
-            parent_child_count[p] = parent_child_count.get(p, 0) + 1
+        if n["data"].get("is_area"):
+            continue
+        a = n["data"].get("area")
+        if a:
+            area_member_count[a] = area_member_count.get(a, 0) + 1
 
     for n in nodes:
         nid = n["data"]["id"]
         if n["data"].get("is_area"):
-            # Area size ~ log(child count)
-            c = parent_child_count.get(nid, 1)
+            c = area_member_count.get(n["data"]["area"], 1)
             n["data"]["degree"] = c
-            n["data"]["size"] = max(30, min(110, 28 + 6 * c ** 0.55))
+            n["data"]["size"] = max(42, min(140, 34 + 7 * c ** 0.55))
         else:
             d = max(1, degree.get(nid, 1))
             n["data"]["degree"] = d
@@ -313,25 +327,49 @@ def build_graph() -> dict:
     kept_ids = {n["data"]["id"] for n in final_nodes}
     final_edges = [e for e in edge_rows if e["data"]["source"] in kept_ids and e["data"]["target"] in kept_ids]
 
-    # Invisible area-pull edges: gives fcose gravitational pull so same-area nodes cluster.
+    # (Pull edges removed — the JS uses a two-pass layout: fcose on areas +
+    # aggregate edges for overview, then per-area local layout on expand.
+    # Pull edges were only needed by the old single-fcose-on-everything layout.)
+
+    # Aggregate cross-area edges: for every real edge whose endpoints live in
+    # different areas, emit one area↔area edge per (src_area, tgt_area, rel)
+    # triple weighted by count. Used for the overview layer (progressive
+    # disclosure) so closed areas still reveal their outbound dependencies.
+    node_area_lookup: dict[str, str] = {}
     for n in final_nodes:
         if n["data"].get("is_area"):
             continue
-        area = n["data"].get("area")
-        if not area:
+        a = n["data"].get("area")
+        if a:
+            node_area_lookup[n["data"]["id"]] = a
+
+    aggregate_counts: dict[tuple[str, str, str], int] = {}
+    for e in final_edges:
+        d = e["data"]
+        if d.get("is_pull"):
             continue
-        area_id = f"area::{area}"
-        if area_id not in kept_ids:
+        src_area = node_area_lookup.get(d["source"])
+        tgt_area = node_area_lookup.get(d["target"])
+        if not src_area or not tgt_area or src_area == tgt_area:
+            continue
+        key = (src_area, tgt_area, d["label"])
+        aggregate_counts[key] = aggregate_counts.get(key, 0) + 1
+
+    for (src_area, tgt_area, rel), count in aggregate_counts.items():
+        src_id = f"area::{src_area}"
+        tgt_id = f"area::{tgt_area}"
+        if src_id not in kept_ids or tgt_id not in kept_ids:
             continue
         final_edges.append({
             "data": {
-                "id": f"{n['data']['id']}|pull|{area_id}",
-                "source": n["data"]["id"],
-                "target": area_id,
-                "is_pull": True,
-                "weight": 1.0,
+                "id": f"{src_id}|agg_{rel}|{tgt_id}",
+                "source": src_id,
+                "target": tgt_id,
+                "label": rel,
+                "weight": float(count),
+                "is_aggregate": True,
             },
-            "classes": "pull",
+            "classes": "aggregate",
         })
 
     return {"nodes": final_nodes, "edges": final_edges}
@@ -361,6 +399,7 @@ HTML_TEMPLATE = r"""<!doctype html>
   header { grid-column: 1 / 4; padding: 0 18px; background: var(--bg-panel); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 18px; }
   header h1 { font-size: 14px; margin: 0; font-weight: 500; letter-spacing: 0.3px; }
   header .counts { font-size: 11px; color: var(--text-dim); font-family: ui-monospace, monospace; }
+  header .hint { font-size: 11px; color: var(--text-dim); font-style: italic; }
   #sidebar { background: var(--bg-panel); padding: 14px; overflow-y: auto; border-right: 1px solid var(--border); font-size: 12px; }
   #sidebar h2 { font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-dim); margin: 14px 0 6px; font-weight: 600; }
   #sidebar h2:first-child { margin-top: 0; }
@@ -369,6 +408,9 @@ HTML_TEMPLATE = r"""<!doctype html>
   #sidebar input[type=search] { width: 100%; padding: 6px 9px; border-radius: 5px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 12px; box-sizing: border-box; outline: none; }
   #sidebar input[type=search]:focus { border-color: var(--accent); }
   .swatch { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+  .edge-swatch { width: 22px; height: 2px; display: inline-block; flex-shrink: 0; position: relative; }
+  .edge-swatch.dashed { background: transparent; border-top: 2px dashed currentColor; height: 0; }
+  .edge-swatch.dotted { background: transparent; border-top: 2px dotted currentColor; height: 0; }
   #cy { background: var(--bg); width: 100%; height: 100%; }
   #detail { background: var(--bg-panel); padding: 14px; border-left: 1px solid var(--border); overflow-y: auto; font-size: 12px; }
   #detail h2 { font-size: 14px; margin: 0 0 6px; font-weight: 500; }
@@ -391,7 +433,10 @@ HTML_TEMPLATE = r"""<!doctype html>
   <header>
     <h1>Praxis System Atlas</h1>
     <span class="counts" id="counts"></span>
+    <span class="hint" id="mode-hint">click an area to expand</span>
     <div class="toolbar">
+      <button id="btn-expand-all">Expand all</button>
+      <button id="btn-collapse-all">Collapse all</button>
       <button id="btn-fit">Fit</button>
       <button id="btn-relayout">Re-layout</button>
       <button id="btn-labels">Labels: auto</button>
@@ -400,6 +445,8 @@ HTML_TEMPLATE = r"""<!doctype html>
   <aside id="sidebar">
     <h2>Search</h2>
     <input type="search" id="search" placeholder="name or id…">
+    <h2>Relations</h2>
+    <div id="relation-filters"></div>
     <h2>Areas</h2>
     <div id="area-filters"></div>
     <h2>Types</h2>
@@ -417,14 +464,31 @@ const AREA_COLORS = __AREA_COLORS__;
 // Counts
 const typeCounts = {};
 const areaCounts = {};
+const relationCounts = {};
 GRAPH.nodes.forEach(n => {
   const t = n.data.type;
   typeCounts[t] = (typeCounts[t] || 0) + 1;
   const a = n.data.area || '(unowned)';
   areaCounts[a] = (areaCounts[a] || 0) + 1;
 });
+GRAPH.edges.forEach(e => {
+  if (e.data.is_pull || e.data.is_aggregate) return;
+  const r = e.data.label;
+  if (!r) return;
+  relationCounts[r] = (relationCounts[r] || 0) + 1;
+});
+const realEdges = GRAPH.edges.filter(e => !e.data.is_pull && !e.data.is_aggregate).length;
+const aggEdges = GRAPH.edges.filter(e => e.data.is_aggregate).length;
 document.getElementById('counts').textContent =
-  GRAPH.nodes.length + ' nodes • ' + GRAPH.edges.length + ' edges';
+  GRAPH.nodes.length + ' nodes • ' + realEdges + ' edges • ' + aggEdges + ' inter-area';
+
+const RELATION_STYLES = {
+  depends_on:       { color: '#7aa2f7', style: 'solid'  },
+  parent_of:        { color: '#bb9af7', style: 'solid'  },
+  derived_from:     { color: '#9ece6a', style: 'dashed' },
+  implements_build: { color: '#e0af68', style: 'solid'  },
+  resolves_bug:     { color: '#f7768e', style: 'dotted' },
+};
 
 function mkCheckbox(container, key, count, color, dataKey) {
   const label = document.createElement('label');
@@ -438,11 +502,29 @@ function mkCheckbox(container, key, count, color, dataKey) {
   container.appendChild(label);
 }
 
+function mkRelCheckbox(container, key, count) {
+  const rs = RELATION_STYLES[key] || { color: '#7e869e', style: 'solid' };
+  const label = document.createElement('label');
+  const cb = document.createElement('input');
+  cb.type = 'checkbox'; cb.checked = true; cb.dataset.relation = key;
+  cb.addEventListener('change', applyFilters);
+  const sw = document.createElement('span');
+  sw.className = 'edge-swatch' + (rs.style !== 'solid' ? ' ' + rs.style : '');
+  if (rs.style === 'solid') sw.style.background = rs.color;
+  else sw.style.color = rs.color;
+  label.appendChild(cb); label.appendChild(sw);
+  label.appendChild(document.createTextNode(key + ' (' + count + ')'));
+  container.appendChild(label);
+}
+
 const areaBox = document.getElementById('area-filters');
 Object.keys(areaCounts).sort().forEach(a => mkCheckbox(areaBox, a, areaCounts[a], AREA_COLORS[a] || '#4a5068', 'area'));
 
 const typeBox = document.getElementById('type-filters');
 Object.keys(typeCounts).sort().forEach(t => mkCheckbox(typeBox, t, typeCounts[t], null, 'type'));
+
+const relBox = document.getElementById('relation-filters');
+Object.keys(relationCounts).sort().forEach(r => mkRelCheckbox(relBox, r, relationCounts[r]));
 
 const cy = cytoscape({
   container: document.getElementById('cy'),
@@ -468,24 +550,35 @@ const cy = cytoscape({
       'text-opacity': 0,
     }},
     { selector: 'node[?is_area]', style: {
-      'background-opacity': 0,
-      'border-width': 0,
+      'background-color': 'data(color)',
+      'background-opacity': 0.10,
+      'border-width': 2,
+      'border-color': 'data(color)',
+      'border-opacity': 0.6,
       'shape': 'round-rectangle',
       'label': 'data(label)',
-      'font-size': '16px',
+      'font-size': '15px',
       'font-weight': 700,
       'color': 'data(color)',
-      'text-valign': 'top',
+      'text-valign': 'center',
       'text-halign': 'center',
-      'text-margin-y': -6,
-      'text-opacity': 0.85,
-      'text-outline-width': 6,
+      'text-margin-y': 0,
+      'text-opacity': 1,
+      'text-outline-width': 4,
       'text-outline-color': '#16161e',
       'text-outline-opacity': 1,
       'min-zoomed-font-size': 0,
       'padding': '22px',
+      'z-index': 1,
+    }},
+    { selector: 'node[?is_area].expanded', style: {
+      'background-opacity': 0,
+      'border-opacity': 0.3,
+      'border-style': 'dashed',
+      'text-valign': 'top',
+      'text-margin-y': -8,
+      'font-size': '14px',
       'z-index': 0,
-      'events': 'no',
     }},
     { selector: 'node:selected', style: {
       'border-width': 2,
@@ -497,16 +590,63 @@ const cy = cytoscape({
       'z-index': 10,
     }},
     { selector: 'edge', style: {
-      'width': 'mapData(weight, 0, 2, 0.8, 2)',
+      'width': 1,
       'line-color': '#7e869e',
       'curve-style': 'straight',
-      'opacity': 0.75,
+      'opacity': 0.7,
       'target-arrow-shape': 'none',
     }},
-    { selector: 'edge.highlight', style: {
+    { selector: 'edge[label = "depends_on"]', style: {
       'line-color': '#7aa2f7',
+      'width': 1.1,
+      'target-arrow-shape': 'triangle-backcurve',
+      'target-arrow-color': '#7aa2f7',
+      'arrow-scale': 0.65,
+      'curve-style': 'straight',
+    }},
+    { selector: 'edge[label = "parent_of"]', style: {
+      'line-color': '#bb9af7',
+      'width': 1.6,
+      'opacity': 0.8,
+    }},
+    { selector: 'edge[label = "derived_from"]', style: {
+      'line-color': '#9ece6a',
+      'line-style': 'dashed',
+      'width': 1.0,
+      'target-arrow-shape': 'triangle-backcurve',
+      'target-arrow-color': '#9ece6a',
+      'arrow-scale': 0.6,
+      'curve-style': 'straight',
+    }},
+    { selector: 'edge[label = "implements_build"]', style: {
+      'line-color': '#e0af68',
+      'width': 1.3,
+      'target-arrow-shape': 'triangle-backcurve',
+      'target-arrow-color': '#e0af68',
+      'arrow-scale': 0.65,
+      'curve-style': 'straight',
+    }},
+    { selector: 'edge[label = "resolves_bug"]', style: {
+      'line-color': '#f7768e',
+      'line-style': 'dotted',
+      'width': 1.2,
+      'target-arrow-shape': 'triangle-backcurve',
+      'target-arrow-color': '#f7768e',
+      'arrow-scale': 0.65,
+      'curve-style': 'straight',
+    }},
+    { selector: 'edge[?is_aggregate]', style: {
+      'width': 'mapData(weight, 1, 40, 1.8, 7)',
+      'opacity': 0.7,
+      'curve-style': 'bezier',
+      'control-point-step-size': 40,
+      'target-arrow-shape': 'triangle-backcurve',
+      'arrow-scale': 0.9,
+      'z-index': 2,
+    }},
+    { selector: 'edge.highlight', style: {
       'opacity': 1,
-      'width': 1.8,
+      'width': 2.2,
       'z-index': 5,
     }},
     { selector: 'edge.pull', style: {
@@ -514,31 +654,30 @@ const cy = cytoscape({
       'events': 'no',
       'width': 0.1,
     }},
-    { selector: '.faded', style: { 'opacity': 0.12 }},
-    { selector: 'edge.faded', style: { 'opacity': 0.05 }},
+    { selector: '.faded', style: { 'opacity': 0.08 }},
+    { selector: 'edge.faded', style: { 'opacity': 0.04 }},
   ],
-  layout: {
-    name: 'fcose',
-    animate: false,
-    randomize: true,
-    nodeRepulsion: 8500,
-    idealEdgeLength: 55,
-    edgeElasticity: 0.25,
-    gravity: 0.2,
-    gravityRangeCompound: 1.8,
-    gravityCompound: 1.2,
-    numIter: 4000,
-    tile: false,
-    packComponents: true,
-    nodeSeparation: 90,
-    uniformNodeDimensions: true,
-  },
+  // Preset layout — positions computed in cy.ready() via a two-pass approach:
+  //  1. fcose on area-nodes + aggregate edges only (overview layer, spread out)
+  //  2. members start stacked at their area's position; layoutArea() spreads
+  //     them on first expand.
+  layout: { name: 'preset' },
   wheelSensitivity: 0.25,
   minZoom: 0.1,
   maxZoom: 4,
 });
 
-// Zoom-gated labels
+// Progressive disclosure state
+const expandedAreas = new Set();
+
+function syncExpandedClass() {
+  cy.nodes('[?is_area]').forEach(a => {
+    if (expandedAreas.has(a.data('area'))) a.addClass('expanded');
+    else a.removeClass('expanded');
+  });
+}
+
+// Zoom-gated labels (area labels are always shown)
 let labelMode = 'auto'; // auto | always | off
 function applyLabelMode() {
   const zoom = cy.zoom();
@@ -552,18 +691,43 @@ document.getElementById('btn-labels').addEventListener('click', () => {
   document.getElementById('btn-labels').textContent = 'Labels: ' + labelMode;
   applyLabelMode();
 });
-document.getElementById('btn-fit').addEventListener('click', () => cy.fit(null, 40));
-document.getElementById('btn-relayout').addEventListener('click', () => cy.layout({
-  name: 'fcose', animate: true, randomize: false, nodeRepulsion: 7500,
-  idealEdgeLength: 45, edgeElasticity: 0.3, numIter: 2500,
-}).run());
+document.getElementById('btn-fit').addEventListener('click', () => {
+  const visible = cy.nodes().filter(n => n.style('display') !== 'none');
+  cy.fit(visible.length ? visible : cy.nodes('[?is_area]'), 60);
+});
 
-// Hover neighborhood focus
+document.getElementById('btn-expand-all').addEventListener('click', () => {
+  cy.nodes('[?is_area]').forEach(a => {
+    const slug = a.data('area');
+    if (!expandedAreas.has(slug)) {
+      expandedAreas.add(slug);
+      layoutArea(slug);
+    }
+  });
+  applyFilters();
+  syncExpandedClass();
+  updateModeHint();
+});
+document.getElementById('btn-collapse-all').addEventListener('click', () => {
+  expandedAreas.clear();
+  applyFilters();
+  syncExpandedClass();
+  updateModeHint();
+});
+
+function updateModeHint() {
+  const hint = document.getElementById('mode-hint');
+  const total = cy.nodes('[?is_area]').length;
+  const n = expandedAreas.size;
+  if (n === 0) hint.textContent = 'click an area to expand';
+  else if (n === total) hint.textContent = 'all ' + total + ' areas expanded';
+  else hint.textContent = n + ' / ' + total + ' areas expanded';
+}
+
+// Hover neighborhood focus — works for both area (overview) and node (expanded) layers.
 cy.on('mouseover', 'node', evt => {
-  if (evt.target.data('is_area')) return;
   const n = evt.target;
-  // Exclude invisible pull edges from neighborhood
-  const visibleEdges = n.connectedEdges().not('.pull');
+  const visibleEdges = n.connectedEdges().not('.pull').filter(e => e.style('display') !== 'none');
   const neighbors = visibleEdges.connectedNodes();
   const hood = n.union(neighbors).union(visibleEdges);
   cy.elements().not(hood).not('.pull').addClass('faded');
@@ -579,15 +743,56 @@ cy.on('mouseout', 'node', evt => {
   applyLabelMode();
 });
 
-// Click detail
+// Tracks areas that have been laid out at least once so re-expand is instant.
+const laidOutAreas = new Set();
+
+function layoutArea(areaSlug) {
+  const areaNode = cy.$('#area\\:\\:' + areaSlug.replace(/[^\w-]/g, ''));
+  const members = cy.nodes().filter(n => !n.data('is_area') && n.data('area') === areaSlug);
+  if (members.length === 0) return;
+  const center = areaNode.position();
+  // Scale the local layout's bounding box to member count so large areas don't
+  // overlap their neighbors. Roughly: radius grows with sqrt(count).
+  const radius = Math.max(80, 22 * Math.sqrt(members.length));
+  const bb = {
+    x1: center.x - radius, y1: center.y - radius,
+    x2: center.x + radius, y2: center.y + radius,
+  };
+  const name = members.length > 30 ? 'grid' : (members.length > 10 ? 'concentric' : 'circle');
+  const opts = {
+    name, boundingBox: bb, animate: true, animationDuration: 350,
+    fit: false, avoidOverlap: true, padding: 10,
+  };
+  if (name === 'concentric') {
+    opts.concentric = n => n.degree(true);
+    opts.levelWidth = () => 2;
+    opts.minNodeSpacing = 18;
+  }
+  if (name === 'circle') opts.radius = radius * 0.8;
+  members.layout(opts).run();
+  laidOutAreas.add(areaSlug);
+}
+
+// Click: area → toggle expand; non-area → detail pane
 cy.on('tap', 'node', evt => {
   const d = evt.target.data();
-  if (d.is_area) return;
+  if (d.is_area) {
+    if (expandedAreas.has(d.area)) {
+      expandedAreas.delete(d.area);
+    } else {
+      expandedAreas.add(d.area);
+      layoutArea(d.area);
+    }
+    syncExpandedClass();
+    applyFilters();
+    updateModeHint();
+    return;
+  }
   renderDetail(d, evt.target);
 });
 cy.on('tap', evt => {
   if (evt.target === cy) {
-    document.getElementById('detail').innerHTML = '<p class="empty">Click a node to inspect.<br><br>Hover a node to focus its neighborhood.</p>';
+    document.getElementById('detail').innerHTML = '<p class="empty">Click an area to expand its members.<br>Click a node to inspect.<br>Hover to focus neighborhood.</p>';
   }
 });
 
@@ -633,52 +838,99 @@ document.getElementById('search').addEventListener('input', applyFilters);
 function applyFilters() {
   const activeAreas = new Set([...document.querySelectorAll('#area-filters input:checked')].map(i => i.dataset.area));
   const activeTypes = new Set([...document.querySelectorAll('#type-filters input:checked')].map(i => i.dataset.type));
+  const activeRelations = new Set([...document.querySelectorAll('#relation-filters input:checked')].map(i => i.dataset.relation));
   const q = (document.getElementById('search').value || '').toLowerCase().trim();
 
   cy.nodes().forEach(n => {
     const d = n.data();
-    if (d.is_area) { n.style('display', activeAreas.has(d.area) ? 'element' : 'none'); return; }
+    if (d.is_area) {
+      n.style('display', activeAreas.has(d.area) ? 'element' : 'none');
+      return;
+    }
     const areaOk = activeAreas.has(d.area || '(unowned)');
     const typeOk = activeTypes.has(d.type);
-    const searchOk = !q || (d.label || '').toLowerCase().includes(q) || (d.id || '').toLowerCase().includes(q);
-    n.style('display', areaOk && typeOk && searchOk ? 'element' : 'none');
+    const searchMatch = q && ((d.label || '').toLowerCase().includes(q) || (d.id || '').toLowerCase().includes(q));
+    // Overview layer: non-area nodes hidden until their area is expanded
+    // (or the user is actively searching for them).
+    const expanded = d.area && expandedAreas.has(d.area);
+    const visible = areaOk && typeOk && (expanded || searchMatch);
+    n.style('display', visible ? 'element' : 'none');
   });
+
   cy.edges().forEach(e => {
-    const visible = e.source().style('display') !== 'none' && e.target().style('display') !== 'none';
-    e.style('display', visible ? 'element' : 'none');
+    const d = e.data();
+    if (d.is_pull) {
+      // Invisible layout-only edges: keep in graph, but styled to 0 opacity.
+      e.style('display', 'element');
+      return;
+    }
+    const sVis = e.source().style('display') !== 'none';
+    const tVis = e.target().style('display') !== 'none';
+    if (!sVis || !tVis) {
+      e.style('display', 'none');
+      return;
+    }
+    const relOk = !d.label || activeRelations.has(d.label);
+    if (!relOk) { e.style('display', 'none'); return; }
+    if (d.is_aggregate) {
+      // Hide aggregate when both endpoint areas are fully expanded —
+      // the underlying real edges take over and carry the same signal.
+      const srcArea = e.source().data('area');
+      const tgtArea = e.target().data('area');
+      const bothExpanded = expandedAreas.has(srcArea) && expandedAreas.has(tgtArea);
+      e.style('display', bothExpanded ? 'none' : 'element');
+      return;
+    }
+    e.style('display', 'element');
   });
 }
 
-function repositionAreaLabels() {
-  // After layout, move each area node to the centroid of same-area nodes.
-  const groups = {};
-  cy.nodes().forEach(n => {
-    if (n.data('is_area')) return;
-    const a = n.data('area');
-    if (!a) return;
-    const p = n.position();
-    (groups[a] ||= []).push(p);
+// Overview layout: fcose on area nodes + aggregate edges only.
+// Non-area nodes get stacked at their area's position until expand.
+function layoutOverview(animate) {
+  const areaEles = cy.nodes('[?is_area]').union(cy.edges('[?is_aggregate]'));
+  const layout = areaEles.layout({
+    name: 'fcose',
+    animate: !!animate,
+    animationDuration: animate ? 500 : 0,
+    randomize: true,
+    nodeRepulsion: 150000,
+    idealEdgeLength: 260,
+    edgeElasticity: 0.1,
+    gravity: 0.05,
+    numIter: 3500,
+    packComponents: true,
+    uniformNodeDimensions: false,
+    nodeSeparation: 160,
+    fit: false,
   });
-  cy.nodes('[?is_area]').forEach(area => {
-    const pts = groups[area.data('area')];
-    if (!pts || !pts.length) return;
-    const sx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
-    const sy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
-    area.position({ x: sx, y: sy });
+  layout.run();
+  // Stack members at their area position; layoutArea() spreads on expand.
+  cy.nodes('[?is_area]').forEach(a => {
+    const p = a.position();
+    cy.nodes().filter(n => !n.data('is_area') && n.data('area') === a.data('area'))
+      .forEach(m => m.position({ x: p.x, y: p.y }));
   });
+  // Un-laid-out status so re-expand re-runs local layout.
+  laidOutAreas.clear();
+  // Previously-expanded areas need a layout re-run after re-positioning.
+  expandedAreas.forEach(slug => layoutArea(slug));
 }
 
 cy.ready(() => {
-  repositionAreaLabels();
-  cy.fit(null, 60);
-  const z = cy.zoom();
-  if (z < 0.7) cy.zoom({ level: 0.7, renderedPosition: { x: cy.width()/2, y: cy.height()/2 } });
+  layoutOverview(false);
+  applyFilters();
+  syncExpandedClass();
+  updateModeHint();
+  cy.fit(cy.nodes('[?is_area]'), 80);
   applyLabelMode();
 });
-// Also reposition after manual re-layout
-const origRelayout = document.getElementById('btn-relayout').onclick;
+
+// Re-layout button re-runs overview (then re-expands any open areas).
+document.getElementById('btn-relayout').onclick = null;
 document.getElementById('btn-relayout').addEventListener('click', () => {
-  setTimeout(repositionAreaLabels, 1500);
+  layoutOverview(true);
+  setTimeout(() => cy.fit(cy.nodes('[?is_area]'), 80), 600);
 });
 </script>
 </body>

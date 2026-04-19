@@ -14,7 +14,7 @@ def _integration_conn() -> SyncPostgresConnection:
 
 
 def tool_praxis_integration(params: dict) -> dict:
-    """Call, list, or describe registered integrations."""
+    """Call, list, describe, create, or manage registered integrations."""
     action = params.get("action", "list")
     conn = _integration_conn()
 
@@ -28,8 +28,14 @@ def tool_praxis_integration(params: dict) -> dict:
         return _test_credentials(params, conn)
     if action == "health":
         return _health(conn)
+    if action == "create":
+        return _create(params, conn)
+    if action == "set_secret":
+        return _set_secret(params, conn)
+    if action == "reload":
+        return _reload(conn)
 
-    return {"error": f"Unknown action: {action}. Use 'call', 'list', 'describe', 'test_credentials', or 'health'."}
+    return {"error": f"Unknown action: {action}. Use 'call', 'list', 'describe', 'test_credentials', 'health', 'create', 'set_secret', or 'reload'."}
 
 
 # ── Thin dispatchers calling registry functions ──────────────────────
@@ -139,6 +145,96 @@ def _test_credentials(params: dict, conn: SyncPostgresConnection) -> dict:
     return {"integration_id": integration_id, "credential_status": "valid", "detail": f"Credential resolved via {auth_kind}"}
 
 
+def _create(params: dict, conn: SyncPostgresConnection) -> dict:
+    """Create a DB-native integration row. Same validation surface as POST /api/integrations."""
+    from surfaces.api.handlers.integrations_admin import (
+        _VALID_ID_RE,
+        _normalize_auth,
+        _normalize_capabilities,
+    )
+    from runtime.integrations.integration_registry import upsert_integration
+
+    integration_id = str(params.get("integration_id", "")).strip()
+    if not _VALID_ID_RE.match(integration_id):
+        return {"error": "integration_id must be 2-128 chars of [a-zA-Z0-9._-], start/end alphanumeric"}
+
+    name = str(params.get("name", "")).strip()
+    if not name:
+        return {"error": "name is required"}
+
+    caps, cap_err = _normalize_capabilities(params.get("capabilities"))
+    if cap_err:
+        return {"error": cap_err}
+
+    auth_shape, auth_err = _normalize_auth(params.get("auth"))
+    if auth_err:
+        return {"error": auth_err}
+
+    upsert_integration(
+        conn,
+        integration_id=integration_id,
+        name=name,
+        description=str(params.get("description", "")),
+        provider=str(params.get("provider", "http")).strip() or "http",
+        capabilities=caps,
+        auth_status="connected" if auth_shape.get("kind") == "none" else "pending",
+        manifest_source=str(params.get("manifest_source", "mcp")).strip() or "mcp",
+        connector_slug=None,
+        auth_shape=auth_shape,
+    )
+
+    return {
+        "integration_id": integration_id,
+        "status": "created",
+        "capabilities": [c["action"] for c in caps],
+        "auth_shape": auth_shape,
+    }
+
+
+def _set_secret(params: dict, conn: SyncPostgresConnection) -> dict:
+    """Store a secret in the macOS Keychain under service=praxis."""
+    integration_id = str(params.get("integration_id", "")).strip()
+    value = str(params.get("value", ""))
+    if not integration_id:
+        return {"error": "integration_id is required"}
+    if not value:
+        return {"error": "value is required"}
+
+    from runtime.integrations.integration_registry import load_authority, parse_jsonb
+    definition = load_authority(conn, integration_id)
+    if definition is None:
+        return {"error": f"integration {integration_id!r} not found"}
+
+    auth_shape = parse_jsonb(definition.get("auth_shape"))
+    env_var = str(auth_shape.get("env_var", "")).strip()
+    if not env_var:
+        return {"error": "integration has no auth.env_var — nothing to store"}
+
+    from adapters.keychain import keychain_set
+    ok = keychain_set(env_var, value)
+    if not ok:
+        return {
+            "error": "keychain_set unavailable (non-Darwin or security CLI failed)",
+            "hint": f"set env var {env_var} via .env or environment variable as fallback",
+        }
+
+    try:
+        conn.execute(
+            "UPDATE integration_registry SET auth_status = 'connected', updated_at = now() WHERE id = $1",
+            integration_id,
+        )
+    except Exception:
+        pass
+
+    return {"integration_id": integration_id, "env_var": env_var, "stored": True}
+
+
+def _reload(conn: SyncPostgresConnection) -> dict:
+    from registry.integration_registry_sync import sync_integration_registry
+    n = sync_integration_registry(conn)
+    return {"synced": n}
+
+
 TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
     "praxis_integration": (
         tool_praxis_integration,
@@ -163,15 +259,71 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["call", "list", "describe", "test_credentials", "health"],
+                        "enum": [
+                            "call",
+                            "list",
+                            "describe",
+                            "test_credentials",
+                            "health",
+                            "create",
+                            "set_secret",
+                            "reload",
+                        ],
                         "default": "list",
                         "description": (
                             "Operation: 'call' (execute an integration action), "
                             "'list' (show available integrations), "
                             "'describe' (get details about one integration), "
                             "'test_credentials' (validate credentials without calling), "
-                            "'health' (all-integrations health overview)."
+                            "'health' (all-integrations health overview), "
+                            "'create' (register a new DB-native integration from a JSON spec), "
+                            "'set_secret' (store the integration's env_var secret in the macOS Keychain), "
+                            "'reload' (re-run sync_integration_registry to refresh static + manifest rows)."
                         ),
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Display name. Required for 'create'.",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Integration description. Optional for 'create'.",
+                    },
+                    "provider": {
+                        "type": "string",
+                        "description": "Provider label (e.g. 'http', 'stripe'). Optional for 'create', defaults to 'http'.",
+                    },
+                    "capabilities": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "action": {"type": "string"},
+                                "description": {"type": "string"},
+                                "method": {"type": "string"},
+                                "path": {"type": "string"},
+                                "body_template": {"type": "object"},
+                                "response_extract": {"type": "string"},
+                            },
+                            "required": ["action"],
+                        },
+                        "description": "List of capabilities. Required for 'create'.",
+                    },
+                    "auth": {
+                        "type": "object",
+                        "properties": {
+                            "kind": {"type": "string", "enum": ["none", "env_var", "api_key", "oauth2"]},
+                            "env_var": {"type": "string"},
+                            "credential_ref": {"type": "string"},
+                            "scopes": {"type": "array", "items": {"type": "string"}},
+                            "token_url": {"type": "string"},
+                            "authorize_url": {"type": "string"},
+                        },
+                        "description": "Auth shape. Required for 'create' unless kind is 'none'.",
+                    },
+                    "value": {
+                        "type": "string",
+                        "description": "Secret value. Required for 'set_secret'.",
                     },
                     "integration_id": {
                         "type": "string",

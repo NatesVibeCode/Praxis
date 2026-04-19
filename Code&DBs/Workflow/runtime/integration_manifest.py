@@ -7,9 +7,7 @@ Handlers delegate to execute_webhook — no duplicate HTTP logic.
 
 from __future__ import annotations
 
-import json
 import logging
-import os
 import re
 import tomllib
 from dataclasses import dataclass
@@ -218,7 +216,7 @@ def resolve_token(
     pg: Any,
     integration_id: str,
 ) -> str | None:
-    """Resolve a token: credential ref (OAuth) → env var fallback."""
+    """Resolve a token: credential ref (OAuth) → env var via full secret chain."""
     # Check credential_ref first — OAuth tokens are short-lived and more
     # specific than static env var keys.
     credential_ref = str(auth_shape.get("credential_ref", "")).strip()
@@ -231,10 +229,13 @@ def resolve_token(
         except Exception as exc:
             logger.debug("credential resolution failed for %s: %s", integration_id, exc)
 
-    # Fall back to direct env var lookup
+    # Fall back to env-var lookup through the standard chain:
+    # .env → macOS Keychain (service=praxis) → os.environ.
     env_var = str(auth_shape.get("env_var", "")).strip()
     if env_var:
-        val = os.environ.get(env_var, "").strip()
+        from adapters.keychain import resolve_secret
+
+        val = resolve_secret(env_var)
         if val:
             return val
 

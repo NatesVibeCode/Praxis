@@ -5,7 +5,24 @@ description: "Praxis repo-local review skill. Use to pressure-test a proposed or
 
 # Praxis Review
 
-Use this skill when a packet is proposed, a slice is built, or a closeout claims success.
+## Application Metadata
+
+| Application | Name | Description |
+| --- | --- | --- |
+| Claude | `Praxis Review` | Pressure-test a proposed or shipped change for the simplest durable shape. |
+| Gemini | `Praxis Review` | Pressure-test a proposed or shipped change for the simplest durable shape. |
+| Codex/OpenAI | `Praxis Review` | Pressure-test a proposed or shipped change for the simplest durable shape. |
+
+Legacy internal skill id: `praxis-review`
+
+Primary references:
+
+- `docs/ARCHITECTURE.md`
+- `Skills/praxis-conversation-closeout/SKILL.md`
+- `Skills/praxis-roadmap/SKILL.md`
+- `Skills/praxis-bug-logging/SKILL.md`
+
+Use when a packet is proposed, a slice is built, or a closeout claims success.
 
 ## Mission
 
@@ -15,20 +32,20 @@ Is this the simplest durable shape with one authority, one reason, and one proof
 
 ## Required Prompt
 
-When the review is retrospective or post-close, ask this question verbatim:
+Ask verbatim:
 
 `Review what you built could you have built anything differently mathematically or component wise?`
 
-Then separate candidate alternatives into two buckets only:
+Separate candidates into two buckets only:
 
-- Mathematical/data-model alternatives
-- Component/architecture alternatives
+- Mathematical / data-model alternatives
+- Component / architecture alternatives
 
-Then ask this question verbatim:
+Then ask verbatim:
 
 `which ones are genuine improvements?`
 
-Only keep improvements that are measurable, non-trivial, and reduce ambiguity, operational burden, or failure surface.
+Keep only improvements that are measurable, non-trivial, and reduce ambiguity, operational burden, or failure surface.
 
 ## First Moves
 
@@ -38,7 +55,7 @@ Read the thing being reviewed:
 - validation output, tests, or receipts
 - the owning contract or architecture note for the touched surface
 
-If authority is unclear, orient with:
+If authority is unclear:
 
 - `praxis workflow query "what owns <area>?"`
 - `praxis workflow discover "<behavior>"`
@@ -62,6 +79,25 @@ Reject:
 - naming-only cleanup with no operational gain
 - extra abstraction that hides the real authority
 
+## Persist, Don't Narrate
+
+Review output is not authority. A verdict that stays in chat is residue. For every genuine improvement, route it to the narrowest durable surface:
+
+- defect discovered by the review -> `praxis workflow bugs file`, attach evidence, resolve only after validation
+- enhancement, hardening, refactor, or new capability -> `praxis workflow roadmap write preview|validate|commit`
+- architecture policy established by the review -> `praxis workflow tools call praxis_operator_architecture_policy --input-json '{...}' --yes`
+- already-tracked item the review confirms complete -> `praxis workflow roadmap closeout preview|commit`
+
+If authority is unclear, ask the router: `praxis workflow query "what record should capture this review outcome?"` — then drop to the specific surface once clear.
+
+Verify every write by reading back through the same authority:
+
+- `praxis workflow roadmap view [--root <id>]`
+- `praxis workflow bugs search ...`
+- `praxis workflow query "<what changed?>"`
+
+If a write cannot be verified, say so plainly.
+
 ## Output Contract
 
 Return exactly:
@@ -69,7 +105,9 @@ Return exactly:
 1. `Verdict`
 2. `Why`
 3. `Genuine Improvements`
-4. `Validation Path`
-5. `Risks`
-
-Only keep an improvement if it reduces ambiguity, operational burden, or failure surface.
+4. `Top 3 Next Moves`
+5. `Validation Path` — the specific command, receipt, or spec that would prove the improvement landed (e.g. `praxis workflow run-status <run_id>`, a failing test that now passes, a receipt id)
+6. `Writes Performed` — ids, titles, and authority of every roadmap row, bug, policy, or closeout the review persisted
+7. `Verification Readback` — the read-lane call that confirmed each write
+8. `Unpersisted Residue` — improvements that lacked a safe durable home, and why
+9. `Risks`

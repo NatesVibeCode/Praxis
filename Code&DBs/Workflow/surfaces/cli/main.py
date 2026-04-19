@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import importlib
+import json
 import os
 from difflib import SequenceMatcher
 import sys
@@ -24,7 +25,9 @@ from observability.read_models import (
 
 from .commands.admin import _compile_command, _github_command, _parse_pr_spec
 from .commands.authority import (
+    _authority_memory_command,
     _catalog_command,
+    _data_dictionary_command,
     _object_command,
     _object_field_command,
     _object_type_command,
@@ -44,6 +47,7 @@ from .commands.operate import (
     _config_command,
     _dashboard_command,
     _events_command,
+    _integrations_command,
     _health_command,
     _health_map_command,
     _metrics_command,
@@ -115,6 +119,70 @@ class GraphLineageCommand:
     """CLI intent for a graph lineage read request."""
 
     run_id: str
+
+
+_COMMAND_INDEX_ENTRIES: list[dict[str, str]] = [
+    {"command": "workflow commands", "description": "Show this command index"},
+    {"command": "workflow routes", "description": "Alias for workflow API route discovery"},
+    {"command": "workflow help routes", "description": "Same route discovery help from the root help system"},
+    {"command": "workflow mcp [list|search|describe|call|help]", "description": "Alias for workflow tools discovery"},
+    {"command": "workflow run <spec.json>", "description": "Submit a workflow spec"},
+    {
+        "command": "workflow preview <spec.json>",
+        "description": "Render the exact execution payload without submitting",
+    },
+    {
+        "command": "workflow spawn <parent_run_id> <spec.json>",
+        "description": "Spawn a child workflow with explicit parent lineage",
+    },
+    {"command": "workflow validate <spec.json>", "description": "Validate a spec without running"},
+    {"command": "workflow records <create|update|rename>", "description": "Persist canonical workflow records"},
+    {"command": "workflow status [--since-hours N]", "description": "Show recent workflow status"},
+    {"command": "workflow active", "description": "Show active workflow runs"},
+    {"command": "workflow stream <run_id>", "description": "Stream one workflow run"},
+    {"command": "workflow retry <run_id> <label>", "description": "Retry one failed job"},
+    {"command": "workflow cancel <run_id>", "description": "Cancel a workflow run"},
+    {"command": "workflow repair <run_id>", "description": "Repair post-run sync state"},
+    {"command": "workflow work <claim|acknowledge>", "description": "Claim or acknowledge worker work"},
+    {"command": "workflow tools [list|search|describe|call|help]", "description": "Discover and call catalog-backed MCP tools"},
+    {"command": "workflow integrations", "description": "Scoped route discovery for /api/integrations"},
+    {"command": "workflow api integrations", "description": "Scoped route discovery for /api/integrations"},
+    {"command": "workflow api data-dictionary", "description": "Scoped route discovery for /api/data-dictionary"},
+    {"command": "workflow integration [list|describe|health|test|call|create|secret|reload]", "description": "Integration management via the catalog-backed MCP tool"},
+    {"command": "workflow dictionary <list|describe|set-override|clear-override|reproject>", "description": "Unified data dictionary authority"},
+    {"command": "workflow authority-memory refresh", "description": "Refresh authority FK projection into memory_edges"},
+    {"command": "workflow data <action>", "description": "Deterministic data cleanup, validation, and workflow launch"},
+    {
+        "command": "workflow schema|registry|object-type|object-field|object|catalog|files|reload|reconcile",
+        "description": "Direct database, file, and registry authority frontdoors",
+    },
+    {"command": "workflow handoff <latest|lineage|status|history>", "description": "CQRS handoff inspection surface"},
+    {
+        "command": "workflow query|recall|discover|architecture|artifacts|bugs|costs|leaderboard|trust|fitness|trends|scope|risk|reviews|receipts",
+        "description": "Derived search, analysis, and bug-tracker surfaces",
+    },
+    {
+        "command": "workflow inspect|replay|graph-topology|graph-lineage|topology|lineage",
+        "description": "Derived observability views",
+    },
+    {
+        "command": "workflow health|health-map|metrics|events|cache|circuits|slots|params|config|notifications|dashboard|api [routes|--host|--port]|routes|supervisor|capabilities|work",
+        "description": "Operator and platform surfaces",
+    },
+    {"command": "workflow native-operator instance|health|db-health|bootstrap|db-bootstrap|smoke|inspect|status|graph-topology|graph-lineage|cockpit|route-disable|roadmap-write|work-item-closeout|roadmap-tree|provider-onboard|native-primary-cutover-gate", "description": "Repo-local operator surface"},
+    {"command": "workflow roadmap view|status|scoreboard|graph|write|closeout", "description": "CQRS-native roadmap query/command frontdoor"},
+    {"command": "workflow compile|github", "description": "Build and repository automation"},
+]
+
+_COMMAND_INDEX_TIPS: list[str] = [
+    "run `workflow help <command>` or `workflow <command> --help` for command-specific usage",
+    "run `workflow commands --json` for machine-readable discovery",
+    "run `workflow help routes` or `workflow help api` for HTTP route discovery",
+    "run `workflow integrations` for the integration API route scope",
+    "run `workflow api integrations` or `workflow api data-dictionary` for scoped route discovery",
+    "run `workflow integration` for integration management",
+    "run `workflow help tools` or `workflow mcp` for catalog-backed tool discovery",
+]
 
 
 class InspectReplayService(Protocol):
@@ -396,8 +464,12 @@ def _workflow_arg_commands() -> dict[str, ArgsCommandHandler]:
         "github": _github_command,
         "api": _api_command,
         "routes": lambda args, *, stdout: _api_command(["routes", *args], stdout=stdout),
+        "integrations": lambda args, *, stdout: _api_command(["integrations", *args], stdout=stdout),
+        "integration": _integrations_command,
         "supervisor": _supervisor_command,
         "tools": _tools_command,
+        "dictionary": _data_dictionary_command,
+        "authority-memory": _authority_memory_command,
         "generate": _generate_command,
         "validate": _validate_command,
         "stream": _stream_command,
@@ -407,11 +479,11 @@ def _workflow_arg_commands() -> dict[str, ArgsCommandHandler]:
         "repair": _lazy_workflow_args_command("_repair_command"),
         "work": _lazy_workflow_args_command("_work_command"),
         "roadmap": _roadmap_command,
+        "commands": lambda args, *, stdout: _commands_index_command(args, stdout=stdout),
     }
     return _ARG_COMMANDS
 
 _STDOUT_COMMANDS: dict[str, StdoutCommandHandler] = {
-    "commands": lambda *, stdout: _commands_index_command(stdout=stdout),
     "status": _lazy_workflow_stdout_command("_status_command"),
     "costs": _costs_command,
     "slots": _slots_command,
@@ -484,48 +556,41 @@ def _mcp_help_text() -> str:
 
 
 def _commands_index_text() -> str:
-    return "\n".join(
-        [
-            "usage: workflow commands",
-            "",
-            "Command index:",
-            "  workflow commands                               Show this command index",
-            "  workflow routes                                 Alias for workflow API route discovery",
-            "  workflow help routes                            Same route discovery help from the root help system",
-            "  workflow mcp [list|search|describe|call]        Alias for workflow tools discovery",
-            "  workflow run <spec.json>                        Submit a workflow spec",
-            "  workflow preview <spec.json>                    Render the exact execution payload without submitting",
-            "  workflow spawn <parent_run_id> <spec.json>      Spawn a child workflow with explicit parent lineage",
-            "  workflow validate <spec.json>                   Validate a spec without running",
-            "  workflow records <create|update|rename>         Persist canonical workflow records",
-            "  workflow status [--since-hours N]               Show recent workflow status",
-            "  workflow active                                 Show active workflow runs",
-            "  workflow stream <run_id>                       Stream one workflow run",
-            "  workflow retry <run_id> <label>                Retry one failed job",
-            "  workflow cancel <run_id>                       Cancel a workflow run",
-            "  workflow repair <run_id>                       Repair post-run sync state",
-            "  workflow work <claim|acknowledge>             Claim or acknowledge worker work",
-            "  workflow tools [list|search|describe|call]     Discover and call catalog-backed MCP tools",
-            "  workflow data <action>                         Deterministic data cleanup, validation, and workflow launch",
-            "  workflow schema|registry|object-type|object-field|object|catalog|files|reload|reconcile",
-            "                                                  Direct database, file, and registry authority frontdoors",
-            "  workflow handoff <latest|lineage|status|history> CQRS handoff inspection surface",
-            "  workflow query|recall|discover|architecture|artifacts|bugs|costs|leaderboard|trust|fitness|trends|scope|risk|reviews|receipts",
-            "                                                  Derived search, analysis, and bug-tracker surfaces",
-            "  workflow inspect|replay|graph-topology|graph-lineage|topology|lineage",
-            "                                                  Derived observability views",
-            "  workflow health|health-map|metrics|events|cache|circuits|slots|params|config|notifications|dashboard|api|supervisor|capabilities|work",
-            "                                                  Operator and platform surfaces",
-            "  workflow native-operator <subcommand>           Repo-local operator surface",
-            "  workflow roadmap <subcommand>                   CQRS-native roadmap query/command frontdoor",
-            "  workflow compile|github                        Build and repository automation",
-            "",
-            "Tip: run `workflow help <command>` or `workflow <command> --help` for command-specific usage.",
-        ]
-    )
+    lines = [
+        "usage: workflow commands",
+        "",
+        "Command index:",
+    ]
+    for entry in _COMMAND_INDEX_ENTRIES:
+        lines.append(f"  {entry['command']:<45} {entry['description']}")
+    lines.extend(["", *[f"Tip: {tip}." for tip in _COMMAND_INDEX_TIPS]])
+    return "\n".join(lines)
 
 
-def _commands_index_command(*, stdout: TextIO) -> int:
+def _commands_index_payload() -> dict[str, object]:
+    return {
+        "usage": "workflow commands",
+        "entries": list(_COMMAND_INDEX_ENTRIES),
+        "tips": list(_COMMAND_INDEX_TIPS),
+    }
+
+
+def _commands_index_command(args: list[str], *, stdout: TextIO) -> int:
+    as_json = False
+    for arg in args:
+        if arg == "--json":
+            as_json = True
+        elif arg in {"-h", "--help", "help"}:
+            stdout.write(_commands_index_text() + "\n")
+            return 0
+        else:
+            stdout.write(f"unknown argument: {arg}\n")
+            return 2
+
+    if as_json:
+        stdout.write(json.dumps(_commands_index_payload(), indent=2) + "\n")
+        return 0
+
     stdout.write(_commands_index_text() + "\n")
     return 0
 
@@ -541,12 +606,17 @@ def _help_text() -> str:
             "  workflow validate <spec.json>",
             "  workflow mcp",
             "  workflow routes",
+            "  workflow integrations",
+            "  workflow integration list",
             "  workflow help routes",
             "  workflow tools list",
             "  workflow tools search <topic> [--exact] [--surface <surface>] [--tier <tier>] [--risk <risk>]",
             "  workflow api routes",
+            "  workflow dictionary list",
+            "  workflow authority-memory refresh",
             "  workflow help tools",
             "  workflow help api",
+            "  workflow commands --json",
             "  workflow query <question>",
             "  workflow data profile artifacts/data/users.csv",
             "  workflow files list --scope instance",
@@ -561,7 +631,10 @@ def _help_text() -> str:
             "  workflow roadmap view",
             "",
             "Command groups:",
-            "  workflow tools [list|search|describe|call]",
+            "  workflow tools [list|search|describe|call|help]",
+            "  workflow dictionary <list|describe|set-override|clear-override|reproject>",
+            "  workflow authority-memory refresh",
+            "  workflow integration [list|describe|health|test|call|create|secret|reload]",
             "  workflow data <action>",
             "  workflow files <list|get|content|upload|delete>",
             "  workflow handoff <latest|lineage|status|history>",
@@ -570,12 +643,20 @@ def _help_text() -> str:
             "  workflow run|preview|run-status|status|active|scheduler|loop|debate|runs|manifest|triggers|retry|cancel|repair|heal|verify|verify-platform|pipeline|proof|queue|diagnose|inspect-job",
             "  workflow inspect|replay|graph-topology|graph-lineage|topology|lineage",
             "  workflow health|health-map|metrics|events|cache|circuits|slots|params|config|notifications|dashboard|api [routes|--host|--port]|routes|supervisor|capabilities|work",
+            "  workflow integrations",
+            "                                                  Scoped route discovery for /api/integrations",
+            "  workflow integration",
+            "                                                  Integration management via the catalog-backed MCP tool",
             "  workflow native-operator instance|health|db-health|bootstrap|db-bootstrap|smoke|inspect|status|graph-topology|graph-lineage|cockpit|route-disable|roadmap-write|work-item-closeout|roadmap-tree|provider-onboard|native-primary-cutover-gate",
             "  workflow roadmap view|status|scoreboard|graph|write|closeout",
             "  workflow compile|github",
             "",
             "Tip: run `workflow commands` or `workflow help commands` for the full command index.",
+            "Tip: run `workflow commands --json` when you want machine-readable discovery.",
             "Tip: run `workflow help routes` or `workflow help api` for HTTP route discovery.",
+            "Tip: run `workflow integrations` or `workflow api integrations` for the integration route scope.",
+            "Tip: run `workflow integration` for integration management.",
+            "Tip: run `workflow api data-dictionary` for the data dictionary route scope.",
             "Tip: run `workflow help tools` or `workflow mcp` for catalog-backed tool discovery.",
             "Tip: run `workflow help <command>` or `workflow <command> --help` for command-specific usage.",
         ]

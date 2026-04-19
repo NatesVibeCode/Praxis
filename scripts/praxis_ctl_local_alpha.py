@@ -26,8 +26,11 @@ if str(WORKFLOW_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKFLOW_ROOT))
 
 from surfaces.api import operator_read
+from surfaces._boot import workflow_database_status_payload
 from surfaces._workflow_database import workflow_database_env_for_repo
 from runtime.dependency_contract import dependency_truth_report
+from runtime.instance import native_instance_contract
+from runtime.primitive_contracts import resolve_runtime_http_endpoints
 from runtime.post_workflow_sync import (
     get_workflow_run_sync_status,
     latest_workflow_run_sync_status,
@@ -40,8 +43,15 @@ from storage.dev_postgres import local_postgres_bootstrap, local_postgres_health
 DISABLED_MESSAGE = (
     "Native local-alpha control is disabled. Use Docker or Cloudflare sandbox authority only."
 )
-DEFAULT_API_BASE_URL = "http://127.0.0.1:8420"
-DEFAULT_WORKFLOW_API_BASE_URL = "http://127.0.0.1:8420"
+_WORKFLOW_OPERATIONAL_FLAGS = (
+    "compile_artifact_authority_ready",
+    "compile_index_authority_ready",
+    "execution_packet_authority_ready",
+    "repo_snapshot_authority_ready",
+    "verification_registry_ready",
+    "verifier_authority_ready",
+    "healer_authority_ready",
+)
 
 
 def _env_for_authority() -> dict[str, str]:
@@ -120,12 +130,46 @@ def _decode_json(raw: bytes) -> dict[str, object] | None:
     return payload if isinstance(payload, dict) else None
 
 
+def _runtime_binding_http_endpoints(
+    env: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    source_env = dict(env if env is not None else os.environ)
+    workflow_env_error: str | None = None
+    try:
+        source_env.update(_env_for_authority())
+    except Exception as exc:
+        workflow_env_error = f"{type(exc).__name__}: {exc}"
+
+    try:
+        native_instance = native_instance_contract(env=source_env)
+    except Exception as exc:
+        native_instance = {"error": f"{type(exc).__name__}: {exc}"}
+
+    endpoints = resolve_runtime_http_endpoints(
+        workflow_env=source_env,
+        native_instance=native_instance,
+        workflow_env_error=workflow_env_error,
+    )
+    return {
+        "api_base_url": str(endpoints.get("api_base_url") or "").rstrip("/"),
+        "launch_url": str(endpoints.get("launch_url") or ""),
+        "dashboard_url": str(endpoints.get("dashboard_url") or ""),
+        "api_docs_url": str(endpoints.get("api_docs_url") or ""),
+    }
+
+
+def _workflow_database_operational(database_json: Mapping[str, object]) -> bool:
+    if not bool(database_json.get("database_reachable")):
+        return False
+    if bool(database_json.get("schema_bootstrapped")):
+        return True
+    return all(bool(database_json.get(flag)) for flag in _WORKFLOW_OPERATIONAL_FLAGS)
+
+
 def _probe_frontdoor_semantics() -> dict[str, object]:
-    api_base = os.environ.get("PRAXIS_API_BASE_URL", DEFAULT_API_BASE_URL).rstrip("/")
-    workflow_api_base = os.environ.get(
-        "PRAXIS_WORKFLOW_API_BASE_URL",
-        DEFAULT_WORKFLOW_API_BASE_URL,
-    ).rstrip("/")
+    runtime_endpoints = _runtime_binding_http_endpoints(os.environ)
+    api_base = runtime_endpoints["api_base_url"]
+    workflow_api_base = os.environ.get("PRAXIS_WORKFLOW_API_BASE_URL", api_base).rstrip("/")
     workflow_probe_headers = {"X-Praxis-UI": "1"}
     api_health_timeout_s = _timeout_override("PRAXIS_ALPHA_TIMEOUT_API_HEALTH_S", 4.0)
     workflow_orient_timeout_s = _timeout_override("PRAXIS_ALPHA_TIMEOUT_WORKFLOW_ORIENT_S", 10.0)
@@ -194,10 +238,10 @@ def _probe_frontdoor_semantics() -> dict[str, object]:
         "workflow_api_ready": workflow_api_ready,
         "mcp_bridge_ready": mcp_bridge_ready,
         "ui_ready": ui_ready,
-        "launch_url": f"{api_base}/app",
+        "launch_url": runtime_endpoints["launch_url"],
         "helm_url": f"{api_base}/app/helm",
-        "dashboard_url": f"{api_base}/app",
-        "api_docs_url": f"{api_base}/docs",
+        "dashboard_url": runtime_endpoints["dashboard_url"],
+        "api_docs_url": runtime_endpoints["api_docs_url"],
     }
 
 
@@ -355,14 +399,20 @@ def cmd_doctor(*, services_ready: str, state_file: str) -> int:
     services_ready_value = _to_bool(services_ready)
     database_reachable = False
     schema_bootstrapped = False
+    workflow_operational = False
+    missing_schema_objects: list[object] = []
     try:
-        database = local_postgres_health(env=_env_for_authority())
-        database_json = database.to_json()
+        database_json = workflow_database_status_payload(env=_env_for_authority())
         database_reachable = bool(database_json.get("database_reachable"))
         schema_bootstrapped = bool(database_json.get("schema_bootstrapped"))
+        workflow_operational = _workflow_database_operational(database_json)
+        raw_missing = database_json.get("missing_schema_objects")
+        missing_schema_objects = raw_missing if isinstance(raw_missing, list) else []
     except Exception:
         database_reachable = False
         schema_bootstrapped = False
+        workflow_operational = False
+        missing_schema_objects = []
 
     state = _read_state(state_file)
     smoke_run_id = _coerce_state_value(state.get("smoke_run_id"), field="smoke_run_id", default=None)
@@ -382,6 +432,8 @@ def cmd_doctor(*, services_ready: str, state_file: str) -> int:
             "services_ready": services_ready_value,
             "database_reachable": database_reachable,
             "schema_bootstrapped": schema_bootstrapped,
+            "workflow_operational": workflow_operational,
+            "missing_schema_objects": missing_schema_objects,
             "api_server_ready": readiness["api_server_ready"],
             "workflow_api_ready": readiness["workflow_api_ready"],
             "mcp_bridge_ready": readiness["mcp_bridge_ready"],

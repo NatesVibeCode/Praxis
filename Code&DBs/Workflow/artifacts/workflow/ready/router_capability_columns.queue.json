@@ -1,0 +1,13 @@
+{
+  "name": "router-capability-columns",
+  "outcome_goal": "Migrate task_type_router scoring from string capability_tags to the typed boolean cap_* columns on provider_model_candidates. Migration 094 already added and populated 10 columns on all 321 active models: cap_language_high, cap_language_low, cap_build_high/med/low, cap_analysis_architecture_research, cap_research_fan, cap_review, cap_tool_use, cap_image. Extend `_load_active_catalog_candidates` in `Code&DBs/Workflow/runtime/task_type_router.py` to select these columns and rework the scorer to consult the typed booleans per task_type (e.g. code_generation -> cap_build_high, research -> cap_research_fan, code_review -> cap_review). Keep capability_tags as fallback for any candidate where all cap_* are NULL. Add a unit test proving the typed path is preferred when columns are set.",
+  "task_type": "code_edit",
+  "agent": "anthropic/claude-sonnet-4-6",
+  "authoring_contract": {"artifact_kind": "code"},
+  "acceptance_contract": {
+    "verify_refs": [
+      "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_task_type_router_profiles.py' 'Code&DBs/Workflow/tests/unit/test_task_type_router_composite_sort.py' 'Code&DBs/Workflow/tests/unit/test_task_type_router_eligibility.py'",
+      "grep -q 'cap_language_high\\|cap_build_high\\|cap_review' 'Code&DBs/Workflow/runtime/task_type_router.py'"
+    ]
+  }
+}

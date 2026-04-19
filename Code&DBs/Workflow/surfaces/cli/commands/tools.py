@@ -188,6 +188,60 @@ def _render_tools_search_no_matches(
         stdout.write("  rerun without one or more filters to widen the catalog slice\n")
 
 
+def _tools_help_text(topic: str | None = None) -> str:
+    if topic is None:
+        return _tools_quickstart_text()
+
+    topic = topic.strip().lower()
+    if topic == "list":
+        return "\n".join(
+            [
+                "usage: workflow tools list [--surface <surface>] [--tier <tier>] [--risk <risk>] [--json]",
+                "",
+                "Browse the catalog or a filtered slice of it.",
+                "Tip: add --json for machine-readable discovery.",
+            ]
+        )
+    if topic == "search":
+        return "\n".join(
+            [
+                "usage: workflow tools search <text> [--exact] [--surface <surface>] [--tier <tier>] [--risk <risk>] [--json]",
+                "",
+                "Search by topic, alias, entrypoint, or describe-command text.",
+                "Tip: add --exact only when you already know the alias, tool name, or entrypoint.",
+            ]
+        )
+    if topic == "describe":
+        return "\n".join(
+            [
+                "usage: workflow tools describe <tool|alias> [--json]",
+                "",
+                "Show the canonical entrypoint, input schema, and example input for one tool.",
+                "Tip: accepts a unique prefix of the alias, tool name, or entrypoint.",
+            ]
+        )
+    if topic == "call":
+        return "\n".join(
+            [
+                "usage: workflow tools call <tool|alias> [--input-json <json> | --input-file <path>] [--workflow-token <token>] [--yes] [--json]",
+                "",
+                "Execute a tool directly from the catalog.",
+                "Tip: add --yes for write or dispatch tools; add --workflow-token when the catalog requires it.",
+            ]
+        )
+    return "\n".join(
+        [
+            f"unknown tools help topic: {topic}",
+            "",
+            "Supported topics:",
+            "  workflow tools help list",
+            "  workflow tools help search",
+            "  workflow tools help describe",
+            "  workflow tools help call",
+        ]
+    )
+
+
 def _tools_quickstart_text() -> str:
     definitions = _filtered_tools()
     alias_definitions = [definition for definition in definitions if definition.cli_recommended_alias]
@@ -200,13 +254,14 @@ def _tools_quickstart_text() -> str:
         direct_entrypoints = alias_definitions[:6]
 
     lines = [
-        "usage: workflow tools [list|search|describe|call]",
+        "usage: workflow tools [list|search|describe|call|help]",
         "",
         "Tool discovery quickstart:",
         "  workflow tools list",
         "  workflow tools search <topic> [--exact] [--surface <surface>] [--tier <tier>] [--risk <risk>]",
         "  workflow tools describe <tool|alias>",
         "  workflow tools call <tool|alias> --input-json '<json>' --yes",
+        "  workflow tools help <list|search|describe|call>",
         "",
     ]
     if direct_entrypoints:
@@ -225,14 +280,18 @@ def _tools_quickstart_text() -> str:
         "Tip: single-result searches print the direct describe and entrypoint commands next.",
         "Tip: search results are relevance-ranked; exact alias and entrypoint matches rise first.",
         "Tip: run `workflow help <alias>` or `workflow <alias> --help` for alias-specific usage.",
+        "Tip: `workflow mcp` is the root alias for the same tool-discovery surface.",
     ]
     )
     return "\n".join(lines)
 
 
 def _tools_command(args: list[str], *, stdout: TextIO) -> int:
-    if not args or args[0] in {"-h", "--help", "help"}:
+    if not args or args[0] in {"-h", "--help"}:
         stdout.write(_tools_quickstart_text() + "\n")
+        return 0
+    if args[0] == "help":
+        stdout.write(_tools_help_text(args[1] if len(args) > 1 else None) + "\n")
         return 0
 
     subcommand = args[0]

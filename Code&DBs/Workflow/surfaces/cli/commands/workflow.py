@@ -21,6 +21,7 @@ from runtime.workspace_paths import workflow_root
 
 _DETACHED_WAIT_ATTEMPTS = 5
 _FOREGROUND_SUBMIT_FLAG = "--foreground-submit"
+_SCRATCH_AGENT_RUNTIME_PROFILE_REF = "scratch_agent"
 
 
 def _workflow_cli():
@@ -413,6 +414,9 @@ def _run_command(args: list[str], *, stdout: TextIO) -> int:
                 "  --timeout <secs>     Execution timeout (default: 300)\n"
                 "  --task-type <type>   Task type for routing: code_generation, review, etc.\n"
                 "  --system <prompt>    System prompt override\n"
+                "  --workspace <ref>    Workspace authority ref\n"
+                "  --runtime-profile <ref> Runtime profile authority ref\n"
+                "  --scratch            Run in the blank scratch_agent container lane\n"
                 "  --preview-execution  Print the exact worker-facing execution payload without submitting\n"
                 "  --dry-run            Parse and show the spec without executing\n"
                 "  --fresh              Force a fresh run while letting Praxis mint the run_id\n"
@@ -429,6 +433,8 @@ def _run_command(args: list[str], *, stdout: TextIO) -> int:
         timeout = 300
         task_type = None
         system_prompt = None
+        runtime_profile_ref = None
+        workspace_ref = None
         clean_args: list[str] = []
         i = 1
         while i < len(args):
@@ -462,6 +468,16 @@ def _run_command(args: list[str], *, stdout: TextIO) -> int:
             elif args[i] == "--system" and i + 1 < len(args):
                 system_prompt = args[i + 1]
                 i += 2
+            elif args[i] == "--runtime-profile" and i + 1 < len(args):
+                runtime_profile_ref = args[i + 1]
+                i += 2
+            elif args[i] == "--workspace" and i + 1 < len(args):
+                workspace_ref = args[i + 1]
+                i += 2
+            elif args[i] == "--scratch":
+                runtime_profile_ref = _SCRATCH_AGENT_RUNTIME_PROFILE_REF
+                workspace_ref = _SCRATCH_AGENT_RUNTIME_PROFILE_REF
+                i += 1
             else:
                 clean_args.append(args[i])
                 i += 1
@@ -483,6 +499,8 @@ def _run_command(args: list[str], *, stdout: TextIO) -> int:
                 timeout=timeout,
                 task_type=task_type,
                 system_prompt=system_prompt,
+                workspace_ref=workspace_ref,
+                runtime_profile_ref=runtime_profile_ref,
             )
         except ValueError as exc:
             stdout.write(f"error: {exc}\n")
@@ -2004,25 +2022,51 @@ def _work_command(args: list[str], *, stdout: TextIO) -> int:
 
 
 def _active_command(*, stdout: TextIO) -> int:
-    """Handle `workflow active` — list currently running workflows."""
+    """Handle `workflow active` — list currently running workflows from DB authority."""
 
     import json as _json
 
-    from runtime.run_control import get_run_control
-
-    run_control = get_run_control()
-    active_ids = run_control.active_run_ids()
-
-    stdout.write(
-        _json.dumps(
-            {
-                "active_runs": active_ids,
-                "count": len(active_ids),
-            },
-            indent=2,
-        )
-        + "\n"
+    exit_code, snapshot = run_cli_tool(
+        "praxis_status_snapshot",
+        {
+            "since_hours": 24,
+        },
     )
+    if exit_code != 0:
+        print_json(stdout, snapshot)
+        return exit_code
+
+    runs = snapshot.get("in_flight_workflows")
+    if not isinstance(runs, list):
+        runs = []
+    active_ids = [
+        str(run.get("run_id"))
+        for run in runs
+        if isinstance(run, dict) and str(run.get("run_id") or "").strip()
+    ]
+    payload = {
+        "active_runs": active_ids,
+        "count": len(active_ids),
+        "runs": runs,
+        "queue": {
+            "depth": snapshot.get("queue_depth"),
+            "status": snapshot.get("queue_depth_status"),
+            "pending": snapshot.get("queue_depth_pending"),
+            "ready": snapshot.get("queue_depth_ready"),
+            "claimed": snapshot.get("queue_depth_claimed"),
+            "running": snapshot.get("queue_depth_running"),
+            "total": snapshot.get("queue_depth_total"),
+        },
+        "metrics": {
+            "since_hours": snapshot.get("since_hours"),
+            "pass_rate": snapshot.get("pass_rate"),
+            "adjusted_pass_rate": snapshot.get("adjusted_pass_rate"),
+            "observability_state": snapshot.get("observability_state"),
+        },
+        "source": "praxis_status_snapshot",
+    }
+
+    stdout.write(_json.dumps(payload, indent=2, default=str) + "\n")
     return 0
 
 

@@ -38,6 +38,7 @@ class _FakeConn:
     definition_stale_ids: list[str] = field(default_factory=list)
     evidence_stale_ids: list[str] = field(default_factory=list)
     active_promotions: list[dict[str, Any]] = field(default_factory=list)
+    fetched: list[tuple[str, tuple[Any, ...]]] = field(default_factory=list)
     executed: list[tuple[str, tuple[Any, ...]]] = field(default_factory=list)
     closed: bool = False
 
@@ -49,6 +50,7 @@ class _FakeConn:
         return "OK"
 
     async def fetch(self, query: str, *args: Any) -> list[Any]:
+        self.fetched.append((query, args))
         if "SET staleness_status = 'definition_stale'" in query:
             return [{"candidate_id": cid} for cid in self.definition_stale_ids]
         if "SET staleness_status = 'evidence_stale'" in query:
@@ -192,6 +194,21 @@ def test_evidence_stale_uses_evidence_reason(monkeypatch) -> None:
     ]
     assert len(supersede_events) == 1
     assert supersede_events[0]["payload"]["reason"] == SUPERSEDE_REASON_EVIDENCE
+
+
+def test_evidence_stale_matches_canonical_wont_fix_status(monkeypatch) -> None:
+    conn = _FakeConn()
+    _recorder, connect = _install(monkeypatch, conn)
+
+    asyncio.run(areconcile_dataset_staleness(connect_database=connect))
+
+    evidence_queries = [
+        query for query, _args in conn.fetched
+        if "wontfix_bugs" in query
+    ]
+    assert evidence_queries
+    assert "UPPER(status) = 'WONT_FIX'" in evidence_queries[0]
+    assert "status = 'wont_fix'" not in evidence_queries[0]
 
 
 def test_supersede_skips_when_no_affected_candidates(monkeypatch) -> None:

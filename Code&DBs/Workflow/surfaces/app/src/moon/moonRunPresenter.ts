@@ -32,7 +32,13 @@ import { RANK_SPACING, COLUMN_SPACING, glyphFromLabel } from './moonBuildPresent
 export function jobStatusToRingState(status: string | undefined): RingState {
   const normalized = (status || '').toLowerCase();
   if (normalized === 'succeeded') return 'run-succeeded';
-  if (normalized === 'failed' || normalized === 'dead_letter' || normalized === 'cancelled') return 'run-failed';
+  if (
+    normalized === 'failed'
+    || normalized === 'dead_letter'
+    || normalized === 'blocked'
+    || normalized === 'cancelled'
+    || normalized === 'parent_failed'
+  ) return 'run-failed';
   if (normalized === 'running' || normalized === 'claimed') return 'run-active';
   // pending / ready / queued / empty: keep pending
   return 'run-pending';

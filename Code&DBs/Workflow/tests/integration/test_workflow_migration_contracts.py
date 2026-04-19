@@ -95,7 +95,10 @@ def test_workflow_migration_manifest_includes_provider_route_health_budget_migra
     assert "162_split_fanout_and_loop.sql" in filenames
     assert "163_dataset_candidate_score_history.sql" in filenames
     assert "164_dataset_promotion_decision_bridge.sql" in filenames
-    assert filenames[-1] == "164_dataset_promotion_decision_bridge.sql"
+    assert "165_integration_registry_updated_at.sql" in filenames
+    assert "166_data_dictionary_authority.sql" in filenames
+    assert "167_scratch_agent_runtime_lane.sql" in filenames
+    assert filenames[-1] == "167_scratch_agent_runtime_lane.sql"
 
 
 def test_every_manifest_migration_has_expected_object_contract() -> None:
@@ -505,6 +508,17 @@ def test_native_runtime_registry_authority_expected_objects_are_registered() -> 
     names = {item.object_name for item in objects}
     assert "registry_native_runtime_profile_authority" in names
     assert "registry_native_runtime_defaults" in names
+
+
+def test_scratch_agent_runtime_lane_expected_objects_are_registered() -> None:
+    objects = workflow_migration_expected_objects("167_scratch_agent_runtime_lane.sql")
+    names = {item.object_name for item in objects}
+    assert names == {
+        "registry_workspace_authority.scratch_agent",
+        "registry_sandbox_profile_authority.sandbox_profile.scratch_agent.default",
+        "registry_runtime_profile_authority.scratch_agent",
+        "registry_native_runtime_profile_authority.scratch_agent",
+    }
 
 
 def test_sandbox_cleanup_reconciliation_expected_objects_are_registered() -> None:

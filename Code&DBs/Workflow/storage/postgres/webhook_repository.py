@@ -179,7 +179,7 @@ class PostgresWebhookRepository:
                 'webhook_events',
                 $2,
                 true,
-                jsonb_build_object('endpoint_id', $1),
+                jsonb_build_object('source_id', $1, 'source_type', 'webhook_events'),
                 'workflow'
             )
             ON CONFLICT DO NOTHING
@@ -207,7 +207,7 @@ class PostgresWebhookRepository:
                 'db.webhook_events.insert',
                 'integration',
                 true,
-                jsonb_build_object('endpoint_id', $1),
+                jsonb_build_object('source_id', $1, 'source_type', 'webhook_events'),
                 $2, $3, $4::jsonb
             )
             ON CONFLICT DO NOTHING

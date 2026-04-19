@@ -120,9 +120,12 @@ def test_cli_auth_volume_flags_use_explicit_host_home(monkeypatch) -> None:
 
     flags = sandbox_runtime._cli_auth_volume_flags()
 
-    assert "/Users/praxis/.codex/auth.json:/root/.codex/auth.json:ro" in flags
-    assert "/Users/praxis/.claude.json:/root/.claude.json:ro" in flags
-    assert "/Users/praxis/.gemini/oauth_creds.json:/root/.gemini/oauth_creds.json:ro" in flags
+    assert "/Users/praxis/.codex/auth.json:/home/praxis-agent/.codex/auth.json:ro" in flags
+    assert "/Users/praxis/.claude.json:/home/praxis-agent/.claude.json:ro" in flags
+    assert (
+        "/Users/praxis/.gemini/oauth_creds.json:"
+        "/home/praxis-agent/.gemini/oauth_creds.json:ro"
+    ) in flags
 
 
 def test_cli_auth_volume_flags_accept_host_home_with_worker_home_probe(monkeypatch) -> None:
@@ -140,9 +143,12 @@ def test_cli_auth_volume_flags_accept_host_home_with_worker_home_probe(monkeypat
 
     flags = sandbox_runtime._cli_auth_volume_flags()
 
-    assert "/Users/praxis/.codex/auth.json:/root/.codex/auth.json:ro" in flags
-    assert "/Users/praxis/.claude.json:/root/.claude.json:ro" in flags
-    assert "/Users/praxis/.gemini/oauth_creds.json:/root/.gemini/oauth_creds.json:ro" in flags
+    assert "/Users/praxis/.codex/auth.json:/home/praxis-agent/.codex/auth.json:ro" in flags
+    assert "/Users/praxis/.claude.json:/home/praxis-agent/.claude.json:ro" in flags
+    assert (
+        "/Users/praxis/.gemini/oauth_creds.json:"
+        "/home/praxis-agent/.gemini/oauth_creds.json:ro"
+    ) in flags
 
 
 def test_cli_auth_volume_flags_limit_mounts_to_selected_provider(monkeypatch) -> None:
@@ -162,11 +168,11 @@ def test_cli_auth_volume_flags_limit_mounts_to_selected_provider(monkeypatch) ->
 
     assert openai_flags == [
         "-v",
-        "/Users/praxis/.codex/auth.json:/root/.codex/auth.json:ro",
+        "/Users/praxis/.codex/auth.json:/home/praxis-agent/.codex/auth.json:ro",
     ]
     assert anthropic_flags == [
         "-v",
-        "/Users/praxis/.claude.json:/root/.claude.json:ro",
+        "/Users/praxis/.claude.json:/home/praxis-agent/.claude.json:ro",
     ]
 
 
@@ -381,6 +387,44 @@ def test_sandbox_runtime_rejects_out_of_scope_artifacts_before_host_copyback(tmp
 
     assert not (tmp_path / "changed.txt").exists()
     assert fake.calls[-1] == ("destroy", "failed")
+
+
+def test_sandbox_runtime_none_materialization_uses_empty_workspace_without_copyback(tmp_path) -> None:
+    (tmp_path / "seed.txt").write_text("seed", encoding="utf-8")
+
+    class _LocalRecordingProvider(_RecordingProvider):
+        execution_lane = "local"
+
+    runtime = SandboxRuntime()
+    fake = _LocalRecordingProvider()
+    runtime._providers = {"fake": fake}  # type: ignore[attr-defined]
+
+    result = runtime.execute_command(
+        provider_name="fake",
+        sandbox_session_id="sandbox_session:run.alpha:job.alpha",
+        sandbox_group_id="group:run.alpha",
+        workdir=str(tmp_path),
+        command="echo hi",
+        stdin_text="payload",
+        env={"OPENAI_API_KEY": "test-key"},
+        timeout_seconds=15,
+        network_policy="enabled",
+        workspace_materialization="none",
+        execution_transport="cli",
+        metadata={
+            "execution_bundle": {
+                "access_policy": {"write_scope": ["changed.txt"]},
+            }
+        },
+    )
+
+    hydrate_snapshot = fake.calls[1][1]
+    assert getattr(hydrate_snapshot, "materialization") == "none"
+    assert not (tmp_path / ".sandbox" / "seed.txt").exists()
+    assert (tmp_path / ".sandbox" / "changed.txt").read_text(encoding="utf-8") == "updated"
+    assert not (tmp_path / "changed.txt").exists()
+    assert result.artifact_refs == ("changed.txt",)
+    assert result.workspace_snapshot_ref.startswith("workspace_snapshot:")
 
 
 def test_sandbox_runtime_requires_docker_when_docker_is_unavailable(
@@ -1092,9 +1136,12 @@ def test_docker_local_exec_mounts_only_provider_auth_files(monkeypatch, tmp_path
 
         run_cmd = next(cmd for cmd in docker_cmds if len(cmd) >= 2 and cmd[:2] == ["docker", "run"])
         joined_cmd = " ".join(run_cmd)
-        assert "/Users/praxis/.codex/auth.json:/root/.codex/auth.json:ro" in joined_cmd
-        assert "/Users/praxis/.claude.json:/root/.claude.json:ro" not in joined_cmd
-        assert "/Users/praxis/.gemini/oauth_creds.json:/root/.gemini/oauth_creds.json:ro" not in joined_cmd
+        assert "/Users/praxis/.codex/auth.json:/home/praxis-agent/.codex/auth.json:ro" in joined_cmd
+        assert "/Users/praxis/.claude.json:/home/praxis-agent/.claude.json:ro" not in joined_cmd
+        assert (
+            "/Users/praxis/.gemini/oauth_creds.json:"
+            "/home/praxis-agent/.gemini/oauth_creds.json:ro"
+        ) not in joined_cmd
     finally:
         provider.destroy_session(session, "completed")
 

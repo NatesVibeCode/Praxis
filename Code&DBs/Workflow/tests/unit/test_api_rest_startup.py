@@ -92,9 +92,9 @@ def test_launcher_status_endpoint_delegates_to_handler(monkeypatch) -> None:
         "ok": True,
         "ready": False,
         "platform_state": "degraded",
-        "launch_url": "http://127.0.0.1:8420/app",
-        "dashboard_url": "http://127.0.0.1:8420/app",
-        "api_docs_url": "http://127.0.0.1:8420/docs",
+        "launch_url": "https://praxis.example/app",
+        "dashboard_url": "https://praxis.example/app",
+        "api_docs_url": "https://praxis.example/docs",
         "doctor": {"api_server_ready": False},
         "dependency_truth": {"ok": True},
         "services": [],
@@ -390,7 +390,9 @@ def test_launcher_app_reports_missing_build(monkeypatch, tmp_path: Path) -> None
         response = client.get("/app")
 
     assert response.status_code == 503
-    assert response.json()["error"] == "launcher_build_missing"
+    payload = response.json()
+    assert payload["error"] == "launcher_build_missing"
+    assert payload["launch_url"] is None
 
 
 class _FakeRunConn:
@@ -948,6 +950,18 @@ def test_run_routes_use_shared_pg_authority_and_match_contract(monkeypatch) -> N
     monkeypatch.setattr(rest, "_ensure_shared_subsystems", lambda _app: subsystems)
     monkeypatch.setattr(
         rest,
+        "_health_db_snapshot",
+        lambda: (
+            [
+                {"name": "postgres", "ok": True},
+                {"name": "worker", "ok": True, "active_jobs": 0, "ready_jobs": 0},
+                {"name": "workflow", "ok": True, "total": 1, "passed": 1, "failed": 0, "pass_rate": 1.0},
+            ],
+            "healthy",
+        ),
+    )
+    monkeypatch.setattr(
+        rest,
         "summarize_run_health",
         lambda run_data, now: (
             captured_health_inputs.append(run_data)
@@ -1021,7 +1035,6 @@ def test_run_routes_use_shared_pg_authority_and_match_contract(monkeypatch) -> N
 
     assert health_response.status_code == 200
     assert health_response.json()["status"] == "healthy"
-    assert any(query.strip() == "SELECT 1" for query, _params in conn.execute_calls)
 
 
 def test_run_detail_graph_shows_control_gates_and_operator_frames(monkeypatch) -> None:

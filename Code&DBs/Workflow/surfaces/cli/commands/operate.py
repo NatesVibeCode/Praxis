@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
-from typing import TextIO
+import json
+
+from typing import Any, TextIO
 
 from surfaces.cli._db import cli_sync_conn
-from surfaces.cli.mcp_tools import print_json, render_health_payload, run_cli_tool
+from surfaces.cli.mcp_tools import (
+    get_definition,
+    print_json,
+    render_health_payload,
+    require_confirmation,
+    run_cli_tool,
+)
 
 
 def _workflow_tool(params: dict[str, object]) -> dict[str, object]:
@@ -18,11 +26,451 @@ def _api_discovery_text() -> str:
     return (
         "Discovery shortcuts:\n"
         "  workflow routes                alias for live HTTP route discovery\n"
+        "  workflow integrations          alias for /api/integrations route discovery\n"
+        "  workflow api integrations      same scoped route discovery from the api namespace\n"
+        "  workflow api data-dictionary   same scoped route discovery for the data dictionary API\n"
         "  workflow routes --json         machine-readable route catalog\n"
         "  workflow help routes           same discovery help from the root help system\n"
         "  workflow tools list            browse catalog-backed MCP tools\n"
         "  workflow tools search <text>    search tools by topic, alias, or entrypoint\n"
     )
+
+
+def _integration_help_text() -> str:
+    return "\n".join(
+        [
+            "usage: workflow integration [list|describe|health|test|call|create|secret|reload] [args]",
+            "",
+            "Integration authority:",
+            "  workflow integration list [--json]",
+            "  workflow integration describe <integration_id> [--json]",
+            "  workflow integration health [--json]",
+            "  workflow integration test <integration_id> [--json]",
+            "  workflow integration call <integration_id> <integration_action> [--args-json '<json>'] [--json] [--yes]",
+            "  workflow integration create --id <id> --name <name> --capabilities-json '<json>' [--auth-json '<json>'] [--description <text>] [--provider <slug>] [--manifest-source <source>] [--json] [--yes]",
+            "  workflow integration secret <integration_id> --value <secret> [--json] [--yes]",
+            "  workflow integration reload [--json] [--yes]",
+            "",
+            "Tip: `workflow integrations` and `workflow api integrations` discover the HTTP route scope; `workflow integration` manages the integration registry.",
+            "Tip: run `workflow tools describe praxis_integration` to inspect the catalog-backed tool metadata.",
+            "Tip: run `workflow tools list` to discover the same entrypoint through the shared tool catalog.",
+        ]
+    )
+
+
+def _load_json_value(raw: str, *, field_name: str) -> Any:
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"invalid JSON for {field_name}: {exc}") from exc
+
+
+def _integration_capabilities_actions(payload: object) -> list[str]:
+    if not isinstance(payload, list):
+        return []
+    actions: list[str] = []
+    for entry in payload:
+        if not isinstance(entry, dict):
+            continue
+        action = str(entry.get("action") or entry.get("name") or "").strip()
+        if action:
+            actions.append(action)
+    return actions
+
+
+def _render_integration_list(payload: dict[str, Any], *, stdout: TextIO) -> None:
+    integrations = payload.get("integrations")
+    if not isinstance(integrations, list):
+        print_json(stdout, payload)
+        return
+    if not integrations:
+        stdout.write("no integrations found\n")
+        return
+
+    header = f"{'INTEGRATION':<24} {'STATUS':<12} {'PROVIDER':<12} CAPABILITIES"
+    stdout.write(header + "\n")
+    stdout.write("-" * len(header) + "\n")
+    for row in integrations:
+        if not isinstance(row, dict):
+            continue
+        cap_text = ", ".join(_integration_capabilities_actions(row.get("capabilities"))[:4]) or "-"
+        stdout.write(
+            f"{str(row.get('id') or row.get('integration_id') or ''):<24} "
+            f"{str(row.get('auth_status') or ''):<12} "
+            f"{str(row.get('provider') or ''):<12} "
+            f"{cap_text}\n"
+        )
+    stdout.write(f"\n{len(integrations)} integration(s)\n")
+
+
+def _render_integration_describe(payload: dict[str, Any], *, stdout: TextIO) -> None:
+    if not isinstance(payload, dict) or payload.get("error"):
+        print_json(stdout, payload)
+        return
+
+    integration_id = str(payload.get("id") or payload.get("integration_id") or "").strip()
+    if integration_id:
+        stdout.write(f"Integration: {integration_id}\n")
+    for key in ("name", "description", "provider", "auth_status", "manifest_source", "connector_slug"):
+        value = payload.get(key)
+        if value not in (None, ""):
+            stdout.write(f"  {key}: {value}\n")
+
+    capabilities = _integration_capabilities_actions(payload.get("capabilities"))
+    if capabilities:
+        stdout.write("  capabilities:\n")
+        for action in capabilities:
+            stdout.write(f"    - {action}\n")
+
+
+def _run_integration_tool(
+    params: dict[str, object],
+    *,
+    stdout: TextIO,
+    as_json: bool,
+    render: str,
+) -> int:
+    exit_code, payload = run_cli_tool("praxis_integration", params)
+    if as_json or payload.get("error"):
+        print_json(stdout, payload)
+        return exit_code
+    if render == "list":
+        _render_integration_list(payload, stdout=stdout)
+        return exit_code
+    if render == "describe":
+        _render_integration_describe(payload, stdout=stdout)
+        return exit_code
+    print_json(stdout, payload)
+    return exit_code
+
+
+def _integrations_command(args: list[str], *, stdout: TextIO) -> int:
+    if not args or args[0] in {"-h", "--help"}:
+        stdout.write(_integration_help_text() + "\n")
+        return 0
+
+    subcommand = args[0]
+    tail = args[1:]
+    if subcommand == "list":
+        as_json = False
+        if tail:
+            if tail == ["--json"]:
+                as_json = True
+            else:
+                stdout.write(f"unknown integration argument: {' '.join(tail)}\n")
+                return 2
+        return _run_integration_tool({"action": "list"}, stdout=stdout, as_json=as_json, render="list")
+
+    if subcommand == "describe":
+        as_json = False
+        integration_id = ""
+        i = 0
+        while i < len(tail):
+            token = tail[i]
+            if token == "--json":
+                as_json = True
+                i += 1
+                continue
+            if token.startswith("--"):
+                stdout.write(f"unknown integration argument: {token}\n")
+                return 2
+            if not integration_id:
+                integration_id = token
+                i += 1
+                continue
+            stdout.write(f"unexpected argument: {token}\n")
+            return 2
+        if not integration_id:
+            stdout.write("usage: workflow integration describe <integration_id> [--json]\n")
+            return 2
+        return _run_integration_tool(
+            {"action": "describe", "integration_id": integration_id},
+            stdout=stdout,
+            as_json=as_json,
+            render="describe",
+        )
+
+    if subcommand == "health":
+        as_json = False
+        if tail:
+            if tail == ["--json"]:
+                as_json = True
+            else:
+                stdout.write(f"unknown integration argument: {' '.join(tail)}\n")
+                return 2
+        return _run_integration_tool({"action": "health"}, stdout=stdout, as_json=as_json, render="json")
+
+    if subcommand == "test":
+        as_json = False
+        integration_id = ""
+        i = 0
+        while i < len(tail):
+            token = tail[i]
+            if token == "--json":
+                as_json = True
+                i += 1
+                continue
+            if token.startswith("--"):
+                stdout.write(f"unknown integration argument: {token}\n")
+                return 2
+            if not integration_id:
+                integration_id = token
+                i += 1
+                continue
+            stdout.write(f"unexpected argument: {token}\n")
+            return 2
+        if not integration_id:
+            stdout.write("usage: workflow integration test <integration_id> [--json]\n")
+            return 2
+        return _run_integration_tool(
+            {"action": "test_credentials", "integration_id": integration_id},
+            stdout=stdout,
+            as_json=as_json,
+            render="json",
+        )
+
+    if subcommand == "call":
+        as_json = False
+        confirmed = False
+        integration_id = ""
+        integration_action = ""
+        args_json: dict[str, object] | None = None
+        i = 0
+        while i < len(tail):
+            token = tail[i]
+            if token == "--json":
+                as_json = True
+                i += 1
+                continue
+            if token == "--yes":
+                confirmed = True
+                i += 1
+                continue
+            if token == "--args-json":
+                if i + 1 >= len(tail):
+                    stdout.write("error: --args-json requires a value\n")
+                    return 2
+                try:
+                    raw_args = _load_json_value(tail[i + 1], field_name="--args-json")
+                except ValueError as exc:
+                    stdout.write(f"error: {exc}\n")
+                    return 2
+                if not isinstance(raw_args, dict):
+                    stdout.write("error: --args-json must decode to a JSON object\n")
+                    return 2
+                args_json = dict(raw_args)
+                i += 2
+                continue
+            if token.startswith("--"):
+                stdout.write(f"unknown integration argument: {token}\n")
+                return 2
+            if not integration_id:
+                integration_id = token
+            elif not integration_action:
+                integration_action = token
+            else:
+                stdout.write(f"unexpected argument: {token}\n")
+                return 2
+            i += 1
+        if not integration_id or not integration_action:
+            stdout.write(
+                "usage: workflow integration call <integration_id> <integration_action> [--args-json '<json>'] [--json] [--yes]\n"
+            )
+            return 2
+        definition = get_definition("praxis_integration")
+        if definition is None:
+            stdout.write("tool definition not found: praxis_integration\n")
+            return 2
+        params: dict[str, object] = {
+            "action": "call",
+            "integration_id": integration_id,
+            "integration_action": integration_action,
+            "args": args_json or {},
+        }
+        confirmation_result = require_confirmation(
+            definition,
+            params,
+            confirmed=confirmed,
+            stdout=stdout,
+        )
+        if confirmation_result is not None:
+            return confirmation_result
+        return _run_integration_tool(params, stdout=stdout, as_json=as_json, render="json")
+
+    if subcommand == "create":
+        as_json = False
+        confirmed = False
+        integration_id = ""
+        name = ""
+        description = ""
+        provider = "http"
+        manifest_source = "cli"
+        capabilities: list[dict[str, object]] | None = None
+        auth: dict[str, object] | None = None
+        i = 0
+        while i < len(tail):
+            token = tail[i]
+            if token == "--json":
+                as_json = True
+                i += 1
+                continue
+            if token == "--yes":
+                confirmed = True
+                i += 1
+                continue
+            if token in {"--id", "--name", "--description", "--provider", "--manifest-source", "--capabilities-json", "--auth-json"}:
+                if i + 1 >= len(tail):
+                    stdout.write(f"error: {token} requires a value\n")
+                    return 2
+                value = tail[i + 1]
+                if token == "--id":
+                    integration_id = value
+                elif token == "--name":
+                    name = value
+                elif token == "--description":
+                    description = value
+                elif token == "--provider":
+                    provider = value
+                elif token == "--manifest-source":
+                    manifest_source = value
+                elif token == "--capabilities-json":
+                    try:
+                        raw_capabilities = _load_json_value(value, field_name="--capabilities-json")
+                    except ValueError as exc:
+                        stdout.write(f"error: {exc}\n")
+                        return 2
+                    if not isinstance(raw_capabilities, list) or not raw_capabilities:
+                        stdout.write("error: --capabilities-json must decode to a non-empty JSON array\n")
+                        return 2
+                    capabilities = []
+                    for item in raw_capabilities:
+                        if not isinstance(item, dict):
+                            stdout.write("error: each capability must be a JSON object\n")
+                            return 2
+                        capabilities.append(dict(item))
+                elif token == "--auth-json":
+                    try:
+                        raw_auth = _load_json_value(value, field_name="--auth-json")
+                    except ValueError as exc:
+                        stdout.write(f"error: {exc}\n")
+                        return 2
+                    if not isinstance(raw_auth, dict):
+                        stdout.write("error: --auth-json must decode to a JSON object\n")
+                        return 2
+                    auth = dict(raw_auth)
+                i += 2
+                continue
+            stdout.write(f"unknown integration argument: {token}\n")
+            return 2
+        if not integration_id or not name or not capabilities:
+            stdout.write(
+                "usage: workflow integration create --id <id> --name <name> --capabilities-json '<json>' [--auth-json '<json>'] [--description <text>] [--provider <slug>] [--manifest-source <source>] [--json] [--yes]\n"
+            )
+            return 2
+        definition = get_definition("praxis_integration")
+        if definition is None:
+            stdout.write("tool definition not found: praxis_integration\n")
+            return 2
+        params = {
+            "action": "create",
+            "integration_id": integration_id,
+            "name": name,
+            "description": description,
+            "provider": provider,
+            "manifest_source": manifest_source,
+            "capabilities": capabilities,
+        }
+        if auth is not None:
+            params["auth"] = auth
+        confirmation_result = require_confirmation(
+            definition,
+            params,
+            confirmed=confirmed,
+            stdout=stdout,
+        )
+        if confirmation_result is not None:
+            return confirmation_result
+        return _run_integration_tool(params, stdout=stdout, as_json=as_json, render="json")
+
+    if subcommand == "secret":
+        as_json = False
+        confirmed = False
+        integration_id = ""
+        value = ""
+        i = 0
+        while i < len(tail):
+            token = tail[i]
+            if token == "--json":
+                as_json = True
+                i += 1
+                continue
+            if token == "--yes":
+                confirmed = True
+                i += 1
+                continue
+            if token == "--value":
+                if i + 1 >= len(tail):
+                    stdout.write("error: --value requires a value\n")
+                    return 2
+                value = tail[i + 1]
+                i += 2
+                continue
+            if token.startswith("--"):
+                stdout.write(f"unknown integration argument: {token}\n")
+                return 2
+            if not integration_id:
+                integration_id = token
+                i += 1
+                continue
+            stdout.write(f"unexpected argument: {token}\n")
+            return 2
+        if not integration_id or not value:
+            stdout.write("usage: workflow integration secret <integration_id> --value <secret> [--json] [--yes]\n")
+            return 2
+        definition = get_definition("praxis_integration")
+        if definition is None:
+            stdout.write("tool definition not found: praxis_integration\n")
+            return 2
+        params = {"action": "set_secret", "integration_id": integration_id, "value": value}
+        confirmation_result = require_confirmation(
+            definition,
+            params,
+            confirmed=confirmed,
+            stdout=stdout,
+        )
+        if confirmation_result is not None:
+            return confirmation_result
+        return _run_integration_tool(params, stdout=stdout, as_json=as_json, render="json")
+
+    if subcommand == "reload":
+        as_json = False
+        confirmed = False
+        if tail:
+            for token in tail:
+                if token == "--json":
+                    as_json = True
+                elif token == "--yes":
+                    confirmed = True
+                else:
+                    stdout.write(f"unknown integration argument: {token}\n")
+                    return 2
+        definition = get_definition("praxis_integration")
+        if definition is None:
+            stdout.write("tool definition not found: praxis_integration\n")
+            return 2
+        params = {"action": "reload"}
+        confirmation_result = require_confirmation(
+            definition,
+            params,
+            confirmed=confirmed,
+            stdout=stdout,
+        )
+        if confirmation_result is not None:
+            return confirmation_result
+        return _run_integration_tool(params, stdout=stdout, as_json=as_json, render="json")
+
+    stdout.write(f"unknown integrations subcommand: {subcommand}\n")
+    return 2
 
 
 def _api_routes_command(args: list[str], *, stdout: TextIO) -> int:
@@ -143,6 +591,9 @@ def _api_routes_command(args: list[str], *, stdout: TextIO) -> int:
                 follow_up.append(f"--method {method}")
             if follow_up:
                 stdout.write(f"  try:    workflow api routes {' '.join(follow_up)}\n")
+    stdout.write(
+        "  Tip: workflow routes is the flat alias; workflow help routes reopens the discovery help.\n"
+    )
     stdout.write("\n")
     if not routes:
         stdout.write("No routes found.\n")
@@ -158,6 +609,35 @@ def _api_routes_command(args: list[str], *, stdout: TextIO) -> int:
         "\nTip: run `workflow api routes --json` or `workflow routes --json` for machine-readable discovery.\n"
     )
     return 0
+
+
+def _api_scoped_routes_command(
+    scope_name: str,
+    path_prefix: str,
+    args: list[str],
+    *,
+    stdout: TextIO,
+) -> int:
+    if args and args[0] in {"-h", "--help"}:
+        stdout.write(
+            f"usage: workflow api {scope_name} [--search TEXT] [--method METHOD] [--tag TAG] [--path-prefix PREFIX] [--visibility public|internal|all] [--json]\n"
+            "\n"
+            f"Scoped route discovery for {path_prefix} and its children.\n"
+            "\n"
+            "Examples:\n"
+            f"  workflow api {scope_name}\n"
+            f"  workflow api {scope_name} --search create\n"
+            f"  workflow api {scope_name} --json\n"
+            f"  workflow api routes --path-prefix {path_prefix} --json\n"
+            "\n"
+            "Tip: this is a shortcut for the live HTTP route catalog, not a separate API.\n"
+        )
+        return 0
+
+    forwarded = ["--path-prefix", path_prefix, *args]
+    if "--path-prefix" in args:
+        forwarded = list(args)
+    return _api_routes_command(forwarded, stdout=stdout)
 
 
 def _render_route_facets(rows: object, *, field_name: str, limit: int = 5) -> str:
@@ -1040,13 +1520,15 @@ def _api_command(args: list[str], *, stdout: TextIO) -> int:
 
     if args and args[0] in {"-h", "--help"}:
         stdout.write(
-            "usage: workflow api [routes|--host HOST|--port PORT]\n"
+            "usage: workflow api [routes|integrations|data-dictionary|--host HOST|--port PORT]\n"
             "\n"
             "Start the Praxis REST API server.\n"
             "Reads the runtime dependency contract from requirements.runtime.txt\n"
             "Flat alias: workflow routes\n"
             "\n"
             "  routes        show and filter the live HTTP route catalog without starting the server\n"
+            "  integrations  show and filter the /api/integrations route scope without starting the server\n"
+            "  data-dictionary show and filter the /api/data-dictionary route scope without starting the server\n"
             "  --host HOST   bind address (default: 0.0.0.0)\n"
             "  --port PORT   TCP port     (default: 8420)\n"
             "\n"
@@ -1056,6 +1538,10 @@ def _api_command(args: list[str], *, stdout: TextIO) -> int:
 
     if args and args[0] == "routes":
         return _api_routes_command(args[1:], stdout=stdout)
+    if args and args[0] == "integrations":
+        return _api_scoped_routes_command("integrations", "/api/integrations", args[1:], stdout=stdout)
+    if args and args[0] == "data-dictionary":
+        return _api_scoped_routes_command("data-dictionary", "/api/data-dictionary", args[1:], stdout=stdout)
 
     host = "0.0.0.0"
     port = 8420

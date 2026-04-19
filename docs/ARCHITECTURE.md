@@ -55,7 +55,7 @@ Architecture-policy rows are durable operator authority. Workflow job execution 
 ### Spec Compilation
 
 1. **Parse** -- Load `.queue.json` file, validate required fields.
-2. **Normalize** -- Auto-generate labels, translate `id` references to labels, expand `replicate` fan-outs, resolve sprint ordering to `depends_on` edges.
+2. **Normalize** -- Auto-generate labels, translate `id` references to labels, expand `replicate` fan-outs and `replicate_with` loops, resolve sprint ordering to `depends_on` edges.
 3. **Route resolution** -- Resolve `auto/` agent routes to concrete provider/model pairs via the provider registry.
 4. **Graph lowering** -- Compile to `WorkflowRequest` containing `WorkflowNodeContract` nodes and `WorkflowEdgeContract` edges. Validate the graph is acyclic.
 

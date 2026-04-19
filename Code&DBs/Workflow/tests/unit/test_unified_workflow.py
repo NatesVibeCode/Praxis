@@ -2790,6 +2790,7 @@ def test_preview_workflow_execution_returns_worker_facing_payload(monkeypatch):
         "name": "preview-spec",
         "workflow_id": "workflow.preview_spec",
         "phase": "build",
+        "workdir": "/repo",
         "jobs": [
             {
                 "label": "build_a",
@@ -2832,11 +2833,45 @@ def test_preview_workflow_execution_returns_worker_facing_payload(monkeypatch):
     assert preview["jobs"][0]["workspace"]["workdir"] == "/repo"
 
 
+def test_preview_workflow_execution_requires_explicit_workdir(monkeypatch):
+    inline_spec = {
+        "name": "preview-spec-no-workdir",
+        "workflow_id": "workflow.preview_spec_no_workdir",
+        "phase": "build",
+        "jobs": [
+            {
+                "label": "build_a",
+                "prompt": "Implement the preview execution lane.",
+                "agent": "auto/build",
+            }
+        ],
+    }
+    monkeypatch.setattr(_ctx_mod, "_runtime_profile_sandbox_payload", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        _ctx_mod,
+        "resolve_job_decision_pack",
+        lambda *args, **kwargs: {
+            "pack_version": 1,
+            "authority_domains": ["workspace_boundary"],
+            "decision_keys": [],
+            "decisions": [],
+        },
+    )
+
+    with pytest.raises(ValueError, match="requires an explicit job.workdir or top-level workdir"):
+        _admission_mod.preview_workflow_execution(
+            _FakeConn(),
+            inline_spec=inline_spec,
+            repo_root="/repo",
+        )
+
+
 def test_preview_workflow_execution_marks_non_agent_jobs_not_applicable(monkeypatch):
     inline_spec = {
         "name": "preview-spec-non-agent",
         "workflow_id": "workflow.preview_spec_non_agent",
         "phase": "build",
+        "workdir": "/repo",
         "jobs": [
             {
                 "label": "seed",
@@ -2886,6 +2921,7 @@ def test_preview_and_submit_share_execution_assembly_until_submit_boundary(monke
         "phase": "build",
         "definition_revision": "definition.preview_submit_shared",
         "plan_revision": "plan.preview_submit_shared",
+        "workdir": "/repo",
         "jobs": [
             {
                 "label": "build_a",

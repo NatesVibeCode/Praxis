@@ -1025,12 +1025,19 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
       applyCatalogToNode(catalogId, nodeId);
       return;
     }
+    // Unresolved nodes need the action-picker popout; SELECT_NODE suppresses it
+    // while a dock is open, so close the stale context dock first.
+    const clicked = viewModel.nodes.find(n => n.id === nodeId);
+    const isUnresolved = !!clicked && !(clicked.route || '').trim();
+    if (isUnresolved && state.openDock !== null) {
+      dispatch({ type: 'CLOSE_DOCK' });
+    }
     if (isSelected && nodeId !== state.activeNodeId) {
       dispatch({ type: 'SELECT_NODE', nodeId: null });
     } else {
       dispatch({ type: 'SELECT_NODE', nodeId });
     }
-  }, [state.viewMode, state.pendingCatalogId, state.activeNodeId, applyCatalogToNode]);
+  }, [state.viewMode, state.pendingCatalogId, state.activeNodeId, state.openDock, applyCatalogToNode, viewModel.nodes]);
 
   const appendNode = useCallback(async (label?: string) => {
     if (!payload?.build_graph) return;
@@ -1240,6 +1247,7 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
     };
   }, [dismissSelectedEdgeMenus, state.selectedEdgeId]);
   const edgeControls = useMemo(() => viewModel.edges.flatMap((edge) => {
+    if (state.viewMode === 'run') return [];
     const geometry = getEdgeGeometry(edge, viewModel.layout);
     if (!geometry) return [];
 
@@ -1259,7 +1267,7 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
       toLabel: nodeById.get(edge.to)?.title || edge.to,
       tone: gatePodTone(edge, gateItem),
     }];
-  }), [gateCatalogByFamily, nodeById, viewModel.edges, viewModel.layout]);
+  }), [gateCatalogByFamily, nodeById, state.viewMode, viewModel.edges, viewModel.layout]);
   const appendPosition = useMemo(
     () => getMoonAppendPosition(viewModel.layout.width),
     [viewModel.layout.width],
@@ -1336,7 +1344,7 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
 
           {/* Center */}
           <div className={`moon-center${!hasNodes ? ' moon-center--empty' : ''}`} ref={centerRef}>
-            {hasNodes && (
+            {hasNodes && state.viewMode !== 'run' && (
               <>
                 <div className="moon-center__dock-actions" aria-label="Workspace panels">
                   <div className="moon-center__dock-group">
@@ -1562,7 +1570,7 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                         style={position}
                         data-drop-node={node.id}
                         onClick={() => handleNodeClick(node.id, isSelected)}
-                        onPointerDown={e => startNodeDrag(e, node)}
+                        onPointerDown={state.viewMode === 'run' ? undefined : e => startNodeDrag(e, node)}
                       >
                         {showIcon(node) ? (
                           <MoonGlyph type={node.glyphType} size={22} color="#fff" />
@@ -1573,16 +1581,18 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                       </div>
                     );
                   })}
-                  <div
-                    className={`moon-graph-append${previewTargetId === '__append__' ? ' moon-graph-append--drag-over' : ''}`}
-                    style={appendPosition}
-                    data-drop-append="true"
-                    onClick={() => appendNode()}
-                  >
-                    <span className="moon-graph-append__plus" aria-hidden="true">
-                      +
-                    </span>
-                  </div>
+                  {state.viewMode !== 'run' && (
+                    <div
+                      className={`moon-graph-append${previewTargetId === '__append__' ? ' moon-graph-append--drag-over' : ''}`}
+                      style={appendPosition}
+                      data-drop-append="true"
+                      onClick={() => appendNode()}
+                    >
+                      <span className="moon-graph-append__plus" aria-hidden="true">
+                        +
+                      </span>
+                    </div>
+                  )}
                 </div>
                 <MoonDragGhost drag={drag.drag} />
               </div>

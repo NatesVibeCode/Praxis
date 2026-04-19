@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 from typing import Any, TextIO
 
+from runtime.authority_memory_projection import refresh_authority_memory_projection
 from runtime import operation_catalog_gateway
 from runtime.app_manifest_registry import (
     AppManifestRegistryBoundaryError,
@@ -42,6 +43,7 @@ from storage.postgres.schema import (
 from storage.postgres.validators import PostgresConfigurationError, PostgresStorageError
 from surfaces.cli._db import cli_sync_conn
 from surfaces.cli.mcp_tools import load_json_file, print_json
+from surfaces.mcp.tools.data_dictionary import tool_praxis_data_dictionary
 from surfaces.mcp.tools.health import tool_praxis_reload
 
 from .data import _data_command
@@ -280,6 +282,272 @@ def _schema_command(args: list[str], *, stdout: TextIO) -> int:
             f"indexes={len(payload.get('actual_indexes') or [])} "
             f"constraints={len(payload.get('actual_constraints') or [])}\n"
         )
+    return 0
+
+
+def _data_dictionary_help_text() -> str:
+    return "\n".join(
+        [
+            "usage: workflow dictionary <list|describe|set-override|clear-override|reproject> [args]",
+            "",
+            "Data dictionary authority:",
+            "  workflow dictionary list [--category CATEGORY] [--json]",
+            "  workflow dictionary describe <object-kind> [--include-layers] [--json]",
+            "  workflow dictionary set-override <object-kind> <field-path> [--field-kind KIND] [--label TEXT] [--description TEXT] [--required] [--default-json JSON] [--valid-values-json JSON] [--examples-json JSON] [--deprecation-notes TEXT] [--display-order N] [--metadata-json JSON] [--yes] [--json]",
+            "  workflow dictionary clear-override <object-kind> <field-path> [--yes] [--json]",
+            "  workflow dictionary reproject [--yes] [--json]",
+        ]
+    )
+
+
+def _data_dictionary_command(args: list[str], *, stdout: TextIO) -> int:
+    if not args or args[0] in {"-h", "--help"}:
+        stdout.write(_data_dictionary_help_text() + "\n")
+        return 2
+
+    action = args[0]
+    as_json = False
+    confirmed = False
+    category = ""
+    include_layers = False
+    object_kind = ""
+    field_path = ""
+    field_kind = None
+    label = None
+    description = None
+    required = None
+    default_value = None
+    valid_values = None
+    examples = None
+    deprecation_notes = None
+    display_order = None
+    metadata = None
+    i = 1
+    while i < len(args):
+        token = args[i]
+        if token == "--json":
+            as_json = True
+            i += 1
+            continue
+        if token == "--yes":
+            confirmed = True
+            i += 1
+            continue
+        if token == "--category" and i + 1 < len(args):
+            category = args[i + 1]
+            i += 2
+            continue
+        if token == "--include-layers":
+            include_layers = True
+            i += 1
+            continue
+        if token == "--field-kind" and i + 1 < len(args):
+            field_kind = args[i + 1]
+            i += 2
+            continue
+        if token == "--label" and i + 1 < len(args):
+            label = args[i + 1]
+            i += 2
+            continue
+        if token == "--description" and i + 1 < len(args):
+            description = args[i + 1]
+            i += 2
+            continue
+        if token == "--required":
+            required = True
+            i += 1
+            continue
+        if token == "--default-json" and i + 1 < len(args):
+            default_value = json.loads(args[i + 1])
+            i += 2
+            continue
+        if token == "--valid-values-json" and i + 1 < len(args):
+            valid_values = json.loads(args[i + 1])
+            i += 2
+            continue
+        if token == "--examples-json" and i + 1 < len(args):
+            examples = json.loads(args[i + 1])
+            i += 2
+            continue
+        if token == "--deprecation-notes" and i + 1 < len(args):
+            deprecation_notes = args[i + 1]
+            i += 2
+            continue
+        if token == "--display-order" and i + 1 < len(args):
+            display_order = int(args[i + 1])
+            i += 2
+            continue
+        if token == "--metadata-json" and i + 1 < len(args):
+            metadata = json.loads(args[i + 1])
+            i += 2
+            continue
+        if not object_kind:
+            object_kind = token
+            i += 1
+            continue
+        if not field_path:
+            field_path = token
+            i += 1
+            continue
+        stdout.write(f"unexpected argument: {token}\n")
+        return 2
+
+    try:
+        if action == "list":
+            payload = tool_praxis_data_dictionary({"action": "list", "category": category or None})
+        elif action == "describe":
+            if not object_kind:
+                stdout.write("usage: workflow dictionary describe <object-kind> [--include-layers] [--json]\n")
+                return 2
+            payload = tool_praxis_data_dictionary({
+                "action": "describe",
+                "object_kind": object_kind,
+                "include_layers": include_layers,
+            })
+        elif action == "set-override":
+            if not confirmed:
+                return _render_confirmation(stdout=stdout)
+            if not object_kind or not field_path:
+                stdout.write("usage: workflow dictionary set-override <object-kind> <field-path> [--yes] [--json]\n")
+                return 2
+            payload = tool_praxis_data_dictionary({
+                "action": "set_override",
+                "object_kind": object_kind,
+                "field_path": field_path,
+                "field_kind": field_kind,
+                "label": label,
+                "description": description,
+                "required": required,
+                "default_value": default_value,
+                "valid_values": valid_values,
+                "examples": examples,
+                "deprecation_notes": deprecation_notes,
+                "display_order": display_order,
+                "metadata": metadata,
+            })
+        elif action == "clear-override":
+            if not confirmed:
+                return _render_confirmation(stdout=stdout)
+            if not object_kind or not field_path:
+                stdout.write("usage: workflow dictionary clear-override <object-kind> <field-path> [--yes] [--json]\n")
+                return 2
+            payload = tool_praxis_data_dictionary({
+                "action": "clear_override",
+                "object_kind": object_kind,
+                "field_path": field_path,
+            })
+        elif action == "reproject":
+            if not confirmed:
+                return _render_confirmation(stdout=stdout)
+            payload = tool_praxis_data_dictionary({"action": "reproject"})
+        else:
+            stdout.write(_data_dictionary_help_text() + "\n")
+            return 2
+    except (json.JSONDecodeError, ValueError) as exc:
+        print_json(stdout, {"error": str(exc)})
+        return 1
+
+    if as_json:
+        print_json(stdout, payload)
+        return 0
+
+    if action == "list":
+        objects = payload.get("objects") if isinstance(payload, dict) else []
+        count = payload.get("count", len(objects)) if isinstance(payload, dict) else len(objects)
+        stdout.write(f"{count} object kind(s)\n")
+        for item in objects or []:
+            if not isinstance(item, dict):
+                continue
+            summary = str(item.get("summary") or "").strip()
+            category_name = str(item.get("category") or "").strip()
+            stdout.write(
+                f"  {str(item.get('object_kind') or ''):<32} "
+                f"{category_name:<12} {str(item.get('label') or '')}\n"
+            )
+            if summary:
+                stdout.write(f"           {summary}\n")
+        return 0
+
+    if action == "describe":
+        obj = payload.get("object") if isinstance(payload, dict) else {}
+        fields = payload.get("fields") if isinstance(payload, dict) else []
+        stdout.write(
+            f"{str(obj.get('object_kind') or object_kind)} "
+            f"fields={len(fields)} source_rows={payload.get('entries_by_source', {})}\n"
+        )
+        for field in fields or []:
+            if not isinstance(field, dict):
+                continue
+            stdout.write(
+                f"  {str(field.get('field_path') or ''):<32} "
+                f"{str(field.get('effective_source') or ''):<10} "
+                f"{str(field.get('field_kind') or ''):<10} "
+                f"{str(field.get('label') or '')}\n"
+            )
+        return 0
+
+    if action == "reproject":
+        stdout.write(
+            f"reprojected ok={bool(payload.get('ok'))} "
+            f"duration_ms={payload.get('duration_ms')}\n"
+        )
+        return 0
+
+    kind = str(payload.get("object_kind") or object_kind)
+    path = str(payload.get("field_path") or field_path)
+    stdout.write(f"{action.replace('-', ' ')} {kind}.{path}\n")
+    return 0
+
+
+def _authority_memory_help_text() -> str:
+    return "\n".join(
+        [
+            "usage: workflow authority-memory refresh [--json]",
+            "",
+            "Authority-memory projection:",
+            "  workflow authority-memory refresh [--json]",
+            "",
+            "Refreshes canonical FK projections from authority tables into memory_edges.",
+        ]
+    )
+
+
+def _authority_memory_command(args: list[str], *, stdout: TextIO) -> int:
+    if not args or args[0] in {"-h", "--help"}:
+        stdout.write(_authority_memory_help_text() + "\n")
+        return 2
+
+    action = args[0]
+    as_json = False
+    if len(args) > 2:
+        stdout.write(f"unexpected argument: {args[2]}\n")
+        return 2
+    if len(args) == 2:
+        if args[1] != "--json":
+            stdout.write(f"unexpected argument: {args[1]}\n")
+            return 2
+        as_json = True
+
+    if action != "refresh":
+        stdout.write(_authority_memory_help_text() + "\n")
+        return 2
+
+    try:
+        result = asyncio.run(refresh_authority_memory_projection())
+    except Exception as exc:
+        print_json(stdout, {"error": str(exc)})
+        return 1
+
+    payload = result.to_json()
+    if as_json:
+        print_json(stdout, payload)
+        return 0
+
+    stdout.write(
+        f"projection_id={payload.get('projection_id')} "
+        f"upserted={payload.get('total_upserted', 0)} "
+        f"deactivated={payload.get('total_deactivated', 0)}\n"
+    )
     return 0
 
 

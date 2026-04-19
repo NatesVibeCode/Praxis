@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
+import re
 from typing import Any
 from typing import TYPE_CHECKING
 
@@ -37,6 +38,9 @@ _GRAPH_RUNTIME_TRIGGER_ADAPTER_TYPES = SUPPORTED_ADAPTER_TYPES - frozenset({
 _STATIC_BRANCHING_KINDS = frozenset({"if", "switch"})
 _COMPILE_LOCAL_WORKSPACE_REF = "workspace.compile.unbound"
 _COMPILE_LOCAL_RUNTIME_PROFILE_REF = "runtime_profile.compile.unbound"
+_ARTIFACT_WRITE_SCOPE_RE = re.compile(
+    r"(?<![\w./-])(artifacts/[A-Za-z0-9._@:+-]+(?:/[A-Za-z0-9._@:+-]+)*/?)"
+)
 
 
 def _default_workspace_ref(
@@ -208,8 +212,52 @@ def _job_write_scope(job: Mapping[str, Any]) -> list[str]:
         return write_scope
     scope = job.get("scope")
     if not _is_mapping(scope):
+        inferred = _infer_artifact_write_scope(job)
+        return inferred
+    write_scope = _string_list(scope.get("write"))
+    if write_scope:
+        return write_scope
+    return _infer_artifact_write_scope(job)
+
+
+def _artifact_scope_texts(value: Any) -> list[str]:
+    if value is None:
         return []
-    return _string_list(scope.get("write"))
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, Mapping):
+        texts: list[str] = []
+        for nested in value.values():
+            texts.extend(_artifact_scope_texts(nested))
+        return texts
+    if isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
+        texts: list[str] = []
+        for nested in value:
+            texts.extend(_artifact_scope_texts(nested))
+        return texts
+    return []
+
+
+def _infer_artifact_write_scope(job: Mapping[str, Any]) -> list[str]:
+    """Infer artifact write scope from explicit job output contracts only."""
+    candidates: list[str] = []
+    for field_name in (
+        "outcome_goal",
+        "output_goal",
+        "output_path",
+        "description",
+        "prompt",
+        "expected_outputs",
+        "authoring_contract",
+        "acceptance_contract",
+    ):
+        for text in _artifact_scope_texts(job.get(field_name)):
+            for match in _ARTIFACT_WRITE_SCOPE_RE.finditer(text):
+                path = match.group(1).rstrip("`'\"),;:.")
+                path = path.rstrip("/")
+                if path and path not in candidates:
+                    candidates.append(path)
+    return candidates
 
 
 def _job_read_scope(job: Mapping[str, Any]) -> list[str]:

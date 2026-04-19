@@ -4,19 +4,11 @@ from __future__ import annotations
 
 import importlib
 import os
+from pathlib import Path
 from typing import Any
 
+from runtime.workspace_paths import authority_workspace_roots, container_workspace_root
 from runtime.workflow.execution_bundle import _VERIFICATION_REQUIRED_TASK_TYPES
-
-
-# Known host-mount path prefixes that indicate a spec was authored on macOS
-# host but will execute in the worker container where only /workspace/... exists.
-# Keeping these explicit (rather than inferring via heuristics) makes the
-# warning actionable — the operator sees exactly which path needs translation.
-_HOST_MOUNT_PREFIXES: tuple[str, ...] = (
-    "/Users/nate/Praxis",
-)
-_CONTAINER_MOUNT_PREFIX = "/workspace"
 
 
 # --------------------------------------------------------------------------
@@ -180,9 +172,8 @@ def _preflight_workdir_drift(spec) -> list[dict[str, Any]]:
     that doesn't exist in the current process's filesystem view.
 
     This catches the most common cross-environment footgun:
-      - spec authored on host with `workdir: /Users/nate/Praxis/artifacts/...`
-      - submitted via an MCP/CLI running in the worker container where only
-        `/workspace/artifacts/...` is reachable
+      - spec authored from one filesystem view
+      - submitted via an MCP/CLI running in another filesystem view
       - bundle hash includes the absolute workdir, so host-submitted runs
         produce a digest the container worker cannot reproduce, failing with
         `evidence.route_identity_mismatch` at a confusing point downstream
@@ -201,10 +192,16 @@ def _preflight_workdir_drift(spec) -> list[dict[str, Any]]:
         # Path does not exist at the current vantage — suggest the translation
         # if the path looks like a known host-mount sibling.
         suggestion: str | None = None
-        for prefix in _HOST_MOUNT_PREFIXES:
-            if path.startswith(prefix + os.sep) or path == prefix:
-                rel = os.path.relpath(path, prefix)
-                suggestion = os.path.join(_CONTAINER_MOUNT_PREFIX, rel)
+        path_obj = Path(path)
+        for prefix in authority_workspace_roots():
+            try:
+                rel = path_obj.relative_to(prefix)
+            except ValueError:
+                continue
+            if rel == Path("."):
+                suggestion = str(container_workspace_root())
+            else:
+                suggestion = str(container_workspace_root() / rel)
                 break
         message = (
             f"{field}={path!r} does not exist in the current process filesystem; "

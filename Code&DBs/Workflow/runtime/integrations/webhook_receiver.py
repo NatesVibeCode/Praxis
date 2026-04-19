@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Optional, Mapping
 
 from storage.postgres.webhook_repository import PostgresWebhookRepository
+from runtime.system_events import emit_system_event
 
 if TYPE_CHECKING:
     from storage.postgres.connection import SyncPostgresConnection
@@ -130,6 +131,26 @@ def ingest_webhook(
         signature_valid=signature_valid,
     )
     event_id = event_row["event_id"] if event_row else None
+
+    # Wake the canonical trigger engine. The worker already owns trigger
+    # evaluation; the webhook ingress only emits the authoritative event.
+    try:
+        emit_system_event(
+            conn,
+            event_type="db.webhook_events.insert",
+            source_id=str(endpoint["endpoint_id"]),
+            source_type="webhook_events",
+            payload={
+                "endpoint_id": str(endpoint["endpoint_id"]),
+                "endpoint_slug": endpoint_slug,
+                "webhook_event_id": event_id,
+                "signature_valid": signature_valid,
+                "target_workflow_id": endpoint.get("target_workflow_id"),
+                "target_trigger_id": endpoint.get("target_trigger_id"),
+            },
+        )
+    except Exception:
+        pass
 
     # Emit to event log
     try:

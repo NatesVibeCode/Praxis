@@ -15,9 +15,6 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from runtime.workflow.mcp_session import mint_workflow_mcp_session_token
 
 _MCP_URL_ENV = "PRAXIS_WORKFLOW_MCP_URL"
-_MCP_HOST_ENV = "PRAXIS_WORKFLOW_MCP_HOST"
-_MCP_PORT_ENV = "PRAXIS_WORKFLOW_MCP_PORT"
-_MCP_SCHEME_ENV = "PRAXIS_WORKFLOW_MCP_SCHEME"
 _DEFAULT_MCP_PATH = "/mcp"
 _WORKFLOW_MCP_SERVER_NAME = "dag-workflow"
 
@@ -55,11 +52,7 @@ def build_workflow_mcp_url(
 ) -> str:
     base_url = str(os.environ.get(_MCP_URL_ENV, "")).strip()
     if not base_url:
-        scheme = str(os.environ.get(_MCP_SCHEME_ENV, "http")).strip() or "http"
-        host_default = "host.docker.internal" if prefer_docker else "127.0.0.1"
-        host = str(os.environ.get(_MCP_HOST_ENV, host_default)).strip() or host_default
-        port = str(os.environ.get(_MCP_PORT_ENV, "8420")).strip() or "8420"
-        base_url = f"{scheme}://{host}:{port}{_DEFAULT_MCP_PATH}"
+        raise RuntimeError(f"{_MCP_URL_ENV} is required for workflow MCP tool injection")
 
     split = urlsplit(base_url)
     query_items = [
@@ -193,6 +186,13 @@ def augment_cli_command_for_workflow_mcp(
     if not base_parts:
         return base_parts
 
+    provider = str(provider_slug or "").strip().lower()
+    from registry.provider_execution_registry import resolve_mcp_args_template
+
+    template = resolve_mcp_args_template(provider)
+    if not template:
+        return base_parts
+
     connection = _workflow_mcp_connection(
         execution_bundle=execution_bundle,
         prefer_docker=prefer_docker,
@@ -200,12 +200,6 @@ def augment_cli_command_for_workflow_mcp(
     if connection is None:
         return base_parts
     _tool_names, mcp_url = connection
-    provider = str(provider_slug or "").strip().lower()
-    from registry.provider_execution_registry import resolve_mcp_args_template
-
-    template = resolve_mcp_args_template(provider)
-    if not template:
-        return base_parts
 
     rendered = _render_mcp_args(template, mcp_url=mcp_url)
     return [*base_parts, *rendered]

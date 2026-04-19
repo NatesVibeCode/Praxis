@@ -118,6 +118,7 @@ def list_integrations(conn: "SyncPostgresConnection") -> list[dict[str, Any]]:
     rows = conn.execute(
         """SELECT ir.id, ir.name, ir.description, ir.provider, ir.capabilities,
                   ir.auth_status, ir.manifest_source, ir.connector_slug,
+                  ir.catalog_dispatch,
                   cr.health_status, cr.error_rate
              FROM integration_registry ir
              LEFT JOIN connector_registry cr ON cr.slug = ir.connector_slug
@@ -135,6 +136,7 @@ def list_integrations(conn: "SyncPostgresConnection") -> list[dict[str, Any]]:
             "provider": item.get("provider", ""),
             "auth_status": item.get("auth_status", ""),
             "source": item.get("manifest_source", ""),
+            "catalog_dispatch": bool(item.get("catalog_dispatch")),
             "health_status": item.get("health_status"),
             "error_rate": item.get("error_rate"),
             "actions": extract_actions(item.get("capabilities")),

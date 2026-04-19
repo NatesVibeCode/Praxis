@@ -25,6 +25,7 @@ from runtime.canonical_manifests import (
     save_manifest_as,
 )
 from runtime.helm_manifest import normalize_helm_bundle
+from runtime.workflow_notifications import start_run_wakeup_listener
 
 from ._shared import (
     REPO_ROOT,
@@ -1252,55 +1253,6 @@ def _handle_model_run_status_get(request: Any, path: str) -> None:
         )
 
 
-class _RunWakeupListener:
-    """LISTEN on 'job_completed' pg_notify channel and wake a threading.Event.
-
-    Runs on a daemon thread using a dedicated asyncpg connection so the
-    SSE handler's iter_run() poll loop wakes immediately on each job
-    completion instead of waiting the full poll_interval.
-    """
-
-    def __init__(self, database_url: str, wakeup_event: threading.Event) -> None:
-        self._database_url = database_url
-        self._wakeup_event = wakeup_event
-        self._stop_event = threading.Event()
-        self._thread = threading.Thread(
-            target=self._run, daemon=True, name="sse-run-wakeup-listener"
-        )
-
-    def start(self) -> None:
-        self._thread.start()
-
-    def stop(self) -> None:
-        self._stop_event.set()
-        self._wakeup_event.set()
-        self._thread.join(timeout=3)
-
-    def _on_notify(self, _conn, _pid, _channel: str, _payload: str) -> None:
-        self._wakeup_event.set()
-
-    def _run(self) -> None:
-        import asyncio
-        import asyncpg
-
-        async def _listen() -> None:
-            while not self._stop_event.is_set():
-                conn = None
-                try:
-                    conn = await asyncpg.connect(self._database_url, timeout=5.0)
-                    await conn.add_listener("job_completed", self._on_notify)
-                    while not self._stop_event.is_set():
-                        await asyncio.sleep(1.0)
-                except Exception:
-                    if not self._stop_event.is_set():
-                        await asyncio.sleep(2.0)
-                finally:
-                    if conn is not None:
-                        await conn.close()
-
-        asyncio.run(_listen())
-
-
 def _handle_workflow_stream(request: Any, path: str) -> None:
     """SSE endpoint: GET /api/workflow-runs/{run_id}/stream
 
@@ -1354,7 +1306,7 @@ def _handle_workflow_stream(request: Any, path: str) -> None:
 
             jobs = initial.get("jobs", [])
             passed = sum(1 for j in jobs if j["status"] == "succeeded")
-            failed = sum(1 for j in jobs if j["status"] in ("failed", "dead_letter"))
+            failed = sum(1 for j in jobs if j["status"] in ("failed", "dead_letter", "blocked", "cancelled"))
             done_data = json.dumps({
                 "status": initial["status"], "spec_name": spec_name,
                 "total_jobs": total_jobs, "passed": passed, "failed": failed,
@@ -1388,9 +1340,11 @@ def _handle_workflow_stream(request: Any, path: str) -> None:
             database_url = workflow_database_env_for_repo(REPO_ROOT)["WORKFLOW_DATABASE_URL"]
         except PostgresConfigurationError:
             database_url = ""
-        listener = _RunWakeupListener(database_url, wakeup) if database_url else None
-        if listener is not None:
-            listener.start()
+        listener = start_run_wakeup_listener(
+            run_id=run_id,
+            wakeup_event=wakeup,
+            database_url=database_url or None,
+        )
         try:
             for notif in consumer.iter_run(run_id, total_jobs, timeout_seconds=None, wakeup_event=wakeup):
                 count += 1

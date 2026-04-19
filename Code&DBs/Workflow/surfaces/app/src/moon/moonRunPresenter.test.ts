@@ -25,7 +25,9 @@ describe('jobStatusToRingState', () => {
     expect(jobStatusToRingState('succeeded')).toBe('run-succeeded');
     expect(jobStatusToRingState('failed')).toBe('run-failed');
     expect(jobStatusToRingState('dead_letter')).toBe('run-failed');
+    expect(jobStatusToRingState('blocked')).toBe('run-failed');
     expect(jobStatusToRingState('cancelled')).toBe('run-failed');
+    expect(jobStatusToRingState('parent_failed')).toBe('run-failed');
     expect(jobStatusToRingState('running')).toBe('run-active');
     expect(jobStatusToRingState('claimed')).toBe('run-active');
     expect(jobStatusToRingState('pending')).toBe('run-pending');
@@ -57,21 +59,24 @@ describe('presentRun', () => {
           { id: 'b', label: 'b', type: 'cli_llm', adapter: 'anthropic', position: 1, status: 'running' },
           { id: 'c', label: 'c', type: 'cli_llm', adapter: 'openai',    position: 2, status: 'pending' },
           { id: 'd', label: 'd', type: 'cli_llm', adapter: 'openai',    position: 3, status: 'failed' },
+          { id: 'e', label: 'e', type: 'cli_llm', adapter: 'openai',    position: 4, status: 'blocked' },
         ],
         edges: [
           { id: 'e1', from: 'a', to: 'b', type: 'sequence' },
           { id: 'e2', from: 'b', to: 'c', type: 'sequence' },
           { id: 'e3', from: 'c', to: 'd', type: 'sequence' },
+          { id: 'e4', from: 'd', to: 'e', type: 'sequence' },
         ],
       },
     });
     const vm = presentRun(run, null);
-    expect(vm.nodes).toHaveLength(4);
+    expect(vm.nodes).toHaveLength(5);
     const byId = new Map(vm.nodes.map((n) => [n.id, n]));
     expect(byId.get('a')?.ringState).toBe('run-succeeded');
     expect(byId.get('b')?.ringState).toBe('run-active');
     expect(byId.get('c')?.ringState).toBe('run-pending');
     expect(byId.get('d')?.ringState).toBe('run-failed');
+    expect(byId.get('e')?.ringState).toBe('run-failed');
   });
 
   test('assigns layout positions along ranks and columns', () => {
@@ -161,7 +166,7 @@ describe('presentRun', () => {
           { id: 'a', label: 'a', type: '', adapter: '', position: 0, status: 'succeeded' },
           { id: 'b', label: 'b', type: '', adapter: '', position: 1, status: 'succeeded' },
           { id: 'c', label: 'c', type: '', adapter: '', position: 2, status: 'failed' },
-          { id: 'd', label: 'd', type: '', adapter: '', position: 3, status: 'pending' },
+          { id: 'd', label: 'd', type: '', adapter: '', position: 3, status: 'blocked' },
         ],
         edges: [],
       },
@@ -169,7 +174,7 @@ describe('presentRun', () => {
     const vm = presentRun(run, null);
     expect(vm.totalNodes).toBe(4);
     expect(vm.resolvedNodes).toBe(2);
-    expect(vm.blockedNodes).toBe(1);
+    expect(vm.blockedNodes).toBe(2);
   });
 
   test('release.readiness reflects overall run status', () => {

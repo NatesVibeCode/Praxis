@@ -1,6 +1,6 @@
 # Praxis MCP Tools
 
-Praxis exposes 61 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
+Praxis exposes 62 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
 
 CLI discovery is generated from the same catalog metadata:
 
@@ -21,9 +21,10 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_constraints` | `evidence` | `advanced` | - | `read` | View automatically-mined constraints from past workflow failures. The system learns rules like 'files in runtime/ must include imports' from repeated failures. |
 | `praxis_friction` | `evidence` | `advanced` | - | `read` | View the friction ledger — a record of every time a guardrail blocked or warned about an action (scope violations, secret leaks, policy bounces). |
 | `praxis_receipts` | `evidence` | `advanced` | - | `read` | Search through past workflow results and analyze costs. Every workflow run produces receipts — this tool lets you search them by keyword and analyze token/cost spending. |
+| `praxis_data_dictionary` | `general` | `advanced` | - | `read` | Unified data dictionary authority. Auto-projects field descriptors for every injected object (tables, object_types, integrations, datasets, ingest payloads, operator decisions, receipts, MCP tools). Operator overrides win over projected rows. |
 | `praxis_governance` | `governance` | `advanced` | - | `read` | Safety checks before dispatching work. Scan prompts for leaked secrets (API keys, tokens, passwords) or verify that a set of file paths falls within allowed scope. |
 | `praxis_heal` | `governance` | `advanced` | - | `read` | Diagnose why a workflow job failed and get a recommended recovery action: retry (transient error), escalate (needs human attention), skip (non-critical), or halt (stop the pipeline). |
-| `praxis_integration` | `integration` | `advanced` | - | `dispatch`, `read` | Call, list, or describe registered integrations (API connectors, webhooks, and other external services). |
+| `praxis_integration` | `integration` | `advanced` | `workflow integration` | `dispatch`, `read`, `write` | Call, list, or describe registered integrations (API connectors, webhooks, and other external services). |
 | `praxis_provider_onboard` | `integration` | `advanced` | - | `read`, `write` | Onboard a CLI or API provider into Praxis Engine through one catalog-backed operation. Probes transport, discovers models, writes onboarding authority, and performs the canonical post-onboarding sync. |
 | `praxis_graph` | `knowledge` | `advanced` | - | `read` | Explore connections from one knowledge-graph entity. Shows what an entity depends on, what depends on it, and the blast radius of changes. |
 | `praxis_ingest` | `knowledge` | `advanced` | - | `write` | Store new information in the knowledge graph so it can be recalled later via praxis_recall. Content is automatically entity-extracted, deduplicated, and embedded for vector search. |
@@ -240,6 +241,30 @@ Example input:
 }
 ```
 
+### General
+
+#### `praxis_data_dictionary`
+
+- Surface: `general`
+- Tier: `advanced`
+- Badges: `advanced`, `general`
+- Risks: `read`
+- CLI entrypoint: `workflow tools call praxis_data_dictionary`
+- CLI schema help: `workflow tools describe praxis_data_dictionary`
+- When to use: Browse or edit field descriptors for any injected object kind.
+- When not to use: Don't use for per-column SQL schema checks — those are covered by praxis_query 'schema for <table>'.
+- Selector: `action`; default `list`; values `list`, `describe`, `set_override`, `clear_override`, `reproject`
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "action": "list",
+  "include_layers": false
+}
+```
+
 ### Governance
 
 #### `praxis_governance`
@@ -293,13 +318,14 @@ Example input:
 
 - Surface: `integration`
 - Tier: `advanced`
-- Badges: `advanced`, `integration`, `dispatches-work`
-- Risks: `dispatch`, `read`
-- CLI entrypoint: `workflow tools call praxis_integration`
+- Badges: `advanced`, `integration`, `alias:integration`, `mutates-state`, `dispatches-work`
+- Risks: `dispatch`, `read`, `write`
+- CLI entrypoint: `workflow integration`
 - CLI schema help: `workflow tools describe praxis_integration`
 - When to use: List integrations, inspect one, validate credentials, or invoke an integration action.
 - When not to use: Do not use it to build connectors or launch workflows.
-- Selector: `action`; default `list`; values `call`, `list`, `describe`, `test_credentials`, `health`
+- Recommended alias: `workflow integration`
+- Selector: `action`; default `list`; values `call`, `list`, `describe`, `test_credentials`, `health`, `create`, `set_secret`, `reload`
 - Required args: (none)
 
 Example input:
@@ -499,7 +525,7 @@ Example input:
 - When to use: Curate, score, and promote evidence-linked training/eval data per specialist; export reproducible JSONL with manifest hashes.
 - When not to use: Do not use for raw SQL or for writing receipts/decisions directly — those have their own surfaces.
 - Recommended alias: `workflow dataset`
-- Selector: `action`; default `summary`; values `summary`, `candidates_scan`, `candidates_list`, `candidate_inspect`, `candidate_promote`, `candidate_reject`, `preference_suggest`, `preference_create`, `eval_add`, `promotion_supersede`, `promotions_list`, `policy_list`, `policy_show`, `policy_record`, `lineage`, `manifests_list`, `export`, `stale_reconcile`, `projection_refresh`
+- Selector: `action`; default `summary`; values `summary`, `candidates_scan`, `candidates_list`, `candidate_inspect`, `candidate_promote`, `candidate_reject`, `inbox`, `preference_suggest`, `preference_create`, `eval_add`, `promotion_supersede`, `promotions_list`, `policy_list`, `policy_show`, `policy_record`, `lineage`, `manifests_list`, `export`, `stale_reconcile`, `projection_refresh`
 - Required args: (none)
 
 Example input:

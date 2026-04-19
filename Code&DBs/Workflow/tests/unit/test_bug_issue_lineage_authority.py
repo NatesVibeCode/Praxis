@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -9,7 +10,7 @@ _WORKFLOW_ROOT = Path(__file__).resolve().parents[2]
 if str(_WORKFLOW_ROOT) not in sys.path:
     sys.path.insert(0, str(_WORKFLOW_ROOT))
 
-from runtime.bug_tracker import Bug, BugCategory, BugSeverity, BugStatus, BugTracker
+from runtime.bug_tracker import Bug, BugCategory, BugSeverity, BugStatus, BugTracker, afile_bug
 import runtime.engineering_observability as observability_mod
 from surfaces.api.handlers import _bug_surface_contract as bug_contract
 from surfaces.api.handlers._shared import _bug_to_dict
@@ -85,6 +86,47 @@ class _RecordingConn:
         }
 
 
+class _AsyncRecordingBugConn:
+    def __init__(self) -> None:
+        self.insert_query: str | None = None
+        self.insert_params: tuple[object, ...] | None = None
+
+    async def execute(self, query: str, *params: object):
+        self.insert_query = query
+        self.insert_params = params
+        return "INSERT 0 1"
+
+    async def fetchrow(self, query: str, *params: object):
+        if query.startswith("SELECT 1 FROM"):
+            return {"exists": 1}
+        if "SELECT * FROM bugs" not in query or self.insert_params is None:
+            return None
+        return {
+            "bug_id": self.insert_params[0],
+            "bug_key": self.insert_params[1],
+            "title": self.insert_params[2],
+            "severity": self.insert_params[3],
+            "status": self.insert_params[4],
+            "priority": self.insert_params[5],
+            "category": self.insert_params[6],
+            "description": self.insert_params[7],
+            "summary": self.insert_params[8],
+            "source_kind": self.insert_params[9],
+            "discovered_in_run_id": self.insert_params[10],
+            "discovered_in_receipt_id": self.insert_params[11],
+            "owner_ref": self.insert_params[12],
+            "source_issue_id": self.insert_params[13],
+            "decision_ref": self.insert_params[14],
+            "opened_at": self.insert_params[15],
+            "resolved_at": None,
+            "created_at": self.insert_params[16],
+            "updated_at": self.insert_params[17],
+            "filed_by": self.insert_params[18],
+            "tags": self.insert_params[19],
+            "resume_context": self.insert_params[20],
+        }
+
+
 class _FakeBugTrackerMod:
     class BugSeverity:
         P2 = BugSeverity.P2
@@ -111,6 +153,51 @@ def test_bug_tracker_file_bug_persists_source_issue_id() -> None:
     assert "source_issue_id" in conn.insert_query
     assert bug.source_issue_id == "issue.dispatch-gap"
     assert _bug_to_dict(bug)["source_issue_id"] == "issue.dispatch-gap"
+
+
+def test_async_file_bug_uses_canonical_bug_tracker_insert_contract() -> None:
+    conn = _AsyncRecordingBugConn()
+
+    row, similar = asyncio.run(
+        afile_bug(
+            conn,
+            title="Async lineage",
+            severity="high",
+            category=BugCategory.RUNTIME,
+            description="Async operator surfaces should use the same bug contract.",
+            filed_by="operator_write",
+            source_kind="issue_promotion",
+            source_issue_id="issue.dispatch-gap",
+        )
+    )
+
+    assert similar == []
+    assert conn.insert_query is not None
+    assert "source_issue_id" in conn.insert_query
+    assert row["bug_id"].startswith("BUG-")
+    assert row["bug_key"] == row["bug_id"].lower().replace("-", "_")
+    assert row["status"] == "OPEN"
+    assert row["severity"] == "P1"
+    assert row["priority"] == "P1"
+    assert row["category"] == "RUNTIME"
+    assert row["filed_by"] == "operator_write"
+    assert row["source_issue_id"] == "issue.dispatch-gap"
+
+
+def test_issue_promotion_routes_through_bug_tracker_authority() -> None:
+    source = (
+        Path(__file__).resolve().parents[2]
+        / "surfaces"
+        / "api"
+        / "operator_write.py"
+    ).read_text()
+    start = source.index("    async def _ensure_issue_promoted_to_bug(")
+    end = source.index("    async def _ensure_bug_promoted_to_roadmap(")
+    promotion_body = source[start:end]
+
+    assert "afile_bug(" in promotion_body
+    assert "INSERT INTO bugs" not in promotion_body
+    assert "_auto_promoted_issue_bug_id" not in source
 
 
 def test_file_bug_payload_forwards_source_issue_id_to_tracker() -> None:

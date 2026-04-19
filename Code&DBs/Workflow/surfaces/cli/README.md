@@ -12,7 +12,8 @@ Owns:
   with relevance-ranked matches that lift exact alias and entrypoint hits first,
   and `--exact` when you already know the alias, name, or entrypoint; single-hit
   searches also print the direct describe and entrypoint commands, while empty
-  searches now print broadening hints instead of ending on a bare zero
+  searches now print broadening hints instead of ending on a bare zero; `workflow
+  tools help <list|search|describe|call>` prints targeted subcommand usage
 - HTTP route discovery via `praxis workflow api routes` and flat alias `praxis workflow routes`, including `--search`,
   `--method`, `--tag`, and `--path-prefix` filters, plus route-facet summaries
   plus `--visibility` for public vs internal slices, and `workflow help routes`

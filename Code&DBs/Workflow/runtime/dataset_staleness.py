@@ -13,7 +13,7 @@ Two passes per tick:
 
    - a ``semantic_assertion`` whose ``assertion_status = 'retracted'``,
      or
-   - a ``bug`` whose ``status = 'wont_fix'``.
+   - a ``bug`` whose canonical ``status = 'WONT_FIX'``.
 
    For each candidate flipped to ``evidence_stale``, every active
    promotion referencing it gets superseded by a tombstone promotion.
@@ -116,7 +116,7 @@ async def reconcile_evidence_staleness(conn: _Connection) -> list[str]:
             wontfix_bugs AS (
                 SELECT bug_id::text AS evidence_ref
                   FROM bugs
-                 WHERE status = 'wont_fix'
+                 WHERE UPPER(status) = 'WONT_FIX'
             ),
             stale_links AS (
                 SELECT DISTINCT l.candidate_id

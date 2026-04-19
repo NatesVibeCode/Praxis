@@ -14,6 +14,7 @@ os.environ.setdefault("WORKFLOW_DATABASE_URL", "postgresql://postgres@localhost:
 import surfaces.api.rest as rest
 from surfaces.cli import workflow_cli as legacy_workflow_cli
 from surfaces.cli.main import main as workflow_cli_main
+from surfaces.cli.commands import authority as authority_commands
 from surfaces.cli.commands import operate as operate_commands
 from surfaces.cli.commands import workflow as workflow_commands
 
@@ -104,6 +105,8 @@ def test_top_level_help_mentions_routes_alias() -> None:
     assert workflow_cli_main(["--help"], stdout=stdout) == 0
     rendered = stdout.getvalue()
     assert "workflow routes" in rendered
+    assert "workflow integrations" in rendered
+    assert "workflow integration list" in rendered
     assert "workflow records" not in rendered
     assert "workflow defs <create|update>" not in rendered
 
@@ -115,8 +118,134 @@ def test_commands_index_mentions_routes_alias() -> None:
     rendered = stdout.getvalue()
     assert "workflow routes" in rendered
     assert "Alias for workflow API route discovery" in rendered
+    assert "workflow integrations" in rendered
+    assert "workflow api integrations" in rendered
+    assert "workflow api data-dictionary" in rendered
+    assert "workflow integration [list|describe|health|test|call|create|secret|reload]" in rendered
+    assert "workflow dictionary <list|describe|set-override|clear-override|reproject>" in rendered
+    assert "workflow authority-memory refresh" in rendered
     assert "workflow records <create|update|rename>" in rendered
     assert "workflow defs <create|update>" not in rendered
+
+
+def test_authority_memory_refresh_frontdoor_uses_projection_refresher(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    called = False
+
+    class _FakeResult:
+        def to_json(self) -> dict[str, object]:
+            return {
+                "projection_id": "authority_memory_projection",
+                "total_upserted": 9,
+                "total_deactivated": 1,
+            }
+
+    async def _fake_refresh_authority_memory_projection():
+        nonlocal called
+        called = True
+        return _FakeResult()
+
+    monkeypatch.setattr(
+        authority_commands,
+        "refresh_authority_memory_projection",
+        _fake_refresh_authority_memory_projection,
+    )
+    stdout = StringIO()
+
+    assert workflow_cli_main(["authority-memory", "refresh"], stdout=stdout) == 0
+    assert called is True
+    assert stdout.getvalue().strip() == "projection_id=authority_memory_projection upserted=9 deactivated=1"
+
+
+def test_data_dictionary_frontdoor_uses_canonical_alias(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_data_dictionary_tool(params: dict[str, object]):
+        captured.update(params)
+        return {
+            "action": "list",
+            "count": 1,
+            "objects": [
+                {
+                    "object_kind": "integration",
+                    "label": "Integration",
+                    "category": "integration",
+                    "summary": "External systems",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(authority_commands, "tool_praxis_data_dictionary", _fake_data_dictionary_tool)
+    stdout = StringIO()
+
+    assert workflow_cli_main(["dictionary", "list"], stdout=stdout) == 0
+    assert captured == {"action": "list", "category": None}
+    rendered = stdout.getvalue()
+    assert "1 object kind(s)" in rendered
+    assert "integration" in rendered
+
+
+def test_integration_frontdoor_lists_registered_integrations(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_run_cli_tool(tool_name: str, params: dict[str, object], **_kwargs):
+        captured["tool_name"] = tool_name
+        captured["params"] = dict(params)
+        return 0, {
+            "integrations": [
+                {
+                    "id": "ipify",
+                    "auth_status": "connected",
+                    "provider": "http",
+                    "capabilities": [{"action": "get_ip"}],
+                }
+            ],
+            "count": 1,
+        }
+
+    monkeypatch.setattr(operate_commands, "run_cli_tool", _fake_run_cli_tool)
+    stdout = StringIO()
+
+    assert workflow_cli_main(["integration", "list"], stdout=stdout) == 0
+    assert captured == {"tool_name": "praxis_integration", "params": {"action": "list"}}
+    rendered = stdout.getvalue()
+    assert "INTEGRATION" in rendered
+    assert "ipify" in rendered
+    assert "get_ip" in rendered
+
+
+def test_integration_create_requires_confirmation(monkeypatch: pytest.MonkeyPatch) -> None:
+    called = False
+
+    def _fake_run_cli_tool(tool_name: str, params: dict[str, object], **_kwargs):
+        nonlocal called
+        called = True
+        return 0, {"tool_name": tool_name, "params": dict(params)}
+
+    monkeypatch.setattr(operate_commands, "run_cli_tool", _fake_run_cli_tool)
+    stdout = StringIO()
+
+    rc = workflow_cli_main(
+        [
+            "integration",
+            "create",
+            "--id",
+            "ipify",
+            "--name",
+            "IPify",
+            "--capabilities-json",
+            '[{"action":"get_ip","method":"GET","path":"https://api.ipify.org/?format=json"}]',
+        ],
+        stdout=stdout,
+    )
+
+    assert rc == 2
+    assert called is False
+    rendered = stdout.getvalue()
+    assert "tool: praxis_integration" in rendered
+    assert "risk: write" in rendered
+    assert "confirmation required" in rendered
 
 
 def test_api_help_mentions_route_discovery() -> None:
@@ -124,9 +253,13 @@ def test_api_help_mentions_route_discovery() -> None:
 
     assert workflow_cli_main(["api", "--help"], stdout=stdout) == 0
     rendered = stdout.getvalue()
-    assert "workflow api [routes|--host HOST|--port PORT]" in rendered
+    assert "workflow api [routes|integrations|data-dictionary|--host HOST|--port PORT]" in rendered
     assert "routes        show and filter the live HTTP route catalog without starting the server" in rendered
+    assert "integrations  show and filter the /api/integrations route scope without starting the server" in rendered
+    assert "data-dictionary show and filter the /api/data-dictionary route scope without starting the server" in rendered
     assert "Flat alias: workflow routes" in rendered
+    assert "workflow integrations" in rendered
+    assert "workflow api data-dictionary" in rendered
     assert "Discovery shortcuts:" in rendered
     assert "workflow help routes" in rendered
 
@@ -136,8 +269,9 @@ def test_routes_help_alias_mentions_route_discovery() -> None:
 
     assert workflow_cli_main(["help", "routes"], stdout=stdout) == 0
     rendered = stdout.getvalue()
-    assert "workflow api [routes|--host HOST|--port PORT]" in rendered
+    assert "workflow api [routes|integrations|data-dictionary|--host HOST|--port PORT]" in rendered
     assert "Flat alias: workflow routes" in rendered
+    assert "workflow integrations" in rendered
     assert "workflow tools list" in rendered
 
 
@@ -149,6 +283,54 @@ def test_api_routes_help_is_a_successful_discovery_command() -> None:
     assert "workflow routes --json" in rendered
     assert "Discovery shortcuts:" in rendered
     assert "workflow help routes" in rendered
+
+
+@pytest.mark.parametrize(
+    ("argv", "path_prefix"),
+    [
+        (["integrations", "--search", "health", "--json"], "/api/integrations"),
+        (["api", "integrations", "--search", "health", "--json"], "/api/integrations"),
+        (["api", "data-dictionary", "--search", "health", "--json"], "/api/data-dictionary"),
+    ],
+)
+def test_scoped_api_route_aliases_forward_the_expected_path_prefix(
+    argv: list[str],
+    path_prefix: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_list_api_routes(**kwargs):
+        captured.update(kwargs)
+        return {
+            "count": 1,
+            "docs_url": "/docs",
+            "openapi_url": "/openapi.json",
+            "redoc_url": "/redoc",
+            "filters": {key: value for key, value in kwargs.items() if value is not None},
+            "routes": [
+                {
+                    "path": path_prefix,
+                    "methods": ["GET"],
+                    "summary": "Scoped route discovery",
+                    "description": "Scoped route discovery",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(rest, "list_api_routes", _fake_list_api_routes)
+    stdout = StringIO()
+
+    assert workflow_cli_main(argv, stdout=stdout) == 0
+    assert captured == {
+        "search": "health",
+        "method": None,
+        "tag": None,
+        "path_prefix": path_prefix,
+        "visibility": "public",
+    }
+    payload = json.loads(stdout.getvalue())
+    assert payload["filters"]["path_prefix"] == path_prefix
 
 
 def test_api_routes_frontdoor_supports_discovery_filters(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -391,6 +573,7 @@ def test_api_routes_frontdoor_renders_route_facets(monkeypatch: pytest.MonkeyPat
     assert "methods: GET=2, POST=1" in rendered
     assert "tags:    workflow=2, operator=1" in rendered
     assert "try:    workflow api routes --tag workflow --method GET" in rendered
+    assert "workflow routes is the flat alias" in rendered
     assert "workflow routes --json" in rendered
 
 
@@ -514,9 +697,104 @@ def test_workflow_run_prompt_frontdoor_uses_prompt_compiler(monkeypatch: pytest.
         "timeout": 300,
         "task_type": None,
         "system_prompt": "You are a code editor. Return ONLY valid JSON structured output.",
+        "workspace_ref": None,
+        "runtime_profile_ref": None,
     }
     assert captured["launch_kwargs"]["prompt_launch_spec"].workflow_id == "workflow_cli_prompt"
     assert captured["launch_kwargs"]["requested_by_ref"] == "workflow.run.prompt"
+
+
+def test_workflow_run_prompt_frontdoor_routes_scratch_lane(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _PromptLaunchSpec:
+        name = "prompt launch"
+        workflow_id = "workflow_cli_prompt"
+        phase = "execute"
+        jobs = [{"label": "run"}]
+
+        def to_inline_spec_dict(self) -> dict[str, object]:
+            return {
+                "name": self.name,
+                "workflow_id": self.workflow_id,
+                "phase": self.phase,
+                "jobs": self.jobs,
+            }
+
+    def _fake_compile_prompt_launch_spec(**kwargs):
+        captured["compile_kwargs"] = kwargs
+        return _PromptLaunchSpec()
+
+    monkeypatch.setattr(workflow_commands, "_default_prompt_provider_slug", lambda: "openai")
+    monkeypatch.setattr(workflow_commands, "compile_prompt_launch_spec", _fake_compile_prompt_launch_spec)
+    monkeypatch.setattr(
+        workflow_commands,
+        "_workflow_cli",
+        lambda: SimpleNamespace(_submit_workflow_launch=lambda **_kwargs: 0),
+    )
+    stdout = StringIO()
+
+    assert workflow_commands._run_command(
+        [
+            "-p",
+            "parse this public PDF and report the tables",
+            "--scratch",
+            "--foreground-submit",
+        ],
+        stdout=stdout,
+    ) == 0
+
+    assert captured["compile_kwargs"]["workspace_ref"] == "scratch_agent"
+    assert captured["compile_kwargs"]["runtime_profile_ref"] == "scratch_agent"
+
+
+def test_workflow_run_prompt_frontdoor_accepts_runtime_profile_ref(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _PromptLaunchSpec:
+        name = "prompt launch"
+        workflow_id = "workflow_cli_prompt"
+        phase = "execute"
+        jobs = [{"label": "run"}]
+
+        def to_inline_spec_dict(self) -> dict[str, object]:
+            return {
+                "name": self.name,
+                "workflow_id": self.workflow_id,
+                "phase": self.phase,
+                "jobs": self.jobs,
+            }
+
+    def _fake_compile_prompt_launch_spec(**kwargs):
+        captured["compile_kwargs"] = kwargs
+        return _PromptLaunchSpec()
+
+    monkeypatch.setattr(workflow_commands, "_default_prompt_provider_slug", lambda: "openai")
+    monkeypatch.setattr(workflow_commands, "compile_prompt_launch_spec", _fake_compile_prompt_launch_spec)
+    monkeypatch.setattr(
+        workflow_commands,
+        "_workflow_cli",
+        lambda: SimpleNamespace(_submit_workflow_launch=lambda **_kwargs: 0),
+    )
+    stdout = StringIO()
+
+    assert workflow_commands._run_command(
+        [
+            "-p",
+            "inspect a temporary artifact",
+            "--runtime-profile",
+            "scratch_agent",
+            "--workspace",
+            "scratch_agent",
+            "--foreground-submit",
+        ],
+        stdout=stdout,
+    ) == 0
+
+    assert captured["compile_kwargs"]["workspace_ref"] == "scratch_agent"
+    assert captured["compile_kwargs"]["runtime_profile_ref"] == "scratch_agent"
 
 
 def test_workflow_run_prompt_frontdoor_reports_unadmitted_provider(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -965,6 +1243,8 @@ def test_root_help_is_discoverable() -> None:
     assert "Most used:" in rendered
     assert "workflow run <spec.json>" in rendered
     assert "workflow mcp" in rendered
+    assert "workflow integrations" in rendered
+    assert "workflow commands --json" in rendered
     assert "workflow native-operator instance" in rendered
     assert "workflow help api" in rendered
     assert "workflow help commands" in rendered
@@ -983,8 +1263,23 @@ def test_commands_root_and_help_topic_show_the_command_index() -> None:
     assert commands_rendered == help_rendered
     assert "Command index:" in commands_rendered
     assert "workflow commands" in commands_rendered
-    assert "workflow mcp [list|search|describe|call]" in commands_rendered
-    assert "workflow tools [list|search|describe|call]" in commands_rendered
+    assert "workflow mcp [list|search|describe|call|help]" in commands_rendered
+    assert "workflow tools [list|search|describe|call|help]" in commands_rendered
+
+
+def test_commands_root_json_exposes_machine_readable_index() -> None:
+    stdout = StringIO()
+
+    assert workflow_cli_main(["commands", "--json"], stdout=stdout) == 0
+
+    payload = json.loads(stdout.getvalue())
+    assert payload["usage"] == "workflow commands"
+    assert any(entry["command"] == "workflow commands" for entry in payload["entries"])
+    assert any(
+        entry["command"] == "workflow tools [list|search|describe|call|help]"
+        for entry in payload["entries"]
+    )
+    assert "run `workflow commands --json` for machine-readable discovery" in payload["tips"]
 
 
 def test_help_can_show_command_specific_usage() -> None:
@@ -1041,6 +1336,53 @@ def test_commands_root_does_not_import_workflow_command_table(
     assert workflow_cli_main(["commands"], stdout=stdout) == 0
     rendered = stdout.getvalue()
     assert "workflow commands" in rendered
+
+
+def test_active_frontdoor_uses_operator_status_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_run_cli_tool(tool_name: str, params: dict[str, object]):
+        captured["tool_name"] = tool_name
+        captured["params"] = dict(params)
+        return 0, {
+            "since_hours": 24,
+            "pass_rate": 0.5,
+            "adjusted_pass_rate": 0.75,
+            "observability_state": "ready",
+            "queue_depth": 4,
+            "queue_depth_status": "ok",
+            "queue_depth_pending": 3,
+            "queue_depth_ready": 0,
+            "queue_depth_claimed": 0,
+            "queue_depth_running": 1,
+            "queue_depth_total": 4,
+            "in_flight_workflows": [
+                {
+                    "run_id": "workflow_live",
+                    "workflow_name": "Live Workflow",
+                    "total_jobs": 2,
+                    "completed_jobs": 1,
+                }
+            ],
+        }
+
+    monkeypatch.setattr(workflow_commands, "run_cli_tool", _fake_run_cli_tool)
+
+    stdout = StringIO()
+    assert workflow_cli_main(["active"], stdout=stdout) == 0
+
+    assert captured == {
+        "tool_name": "praxis_status_snapshot",
+        "params": {"since_hours": 24},
+    }
+    payload = json.loads(stdout.getvalue())
+    assert payload["source"] == "praxis_status_snapshot"
+    assert payload["active_runs"] == ["workflow_live"]
+    assert payload["count"] == 1
+    assert payload["runs"][0]["workflow_name"] == "Live Workflow"
+    assert payload["queue"]["running"] == 1
 
 
 def test_generate_frontdoor_uses_direct_compat_handler(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1131,7 +1473,7 @@ def test_help_can_show_api_usage() -> None:
     assert workflow_cli_main(["help", "api"], stdout=stdout) == 0
 
     rendered = stdout.getvalue()
-    assert "workflow api [routes|--host HOST|--port PORT]" in rendered
+    assert "workflow api [routes|integrations|data-dictionary|--host HOST|--port PORT]" in rendered
     assert "routes        show and filter the live HTTP route catalog without starting the server" in rendered
 
 

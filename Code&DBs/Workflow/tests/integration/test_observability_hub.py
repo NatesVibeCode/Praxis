@@ -262,8 +262,8 @@ class TestIngestReceipt:
         assert rollup.total_successes == 1
         assert rollup.overall_pass_rate == 1.0
 
-    def test_auto_bug_filing_on_repeated_failures(self, hub):
-        """After 3+ receipts with the same failure code, a bug should be auto-filed."""
+    def test_ingest_receipt_does_not_auto_file_repeated_failures(self, hub):
+        """ReceiptStore owns workflow-result auto-bug filing; the hub only tracks panel signals."""
         code = f"TIMEOUT_EXCEEDED_{uuid.uuid4().hex[:8]}"
         for i in range(3):
             hub.ingest_receipt(
@@ -275,12 +275,10 @@ class TestIngestReceipt:
             )
 
         bugs = [bug for bug in hub.get_bugs(limit=500) if code in bug.title]
-        assert len(bugs) == 1
-        assert code in bugs[0].title
-        assert bugs[0].filed_by == "observability_hub"
+        assert bugs == []
+        assert hub.operator_snapshot().recent_failure_codes.get(code) == 3
 
-    def test_auto_bug_dedup(self, hub):
-        """Filing the same failure code 6 times should still only produce 1 bug."""
+    def test_repeated_failure_tracking_does_not_create_bug_authority(self, hub):
         code = f"TIMEOUT_EXCEEDED_{uuid.uuid4().hex[:8]}"
         for i in range(6):
             hub.ingest_receipt(
@@ -292,9 +290,10 @@ class TestIngestReceipt:
             )
 
         bugs = [bug for bug in hub.get_bugs(limit=500) if code in bug.title]
-        assert len(bugs) == 1
+        assert bugs == []
+        assert hub.operator_snapshot().recent_failure_codes.get(code) == 6
 
-    def test_auto_bug_links_failure_evidence_and_signature_tags(self, hub):
+    def test_receipt_identity_is_tracked_without_evidence_side_effects(self, hub):
         code = f"TIMEOUT_EXCEEDED_{uuid.uuid4().hex[:8]}"
         for i in range(3):
             occurred_at = datetime.now(timezone.utc)
@@ -321,18 +320,11 @@ class TestIngestReceipt:
             )
 
         bugs = [bug for bug in hub.get_bugs(limit=500) if code in bug.title]
-        assert len(bugs) == 1
-        bug = bugs[0]
-        assert any(tag.startswith("failure_code:") for tag in bug.tags)
-        assert "auto-filed" in bug.tags
+        assert bugs == []
+        assert hub.operator_snapshot().last_run_id == "run-2"
+        assert hub.operator_snapshot().last_failure_category == "runtime_failed"
 
-        evidence = hub._get_bug_tracker().list_evidence(bug.bug_id)
-        roles = {(row["evidence_kind"], row["evidence_role"]) for row in evidence}
-        assert ("receipt", "observed_in") in roles
-        assert ("run", "observed_in") in roles
-
-    def test_different_failure_codes_file_separate_bugs(self, hub):
-        """Different failure codes each get their own bug after threshold."""
+    def test_different_failure_codes_track_panel_counts_only(self, hub):
         codes = [f"CODE_A_{uuid.uuid4().hex[:8]}", f"CODE_B_{uuid.uuid4().hex[:8]}"]
         for code in codes:
             for i in range(3):
@@ -345,10 +337,10 @@ class TestIngestReceipt:
                 )
 
         bugs = [bug for bug in hub.get_bugs(limit=500) if any(code in bug.title for code in codes)]
-        assert len(bugs) == 2
-        titles = set(b.title for b in bugs)
-        assert any(codes[0] in t for t in titles)
-        assert any(codes[1] in t for t in titles)
+        assert bugs == []
+        snapshot = hub.operator_snapshot()
+        assert snapshot.recent_failure_codes.get(codes[0]) == 3
+        assert snapshot.recent_failure_codes.get(codes[1]) == 3
 
 
 class TestRefreshOperatorPanel:

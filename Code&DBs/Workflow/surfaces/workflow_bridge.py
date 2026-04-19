@@ -18,7 +18,7 @@ from runtime.claims import (
     ClaimLeaseProposalSnapshot,
     route_snapshot_allows_worker_claim,
 )
-from runtime.domain import RunState, RuntimeBoundaryError
+from runtime.domain import RuntimeBoundaryError
 from runtime.subscriptions import (
     WorkerSubscriptionAcknowledgement,
     WorkerSubscriptionBatch,
@@ -68,44 +68,6 @@ class WorkflowAcknowledgement:
     acknowledgement: WorkerSubscriptionAcknowledgement
     lifecycle_authority: str = _LIFECYCLE_AUTHORITY
     bus_authority: str = _BUS_AUTHORITY
-
-
-def _snapshot_from_run_row(
-    row: dict[str, object],
-    *,
-    run_id: str,
-) -> ClaimLeaseProposalSnapshot:
-    current_state = row.get("current_state")
-    if isinstance(current_state, RunState):
-        state = current_state
-    else:
-        state = RunState(str(current_state or RunState.QUEUED.value))
-    request_envelope = row.get("request_envelope")
-    claim_id = ""
-    if isinstance(request_envelope, dict):
-        raw_claim_id = request_envelope.get("claim_id")
-        if isinstance(raw_claim_id, str) and raw_claim_id.strip():
-            claim_id = raw_claim_id.strip()
-    if not claim_id:
-        claim_id = f"claim:{run_id}"
-    return ClaimLeaseProposalSnapshot(
-        run_id=str(row.get("run_id") or run_id),
-        workflow_id=str(row.get("workflow_id") or ""),
-        request_id=str(row.get("request_id") or ""),
-        current_state=state,
-        claim_id=claim_id,
-        lease_id=None,
-        proposal_id=None,
-        attempt_no=int(row.get("attempt_no") or 1) if str(row.get("attempt_no") or "").strip() else 1,
-        transition_seq=0,
-        sandbox_group_id=None,
-        sandbox_session_id=None,
-        share_mode="exclusive",
-        reuse_reason_code=None,
-        last_event_id=(
-            str(row.get("last_event_id") or "").strip() or None
-        ),
-    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -232,29 +194,7 @@ def build_live_workflow_bridge(database_url: str) -> WorkflowBridge:
             async def _inspect():
                 conn = await asyncpg.connect(self._url, timeout=5.0)
                 try:
-                    try:
-                        return await self._runtime.inspect_route(conn, run_id=run_id)
-                    except RuntimeBoundaryError as exc:
-                        message = str(exc)
-                        if "runtime route" not in message or "missing" not in message:
-                            raise
-                        row = await conn.fetchrow(
-                            """
-                            SELECT run_id,
-                                   workflow_id,
-                                   request_id,
-                                   current_state,
-                                   request_envelope,
-                                   attempt_no,
-                                   last_event_id
-                            FROM workflow_runs
-                            WHERE run_id = $1
-                            """,
-                            run_id,
-                        )
-                        if row is None:
-                            raise
-                        return _snapshot_from_run_row(dict(row), run_id=run_id)
+                    return await self._runtime.inspect_route(conn, run_id=run_id)
                 finally:
                     await conn.close()
 

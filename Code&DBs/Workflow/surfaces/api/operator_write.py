@@ -32,6 +32,7 @@ from runtime.cache_invalidation import (
     CACHE_KIND_ROUTE_AUTHORITY_SNAPSHOT,
     aemit_cache_invalidation,
 )
+from runtime.bug_tracker import BugCategory, afile_bug
 from runtime.circuit_breaker import invalidate_circuit_breaker_override_cache
 from runtime.event_log import CHANNEL_DATASET, CHANNEL_SEMANTIC_ASSERTION, aemit
 from runtime.instance import NativeWorkflowInstance, resolve_native_instance
@@ -1079,11 +1080,6 @@ def _issue_key_from_issue_id(issue_id: str) -> str:
     if issue_id.startswith(prefix):
         return f"issue.{issue_id[len(prefix):]}"
     return issue_id.replace("_", ".")
-
-
-def _auto_promoted_issue_bug_id(issue_id: str) -> str:
-    suffix = _scope_fragment(issue_id, fallback="issue").replace("-", ".")
-    return f"bug.auto_issue.{suffix}"
 
 
 def _task_route_eligibility_record_from_row(row: Mapping[str, Any]) -> TaskRouteEligibilityRecord:
@@ -2741,95 +2737,45 @@ class OperatorControlFrontdoor:
             issue_row = await self._fetch_issue_row(conn, issue_id=issue_id)
             if issue_row is None:
                 return None, None
-            bug_id = _auto_promoted_issue_bug_id(issue_id)
-            created_at_value = (
-                _normalize_as_of(
-                    created_at,
-                    error_type=ValueError,
-                    reason_code="operator_control.invalid_created_at",
-                )
-                if created_at is not None
-                else _normalize_as_of(
-                    issue_row["created_at"],
-                    error_type=ValueError,
-                    reason_code="operator_control.invalid_created_at",
-                )
-            )
-            updated_at_value = (
-                created_at_value
-                if updated_at is None
-                else _normalize_as_of(
-                    updated_at,
-                    error_type=ValueError,
-                    reason_code="operator_control.invalid_updated_at",
-                )
-            )
-            await conn.execute(
-                """
-                INSERT INTO bugs (
-                    bug_id,
-                    bug_key,
-                    title,
-                    status,
-                    severity,
-                    priority,
-                    summary,
-                    source_kind,
-                    discovered_in_run_id,
-                    discovered_in_receipt_id,
-                    owner_ref,
-                    source_issue_id,
-                    decision_ref,
-                    resolution_summary,
-                    opened_at,
-                    resolved_at,
-                    created_at,
-                    updated_at
-                ) VALUES (
-                    $1, $2, $3, 'open', $4, $5, $6, $7, $8, $9, $10, $11, $12, NULL, $13, NULL, $14, $15
-                )
-                ON CONFLICT (bug_id) DO UPDATE SET
-                    bug_key = EXCLUDED.bug_key,
-                    title = EXCLUDED.title,
-                    severity = EXCLUDED.severity,
-                    priority = EXCLUDED.priority,
-                    summary = EXCLUDED.summary,
-                    source_kind = EXCLUDED.source_kind,
-                    discovered_in_run_id = EXCLUDED.discovered_in_run_id,
-                    discovered_in_receipt_id = EXCLUDED.discovered_in_receipt_id,
-                    owner_ref = EXCLUDED.owner_ref,
-                    source_issue_id = EXCLUDED.source_issue_id,
-                    decision_ref = EXCLUDED.decision_ref,
-                    opened_at = EXCLUDED.opened_at,
-                    updated_at = EXCLUDED.updated_at
-                """,
-                bug_id,
-                bug_id.replace(".", "-"),
-                _require_text(issue_row.get("title"), field_name="issue.title"),
-                _require_text(issue_row.get("severity"), field_name="issue.severity"),
-                _require_text(issue_row.get("priority"), field_name="issue.priority"),
+            summary = (
                 f"Auto-promoted from {issue_id}: "
-                f"{_require_text(issue_row.get('summary'), field_name='issue.summary')}",
-                _require_text(issue_row.get("source_kind"), field_name="issue.source_kind"),
-                _optional_text(
+                f"{_require_text(issue_row.get('summary'), field_name='issue.summary')}"
+            )
+            bug_row, _similar_bugs = await afile_bug(
+                conn,
+                title=_require_text(issue_row.get("title"), field_name="issue.title"),
+                severity=_require_text(issue_row.get("severity"), field_name="issue.severity"),
+                category=BugCategory.OTHER,
+                description=summary,
+                filed_by="operator_write",
+                source_kind="issue_promotion",
+                decision_ref=_require_text(
+                    issue_row.get("decision_ref"),
+                    field_name="issue.decision_ref",
+                ),
+                discovered_in_run_id=_optional_text(
                     issue_row.get("discovered_in_run_id"),
                     field_name="issue.discovered_in_run_id",
                 ),
-                _optional_text(
+                discovered_in_receipt_id=_optional_text(
                     issue_row.get("discovered_in_receipt_id"),
                     field_name="issue.discovered_in_receipt_id",
                 ),
-                _optional_text(issue_row.get("owner_ref"), field_name="issue.owner_ref"),
-                issue_id,
-                _require_text(issue_row.get("decision_ref"), field_name="issue.decision_ref"),
-                _normalize_as_of(
-                    issue_row["opened_at"],
-                    error_type=ValueError,
-                    reason_code="operator_control.invalid_opened_at",
+                owner_ref=_optional_text(issue_row.get("owner_ref"), field_name="issue.owner_ref"),
+                source_issue_id=issue_id,
+                tags=(
+                    "auto-promoted",
+                    f"source_issue:{_scope_fragment(issue_id, fallback='issue')}",
                 ),
-                created_at_value,
-                updated_at_value,
+                resume_context={
+                    "promoted_from_issue_id": issue_id,
+                    "issue_source_kind": _require_text(
+                        issue_row.get("source_kind"),
+                        field_name="issue.source_kind",
+                    ),
+                },
             )
+            bug_id = _require_text(bug_row.get("bug_id"), field_name="bug_id")
             created = True
         else:
             bug_id = _require_text(existing_bug.get("bug_id"), field_name="bug_id")

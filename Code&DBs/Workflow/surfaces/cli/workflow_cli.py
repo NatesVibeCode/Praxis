@@ -22,6 +22,7 @@ import os
 import argparse
 import json
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -524,7 +525,6 @@ def cmd_stream(args: argparse.Namespace) -> int:
     try:
         pg_conn = _get_pg_conn()
         from runtime.workflow.unified import get_run_status
-        from runtime.workflow_notifications import WorkflowNotificationConsumer
 
         initial = get_run_status(pg_conn, args.run_id)
         if initial is None:
@@ -534,46 +534,166 @@ def cmd_stream(args: argparse.Namespace) -> int:
         total_jobs = int(initial.get("total_jobs") or 0)
         spec_name = initial.get("spec_name", "")
         status = initial.get("status", "unknown")
-        jobs = initial.get("jobs", [])
-        terminal_passed = sum(1 for job in jobs if job.get("status") == "succeeded")
-        terminal_failed = sum(1 for job in jobs if job.get("status") in ("failed", "dead_letter"))
+        terminal_states = {"succeeded", "failed", "dead_letter", "cancelled"}
+        terminal_job_states = {
+            "succeeded",
+            "failed",
+            "blocked",
+            "dead_letter",
+            "cancelled",
+            "parent_failed",
+        }
+
+        def _job_label(job: dict[str, object]) -> str:
+            return str(job.get("label") or job.get("job_label") or "")
+
+        def _job_agent(job: dict[str, object]) -> str:
+            return str(job.get("resolved_agent") or job.get("agent_slug") or "")
+
+        def _duration_seconds(job: dict[str, object]) -> float:
+            try:
+                return float(job.get("duration_ms") or 0) / 1000.0
+            except (TypeError, ValueError):
+                return 0.0
+
+        def _counts(status_data: dict[str, object]) -> tuple[int, int, int, int, int]:
+            rows = [job for job in status_data.get("jobs", []) if isinstance(job, dict)]
+            passed = sum(1 for job in rows if job.get("status") == "succeeded")
+            failed = sum(1 for job in rows if job.get("status") in {"failed", "blocked", "dead_letter", "parent_failed"})
+            active = sum(1 for job in rows if job.get("status") in {"claimed", "running"})
+            waiting = sum(1 for job in rows if job.get("status") in {"pending", "ready"})
+            completed = int(status_data.get("completed_jobs") or passed + failed)
+            return completed, passed, failed, active, waiting
+
+        def _elapsed_seconds(status_data: dict[str, object]) -> float:
+            started = status_data.get("created_at") or status_data.get("requested_at")
+            finished = status_data.get("finished_at")
+            if not isinstance(started, datetime):
+                return 0.0
+            end = finished if isinstance(finished, datetime) else datetime.now(timezone.utc)
+            return max(0.0, (end - started).total_seconds())
+
+        def _status_signature(status_data: dict[str, object]) -> tuple[object, ...]:
+            rows = [job for job in status_data.get("jobs", []) if isinstance(job, dict)]
+            return (
+                status_data.get("status"),
+                status_data.get("completed_jobs"),
+                tuple(
+                    (
+                        _job_label(job),
+                        job.get("status"),
+                        job.get("attempt"),
+                        job.get("claimed_by"),
+                        job.get("heartbeat_at"),
+                        job.get("finished_at"),
+                        job.get("last_error_code"),
+                    )
+                    for job in rows
+                ),
+            )
+
+        def _print_snapshot(status_data: dict[str, object]) -> None:
+            completed, passed, failed, active, waiting = _counts(status_data)
+            current_status = str(status_data.get("status") or "unknown")
+            elapsed = _elapsed_seconds(status_data)
+            print(
+                "status "
+                f"state={current_status} completed={completed}/{total_jobs} "
+                f"passed={passed} failed={failed} active={active} waiting={waiting} "
+                f"elapsed_s={elapsed:.1f}"
+            )
+            for job in status_data.get("jobs", []):
+                if not isinstance(job, dict):
+                    continue
+                job_status = str(job.get("status") or "")
+                if job_status not in {"claimed", "running", "ready"}:
+                    continue
+                detail = (
+                    "active "
+                    f"label={_job_label(job)} status={job_status} agent={_job_agent(job)}"
+                )
+                if job.get("attempt"):
+                    detail += f" attempt={job.get('attempt')}"
+                if job.get("claimed_by"):
+                    detail += f" claimed_by={job.get('claimed_by')}"
+                heartbeat_at = job.get("heartbeat_at")
+                if isinstance(heartbeat_at, datetime):
+                    age = (datetime.now(timezone.utc) - heartbeat_at).total_seconds()
+                    detail += f" heartbeat_age_s={max(0.0, age):.1f}"
+                print(detail)
+
+        def _print_terminal_jobs(status_data: dict[str, object], emitted_labels: set[str]) -> None:
+            completed, passed, failed, _, _ = _counts(status_data)
+            for job in status_data.get("jobs", []):
+                if not isinstance(job, dict):
+                    continue
+                label = _job_label(job)
+                job_status = str(job.get("status") or "")
+                if not label or label in emitted_labels or job_status not in terminal_job_states:
+                    continue
+                emitted_labels.add(label)
+                failure_code = str(
+                    job.get("failure_category")
+                    or job.get("last_error_code")
+                    or job.get("error_code")
+                    or ""
+                )
+                line = (
+                    "job    "
+                    f"label={label} status={job_status} agent={_job_agent(job)} "
+                    f"duration_s={_duration_seconds(job):.1f}"
+                )
+                if failure_code:
+                    line += f" failure_code={failure_code}"
+                print(line)
+                print(f"progress completed={completed} total={total_jobs} passed={passed} failed={failed}")
 
         print(f"start  run_id={args.run_id} spec={spec_name} total_jobs={total_jobs} status={status}")
+        _print_snapshot(initial)
 
-        if status in ("succeeded", "failed", "dead_letter", "cancelled"):
+        if status in terminal_states:
+            emitted_terminal_jobs: set[str] = set()
+            _print_terminal_jobs(initial, emitted_terminal_jobs)
+            _, terminal_passed, terminal_failed, _, _ = _counts(initial)
             print(f"done   status={status} passed={terminal_passed} failed={terminal_failed} total={total_jobs}")
-            return 0
+            return 0 if status in ("succeeded", "cancelled") else 1
 
-        consumer = WorkflowNotificationConsumer(pg_conn)
-        passed = 0
-        failed = 0
-        count = 0
-        for notif in consumer.iter_run(
-            args.run_id,
-            total_jobs,
-            timeout_seconds=args.timeout,
-            poll_interval=args.poll_interval,
-        ):
-            count += 1
-            if notif.status == "succeeded":
-                passed += 1
-            else:
-                failed += 1
-            print(
-                "job    "
-                f"label={notif.job_label} status={notif.status} agent={notif.agent_slug} "
-                f"duration_s={notif.duration_seconds:.1f}"
-                + (f" failure_code={notif.failure_code}" if notif.failure_code else "")
-            )
-            print(f"progress completed={count} total={total_jobs} passed={passed} failed={failed}")
+        deadline = time.monotonic() + float(args.timeout) if args.timeout is not None else None
+        last_signature = _status_signature(initial)
+        emitted_terminal_jobs: set[str] = set()
+        final = initial
+        while deadline is None or time.monotonic() < deadline:
+            sleep_for = max(0.1, float(args.poll_interval or 2.0))
+            if deadline is not None:
+                sleep_for = min(sleep_for, max(0.0, deadline - time.monotonic()))
+            if sleep_for > 0:
+                time.sleep(sleep_for)
 
-        final = get_run_status(pg_conn, args.run_id)
+            current = get_run_status(pg_conn, args.run_id)
+            if current is None:
+                final = None
+                break
+            final = current
+            signature = _status_signature(current)
+            if signature != last_signature:
+                _print_snapshot(current)
+                last_signature = signature
+
+            completed, passed, failed, _, _ = _counts(current)
+            _print_terminal_jobs(current, emitted_terminal_jobs)
+
+            current_status = str(current.get("status") or "unknown")
+            if current_status in terminal_states:
+                print(f"done   status={current_status} passed={passed} failed={failed} total={total_jobs}")
+                return 0 if current_status in ("succeeded", "cancelled") else 1
+
         if final is None:
+            print("done   status=not_found passed=0 failed=0 total=0")
+            return 1
+        completed, passed, failed, _, _ = _counts(final)
+        final_status = str(final.get("status") or "timeout")
+        if final_status not in terminal_states and completed < total_jobs:
             final_status = "timeout"
-        else:
-            final_status = final.get("status", "unknown")
-            if final_status not in ("succeeded", "failed", "dead_letter", "cancelled") and count < total_jobs:
-                final_status = "timeout"
         print(f"done   status={final_status} passed={passed} failed={failed} total={total_jobs}")
         return 0 if final_status in ("succeeded", "cancelled") else 1
     except Exception as exc:

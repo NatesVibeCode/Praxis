@@ -134,3 +134,10 @@ def test_docker_database_url_includes_explicit_postgres_role(
         "docker-resolved DSN must pin the canonical postgres role so libpq "
         "never falls back to the OS user (see BUG-5A367F0C)"
     )
+
+
+def test_authority_scripts_do_not_bake_machine_specific_postgres_dsn() -> None:
+    repo_root = Path(__file__).resolve().parents[4]
+    for relative in ("scripts/refresh_authority_memory.py", "scripts/praxis_atlas.py"):
+        script_text = (repo_root / relative).read_text(encoding="utf-8")
+        assert "praxis-postgres-1.orb.local" not in script_text

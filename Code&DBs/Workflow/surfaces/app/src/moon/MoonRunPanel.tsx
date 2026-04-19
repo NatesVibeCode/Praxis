@@ -16,13 +16,22 @@ const STATUS_DOT: Record<string, string> = {
   claimed: '#58a6ff',
   failed: '#f85149',
   dead_letter: '#f85149',
+  blocked: '#f85149',
+  parent_failed: '#f85149',
   pending: '#484f58',
   ready: '#8b949e',
   cancelled: '#8b949e',
 };
 
 const TERMINAL: Set<RunStatus> = new Set(['succeeded', 'failed', 'cancelled']);
-const TERMINAL_JOB_STATUSES = new Set<RunJob['status']>(['succeeded', 'failed', 'dead_letter', 'cancelled']);
+const TERMINAL_JOB_STATUSES = new Set<RunJob['status']>([
+  'succeeded',
+  'failed',
+  'dead_letter',
+  'blocked',
+  'cancelled',
+  'parent_failed',
+]);
 
 interface RunStreamEvent {
   jobs?: RunJob[];

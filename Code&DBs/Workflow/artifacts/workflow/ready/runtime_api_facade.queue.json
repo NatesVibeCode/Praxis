@@ -1,0 +1,20 @@
+{
+  "name": "runtime-api-facade",
+  "outcome_goal": "Enforce the surface/runtime boundary. Currently surfaces/api/* has 34 direct imports into 8 internal runtime modules (runtime.instance, runtime.recurring_review_repair_flow, runtime.work_item_workflow_bindings, runtime.execution, runtime.intake, runtime.post_workflow_sync, policy.workflow_classes, storage.postgres). Create `runtime/api.py` as the thin public facade that re-exports the exact set of functions surfaces need, and `runtime/domain.py` already exists — extend it if needed. Then rewrite every `from runtime.<internal> import X` or `from storage.postgres import X` in surfaces/api/* and surfaces/api/handlers/* to route through runtime.api or runtime.domain. No behavior change. No new dependencies. Final grep `from runtime\\.` under surfaces/api/ must match only `runtime.api` or `runtime.domain`.",
+  "task_type": "code_edit",
+  "agent": "anthropic/claude-sonnet-4-6",
+  "authoring_contract": {"artifact_kind": "refactor"},
+  "acceptance_contract": {
+    "verify_refs": [
+      "! grep -rE 'from runtime\\.(instance|recurring_review_repair_flow|work_item_workflow_bindings|execution|intake|post_workflow_sync)' 'Code&DBs/Workflow/surfaces/api'",
+      "! grep -rE 'from storage\\.postgres' 'Code&DBs/Workflow/surfaces/api'",
+      "! grep -rE 'from policy\\.workflow_classes' 'Code&DBs/Workflow/surfaces/api'",
+      "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/' -k 'surface or frontdoor or operator_write or workflow_query'"
+    ]
+  },
+  "anti_requirements": [
+    "Do not add behavior. This is a pure move + re-export.",
+    "Do not introduce a new abstraction layer. The facade is a flat module that re-exports existing callables verbatim.",
+    "Do not touch storage.postgres internals — callers should go through runtime.api (which in turn uses storage.postgres privately)."
+  ]
+}

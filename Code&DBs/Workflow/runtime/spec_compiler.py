@@ -158,6 +158,8 @@ class PromptLaunchSpec:
     phase: str
     graph_runtime_submit: bool
     jobs: list[dict[str, Any]]
+    workspace_ref: str | None = None
+    runtime_profile_ref: str | None = None
     definition_revision: str | None = None
     plan_revision: str | None = None
     packet_provenance: dict[str, Any] | None = None
@@ -170,6 +172,10 @@ class PromptLaunchSpec:
             "graph_runtime_submit": self.graph_runtime_submit,
             "jobs": self.jobs,
         }
+        if self.workspace_ref is not None:
+            spec_dict["workspace_ref"] = self.workspace_ref
+        if self.runtime_profile_ref is not None:
+            spec_dict["runtime_profile_ref"] = self.runtime_profile_ref
         if self.definition_revision is not None:
             spec_dict["definition_revision"] = self.definition_revision
         if self.plan_revision is not None:
@@ -439,6 +445,8 @@ def compile_prompt_launch_spec(
     timeout: int = 300,
     task_type: str | None = None,
     system_prompt: str | None = None,
+    workspace_ref: str | None = None,
+    runtime_profile_ref: str | None = None,
     workflow_id: str = "workflow_cli_prompt",
 ) -> PromptLaunchSpec:
     """Compile a prompt launch into the inline workflow.submit shape.
@@ -571,6 +579,8 @@ def compile_prompt_launch_spec(
         phase="execute",
         graph_runtime_submit=True,
         jobs=[launch_job],
+        workspace_ref=str(workspace_ref or "").strip() or None,
+        runtime_profile_ref=str(runtime_profile_ref or "").strip() or None,
         definition_revision=definition_revision,
         plan_revision=plan_revision,
         packet_provenance=packet_provenance,

@@ -77,6 +77,33 @@ def test_compile_prompt_launch_spec_prefers_provider_specific_adapter_when_unspe
     assert spec.jobs[0]["agent"] == "cursor/auto"
 
 
+def test_compile_prompt_launch_spec_carries_runtime_profile_authority(monkeypatch) -> None:
+    monkeypatch.setattr(
+        spec_compiler,
+        "default_adapter_type_for_provider",
+        lambda provider_slug: "cli_llm" if provider_slug == "openai" else None,
+    )
+    monkeypatch.setattr(
+        spec_compiler,
+        "resolve_lane_policy",
+        lambda provider_slug, adapter_type: {"admitted_by_policy": True},
+    )
+
+    spec = spec_compiler.compile_prompt_launch_spec(
+        prompt="Summarize the attached notes",
+        provider_slug="openai",
+        model_slug="gpt-5.4-mini",
+        workspace_ref="scratch_agent",
+        runtime_profile_ref="scratch_agent",
+    )
+
+    assert spec.workspace_ref == "scratch_agent"
+    assert spec.runtime_profile_ref == "scratch_agent"
+    inline_spec = spec.to_inline_spec_dict()
+    assert inline_spec["workspace_ref"] == "scratch_agent"
+    assert inline_spec["runtime_profile_ref"] == "scratch_agent"
+
+
 def test_compile_prompt_launch_spec_rejects_unadmitted_prompt_provider(monkeypatch) -> None:
     monkeypatch.setattr(
         spec_compiler,

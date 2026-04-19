@@ -10,6 +10,8 @@ from runtime.engineering_observability import (
     build_code_hotspots,
     build_platform_observability,
 )
+from runtime.instance import native_instance_contract
+from runtime.primitive_contracts import build_orient_primitive_contracts
 from surfaces._boot import resolve_surface_env, workflow_database_status
 from surfaces.api.operator_read import (
     build_transport_support_summary,
@@ -80,6 +82,224 @@ def _cli_surface_hint(
     if suffix:
         text += f" {suffix}"
     return text
+
+
+def _build_standing_orders(subs: Any) -> list[dict[str, Any]]:
+    """Return active architecture-policy rows as boot-time directives.
+
+    Every harness that orients via /orient receives these as standing orders.
+    Queries operator_decisions directly via the sync pg connection so this stays
+    callable from the sync handler dispatcher without crossing async boundaries.
+    """
+
+    try:
+        pg = subs.get_pg_conn()
+    except Exception as exc:  # noqa: BLE001 — orient must not crash on auxiliary reads
+        return [{"error": f"standing_orders unavailable: {exc}"}]
+
+    try:
+        rows = pg.fetch(
+            """
+            SELECT
+                decision_scope_ref,
+                decision_key,
+                title,
+                rationale,
+                decided_by,
+                decision_source,
+                effective_from,
+                effective_to
+            FROM operator_decisions
+            WHERE decision_kind = 'architecture_policy'
+              AND decision_status IN ('decided', 'active')
+              AND effective_from <= now()
+              AND (effective_to IS NULL OR effective_to > now())
+            ORDER BY effective_from DESC, decided_at DESC
+            LIMIT 50
+            """
+        )
+    except Exception as exc:  # noqa: BLE001 — orient must not crash on auxiliary reads
+        return [{"error": f"standing_orders unavailable: {exc}"}]
+
+    directives: list[dict[str, Any]] = []
+    for row in rows:
+        effective_from = row["effective_from"]
+        effective_to = row["effective_to"]
+        directive = {
+            "authority_domain": row["decision_scope_ref"],
+            "policy_slug": row["decision_key"],
+            "title": row["title"],
+            "rationale": row["rationale"],
+            "decided_by": row["decided_by"],
+            "decision_source": row["decision_source"],
+            "effective_from": effective_from.isoformat() if effective_from else None,
+            "effective_to": effective_to.isoformat() if effective_to else None,
+        }
+        directives.append({k: v for k, v in directive.items() if v is not None})
+    return directives
+
+
+def _build_orient_tool_guidance(
+    *,
+    discover_tool: Any,
+    recall_tool: Any,
+    query_tool: Any,
+    workflow_tool: Any,
+    health_tool: Any,
+    bugs_tool: Any,
+    tool_count: int,
+) -> dict[str, Any]:
+    """Return structured tool-selection guidance for the orient authority envelope."""
+
+    return {
+        "kind": "orient_tool_guidance",
+        "authority": "surfaces.mcp.catalog.get_tool_catalog",
+        "policy_decision_ref": (
+            "operator_decision.architecture_policy.orient.authority_envelope_tool_guidance"
+        ),
+        "policy_decision_key": "architecture-policy::orient::authority-envelope-tool-guidance",
+        "preferred_operator_surface": {
+            "kind": "catalog_backed_cli",
+            "command_prefix": "workflow",
+            "tool_count": tool_count,
+            "generic_call": "workflow tools call <tool|alias> --input-json '{...}'",
+        },
+        "catalog": {
+            "list_command": "workflow tools list",
+            "search_command": "workflow tools search <text>",
+            "schema_command": "workflow tools describe <tool|alias>",
+            "directive": "Inspect the live catalog before guessing tool names or schemas.",
+        },
+        "primary_reads": [
+            {
+                "intent": "unknown or broad system question",
+                "tool": query_tool.name,
+                "command": query_tool.cli_entrypoint,
+                "schema": query_tool.cli_describe_command,
+            },
+            {
+                "intent": "current platform health or degraded state",
+                "tool": health_tool.name,
+                "command": health_tool.cli_entrypoint,
+                "schema": health_tool.cli_describe_command,
+            },
+            {
+                "intent": "code behavior before building",
+                "tool": discover_tool.name,
+                "command": discover_tool.cli_entrypoint,
+                "schema": discover_tool.cli_describe_command,
+            },
+            {
+                "intent": "architecture memory and decisions",
+                "tool": recall_tool.name,
+                "command": recall_tool.cli_entrypoint,
+                "schema": recall_tool.cli_describe_command,
+            },
+            {
+                "intent": "bug state, replay packets, and duplicate checks",
+                "tool": bugs_tool.name,
+                "command": bugs_tool.cli_entrypoint,
+                "schema": bugs_tool.cli_describe_command,
+            },
+        ],
+        "dispatch": {
+            "tool": workflow_tool.name,
+            "command": workflow_tool.cli_entrypoint,
+            "schema": workflow_tool.cli_describe_command,
+            "model": "kickoff first; inspect status or stream separately",
+        },
+        "guardrails": {
+            "write_dispatch_requires_yes": True,
+            "session_tools_require_workflow_token": True,
+            "search_before_build": True,
+        },
+    }
+
+
+def _build_orient_authority_envelope(
+    subs: Any,
+    *,
+    standing_orders: list[dict[str, Any]],
+    health_payload: dict[str, Any],
+    dependency_truth: dict[str, Any],
+    tool_guidance: dict[str, Any],
+) -> dict[str, Any]:
+    """Return the explicit authority envelope projected by /orient."""
+
+    workflow_env: dict[str, str] = {}
+    workflow_env_error: str | None = None
+    try:
+        workflow_env = _workflow_env(subs)
+        native_instance: dict[str, Any] = native_instance_contract(
+            env=workflow_env,
+        )
+    except Exception as exc:  # noqa: BLE001 — orient must report drift instead of hiding it
+        workflow_env_error = f"{type(exc).__name__}: {exc}"
+        native_instance = {
+            "error": f"native_instance unavailable: {workflow_env_error}",
+        }
+    primitive_contracts = build_orient_primitive_contracts(
+        workflow_env=workflow_env,
+        native_instance=native_instance,
+        workflow_env_error=workflow_env_error,
+    )
+
+    return {
+        "kind": "orient_authority_envelope",
+        "version": "1.0",
+        "mandatory": True,
+        "authority": "surfaces.api.handlers.workflow_admin._handle_orient",
+        "policy_decision_ref": (
+            "operator_decision.architecture_policy.orient.mandatory_authority_envelope"
+        ),
+        "policy_decision_key": "architecture-policy::orient::mandatory-authority-envelope",
+        "native_instance": native_instance,
+        "standing_orders_ref": "/orient#standing_orders",
+        "standing_orders_count": len(
+            [
+                order
+                for order in standing_orders
+                if isinstance(order, dict) and "error" not in order
+            ]
+        ),
+        "health_ref": "/orient#health",
+        "health_overall": (health_payload.get("preflight") or {}).get("overall"),
+        "lane_recommendation": health_payload.get("lane_recommendation") or {},
+        "tool_guidance": tool_guidance,
+        "tool_guidance_ref": "/orient#tool_guidance",
+        "primitive_contracts": primitive_contracts,
+        "primitive_contracts_ref": "/orient#primitive_contracts",
+        "dependency_truth": {
+            "ok": dependency_truth.get("ok"),
+            "missing_count": dependency_truth.get("missing_count"),
+        },
+        "surface_refs": {
+            "orient": "/orient",
+            "workflow_health": "/health",
+            "operator_status_snapshot": "/api/status",
+            "native_operator_surface": (
+                "surfaces.api.native_operator_surface.query_native_operator_surface"
+            ),
+            "context_shard": "praxis_context_shard",
+        },
+        "scope_source": {
+            "default": "/orient#authority_envelope.native_instance",
+            "workflow_session": "praxis_context_shard when a signed workflow token is present",
+        },
+        "enforcement": {
+            "new_entrypoints": (
+                "consume or project this envelope instead of resolving runtime authority independently"
+            ),
+            "drift_signal": (
+                "native_instance.error or mismatched downstream native_instance payloads must be treated "
+                "as authority drift"
+            ),
+            "primitive_contracts": (
+                "operation posture, runtime binding, state semantics, proof refs, and failure identity "
+                "must be consumed from /orient or their named underlying authorities"
+            ),
+        },
+    }
 
 
 def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
@@ -178,6 +398,27 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
     health_tool = _tool_definition("praxis_health")
     bugs_tool = _tool_definition("praxis_bugs")
     tool_count = len(get_tool_catalog())
+    tool_guidance = _build_orient_tool_guidance(
+        discover_tool=discover_tool,
+        recall_tool=recall_tool,
+        query_tool=query_tool,
+        workflow_tool=workflow_tool,
+        health_tool=health_tool,
+        bugs_tool=bugs_tool,
+        tool_count=tool_count,
+    )
+
+    try:
+        standing_orders = _build_standing_orders(subs)
+    except Exception as exc:  # noqa: BLE001 — orient must not crash on auxiliary reads
+        standing_orders = [{"error": f"standing_orders unavailable: {exc}"}]
+    authority_envelope = _build_orient_authority_envelope(
+        subs,
+        standing_orders=standing_orders,
+        health_payload=health_payload,
+        dependency_truth=dependency_truth,
+        tool_guidance=tool_guidance,
+    )
 
     return {
         "platform": "praxis-workflow",
@@ -188,6 +429,10 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
             "authority": "surfaces.api.handlers.workflow_admin._handle_orient",
             "lane": "native_operator",
             "packet_read_order": [
+                "standing_orders",
+                "authority_envelope",
+                "tool_guidance",
+                "primitive_contracts",
                 "roadmap_truth",
                 "queue_refs",
                 "current_state_notes",
@@ -195,6 +440,9 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
                 "recent_activity",
             ],
             "downstream_truth_surfaces": {
+                "standing_orders": "/orient#standing_orders",
+                "tool_guidance": "/orient#tool_guidance",
+                "primitive_contracts": "/orient#primitive_contracts",
                 "roadmap_truth": "/api/operator/roadmap/tree/{root_roadmap_item_id}",
                 "queue_refs_and_current_state_notes": (
                     "surfaces.api.native_operator_surface.query_native_operator_surface"
@@ -203,10 +451,17 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
             },
             "directive": (
                 "Treat /orient as the canonical instruction authority for this lane. "
+                "Read standing_orders first — they are active architecture-policy rows "
+                "from operator authority and bind this session's behavior. "
                 "Downstream packets should read roadmap-backed truth, queue refs, and current-state "
                 "notes before using repo files or prior chat state."
             ),
         },
+        "standing_orders": standing_orders,
+        "authority_envelope": authority_envelope,
+        "native_instance": authority_envelope.get("native_instance"),
+        "tool_guidance": tool_guidance,
+        "primitive_contracts": authority_envelope.get("primitive_contracts"),
         "capabilities": [
             "workflow_runs",
             "workflow_validate",
@@ -437,7 +692,7 @@ def _handle_orient(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
                 {"label": "workflow-worker", "managed_by": "docker-compose"},
                 {"label": "scheduler", "interval_sec": 60, "managed_by": "docker-compose"},
             ],
-            "notes": "scripts/praxis is the preferred launcher entrypoint; scripts/praxis-ctl remains a compatibility alias. Docker Compose owns postgres, api-server, workflow-worker, and scheduler. Native launchd install/setup control has been removed. The launcher front door is http://127.0.0.1:8420/app and the always-on MCP bridge is served from the API surface.",
+            "notes": "scripts/praxis is the preferred launcher entrypoint; scripts/praxis-ctl remains a compatibility alias. Docker Compose owns postgres, api-server, workflow-worker, and scheduler. Native launchd install/setup control has been removed. Launcher and docs endpoints are projected by /orient#primitive_contracts.runtime_binding.http_endpoints.",
         },
 }
 
@@ -621,7 +876,11 @@ def _handle_platform_overview_get(request: Any, path: str) -> None:
                     pg.fetchval("SELECT COUNT(*) FROM pg_tables WHERE schemaname = 'public'")
                 ),
                 "total_bugs": int(pg.fetchval("SELECT COUNT(*) FROM bugs")),
-                "open_bugs": int(pg.fetchval("SELECT COUNT(*) FROM bugs WHERE status = 'OPEN'")),
+                "open_bugs": int(
+                    pg.fetchval(
+                        "SELECT COUNT(*) FROM bugs WHERE UPPER(status) IN ('OPEN', 'IN_PROGRESS')"
+                    )
+                ),
                 "total_workflow_runs": int(pg.fetchval("SELECT COUNT(*) FROM public.workflow_runs")),
                 "total_registry_items": int(pg.fetchval("SELECT COUNT(*) FROM platform_registry")),
                 "recent_workflows": [

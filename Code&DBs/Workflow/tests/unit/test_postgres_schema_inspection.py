@@ -124,6 +124,73 @@ def test_inspect_workflow_schema_treats_expected_workflow_definition_rows_as_pre
     assert readiness.missing_by_migration == {}
 
 
+def test_inspect_workflow_schema_treats_expected_registry_rows_as_present(
+    monkeypatch,
+) -> None:
+    expected = (
+        WorkflowMigrationExpectedObject(
+            object_type="row",
+            object_name="registry_workspace_authority.scratch_agent",
+        ),
+        WorkflowMigrationExpectedObject(
+            object_type="row",
+            object_name=(
+                "registry_sandbox_profile_authority."
+                "sandbox_profile.scratch_agent.default"
+            ),
+        ),
+        WorkflowMigrationExpectedObject(
+            object_type="row",
+            object_name="registry_runtime_profile_authority.scratch_agent",
+        ),
+        WorkflowMigrationExpectedObject(
+            object_type="row",
+            object_name="registry_native_runtime_profile_authority.scratch_agent",
+        ),
+    )
+
+    class _Conn:
+        async def fetch(self, query: str, *args):
+            normalized = " ".join(query.split())
+            if "FROM registry_workspace_authority" in normalized:
+                assert args == (["scratch_agent"],)
+                return [{"row_key": "scratch_agent"}]
+            if "FROM registry_sandbox_profile_authority" in normalized:
+                assert args == (["sandbox_profile.scratch_agent.default"],)
+                return [{"row_key": "sandbox_profile.scratch_agent.default"}]
+            if "FROM registry_runtime_profile_authority" in normalized:
+                assert args == (["scratch_agent"],)
+                return [{"row_key": "scratch_agent"}]
+            if "FROM registry_native_runtime_profile_authority" in normalized:
+                assert args == (["scratch_agent"],)
+                return [{"row_key": "scratch_agent"}]
+            raise AssertionError(f"unexpected query: {query}")
+
+        async def fetchval(self, query: str, *args):
+            normalized = " ".join(query.split())
+            if normalized == "SELECT to_regclass($1::text) IS NOT NULL":
+                assert args[0] in {
+                    "public.registry_workspace_authority",
+                    "public.registry_sandbox_profile_authority",
+                    "public.registry_runtime_profile_authority",
+                    "public.registry_native_runtime_profile_authority",
+                }
+                return True
+            raise AssertionError(f"unexpected query: {query}")
+
+    monkeypatch.setattr(
+        postgres_schema,
+        "_workflow_schema_readiness_by_migration",
+        lambda: (("167_scratch_agent_runtime_lane.sql", expected),),
+    )
+
+    readiness = asyncio.run(postgres_schema.inspect_workflow_schema(_Conn()))
+
+    assert readiness.is_bootstrapped is True
+    assert readiness.missing_objects == ()
+    assert readiness.missing_by_migration == {}
+
+
 def test_inspect_workflow_schema_accepts_bare_constraint_names(monkeypatch) -> None:
     class _Conn:
         async def fetch(self, query: str, *args):

@@ -354,7 +354,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
     "praxis_integration": _tool(
         surface="integration",
         tier="advanced",
-        recommended_alias=None,
+        recommended_alias="integration",
         when_to_use="List integrations, inspect one, validate credentials, or invoke an integration action.",
         when_not_to_use="Do not use it to build connectors or launch workflows.",
         risks={
@@ -365,6 +365,9 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
                 "test_credentials": "read",
                 "health": "read",
                 "call": "dispatch",
+                "create": "write",
+                "set_secret": "write",
+                "reload": "write",
             },
         },
         examples=[

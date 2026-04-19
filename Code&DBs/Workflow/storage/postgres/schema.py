@@ -36,6 +36,11 @@ _SCHEMA_BOOTSTRAP_WAIT_LOG_INTERVAL_S = 10.0
 _ROW_EXPECTATION_KEY_COLUMNS = {
     "operation_catalog_registry": "operation_name",
     "operation_catalog_source_policy_registry": "source_kind",
+    "operator_decisions": "operator_decision_id",
+    "registry_native_runtime_profile_authority": "runtime_profile_ref",
+    "registry_runtime_profile_authority": "runtime_profile_ref",
+    "registry_sandbox_profile_authority": "sandbox_profile_ref",
+    "registry_workspace_authority": "workspace_ref",
     "workflow_definitions": "workflow_definition_id",
     "workflow_definition_nodes": "workflow_definition_node_id",
     "workflow_definition_edges": "workflow_definition_edge_id",

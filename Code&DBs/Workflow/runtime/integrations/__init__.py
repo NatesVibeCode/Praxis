@@ -130,8 +130,16 @@ def _resolve_manifest_handler(
     definition: dict[str, Any],
     action: str,
 ) -> IntegrationHandler | None:
-    """Try to build a handler from manifest data in the integration definition."""
-    if str(definition.get("manifest_source") or "").strip() != "manifest":
+    """Try to build a handler from manifest-shaped data in the definition.
+
+    Any integration whose capabilities carry a full-URL ``path`` + ``method``
+    can be served by the generic webhook executor — regardless of whether
+    the row was sourced from a TOML manifest on disk, a DB-native API POST,
+    or an MCP ``create`` call. The ``manifest_source`` column labels origin;
+    it does not gate executability.
+    """
+    source = str(definition.get("manifest_source") or "").strip().lower()
+    if source not in {"manifest", "api", "mcp", "ui"}:
         return None
     try:
         from runtime.integration_manifest import build_manifest_handler

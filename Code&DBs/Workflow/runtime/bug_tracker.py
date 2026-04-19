@@ -1742,8 +1742,13 @@ class BugTracker:
         bug_id: str,
         *,
         receipt_limit: int = 5,
+        allow_backfill: bool = False,
     ) -> dict[str, Any] | None:
-        packet = self.failure_packet(bug_id, receipt_limit=receipt_limit)
+        packet = self.failure_packet(
+            bug_id,
+            receipt_limit=receipt_limit,
+            allow_backfill=allow_backfill,
+        )
         if packet is None:
             return None
 
@@ -2156,3 +2161,80 @@ class BugTracker:
             observability_state="degraded" if stats_errors else "complete",
             errors=tuple(stats_errors),
         )
+
+
+async def afile_bug(
+    conn: Any,
+    title: str,
+    severity: BugSeverity | str,
+    category: BugCategory | str,
+    description: str,
+    filed_by: str,
+    *,
+    source_kind: str = "dispatch",
+    decision_ref: str = "",
+    discovered_in_run_id: str | None = None,
+    discovered_in_receipt_id: str | None = None,
+    owner_ref: str | None = None,
+    source_issue_id: str | None = None,
+    tags: Tuple[str, ...] = (),
+    resume_context: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Async bug filing authority for asyncpg-backed operator surfaces."""
+    bug_id = f"BUG-{uuid.uuid4().hex[:8].upper()}"
+    bug_key = bug_id.lower().replace("-", "_")
+    now = datetime.now(timezone.utc)
+    normalized_severity = BugTracker._normalize_severity(severity, default=BugSeverity.P2)
+    normalized_category = BugTracker._normalize_category(category, default=BugCategory.OTHER)
+    normalized_tags = tuple(str(tag).strip() for tag in tags if str(tag).strip())
+    normalized_source_kind = source_kind.strip() or "dispatch"
+    normalized_decision_ref = decision_ref.strip()
+    normalized_source_issue_id = str(source_issue_id or "").strip() or None
+    initial_resume = resume_context if isinstance(resume_context, dict) else {}
+
+    if discovered_in_run_id:
+        exists = await conn.fetchrow(
+            "SELECT 1 FROM workflow_runs WHERE run_id = $1",
+            discovered_in_run_id,
+        )
+        if exists is None:
+            raise ValueError(f"unknown discovered_in_run_id: {discovered_in_run_id}")
+    if discovered_in_receipt_id:
+        exists = await conn.fetchrow(
+            "SELECT 1 FROM receipts WHERE receipt_id = $1",
+            discovered_in_receipt_id,
+        )
+        if exists is None:
+            raise ValueError(f"unknown discovered_in_receipt_id: {discovered_in_receipt_id}")
+
+    await conn.execute(
+        """INSERT INTO bugs
+            (bug_id, bug_key, title, severity, status, priority, category, description,
+             summary, source_kind, discovered_in_run_id, discovered_in_receipt_id,
+             owner_ref, source_issue_id, decision_ref, opened_at, resolved_at,
+             created_at, updated_at, filed_by, tags, resume_context)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NULL, $17, $18, $19, $20, $21::jsonb)""",
+        bug_id,
+        bug_key,
+        title,
+        normalized_severity.value,
+        BugStatus.OPEN.value,
+        normalized_severity.value,
+        normalized_category.value,
+        description,
+        description[:200],
+        normalized_source_kind,
+        discovered_in_run_id,
+        discovered_in_receipt_id,
+        owner_ref,
+        normalized_source_issue_id,
+        normalized_decision_ref,
+        now,
+        now,
+        now,
+        filed_by,
+        ",".join(normalized_tags),
+        json.dumps(initial_resume, default=str),
+    )
+    row = await conn.fetchrow("SELECT * FROM bugs WHERE bug_id = $1", bug_id)
+    return dict(row), []

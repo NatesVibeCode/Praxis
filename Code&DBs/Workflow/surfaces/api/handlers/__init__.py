@@ -5,6 +5,17 @@ from __future__ import annotations
 from typing import Any
 
 from ._surface_usage import record_api_route_usage as _record_api_route_usage
+from .data_dictionary_admin import (
+    DATA_DICTIONARY_DELETE_ROUTES,
+    DATA_DICTIONARY_GET_ROUTES,
+    DATA_DICTIONARY_POST_ROUTES,
+    DATA_DICTIONARY_PUT_ROUTES,
+)
+from .integrations_admin import (
+    INTEGRATIONS_GET_ROUTES,
+    INTEGRATIONS_POST_ROUTES,
+    INTEGRATIONS_PUT_ROUTES,
+)
 from .workflow_admin import ADMIN_GET_ROUTES, ADMIN_POST_ROUTES, ADMIN_ROUTES
 from .workflow_mcp import MCP_POST_ROUTES
 from .workflow_notify import NOTIFY_GET_ROUTES, NOTIFY_POST_ROUTES, NOTIFY_ROUTES
@@ -30,21 +41,28 @@ POST_ROUTE_HANDLERS = [
     *NOTIFY_POST_ROUTES,
     *RUN_POST_ROUTES,
     *QUERY_POST_ROUTES,
+    *DATA_DICTIONARY_POST_ROUTES,
+    *INTEGRATIONS_POST_ROUTES,
     *ADMIN_POST_ROUTES,
 ]
 
 PUT_ROUTE_HANDLERS = [
+    *DATA_DICTIONARY_PUT_ROUTES,
+    *INTEGRATIONS_PUT_ROUTES,
     *QUERY_PUT_ROUTES,
 ]
 
 GET_ROUTE_HANDLERS = [
     *QUERY_GET_ROUTES,
+    *DATA_DICTIONARY_GET_ROUTES,
+    *INTEGRATIONS_GET_ROUTES,
     *ADMIN_GET_ROUTES,
     *NOTIFY_GET_ROUTES,
     *RUN_GET_ROUTES,
 ]
 
 DELETE_ROUTE_HANDLERS = [
+    *DATA_DICTIONARY_DELETE_ROUTES,
     *QUERY_DELETE_ROUTES,
 ]
 

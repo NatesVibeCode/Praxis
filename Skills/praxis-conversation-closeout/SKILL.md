@@ -61,7 +61,7 @@ Drop to `praxis workflow tools describe|call ...` only for decision and policy s
 
 1. Conversation history is not authority.
 2. The decisions table is for durable decisions, not generic summaries.
-3. Architecture policy belongs in `operator_decisions` under typed policy authority, not in markdown drift.
+3. Architecture policy belongs in `praxis_operator_architecture_policy`, not in `operator_decisions` or markdown drift.
 4. Bugs, roadmap rows, and closeout receipts keep their own write seams; do not stuff them into decisions just because they were discussed.
 5. If a stable `praxis workflow <noun>` command exists, prefer it over a raw tool name.
 6. Do not invent ids, decision keys, roadmap ids, bug ids, or provenance.

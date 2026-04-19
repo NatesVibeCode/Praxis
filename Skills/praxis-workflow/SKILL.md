@@ -45,7 +45,7 @@ praxis workflow inspect <run_id>
 
 ```text
 praxis workflow cancel <run_id>
-praxis workflow tools call praxis_workflow --input-json '{"action":"retry","run_id":"<run_id>","label":"<job_label>"}'
+praxis workflow retry <run_id> <label>
 ```
 
 ## Rules

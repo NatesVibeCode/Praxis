@@ -17,6 +17,7 @@ const RUN_STATUS_COLOR: Record<string, string> = {
   failed: '#f85149',
   cancelled: '#8b949e',
   queued: '#484f58',
+  loading: '#484f58',
 };
 
 const JOB_STATUS_COLOR: Record<string, string> = {
@@ -25,10 +26,30 @@ const JOB_STATUS_COLOR: Record<string, string> = {
   claimed: '#58a6ff',
   failed: '#f85149',
   dead_letter: '#f85149',
+  blocked: '#f85149',
+  parent_failed: '#f85149',
   pending: '#484f58',
   ready: '#8b949e',
   cancelled: '#8b949e',
 };
+
+const TERMINAL_JOB_STATUSES = new Set<RunJob['status']>([
+  'succeeded',
+  'failed',
+  'dead_letter',
+  'blocked',
+  'cancelled',
+  'parent_failed',
+]);
+const FAILED_JOB_STATUSES = new Set<RunJob['status']>([
+  'failed',
+  'dead_letter',
+  'blocked',
+  'cancelled',
+  'parent_failed',
+]);
+const ACTIVE_JOB_STATUSES = new Set<RunJob['status']>(['claimed', 'running']);
+const WAITING_JOB_STATUSES = new Set<RunJob['status']>(['pending', 'ready']);
 
 function formatDuration(ms: number): string {
   if (!ms || ms < 0) return '—';
@@ -44,6 +65,10 @@ function formatCost(usd: number): string {
   return usd < 0.01 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`;
 }
 
+function jobSelectionId(job: RunJob): string {
+  return job.label || String(job.id);
+}
+
 export function MoonRunOverlay({
   run,
   loading,
@@ -55,69 +80,141 @@ export function MoonRunOverlay({
 }: Props) {
   const [expandedOutput, setExpandedOutput] = useState(false);
 
-  // Clear expanded view when selection changes.
   useEffect(() => {
     setExpandedOutput(false);
   }, [selectedJobId]);
 
-  // selectedJobId is the graph-node id (string) from RunGraphNode. Match by
-  // label; RunGraphNode.id is typically the job's label or a stable key
-  // tied to the compiled spec, which is what RunJob.label also reports.
-  const selectedJob: RunJob | null = selectedJobId && run?.jobs
-    ? (run.jobs.find((j) => j.label === selectedJobId) ?? null)
+  const jobs = run?.jobs ?? [];
+  const selectedGraphNode = selectedJobId && run?.graph?.nodes
+    ? run.graph.nodes.find((node) => node.id === selectedJobId) ?? null
+    : null;
+  const selectedJob: RunJob | null = selectedJobId
+    ? (
+        jobs.find((j) =>
+          j.label === selectedJobId
+          || String(j.id) === selectedJobId
+          || (selectedGraphNode ? j.label === selectedGraphNode.label : false),
+        ) ?? null
+      )
     : null;
 
-  const runStatus = run?.status ?? 'queued';
+  const runStatus = run?.status ?? (loading ? 'loading' : 'queued');
   const isTerminal = runStatus === 'succeeded' || runStatus === 'failed' || runStatus === 'cancelled';
   const statusColor = RUN_STATUS_COLOR[runStatus] ?? '#8b949e';
 
-  const totalJobs = run?.jobs?.length ?? 0;
-  const completedJobs = run?.jobs?.filter((j) =>
-    j.status === 'succeeded' || j.status === 'failed' || j.status === 'dead_letter' || j.status === 'cancelled',
-  ).length ?? 0;
-  const totalCost = run?.jobs?.reduce((acc, j) => acc + (j.cost_usd || 0), 0) ?? 0;
-  const totalDuration = run?.total_duration_ms ?? 0;
+  const totalJobs = jobs.length || run?.total_jobs || 0;
+  const completedJobs = jobs.length
+    ? jobs.filter((j) => TERMINAL_JOB_STATUSES.has(j.status)).length
+    : run?.completed_jobs ?? 0;
+  const failedJobs = jobs.filter((j) => FAILED_JOB_STATUSES.has(j.status)).length;
+  const activeJobs = jobs.filter((j) => ACTIVE_JOB_STATUSES.has(j.status)).length;
+  const waitingJobs = jobs.filter((j) => WAITING_JOB_STATUSES.has(j.status)).length;
+  const totalCost = jobs.length
+    ? jobs.reduce((acc, j) => acc + (j.cost_usd || 0), 0)
+    : run?.total_cost ?? 0;
+  const totalDuration = run?.total_duration_ms ?? jobs.reduce((acc, j) => acc + (j.duration_ms || 0), 0);
 
   return (
     <>
-      <div className="moon-run-overlay__header">
-        <button
-          type="button"
-          className="moon-run-overlay__back"
-          onClick={onExit}
-          aria-label="Exit run view"
-        >
-          ← Back
-        </button>
-        <div className="moon-run-overlay__title">
-          <div className="moon-run-overlay__spec-name">{run?.spec_name ?? 'Run'}</div>
-          <div className="moon-run-overlay__run-id">{run?.run_id ?? ''}</div>
-        </div>
-        <div className="moon-run-overlay__chip" style={{ background: statusColor }}>
-          {runStatus}
-        </div>
-        <div className="moon-run-overlay__metrics">
-          <span>{completedJobs}/{totalJobs}</span>
-          <span>{formatDuration(totalDuration)}</span>
-          <span>{formatCost(totalCost)}</span>
-        </div>
-        {!isTerminal && onCancel && (
+      <aside className="moon-run-overlay__summary" aria-label="Run ledger">
+        <header className="moon-run-overlay__summary-head">
           <button
             type="button"
-            className="moon-run-overlay__cancel"
-            onClick={onCancel}
+            className="moon-run-overlay__summary-back"
+            onClick={onExit}
+            aria-label="Exit run view"
           >
-            Cancel
+            ←
           </button>
-        )}
-      </div>
+          <div>
+            <div className="moon-run-overlay__summary-kicker">Run</div>
+            <div className="moon-run-overlay__summary-title">{run?.spec_name ?? 'Loading run'}</div>
+            {run?.run_id && (
+              <div className="moon-run-overlay__summary-run-id">{run.run_id}</div>
+            )}
+          </div>
+          <span className="moon-run-overlay__summary-pill" style={{ borderColor: statusColor, color: statusColor }}>
+            {runStatus}
+          </span>
+          {!isTerminal && onCancel && (
+            <button
+              type="button"
+              className="moon-run-overlay__summary-cancel"
+              onClick={onCancel}
+            >
+              Cancel
+            </button>
+          )}
+        </header>
 
-      {loading && !run && (
-        <div className="moon-run-overlay__loading">Loading run…</div>
-      )}
-      {error && (
-        <div className="moon-run-overlay__error">{error}</div>
-      )}
+        <dl className="moon-run-overlay__stat-grid">
+          <div>
+            <dt>Jobs</dt>
+            <dd>{completedJobs}/{totalJobs}</dd>
+          </div>
+          <div>
+            <dt>Failed</dt>
+            <dd>{failedJobs}</dd>
+          </div>
+          <div>
+            <dt>Active</dt>
+            <dd>{activeJobs}</dd>
+          </div>
+          <div>
+            <dt>Waiting</dt>
+            <dd>{waitingJobs}</dd>
+          </div>
+          <div>
+            <dt>Time</dt>
+            <dd>{formatDuration(totalDuration)}</dd>
+          </div>
+          <div>
+            <dt>Cost</dt>
+            <dd>{formatCost(totalCost)}</dd>
+          </div>
+        </dl>
+
+        {loading && !run && (
+          <div className="moon-run-overlay__summary-empty">Loading run…</div>
+        )}
+        {error && (
+          <div className="moon-run-overlay__summary-error">{error}</div>
+        )}
+
+        {jobs.length > 0 ? (
+          <div className="moon-run-overlay__job-list">
+            {jobs.map((job) => {
+              const selected = selectedJob?.id === job.id || selectedJobId === job.label || selectedJobId === String(job.id);
+              const color = JOB_STATUS_COLOR[job.status] ?? '#484f58';
+              return (
+                <button
+                  key={job.id}
+                  type="button"
+                  className={`moon-run-overlay__job-row${selected ? ' moon-run-overlay__job-row--selected' : ''}`}
+                  onClick={() => onSelectJob(selected ? null : jobSelectionId(job))}
+                  aria-pressed={selected}
+                >
+                  <span className="moon-run-overlay__job-dot" style={{ background: color }} />
+                  <span className="moon-run-overlay__job-label">{job.label}</span>
+                  <span className="moon-run-overlay__job-status">{job.status}</span>
+                  {(job.duration_ms > 0 || job.last_error_code) && (
+                    <span className="moon-run-overlay__job-meta">
+                      {job.duration_ms > 0 && (
+                        <span className="moon-run-overlay__job-metric">{formatDuration(job.duration_ms)}</span>
+                      )}
+                      {job.last_error_code && (
+                        <span className="moon-run-overlay__job-error">{job.last_error_code}</span>
+                      )}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        ) : !loading && (
+          <div className="moon-run-overlay__summary-empty">No jobs recorded.</div>
+        )}
+      </aside>
 
       {selectedJob && (
         <aside className="moon-run-overlay__receipt" aria-label="Job receipt">

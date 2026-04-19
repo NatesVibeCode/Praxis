@@ -302,6 +302,8 @@ class TaskRouteDecision:
     effective_marginal_cost: float = 0.0
     spend_pressure: str = "unknown"
     budget_status: str = ""
+    prefer_prepaid: bool = False
+    allow_payg_fallback: bool = True
 
 
 @dataclass(frozen=True)
@@ -586,6 +588,8 @@ class TaskTypeRouter:
             effective_marginal_cost=_row_effective_marginal_cost(economics),
             spend_pressure=str(economics.get("spend_pressure") or "unknown"),
             budget_status=str(economics.get("budget_status") or ""),
+            prefer_prepaid=bool(economics.get("prefer_prepaid", False)),
+            allow_payg_fallback=bool(economics.get("allow_payg_fallback", True)),
         )
 
     def resolve_explicit_eligibility(
@@ -991,6 +995,8 @@ class TaskTypeRouter:
                 effective_marginal_cost=_row_effective_marginal_cost(row),
                 spend_pressure=str(row.get("spend_pressure") or "unknown"),
                 budget_status=str(row.get("budget_status") or ""),
+                prefer_prepaid=bool(row.get("prefer_prepaid", False)),
+                allow_payg_fallback=bool(row.get("allow_payg_fallback", True)),
             )
             for row in rows
         ]

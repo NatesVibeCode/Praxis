@@ -16,6 +16,8 @@ BugCategory = _mod.BugCategory
 BugSeverity = _mod.BugSeverity
 BugTracker = _mod.BugTracker
 
+from surfaces.api.handlers import _bug_surface_contract as bug_contract
+
 
 @pytest.fixture
 def tracker():
@@ -50,3 +52,71 @@ def test_failure_packet_skips_replay_backfill_when_read_only(
 
     assert packet is not None
     assert packet["provenance_backfill"]["reason_code"] == "bug.replay_backfill.skipped_read_only"
+
+
+def test_replay_bug_skips_replay_backfill_by_default(
+    tracker: BugTracker,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bug, _ = tracker.file_bug(
+        title="Read-only replay action",
+        severity=BugSeverity.P2,
+        category=BugCategory.RUNTIME,
+        description="Replay reads should not backfill provenance implicitly.",
+        filed_by="alice",
+    )
+
+    monkeypatch.setattr(
+        tracker,
+        "backfill_replay_provenance",
+        lambda _bug_id: (_ for _ in ()).throw(
+            AssertionError("replay_bug read path must not backfill provenance")
+        ),
+    )
+
+    replay = tracker.replay_bug(bug.bug_id)
+
+    assert replay is not None
+    assert replay["bug_id"] == bug.bug_id
+
+
+def test_bug_surface_packet_history_replay_are_read_only() -> None:
+    calls: list[tuple[str, bool]] = []
+
+    class _Tracker:
+        def failure_packet(self, bug_id: str, *, receipt_limit: int = 5, allow_backfill: bool = True):
+            calls.append((f"packet:{bug_id}:{receipt_limit}", allow_backfill))
+            return {
+                "signature": {"bug_id": bug_id},
+                "agent_actions": {},
+                "replay_context": {"ready": False},
+            }
+
+        def replay_bug(self, bug_id: str, *, receipt_limit: int = 5, allow_backfill: bool = True):
+            calls.append((f"replay:{bug_id}:{receipt_limit}", allow_backfill))
+            return {"bug_id": bug_id, "ready": False}
+
+    serialize = lambda value, **_kwargs: value
+    tracker = _Tracker()
+
+    bug_contract.packet_payload(
+        bt=tracker,
+        body={"bug_id": "BUG-READONLY", "receipt_limit": 2},
+        serialize=serialize,
+    )
+    bug_contract.history_payload(
+        bt=tracker,
+        body={"bug_id": "BUG-READONLY", "receipt_limit": 3},
+        serialize=serialize,
+    )
+    bug_contract.replay_payload(
+        bt=tracker,
+        body={"bug_id": "BUG-READONLY", "receipt_limit": 4},
+        serialize=serialize,
+    )
+
+    assert calls == [
+        ("packet:BUG-READONLY:2", False),
+        ("packet:BUG-READONLY:3", False),
+        ("replay:BUG-READONLY:4", False),
+    ]

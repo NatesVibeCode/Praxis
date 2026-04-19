@@ -1,0 +1,140 @@
+{
+  "name": "Recruiter Pipeline Daily Cycle",
+  "phase": "W",
+  "queue_id": "recruiter_daily_cycle_20260418",
+  "outcome_goal": "artifacts/recruiter_daily_cycle_20260418/daily_brief.md exists with a prioritized action list; new opportunities are persisted through /Users/nate/Recruiter/recruiter-runtime/bin/recruiter-runtime; top-5 roles have tailored outreach drafts on disk; dispositions are filed (apply/watch/dismiss) through the recruiter-runtime CLI — no direct SQL, no manual ATS scraping.",
+  "anti_requirements": [
+    "Do NOT write directly to the recruiter-runtime database — go through /Users/nate/Recruiter/recruiter-runtime/bin/recruiter-runtime or recruiter-operator.",
+    "Do NOT send any outreach automatically — drafts land on disk for human review before any send.",
+    "Do NOT fabricate roles. If ATS discovery returns nothing for a source, record the empty result with reason; do not invent listings.",
+    "Do NOT route the discovery research jobs to DeepSeek for anything other than task_type=research.",
+    "Do NOT skip dedupe against existing pipeline state before scoring."
+  ],
+  "jobs": [
+    {
+      "label": "snapshot_pipeline",
+      "task_type": "extraction",
+      "description": "Snapshot current pipeline state and today's inbox deltas",
+      "outcome_goal": "artifacts/recruiter_daily_cycle_20260418/00_snapshot.json contains: open_roles[], in_flight_applications[], pending_follow_ups[], dismissed_last_30d[] — sourced from the recruiter-runtime CLI, not invented.",
+      "prompt": "Snapshot current recruiter pipeline state so downstream jobs can dedupe and prioritize.\n\nRun the recruiter-runtime export to capture state:\n\n/Users/nate/Recruiter/recruiter-runtime/bin/export_leads_json > artifacts/recruiter_daily_cycle_20260418/00_snapshot.json\n\nIf `export_leads_json` produces a different shape than expected, inspect it (`head -c 2000`) and produce `00_snapshot.json` with the four fields listed in the outcome_goal, sourced from that output. Do not invent rows. If a section is empty, emit an empty array with a note.",
+      "read": [],
+      "write": ["artifacts/recruiter_daily_cycle_20260418/00_snapshot.json"],
+      "verify_command": "test -s artifacts/recruiter_daily_cycle_20260418/00_snapshot.json && python3 -c 'import json,sys; d=json.load(open(\"artifacts/recruiter_daily_cycle_20260418/00_snapshot.json\")); sys.exit(0 if isinstance(d, (list, dict)) else 1)'"
+    },
+    {
+      "label": "sweep_greenhouse_lever",
+      "task_type": "research",
+      "depends_on": ["snapshot_pipeline"],
+      "description": "Parallel ATS sweep — Greenhouse + Lever (broad recall)",
+      "outcome_goal": "artifacts/recruiter_daily_cycle_20260418/discovery/greenhouse_lever.json contains role candidates from Greenhouse and Lever matching the target profile, deduped against 00_snapshot.json open_roles[] and dismissed_last_30d[].",
+      "prompt": "Run broad recall sweep over Greenhouse and Lever for the target profile. Use `/Users/nate/Recruiter/recruiter-runtime/bin/batch-discover --sources greenhouse,lever --mode broad` (or inspect the CLI's --help if the flag shape differs). Capture raw output, then dedupe against existing roles listed in `artifacts/recruiter_daily_cycle_20260418/00_snapshot.json`. Write the deduped candidate set (with source, company, role, URL, first_seen) to `artifacts/recruiter_daily_cycle_20260418/discovery/greenhouse_lever.json`.\n\nIf the CLI returns an error, report the exact error and stop — do not substitute raw web scraping.",
+      "read": ["artifacts/recruiter_daily_cycle_20260418/00_snapshot.json"],
+      "write": ["artifacts/recruiter_daily_cycle_20260418/discovery/greenhouse_lever.json"],
+      "verify_command": "test -s artifacts/recruiter_daily_cycle_20260418/discovery/greenhouse_lever.json"
+    },
+    {
+      "label": "sweep_ashby_workable_smartrecruiters",
+      "task_type": "research",
+      "depends_on": ["snapshot_pipeline"],
+      "description": "Parallel ATS sweep — Ashby, Workable, SmartRecruiters",
+      "outcome_goal": "artifacts/recruiter_daily_cycle_20260418/discovery/ashby_workable_smart.json contains deduped role candidates from those three sources.",
+      "prompt": "Same shape as sweep_greenhouse_lever but for Ashby, Workable, SmartRecruiters. Invocation: `/Users/nate/Recruiter/recruiter-runtime/bin/batch-discover --sources ashby,workable,smartrecruiters --mode broad`. Write to `artifacts/recruiter_daily_cycle_20260418/discovery/ashby_workable_smart.json`.",
+      "read": ["artifacts/recruiter_daily_cycle_20260418/00_snapshot.json"],
+      "write": ["artifacts/recruiter_daily_cycle_20260418/discovery/ashby_workable_smart.json"],
+      "verify_command": "test -s artifacts/recruiter_daily_cycle_20260418/discovery/ashby_workable_smart.json"
+    },
+    {
+      "label": "narrow_fallback_recovery",
+      "task_type": "research",
+      "depends_on": ["sweep_greenhouse_lever", "sweep_ashby_workable_smartrecruiters"],
+      "description": "Narrow-pass recovery for companies with weak broad-pass yield",
+      "outcome_goal": "artifacts/recruiter_daily_cycle_20260418/discovery/narrow_recovery.json contains additional roles found via second-pass targeted company search; includes per-company note on why recovery was triggered.",
+      "prompt": "Read both broad-sweep outputs. Identify target companies that are on the watchlist but produced zero roles in the broad pass. For each, run narrow company-targeted search via `/Users/nate/Recruiter/recruiter-runtime/bin/batch-discover --mode narrow --company <slug>`. Capture recovered roles to `artifacts/recruiter_daily_cycle_20260418/discovery/narrow_recovery.json`. Do not blur narrow-recovery results with the broad set — keep them in a separate file so provenance is preserved.",
+      "read": [
+        "artifacts/recruiter_daily_cycle_20260418/discovery/greenhouse_lever.json",
+        "artifacts/recruiter_daily_cycle_20260418/discovery/ashby_workable_smart.json"
+      ],
+      "write": ["artifacts/recruiter_daily_cycle_20260418/discovery/narrow_recovery.json"],
+      "verify_command": "test -f artifacts/recruiter_daily_cycle_20260418/discovery/narrow_recovery.json"
+    },
+    {
+      "label": "enrich_companies",
+      "task_type": "research",
+      "depends_on": ["narrow_fallback_recovery"],
+      "description": "Enrich net-new companies with funding / size / recent news signals",
+      "outcome_goal": "artifacts/recruiter_daily_cycle_20260418/01_enriched.json merges all three discovery files, one row per role, adding company signals (size, stage, recent funding, recent layoffs if any) for every net-new company.",
+      "prompt": "Merge the three discovery files into one candidate set. For every company not already present in the pipeline snapshot, call `/Users/nate/Recruiter/recruiter-runtime/bin/enrich_companies <company>` and attach size / stage / recent news signals. Write the enriched set to `artifacts/recruiter_daily_cycle_20260418/01_enriched.json`. Flag companies where public signals contradict the watchlist (layoffs, acquisition, hiring freeze) — do not drop them, annotate them.",
+      "read": [
+        "artifacts/recruiter_daily_cycle_20260418/00_snapshot.json",
+        "artifacts/recruiter_daily_cycle_20260418/discovery/greenhouse_lever.json",
+        "artifacts/recruiter_daily_cycle_20260418/discovery/ashby_workable_smart.json",
+        "artifacts/recruiter_daily_cycle_20260418/discovery/narrow_recovery.json"
+      ],
+      "write": ["artifacts/recruiter_daily_cycle_20260418/01_enriched.json"],
+      "verify_command": "test -s artifacts/recruiter_daily_cycle_20260418/01_enriched.json"
+    },
+    {
+      "label": "score_and_triage",
+      "task_type": "analysis",
+      "depends_on": ["enrich_companies"],
+      "description": "Score every role and assign a disposition (apply / watch / dismiss)",
+      "outcome_goal": "artifacts/recruiter_daily_cycle_20260418/02_triage.json has one row per enriched role with: fit_score (0-100), freshness_score (0-100), confidence (high/med/low), disposition (apply|watch|dismiss), and a one-sentence rationale. Top-5 apply-bucket roles are flagged.",
+      "prompt": "Read `01_enriched.json`. Score each role on three axes:\n- **fit_score** — role vs target profile (role family, seniority, stack, domain)\n- **freshness_score** — recency and hiring-velocity signal\n- **confidence** — high/medium/low based on source quality and enrichment agreement\n\nAssign **disposition**:\n- `apply` — fit_score ≥ 70 AND freshness ≥ 60 AND confidence ≥ medium\n- `watch` — fit_score ≥ 50 OR company on watchlist\n- `dismiss` — everything else\n\nWrite `02_triage.json`. Flag top-5 apply-bucket roles (`top_today: true`) ordered by composite score.\n\nDo NOT be generous. A long watch-list defeats the purpose — if you can't say why you'd apply, it's dismiss.",
+      "read": ["artifacts/recruiter_daily_cycle_20260418/01_enriched.json"],
+      "write": ["artifacts/recruiter_daily_cycle_20260418/02_triage.json"],
+      "verify_command": "python3 -c 'import json; d=json.load(open(\"artifacts/recruiter_daily_cycle_20260418/02_triage.json\")); assert sum(1 for r in d if r.get(\"top_today\"))==5, \"need exactly 5 top_today flags\"'"
+    },
+    {
+      "label": "draft_outreach_top5",
+      "task_type": "creative",
+      "depends_on": ["score_and_triage"],
+      "description": "Tailored cover snippet + resume-tilt notes for the top-5",
+      "outcome_goal": "artifacts/recruiter_daily_cycle_20260418/outreach/ contains 5 markdown files (one per top_today role) each with: tailored 3-paragraph cover snippet, 3 resume-tilt bullets (what to emphasize), and the 2 weakest-fit-to-rebut lines the reader will raise.",
+      "prompt": "For each `top_today:true` role in `02_triage.json`, write a markdown file at `artifacts/recruiter_daily_cycle_20260418/outreach/<company>_<role_slug>.md` with three sections:\n\n1. **Cover snippet** (3 paragraphs, under 250 words) — specific to this role, not generic. Name the stack, the product, and one recent signal from enrichment.\n2. **Resume tilt** (3 bullets) — which existing experience to foreground for this role. Cite it by role/year so I can find it on the resume.\n3. **Rebuttals ready** (2 bullets) — the two most-likely 'why not you' objections this reader will raise, and the one-line rebuttal for each.\n\nNo templates. If two roles come from the same company, they still get distinct files — the rationale per role is what matters.",
+      "read": [
+        "artifacts/recruiter_daily_cycle_20260418/02_triage.json",
+        "artifacts/recruiter_daily_cycle_20260418/01_enriched.json"
+      ],
+      "write": ["artifacts/recruiter_daily_cycle_20260418/outreach/"],
+      "verify_command": "ls artifacts/recruiter_daily_cycle_20260418/outreach/*.md 2>/dev/null | wc -l | awk '{ exit ($1==5)?0:1 }'"
+    },
+    {
+      "label": "file_dispositions",
+      "task_type": "operate",
+      "depends_on": ["score_and_triage"],
+      "description": "Persist apply / watch / dismiss decisions through recruiter-runtime",
+      "outcome_goal": "Every row in 02_triage.json has its disposition persisted via /Users/nate/Recruiter/recruiter-runtime/bin/recruiter-runtime; export_leads_json afterward shows matching state; artifacts/recruiter_daily_cycle_20260418/03_filed.json records exit codes and any failures.",
+      "prompt": "For each row in `02_triage.json`, persist its disposition through the recruiter-runtime CLI — not by writing to its database directly.\n\nTypical invocations (confirm flags via `--help` before first use):\n- `/Users/nate/Recruiter/recruiter-runtime/bin/recruiter-runtime lead add --url <url> --company <co> --role <role> --disposition <apply|watch|dismiss> --rationale <one-line>`\n- Use `lead update` if the lead already exists in the snapshot.\n\nRecord each call's exit code and any error to `03_filed.json`. If a call fails, do NOT fall through to SQL. Continue with remaining rows, surface the failures in `03_filed.json.errors[]` for human triage.\n\nAfter processing, run `export_leads_json` once more and assert that the counts of `apply` / `watch` / `dismiss` changes match what you intended. Record the before/after counts in `03_filed.json`.",
+      "read": ["artifacts/recruiter_daily_cycle_20260418/02_triage.json"],
+      "write": ["artifacts/recruiter_daily_cycle_20260418/03_filed.json"],
+      "verify_command": "python3 -c 'import json; d=json.load(open(\"artifacts/recruiter_daily_cycle_20260418/03_filed.json\")); assert \"before\" in d and \"after\" in d'"
+    },
+    {
+      "label": "schedule_apply_block",
+      "task_type": "operate",
+      "depends_on": ["draft_outreach_top5", "file_dispositions"],
+      "description": "Hold calendar time for today's apply block",
+      "outcome_goal": "artifacts/recruiter_daily_cycle_20260418/04_schedule.json records whether a 90-minute apply-work hold was placed on today's calendar (or a reason it was skipped), with the event id if placed.",
+      "prompt": "Place a 90-minute 'Apply Block — recruiter_daily_cycle' hold on today's calendar during the next available window between 9am and 4pm local time. Use whichever calendar surface is available in this environment — if no calendar tool is connected, record that to `04_schedule.json` with `skipped:true, reason:\"no calendar surface available\"` rather than failing the job.\n\nDo NOT invite anyone else. This is a personal hold.",
+      "read": [],
+      "write": ["artifacts/recruiter_daily_cycle_20260418/04_schedule.json"],
+      "verify_command": "test -s artifacts/recruiter_daily_cycle_20260418/04_schedule.json"
+    },
+    {
+      "label": "daily_brief",
+      "task_type": "creative",
+      "depends_on": ["file_dispositions", "draft_outreach_top5", "schedule_apply_block"],
+      "description": "Single-page daily brief for the human operator",
+      "outcome_goal": "artifacts/recruiter_daily_cycle_20260418/daily_brief.md is a single page with: top-5 today with direct links to the outreach drafts, new apply-bucket count vs yesterday, stale watch-list items, any enrichment red flags (layoffs/freezes), and the calendar hold outcome.",
+      "prompt": "Write `artifacts/recruiter_daily_cycle_20260418/daily_brief.md` as a single-page morning brief. Target length: under 400 words. Sections:\n\n1. **Today's Top 5** — one line per role with company, role title, fit score, and a `[draft](outreach/<file>)` link\n2. **Pipeline delta** — +N in apply, +N in watch, +N dismissed today\n3. **Red flags** — any enrichment signals (layoffs, freezes, acquisition) that matter for decisions already in flight\n4. **Stale items** — watch-list roles older than 14 days with no movement\n5. **Today's block** — whether the calendar hold was placed, and the event link\n\nLead with signal. No meta-commentary on the workflow itself.",
+      "read": [
+        "artifacts/recruiter_daily_cycle_20260418/02_triage.json",
+        "artifacts/recruiter_daily_cycle_20260418/03_filed.json",
+        "artifacts/recruiter_daily_cycle_20260418/04_schedule.json",
+        "artifacts/recruiter_daily_cycle_20260418/01_enriched.json"
+      ],
+      "write": ["artifacts/recruiter_daily_cycle_20260418/daily_brief.md"],
+      "verify_command": "test -s artifacts/recruiter_daily_cycle_20260418/daily_brief.md && grep -q 'Top 5' artifacts/recruiter_daily_cycle_20260418/daily_brief.md"
+    }
+  ]
+}

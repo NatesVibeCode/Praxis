@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import asyncpg
+import pytest
 
 from runtime.claims import ClaimLeaseProposalRuntime
-from runtime.domain import RunState, RuntimeBoundaryError
+from runtime.domain import RuntimeBoundaryError
 import runtime.outbox as outbox_mod
 import runtime.subscription_repository as subscription_repo_mod
 import runtime.subscriptions as subscriptions_mod
@@ -49,7 +50,7 @@ class _FakeWorkerSubscription:
         self.repository = repository
 
 
-def test_live_workflow_bridge_falls_back_to_workflow_run_when_route_row_missing(monkeypatch) -> None:
+def test_live_workflow_bridge_fails_when_runtime_route_row_missing(monkeypatch) -> None:
     bridge_mod._BOOTSTRAPPED_BRIDGE_DB = None
     monkeypatch.setattr(connection_mod, "ensure_postgres_available", lambda env=None: object())
     monkeypatch.setattr(asyncpg, "connect", _fake_connect)
@@ -65,14 +66,9 @@ def test_live_workflow_bridge_falls_back_to_workflow_run_when_route_row_missing(
     monkeypatch.setattr(subscriptions_mod, "WorkflowWorkerSubscription", _FakeWorkerSubscription)
 
     bridge = build_live_workflow_bridge("postgresql://repo.test/workflow")
-    snapshot = bridge.routes.inspect_route(run_id="run-queued")
 
-    assert snapshot.run_id == "run-queued"
-    assert snapshot.workflow_id == "workflow-1"
-    assert snapshot.request_id == "request-1"
-    assert snapshot.current_state is RunState.QUEUED
-    assert snapshot.claim_id == "claim:run-queued"
-    assert snapshot.last_event_id == "event-1"
+    with pytest.raises(RuntimeBoundaryError, match="runtime route 'run-queued' is missing"):
+        bridge.routes.inspect_route(run_id="run-queued")
 
 
 async def _fake_connect(*_args, **_kwargs) -> _FakeConn:

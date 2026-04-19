@@ -53,8 +53,10 @@ def test_tools_root_shows_quickstart() -> None:
     rendered = stdout.getvalue()
     assert "Tool discovery quickstart:" in rendered
     assert "workflow tools search <topic> [--exact] [--surface <surface>] [--tier <tier>] [--risk <risk>]" in rendered
+    assert "workflow tools help <list|search|describe|call>" in rendered
     assert "search results are relevance-ranked" in rendered.lower()
     assert "unique prefix" in rendered.lower()
+    assert "workflow mcp" in rendered
     assert "Common direct entrypoints:" in rendered
     assert "workflow diagnose" in rendered
 
@@ -240,8 +242,16 @@ def test_tools_list_plain_output_highlights_entrypoints() -> None:
     assert "ENTRYPOINT" in rendered
     assert "ALIAS" in rendered
     assert "workflow query" in rendered
+    assert "workflow integration" in rendered
     assert "query" in rendered
     assert "workflow tools call praxis_connector" in rendered
+
+
+def test_integration_tool_has_direct_entrypoint() -> None:
+    definition = get_tool_catalog()["praxis_integration"]
+
+    assert definition.cli_entrypoint == "workflow integration"
+    assert definition.cli_recommended_alias == "integration"
 
 
 def test_tools_describe_reports_ambiguous_prefixes(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -464,6 +474,27 @@ def test_tools_root_help_mentions_alias_support() -> None:
     rendered = stdout.getvalue()
     assert "workflow tools describe <tool|alias>" in rendered
     assert "workflow tools call <tool|alias>" in rendered
+
+
+def test_tools_help_search_shows_targeted_usage() -> None:
+    stdout = StringIO()
+
+    assert workflow_cli_main(["tools", "help", "search"], stdout=stdout) == 0
+
+    rendered = stdout.getvalue()
+    assert "usage: workflow tools search <text>" in rendered
+    assert "Search by topic, alias, entrypoint, or describe-command text." in rendered
+    assert "add --exact only when you already know the alias, tool name, or entrypoint" in rendered
+
+
+def test_mcp_help_topic_routes_to_tools_help() -> None:
+    tools_stdout = StringIO()
+    mcp_stdout = StringIO()
+
+    assert workflow_cli_main(["tools", "help", "call"], stdout=tools_stdout) == 0
+    assert workflow_cli_main(["mcp", "help", "call"], stdout=mcp_stdout) == 0
+
+    assert mcp_stdout.getvalue() == tools_stdout.getvalue()
 
 
 def test_architecture_scan_alias_renders_exact_static_findings(monkeypatch: pytest.MonkeyPatch) -> None:

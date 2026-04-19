@@ -15,28 +15,25 @@ import logging
 import threading
 from typing import Any, Callable, Protocol
 
+from runtime.workspace_paths import authority_workspace_roots, container_workspace_root
+
 _log = logging.getLogger(__name__)
-
-
-# Host paths (e.g. `/Users/nate/Praxis/...`) are encoded into workflow specs at
-# admission time by the host CLI, but deterministic builders run in-process in
-# the worker container where only `/workspace/...` exists. Translate at this one
-# boundary so individual builders never have to care about the split.
-_HOST_WORKSPACE_ROOT = Path("/Users/nate/Praxis")
-_CONTAINER_WORKSPACE_ROOT = Path("/workspace")
 
 
 def _translate_host_path_to_container(value: Any) -> Any:
     if not isinstance(value, str) or not value:
         return value
     path = Path(value)
-    try:
-        relative = path.relative_to(_HOST_WORKSPACE_ROOT)
-    except ValueError:
-        return value
-    if _HOST_WORKSPACE_ROOT.exists() or not _CONTAINER_WORKSPACE_ROOT.exists():
-        return value
-    return str(_CONTAINER_WORKSPACE_ROOT / relative)
+    container_root = container_workspace_root()
+    for host_root in authority_workspace_roots():
+        try:
+            relative = path.relative_to(host_root)
+        except ValueError:
+            continue
+        if host_root.exists() or not container_root.exists():
+            return value
+        return str(container_root / relative)
+    return value
 
 
 def _normalize_payload_for_container(payload: dict[str, Any]) -> dict[str, Any]:
@@ -49,7 +46,7 @@ def _normalize_payload_for_container(payload: dict[str, Any]) -> dict[str, Any]:
 
     value = payload.get("workspace_root")
     translated = _translate_host_path_to_container(value)
-    if translated is not value:
+    if translated != value:
         payload["workspace_root"] = translated
     return payload
 

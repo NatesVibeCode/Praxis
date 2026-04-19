@@ -616,8 +616,23 @@ def _as_dict_list(value: object) -> list[dict[str, Any]]:
     return [dict(item) for item in value if isinstance(item, dict)]
 
 
-def _validate_spec_path(path: str) -> Path:
+def _resolve_spec_path(path: str) -> Path:
+    """Resolve a spec path against cwd; fall back to repo root if relative."""
     file_path = Path(path)
+    if not file_path.is_absolute() and not file_path.exists():
+        search = Path(__file__).resolve().parent
+        while search != search.parent:
+            if (search / ".git").exists():
+                candidate = search / path
+                if candidate.exists():
+                    return candidate
+                break
+            search = search.parent
+    return file_path
+
+
+def _validate_spec_path(path: str) -> Path:
+    file_path = _resolve_spec_path(path)
     if not file_path.exists():
         raise WorkflowSpecError(f"Spec file not found: {path}")
     if not file_path.name.endswith(".json"):
@@ -1061,9 +1076,15 @@ def load_workflow_batch(
 
 
 def load_raw(path: str) -> dict[str, Any]:
-    """Load raw JSON from a spec file without additional parsing."""
+    """Load raw JSON from a spec file without additional parsing.
 
-    file_path = Path(path)
+    If the given path is relative and not found under the current working
+    directory, walk up from this module to find the repo root (marked by
+    `.git`) and try the path there — so `praxis workflow run <spec>` works
+    from any cwd.
+    """
+
+    file_path = _resolve_spec_path(path)
     with file_path.open("r", encoding="utf-8") as handle:
         loaded = json.load(handle)
     if not isinstance(loaded, dict):

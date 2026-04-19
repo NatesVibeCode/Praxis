@@ -71,6 +71,24 @@ class _SubsystemsStub:
         return self.generator
 
 
+class _StreamRequestStub:
+    def __init__(self, subsystems: Any) -> None:
+        self.subsystems = subsystems
+        self.status: int | None = None
+        self.headers: dict[str, str] = {}
+        self.ended = False
+        self.wfile = io.BytesIO()
+
+    def send_response(self, status: int) -> None:
+        self.status = status
+
+    def send_header(self, key: str, value: str) -> None:
+        self.headers[key] = value
+
+    def end_headers(self) -> None:
+        self.ended = True
+
+
 def test_manifest_generate_uses_subsystem_matcher() -> None:
     subsystems = _SubsystemsStub()
     request = _RequestStub({"intent": "Build a support dashboard"}, subsystems=subsystems)
@@ -711,3 +729,105 @@ def test_workflow_run_handler_does_not_own_manifest_or_checkpoint_write_sql() ->
     )
     leaked = [snippet for snippet in forbidden_sql_snippets if snippet in source]
     assert leaked == [], f"workflow_run.py still owns canonical write SQL: {leaked}"
+
+
+def test_workflow_stream_uses_shared_run_wakeup_listener(monkeypatch) -> None:
+    subsystems = _SubsystemsStub()
+    request = _StreamRequestStub(subsystems)
+
+    workflow_unified = __import__("runtime.workflow.unified", fromlist=["*"])
+    statuses = [
+        {
+            "run_id": "run-123",
+            "status": "running",
+            "spec_name": "stream-spec",
+            "total_jobs": 1,
+            "jobs": [],
+        },
+        {
+            "run_id": "run-123",
+            "status": "succeeded",
+            "spec_name": "stream-spec",
+            "total_jobs": 1,
+            "jobs": [{"status": "succeeded"}],
+        },
+    ]
+    monkeypatch.setattr(workflow_unified, "get_run_status", lambda *_args, **_kwargs: statuses.pop(0))
+    monkeypatch.setattr(
+        workflow_run,
+        "workflow_database_env_for_repo",
+        lambda _repo: {"WORKFLOW_DATABASE_URL": "postgresql://example"},
+    )
+
+    listener_calls: list[dict[str, Any]] = []
+
+    class _FakeListener:
+        def __init__(self) -> None:
+            self.stop_calls = 0
+
+        def stop(self) -> None:
+            self.stop_calls += 1
+
+    fake_listener = _FakeListener()
+
+    def _start_run_wakeup_listener(
+        *,
+        run_id: str,
+        wakeup_event,
+        database_url: str | None = None,
+        channels: tuple[str, ...] = ("job_completed", "run_complete"),
+    ):
+        listener_calls.append(
+            {
+                "run_id": run_id,
+                "database_url": database_url,
+                "channels": channels,
+                "wakeup_event": wakeup_event,
+            }
+        )
+        return fake_listener
+
+    workflow_notifications = __import__("runtime.workflow_notifications", fromlist=["*"])
+
+    class _FakeNotificationConsumer:
+        def __init__(self, conn) -> None:
+            self.conn = conn
+
+        def iter_run(
+            self,
+            run_id: str,
+            total_jobs: int,
+            timeout_seconds=None,
+            poll_interval: float = 2.0,
+            wakeup_event=None,
+        ):
+            del run_id, total_jobs, timeout_seconds, poll_interval
+            assert wakeup_event is not None
+            yield SimpleNamespace(
+                job_label="build_a",
+                status="succeeded",
+                agent_slug="openai/gpt-5.4-mini",
+                duration_seconds=1.2,
+                failure_code="",
+                cpu_percent=None,
+                mem_bytes=None,
+            )
+
+    monkeypatch.setattr(workflow_run, "start_run_wakeup_listener", _start_run_wakeup_listener)
+    monkeypatch.setattr(workflow_notifications, "WorkflowNotificationConsumer", _FakeNotificationConsumer)
+
+    workflow_run._handle_workflow_stream(request, "/api/workflow-runs/run-123/stream")
+
+    assert request.status == 200
+    assert request.ended is True
+    assert len(listener_calls) == 1
+    assert listener_calls[0]["run_id"] == "run-123"
+    assert listener_calls[0]["database_url"] == "postgresql://example"
+    assert listener_calls[0]["channels"] == ("job_completed", "run_complete")
+    assert fake_listener.stop_calls == 1
+
+    body = request.wfile.getvalue().decode()
+    assert "event: start" in body
+    assert "event: job" in body
+    assert "event: progress" in body
+    assert "event: done" in body

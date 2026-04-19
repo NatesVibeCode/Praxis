@@ -51,6 +51,7 @@ def _parse_docker_mem_str(mem_str: str) -> int:
 _CLOUDFLARE_SANDBOX_URL_ENV = "PRAXIS_CLOUDFLARE_SANDBOX_URL"
 _CLOUDFLARE_SANDBOX_TOKEN_ENV = "PRAXIS_CLOUDFLARE_SANDBOX_TOKEN"
 _IGNORED_MANIFEST_DIRS = frozenset({".git", "__pycache__", ".pytest_cache", ".mypy_cache"})
+_EMPTY_WORKSPACE_MATERIALIZATION = "none"
 
 # CLI auth files to mount read-only into Docker containers.
 # Each entry: (provider slugs, host_path_relative_to_home, container_path).
@@ -485,6 +486,10 @@ def _workspace_snapshot_ref(
     canonical = json.dumps(entries, separators=(",", ":"), ensure_ascii=True)
     digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
     return f"workspace_snapshot:{digest}"
+
+
+def _uses_empty_workspace_materialization(value: object) -> bool:
+    return str(value or "").strip().lower() == _EMPTY_WORKSPACE_MATERIALIZATION
 
 
 def _workspace_snapshot_cache_root() -> str:
@@ -1140,19 +1145,35 @@ class SandboxRuntime:
             workspace_overlays = _normalize_workspace_overlay_files(
                 provider_metadata.get("workspace_overlays")
             )
-            workspace_snapshot_ref = _workspace_snapshot_ref(
-                workdir,
-                overlay_files=workspace_overlays,
-            )
-            hydration_receipt = provider.hydrate_workspace(
-                session,
-                WorkspaceSnapshot(
-                    source_root=workdir,
-                    materialization=workspace_materialization,
-                    workspace_snapshot_ref=workspace_snapshot_ref,
+            if _uses_empty_workspace_materialization(workspace_materialization):
+                with tempfile.TemporaryDirectory(prefix="praxis-empty-workspace-") as empty_root:
+                    workspace_snapshot_ref = _workspace_snapshot_ref(
+                        empty_root,
+                        overlay_files=workspace_overlays,
+                    )
+                    hydration_receipt = provider.hydrate_workspace(
+                        session,
+                        WorkspaceSnapshot(
+                            source_root=empty_root,
+                            materialization=_EMPTY_WORKSPACE_MATERIALIZATION,
+                            workspace_snapshot_ref=workspace_snapshot_ref,
+                            overlay_files=workspace_overlays,
+                        ),
+                    )
+            else:
+                workspace_snapshot_ref = _workspace_snapshot_ref(
+                    workdir,
                     overlay_files=workspace_overlays,
-                ),
-            )
+                )
+                hydration_receipt = provider.hydrate_workspace(
+                    session,
+                    WorkspaceSnapshot(
+                        source_root=workdir,
+                        materialization=workspace_materialization,
+                        workspace_snapshot_ref=workspace_snapshot_ref,
+                        overlay_files=workspace_overlays,
+                    ),
+                )
             # The hydrated workspace is owned by the worker uid (root). The
             # ephemeral CLI container runs as uid 1100 and cannot write into
             # root-owned directories; Write-tool calls silently fail and the
@@ -1189,7 +1210,11 @@ class SandboxRuntime:
             # Dehydrate: copy changed files from sandbox back to host workdir.
             # Without this, agent-produced files exist only in the ephemeral
             # container workspace and never reach the host repo.
-            if artifact_refs and getattr(provider, "execution_lane", "") == "local":
+            if (
+                artifact_refs
+                and getattr(provider, "execution_lane", "") == "local"
+                and not _uses_empty_workspace_materialization(workspace_materialization)
+            ):
                 _dehydrate_copy(session.workspace_root, workdir, artifact_refs)
             if artifact_store is not None:
                 persisted_refs: list[str] = []

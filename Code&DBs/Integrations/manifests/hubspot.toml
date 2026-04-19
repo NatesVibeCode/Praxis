@@ -1,0 +1,105 @@
+# HubSpot CRM — Private App integration.
+#
+# Auth: HubSpot Private App Access Token (Personal Access Token, bearer).
+# Store it in macOS Keychain:
+#   security add-generic-password -U -a praxis -s HUBSPOT_ACCESS_TOKEN -w <pat>
+#
+# Private-App setup: https://developers.hubspot.com/docs/guides/apps/private-apps/overview
+# Scopes needed (minimum MVP):
+#   crm.objects.contacts.read   crm.objects.contacts.write
+#   crm.objects.companies.read  crm.objects.companies.write
+#   crm.objects.deals.read      crm.objects.deals.write
+#   crm.objects.owners.read
+
+[integration]
+id = "hubspot"
+name = "HubSpot CRM"
+description = "HubSpot CRM via Private App access token — contacts, companies, deals, notes."
+provider = "http"
+icon = "hubspot"
+
+[auth]
+kind = "api_key"
+env_var = "HUBSPOT_ACCESS_TOKEN"
+
+# ── Contacts ────────────────────────────────────────────────────────────────
+
+[[capabilities]]
+action = "list_contacts"
+description = "Paginated list of contacts. Query args: limit, after, properties (comma-separated)."
+method = "GET"
+path = "https://api.hubapi.com/crm/v3/objects/contacts"
+
+[[capabilities]]
+action = "create_contact"
+description = "Create a contact. Body: {properties: {email, firstname, lastname, phone, ...}}"
+method = "POST"
+path = "https://api.hubapi.com/crm/v3/objects/contacts"
+
+[[capabilities]]
+action = "search_contacts"
+description = "Search contacts. Body: {filterGroups, sorts, properties, limit, after}"
+method = "POST"
+path = "https://api.hubapi.com/crm/v3/objects/contacts/search"
+
+[[capabilities]]
+action = "batch_read_contacts"
+description = "Batch read contacts by id. Body: {inputs: [{id}], properties: [...]}"
+method = "POST"
+path = "https://api.hubapi.com/crm/v3/objects/contacts/batch/read"
+
+# ── Companies ───────────────────────────────────────────────────────────────
+
+[[capabilities]]
+action = "list_companies"
+description = "Paginated list of companies. Query args: limit, after, properties."
+method = "GET"
+path = "https://api.hubapi.com/crm/v3/objects/companies"
+
+[[capabilities]]
+action = "create_company"
+description = "Create a company. Body: {properties: {name, domain, industry, ...}}"
+method = "POST"
+path = "https://api.hubapi.com/crm/v3/objects/companies"
+
+[[capabilities]]
+action = "search_companies"
+description = "Search companies. Body: {filterGroups, sorts, properties, limit, after}"
+method = "POST"
+path = "https://api.hubapi.com/crm/v3/objects/companies/search"
+
+# ── Deals ───────────────────────────────────────────────────────────────────
+
+[[capabilities]]
+action = "list_deals"
+description = "Paginated list of deals. Query args: limit, after, properties."
+method = "GET"
+path = "https://api.hubapi.com/crm/v3/objects/deals"
+
+[[capabilities]]
+action = "create_deal"
+description = "Create a deal. Body: {properties: {dealname, amount, pipeline, dealstage, closedate, ...}}"
+method = "POST"
+path = "https://api.hubapi.com/crm/v3/objects/deals"
+
+[[capabilities]]
+action = "search_deals"
+description = "Search deals. Body: {filterGroups, sorts, properties, limit, after}"
+method = "POST"
+path = "https://api.hubapi.com/crm/v3/objects/deals/search"
+
+# ── Engagements ─────────────────────────────────────────────────────────────
+
+[[capabilities]]
+action = "create_note"
+description = "Log a note engagement. Body: {properties: {hs_note_body, hs_timestamp}, associations: [...]}"
+method = "POST"
+path = "https://api.hubapi.com/crm/v3/objects/notes"
+
+# ── Owners (for assignment lookups) ─────────────────────────────────────────
+
+[[capabilities]]
+action = "list_owners"
+description = "List HubSpot users (owners) for assignment. Query args: limit, after, email."
+method = "GET"
+path = "https://api.hubapi.com/crm/v3/owners"

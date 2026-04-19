@@ -15,7 +15,7 @@ describe('moonBuildReducer — run view transitions', () => {
     expect(next.viewMode).toBe('run');
     expect(next.activeRunId).toBe('workflow_abc');
     expect(next.runViewSource).toBe('url');
-    expect(next.runViewOpen).toBe(true);
+    expect(next.runViewOpen).toBe(false);
     // build-mode transient state cleared
     expect(next.selectedNodeId).toBeNull();
     expect(next.dragItemId).toBeNull();

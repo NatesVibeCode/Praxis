@@ -35,7 +35,7 @@ def test_cmd_stream_returns_terminal_summary_when_run_already_done(
             "spec_name": "stream smoke",
             "total_jobs": 1,
             "status": "succeeded",
-            "jobs": [{"status": "succeeded"}],
+            "jobs": [{"job_label": "build_a", "status": "succeeded", "duration_ms": 1200}],
         }
     ]
 
@@ -57,6 +57,7 @@ def test_cmd_stream_returns_terminal_summary_when_run_already_done(
     output = capsys.readouterr().out
     assert result == 0
     assert "start  run_id=workflow_done" in output
+    assert "job    label=build_a status=succeeded" in output
     assert "done   status=succeeded" in output
 
 
@@ -77,7 +78,14 @@ def test_cmd_stream_yields_job_progress_and_done(
             "spec_name": "stream smoke",
             "total_jobs": 1,
             "status": "succeeded",
-            "jobs": [{"status": "succeeded"}],
+            "jobs": [
+                {
+                    "label": "build_a",
+                    "status": "succeeded",
+                    "agent_slug": "openai/gpt-5.4-mini",
+                    "duration_ms": 1200,
+                }
+            ],
         },
     ]
 

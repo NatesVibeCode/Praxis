@@ -12,6 +12,8 @@ import {
 } from './actionTruth';
 import { MoonGlyph } from './MoonGlyph';
 import { MoonSurfaceReviewPanel } from './MoonSurfaceReviewPanel';
+import { MoonIntegrationsPanel } from './MoonIntegrationsPanel';
+import { MoonDataDictionaryPanel } from './MoonDataDictionaryPanel';
 
 interface Props {
   workflowId: string | null;
@@ -279,6 +281,8 @@ export function MoonActionDock({
           sourcePolicies={catalogEnvelope.sourcePolicies}
           onCatalogReload={handleCatalogReload}
         />
+        <MoonIntegrationsPanel />
+        <MoonDataDictionaryPanel />
         <div className="moon-dock__section-label">Catalog</div>
         <div className="moon-catalog__filters">
           {filterableFamilies.map(f => (

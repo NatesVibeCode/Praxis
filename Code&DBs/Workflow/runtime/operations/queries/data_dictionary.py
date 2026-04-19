@@ -1,4 +1,11 @@
-"""Query handlers for a DB-backed data dictionary projected into memory_entities."""
+"""Query handlers for the unified data dictionary.
+
+Two flows live here:
+- Legacy `QueryDataDictionary(table_name=...)` — reads the per-table projection
+  in `memory_entities` (kept so existing callers continue to work).
+- New `QueryDataDictionaryObject(object_kind=...)` — reads the merged
+  `data_dictionary_effective` view and returns {object, fields, layers}.
+"""
 from __future__ import annotations
 
 import json
@@ -10,6 +17,11 @@ from contracts.data_dictionary import (
     build_data_dictionary_table,
 )
 from pydantic import BaseModel
+from runtime.data_dictionary import (
+    DataDictionaryBoundaryError,
+    describe_object,
+    list_object_kinds,
+)
 
 
 _TABLE_PREFIX = "table:"
@@ -241,3 +253,69 @@ def handle_query_data_dictionary(
         )
         response["matches"] = ambiguous
     return response
+
+
+class QueryDataDictionaryObject(BaseModel):
+    object_kind: str | None = None
+    category: str | None = None
+    include_layers: bool = False
+
+
+def _resolve_conn(subsystems: Any) -> Any:
+    env = getattr(subsystems, "_postgres_env", None)
+    resolved_env = env() if callable(env) else None
+    if hasattr(subsystems, "get_pg_conn") and callable(subsystems.get_pg_conn):
+        conn = subsystems.get_pg_conn()
+    elif resolved_env is not None:
+        conn = resolved_env.get("pg_conn")
+    else:
+        conn = None
+    if conn is None:
+        raise RuntimeError("No Postgres connection available for data dictionary query.")
+    return conn
+
+
+def handle_query_data_dictionary_object(
+    query: QueryDataDictionaryObject,
+    subsystems: Any,
+) -> dict[str, Any]:
+    """Query the unified data dictionary by object_kind.
+
+    - With no `object_kind`, returns the catalog of object kinds (optionally
+      filtered by `category`).
+    - With `object_kind`, returns the merged field list (operator > inferred >
+      auto) and, optionally, the raw per-source layers.
+    """
+    conn = _resolve_conn(subsystems)
+    generated_at = datetime.now(timezone.utc).isoformat()
+    try:
+        if not (query.object_kind and query.object_kind.strip()):
+            objects = list_object_kinds(conn, category=query.category)
+            return {
+                "routed_to": "data_dictionary_object",
+                "scope": "catalog",
+                "generated_at": generated_at,
+                "objects": objects,
+                "count": len(objects),
+                "category": query.category,
+            }
+        payload = describe_object(
+            conn,
+            object_kind=query.object_kind,
+            include_layers=query.include_layers,
+        )
+        return {
+            "routed_to": "data_dictionary_object",
+            "scope": "object",
+            "generated_at": generated_at,
+            "object_kind": query.object_kind,
+            **payload,
+        }
+    except DataDictionaryBoundaryError as exc:
+        return {
+            "routed_to": "data_dictionary_object",
+            "scope": "error",
+            "generated_at": generated_at,
+            "error": str(exc),
+            "status_code": exc.status_code,
+        }

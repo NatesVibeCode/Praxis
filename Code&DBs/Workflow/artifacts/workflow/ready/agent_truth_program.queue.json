@@ -1,0 +1,25 @@
+{
+  "name": "agent-truth-program",
+  "outcome_goal": "Define the product around an agent-native truth engine. Direct instructions, compiled writing, inferred state, and observed activity all flow into one substrate that keeps truth coherent across CLI, MCP, and app surfaces. Phase 1 lands the sandbox contract substrate — one sandbox contract for every execution lane, transport split from isolation, a Seatbelt-backed default. Phase 2 defines and wires the truth engine itself: a projection that merges authoritative rows, inferred facts (from semantic_assertions), and live observations (from receipts + workflow_runs) into one queryable current-state surface.",
+  "task_type": "architecture",
+  "agent": "anthropic/claude-sonnet-4-6",
+  "authoring_contract": {"artifact_kind": "code"},
+  "acceptance_contract": {
+    "verify_refs": [
+      "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/' -k 'sandbox or semantic_assert or memory_edge or truth or projection'",
+      "praxis workflow query 'truth engine current state' --limit 5"
+    ]
+  },
+  "jobs": [
+    {"sprint": 1, "task_type": "code_generation",
+     "authoring_contract": {"artifact_kind": "code",
+       "summary": "Sandbox contract substrate. Split transport (how a job talks to its tools) from isolation (what FS/network/process boundary the job runs in). One canonical SandboxContract dataclass used by every execution lane — deterministic, docker, native, sandbox. Seatbelt-backed isolation is the default on macOS; other lanes opt in. Adapters read the contract; no lane infers its own isolation rules."}},
+    {"sprint": 2, "task_type": "code_generation",
+     "authoring_contract": {"artifact_kind": "code",
+       "summary": "Agent-native truth engine. A projection (SQL view or materialized table) that merges three streams: authoritative rows (bugs, roadmap_items, operator_decisions, etc), inferred facts (semantic_assertions.semantic_current_assertions), and observed activity (receipts + workflow_runs finishing states). Reachable via `praxis workflow query` and an MCP tool. Truth-of-record is coherent across CLI, MCP, and the Moon app. The projection refresh is incremental, not full-rebuild."}}
+  ],
+  "anti_requirements": [
+    "No duplicate truth surfaces. The projection is the single query target; readers do not fan out to source tables.",
+    "No 'truth' that isn't evidence-backed. Every row in the projection traces to an authoritative row, an assertion, or a receipt."
+  ]
+}

@@ -77,10 +77,22 @@ def workflow_authority_cache_key(database_url: str) -> str:
 def resolve_workflow_database_url(
     env: Mapping[str, str] | None = None,
 ) -> str:
-    """Resolve the workflow database URL from explicit configuration."""
+    """Resolve the workflow database URL from explicit configuration.
+
+    Resolution order matches secret resolution (adapters.keychain.resolve_secret):
+      1. explicit `env` mapping if provided, else os.environ
+      2. repo-root `.env` file
+    """
 
     source = env if env is not None else os.environ
     raw_value = source.get(WORKFLOW_DATABASE_URL_ENV)
+    if not raw_value and env is None:
+        try:
+            from adapters.keychain import resolve_secret
+
+            raw_value = resolve_secret(WORKFLOW_DATABASE_URL_ENV)
+        except Exception:
+            raw_value = None
     if raw_value is None:
         raise PostgresConfigurationError(
             "postgres.config_missing",

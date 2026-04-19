@@ -406,6 +406,8 @@ def test_runtime_profile_scopes_auto_chain_to_admitted_candidates() -> None:
 
     assert [entry.provider_slug for entry in chain] == ["openai", "openai"]
     assert [entry.model_slug for entry in chain] == ["gpt-5.4", "gpt-5.4-mini"]
+    assert [entry.prefer_prepaid for entry in chain] == [True, True]
+    assert [entry.allow_payg_fallback for entry in chain] == [True, True]
 
 
 def test_runtime_profile_does_not_override_explicit_slug() -> None:
@@ -419,6 +421,29 @@ def test_runtime_profile_does_not_override_explicit_slug() -> None:
     assert decision.provider_slug == "anthropic"
     assert decision.model_slug == "claude-sonnet-4-6"
     assert decision.was_auto is False
+
+
+def test_explicit_route_decision_preserves_economics_policy_bits(monkeypatch) -> None:
+    monkeypatch.setitem(
+        TaskTypeRouter.resolve.__globals__,
+        "_resolve_route_economics",
+        lambda **kwargs: {
+            "adapter_type": "llm_task",
+            "billing_mode": "metered_api",
+            "budget_bucket": "api",
+            "effective_marginal_cost": 1.0,
+            "spend_pressure": "high",
+            "budget_status": "limited",
+            "prefer_prepaid": False,
+            "allow_payg_fallback": False,
+        },
+    )
+    router = TaskTypeRouter(_ScopedProfileConn())
+
+    decision = router.resolve("anthropic/claude-sonnet-4-6")
+
+    assert decision.prefer_prepaid is False
+    assert decision.allow_payg_fallback is False
 
 
 class _ResearchProfileConn(_CatalogProfileConn):

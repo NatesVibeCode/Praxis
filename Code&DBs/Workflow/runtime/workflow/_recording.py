@@ -203,9 +203,15 @@ def _build_observability_receipt(result: WorkflowResult) -> dict[str, object]:
     """Normalize a WorkflowResult into the observability hub receipt shape."""
 
     caps = _workflow_caps.WORKFLOW_CAPABILITIES
+    label = result.label or "workflow"
+    attempt_no = max(1, int(result.attempts or 1))
     receipt: dict[str, object] = {
+        "receipt_id": f"receipt:{result.run_id}:{label}:{attempt_no}",
+        "workflow_id": result.run_id,
         "agent_slug": result.author_model
         or (f"{result.provider_slug}/{result.model_slug}" if result.model_slug else result.provider_slug),
+        "provider_slug": result.provider_slug,
+        "model_slug": result.model_slug,
         "status": result.status,
         "cost": float(
             (
@@ -215,7 +221,10 @@ def _build_observability_receipt(result: WorkflowResult) -> dict[str, object]:
             )
         ),
         "latency_seconds": float(result.latency_ms) / 1000.0,
-        "job_label": result.label or "",
+        "job_label": label,
+        "label": label,
+        "node_id": label,
+        "attempt_no": attempt_no,
         "timestamp": result.finished_at.isoformat(),
         "failure_code": result.failure_code,
         "run_id": result.run_id,

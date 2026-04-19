@@ -41,7 +41,7 @@ Updated source audit for the Moon builder as of 2026-04-15.
 - `Approval` now pauses execution behind an authority checkpoint; `Validation` now compiles into a runtime verification command instead of mutating edge state.
 - `Human Review` stays off the inline gate surface entirely; `Retry` now feeds runtime job policy from the gate dock.
 - Selecting a gate no longer needs to mean "open a dock immediately"; the pod is now the first-class entry point and the dock is the deeper editor.
-- `Fan Out` now has a verified runtime lane and is no longer treated as a hidden builder-only concept.
+- `Fan Out` and `Loop` now both have verified runtime lanes and are no longer treated as hidden builder-only concepts.
 
 ## Summary
 - The old first-pass assumption that most Moon node actions were decorative is no longer accurate.
@@ -67,7 +67,8 @@ Updated source audit for the Moon builder as of 2026-04-15.
 | `Notify` | keep in core | Real route with an opinionated config surface in the inspector. |
 | `HTTP Request` | keep in core | Real route with presets, method, header, and body controls in the inspector. |
 | `Run Workflow` | keep in core | Real route with saved-workflow selection in the inspector. |
-| `Fan Out` | hide from main UI | Real concept, but still missing one verified Moon-to-runtime lane. |
+| `Fan Out` | keep in advanced | Real capability (API-only count-based burst) with a verified builder-to-runtime lane; expert-oriented so kept out of the default core set. |
+| `Loop` | keep in advanced | Real capability (item-based for-each) with a verified builder-to-runtime lane; expert-oriented so kept out of the default core set. |
 | `Validation` | keep in core | Real verification behavior now hangs off the upstream step instead of staying decorative edge metadata. |
 | `Approval` | keep in core | Pauses execution behind one canonical human checkpoint. |
 
@@ -104,8 +105,8 @@ These are the step/action buttons shown in the trigger picker, node popout, and 
 | `Docs` | `auto/research` | alias | Same route as `Web Research` today; not distinct functionality. |
 | `Classify` | `auto/classify` | runnable | Planned as a real job route. |
 | `Draft` | `auto/draft` | runnable | Planned as a real job route. |
-| `Fan Out` | `workflow.fanout` | runnable | Real capability target with a verified builder-to-runtime lane. |
-| `Fan Out (Legacy)` | `auto/fan-out` | alias | Compatibility token kept so older saved graphs still open cleanly. |
+| `Fan Out` | `workflow.fanout` | runnable | Real capability target (API-only count-based burst) with a verified builder-to-runtime lane. |
+| `Loop` | `workflow.loop` | runnable | Real capability target (item-based for-each map) with a verified builder-to-runtime lane. |
 | `Notify` | `@notifications/send` | runnable | Real platform integration path, but still requires downstream message config to be useful. |
 | `HTTP Request` | `@webhook/post` | runnable | Real webhook integration path, but requires URL/auth/body config. |
 | `Run Workflow` | `@workflow/invoke` | runnable | Real workflow invoke path, but requires target workflow config. |

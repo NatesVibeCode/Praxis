@@ -1,7 +1,9 @@
 """Observability hub: single coordinator wiring quality views, bug tracker, and operator panel.
 
-Ingests workflow receipts, materializes quality rollups, auto-files bugs on
-repeated failure codes, and maintains operator panel state.
+Ingests workflow receipts, materializes quality rollups, and maintains operator
+panel state. Workflow-result bug filing is owned by ``runtime.receipt_store``;
+the hub keeps a manual bug-tracker passthrough but does not auto-file from
+receipts.
 
 Uses importlib-based direct file imports to avoid triggering the runtime
 package __init__.py (which requires Python 3.10+ features).
@@ -54,10 +56,8 @@ QualityWindow = _quality_views.QualityWindow
 QualityRollup = _quality_views.QualityRollup
 
 BugTracker = _bug_tracker.BugTracker
-Bug = _bug_tracker.Bug
 BugSeverity = _bug_tracker.BugSeverity
 BugCategory = _bug_tracker.BugCategory
-BugStatus = _bug_tracker.BugStatus
 
 OperatorPanel = _operator_panel.OperatorPanel
 OperatorSnapshot = _operator_panel.OperatorSnapshot
@@ -121,14 +121,6 @@ class ReceiptIngester:
         return dict(sorted_items[:limit])
 
 
-# ---------------------------------------------------------------------------
-# ObservabilityHub — the coordinator
-# ---------------------------------------------------------------------------
-
-
-_AUTO_BUG_THRESHOLD = 3  # file a bug after this many occurrences of the same failure code
-
-
 class ObservabilityHub:
     """Single coordinator that wires quality views, bug tracker, and operator panel."""
 
@@ -142,93 +134,8 @@ class ObservabilityHub:
 
         # In-memory failure code counter for auto-bug-filing
         self._failure_code_counts: dict = defaultdict(int)
-        self._failure_signature_counts: dict[str, int] = defaultdict(int)
         self._failure_category_counts: dict[str, int] = defaultdict(int)
-        # Track which failure signatures already have an auto-filed bug
-        self._auto_filed_bug_ids: dict[str, str] = {}
         self._recent_receipts: deque[dict[str, Any]] = deque(maxlen=50)
-
-    @staticmethod
-    def _signature_tags(receipt: dict[str, Any], failure_code: str) -> tuple[str, ...]:
-        normalize = _bug_tracker._normalize_tag_value
-        tags = [
-            "auto-filed",
-            f"failure_code:{normalize(failure_code)}",
-        ]
-        for key, prefix in (
-            ("job_label", "job_label"),
-            ("label", "job_label"),
-            ("node_id", "node_id"),
-            ("failure_category", "failure_category"),
-            ("agent_slug", "agent"),
-            ("agent", "agent"),
-            ("provider_slug", "provider"),
-            ("model_slug", "model"),
-        ):
-            value = str(receipt.get(key) or "").strip()
-            if value:
-                tags.append(f"{prefix}:{normalize(value)}")
-        deduped: list[str] = []
-        seen: set[str] = set()
-        for tag in tags:
-            if tag not in seen:
-                seen.add(tag)
-                deduped.append(tag)
-        return tuple(deduped)
-
-    @staticmethod
-    def _signature_key(receipt: dict[str, Any], failure_code: str) -> str:
-        signature = _bug_tracker.build_failure_signature(
-            failure_code=failure_code,
-            job_label=str(receipt.get("job_label") or receipt.get("label") or "").strip() or None,
-            node_id=str(receipt.get("node_id") or "").strip() or None,
-            failure_category=str(receipt.get("failure_category") or "").strip() or None,
-            agent=str(receipt.get("agent_slug") or receipt.get("agent") or "").strip() or None,
-            provider_slug=str(receipt.get("provider_slug") or "").strip() or None,
-            model_slug=str(receipt.get("model_slug") or "").strip() or None,
-            source_kind="observability_hub",
-        )
-        return str(signature.get("fingerprint"))
-
-    def _link_failure_evidence(
-        self,
-        *,
-        bug_id: str,
-        receipt: dict[str, Any],
-        failure_code: str,
-    ) -> None:
-        tracker = self._get_bug_tracker()
-        run_id = str(receipt.get("run_id") or "").strip()
-        receipt_id = str(
-            receipt.get("receipt_id")
-            or receipt.get("id")
-            or receipt.get("receipt_ref")
-            or ""
-        ).strip()
-        if receipt_id:
-            try:
-                tracker.link_evidence(
-                    bug_id,
-                    evidence_kind="receipt",
-                    evidence_ref=receipt_id,
-                    evidence_role="observed_in",
-                    created_by="observability_hub",
-                    notes=f"Observed failure {failure_code}.",
-                )
-            except ValueError:
-                pass
-        if run_id:
-            try:
-                tracker.link_evidence(
-                    bug_id,
-                    evidence_kind="run",
-                    evidence_ref=run_id,
-                    evidence_role="observed_in",
-                    created_by="observability_hub",
-                    notes=f"Observed failing run {run_id}.",
-                )
-            except ValueError:
-                pass
 
     # -- lazy initialization ------------------------------------------------
 
@@ -250,15 +157,11 @@ class ObservabilityHub:
     # -- receipt ingestion --------------------------------------------------
 
     def ingest_receipt(self, receipt: dict) -> None:
-        """Feed a workflow receipt into quality materializer and operator panel.
-
-        If the receipt is a failure, tracks the failure code and auto-files a
-        bug when the same code appears 3+ times (with dedup).
-        """
+        """Feed a workflow receipt into quality materializer and operator panel."""
         # (a) Feed into quality materializer
         self._get_quality().ingest_receipt(receipt)
 
-        # (b) Track failure codes and auto-file bugs
+        # (b) Track failure signals for the operator panel.
         status = receipt.get("status", "")
         failure_code = receipt.get("failure_code")
         failure_category = str(receipt.get("failure_category") or "").strip()
@@ -291,42 +194,6 @@ class ObservabilityHub:
         if status != "succeeded" and failure_code:
             self._failure_code_counts[failure_code] += 1
             panel.register_failure_codes(dict(self._failure_code_counts))
-            signature_key = self._signature_key(receipt, failure_code)
-            signature_tags = self._signature_tags(receipt, failure_code)
-            self._failure_signature_counts[signature_key] += 1
-            count = self._failure_signature_counts[signature_key]
-            tracker = self._get_bug_tracker()
-            bug_id = self._auto_filed_bug_ids.get(signature_key)
-            if bug_id is None:
-                existing = tracker.list_bugs(
-                    open_only=True,
-                    tags=signature_tags,
-                    limit=1,
-                )
-                if existing:
-                    bug_id = existing[0].bug_id
-                    self._auto_filed_bug_ids[signature_key] = bug_id
-            if count >= _AUTO_BUG_THRESHOLD and bug_id is None:
-                bug, _similar_bugs = tracker.file_bug(
-                    title=f"Repeated failure: {failure_code}",
-                    severity=BugSeverity.P2,
-                    category=BugCategory.RUNTIME,
-                    description=(
-                        f"Failure code '{failure_code}' has occurred {count} times. "
-                        f"Auto-filed by ObservabilityHub."
-                    ),
-                    filed_by="observability_hub",
-                    source_kind="observability_hub",
-                    tags=signature_tags,
-                )
-                bug_id = bug.bug_id
-                self._auto_filed_bug_ids[signature_key] = bug_id
-            if bug_id is not None:
-                self._link_failure_evidence(
-                    bug_id=bug_id,
-                    receipt=receipt,
-                    failure_code=failure_code,
-                )
 
     # -- operator panel -----------------------------------------------------
 

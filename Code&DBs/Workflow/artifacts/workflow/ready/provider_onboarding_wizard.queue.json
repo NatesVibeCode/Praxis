@@ -1,0 +1,18 @@
+{
+  "name": "provider-onboarding-wizard",
+  "outcome_goal": "Build an interactive CLI wizard that onboards a new model into the routing table safely. Flow: detect available models via provider CLI or API probe -> propose capability assignments from the 10 cap_* columns on provider_model_candidates (cap_language_high, cap_build_high/med/low, cap_analysis_architecture_research, cap_research_fan, cap_review, cap_tool_use, cap_image) -> require operator approval -> run a smoke probe job through the canonical workflow runner -> only then flip status='active'. Reachable as `praxis workflow tools call praxis_provider_onboard`. This closes the root cause of session-scoped routing bugs (see BUG-6DDC72E5) where models entered the route table without validation.",
+  "task_type": "code_generation",
+  "agent": "anthropic/claude-sonnet-4-6",
+  "authoring_contract": {"artifact_kind": "code"},
+  "acceptance_contract": {
+    "verify_refs": [
+      "PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_provider_onboarding_wizard.py'",
+      "praxis workflow tools describe praxis_provider_onboard"
+    ]
+  },
+  "anti_requirements": [
+    "Do not auto-activate a model without explicit operator approval.",
+    "Do not bypass the smoke probe — a model must prove it can roundtrip at least one real request before status flips to 'active'.",
+    "Do not write capability_tags; write typed cap_* boolean columns only."
+  ]
+}

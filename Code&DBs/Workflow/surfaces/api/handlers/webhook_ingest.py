@@ -87,4 +87,5 @@ async def receive_webhook(slug: str, request: Request) -> JSONResponse:
     return JSONResponse({
         "event_id": result.event_id,
         "status": "received",
+        "trigger_action": result.trigger_action,
     })

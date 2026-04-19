@@ -3,6 +3,7 @@ cycles, persisting only a minimal status row in Postgres.
 """
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 import json
 import logging
@@ -387,6 +388,83 @@ class _SemanticProjectionRefreshModule(HeartbeatModule):
         return _ok(self.name, t0)
 
 
+class _AuthorityMemoryProjectionRefreshModule(HeartbeatModule):
+    """Heartbeat adapter for authority-memory projection refresh."""
+
+    def __init__(
+        self,
+        *,
+        workflow_env: Mapping[str, str] | None = None,
+    ) -> None:
+        self._workflow_env = None if workflow_env is None else dict(workflow_env)
+
+    @property
+    def name(self) -> str:
+        return "authority_memory_refresh"
+
+    def _has_workflow_authority(self) -> bool:
+        if self._workflow_env and str(self._workflow_env.get("WORKFLOW_DATABASE_URL") or "").strip():
+            return True
+        return bool(str(os.environ.get("WORKFLOW_DATABASE_URL") or "").strip())
+
+    def run(self) -> HeartbeatModuleResult:
+        t0 = time.monotonic()
+        if not self._has_workflow_authority():
+            return _ok(self.name, t0)
+        try:
+            from runtime.authority_memory_projection import (
+                refresh_authority_memory_projection,
+            )
+
+            asyncio.run(
+                refresh_authority_memory_projection(
+                    env=self._workflow_env,
+                )
+            )
+        except Exception as exc:
+            return _fail(self.name, t0, str(exc))
+        return _ok(self.name, t0)
+
+
+class _OperatorDecisionProjectionRefreshModule(HeartbeatModule):
+    """Heartbeat adapter for operator-decision projection refresh."""
+
+    def __init__(
+        self,
+        *,
+        workflow_env: Mapping[str, str] | None = None,
+        limit: int = 100,
+    ) -> None:
+        self._workflow_env = None if workflow_env is None else dict(workflow_env)
+        self._limit = max(1, int(limit or 100))
+
+    @property
+    def name(self) -> str:
+        return "operator_decision_projection_refresh"
+
+    def _has_workflow_authority(self) -> bool:
+        if self._workflow_env and str(self._workflow_env.get("WORKFLOW_DATABASE_URL") or "").strip():
+            return True
+        return bool(str(os.environ.get("WORKFLOW_DATABASE_URL") or "").strip())
+
+    def run(self) -> HeartbeatModuleResult:
+        t0 = time.monotonic()
+        if not self._has_workflow_authority():
+            return _ok(self.name, t0)
+        try:
+            from runtime.operator_decision_projection_subscriber import (
+                OperatorDecisionProjectionSubscriber,
+            )
+
+            OperatorDecisionProjectionSubscriber().consume_available(
+                limit=self._limit,
+                env=self._workflow_env,
+            )
+        except Exception as exc:
+            return _fail(self.name, t0, str(exc))
+        return _ok(self.name, t0)
+
+
 class _DatasetCandidateRefreshModule(HeartbeatModule):
     """Heartbeat adapter for dataset_raw_candidates ingestion."""
 
@@ -416,6 +494,45 @@ class _DatasetCandidateRefreshModule(HeartbeatModule):
             from runtime.dataset_candidate_subscriber import DatasetCandidateSubscriber
 
             DatasetCandidateSubscriber().consume_available(
+                limit=self._limit,
+                env=self._workflow_env,
+            )
+        except Exception as exc:
+            return _fail(self.name, t0, str(exc))
+        return _ok(self.name, t0)
+
+
+class _BugCandidatesRefreshModule(HeartbeatModule):
+    """Heartbeat adapter for bug-candidate projection refresh."""
+
+    def __init__(
+        self,
+        *,
+        workflow_env: Mapping[str, str] | None = None,
+        limit: int = 100,
+    ) -> None:
+        self._workflow_env = None if workflow_env is None else dict(workflow_env)
+        self._limit = max(1, int(limit or 100))
+
+    @property
+    def name(self) -> str:
+        return "bug_candidates_refresh"
+
+    def _has_workflow_authority(self) -> bool:
+        if self._workflow_env and str(self._workflow_env.get("WORKFLOW_DATABASE_URL") or "").strip():
+            return True
+        return bool(str(os.environ.get("WORKFLOW_DATABASE_URL") or "").strip())
+
+    def run(self) -> HeartbeatModuleResult:
+        t0 = time.monotonic()
+        if not self._has_workflow_authority():
+            return _ok(self.name, t0)
+        try:
+            from runtime.bug_candidates_projection_subscriber import (
+                BugCandidatesProjectionSubscriber,
+            )
+
+            BugCandidatesProjectionSubscriber().consume_available(
                 limit=self._limit,
                 env=self._workflow_env,
             )
@@ -571,6 +688,7 @@ class HeartbeatRunner:
 
     def build_modules(self) -> list[HeartbeatModule]:
         """Create all heartbeat modules wired to the memory engine."""
+        from memory.data_dictionary_projector import DataDictionaryProjector
         from memory.sync import MemorySync
         from memory.relationship_miner import RelationshipMiner
         from memory.rollup_generator import RollupGenerator
@@ -596,12 +714,15 @@ class HeartbeatRunner:
                 ContentQualityScanner(self._engine),
                 MemorySync(self._conn, self._engine),
                 SchemaProjector(self._conn, self._engine),
+                DataDictionaryProjector(self._conn),
                 _DatabaseMaintenanceModule(self._conn, embedder=self._embedder),
                 _AutoReviewFlushModule(self._conn),
                 RelationshipMiner(self._conn, self._engine),
                 RollupGenerator(self._conn, self._engine),
                 SystemEventsCleanupModule(self._conn),
                 _SemanticProjectionRefreshModule(workflow_env=self._workflow_env),
+                _AuthorityMemoryProjectionRefreshModule(workflow_env=self._workflow_env),
+                _OperatorDecisionProjectionRefreshModule(workflow_env=self._workflow_env),
                 _DatasetCandidateRefreshModule(workflow_env=self._workflow_env),
                 _DatasetCurationRefreshModule(workflow_env=self._workflow_env),
                 _DatasetStalenessReconcileModule(workflow_env=self._workflow_env),

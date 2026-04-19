@@ -28,7 +28,7 @@ def test_commands_delegates_to_modern_command_index(capsys) -> None:
     assert legacy_rc == modern_rc == 0
     assert legacy_rendered == modern_rendered
     assert "workflow commands" in legacy_rendered
-    assert "workflow tools [list|search|describe|call]" in legacy_rendered
+    assert "workflow tools [list|search|describe|call|help]" in legacy_rendered
 
 
 def test_help_topic_delegates_to_modern_command_usage(capsys) -> None:

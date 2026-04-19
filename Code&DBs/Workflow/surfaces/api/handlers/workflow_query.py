@@ -657,7 +657,7 @@ def _load_recent_runs_snapshot(pg: Any, *, limit: int = 20) -> list[dict[str, An
                   COALESCE(NULLIF(r.request_envelope->>'total_jobs', ''), '0')::int AS total_jobs,
                   r.requested_at AS created_at,
                   r.finished_at,
-                  COUNT(j.id) FILTER (WHERE j.status IN ('succeeded','failed','dead_letter')) as completed_jobs,
+                  COUNT(j.id) FILTER (WHERE j.status IN ('succeeded','failed','dead_letter','blocked','cancelled')) as completed_jobs,
                   COALESCE(SUM(j.cost_usd), 0) as total_cost
            FROM public.workflow_runs r
            LEFT JOIN public.workflow_jobs j ON j.run_id = r.run_id

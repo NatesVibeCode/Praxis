@@ -6,6 +6,12 @@ from pathlib import Path
 
 from surfaces.api.handlers import workflow_admin
 from surfaces.mcp.catalog import get_tool_catalog
+from runtime.primitive_contracts import (
+    bug_open_status_values,
+    bug_resolved_status_values,
+    redact_url,
+    resolve_runtime_http_endpoints,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -51,7 +57,11 @@ def test_orient_includes_dependency_truth(monkeypatch) -> None:
         "missing": [],
     }
 
-    monkeypatch.setattr(workflow_admin, "dependency_truth_report", lambda scope="all": fake_dependency_truth)
+    monkeypatch.setattr(
+        workflow_admin,
+        "dependency_truth_report",
+        lambda scope="all": fake_dependency_truth,
+    )
     monkeypatch.setattr(
         workflow_admin,
         "_handle_health",
@@ -150,6 +160,228 @@ def test_orient_advertises_catalog_backed_cli(monkeypatch) -> None:
     assert "kickoff first" in instructions
 
 
+def test_orient_projects_mandatory_authority_envelope(monkeypatch) -> None:
+    fake_dependency_truth = {"ok": True, "missing_count": 0}
+    fake_native_instance = {
+        "praxis_instance_name": "praxis",
+        "praxis_runtime_profile": "praxis",
+        "repo_root": "/repo",
+        "workdir": "/repo",
+    }
+    fake_standing_orders = [
+        {
+            "authority_domain": "orient",
+            "policy_slug": "architecture-policy::orient::mandatory-authority-envelope",
+            "title": "Orient is the mandatory runtime authority envelope",
+        }
+    ]
+
+    monkeypatch.setattr(
+        workflow_admin,
+        "dependency_truth_report",
+        lambda scope="all": fake_dependency_truth,
+    )
+    monkeypatch.setattr(
+        workflow_admin,
+        "_handle_health",
+        lambda subs, body: {
+            "preflight": {"overall": "healthy"},
+            "operator_snapshot": {},
+            "proof_metrics": {},
+            "schema_authority": {},
+            "lane_recommendation": {"recommended_posture": "build"},
+        },
+    )
+    monkeypatch.setattr(
+        workflow_admin,
+        "_build_standing_orders",
+        lambda subs: fake_standing_orders,
+    )
+    monkeypatch.setattr(
+        workflow_admin,
+        "_workflow_env",
+        lambda subs: {
+            "WORKFLOW_DATABASE_URL": "postgresql://nate:secret@repo.test:5432/praxis",
+            "WORKFLOW_DATABASE_AUTHORITY_SOURCE": "repo_env:/repo/.env",
+            "PRAXIS_API_BASE_URL": "http://praxis.test:8420",
+        },
+    )
+    monkeypatch.setattr(
+        workflow_admin,
+        "native_instance_contract",
+        lambda env=None: fake_native_instance,
+    )
+    monkeypatch.setattr(
+        workflow_admin,
+        "build_code_hotspots",
+        lambda **kwargs: {"authority": "code_hotspots", "kwargs": kwargs},
+    )
+    monkeypatch.setattr(
+        workflow_admin,
+        "build_bug_scoreboard",
+        lambda **kwargs: {"authority": "bug_scoreboard", "kwargs": kwargs},
+    )
+    monkeypatch.setattr(
+        workflow_admin,
+        "build_platform_observability",
+        lambda **kwargs: {"authority": "platform_observability", "kwargs": kwargs},
+    )
+
+    result = workflow_admin._handle_orient(_FakeSubsystems(), {})
+
+    envelope = result["authority_envelope"]
+    assert result["native_instance"] == fake_native_instance
+    assert result["instruction_authority"]["packet_read_order"][:4] == [
+        "standing_orders",
+        "authority_envelope",
+        "tool_guidance",
+        "primitive_contracts",
+    ]
+    assert result["instruction_authority"]["downstream_truth_surfaces"]["primitive_contracts"] == (
+        "/orient#primitive_contracts"
+    )
+    assert envelope["kind"] == "orient_authority_envelope"
+    assert envelope["mandatory"] is True
+    assert envelope["policy_decision_ref"] == (
+        "operator_decision.architecture_policy.orient.mandatory_authority_envelope"
+    )
+    assert envelope["native_instance"] == fake_native_instance
+    assert envelope["standing_orders_count"] == 1
+    assert envelope["health_overall"] == "healthy"
+    assert envelope["lane_recommendation"] == {"recommended_posture": "build"}
+    assert envelope["dependency_truth"] == {"ok": True, "missing_count": 0}
+    assert envelope["scope_source"]["default"] == "/orient#authority_envelope.native_instance"
+    assert envelope["tool_guidance"] == result["tool_guidance"]
+    assert envelope["primitive_contracts"] == result["primitive_contracts"]
+    assert envelope["primitive_contracts_ref"] == "/orient#primitive_contracts"
+
+    tool_guidance = result["tool_guidance"]
+    assert tool_guidance["kind"] == "orient_tool_guidance"
+    assert tool_guidance["policy_decision_ref"] == (
+        "operator_decision.architecture_policy.orient.authority_envelope_tool_guidance"
+    )
+    assert tool_guidance["preferred_operator_surface"]["command_prefix"] == "workflow"
+    assert tool_guidance["catalog"]["schema_command"] == "workflow tools describe <tool|alias>"
+    assert tool_guidance["catalog"]["directive"].startswith("Inspect the live catalog")
+    primary_read_commands = {item["command"] for item in tool_guidance["primary_reads"]}
+    assert {
+        "workflow query",
+        "workflow health",
+        "workflow discover",
+        "workflow recall",
+        "workflow bugs",
+    }.issubset(primary_read_commands)
+    assert tool_guidance["dispatch"]["command"] == "workflow tools call praxis_workflow"
+    assert tool_guidance["guardrails"] == {
+        "write_dispatch_requires_yes": True,
+        "session_tools_require_workflow_token": True,
+        "search_before_build": True,
+    }
+
+    primitive_contracts = result["primitive_contracts"]
+    assert primitive_contracts["kind"] == "orient_primitive_contracts"
+    assert primitive_contracts["policy_decision_ref"] == (
+        "operator_decision.architecture_policy.primitive_contracts."
+        "orient_projects_operation_runtime_state_contracts"
+    )
+
+    operation_posture = primitive_contracts["operation_posture"]
+    assert operation_posture["catalog_postures"] == ["build", "observe", "operate"]
+    assert operation_posture["posture_rules"]["observe"]["forbids"] == ["mutate"]
+    assert operation_posture["semantic_operations"]["repair"]["requires"] == [
+        "proof_ref",
+        "before_state_ref",
+        "after_state_ref",
+    ]
+
+    runtime_binding = primitive_contracts["runtime_binding"]
+    assert runtime_binding["database"]["env_ref"] == "WORKFLOW_DATABASE_URL"
+    assert runtime_binding["database"]["authority_source"] == "repo_env:/repo/.env"
+    assert runtime_binding["database"]["redacted_url"] == (
+        "postgresql://nate:***@repo.test:5432/praxis"
+    )
+    assert runtime_binding["database"]["secret_policy"].startswith("never emit raw DSN")
+    assert runtime_binding["http_endpoints"]["authority_source"] == "env:PRAXIS_API_BASE_URL"
+    assert runtime_binding["http_endpoints"]["launch_url"] == "http://praxis.test:8420/app"
+    assert runtime_binding["workspace"]["repo_root"] == "/repo"
+
+    state_semantics = primitive_contracts["state_semantics"]["bug"]
+    assert state_semantics["open_statuses"] == ["OPEN", "IN_PROGRESS"]
+    assert state_semantics["resolved_statuses"] == ["FIXED", "WONT_FIX", "DEFERRED"]
+    assert state_semantics["status_predicates"]["IN_PROGRESS"]["is_open"] is True
+    assert state_semantics["status_predicates"]["WONT_FIX"]["is_resolved"] is True
+
+    proof_ref = primitive_contracts["proof_ref"]
+    assert "decision" in proof_ref["allowed_ref_kinds"]
+    assert proof_ref["replay_ref"]["blocked_reason_field"] == "replay_reason_code"
+
+    failure_identity = primitive_contracts["failure_identity"]
+    assert failure_identity["authority"] == "runtime.bug_evidence.build_failure_signature"
+    assert failure_identity["fingerprint_field"] == "fingerprint"
+
+
+def test_runtime_http_endpoints_resolve_from_binding_authority() -> None:
+    endpoints = resolve_runtime_http_endpoints(
+        workflow_env={"PRAXIS_API_BASE_URL": "http://praxis.test:9444"},
+        native_instance={"repo_root": "/repo", "workdir": "/repo"},
+    )
+
+    assert endpoints == {
+        "api_base_url": "http://praxis.test:9444",
+        "launch_url": "http://praxis.test:9444/app",
+        "dashboard_url": "http://praxis.test:9444/app",
+        "api_docs_url": "http://praxis.test:9444/docs",
+        "authority_source": "env:PRAXIS_API_BASE_URL",
+    }
+
+
+def test_primitive_contract_helpers_are_secret_safe_and_predicate_backed() -> None:
+    assert redact_url("postgresql://user:pass@db.local:5432/praxis?sslmode=require") == (
+        "postgresql://user:***@db.local:5432/praxis"
+    )
+    assert bug_open_status_values() == ("OPEN", "IN_PROGRESS")
+    assert bug_resolved_status_values() == ("FIXED", "WONT_FIX", "DEFERRED")
+
+
+def test_praxis_ctl_frontdoor_urls_come_from_runtime_binding(monkeypatch) -> None:
+    local_alpha = _load_local_alpha()
+    calls: list[str] = []
+
+    def _fake_http_request(url: str, **kwargs):
+        del kwargs
+        calls.append(url)
+        if url.endswith("/api/health"):
+            return 200, b'{"status": "healthy"}'
+        if url.endswith("/orient"):
+            return 200, b'{"platform": "praxis-workflow"}'
+        if url.endswith("/mcp"):
+            return 200, b'{"result": {"serverInfo": {"name": "praxis-mcp"}}}'
+        if url.endswith("/app"):
+            return 200, b'<title>Praxis</title><div id="root"></div>'
+        return 404, b"{}"
+
+    monkeypatch.setenv("PRAXIS_API_BASE_URL", "https://praxis.example:9443")
+    monkeypatch.delenv("PRAXIS_WORKFLOW_API_BASE_URL", raising=False)
+    monkeypatch.setattr(local_alpha, "_http_request", _fake_http_request)
+
+    payload = local_alpha._probe_frontdoor_semantics()
+
+    assert not hasattr(local_alpha, "DEFAULT_API_BASE_URL")
+    assert payload["api_server_ready"] is True
+    assert payload["workflow_api_ready"] is True
+    assert payload["mcp_bridge_ready"] is True
+    assert payload["ui_ready"] is True
+    assert payload["launch_url"] == "https://praxis.example:9443/app"
+    assert payload["dashboard_url"] == "https://praxis.example:9443/app"
+    assert payload["api_docs_url"] == "https://praxis.example:9443/docs"
+    assert calls == [
+        "https://praxis.example:9443/api/health",
+        "https://praxis.example:9443/orient",
+        "https://praxis.example:9443/mcp",
+        "https://praxis.example:9443/app",
+    ]
+
+
 def test_praxis_ctl_doctor_includes_dependency_truth(monkeypatch, tmp_path: Path, capsys) -> None:
     local_alpha = _load_local_alpha()
     fake_dependency_truth = {
@@ -163,16 +395,21 @@ def test_praxis_ctl_doctor_includes_dependency_truth(monkeypatch, tmp_path: Path
         "missing": [],
     }
 
-    class _FakeDatabaseStatus:
-        def to_json(self):
-            return {"database_reachable": True, "schema_bootstrapped": True}
-
     class _FakeSyncStatus:
         sync_status = "skipped"
         sync_cycle_id = None
         sync_error_count = 0
 
-    monkeypatch.setattr(local_alpha, "local_postgres_health", lambda env=None: _FakeDatabaseStatus())
+    monkeypatch.setattr(
+        local_alpha,
+        "workflow_database_status_payload",
+        lambda env=None: {
+            "database_reachable": True,
+            "schema_bootstrapped": True,
+            "workflow_operational": True,
+            "missing_schema_objects": [],
+        },
+    )
     monkeypatch.setattr(
         local_alpha,
         "_env_for_authority",
@@ -203,11 +440,72 @@ def test_praxis_ctl_doctor_includes_dependency_truth(monkeypatch, tmp_path: Path
     assert payload["dependency_truth"] == fake_dependency_truth
     assert payload["database_reachable"] is True
     assert payload["schema_bootstrapped"] is True
+    assert payload["workflow_operational"] is True
     assert payload["api_server_ready"] is True
     assert payload["workflow_api_ready"] is True
     assert payload["mcp_bridge_ready"] is True
     assert payload["ui_ready"] is True
     assert payload["launch_url"] == "http://127.0.0.1:8420/app"
+
+
+def test_praxis_ctl_doctor_reports_operational_authority_with_schema_drift(
+    monkeypatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    local_alpha = _load_local_alpha()
+
+    class _FakeSyncStatus:
+        sync_status = "skipped"
+        sync_cycle_id = None
+        sync_error_count = 0
+
+    monkeypatch.setattr(
+        local_alpha,
+        "workflow_database_status_payload",
+        lambda env=None: {
+            "database_reachable": True,
+            "schema_bootstrapped": False,
+            "missing_schema_objects": ["data_dictionary_effective"],
+            "compile_artifact_authority_ready": True,
+            "compile_index_authority_ready": True,
+            "execution_packet_authority_ready": True,
+            "repo_snapshot_authority_ready": True,
+            "verification_registry_ready": True,
+            "verifier_authority_ready": True,
+            "healer_authority_ready": True,
+        },
+    )
+    monkeypatch.setattr(
+        local_alpha,
+        "_env_for_authority",
+        lambda: {"WORKFLOW_DATABASE_URL": "postgresql://repo.test/praxis"},
+    )
+    monkeypatch.setattr(local_alpha, "dependency_truth_report", lambda scope="all": {"ok": True})
+    monkeypatch.setattr(local_alpha, "latest_workflow_run_sync_status", lambda: _FakeSyncStatus())
+    monkeypatch.setattr(local_alpha, "get_workflow_run_sync_status", lambda run_id: _FakeSyncStatus())
+    monkeypatch.setattr(
+        local_alpha,
+        "_probe_frontdoor_semantics",
+        lambda: {
+            "api_server_ready": True,
+            "workflow_api_ready": True,
+            "mcp_bridge_ready": True,
+            "ui_ready": True,
+            "launch_url": "http://127.0.0.1:8420/app",
+            "dashboard_url": "http://127.0.0.1:8420/app",
+            "api_docs_url": "http://127.0.0.1:8420/docs",
+        },
+    )
+
+    exit_code = local_alpha.cmd_doctor(services_ready="true", state_file=str(tmp_path / "state.json"))
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["database_reachable"] is True
+    assert payload["schema_bootstrapped"] is False
+    assert payload["workflow_operational"] is True
+    assert payload["missing_schema_objects"] == ["data_dictionary_effective"]
 
 
 def test_praxis_ctl_env_for_authority_uses_shared_repo_resolver_when_process_env_missing(monkeypatch) -> None:
@@ -222,6 +520,59 @@ def test_praxis_ctl_env_for_authority_uses_shared_repo_resolver_when_process_env
     assert local_alpha._env_for_authority() == {
         "WORKFLOW_DATABASE_URL": "postgresql://repo.test/praxis",
     }
+
+
+def test_praxis_ctl_runtime_endpoints_use_runtime_binding_contract(monkeypatch) -> None:
+    local_alpha = _load_local_alpha()
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        local_alpha,
+        "_env_for_authority",
+        lambda: {"WORKFLOW_DATABASE_URL": "postgresql://repo.test/praxis"},
+    )
+    monkeypatch.setattr(
+        local_alpha,
+        "native_instance_contract",
+        lambda env=None: {
+            "repo_root": "/repo",
+            "workdir": "/repo",
+            "praxis_runtime_profile": "praxis",
+        },
+    )
+
+    def _fake_runtime_binding_contract(*, workflow_env, native_instance, workflow_env_error=None):
+        captured["workflow_env"] = dict(workflow_env)
+        captured["native_instance"] = dict(native_instance)
+        captured["workflow_env_error"] = workflow_env_error
+        return {
+            "http_endpoints": {
+                "api_base_url": "https://runtime.example",
+                "launch_url": "https://runtime.example/app",
+                "dashboard_url": "https://runtime.example/app",
+                "api_docs_url": "https://runtime.example/docs",
+            }
+        }
+
+    monkeypatch.setattr(
+        local_alpha,
+        "build_runtime_binding_contract",
+        _fake_runtime_binding_contract,
+    )
+
+    endpoints = local_alpha._runtime_binding_http_endpoints({})
+
+    assert endpoints["api_base_url"] == "https://runtime.example"
+    assert endpoints["launch_url"] == "https://runtime.example/app"
+    assert captured["workflow_env"] == {
+        "WORKFLOW_DATABASE_URL": "postgresql://repo.test/praxis",
+    }
+    assert captured["native_instance"] == {
+        "repo_root": "/repo",
+        "workdir": "/repo",
+        "praxis_runtime_profile": "praxis",
+    }
+    assert captured["workflow_env_error"] is None
 
 
 def test_probe_frontdoor_semantics_uses_ui_header_for_workflow_probes(monkeypatch) -> None:

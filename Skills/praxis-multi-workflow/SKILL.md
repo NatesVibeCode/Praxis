@@ -21,6 +21,12 @@ Coordinate many runs without inventing a second orchestration system.
 
 Per-run execution stays on `praxis-workflow`.
 
+For templated iteration across a list of items, use the loop surface:
+
+```text
+praxis workflow loop --items "a,b,c" --prompt "Analyze: {{item}}" [--tier mid] [--max-parallel 4]
+```
+
 Wave control lives on the catalog-backed wave tool:
 
 ```text

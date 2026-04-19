@@ -74,7 +74,13 @@ Use provenance fields only when they can be verified:
 
 ### 3. File Through The Authority Surface
 
-Prefer:
+Prefer the stable CLI surface:
+
+```text
+praxis workflow bugs file
+```
+
+When CLI needs raw field control, use the tool surface:
 
 ```text
 praxis workflow tools call praxis_bugs --input-json '{"action":"file","title":"...","severity":"P1","category":"RUNTIME","description":"...","filed_by":"...","source_kind":"..."}' --yes
@@ -100,7 +106,7 @@ Front-load the description with the actual failure, impact, and blocker so the a
 After filing, attach authoritative evidence with:
 
 ```text
-praxis workflow tools call praxis_bugs --input-json '{"action":"attach_evidence","bug_id":"BUG-...","evidence_kind":"receipt","evidence_ref":"receipt-...","evidence_role":"observed_in"}' --yes
+praxis workflow bugs attach_evidence --bug-id BUG-... --evidence-kind receipt --evidence-ref receipt-... --evidence-role observed_in
 ```
 
 Canonical evidence kinds:
@@ -130,10 +136,16 @@ Only resolve with terminal statuses:
 - `WONT_FIX`
 - `DEFERRED`
 
-Prefer:
+Prefer the stable CLI surface:
 
 ```text
-praxis workflow tools call praxis_bugs --input-json '{"action":"resolve","bug_id":"BUG-...","status":"FIXED"}' --yes
+praxis workflow bugs resolve --bug-id BUG-... --status FIXED
+```
+
+For FIXED with automated verifier proof in one step:
+
+```text
+praxis workflow bugs resolve --bug-id BUG-... --status FIXED --verifier-ref verifier.job.python.pytest_file --inputs-json '{"path":"..."}'
 ```
 
 Before resolving `FIXED`:

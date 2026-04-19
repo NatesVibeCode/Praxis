@@ -24,6 +24,15 @@ _FAST_FRONTDOOR_PROBE_ENV = {
 _STATUS_TIMEOUT_S = 12.0
 _RECOVER_TIMEOUT_S = 20.0
 _LAUNCH_TIMEOUT_S = 45.0
+_WORKFLOW_OPERATIONAL_FLAGS = (
+    "compile_artifact_authority_ready",
+    "compile_index_authority_ready",
+    "execution_packet_authority_ready",
+    "repo_snapshot_authority_ready",
+    "verification_registry_ready",
+    "verifier_authority_ready",
+    "healer_authority_ready",
+)
 
 
 @dataclass(slots=True)
@@ -117,12 +126,21 @@ def _run_launcher_json(
 
 
 def _platform_ready(doctor: dict[str, Any]) -> bool:
-    # Core readiness: database + schema. Everything else is nice-to-have.
-    required_flags = (
-        "database_reachable",
-        "schema_bootstrapped",
+    # Core readiness: database + workflow authority. UI/frontdoor probes are
+    # reported separately and must not mask a usable operator plane.
+    return bool(doctor.get("database_reachable")) and bool(
+        doctor.get("workflow_operational", doctor.get("schema_bootstrapped"))
     )
-    return all(bool(doctor.get(flag)) for flag in required_flags)
+
+
+def _workflow_database_operational(status: dict[str, Any]) -> bool:
+    if not bool(status.get("database_reachable")):
+        return False
+    if bool(status.get("workflow_operational", False)) or bool(
+        status.get("schema_bootstrapped", False)
+    ):
+        return True
+    return all(bool(status.get(flag)) for flag in _WORKFLOW_OPERATIONAL_FLAGS)
 
 
 def _service_summary(services: list[dict[str, Any]]) -> dict[str, int]:
@@ -131,6 +149,23 @@ def _service_summary(services: list[dict[str, Any]]) -> dict[str, int]:
         state = str(service.get("state") or "unknown")
         summary[state] = summary.get(state, 0) + 1
     return summary
+
+
+def _text(value: object) -> str | None:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def _launcher_urls(status: dict[str, Any], doctor: dict[str, Any]) -> dict[str, str | None]:
+    launch_url = _text(status.get("launch_url")) or _text(doctor.get("launch_url"))
+    dashboard_url = _text(status.get("dashboard_url")) or _text(doctor.get("dashboard_url")) or launch_url
+    api_docs_url = _text(status.get("api_docs_url")) or _text(doctor.get("api_docs_url"))
+    return {
+        "launch_url": launch_url,
+        "dashboard_url": dashboard_url,
+        "api_docs_url": api_docs_url,
+    }
 
 
 def launcher_status_payload() -> dict[str, Any]:
@@ -153,16 +188,20 @@ def launcher_status_payload() -> dict[str, Any]:
     schema_ok = False
     try:
         pg_health = workflow_database_status_payload()
-        db_ok = bool(pg_health.get("reachable", False))
-        schema_ok = bool(pg_health.get("bootstrapped", False))
+        db_ok = bool(pg_health.get("database_reachable", False))
+        schema_ok = bool(pg_health.get("schema_bootstrapped", False))
+        workflow_ok = _workflow_database_operational(pg_health)
     except Exception:
+        workflow_ok = False
         pass
     # Fallback to doctor if direct check fails
     if not db_ok:
         db_ok = bool(doctor.get("database_reachable"))
         schema_ok = bool(doctor.get("schema_bootstrapped"))
+        workflow_ok = bool(doctor.get("workflow_operational", schema_ok))
 
-    ready = db_ok and schema_ok
+    ready = db_ok and workflow_ok
+    urls = _launcher_urls(status, doctor)
 
     return {
         "ok": True,
@@ -172,9 +211,9 @@ def launcher_status_payload() -> dict[str, Any]:
         "preferred_command": status.get("preferred_command") or "praxis",
         "ready": ready,
         "platform_state": "ready" if ready else "degraded",
-        "launch_url": "http://127.0.0.1:8420/app",
-        "dashboard_url": "http://127.0.0.1:8420/app",
-        "api_docs_url": "http://127.0.0.1:8420/docs",
+        "launch_url": urls["launch_url"],
+        "dashboard_url": urls["dashboard_url"],
+        "api_docs_url": urls["api_docs_url"],
         "doctor": doctor,
         "dependency_truth": doctor.get("dependency_truth"),
         "services": services,
@@ -268,6 +307,7 @@ def launcher_recover_payload(
             "services_ready": True,
             "database_reachable": status.get("database_reachable"),
             "schema_bootstrapped": status.get("schema_bootstrapped"),
+            "workflow_operational": status.get("workflow_operational"),
             "api_server_ready": status.get("api_server_ready"),
             "workflow_api_ready": status.get("workflow_api_ready"),
             "mcp_bridge_ready": status.get("mcp_bridge_ready"),

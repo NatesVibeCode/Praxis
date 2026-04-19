@@ -250,11 +250,18 @@ def test_workflow_id_from_raw_dict_is_detected() -> None:
 # ----- workdir drift -----------------------------------------------------
 
 
-def test_workdir_drift_warns_on_missing_host_path_with_suggestion(tmp_path) -> None:
-    # /Users/nate/Praxis/... is a known host mount prefix. If the process
-    # can't see that path, we suggest the /workspace/... rebase.
-    missing = "/Users/nate/Praxis/artifacts/e2e_exercise_99999999"
-    assert not (tmp_path / missing).exists()  # sanity
+def test_workdir_drift_warns_on_missing_host_path_with_suggestion(monkeypatch, tmp_path) -> None:
+    host_root = tmp_path / "host"
+    container_root = tmp_path / "container"
+    missing = str(host_root / "artifacts" / "e2e_exercise_99999999")
+    monkeypatch.setattr(
+        "runtime.workflow_validation.authority_workspace_roots",
+        lambda: (host_root,),
+    )
+    monkeypatch.setattr(
+        "runtime.workflow_validation.container_workspace_root",
+        lambda: container_root,
+    )
     spec = _FakeSpec(jobs=[], raw={"workdir": missing})
 
     warnings = _preflight_workdir_drift(spec)
@@ -262,7 +269,7 @@ def test_workdir_drift_warns_on_missing_host_path_with_suggestion(tmp_path) -> N
     assert len(warnings) == 1
     assert warnings[0]["kind"] == "workdir_path_missing"
     assert warnings[0]["severity"] == "warning"
-    assert "/workspace/artifacts/e2e_exercise_99999999" in warnings[0]["message"]
+    assert str(container_root / "artifacts" / "e2e_exercise_99999999") in warnings[0]["message"]
 
 
 def test_workdir_drift_quiet_when_path_exists(tmp_path) -> None:

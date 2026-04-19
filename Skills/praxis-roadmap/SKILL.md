@@ -14,31 +14,27 @@ Roadmap truth lives in the DB-backed operator surfaces, not in freehand markdown
 Read authority:
 
 ```text
-praxis workflow tools describe praxis_operator_roadmap_view
-praxis workflow tools call praxis_operator_roadmap_view --input-json '{}'
+praxis workflow roadmap view
+praxis workflow roadmap view --root <roadmap_item_id>
 ```
 
 Write authority:
 
 ```text
-praxis workflow tools describe praxis_operator_write
+praxis workflow roadmap write preview --title <title> --intent-brief <brief>
+praxis workflow roadmap write validate --title <title> --intent-brief <brief>
+praxis workflow roadmap write commit --title <title> --intent-brief <brief>
 ```
-
-Verified `praxis_operator_write` actions:
-
-- `preview`
-- `validate`
-- `commit`
 
 Minimum verified write fields:
 
 - `title`
 - `intent_brief`
 
-Example preview:
+For complex write shapes, inspect the tool schema before committing:
 
 ```text
-praxis workflow tools call praxis_operator_write --input-json '{"action":"preview","title":"Consolidate CLI frontdoors","intent_brief":"one authority for operator CLI"}'
+praxis workflow tools describe praxis_operator_write
 ```
 
 ## Rules

@@ -1,0 +1,184 @@
+{
+  "name": "Decision Crucible — Praxis Public Release Posture",
+  "phase": "W",
+  "queue_id": "decision_crucible_public_release_20260418",
+  "outcome_goal": "artifacts/decision_crucible_public_release_20260418/decision_record.md exists with: (a) a chosen public-release posture, (b) every load-bearing claim traced to a numbered evidence_briefs/* file or debate transcript, (c) a named rollback trigger per risk, (d) one row in operator_decisions with decision_kind='strategic_posture' and decision_scope_ref='public_release' filed via praxis_operator_architecture_policy (no direct SQL).",
+  "anti_requirements": [
+    "Do NOT route any non-research job to DeepSeek — research-only.",
+    "Do NOT route any debate position to a non-frontier model; one frontier model per provider (Gemini Pro, GPT frontier, Opus).",
+    "Do NOT skip the red-team pass even if the debate appears to converge.",
+    "Do NOT file the decision via direct INSERT — go through praxis_operator_architecture_policy so decision_key is minted and scope validation runs.",
+    "Do NOT collapse evidence into the decision record without citations — every numeric claim or external-fact claim must reference an evidence brief by filename and section."
+  ],
+  "jobs": [
+    {
+      "label": "frame_subquestions",
+      "task_type": "analysis",
+      "description": "Decompose the public-release posture question into 4-6 testable sub-questions",
+      "outcome_goal": "artifacts/decision_crucible_public_release_20260418/00_frame.md lists 4-6 sub-questions, each with: (a) why it is load-bearing, (b) what evidence would resolve it, (c) what answer would change the overall posture.",
+      "prompt": "The strategic question is: **What public-release posture should Praxis adopt — license, target operator persona, monetization, governance, distribution — that maximizes adoption without surrendering the engineering surface that makes Praxis defensible?**\n\nDo NOT answer the question. Frame it.\n\nProduce `artifacts/decision_crucible_public_release_20260418/00_frame.md` with 4-6 sub-questions that are:\n- Independently researchable (so they can be parallelized in the next stage)\n- Answer-changing (a different answer flips the overall posture)\n- Bounded (a research worker can produce a useful brief in one pass)\n\nFor each sub-question include:\n1. **Question** — one sentence, no compound clauses\n2. **Why load-bearing** — what hinges on the answer\n3. **Resolving evidence** — what kind of evidence (precedent, market data, license analysis, governance case study) would settle it\n4. **Posture shift** — concretely, what would change in the final recommendation if the answer flips\n\nDo not propose answers. Do not advocate. Frame only.",
+      "read": [],
+      "write": ["artifacts/decision_crucible_public_release_20260418/00_frame.md"],
+      "verify_command": "test -s artifacts/decision_crucible_public_release_20260418/00_frame.md && grep -cE '^## ' artifacts/decision_crucible_public_release_20260418/00_frame.md | awk '{ exit ($1>=4 && $1<=6) ? 0 : 1 }'"
+    },
+    {
+      "label": "evidence_brief_axis_1",
+      "task_type": "research",
+      "depends_on": ["frame_subquestions"],
+      "description": "Parallel research worker — sub-question 1",
+      "outcome_goal": "artifacts/decision_crucible_public_release_20260418/evidence_briefs/01_brief.md contains a cited brief answering sub-question 1 from 00_frame.md, with at least 5 distinct sources and explicit confidence rating per claim.",
+      "prompt": "Read `artifacts/decision_crucible_public_release_20260418/00_frame.md` and pick **sub-question 1** (the first one listed). Produce a cited evidence brief at `artifacts/decision_crucible_public_release_20260418/evidence_briefs/01_brief.md`.\n\nStructure:\n- **Sub-question** (verbatim from frame)\n- **TL;DR** (3 sentences max)\n- **Findings** (numbered claims; each claim has [source-N] citations and a confidence label: high/medium/low)\n- **Sources** (numbered list with URL or document reference and a one-line note on why this source is credible)\n- **Open gaps** (what would be needed to raise confidence)\n\nUse multi-angle search. Prefer primary sources (license texts, regulatory filings, founder interviews, post-mortems) over secondary commentary. If a claim depends on a single source, label it low confidence even if the source is reputable.",
+      "read": ["artifacts/decision_crucible_public_release_20260418/00_frame.md"],
+      "write": ["artifacts/decision_crucible_public_release_20260418/evidence_briefs/01_brief.md"],
+      "verify_command": "test -s artifacts/decision_crucible_public_release_20260418/evidence_briefs/01_brief.md && grep -c '^## Sources' artifacts/decision_crucible_public_release_20260418/evidence_briefs/01_brief.md | grep -q 1"
+    },
+    {
+      "label": "evidence_brief_axis_2",
+      "task_type": "research",
+      "depends_on": ["frame_subquestions"],
+      "description": "Parallel research worker — sub-question 2",
+      "outcome_goal": "artifacts/decision_crucible_public_release_20260418/evidence_briefs/02_brief.md contains a cited brief answering sub-question 2 from 00_frame.md.",
+      "prompt": "Same shape as evidence_brief_axis_1, but for **sub-question 2** in `00_frame.md`. Write to `artifacts/decision_crucible_public_release_20260418/evidence_briefs/02_brief.md`.",
+      "read": ["artifacts/decision_crucible_public_release_20260418/00_frame.md"],
+      "write": ["artifacts/decision_crucible_public_release_20260418/evidence_briefs/02_brief.md"],
+      "verify_command": "test -s artifacts/decision_crucible_public_release_20260418/evidence_briefs/02_brief.md"
+    },
+    {
+      "label": "evidence_brief_axis_3",
+      "task_type": "research",
+      "depends_on": ["frame_subquestions"],
+      "description": "Parallel research worker — sub-question 3",
+      "outcome_goal": "artifacts/decision_crucible_public_release_20260418/evidence_briefs/03_brief.md contains a cited brief answering sub-question 3.",
+      "prompt": "Same shape as evidence_brief_axis_1, but for **sub-question 3** in `00_frame.md`. Write to `artifacts/decision_crucible_public_release_20260418/evidence_briefs/03_brief.md`.",
+      "read": ["artifacts/decision_crucible_public_release_20260418/00_frame.md"],
+      "write": ["artifacts/decision_crucible_public_release_20260418/evidence_briefs/03_brief.md"],
+      "verify_command": "test -s artifacts/decision_crucible_public_release_20260418/evidence_briefs/03_brief.md"
+    },
+    {
+      "label": "evidence_brief_axis_4",
+      "task_type": "research",
+      "depends_on": ["frame_subquestions"],
+      "description": "Parallel research worker — sub-question 4",
+      "outcome_goal": "artifacts/decision_crucible_public_release_20260418/evidence_briefs/04_brief.md contains a cited brief answering sub-question 4.",
+      "prompt": "Same shape as evidence_brief_axis_1, but for **sub-question 4** in `00_frame.md`. Write to `artifacts/decision_crucible_public_release_20260418/evidence_briefs/04_brief.md`. If `00_frame.md` lists fewer than 4 sub-questions, write a brief noting that this slot was not used and exit cleanly.",
+      "read": ["artifacts/decision_crucible_public_release_20260418/00_frame.md"],
+      "write": ["artifacts/decision_crucible_public_release_20260418/evidence_briefs/04_brief.md"],
+      "verify_command": "test -s artifacts/decision_crucible_public_release_20260418/evidence_briefs/04_brief.md"
+    },
+    {
+      "label": "archetype_brainstorm",
+      "task_type": "brainstorm",
+      "depends_on": ["evidence_brief_axis_1", "evidence_brief_axis_2", "evidence_brief_axis_3", "evidence_brief_axis_4"],
+      "description": "Generate 5+ distinct public-release archetypes grounded in the evidence briefs",
+      "outcome_goal": "artifacts/decision_crucible_public_release_20260418/01_archetypes.md lists 5+ archetypes, each with: name, license/governance/monetization/distribution profile, 2-line precedent reference (citing evidence briefs), and explicit incompatibility list (what other archetypes this one rules out).",
+      "prompt": "Read all four evidence briefs under `artifacts/decision_crucible_public_release_20260418/evidence_briefs/`. Generate **at least 5 distinct public-release archetypes** for Praxis. They must be genuinely different — not gradients of the same idea.\n\nWrite to `artifacts/decision_crucible_public_release_20260418/01_archetypes.md`. For each archetype:\n\n- **Name** (memorable, 2-4 words)\n- **License** (specific, not 'open source' — e.g. AGPLv3, BSL with conversion, source-available with commercial terms)\n- **Governance** (BDFL, foundation, single-vendor, federated)\n- **Monetization** (none, hosted SaaS, support contracts, dual-license, marketplace cut)\n- **Distribution** (CLI binary, container, hosted-only, embedded SDK)\n- **Target persona** (one operator persona — be specific, e.g. 'staff engineer at a 200-person fintech doing internal tooling')\n- **Precedent** (one or two real-world projects with similar posture; cite which evidence brief discusses them)\n- **Rules out** (which other archetypes in this list this one is incompatible with, and why)\n\nForce diversity. If two archetypes have the same monetization AND license, kill one and replace it.",
+      "read": [
+        "artifacts/decision_crucible_public_release_20260418/00_frame.md",
+        "artifacts/decision_crucible_public_release_20260418/evidence_briefs/01_brief.md",
+        "artifacts/decision_crucible_public_release_20260418/evidence_briefs/02_brief.md",
+        "artifacts/decision_crucible_public_release_20260418/evidence_briefs/03_brief.md",
+        "artifacts/decision_crucible_public_release_20260418/evidence_briefs/04_brief.md"
+      ],
+      "write": ["artifacts/decision_crucible_public_release_20260418/01_archetypes.md"],
+      "verify_command": "grep -cE '^## ' artifacts/decision_crucible_public_release_20260418/01_archetypes.md | awk '{ exit ($1>=5) ? 0 : 1 }'"
+    },
+    {
+      "label": "debate_position_open_core",
+      "task_type": "debate",
+      "agent": "google/gemini-3.1-pro-preview",
+      "depends_on": ["archetype_brainstorm"],
+      "description": "Crossfire position A — defend the most aggressive open archetype",
+      "outcome_goal": "artifacts/decision_crucible_public_release_20260418/debate/A_open.md argues for the most permissive/openness-leaning archetype from 01_archetypes.md, attacks the other two debate positions by name, and grounds claims in evidence briefs.",
+      "prompt": "Read `artifacts/decision_crucible_public_release_20260418/01_archetypes.md` and the four evidence briefs.\n\n**YOUR POSITION:** Pick the most permissive/openness-leaning archetype (e.g. Apache-2.0 or MIT, no monetization gate, foundation governance) and argue it is the right posture for Praxis's public release.\n\nAttack the two other debate positions (debate_position_source_available, debate_position_dual_license_hosted) by name when their position papers land. Use cost math, adoption math, and precedent. Cite evidence briefs by filename when making external-fact claims.\n\nWrite to `artifacts/decision_crucible_public_release_20260418/debate/A_open.md`.",
+      "read": [
+        "artifacts/decision_crucible_public_release_20260418/01_archetypes.md",
+        "artifacts/decision_crucible_public_release_20260418/evidence_briefs/01_brief.md",
+        "artifacts/decision_crucible_public_release_20260418/evidence_briefs/02_brief.md",
+        "artifacts/decision_crucible_public_release_20260418/evidence_briefs/03_brief.md",
+        "artifacts/decision_crucible_public_release_20260418/evidence_briefs/04_brief.md"
+      ],
+      "write": ["artifacts/decision_crucible_public_release_20260418/debate/A_open.md"],
+      "verify_command": "test -s artifacts/decision_crucible_public_release_20260418/debate/A_open.md"
+    },
+    {
+      "label": "debate_position_source_available",
+      "task_type": "debate",
+      "agent": "openai/gpt-5.4",
+      "depends_on": ["archetype_brainstorm"],
+      "description": "Crossfire position B — defend a source-available / BSL-style archetype",
+      "outcome_goal": "artifacts/decision_crucible_public_release_20260418/debate/B_source_available.md argues for a source-available or BSL-with-conversion archetype.",
+      "prompt": "Read `artifacts/decision_crucible_public_release_20260418/01_archetypes.md` and the four evidence briefs.\n\n**YOUR POSITION:** Pick the source-available / BSL-style archetype (commercial-use restriction with time-bombed conversion to OSS, single-vendor governance, hosted SaaS as the monetization path) and argue it is the right posture for Praxis's public release.\n\nAttack debate_position_open and debate_position_dual_license_hosted by name. Use cost math and precedent. Cite evidence briefs when making external-fact claims.\n\nWrite to `artifacts/decision_crucible_public_release_20260418/debate/B_source_available.md`.",
+      "read": [
+        "artifacts/decision_crucible_public_release_20260418/01_archetypes.md",
+        "artifacts/decision_crucible_public_release_20260418/evidence_briefs/01_brief.md",
+        "artifacts/decision_crucible_public_release_20260418/evidence_briefs/02_brief.md",
+        "artifacts/decision_crucible_public_release_20260418/evidence_briefs/03_brief.md",
+        "artifacts/decision_crucible_public_release_20260418/evidence_briefs/04_brief.md"
+      ],
+      "write": ["artifacts/decision_crucible_public_release_20260418/debate/B_source_available.md"],
+      "verify_command": "test -s artifacts/decision_crucible_public_release_20260418/debate/B_source_available.md"
+    },
+    {
+      "label": "debate_position_dual_license_hosted",
+      "task_type": "debate",
+      "agent": "anthropic/claude-opus-4-6",
+      "depends_on": ["archetype_brainstorm"],
+      "description": "Crossfire position C — defend dual-license + hosted-first archetype",
+      "outcome_goal": "artifacts/decision_crucible_public_release_20260418/debate/C_dual_license.md argues for the dual-license + hosted-first archetype.",
+      "prompt": "Read `artifacts/decision_crucible_public_release_20260418/01_archetypes.md` and the four evidence briefs.\n\n**YOUR POSITION:** Pick the dual-license + hosted-first archetype (AGPLv3 OSS plus commercial license, hosted offering as the primary distribution surface) and argue it is the right posture for Praxis's public release.\n\nAttack debate_position_open and debate_position_source_available by name. Use cost math and precedent. Cite evidence briefs when making external-fact claims.\n\nWrite to `artifacts/decision_crucible_public_release_20260418/debate/C_dual_license.md`.",
+      "read": [
+        "artifacts/decision_crucible_public_release_20260418/01_archetypes.md",
+        "artifacts/decision_crucible_public_release_20260418/evidence_briefs/01_brief.md",
+        "artifacts/decision_crucible_public_release_20260418/evidence_briefs/02_brief.md",
+        "artifacts/decision_crucible_public_release_20260418/evidence_briefs/03_brief.md",
+        "artifacts/decision_crucible_public_release_20260418/evidence_briefs/04_brief.md"
+      ],
+      "write": ["artifacts/decision_crucible_public_release_20260418/debate/C_dual_license.md"],
+      "verify_command": "test -s artifacts/decision_crucible_public_release_20260418/debate/C_dual_license.md"
+    },
+    {
+      "label": "red_team_pass",
+      "task_type": "analysis",
+      "depends_on": ["debate_position_open_core", "debate_position_source_available", "debate_position_dual_license_hosted"],
+      "description": "Adversarial red-team — surface hidden assumptions, second-order effects, regulatory risk",
+      "outcome_goal": "artifacts/decision_crucible_public_release_20260418/02_red_team.md catalogs ≥8 distinct failure modes across the three debate positions, each with: trigger condition, blast radius, detection signal, and reversibility cost.",
+      "prompt": "Read all three debate position papers under `artifacts/decision_crucible_public_release_20260418/debate/` and the evidence briefs.\n\nDo NOT pick a winner. Catalog failure modes — what could make each position the wrong choice, and how would we know.\n\nWrite to `artifacts/decision_crucible_public_release_20260418/02_red_team.md`. Produce **at least 8 distinct failure modes**, ordered by blast radius. For each:\n\n1. **Failure mode** (one sentence)\n2. **Which position(s) is most vulnerable**\n3. **Trigger condition** (a concrete observable event that would precipitate this)\n4. **Blast radius** (what breaks: reputation / revenue / contributor pipeline / legal exposure)\n5. **Detection signal** (a metric, event, or external signal we could watch for)\n6. **Reversibility cost** (low / medium / high — and why)\n\nForce diversity: at least 2 failure modes per position, plus 2 that are cross-cutting. Do not list 'low adoption' as a failure mode unless you can name the specific cause.",
+      "read": [
+        "artifacts/decision_crucible_public_release_20260418/debate/A_open.md",
+        "artifacts/decision_crucible_public_release_20260418/debate/B_source_available.md",
+        "artifacts/decision_crucible_public_release_20260418/debate/C_dual_license.md"
+      ],
+      "write": ["artifacts/decision_crucible_public_release_20260418/02_red_team.md"],
+      "verify_command": "grep -cE '^## ' artifacts/decision_crucible_public_release_20260418/02_red_team.md | awk '{ exit ($1>=8) ? 0 : 1 }'"
+    },
+    {
+      "label": "decision_record",
+      "task_type": "creative",
+      "depends_on": ["red_team_pass"],
+      "description": "Synthesize the decision record",
+      "outcome_goal": "artifacts/decision_crucible_public_release_20260418/decision_record.md exists with: chosen posture, every load-bearing claim cited to an evidence brief or debate transcript by filename, named rollback trigger per top-3 risk from 02_red_team.md.",
+      "prompt": "You are writing the decision record. Read everything in `artifacts/decision_crucible_public_release_20260418/`.\n\nWrite `artifacts/decision_crucible_public_release_20260418/decision_record.md` with this structure:\n\n1. **Decision** (one paragraph — the chosen posture, named concretely)\n2. **Why this and not the others** (call out which debate positions lost which arguments — cite by filename and section)\n3. **Load-bearing claims** (numbered list; each claim cites the evidence brief by filename + section)\n4. **Acknowledged risks and rollback triggers** (top-3 failure modes from 02_red_team.md, each with a watch-for signal and a concrete rollback action)\n5. **What we are explicitly NOT deciding** (scope boundary — the things that should be decided later)\n6. **Confidence** (high / medium / low) and what would raise it\n\nBe opinionated. Hedge only where the evidence genuinely splits. Do not produce a 'on the one hand / on the other hand' summary — produce a decision.",
+      "read": [
+        "artifacts/decision_crucible_public_release_20260418/00_frame.md",
+        "artifacts/decision_crucible_public_release_20260418/01_archetypes.md",
+        "artifacts/decision_crucible_public_release_20260418/02_red_team.md",
+        "artifacts/decision_crucible_public_release_20260418/debate/A_open.md",
+        "artifacts/decision_crucible_public_release_20260418/debate/B_source_available.md",
+        "artifacts/decision_crucible_public_release_20260418/debate/C_dual_license.md"
+      ],
+      "write": ["artifacts/decision_crucible_public_release_20260418/decision_record.md"],
+      "verify_command": "test -s artifacts/decision_crucible_public_release_20260418/decision_record.md && grep -q 'Rollback' artifacts/decision_crucible_public_release_20260418/decision_record.md"
+    },
+    {
+      "label": "file_decision",
+      "task_type": "operate",
+      "depends_on": ["decision_record"],
+      "description": "File the decision through operator authority so it is durable and discoverable",
+      "outcome_goal": "operator_decisions has exactly one row with decision_kind='strategic_posture' and decision_scope_ref='public_release', filed via praxis_operator_architecture_policy (no direct SQL).",
+      "prompt": "File the decision record through operator authority. Do NOT write SQL.\n\nFrom `/Users/nate/Praxis`, read the chosen posture and rationale out of `artifacts/decision_crucible_public_release_20260418/decision_record.md` (the **Decision** section is the title; the first sentence of **Why this and not the others** plus the top rollback trigger from **Acknowledged risks** is the rationale).\n\nThen run:\n\n/Users/nate/.local/bin/praxis workflow tools call praxis_operator_architecture_policy --input-json '{\"authority_domain\":\"public_release\",\"policy_slug\":\"public-release-posture\",\"title\":\"<chosen posture title from decision record>\",\"rationale\":\"<rationale + top rollback trigger, max 800 chars; reference artifacts/decision_crucible_public_release_20260418/decision_record.md as the full record>\",\"decided_by\":\"nate\",\"decision_source\":\"workflow\"}' --yes\n\nIt must exit 0. If it returns an error about decision_scope_kind or authority_domain not existing, inspect the tool handler at `Code&DBs/Workflow/surfaces/mcp/tools/operator.py:457` and report the exact error — do NOT fall back to direct SQL.\n\nVerify:\n`psql postgresql://localhost:5432/praxis -tAc \"SELECT COUNT(*) FROM operator_decisions WHERE decision_kind='architecture_policy' AND decision_scope_ref='public_release';\"` must return 1.",
+      "read": ["artifacts/decision_crucible_public_release_20260418/decision_record.md"],
+      "write": [],
+      "verify_command": "psql postgresql://localhost:5432/praxis -tAc \"SELECT COUNT(*) FROM operator_decisions WHERE decision_scope_ref='public_release';\" | grep -qE '^1$'"
+    }
+  ]
+}

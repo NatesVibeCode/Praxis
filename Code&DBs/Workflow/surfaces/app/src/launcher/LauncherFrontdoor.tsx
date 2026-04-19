@@ -8,6 +8,7 @@ interface LauncherDoctor {
   services_ready?: boolean;
   database_reachable?: boolean;
   schema_bootstrapped?: boolean;
+  workflow_operational?: boolean;
   api_server_ready?: boolean;
   workflow_api_ready?: boolean;
   mcp_bridge_ready?: boolean;
@@ -118,12 +119,14 @@ export function LauncherFrontdoor() {
 
   const readinessCards = useMemo(() => {
     const doctor = status?.doctor ?? {};
+    const databaseReady = Boolean(doctor.database_reachable)
+      && Boolean(doctor.workflow_operational ?? doctor.schema_bootstrapped);
     return [
       {
         title: APP_CONFIG.databaseName,
         detail: 'Database truth and schema authority',
-        ok: Boolean(doctor.database_reachable) && Boolean(doctor.schema_bootstrapped),
-        meta: readinessLabel(Boolean(doctor.database_reachable) && Boolean(doctor.schema_bootstrapped), 'Bound'),
+        ok: databaseReady,
+        meta: readinessLabel(databaseReady, 'Bound'),
       },
       {
         title: 'Praxis API',

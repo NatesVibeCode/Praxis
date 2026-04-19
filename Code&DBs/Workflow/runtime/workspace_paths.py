@@ -8,15 +8,23 @@ that no other module hardcodes ``Code&DBs`` / ``Workflow`` / ``Databases``.
 from __future__ import annotations
 
 import json
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Mapping
 
 _LAYOUT_FILENAME = "workspace_layout.json"
+_HOST_WORKSPACE_ROOT_ENV = "PRAXIS_HOST_WORKSPACE_ROOT"
+_CONTAINER_WORKSPACE_ROOT_ENV = "PRAXIS_CONTAINER_WORKSPACE_ROOT"
 
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
+
+
+def repo_root() -> Path:
+    """Repo root for the checked-out Praxis workspace."""
+    return _repo_root()
 
 
 @lru_cache(maxsize=1)
@@ -76,6 +84,49 @@ def log_path(name: str, *, repo_root: Path | None = None) -> Path:
     assert isinstance(log_paths, Mapping)
     relative = str(log_paths[name])
     return code_tree_root(repo_root) / relative
+
+
+def container_workspace_root(*, env: Mapping[str, str] | None = None) -> Path:
+    """Canonical workspace root inside sandbox/container execution."""
+    source = env if env is not None else os.environ
+    configured = str(source.get(_CONTAINER_WORKSPACE_ROOT_ENV) or "").strip()
+    if configured:
+        return Path(configured).expanduser()
+    execution_mounts = _layout()["execution_mounts"]
+    assert isinstance(execution_mounts, Mapping)
+    return Path(str(execution_mounts["container_workspace_root"])).expanduser()
+
+
+def authority_workspace_roots(*, env: Mapping[str, str] | None = None) -> tuple[Path, ...]:
+    """Workspace roots asserted by runtime authority, ordered by precedence."""
+    source = env if env is not None else os.environ
+    roots: list[Path] = []
+
+    def _append(value: object) -> None:
+        if not isinstance(value, (str, Path)):
+            return
+        raw = str(value).strip()
+        if not raw:
+            return
+        candidate = Path(raw).expanduser()
+        try:
+            candidate = candidate.resolve()
+        except OSError:
+            candidate = candidate.absolute()
+        if candidate not in roots:
+            roots.append(candidate)
+
+    _append(source.get(_HOST_WORKSPACE_ROOT_ENV))
+    try:
+        from runtime.instance import native_instance_contract
+
+        contract = native_instance_contract(env=source)
+        _append(contract.get("repo_root"))
+        _append(contract.get("workdir"))
+    except Exception:
+        pass
+    _append(_repo_root())
+    return tuple(roots)
 
 
 def to_repo_ref(path: Path | str, *, repo_root: Path | None = None) -> str:

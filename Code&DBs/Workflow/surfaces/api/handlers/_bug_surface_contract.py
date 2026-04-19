@@ -287,6 +287,7 @@ def packet_payload(
     packet = bt.failure_packet(
         bug_id,
         receipt_limit=max(1, int(body.get("receipt_limit", 5) or 5)),
+        allow_backfill=False,
     )
     if packet is None:
         raise ValueError(f"bug not found: {bug_id}")
@@ -305,6 +306,7 @@ def history_payload(
     packet = bt.failure_packet(
         bug_id,
         receipt_limit=max(1, int(body.get("receipt_limit", 5) or 5)),
+        allow_backfill=False,
     )
     if packet is None:
         raise ValueError(f"bug not found: {bug_id}")
@@ -323,6 +325,7 @@ def replay_payload(
     replay = bt.replay_bug(
         bug_id,
         receipt_limit=max(1, int(body.get("receipt_limit", 5) or 5)),
+        allow_backfill=False,
     )
     if replay is None:
         raise ValueError(f"bug not found: {bug_id}")

@@ -14,8 +14,10 @@ import pytest
 from runtime.workspace_paths import (
     _layout,
     _repo_root,
+    authority_workspace_roots,
     code_tree_dirname,
     code_tree_root,
+    container_workspace_root,
     databases_root,
     log_path,
     strip_workflow_prefix,
@@ -31,6 +33,7 @@ def test_layout_file_exists_and_parses() -> None:
     assert "code_tree" in layout
     assert "subdirs" in layout
     assert "log_paths" in layout
+    assert "execution_mounts" in layout
 
 
 def test_canonical_tree_dirname_matches_disk() -> None:
@@ -57,6 +60,19 @@ def test_log_path_resolves() -> None:
     pg = log_path("postgres")
     assert pg.name == "postgres.log"
     assert "postgres-dev" in str(pg)
+
+
+def test_container_workspace_root_comes_from_layout_authority() -> None:
+    assert container_workspace_root() == Path(_layout()["execution_mounts"]["container_workspace_root"])
+
+
+def test_container_workspace_root_allows_explicit_authority_override() -> None:
+    assert container_workspace_root(env={"PRAXIS_CONTAINER_WORKSPACE_ROOT": "/sandbox"}) == Path("/sandbox")
+
+
+def test_authority_workspace_roots_includes_explicit_host_override() -> None:
+    roots = authority_workspace_roots(env={"PRAXIS_HOST_WORKSPACE_ROOT": "/host/workspace"})
+    assert roots[0] == Path("/host/workspace")
 
 
 def test_to_repo_ref_canonicalizes_absolute() -> None:
