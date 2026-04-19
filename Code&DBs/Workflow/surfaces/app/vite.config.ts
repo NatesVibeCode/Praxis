@@ -4,7 +4,15 @@ import { spawn, ChildProcess } from 'child_process';
 import { readFileSync, watch, FSWatcher } from 'fs';
 import net from 'net';
 
-async function canBindPort(port: number, host = '127.0.0.1'): Promise<boolean> {
+// Single source of truth for the dev bind address. Every port interaction
+// — the free-port probe, the Python child spawn, and the Vite proxy origin —
+// goes through this constant. If these ever disagree, the probe can green-
+// light a port the server then can't actually bind (e.g. when OrbStack or
+// another process already holds *:<port>), and the dev proxy silently
+// targets a dead address.
+const API_HOST = '127.0.0.1';
+
+async function canBindPort(port: number, host = API_HOST): Promise<boolean> {
   return await new Promise<boolean>((resolve, reject) => {
     const server = net.createServer();
     server.once('error', (error: NodeJS.ErrnoException) => {
@@ -28,7 +36,7 @@ async function canBindPort(port: number, host = '127.0.0.1'): Promise<boolean> {
   });
 }
 
-async function findOpenPort(preferredPort: number, host = '127.0.0.1', maxAttempts = 50): Promise<number> {
+async function findOpenPort(preferredPort: number, host = API_HOST, maxAttempts = 50): Promise<number> {
   const startPort = Number.isFinite(preferredPort) && preferredPort > 0 ? preferredPort : 1;
   for (let offset = 0; offset < maxAttempts; offset += 1) {
     const candidate = startPort + offset;
@@ -78,20 +86,41 @@ function apiServerPlugin(apiPort: number) {
   let shuttingDown = false;
   const backendWatchers: FSWatcher[] = [];
 
+  // Crash-loop circuit breaker: if the child exits unexpectedly more than
+  // CRASH_WINDOW_MAX times within CRASH_WINDOW_MS we stop restarting and
+  // print a clear diagnosis instead of flooding the log forever.
+  const CRASH_WINDOW_MS = 10_000;
+  const CRASH_WINDOW_MAX = 3;
+  const recentCrashes: number[] = [];
+  let circuitOpen = false;
+
   const repoRoot = decodeURIComponent(new URL('../../../../', import.meta.url).pathname);
   const workflowRoot = `${repoRoot}Code&DBs/Workflow`;
   const repoEnvPath = `${repoRoot}.env`;
-  const apiArgs = ['-m', 'surfaces.api.server', '--port', String(apiPort)];
+  // Host + args stay in lock-step with the probe in `canBindPort` (both use
+  // `API_HOST`). The Vite proxy origin below uses the same constant — if any
+  // of the three diverges, the child can bind a different address than the
+  // probe measured and the proxy silently points at a dead port.
+  const apiArgs = [
+    '-m',
+    'surfaces.api.server',
+    '--host',
+    API_HOST,
+    '--port',
+    String(apiPort),
+  ];
 
   const normalizedWorkflowRoot = workflowRoot.replace(/\\/g, '/');
   const normalizedRepoEnvPath = repoEnvPath.replace(/\\/g, '/');
 
   function loadApiEnv() {
     const dotEnv = loadDotEnv(repoRoot);
+    const configuredWorkflowDatabaseUrl = dotEnv.WORKFLOW_DATABASE_URL || process.env.WORKFLOW_DATABASE_URL;
+    if (!configuredWorkflowDatabaseUrl) {
+      throw new Error(`WORKFLOW_DATABASE_URL must be set in process env or declared in ${normalizedRepoEnvPath}`);
+    }
     const workflowDatabaseUrl = normalizeWorkflowDatabaseUrl(
-      dotEnv.WORKFLOW_DATABASE_URL
-      || process.env.WORKFLOW_DATABASE_URL
-      || 'postgresql://postgres@localhost:5432/praxis',
+      configuredWorkflowDatabaseUrl,
     );
     return {
       ...process.env,
@@ -114,8 +143,36 @@ function apiServerPlugin(apiPort: number) {
     });
   }
 
+  function recordCrashAndShouldHalt(): boolean {
+    const now = Date.now();
+    // Drop samples outside the current window, then push the new one.
+    while (recentCrashes.length > 0 && now - recentCrashes[0] > CRASH_WINDOW_MS) {
+      recentCrashes.shift();
+    }
+    recentCrashes.push(now);
+    return recentCrashes.length > CRASH_WINDOW_MAX;
+  }
+
+  function openCircuit(lastExitReason: string) {
+    circuitOpen = true;
+    console.error(
+      [
+        `[api] Python API child crashed ${recentCrashes.length} times in ${CRASH_WINDOW_MS / 1000}s`,
+        `[api] Last exit: ${lastExitReason}. Giving up on auto-restart.`,
+        `[api] Diagnose:`,
+        `[api]   1. Check for another listener on the same port:`,
+        `[api]        lsof -iTCP:${apiPort} -sTCP:LISTEN -P -n`,
+        `[api]      A wildcard bind (e.g. OrbStack, docker-proxy) at *:${apiPort} does NOT`,
+        `[api]      block our loopback bind — so this check is for ${API_HOST}:${apiPort} specifically.`,
+        `[api]   2. Run the child directly to see its stderr:`,
+        `[api]        WORKFLOW_DATABASE_URL=... PYTHONPATH=${workflowRoot} python3 -m surfaces.api.server --host ${API_HOST} --port ${apiPort}`,
+        `[api]   3. Fix, then restart Vite to reset the circuit breaker.`,
+      ].join('\n'),
+    );
+  }
+
   function startApiServer(reason: string) {
-    if (shuttingDown) return;
+    if (shuttingDown || circuitOpen) return;
     const child = spawn('python3', apiArgs, {
       env: loadApiEnv(),
       cwd: workflowRoot,
@@ -133,13 +190,17 @@ function apiServerPlugin(apiPort: number) {
       if (proc === child) proc = null;
       if (shuttingDown) return;
       const exitReason = code !== null ? `code ${code}` : `signal ${signal ?? 'unknown'}`;
+      if (recordCrashAndShouldHalt()) {
+        openCircuit(exitReason);
+        return;
+      }
       console.error(`[api] exited unexpectedly (${exitReason}) — restarting in 2s`);
       setTimeout(() => {
         if (!proc) startApiServer('auto-restarted after crash');
       }, 2000);
     });
 
-    console.log(`[api] Python API server ${reason} on :${apiPort}`);
+    console.log(`[api] Python API server ${reason} on ${API_HOST}:${apiPort}`);
   }
 
   function stopApiServer() {
@@ -160,6 +221,14 @@ function apiServerPlugin(apiPort: number) {
     if (restartTimer) clearTimeout(restartTimer);
     restartTimer = setTimeout(() => {
       restartTimer = null;
+      // Operator-triggered restart (file change) — reset the circuit breaker
+      // so a genuine fix following a crash-loop can take effect without
+      // needing a full Vite restart.
+      if (circuitOpen) {
+        console.log('[api] File change detected — resetting crash-loop circuit breaker.');
+        circuitOpen = false;
+        recentCrashes.length = 0;
+      }
       console.log(`[api] Backend change detected (${reason}) — restarting Python API server...`);
       stopApiServer();
       setTimeout(() => {
@@ -255,7 +324,7 @@ export default defineConfig(async ({ command }) => {
     console.log(`[dev] UI port ${uiPort} | API port ${apiPort}`);
   }
 
-  const apiOrigin = `http://127.0.0.1:${apiPort}`;
+  const apiOrigin = `http://${API_HOST}:${apiPort}`;
 
   return {
     base: isServe ? '/' : '/app/',
@@ -307,7 +376,7 @@ export default defineConfig(async ({ command }) => {
       },
     },
     server: {
-      host: '127.0.0.1',
+      host: API_HOST,
       port: uiPort,
       strictPort: true,
       proxy: {

@@ -43,7 +43,7 @@ def _prime_workflow_database_env() -> None:
 
 
 def start_server(
-    host: str = "0.0.0.0",
+    host: str = "127.0.0.1",
     port: int = 8420,
     *,
     reload: bool = False,
@@ -52,7 +52,10 @@ def start_server(
     """Start the Praxis Engine REST API server.
 
     Args:
-        host: Bind address (default ``"0.0.0.0"`` — all interfaces).
+        host: Bind address (default ``"127.0.0.1"`` — loopback only).
+            Container / prod deployments must pass ``--host 0.0.0.0`` or set
+            ``PRAXIS_API_HOST=0.0.0.0`` so traffic from outside the container
+            reaches the server.
         port: TCP port to listen on (default ``8420``).
         reload: Enable uvicorn auto-reload for local development.
         reload_dirs: Explicit directories to watch when reload is enabled.
@@ -101,8 +104,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Praxis Engine API server")
     parser.add_argument(
         "--host",
-        default=os.environ.get("PRAXIS_API_HOST", "0.0.0.0"),
-        help="Bind address (default: 0.0.0.0)",
+        default=os.environ.get("PRAXIS_API_HOST", "127.0.0.1"),
+        help=(
+            "Bind address (default: 127.0.0.1). "
+            "Use 0.0.0.0 or set PRAXIS_API_HOST=0.0.0.0 for container/LAN access."
+        ),
     )
     parser.add_argument(
         "--port",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 from typing import Any, TextIO
 
@@ -1514,7 +1515,7 @@ def _api_command(args: list[str], *, stdout: TextIO) -> int:
 
     Options:
       routes         show the live route catalog without starting the server
-      --host HOST   bind address (default: 0.0.0.0)
+      --host HOST   bind address (default: 127.0.0.1; use 0.0.0.0 for LAN/container)
       --port PORT   TCP port (default: 8420)
     """
 
@@ -1529,7 +1530,7 @@ def _api_command(args: list[str], *, stdout: TextIO) -> int:
             "  routes        show and filter the live HTTP route catalog without starting the server\n"
             "  integrations  show and filter the /api/integrations route scope without starting the server\n"
             "  data-dictionary show and filter the /api/data-dictionary route scope without starting the server\n"
-            "  --host HOST   bind address (default: 0.0.0.0)\n"
+            "  --host HOST   bind address (default: 127.0.0.1; 0.0.0.0 for LAN/container)\n"
             "  --port PORT   TCP port     (default: 8420)\n"
             "\n"
             f"{_api_discovery_text()}"
@@ -1543,8 +1544,8 @@ def _api_command(args: list[str], *, stdout: TextIO) -> int:
     if args and args[0] == "data-dictionary":
         return _api_scoped_routes_command("data-dictionary", "/api/data-dictionary", args[1:], stdout=stdout)
 
-    host = "0.0.0.0"
-    port = 8420
+    host = os.environ.get("PRAXIS_API_HOST", "127.0.0.1")
+    port = int(os.environ.get("PRAXIS_API_PORT", "8420"))
 
     i = 0
     while i < len(args):
