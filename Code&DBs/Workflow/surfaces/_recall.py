@@ -12,6 +12,10 @@ _DECISION_ENTITY_TYPES = {"", "decision", "architecture_policy", "operator_decis
 _TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9_:-]*")
 
 
+class RecallAuthorityError(RuntimeError):
+    """Raised when a recall authority path is unavailable or malformed."""
+
+
 def _readable_name(*, name: object, source: object, content: object) -> str:
     normalized_name = str(name or "").strip()
     if normalized_name.startswith("doc:"):
@@ -109,14 +113,19 @@ def _search_operator_decisions(
     if normalized_type not in _DECISION_ENTITY_TYPES:
         return []
 
-    results = operator_control.list_operator_decisions(
-        active_only=False,
-        limit=min(max(limit * 10, 100), 500),
-        env=_resolved_env(subsystems),
-    )
+    try:
+        results = operator_control.list_operator_decisions(
+            active_only=False,
+            limit=min(max(limit * 10, 100), 500),
+            env=_resolved_env(subsystems),
+        )
+    except Exception as exc:
+        raise RecallAuthorityError(
+            f"operator decision recall failed: {type(exc).__name__}: {exc}"
+        ) from exc
     rows = results.get("operator_decisions")
     if not isinstance(rows, list):
-        return []
+        raise RecallAuthorityError("operator decision recall returned a non-list payload")
 
     query_lower = query.strip().lower()
     tokens = _normalize_tokens(query)
@@ -166,10 +175,15 @@ def _search_federated_memory_results(
     limit: int,
 ) -> list[dict[str, Any]]:
     """Search the memory graph through the federated retriever first."""
-    try:
-        engine = subsystems.get_memory_engine()
-    except Exception:
+    getter = getattr(subsystems, "get_memory_engine", None)
+    if not callable(getter):
         return []
+    try:
+        engine = getter()
+    except Exception as exc:
+        raise RecallAuthorityError(
+            f"federated memory engine unavailable: {type(exc).__name__}: {exc}"
+        ) from exc
 
     try:
         retriever = FederatedRetriever(engine)
@@ -185,8 +199,10 @@ def _search_federated_memory_results(
             entity_type=memory_entity_type,
             limit=limit,
         )
-    except Exception:
-        return []
+    except Exception as exc:
+        raise RecallAuthorityError(
+            f"federated memory search failed: {type(exc).__name__}: {exc}"
+        ) from exc
 
     normalized: list[dict[str, Any]] = []
     for result in results:
@@ -220,15 +236,12 @@ def search_recall_results(
         normalized = _normalize_knowledge_result(result)
         merged[normalized["entity_id"]] = normalized
 
-    try:
-        operator_decisions = _search_operator_decisions(
-            subsystems,
-            query=query,
-            entity_type=entity_type,
-            limit=normalized_limit,
-        )
-    except Exception:
-        operator_decisions = []
+    operator_decisions = _search_operator_decisions(
+        subsystems,
+        query=query,
+        entity_type=entity_type,
+        limit=normalized_limit,
+    )
 
     for result in operator_decisions:
         existing = merged.get(result["entity_id"])
@@ -246,4 +259,4 @@ def search_recall_results(
     return ranked[:normalized_limit]
 
 
-__all__ = ["search_recall_results"]
+__all__ = ["RecallAuthorityError", "search_recall_results"]

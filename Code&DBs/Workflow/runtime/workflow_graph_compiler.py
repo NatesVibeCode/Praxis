@@ -211,10 +211,11 @@ def _job_write_scope(job: Mapping[str, Any]) -> list[str]:
     if write_scope:
         return write_scope
     scope = job.get("scope")
-    if not _is_mapping(scope):
-        inferred = _infer_artifact_write_scope(job)
-        return inferred
-    write_scope = _string_list(scope.get("write"))
+    if _is_mapping(scope):
+        write_scope = _string_list(scope.get("write"))
+        if write_scope:
+            return write_scope
+    write_scope = _string_list(job.get("write"))
     if write_scope:
         return write_scope
     return _infer_artifact_write_scope(job)

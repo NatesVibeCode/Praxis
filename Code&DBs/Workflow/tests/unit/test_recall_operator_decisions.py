@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from surfaces._recall import search_recall_results
+import pytest
+
+from surfaces._recall import RecallAuthorityError, search_recall_results
 from surfaces.api.handlers import workflow_query_core
 from surfaces.mcp.tools import knowledge
 
@@ -57,6 +59,21 @@ def test_search_recall_results_includes_operator_decisions(monkeypatch) -> None:
     assert results[0]["entity_id"] == _operator_decision_row()["operator_decision_id"]
     assert results[0]["source"] == "operator_decisions"
     assert results[0]["found_via"] == "authority_scan"
+
+
+def test_search_recall_results_surfaces_operator_decision_failure(monkeypatch) -> None:
+    def _boom(**kwargs):
+        raise RuntimeError("operator db offline")
+
+    monkeypatch.setattr("surfaces._recall.operator_control.list_operator_decisions", _boom)
+
+    with pytest.raises(RecallAuthorityError, match="operator db offline"):
+        search_recall_results(
+            _FakeSubsystems(),
+            query="provider onboarding authority",
+            entity_type=None,
+            limit=10,
+        )
 
 
 def test_handle_recall_surfaces_operator_decisions(monkeypatch) -> None:

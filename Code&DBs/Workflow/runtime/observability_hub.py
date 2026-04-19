@@ -288,16 +288,21 @@ class ObservabilityHub:
         discovered_in_run_id: str | None = None,
         discovered_in_receipt_id: str | None = None,
         owner_ref: str | None = None,
+        source_issue_id: str | None = None,
         tags: tuple[str, ...] = (),
+        resume_context: dict[str, Any] | None = None,
     ):
         """File a bug through the tracker."""
         normalized_severity = BugTracker._normalize_severity(
             severity, default=BugSeverity.P2
         )
+        normalized_category = BugTracker._normalize_category(
+            category, default=BugCategory.OTHER
+        )
         bug, _similar_bugs = self._get_bug_tracker().file_bug(
             title=title,
             severity=normalized_severity,
-            category=BugCategory(category),
+            category=normalized_category,
             description=description,
             filed_by=filed_by,
             source_kind=source_kind,
@@ -305,7 +310,9 @@ class ObservabilityHub:
             discovered_in_run_id=discovered_in_run_id,
             discovered_in_receipt_id=discovered_in_receipt_id,
             owner_ref=owner_ref,
+            source_issue_id=source_issue_id,
             tags=tags,
+            resume_context=resume_context,
         )
         return bug
 
@@ -313,6 +320,12 @@ class ObservabilityHub:
         self,
         status: str = None,
         severity: str = None,
+        category: str | None = None,
+        title_like: str | None = None,
+        tags: tuple[str, ...] = (),
+        exclude_tags: tuple[str, ...] = (),
+        source_issue_id: str | None = None,
+        open_only: bool = False,
         limit: int = 50,
     ) -> list:
         """List bugs with optional filters."""
@@ -321,9 +334,18 @@ class ObservabilityHub:
         normalized_severity = (
             BugTracker._normalize_severity(severity, default=None) if severity else None
         )
+        normalized_category = (
+            BugTracker._normalize_category(category, default=None) if category else None
+        )
         return bt.list_bugs(
             status=normalized_status,
             severity=normalized_severity,
+            category=normalized_category,
+            title_like=title_like,
+            tags=tags,
+            exclude_tags=exclude_tags,
+            source_issue_id=source_issue_id,
+            open_only=open_only,
             limit=limit,
         )
 

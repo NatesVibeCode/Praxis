@@ -163,62 +163,6 @@ def _provider_api_key_present(provider_slug: str) -> bool:
     )
 
 
-def _sync_lane_admission(
-    provider_slug: str,
-    adapter_type: str,
-    transport_ready: bool,
-    reason: str,
-) -> None:
-    """Write probe result back to provider_transport_admissions so the router
-    skips lanes whose transport isn't actually available.  Re-enables the lane
-    when a later probe succeeds."""
-    try:
-        import asyncpg
-        from registry.provider_execution_registry import reload_from_db
-
-        db_url = _resolve_database_url(None)
-        if not db_url:
-            return
-
-        async def _update():
-            conn = await asyncpg.connect(db_url)
-            try:
-                await conn.execute(
-                    """
-                    UPDATE provider_transport_admissions
-                       SET admitted_by_policy = $1,
-                           policy_reason      = $2,
-                           updated_at         = now()
-                     WHERE provider_slug = $3
-                       AND adapter_type  = $4
-                       AND status        = 'active'
-                    """,
-                    transport_ready,
-                    reason,
-                    provider_slug,
-                    adapter_type,
-                )
-            finally:
-                await conn.close()
-
-        import concurrent.futures
-
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-
-        if loop is not None and loop.is_running():
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                pool.submit(asyncio.run, _update()).result(timeout=5)
-        else:
-            asyncio.run(_update())
-
-        reload_from_db()
-    except Exception:
-        pass  # probe writeback is best-effort; don't break health checks
-
-
 async def _run_checks_async(probes: list[HealthProbe]) -> list[PreflightCheck]:
     if not probes:
         return []
@@ -447,14 +391,6 @@ class ProviderTransportProbe(HealthProbe):
                 status = "ok" if transport_ready else "warning"
 
             details["transport_ready"] = transport_ready
-
-            if supported:
-                _sync_lane_admission(
-                    self._provider_slug,
-                    self._adapter_type,
-                    transport_ready,
-                    message,
-                )
 
             return _build_check(
                 name=self.name,

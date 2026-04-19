@@ -36,3 +36,16 @@ def test_explicit_write_scope_wins_over_artifact_inference() -> None:
     }
 
     assert _job_write_scope(job) == ["Code&DBs/Workflow/runtime/example.py"]
+
+
+def test_top_level_write_scope_wins_over_artifact_inference() -> None:
+    job = {
+        "label": "pull_crm_snapshot",
+        "write": ["artifacts/hubspot_enrichment_20260418/"],
+        "prompt": (
+            "Build artifacts/hubspot_enrichment_20260418/00_crm_snapshot.json. "
+            "Use artifacts/hubspot_enrichment_20260418/search_deals.raw.json as an intermediate."
+        ),
+    }
+
+    assert _job_write_scope(job) == ["artifacts/hubspot_enrichment_20260418/"]

@@ -91,8 +91,15 @@ def tool_praxis_recall(params: dict) -> dict:
             clean.append(entry)
 
         return {"results": clean, "count": len(clean)}
-    except Exception as e:
-        return {"results": [], "count": 0, "note": f"Knowledge graph error: {e}"}
+    except Exception as exc:
+        return {
+            "results": [],
+            "count": 0,
+            "status": "unavailable",
+            "reason_code": "knowledge_graph.error",
+            "error_type": type(exc).__name__,
+            "error_message": str(exc),
+        }
 
 
 def tool_praxis_ingest(params: dict) -> dict:

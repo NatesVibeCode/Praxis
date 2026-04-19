@@ -260,8 +260,16 @@ async def _load_run_jobs_with_submission_summary(
 ) -> list[dict[str, Any]]:
     try:
         rows = await conn.fetch(_RunJobsWithSubmissionQuery, run_id)
-    except Exception:
-        return []
+    except Exception as exc:
+        raise NativeFrontdoorError(
+            "frontdoor.run_jobs_query_failed",
+            "workflow run jobs query failed",
+            details={
+                "run_id": run_id,
+                "error_type": type(exc).__name__,
+                "error_message": str(exc),
+            },
+        ) from exc
     jobs: list[dict[str, Any]] = []
     for row in rows:
         payload = dict(row)

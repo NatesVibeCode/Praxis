@@ -116,6 +116,29 @@ class TestPreDispatchClean:
         assert gate.loop_verdict is not None
         assert gate.loop_verdict["action"] == "proceed"
 
+    def test_provider_preflight_exception_blocks_dispatch(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        pipeline_operate: WorkflowPipeline,
+    ):
+        import runtime.agent_spawner as agent_spawner_mod
+
+        def _boom(self, agent_slug: str):
+            raise RuntimeError("preflight backend offline")
+
+        monkeypatch.setattr(agent_spawner_mod.AgentSpawner, "preflight", _boom)
+
+        gate = pipeline_operate.pre_dispatch({
+            "prompt": "Fix the flaky test in test_utils.py",
+            "job_label": "j-preflight-001",
+            "agent_slug": "openai/gpt-5.4",
+        })
+
+        assert gate.passed is False
+        assert gate.blocked_by == (
+            "provider_preflight:openai/gpt-5.4 failed: RuntimeError: preflight backend offline",
+        )
+
 
 class TestGovernanceBlocks:
     """Governance scanner blocks prompts containing API keys."""

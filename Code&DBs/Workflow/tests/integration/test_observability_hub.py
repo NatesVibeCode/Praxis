@@ -383,6 +383,17 @@ class TestFileBugAndGetBugs:
         bugs = hub.get_bugs(limit=500)
         assert any(existing.bug_id == bug.bug_id for existing in bugs)
 
+    def test_file_bug_normalizes_category_case(self, hub):
+        title = f"Lowercase category {uuid.uuid4().hex[:8]}"
+        bug = hub.file_bug(
+            title=title,
+            severity="p1",
+            category="runtime",
+            description="Something broke",
+            filed_by="test",
+        )
+        assert bug.category.value == "RUNTIME"
+
     def test_filter_by_status(self, hub):
         bug = hub.file_bug(f"a_{uuid.uuid4().hex[:8]}", "P2", "RUNTIME", "desc", "test")
         bugs_open = hub.get_bugs(status="OPEN")
@@ -396,6 +407,12 @@ class TestFileBugAndGetBugs:
         hub.file_bug(f"b_{uuid.uuid4().hex[:8]}", "P3", "RUNTIME", "minor", "test")
         p0_bugs = hub.get_bugs(severity="P0")
         assert any(existing.bug_id == bug.bug_id and existing.title == title for existing in p0_bugs)
+
+    def test_filter_by_category_accepts_noncanonical_case(self, hub):
+        title = f"runtime filter {uuid.uuid4().hex[:8]}"
+        bug = hub.file_bug(title, "P2", "runtime", "desc", "test")
+        bugs_runtime = hub.get_bugs(category="runtime")
+        assert any(existing.bug_id == bug.bug_id for existing in bugs_runtime)
 
 
 class TestHealthCheck:

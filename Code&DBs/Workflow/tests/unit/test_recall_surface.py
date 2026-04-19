@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+import pytest
+
 from memory.types import Entity, EntityType
 from surfaces import _recall
 
@@ -67,3 +69,34 @@ def test_search_recall_results_uses_federated_memory_search(monkeypatch):
     assert results[0]["source"] == "memory"
     assert results[0]["found_via"] == "text"
     assert _FakeFederatedRetriever.calls == [("federated memory", None, 10)]
+
+
+def test_search_recall_results_surfaces_federated_engine_failure() -> None:
+    class _BrokenSubsystems(_FakeSubsystems):
+        def get_memory_engine(self):
+            raise RuntimeError("memory offline")
+
+    with pytest.raises(_recall.RecallAuthorityError, match="memory offline"):
+        _recall.search_recall_results(
+            _BrokenSubsystems(),
+            query="federated memory",
+            limit=10,
+        )
+
+
+def test_search_recall_results_surfaces_federated_search_failure(monkeypatch) -> None:
+    class _BrokenRetriever:
+        def __init__(self, engine):
+            self._engine = engine
+
+        def search(self, query: str, entity_type=None, limit: int = 20):
+            raise RuntimeError("vector index offline")
+
+    monkeypatch.setattr(_recall, "FederatedRetriever", _BrokenRetriever)
+
+    with pytest.raises(_recall.RecallAuthorityError, match="vector index offline"):
+        _recall.search_recall_results(
+            _FakeSubsystems(),
+            query="federated memory",
+            limit=10,
+        )

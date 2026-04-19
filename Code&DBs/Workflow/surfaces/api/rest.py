@@ -79,6 +79,26 @@ _CLIENT_VERSION_HEADERS = (
     "X-Praxis-Client-Version",
     "User-Agent",
 )
+
+
+def _run_authority_unavailable(
+    *,
+    reason_code: str,
+    message: str,
+    run_id: str,
+    exc: Exception | None = None,
+) -> HTTPException:
+    detail: dict[str, Any] = {
+        "reason_code": reason_code,
+        "message": message,
+        "run_id": run_id,
+    }
+    if exc is not None:
+        detail["error_type"] = type(exc).__name__
+        detail["error_message"] = str(exc)
+    return HTTPException(status_code=503, detail=detail)
+
+
 _IDEMPOTENCY_HEADER = "Idempotency-Key"
 _HTTP_BEARER = HTTPBearer(auto_error=False)
 
@@ -1699,15 +1719,28 @@ def _load_run_jobs_from_status_authority(conn: Any, run_id: str) -> list[dict[st
         from runtime.workflow.unified import get_run_status
 
         status = get_run_status(conn, run_id)
-    except Exception:
-        return []
+    except Exception as exc:
+        raise _run_authority_unavailable(
+            reason_code="run_detail.status_authority_query_failed",
+            message="run status authority query failed",
+            run_id=run_id,
+            exc=exc,
+        ) from exc
 
     if not isinstance(status, dict):
-        return []
+        raise _run_authority_unavailable(
+            reason_code="run_detail.status_authority_invalid_payload",
+            message="run status authority returned a non-object payload",
+            run_id=run_id,
+        )
 
     jobs = status.get("jobs")
     if not isinstance(jobs, list):
-        return []
+        raise _run_authority_unavailable(
+            reason_code="run_detail.status_authority_missing_jobs",
+            message="run status authority payload is missing jobs",
+            run_id=run_id,
+        )
     return [
         _serialize_run_job(dict(row))
         for row in jobs
@@ -1734,8 +1767,13 @@ def _load_run_spec_snapshot(conn: Any, run_id: str) -> dict[str, Any] | None:
             "SELECT request_envelope->'spec_snapshot' AS spec_snapshot FROM workflow_runs WHERE run_id = $1",
             run_id,
         )
-    except Exception:
-        return None
+    except Exception as exc:
+        raise _run_authority_unavailable(
+            reason_code="run_detail.spec_snapshot_query_failed",
+            message="run spec snapshot query failed",
+            run_id=run_id,
+            exc=exc,
+        ) from exc
     if not rows:
         return None
     return _parse_json_mapping(rows[0].get("spec_snapshot"))
@@ -1750,8 +1788,13 @@ def _load_operator_frame_counts(conn: Any, run_id: str) -> dict[str, Counter[str
                ORDER BY node_id, operator_frame_id""",
             run_id,
         )
-    except Exception:
-        return {}
+    except Exception as exc:
+        raise _run_authority_unavailable(
+            reason_code="run_detail.operator_frame_query_failed",
+            message="run operator frame query failed",
+            run_id=run_id,
+            exc=exc,
+        ) from exc
 
     counts_by_node: dict[str, Counter[str]] = {}
     for row in rows or []:

@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from .._payload_contract import coerce_query_bool, coerce_query_int
+from .._payload_contract import (
+    coerce_query_bool,
+    coerce_query_int,
+    coerce_query_text,
+    coerce_text_sequence,
+)
 from . import _bug_surface_contract as _bug_contract
 from . import workflow_query_core as _workflow_query_core
 from ._shared import _ClientError, _query_params
@@ -61,11 +66,52 @@ def _handle_bugs_get(request: Any, path: str) -> None:
             field_name="open_only",
             default=False,
         )
+        status = coerce_query_text(
+            params.get("status"),
+            field_name="status",
+        )
+        severity = coerce_query_text(
+            params.get("severity"),
+            field_name="severity",
+        )
+        category = coerce_query_text(
+            params.get("category"),
+            field_name="category",
+        )
+        title_like = coerce_query_text(
+            params.get("title_like"),
+            field_name="title_like",
+        )
+        tags = coerce_text_sequence(
+            params.get("tags"),
+            field_name="tags",
+        )
+        exclude_tags = coerce_text_sequence(
+            params.get("exclude_tags"),
+            field_name="exclude_tags",
+        )
+        source_issue_id = coerce_query_text(
+            params.get("source_issue_id"),
+            field_name="source_issue_id",
+        )
+        include_replay_state = coerce_query_bool(
+            params.get("include_replay_state"),
+            field_name="include_replay_state",
+            default=False,
+        )
         result = _handle_bugs(
             request.subsystems,
             {
                 "action": "list",
                 "limit": limit,
+                "status": status,
+                "severity": severity,
+                "category": category,
+                "title_like": title_like,
+                "tags": tags,
+                "exclude_tags": exclude_tags,
+                "source_issue_id": source_issue_id,
+                "include_replay_state": include_replay_state,
                 "replay_ready_only": replay_ready_only,
                 "open_only": open_only,
             },

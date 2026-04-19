@@ -4906,6 +4906,45 @@ def test_handle_bugs_list_uses_injected_parser_contract() -> None:
     assert "replay_ready" not in result["bugs"][0]
 
 
+def test_handle_bugs_get_forwards_full_query_contract(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def _fake_handle_bugs(subsystems, body):
+        captured["subsystems"] = subsystems
+        captured["body"] = body
+        return {"bugs": [], "count": 0, "returned_count": 0}
+
+    monkeypatch.setattr(workflow_query._bug_routes, "_handle_bugs", _fake_handle_bugs)
+
+    request = _RequestStub(
+        subsystems=SimpleNamespace(get_pg_conn=lambda: None),
+        path=(
+            "/api/bugs?"
+            "limit=12&status=open&severity=p1&category=runtime&title_like=authority+drift&"
+            "tags=alpha&tags=beta&exclude_tags=legacy&source_issue_id=issue-123&"
+            "include_replay_state=1&replay_ready_only=on&open_only=yes"
+        ),
+    )
+
+    workflow_query._handle_bugs_get(request, request.path)
+
+    assert request.sent == (200, {"bugs": [], "count": 0, "returned_count": 0})
+    assert captured["body"] == {
+        "action": "list",
+        "limit": 12,
+        "status": "open",
+        "severity": "p1",
+        "category": "runtime",
+        "title_like": "authority drift",
+        "tags": ("alpha", "beta"),
+        "exclude_tags": ("legacy",),
+        "source_issue_id": "issue-123",
+        "include_replay_state": True,
+        "replay_ready_only": True,
+        "open_only": True,
+    }
+
+
 def test_handle_bugs_search_include_replay_state_uses_read_only_hint() -> None:
     captured: dict[str, Any] = {}
 

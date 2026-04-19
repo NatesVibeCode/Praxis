@@ -366,6 +366,7 @@ def write_job_receipt(
         verified_paths,
         spec_snapshot.get("scope_write"),
         spec_snapshot.get("write_scope"),
+        spec_snapshot.get("write"),
     )
     if workspace_root:
         receipt_outputs["workspace_provenance"] = build_workspace_provenance(

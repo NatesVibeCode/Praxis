@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 _WORKFLOW_ROOT = Path(__file__).resolve().parents[2]
@@ -15,6 +17,7 @@ if str(_WORKFLOW_ROOT) not in sys.path:
 
 import surfaces.api.rest as rest
 from surfaces.api import handlers as api_handlers
+from surfaces.api.handlers import _query_bugs
 from surfaces.api.handlers import workflow_query
 
 
@@ -188,6 +191,56 @@ def test_api_routes_endpoint_can_include_internal_routes() -> None:
     assert routes_route["visibility"] == "internal"
 
 
+def test_api_bugs_route_forwards_full_query_contract_through_http(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def _fake_handle_bugs(subsystems, body):
+        captured["subsystems"] = subsystems
+        captured["body"] = body
+        return {"bugs": [], "count": 0, "returned_count": 0}
+
+    fake_subsystems = object()
+    monkeypatch.setattr(rest, "_ensure_shared_subsystems", lambda _app: fake_subsystems)
+    monkeypatch.setattr(_query_bugs, "_handle_bugs", _fake_handle_bugs)
+
+    with TestClient(rest.app) as client:
+        response = client.get(
+            "/api/bugs",
+            params=[
+                ("limit", "12"),
+                ("status", "open"),
+                ("severity", "p1"),
+                ("category", "runtime"),
+                ("title_like", "authority drift"),
+                ("tags", "alpha"),
+                ("tags", "beta"),
+                ("exclude_tags", "legacy"),
+                ("source_issue_id", "issue-123"),
+                ("include_replay_state", "1"),
+                ("replay_ready_only", "on"),
+                ("open_only", "yes"),
+            ],
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"bugs": [], "count": 0, "returned_count": 0}
+    assert captured["subsystems"] is fake_subsystems
+    assert captured["body"] == {
+        "action": "list",
+        "limit": 12,
+        "status": "open",
+        "severity": "p1",
+        "category": "runtime",
+        "title_like": "authority drift",
+        "tags": ("alpha", "beta"),
+        "exclude_tags": ("legacy",),
+        "source_issue_id": "issue-123",
+        "include_replay_state": True,
+        "replay_ready_only": True,
+        "open_only": True,
+    }
+
+
 def test_api_handoff_routes_are_registered_on_the_fastapi_app() -> None:
     paths = {route.path for route in rest.app.routes if getattr(route, "path", None)}
 
@@ -195,6 +248,21 @@ def test_api_handoff_routes_are_registered_on_the_fastapi_app() -> None:
     assert "/api/handoff/lineage" in paths
     assert "/api/handoff/status" in paths
     assert "/api/handoff/history" in paths
+
+
+def test_run_status_authority_failure_surfaces_503(monkeypatch) -> None:
+    def _boom(conn, run_id: str):
+        raise RuntimeError("status authority offline")
+
+    monkeypatch.setattr("runtime.workflow.unified.get_run_status", _boom)
+
+    with pytest.raises(HTTPException) as exc_info:
+        rest._load_run_jobs_from_status_authority(object(), "run-123")
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail["reason_code"] == "run_detail.status_authority_query_failed"
+    assert exc_info.value.detail["run_id"] == "run-123"
+    assert exc_info.value.detail["error_message"] == "status authority offline"
 
 
 def test_query_route_is_gone_from_rest_surface(monkeypatch) -> None:

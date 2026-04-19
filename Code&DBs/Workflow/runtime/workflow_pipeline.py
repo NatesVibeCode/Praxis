@@ -171,8 +171,11 @@ class WorkflowPipeline:
                     blocked_by.append(
                         f"provider_preflight:{agent_slug} is not ready — {readiness.reason}"
                     )
-            except Exception:
-                pass  # fail-open: preflight errors don't block execution
+            except Exception as exc:
+                blocked_by.append(
+                    f"provider_preflight:{agent_slug} failed: "
+                    f"{type(exc).__name__}: {exc}"
+                )
 
         # --- 1. Posture check -------------------------------------------
         # Workflow execution is a MUTATE operation; check posture allows it.
