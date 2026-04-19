@@ -114,18 +114,33 @@ def _matches(text: str, keywords: list[str]) -> bool:
     return any(kw in text for kw in keywords)
 
 
+def _route_path(candidate: str) -> str:
+    """Return just the path portion of a route candidate.
+
+    The dispatcher now hands matchers the URL-encoded path plus any
+    ``?query`` suffix (so handlers can read query params and preserve
+    percent-encoded path segments). Route matchers only care about the
+    path, so they must strip the query before comparing.
+    """
+    return candidate.split("?", 1)[0] if "?" in candidate else candidate
+
+
 def _exact(path: str) -> RouteMatcher:
-    return lambda candidate, expected=path: candidate == expected
+    return lambda candidate, expected=path: _route_path(candidate) == expected
 
 
 def _prefix(path_prefix: str) -> RouteMatcher:
-    return lambda candidate, prefix=path_prefix: candidate.startswith(prefix)
+    return (
+        lambda candidate, prefix=path_prefix:
+        _route_path(candidate).startswith(prefix)
+    )
 
 
 def _prefix_suffix(path_prefix: str, path_suffix: str) -> RouteMatcher:
     return (
         lambda candidate, prefix=path_prefix, suffix=path_suffix:
-        candidate.startswith(prefix) and candidate.endswith(suffix)
+        _route_path(candidate).startswith(prefix)
+        and _route_path(candidate).endswith(suffix)
     )
 
 

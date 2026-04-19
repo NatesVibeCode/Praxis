@@ -1057,12 +1057,39 @@ async def _route_to_handler(request: Request) -> Response:
     This replaces the legacy bridge — same handler functions,
     cleaner dispatch. Every route that uses this is explicitly
     registered as a FastAPI endpoint (no catch-all wildcards).
+
+    The handler is invoked with the URL-encoded path plus the query
+    string — i.e. the raw request target. Two reasons it must be
+    encoded rather than decoded:
+
+    * Handlers that read query params (``?category=table``,
+      ``?include_layers=1``) rely on ``urlparse(...).query`` — they'd
+      get nothing if we handed them only ``request.url.path``.
+    * Path segments can legitimately contain ``/`` once percent-
+      decoded (e.g. ``object_kind='dataset:slm/review'`` becomes
+      ``dataset%3Aslm%2Freview`` in the URL). Handlers split on ``/``
+      before ``unquote``-ing each segment, so the path must reach
+      them with ``%2F`` still intact or the split will produce the
+      wrong segment count.
     """
     subsystems = _ensure_shared_subsystems(app)
     if subsystems is None:
         raise HTTPException(status_code=503, detail="shared subsystems unavailable")
 
-    path = request.url.path.rstrip("/") or "/"
+    raw_path_bytes = request.scope.get("raw_path") or b""
+    if raw_path_bytes:
+        # raw_path is the pre-decode bytes for the path only — it does
+        # not include the query string. Latin-1 is the ASGI-mandated
+        # byte→str mapping and round-trips cleanly.
+        raw_path = raw_path_bytes.decode("latin-1")
+        # Strip the query fragment if one is embedded (some ASGI
+        # servers include it, others don't).
+        raw_path = raw_path.split("?", 1)[0]
+    else:
+        raw_path = request.url.path
+    raw_path = raw_path.rstrip("/") or "/"
+    query = request.url.query
+    path = f"{raw_path}?{query}" if query else raw_path
     body = await request.body()
     adapter = _FastAPIHandlerAdapter(request, subsystems, body)
 

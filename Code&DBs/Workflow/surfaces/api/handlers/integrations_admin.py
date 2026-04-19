@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 from typing import Any
+from urllib.parse import unquote, urlparse
 
 from ._shared import RouteEntry, _exact, _prefix, _read_json_body
 
@@ -20,8 +21,17 @@ _VALID_AUTH_KINDS = {"none", "env_var", "api_key", "oauth2"}
 
 
 def _path_tail(path: str, prefix: str) -> list[str]:
-    tail = path[len(prefix):] if path.startswith(prefix) else ""
-    return [part for part in tail.split("/") if part]
+    """Return the URL-decoded segments of ``path`` after ``prefix``.
+
+    The dispatcher now hands us the URL-encoded path with an optional
+    ``?query`` suffix, so we must strip the query before slicing and
+    ``unquote`` each segment so encoded characters (``%2F`` inside a
+    capability name, percent-encoded spaces, etc.) are restored
+    after splitting.
+    """
+    raw = urlparse(path).path
+    tail = raw[len(prefix):] if raw.startswith(prefix) else ""
+    return [unquote(part) for part in tail.split("/") if part]
 
 
 def _validate_capability(cap: Any) -> str | None:

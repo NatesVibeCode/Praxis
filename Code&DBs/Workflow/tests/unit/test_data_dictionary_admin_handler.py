@@ -135,6 +135,27 @@ def test_describe_404_when_reproject_collides_with_kind_segment() -> None:
     assert stub.sent == (404, {"error": "not found"})
 
 
+def test_describe_decodes_percent_encoded_slash_in_object_kind(monkeypatch) -> None:
+    """object_kind can contain '/' (e.g. 'dataset:slm/review').
+
+    The frontend URL-encodes it with encodeURIComponent so it lands as
+    ``dataset%3Aslm%2Freview`` in the URL path. The handler must split
+    on ``/`` first (so %2F stays inside one segment) and *then* unquote,
+    producing one segment that describes the real kind.
+    """
+    captured: dict[str, Any] = {}
+
+    def fake_describe(conn, object_kind, include_layers):
+        captured["object_kind"] = object_kind
+        return {"object": {"object_kind": object_kind}, "fields": [], "entries_by_source": {}}
+
+    monkeypatch.setattr(handler, "describe_object", fake_describe)
+    stub = _RequestStub("/api/data-dictionary/dataset%3Aslm%2Freview")
+    handler._handle_describe(stub, stub.path)
+    assert captured["object_kind"] == "dataset:slm/review"
+    assert stub.sent[0] == 200
+
+
 def test_describe_404_when_more_than_one_segment() -> None:
     # Two segments belongs to PUT/DELETE, not GET describe.
     stub = _RequestStub("/api/data-dictionary/table:orders/id")
