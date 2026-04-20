@@ -41,9 +41,11 @@ def _direct_import(module_name, file_name):
 
 _obs_hub = _direct_import("observability_hub", "observability_hub.py")
 _health = _direct_import("health", "health.py")
+_bug_tracker_mod = _direct_import("bug_tracker", "bug_tracker.py")
 
 ObservabilityHub = _obs_hub.ObservabilityHub
 ReceiptIngester = _obs_hub.ReceiptIngester
+BugTracker = _bug_tracker_mod.BugTracker
 
 HealthProbe = _health.HealthProbe
 HealthStatus = _health.HealthStatus
@@ -274,7 +276,7 @@ class TestIngestReceipt:
                 )
             )
 
-        bugs = [bug for bug in hub.get_bugs(limit=500) if code in bug.title]
+        bugs = [bug for bug in BugTracker(hub._conn).list_bugs(limit=500) if code in bug.title]
         assert bugs == []
         assert hub.operator_snapshot().recent_failure_codes.get(code) == 3
 
@@ -289,7 +291,7 @@ class TestIngestReceipt:
                 )
             )
 
-        bugs = [bug for bug in hub.get_bugs(limit=500) if code in bug.title]
+        bugs = [bug for bug in BugTracker(hub._conn).list_bugs(limit=500) if code in bug.title]
         assert bugs == []
         assert hub.operator_snapshot().recent_failure_codes.get(code) == 6
 
@@ -319,7 +321,7 @@ class TestIngestReceipt:
                 )
             )
 
-        bugs = [bug for bug in hub.get_bugs(limit=500) if code in bug.title]
+        bugs = [bug for bug in BugTracker(hub._conn).list_bugs(limit=500) if code in bug.title]
         assert bugs == []
         assert hub.operator_snapshot().last_run_id == "run-2"
         assert hub.operator_snapshot().last_failure_category == "runtime_failed"
@@ -336,7 +338,11 @@ class TestIngestReceipt:
                     )
                 )
 
-        bugs = [bug for bug in hub.get_bugs(limit=500) if any(code in bug.title for code in codes)]
+        bugs = [
+            bug
+            for bug in BugTracker(hub._conn).list_bugs(limit=500)
+            if any(code in bug.title for code in codes)
+        ]
         assert bugs == []
         snapshot = hub.operator_snapshot()
         assert snapshot.recent_failure_codes.get(codes[0]) == 3
@@ -390,52 +396,16 @@ class TestRefreshOperatorPanel:
         assert hub.operator_snapshot().recent_lineage_depth == 3
 
 
-class TestFileBugAndGetBugs:
-    def test_file_and_retrieve(self, hub):
-        title = f"Test bug {uuid.uuid4().hex[:8]}"
-        bug = hub.file_bug(
-            title=title,
-            severity="P1",
-            category="RUNTIME",
-            description="Something broke",
-            filed_by="test",
-        )
-        assert bug.title == title
-        assert bug.severity.value == "P1"
+class TestObservabilityHubIsReadOnlyForBugs:
+    """ObservabilityHub no longer exposes file_bug / get_bugs shims — bug reads
+    must route through ``surfaces.api.handlers._bug_surface_contract`` or
+    ``runtime.bug_tracker.BugTracker`` directly. Closes BUG-7D9292F9."""
 
-        bugs = hub.get_bugs(limit=500)
-        assert any(existing.bug_id == bug.bug_id for existing in bugs)
+    def test_hub_does_not_expose_file_bug_shim(self, hub):
+        assert not hasattr(hub, "file_bug")
 
-    def test_file_bug_normalizes_category_case(self, hub):
-        title = f"Lowercase category {uuid.uuid4().hex[:8]}"
-        bug = hub.file_bug(
-            title=title,
-            severity="p1",
-            category="runtime",
-            description="Something broke",
-            filed_by="test",
-        )
-        assert bug.category.value == "RUNTIME"
-
-    def test_filter_by_status(self, hub):
-        bug = hub.file_bug(f"a_{uuid.uuid4().hex[:8]}", "P2", "RUNTIME", "desc", "test")
-        bugs_open = hub.get_bugs(status="OPEN")
-        assert any(existing.bug_id == bug.bug_id for existing in bugs_open)
-        bugs_fixed = hub.get_bugs(status="FIXED")
-        assert all(existing.bug_id != bug.bug_id for existing in bugs_fixed)
-
-    def test_filter_by_severity(self, hub):
-        title = f"a_{uuid.uuid4().hex[:8]}"
-        bug = hub.file_bug(title, "P0", "RUNTIME", "critical", "test")
-        hub.file_bug(f"b_{uuid.uuid4().hex[:8]}", "P3", "RUNTIME", "minor", "test")
-        p0_bugs = hub.get_bugs(severity="P0")
-        assert any(existing.bug_id == bug.bug_id and existing.title == title for existing in p0_bugs)
-
-    def test_filter_by_category_accepts_noncanonical_case(self, hub):
-        title = f"runtime filter {uuid.uuid4().hex[:8]}"
-        bug = hub.file_bug(title, "P2", "runtime", "desc", "test")
-        bugs_runtime = hub.get_bugs(category="runtime")
-        assert any(existing.bug_id == bug.bug_id for existing in bugs_runtime)
+    def test_hub_does_not_expose_get_bugs_shim(self, hub):
+        assert not hasattr(hub, "get_bugs")
 
 
 class TestHealthCheck:

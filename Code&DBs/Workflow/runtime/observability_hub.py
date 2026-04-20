@@ -1,9 +1,12 @@
 """Observability hub: single coordinator wiring quality views, bug tracker, and operator panel.
 
 Ingests workflow receipts, materializes quality rollups, and maintains operator
-panel state. Workflow-result bug filing is owned by ``runtime.receipt_store``;
-the hub keeps a manual bug-tracker passthrough but does not auto-file from
-receipts.
+panel state. The hub is read-only for derived metrics; workflow-result bug
+filing is owned by ``runtime.receipt_store`` and bug reads route through
+``surfaces.api.handlers._bug_surface_contract`` /
+``runtime.bug_tracker.BugTracker``. The hub does not re-export file_bug /
+get_bugs shims (closes BUG-7D9292F9 /
+operator_decision.architecture_policy.primitive_contracts.bug_query_open_only_defaults).
 
 Uses importlib-based direct file imports to avoid triggering the runtime
 package __init__.py (which requires Python 3.10+ features).
@@ -56,8 +59,6 @@ QualityWindow = _quality_views.QualityWindow
 QualityRollup = _quality_views.QualityRollup
 
 BugTracker = _bug_tracker.BugTracker
-BugSeverity = _bug_tracker.BugSeverity
-BugCategory = _bug_tracker.BugCategory
 
 OperatorPanel = _operator_panel.OperatorPanel
 OperatorSnapshot = _operator_panel.OperatorSnapshot
@@ -294,82 +295,6 @@ class ObservabilityHub:
         """Trigger quality materialization for the given window."""
         qw = QualityWindow(window)
         return self._get_quality().materialize(qw, window_start)
-
-    # -- bug tracker passthrough --------------------------------------------
-
-    def file_bug(
-        self,
-        title: str,
-        severity: str,
-        category: str,
-        description: str,
-        filed_by: str,
-        *,
-        source_kind: str = "manual",
-        decision_ref: str = "",
-        discovered_in_run_id: str | None = None,
-        discovered_in_receipt_id: str | None = None,
-        owner_ref: str | None = None,
-        source_issue_id: str | None = None,
-        tags: tuple[str, ...] = (),
-        resume_context: dict[str, Any] | None = None,
-    ):
-        """File a bug through the tracker."""
-        normalized_severity = BugTracker._normalize_severity(
-            severity, default=BugSeverity.P2
-        )
-        normalized_category = BugTracker._normalize_category(
-            category, default=BugCategory.OTHER
-        )
-        bug, _similar_bugs = self._get_bug_tracker().file_bug(
-            title=title,
-            severity=normalized_severity,
-            category=normalized_category,
-            description=description,
-            filed_by=filed_by,
-            source_kind=source_kind,
-            decision_ref=decision_ref,
-            discovered_in_run_id=discovered_in_run_id,
-            discovered_in_receipt_id=discovered_in_receipt_id,
-            owner_ref=owner_ref,
-            source_issue_id=source_issue_id,
-            tags=tags,
-            resume_context=resume_context,
-        )
-        return bug
-
-    def get_bugs(
-        self,
-        status: str = None,
-        severity: str = None,
-        category: str | None = None,
-        title_like: str | None = None,
-        tags: tuple[str, ...] = (),
-        exclude_tags: tuple[str, ...] = (),
-        source_issue_id: str | None = None,
-        open_only: bool = False,
-        limit: int = 50,
-    ) -> list:
-        """List bugs with optional filters."""
-        bt = self._get_bug_tracker()
-        normalized_status = BugTracker._normalize_status(status, default=None) if status else None
-        normalized_severity = (
-            BugTracker._normalize_severity(severity, default=None) if severity else None
-        )
-        normalized_category = (
-            BugTracker._normalize_category(category, default=None) if category else None
-        )
-        return bt.list_bugs(
-            status=normalized_status,
-            severity=normalized_severity,
-            category=normalized_category,
-            title_like=title_like,
-            tags=tags,
-            exclude_tags=exclude_tags,
-            source_issue_id=source_issue_id,
-            open_only=open_only,
-            limit=limit,
-        )
 
     # -- health checks ------------------------------------------------------
 

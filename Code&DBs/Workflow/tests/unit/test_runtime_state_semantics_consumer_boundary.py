@@ -215,6 +215,28 @@ def test_bug_query_default_open_only_helpers_pin_two_policies() -> None:
     )
 
 
+def test_observability_hub_does_not_re_expose_bug_tracker_shims() -> None:
+    """ObservabilityHub must stay read-only for derived metrics.
+
+    Re-exposing ``file_bug`` or ``get_bugs`` passthroughs forks the
+    bug-query contract (BUG-7D9292F9): hub callers bypass
+    ``runtime.primitive_contracts.bug_query_default_open_only_*`` helpers
+    and ``surfaces.api.handlers._bug_surface_contract``. Pin the read-only
+    shape so any re-introduction fails loudly.
+    """
+    hub_source = (_WORKFLOW_ROOT / "runtime" / "observability_hub.py").read_text(
+        encoding="utf-8"
+    )
+    forbidden = ("def file_bug(", "def get_bugs(")
+    offenders = [pattern for pattern in forbidden if pattern in hub_source]
+    assert not offenders, (
+        "runtime.observability_hub re-introduced a bug-tracker shim — route "
+        "callers through surfaces.api.handlers._bug_surface_contract or "
+        "runtime.bug_tracker.BugTracker directly:\n  - "
+        + "\n  - ".join(offenders)
+    )
+
+
 def test_bug_query_default_open_only_consumers_route_through_authority() -> None:
     """Every surface that declares a bug-query open_only default must import the authority helper.
 
