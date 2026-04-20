@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Praxis Engine — The autonomous engineering control plane</title>
+  <meta name="description" content="An autonomous engineering control plane. Software systems that author, test, and repair themselves — governed by explicit policy, auditable by design." />
+
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Praxis Engine" />
+  <meta property="og:description" content="The autonomous engineering control plane. Launching 2026." />
+  <meta property="og:url" content="https://praxisengine.io" />
+  <meta name="twitter:card" content="summary_large_image" />
+
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <style>
+    :root {
+      --bg: #0a0a0a;
+      --bg-edge: #050505;
+      --fg: #f5f5f5;
+      --fg-dim: #8a8a8a;
+      --fg-faint: #3a3a3a;
+      --rule: #1a1a1a;
+      --accent: #ffffff;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+      font-size: 16px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    body {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      background:
+        radial-gradient(ellipse at 50% 0%, rgba(255,255,255,0.03) 0%, transparent 55%),
+        linear-gradient(180deg, var(--bg) 0%, var(--bg-edge) 100%);
+    }
+
+    .mono { font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace; }
+
+    .wrap {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      max-width: 680px;
+      margin: 0 auto;
+      padding: 48px 32px 32px;
+      width: 100%;
+    }
+
+    header.brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 80px;
+    }
+
+    .logomark {
+      width: 40px;
+      height: 40px;
+      flex-shrink: 0;
+    }
+
+    .wordmark {
+      font-family: 'JetBrains Mono', ui-monospace, monospace;
+      font-size: 13px;
+      font-weight: 500;
+      letter-spacing: 0.24em;
+      text-transform: uppercase;
+      color: var(--fg);
+    }
+
+    h1 {
+      font-size: clamp(32px, 5.2vw, 52px);
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      line-height: 1.08;
+      margin: 0 0 24px;
+      color: var(--fg);
+      text-wrap: balance;
+    }
+
+    h1 .hl {
+      color: var(--fg);
+      text-shadow: 0 0 40px rgba(255,255,255,0.12);
+    }
+
+    .lede {
+      font-size: clamp(16px, 2vw, 18px);
+      line-height: 1.55;
+      color: var(--fg-dim);
+      max-width: 52ch;
+      margin: 0 0 48px;
+      text-wrap: pretty;
+    }
+
+    form.capture {
+      display: flex;
+      gap: 8px;
+      max-width: 480px;
+      margin-bottom: 20px;
+    }
+
+    input[type="email"] {
+      flex: 1;
+      background: transparent;
+      color: var(--fg);
+      border: 1px solid var(--fg-faint);
+      border-radius: 4px;
+      padding: 14px 16px;
+      font-family: inherit;
+      font-size: 15px;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+      min-width: 0;
+    }
+
+    input[type="email"]:focus {
+      outline: none;
+      border-color: var(--fg);
+      box-shadow: 0 0 0 3px rgba(255,255,255,0.08);
+    }
+
+    input[type="email"]::placeholder { color: var(--fg-dim); }
+
+    button[type="submit"] {
+      background: var(--fg);
+      color: var(--bg);
+      border: 1px solid var(--fg);
+      border-radius: 4px;
+      padding: 14px 22px;
+      font-family: inherit;
+      font-size: 15px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s ease, color 0.15s ease;
+      white-space: nowrap;
+    }
+
+    button[type="submit"]:hover { background: transparent; color: var(--fg); }
+    button[type="submit"]:disabled { opacity: 0.55; cursor: not-allowed; }
+
+    .status {
+      font-family: 'JetBrains Mono', ui-monospace, monospace;
+      font-size: 12px;
+      letter-spacing: 0.04em;
+      color: var(--fg-dim);
+      min-height: 18px;
+    }
+
+    .status.ok { color: var(--fg); }
+    .status.err { color: #ff8c6b; }
+
+    .meta {
+      margin-top: 72px;
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      font-family: 'JetBrains Mono', ui-monospace, monospace;
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--fg-dim);
+      padding-top: 24px;
+      border-top: 1px solid var(--rule);
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .meta span { white-space: nowrap; }
+
+    footer {
+      padding: 24px 32px;
+      font-family: 'JetBrains Mono', ui-monospace, monospace;
+      font-size: 10px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--fg-faint);
+      text-align: center;
+    }
+
+    @media (max-width: 520px) {
+      header.brand { margin-bottom: 56px; }
+      form.capture { flex-direction: column; }
+      button[type="submit"] { width: 100%; }
+      .meta { flex-direction: column; gap: 8px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; animation: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="brand">
+      <!-- Logomark: Praxis mark, inverted for dark background -->
+      <svg class="logomark" viewBox="0 0 500 500" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Praxis Engine">
+        <g fill="none" stroke="currentColor" stroke-linejoin="miter" stroke-linecap="square">
+          <path d="M 130 100 L 370 100 L 370 188 M 370 252 L 370 340 L 130 340 L 130 252 M 130 188 L 130 100" stroke-width="22" />
+          <line x1="130" y1="220" x2="370" y2="220" stroke-width="16" />
+        </g>
+        <g fill="currentColor">
+          <circle cx="130" cy="220" r="30" />
+          <circle cx="306" cy="220" r="22" />
+          <circle cx="370" cy="220" r="42" />
+        </g>
+        <g transform="translate(228 220)">
+          <circle cx="0" cy="0" r="58" fill="#0a0a0a" stroke="currentColor" stroke-width="14" />
+          <circle cx="0" cy="0" r="34" fill="#0a0a0a" stroke="currentColor" stroke-width="12" />
+          <circle cx="0" cy="0" r="16" fill="currentColor" />
+        </g>
+      </svg>
+      <span class="wordmark">Praxis Engine</span>
+    </header>
+
+    <main>
+      <h1><span class="hl">The autonomous engineering control plane.</span></h1>
+      <p class="lede">
+        Software systems that author, test, and repair themselves — governed by explicit
+        policy, auditable by design. Private beta launching 2026.
+      </p>
+
+      <form class="capture" id="signup" novalidate>
+        <input
+          type="email"
+          id="email"
+          name="email"
+          placeholder="you@domain.com"
+          autocomplete="email"
+          required
+          aria-label="Email address"
+        />
+        <button type="submit" id="submit">Notify me</button>
+      </form>
+      <div class="status mono" id="status" aria-live="polite">&nbsp;</div>
+
+      <div class="meta">
+        <span>STATUS · PRIVATE BETA</span>
+        <span>LAUNCH · 2026</span>
+        <span>BUILT IN · BELLINGHAM, WA</span>
+      </div>
+    </main>
+  </div>
+
+  <footer>
+    © <span id="year">2026</span> Praxis Labs, LLC
+  </footer>
+
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+
+    const form = document.getElementById('signup');
+    const emailInput = document.getElementById('email');
+    const button = document.getElementById('submit');
+    const status = document.getElementById('status');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = emailInput.value.trim();
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        status.textContent = '! invalid email';
+        status.className = 'status mono err';
+        return;
+      }
+      button.disabled = true;
+      status.textContent = '> submitting';
+      status.className = 'status mono';
+      try {
+        const res = await fetch('/api/subscribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, source: 'landing', ts: Date.now() }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        status.textContent = '✓ you\'re on the list';
+        status.className = 'status mono ok';
+        emailInput.value = '';
+      } catch (err) {
+        status.textContent = '! could not submit — try again';
+        status.className = 'status mono err';
+      } finally {
+        button.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
