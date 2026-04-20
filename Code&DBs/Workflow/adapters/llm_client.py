@@ -22,6 +22,10 @@ from .http_transport import (
     perform_http_request,
 )
 from registry.provider_execution_registry import resolve_adapter_config, resolve_api_protocol_family
+from runtime.integrations.rate_limiter import (
+    RateLimitAcquireTimeout,
+    acquire_for_provider,
+)
 
 if TYPE_CHECKING:
     from .deterministic import DeterministicExecutionControl
@@ -399,6 +403,25 @@ def _cancelled_client_error() -> LLMClientError:
     return LLMClientError("llm_client.cancelled", "request cancelled")
 
 
+def _throttle_for_provider(request: LLMRequest, timeout_seconds: int) -> None:
+    """Wait on the provider's rate-limit bucket before dispatching the request.
+
+    No-op when no global throttle registry is installed or when the provider
+    has no rate_limit_configs row. Raises LLMClientError("llm_client.rate_limited")
+    on timeout so callers see a clean reason_code instead of a bucket error.
+    """
+    try:
+        acquire_for_provider(
+            request.provider_slug,
+            max_wait_seconds=min(float(timeout_seconds), 30.0),
+        )
+    except RateLimitAcquireTimeout as exc:
+        raise LLMClientError(
+            "llm_client.rate_limited",
+            str(exc),
+        ) from exc
+
+
 def _perform_http_request(
     *,
     request: LLMRequest,
@@ -406,6 +429,7 @@ def _perform_http_request(
     headers: dict[str, str],
     timeout_seconds: int,
 ) -> HTTPResponse:
+    _throttle_for_provider(request, timeout_seconds)
     return perform_http_request(
         method="POST",
         url=request.endpoint_uri,
@@ -423,6 +447,7 @@ def _open_streaming_http_request(
     headers: dict[str, str],
     timeout_seconds: int,
 ) -> HTTPStreamResponse:
+    _throttle_for_provider(request, timeout_seconds)
     return open_http_stream(
         method="POST",
         url=request.endpoint_uri,
