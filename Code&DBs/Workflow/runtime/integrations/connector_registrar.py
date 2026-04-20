@@ -106,6 +106,38 @@ def register_built_connector(
     }
 
 
+def sync_built_connectors(pg: Any) -> int:
+    """Register every built connector artifact that is present on disk.
+
+    This keeps ``connector_registry`` and the derived ``integration_registry``
+    projections aligned with built connector artifacts without requiring a
+    manual registration call for each one.
+    """
+    if pg is None or not _CONNECTORS_DIR.is_dir():
+        return 0
+
+    registered = 0
+    for connector_dir in sorted(_CONNECTORS_DIR.iterdir()):
+        if not connector_dir.is_dir() or connector_dir.name.startswith("."):
+            continue
+        client_path = connector_dir / "client.py"
+        if not client_path.exists():
+            continue
+
+        slug = connector_dir.name
+        display_name = slug.replace("_", " ").title()
+        try:
+            result = register_built_connector(slug, display_name, pg)
+        except Exception as exc:
+            logger.warning("connector auto-registration failed for %s: %s", slug, exc)
+            continue
+
+        if result.get("registered"):
+            registered += 1
+
+    return registered
+
+
 # ── Introspection helpers ────────────────────────────────────────────
 
 

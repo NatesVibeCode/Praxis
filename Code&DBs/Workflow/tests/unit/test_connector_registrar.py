@@ -17,6 +17,7 @@ from runtime.integrations.connector_registrar import (
     _infer_auth_shape,
     _introspect_capabilities,
     register_built_connector,
+    sync_built_connectors,
 )
 
 
@@ -202,3 +203,29 @@ def test_register_success(tmp_path):
     calls = [str(c) for c in pg.execute.call_args_list]
     assert any("connector_registry" in c for c in calls)
     assert any("integration_registry" in c for c in calls)
+
+
+def test_sync_built_connectors_registers_each_built_connector(tmp_path):
+    first = tmp_path / "stripe"
+    first.mkdir()
+    (first / "client.py").write_text("class StripeClient:\n    pass\n", encoding="utf-8")
+    second = tmp_path / "slack"
+    second.mkdir()
+    (second / "client.py").write_text("class SlackClient:\n    pass\n", encoding="utf-8")
+
+    pg = MagicMock()
+    pg.execute.return_value = [{"connector_id": "conn_test"}]
+
+    with patch("runtime.integrations.connector_registrar._CONNECTORS_DIR", tmp_path):
+        with patch(
+            "runtime.integrations.connector_registrar.register_built_connector",
+            side_effect=[
+                {"registered": True},
+                {"registered": True},
+            ],
+        ) as register_mock:
+            count = sync_built_connectors(pg)
+
+    assert count == 2
+    assert register_mock.call_args_list[0].args[0:2] == ("slack", "Slack")
+    assert register_mock.call_args_list[1].args[0:2] == ("stripe", "Stripe")

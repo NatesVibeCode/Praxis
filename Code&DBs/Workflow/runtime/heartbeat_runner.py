@@ -757,11 +757,22 @@ class HeartbeatRunner:
 
     def build_modules(self) -> list[HeartbeatModule]:
         """Create all heartbeat modules wired to the memory engine."""
+        from memory.data_dictionary_activity_classifier import (
+            DataDictionaryActivityClassifier,
+        )
+        from memory.data_dictionary_signal_classifiers import (
+            AuditColumnsClassifier,
+            DecisionBackedClassifier,
+            ReceiptActiveClassifier,
+        )
+        from memory.data_dictionary_wiring_audit_projector import (
+            DataDictionaryWiringAuditProjector,
+        )
+        from memory.audit_primitive_contract_runner import (
+            AuditPrimitiveContractRunner,
+        )
         from memory.data_dictionary_classifications_projector import (
             DataDictionaryClassificationsProjector,
-        )
-        from memory.data_dictionary_classifications_propagation_projector import (
-            DataDictionaryClassificationsPropagationProjector,
         )
         from memory.data_dictionary_lineage_projector import (
             DataDictionaryLineageProjector,
@@ -770,14 +781,14 @@ class HeartbeatRunner:
         from memory.data_dictionary_quality_projector import (
             DataDictionaryQualityProjector,
         )
-        from memory.data_dictionary_quality_policy_projector import (
-            DataDictionaryQualityPolicyProjector,
-        )
         from memory.data_dictionary_stewardship_projector import (
             DataDictionaryStewardshipProjector,
         )
         from memory.data_dictionary_drift_projector import (
             DataDictionaryDriftProjector,
+        )
+        from memory.data_dictionary_governance_change_feed_module import (
+            DataDictionaryGovernanceChangeFeedModule,
         )
         from memory.sync import MemorySync
         from memory.relationship_miner import RelationshipMiner
@@ -807,11 +818,21 @@ class HeartbeatRunner:
                 DataDictionaryProjector(self._conn),
                 DataDictionaryLineageProjector(self._conn),
                 DataDictionaryClassificationsProjector(self._conn),
-                DataDictionaryClassificationsPropagationProjector(self._conn),
+                DataDictionaryActivityClassifier(self._conn),
+                DecisionBackedClassifier(self._conn),
+                ReceiptActiveClassifier(self._conn),
+                AuditColumnsClassifier(self._conn),
+                DataDictionaryWiringAuditProjector(self._conn),
+                # Contracts run AFTER the audit snapshot so they see the
+                # freshest findings. They auto-apply at tier=none and
+                # escalate to bugs otherwise.
+                AuditPrimitiveContractRunner(self._conn),
                 DataDictionaryQualityProjector(self._conn),
-                DataDictionaryQualityPolicyProjector(self._conn),
                 DataDictionaryStewardshipProjector(self._conn),
                 DataDictionaryDriftProjector(self._conn),
+                # Change-feed drain BEFORE the full scan: real-time reaction
+                # to authority-table mutations between scheduled cycles.
+                DataDictionaryGovernanceChangeFeedModule(self._conn),
                 _DataDictionaryGovernanceModule(self._conn),
                 _DatabaseMaintenanceModule(self._conn, embedder=self._embedder),
                 _AutoReviewFlushModule(self._conn),
@@ -823,6 +844,7 @@ class HeartbeatRunner:
                 _AuthorityMemoryProjectionRefreshModule(workflow_env=self._workflow_env),
                 _OperatorDecisionProjectionRefreshModule(workflow_env=self._workflow_env),
                 _DatasetCandidateRefreshModule(workflow_env=self._workflow_env),
+                _BugCandidatesRefreshModule(workflow_env=self._workflow_env),
                 _DatasetCurationRefreshModule(workflow_env=self._workflow_env),
                 _DatasetStalenessReconcileModule(workflow_env=self._workflow_env),
             ])

@@ -1,7 +1,7 @@
 import { parseEditorSurface } from '../dashboard/operatingModelSurfaceState';
 import { shellUrl } from './routes';
 
-export type StaticTabId = 'dashboard' | 'build' | 'costs' | 'manifests';
+export type StaticTabId = 'dashboard' | 'build' | 'costs' | 'manifests' | 'atlas';
 export type DynamicTabKind = 'run-detail' | 'manifest' | 'manifest-editor';
 export type AppTabId = StaticTabId | string;
 export type BuildView = 'moon';
@@ -162,6 +162,16 @@ export function parseShellLocationState(search: string, pathname: string = windo
     };
   }
 
+  if (appRelative === 'atlas' || appRelative.startsWith('atlas/')) {
+    return {
+      shellState: {
+        ...shellState,
+        activeTabId: 'atlas',
+      },
+      chatOpen: false,
+    };
+  }
+
   const manifestId = asString(params.get('manifest'));
   if (manifestId && manifestId !== 'editor') {
     const manifestTabId = asString(params.get('tab'));
@@ -220,6 +230,16 @@ export function parseShellLocationState(search: string, pathname: string = windo
       shellState: {
         ...shellState,
         activeTabId: 'manifests',
+      },
+      chatOpen: false,
+    };
+  }
+
+  if (page === 'atlas') {
+    return {
+      shellState: {
+        ...shellState,
+        activeTabId: 'atlas',
       },
       chatOpen: false,
     };
@@ -293,6 +313,10 @@ export function buildShellUrl(state: ShellState, chatOpen: boolean): string {
 
   if (state.activeTabId === 'manifests') {
     return '/app/manifests';
+  }
+
+  if (state.activeTabId === 'atlas') {
+    return '/app/atlas';
   }
 
   const activeDynamicTab = state.dynamicTabs.find((tab) => tab.id === state.activeTabId) || null;

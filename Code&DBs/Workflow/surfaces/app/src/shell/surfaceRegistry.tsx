@@ -18,7 +18,7 @@ export interface ShellTabDescriptor {
 export type ResolvedShellSurface =
   | {
       category: 'static';
-      id: 'dashboard' | 'build' | 'costs' | 'manifests';
+      id: 'dashboard' | 'build' | 'costs' | 'manifests' | 'atlas';
       context: ShellSurfaceContext;
     }
   | {
@@ -71,7 +71,16 @@ const STATIC_SURFACES = {
     }),
     getNavigateDescription: (_state: ShellState) => 'Open the manifest catalog.',
   },
-} satisfies Record<'dashboard' | 'build' | 'costs' | 'manifests', {
+  atlas: {
+    kindLabel: 'Accent',
+    getTabLabel: (_state: ShellState) => 'Graph Diagram',
+    getContext: (_state: ShellState): ShellSurfaceContext => ({
+      label: 'Knowledge graph',
+      detail: 'Graph view of memory entities and authority-linked edges across the system.',
+    }),
+    getNavigateDescription: (_state: ShellState) => 'Open the knowledge-graph diagram.',
+  },
+} satisfies Record<'dashboard' | 'build' | 'costs' | 'manifests' | 'atlas', {
   kindLabel: string;
   getTabLabel: (state: ShellState) => string;
   getContext: (state: ShellState) => ShellSurfaceContext;
@@ -118,7 +127,13 @@ export function resolveActiveShellSurface(
   state: ShellState,
   activeDynamicTab: DynamicTab | null,
 ): ResolvedShellSurface {
-  if (state.activeTabId === 'dashboard' || state.activeTabId === 'build' || state.activeTabId === 'costs' || state.activeTabId === 'manifests') {
+  if (
+    state.activeTabId === 'dashboard'
+    || state.activeTabId === 'build'
+    || state.activeTabId === 'costs'
+    || state.activeTabId === 'manifests'
+    || state.activeTabId === 'atlas'
+  ) {
     return {
       category: 'static',
       id: state.activeTabId,
@@ -158,9 +173,9 @@ export function buildShellTabs(state: ShellState): ShellTabDescriptor[] {
       closable: false,
     },
     {
-      id: 'costs',
-      label: STATIC_SURFACES.costs.getTabLabel(state),
-      kind: STATIC_SURFACES.costs.kindLabel,
+      id: 'atlas',
+      label: STATIC_SURFACES.atlas.getTabLabel(state),
+      kind: STATIC_SURFACES.atlas.kindLabel,
       closable: false,
     },
     {
@@ -186,7 +201,7 @@ export function buildShellNavigationItems(args: {
 }): MenuAction[] {
   const { state, chatOpen, activateTab, setChatOpen } = args;
 
-  const staticItems: MenuAction[] = (['dashboard', 'build', 'costs', 'manifests'] as const).map((surfaceId) => ({
+  const staticItems: MenuAction[] = (['dashboard', 'build', 'atlas', 'manifests', 'costs'] as const).map((surfaceId) => ({
     id: `navigate:${surfaceId}`,
     label: STATIC_SURFACES[surfaceId].getTabLabel(state),
     description: STATIC_SURFACES[surfaceId].getNavigateDescription(state),
@@ -196,7 +211,9 @@ export function buildShellNavigationItems(args: {
         ? ['build', 'workflow', 'moon']
         : surfaceId === 'costs'
           ? ['costs', 'spend', 'finance', 'ledger']
-          : ['manifest', 'manifests', 'catalog', 'search', 'list', 'discover', 'control-plane', 'plan', 'approval'],
+          : surfaceId === 'manifests'
+            ? ['manifest', 'manifests', 'catalog', 'search', 'list', 'discover', 'control-plane', 'plan', 'approval']
+            : ['accent', 'atlas', 'graph', 'diagram', 'knowledge', 'memory', 'entities', 'map', 'overview'],
     selected: state.activeTabId === surfaceId,
     onSelect: () => activateTab(surfaceId),
   }));

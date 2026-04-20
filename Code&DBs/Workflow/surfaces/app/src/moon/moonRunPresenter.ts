@@ -239,6 +239,14 @@ export function presentRun(
     jobsByLabel.set(job.label, job);
   }
 
+  // Outgoing-edge tally for the run-view nodes so sibling-aware fan styling
+  // and the branch-pod affordance have the same metadata in live and build
+  // views.
+  const outgoingByNode = new Map<string, number>();
+  for (const e of graph.edges) {
+    outgoingByNode.set(e.from, (outgoingByNode.get(e.from) || 0) + 1);
+  }
+
   const nodes: OrbitNode[] = graph.nodes.map((n) => {
     const pos = layout.nodes.get(n.id) || { x: 0, y: 0, rank: 0 };
     const ringState = jobStatusToRingState(n.status);
@@ -259,17 +267,39 @@ export function presentRun(
       x: pos.x,
       y: pos.y,
       rank: pos.rank,
+      multiplicity: null,
+      outgoingEdgeCount: outgoingByNode.get(n.id) || 0,
     };
   });
 
-  const edges: OrbitEdge[] = graph.edges.map((e) => ({
-    id: e.id,
-    from: e.from,
-    to: e.to,
-    kind: e.type || 'sequence',
-    isOnDominantPath: pathSet.has(e.from) && pathSet.has(e.to),
-    gateState: 'empty' as const,
-  }));
+  // Sibling fan metadata — matches the build presenter so MoonEdges can
+  // thin strokes identically for live runs with branching.
+  const siblingsBySource = new Map<string, string[]>();
+  for (const e of graph.edges) {
+    const bucket = siblingsBySource.get(e.from) || [];
+    bucket.push(e.id);
+    siblingsBySource.set(e.from, bucket);
+  }
+  const siblingMetaById = new Map<string, { index: number; count: number }>();
+  for (const bucket of siblingsBySource.values()) {
+    for (let i = 0; i < bucket.length; i++) {
+      siblingMetaById.set(bucket[i], { index: i, count: bucket.length });
+    }
+  }
+
+  const edges: OrbitEdge[] = graph.edges.map((e) => {
+    const sm = siblingMetaById.get(e.id) || { index: 0, count: 1 };
+    return {
+      id: e.id,
+      from: e.from,
+      to: e.to,
+      kind: e.type || 'sequence',
+      isOnDominantPath: pathSet.has(e.from) && pathSet.has(e.to),
+      gateState: 'empty' as const,
+      siblingCount: sm.count,
+      siblingIndex: sm.index,
+    };
+  });
 
   const selectedNode = selectedJobId
     ? nodes.find((n) => n.id === selectedJobId) ?? null

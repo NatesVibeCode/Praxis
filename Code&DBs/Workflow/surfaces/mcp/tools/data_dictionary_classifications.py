@@ -11,6 +11,7 @@ from runtime.data_dictionary_classifications import (
     describe_classifications,
     find_by_tag,
     set_operator_classification,
+    tag_catalog,
 )
 from ..subsystems import _subs
 
@@ -44,6 +45,24 @@ def tool_praxis_data_dictionary_classifications(
     try:
         if action == "summary":
             return {"action": "summary", **classification_summary(_conn())}
+
+        if action == "tags":
+            # Rollup of every tag_key × tag_value × source present in the
+            # classifications store — shows at a glance what categories
+            # of auto/operator tags are currently live.
+            catalog = tag_catalog(_conn())
+            by_key: dict[str, dict[str, Any]] = {}
+            for row in catalog:
+                k = row.get("tag_key") or ""
+                bucket = by_key.setdefault(k, {"total_rows": 0, "by_value": []})
+                bucket["total_rows"] += int(row.get("rows") or 0)
+                bucket["by_value"].append(row)
+            return {
+                "action": "tags",
+                "distinct_keys": len(by_key),
+                "catalog": catalog,
+                "by_key": by_key,
+            }
 
         if action == "describe":
             return {
@@ -137,7 +156,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "action": {
                         "type": "string",
                         "enum": [
-                            "summary", "describe", "by_tag",
+                            "summary", "describe", "by_tag", "tags",
                             "set", "clear", "reproject",
                         ],
                         "default": "summary",

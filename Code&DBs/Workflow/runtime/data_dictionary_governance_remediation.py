@@ -274,40 +274,7 @@ def _owner_permanent(
     discover_paths = _discover_write_paths(discover, violation.object_kind)
     out: list[RemediationAction] = []
 
-    # Backstop A: file an architecture-policy decision that makes the
-    # invariant explicit and visible during every orient.
-    tag = (
-        "pii-requires-owner" if violation.policy == "pii_without_owner"
-        else "sensitive-requires-owner"
-    )
-    out.append(RemediationAction(
-        kind="operator_decision",
-        summary=(
-            "File an architecture-policy decision: "
-            f"'{violation.policy.replace('_',' ')}' is a standing prohibition"
-        ),
-        command=_mcp_cmd(
-            "praxis_operator_architecture_policy",
-            {
-                "action": "add",
-                "decision_key": f"architecture-policy::governance::{tag}",
-                "rationale": (
-                    f"Governance invariant: every object carrying the "
-                    f"{'pii' if violation.policy == 'pii_without_owner' else 'sensitive'} "
-                    "tag must have at least one owner steward. Governance "
-                    "heartbeat files a bug against violations."
-                ),
-            },
-        ),
-        autorun_ok=False,
-        confidence=0.95,
-        explain=(
-            "Once recorded, every orient shows the standing order. "
-            "Governance bugs cite this decision via decision_ref."
-        ),
-    ))
-
-    # Backstop B: extend the namespace-owner projector to cover this
+    # Backstop: extend the namespace-owner projector to cover this
     # namespace, so future tables auto-get the owner.
     if ns and not _namespace_owner_suggestion(violation.object_kind):
         explain = (
@@ -504,30 +471,6 @@ def _rule_permanent(
                 "Wrap the repair as a HeartbeatModule so the next "
                 "cycle both detects and heals."
             ),
-        ),
-        RemediationAction(
-            kind="operator_decision",
-            summary=(
-                "File an architecture-policy decision documenting the "
-                "rule's intent so future maintainers know whether "
-                "disabling it is safe"
-            ),
-            command=_mcp_cmd(
-                "praxis_operator_architecture_policy",
-                {
-                    "action": "add",
-                    "decision_key": (
-                        f"architecture-policy::data-quality::{rule}-rationale"
-                    ),
-                    "rationale": (
-                        f"Why {rule!r} on {obj} matters, who it protects, "
-                        "and under what conditions disabling it is "
-                        "appropriate."
-                    ),
-                },
-            ),
-            autorun_ok=False,
-            confidence=0.70,
         ),
     ]
 

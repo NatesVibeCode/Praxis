@@ -26,6 +26,7 @@ class RoadmapWriteCommand(BaseModel):
     approval_tag: str | None = None
     reference_doc: str | None = None
     outcome_gate: str | None = None
+    proof_kind: str | None = None
 
 
 class WorkItemCloseoutCommand(BaseModel):
@@ -155,6 +156,7 @@ def handle_operator_roadmap_write(
         approval_tag=command.approval_tag,
         reference_doc=command.reference_doc,
         outcome_gate=command.outcome_gate,
+        proof_kind=command.proof_kind,
         env=_resolved_env(subsystems),
     )
 

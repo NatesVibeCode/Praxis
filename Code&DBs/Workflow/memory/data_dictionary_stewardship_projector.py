@@ -69,7 +69,30 @@ _NAMESPACE_OWNERS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"^friction"),                "friction_authority"),
     (re.compile(r"^agent_"),                  "agent_authority"),
     (re.compile(r"^constraint"),              "constraint_authority"),
+    # Added to close the sensitive-without-owner governance cluster
+    # (BUG-EEA0502A / BUG-80C6B62F / BUG-48241FEA / BUG-61D7951E /
+    # BUG-A75077EE / BUG-D577C0FA / BUG-F333D3A1 / BUG-E5E236F5 /
+    # BUG-5535F587). Each orphan table's name prefix now maps to a named
+    # service-tier owner, so the namespace projector assigns an ``owner``
+    # steward and the governance scanner stops flagging "no owner".
+    (re.compile(r"^provider_"),               "provider_authority"),
+    (re.compile(r"^webhook"),                 "webhook_authority"),
+    (re.compile(r"^market_"),                 "market_authority"),
+    (re.compile(r"^registry_"),               "registry_authority"),
+    (re.compile(r"^credential"),              "credential_authority"),
 ]
+
+
+# Object kinds outside the ``table:`` namespace (e.g. ``tool:*``,
+# ``object_type:*``) that still need explicit owner stewardship. The
+# namespace projector cannot derive these from table-name prefixes, so they
+# live here as direct ``object_kind -> owner`` assignments. Closes
+# BUG-13492A13 (tool:praxis_provider_onboard) and BUG-A745DE65
+# (object_type:contact).
+_EXPLICIT_OWNERS: dict[str, str] = {
+    "tool:praxis_provider_onboard": "provider_authority",
+    "object_type:contact":          "data_dictionary_authority",
+}
 
 
 def _namespace_owner(table_name: str) -> str | None:
@@ -111,6 +134,7 @@ class DataDictionaryStewardshipProjector(HeartbeatModule):
             ("audit_column_publishers", lambda: self._project_audit_columns(entries)),
             ("namespace_owners",         lambda: self._project_namespace_owners(known_tables)),
             ("projector_publishers",     lambda: self._project_projector_publishers(known_tables)),
+            ("explicit_owners",          lambda: self._project_explicit_owners()),
         ]:
             try:
                 fn()
@@ -234,10 +258,44 @@ class DataDictionaryStewardshipProjector(HeartbeatModule):
             source="auto",
         )
 
+    # -- explicit owners (non-table object kinds) --------------------------
+
+    def _project_explicit_owners(self) -> None:
+        """Emit owner stewardship for object kinds outside ``table:*``.
+
+        The namespace projector derives owners from ``table:<prefix>``
+        patterns, so ``tool:*`` and ``object_type:*`` objects never get an
+        owner from it. ``_EXPLICIT_OWNERS`` holds direct
+        ``object_kind -> owner`` mappings for those kinds. Closes
+        BUG-13492A13 (tool:praxis_provider_onboard) and BUG-A745DE65
+        (object_type:contact).
+        """
+        out: list[dict[str, Any]] = []
+        for object_kind, owner in _EXPLICIT_OWNERS.items():
+            out.append({
+                "object_kind": object_kind,
+                "field_path": "",
+                "steward_kind": "owner",
+                "steward_id": owner,
+                "steward_type": "service",
+                "confidence": 0.7,
+                "origin_ref": {
+                    "projector": "stewardship_explicit_owners",
+                    "rule": f"explicit:{object_kind}",
+                },
+            })
+        apply_projected_stewards(
+            self._conn,
+            projector_tag="stewardship_explicit_owners",
+            entries=out,
+            source="auto",
+        )
+
 
 __all__ = [
     "DataDictionaryStewardshipProjector",
     "_namespace_owner",
     "_AUDIT_COLUMN_NAMES",
     "_PROJECTOR_PUBLISHERS",
+    "_EXPLICIT_OWNERS",
 ]

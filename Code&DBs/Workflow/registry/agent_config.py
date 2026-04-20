@@ -219,6 +219,7 @@ class AgentRegistry:
         self._by_provider: dict[str, list[AgentConfig]] = {}
         self._by_tier: dict[str, list[AgentConfig]] = {}
         self._by_stage: dict[str, list[AgentConfig]] = {}
+        self._auto_routes: dict[str, AgentConfig] = {}
         self._sealed = False
 
         for agent in agents:
@@ -228,6 +229,18 @@ class AgentRegistry:
                     f"Duplicate agent slug: {agent.slug}",
                 )
             self._by_slug[agent.slug] = agent
+            # BUG-C5342363: auto/* slugs are synthesized route selectors
+            # (task-type / tier / latency aliases) that copy the primary
+            # target's provider, capability_tier, and allowed_stages. If we
+            # indexed them into _by_provider / _by_tier / _by_stage they'd
+            # double-count the primary and pollute list_by_provider("openai"),
+            # list_by_tier("high"), and list_by_stage("build") with alias
+            # entries that are not independent agents. They stay in _by_slug
+            # (so get("auto/high") still resolves) and are tracked in a
+            # dedicated _auto_routes view for explicit alias enumeration.
+            if agent.slug.startswith("auto/"):
+                self._auto_routes[agent.slug] = agent
+                continue
             self._by_provider.setdefault(agent.provider, []).append(agent)
             self._by_tier.setdefault(agent.capability_tier, []).append(agent)
             for stage in agent.allowed_stages:
@@ -502,6 +515,17 @@ class AgentRegistry:
     def list_by_stage(self, stage: str) -> list[AgentConfig]:
         """Return agents allowed in a pipeline stage (defensive copy)."""
         return list(self._by_stage.get(stage, []))
+
+    def list_auto_routes(self) -> list[AgentConfig]:
+        """Return synthesized ``auto/*`` route aliases (defensive copy).
+
+        These are route selectors (task-type, tier, latency) that resolve
+        to a primary concrete agent at dispatch time. They are deliberately
+        excluded from :meth:`list_by_provider`, :meth:`list_by_tier`, and
+        :meth:`list_by_stage` so those aggregates report canonical registry
+        rows only. Callers that need to enumerate alias routes come here.
+        """
+        return list(self._auto_routes.values())
 
     def failover_chain(self, slug: str, *, strict: bool = False) -> list[AgentConfig]:
         """Resolve the ordered failover chain starting from *slug*.

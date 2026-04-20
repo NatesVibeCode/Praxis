@@ -19,7 +19,7 @@ from runtime.execution.records import (
     NODE_AWAITING_HUMAN_RECEIPT_TYPE,
     NODE_EXECUTION_RECEIPT_TYPE,
 )
-from runtime.self_healing import normalize_failure_code
+from runtime.self_healing import derive_terminal_reason_code
 from runtime.run_node_receipts import write_run_node_receipt
 
 if TYPE_CHECKING:
@@ -28,12 +28,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _worker_error_code(exc: BaseException, *, fallback: str) -> str:
-    for attr in ("failure_code", "reason_code", "error_code", "code"):
-        value = getattr(exc, attr, None)
-        if isinstance(value, str) and value.strip():
-            return normalize_failure_code(value.strip(), str(exc))
-    return normalize_failure_code(fallback, str(exc))
+# BUG-CBC73AB3: worker-layer exception→reason_code translation lives in the
+# canonical ``runtime.self_healing.derive_terminal_reason_code`` authority.
+# This thin alias preserves the old call sites inside this module without
+# re-creating a second independent authority.
+_worker_error_code = derive_terminal_reason_code
 
 
 class RunNodeStateRepository(Protocol):

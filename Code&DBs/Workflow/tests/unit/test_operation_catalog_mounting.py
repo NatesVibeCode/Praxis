@@ -114,10 +114,47 @@ def test_workflow_query_routes_bind_directly_to_authoritative_handlers() -> None
         for matcher, handler in workflow_query_routes.QUERY_GET_ROUTES
         if matcher("/api/files")
     ]
+    matched_object_types = [
+        handler
+        for matcher, handler in workflow_query_routes.QUERY_GET_ROUTES
+        if matcher("/api/object-types")
+    ]
+    matched_object_type_fields = [
+        handler
+        for matcher, handler in workflow_query_routes.QUERY_GET_ROUTES
+        if matcher("/api/object-types/schema-123/fields")
+    ]
 
     assert workflow_query._handle_catalog_get in matched_catalog
     assert workflow_query._handle_workflows_get in matched_workflows
     assert workflow_query._handle_files_get in matched_files
+    assert workflow_query._handle_object_types_get in matched_object_types
+    assert workflow_query._handle_object_fields_get in matched_object_type_fields
+    assert workflow_query._handle_object_types_post in [
+        handler
+        for matcher, handler in workflow_query_routes.QUERY_POST_ROUTES
+        if matcher("/api/object-types")
+    ]
+    assert workflow_query._handle_object_fields_post in [
+        handler
+        for matcher, handler in workflow_query_routes.QUERY_POST_ROUTES
+        if matcher("/api/object-types/schema-123/fields")
+    ]
+    assert workflow_query._handle_object_types_put in [
+        handler
+        for matcher, handler in workflow_query_routes.QUERY_PUT_ROUTES
+        if matcher("/api/object-types/schema-123")
+    ]
+    assert workflow_query._handle_object_fields_delete in [
+        handler
+        for matcher, handler in workflow_query_routes.QUERY_DELETE_ROUTES
+        if matcher("/api/object-types/schema-123/fields/title")
+    ]
+    assert workflow_query._handle_object_types_delete in [
+        handler
+        for matcher, handler in workflow_query_routes.QUERY_DELETE_ROUTES
+        if matcher("/api/object-types/schema-123")
+    ]
 
 
 def test_mount_capabilities_raises_when_catalog_load_fails(monkeypatch) -> None:

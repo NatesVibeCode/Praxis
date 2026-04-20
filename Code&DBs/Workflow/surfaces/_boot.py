@@ -150,6 +150,14 @@ def sync_registries(conn: Any) -> tuple[list[str], list[str]]:
         skipped.append("native_runtime_profile_authority")
 
     try:
+        from runtime.integrations.connector_registrar import sync_built_connectors
+
+        sync_built_connectors(conn)
+        succeeded.append("connector_registry")
+    except Exception:
+        skipped.append("connector_registry")
+
+    try:
         from runtime.reference_catalog_seeder import seed_reference_catalog
 
         seed_reference_catalog(conn)

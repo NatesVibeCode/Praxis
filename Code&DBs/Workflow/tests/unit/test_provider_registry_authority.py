@@ -289,6 +289,93 @@ def test_admin_health_uses_transport_support_frontdoor_for_provider_probes(monke
         "provider_registry_fallback_active": False,
     }
     assert result["provider_registry"]["status"] == "loaded_from_db"
+    assert result["content_health"] == {"status": "skipped", "reason": "no memory engine connection"}
+
+
+def test_admin_health_includes_content_health_report(monkeypatch) -> None:
+    class _FakePanel:
+        def snapshot(self):
+            return {"posture": "build"}
+
+        def recommend_lane(self):
+            return SimpleNamespace(
+                recommended_posture="build",
+                confidence=1.0,
+                reasons=("healthy",),
+                degraded_cause=None,
+            )
+
+    monkeypatch.setattr(
+        workflow_admin,
+        "build_content_health_report",
+        lambda memory_engine: {"status": "ok", "memory_engine": "wired"},
+    )
+    monkeypatch.setattr(
+        workflow_admin,
+        "query_transport_support",
+        lambda **_kwargs: _transport_support_payload(),
+    )
+    monkeypatch.setattr(
+        workflow_admin,
+        "provider_registry_health",
+        lambda: {
+            "status": "loaded_from_db",
+            "authority_available": True,
+            "fallback_active": False,
+            "provider_count": 2,
+            "providers": ["google", "openai"],
+        },
+    )
+    monkeypatch.setattr(
+        workflow_admin,
+        "dependency_truth_report",
+        lambda scope="all": {"ok": True, "scope": scope},
+    )
+    monkeypatch.setattr(
+        workflow_admin,
+        "_workflow_env",
+        lambda _subs: {"WORKFLOW_DATABASE_URL": "postgresql://repo.test/workflow"},
+    )
+    monkeypatch.setattr(
+        workflow_admin,
+        "workflow_database_status",
+        lambda env=None: SimpleNamespace(
+            schema_bootstrapped=True,
+            missing_schema_objects=(),
+            compile_artifact_authority_ready=True,
+            compile_index_authority_ready=True,
+            execution_packet_authority_ready=True,
+            repo_snapshot_authority_ready=True,
+            verification_registry_ready=True,
+            verifier_authority_ready=True,
+            healer_authority_ready=True,
+        ),
+    )
+    monkeypatch.setattr(
+        "runtime.receipt_store.proof_metrics",
+        lambda since_hours=0: {"ok": True, "since_hours": since_hours},
+        raising=False,
+    )
+
+    subs = SimpleNamespace(
+        get_health_mod=lambda: SimpleNamespace(
+            PostgresProbe=lambda db_url: _FakeProbe(("postgres", db_url)),
+            PostgresConnectivityProbe=lambda db_url: _FakeProbe(("postgres_connectivity", db_url)),
+            DiskSpaceProbe=lambda path: _FakeProbe(("disk", path)),
+            ProviderTransportProbe=lambda provider_slug, adapter_type: _FakeProbe(("provider_transport", provider_slug, adapter_type)),
+            PreflightRunner=_CapturingPreflightRunner,
+        ),
+        get_pg_conn=lambda: "pg-conn",
+        get_operator_panel=lambda: _FakePanel(),
+        get_memory_engine=lambda: SimpleNamespace(_connect=lambda: object()),
+    )
+
+    result = workflow_admin._handle_health(subs, {})
+
+    assert result["content_health"] == {
+        "status": "ok",
+        "memory_engine": "wired",
+    }
 
 
 def test_mcp_health_uses_transport_support_frontdoor_for_provider_probes(monkeypatch) -> None:

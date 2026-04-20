@@ -41,6 +41,48 @@ export function getEdgeGeometry(
   };
 }
 
+/**
+ * Line treatment derived from gate family. One source of truth so the canvas
+ * and any preview surfaces (e.g. dock explanations) read consistent shapes.
+ *
+ * - conditional: dashed, white. Reads as "maybe this path." Distinct from
+ *   success because it carries routing intent, not a failure outcome.
+ * - after_failure: solid, muted coral tint. The only place we allow color
+ *   to leak into the canvas — failure earns attention.
+ * - after_any: dotted. Reads as "runs regardless" — intentionally the
+ *   weakest signal because it adds no guard.
+ * - after_success / untyped: solid, inherits flowing-vs-muted color.
+ */
+export interface EdgeStyle {
+  strokeDasharray?: string;
+  /** CSS color string or var() reference. */
+  color: string;
+  /** Stroke width before sibling-fan thinning. */
+  baseWidth: number;
+}
+
+export function edgeStyleFromFamily(edge: OrbitEdge, isFlowing: boolean): EdgeStyle {
+  const baseColor = isFlowing
+    ? 'var(--moon-fg, #ffffff)'
+    : 'var(--moon-fg-muted, rgba(232, 232, 232, 0.55))';
+  switch (edge.gateFamily) {
+    case 'conditional':
+      return { color: 'var(--moon-fg, #ffffff)', strokeDasharray: '7 5', baseWidth: 1.75 };
+    case 'after_failure':
+      return {
+        color: 'var(--moon-danger, #ff8a6a)',
+        strokeDasharray: undefined,
+        baseWidth: 1.9,
+      };
+    case 'after_any':
+      return { color: baseColor, strokeDasharray: '2 4', baseWidth: 1.5 };
+    case 'after_success':
+      return { color: 'var(--moon-fg, #ffffff)', strokeDasharray: undefined, baseWidth: 1.9 };
+    default:
+      return { color: baseColor, strokeDasharray: undefined, baseWidth: 1.75 };
+  }
+}
+
 interface MoonEdgesProps {
   edges: OrbitEdge[];
   layout: GraphLayout;
@@ -71,14 +113,13 @@ export function MoonEdges({ edges, layout, selectedEdgeId, onEdgeClick }: MoonEd
         if (!geometry) return null;
 
         const isSelected = edge.id === selectedEdgeId;
-        const isConditional = edge.gateFamily === 'conditional';
         const isFlowing = isSelected || edge.isOnDominantPath;
-        const color = isConditional
-          ? 'var(--moon-fg, #ffffff)'
-          : isFlowing
-            ? 'var(--moon-fg, #ffffff)'
-            : 'var(--moon-fg-muted, rgba(232, 232, 232, 0.55))';
-        const width = isSelected ? 2.5 : edge.isOnDominantPath ? 2 : 1.75;
+        const style = edgeStyleFromFamily(edge, isFlowing);
+        // When 3+ siblings share a source, thin each blade so the bundle
+        // reads as a single fan gesture rather than three competing lines.
+        const fanThin = edge.siblingCount >= 3 ? 0.8 : 1;
+        const baseWidth = isSelected ? style.baseWidth + 0.75 : style.baseWidth;
+        const width = Math.max(1, baseWidth * fanThin);
 
         return (
           <g key={edge.id} filter={isFlowing ? 'url(#moon-edge-glow)' : undefined}>
@@ -96,16 +137,16 @@ export function MoonEdges({ edges, layout, selectedEdgeId, onEdgeClick }: MoonEd
             />
             <path
               d={geometry.path}
-              stroke={color}
+              stroke={style.color}
               strokeWidth={width}
               fill="none"
-              strokeDasharray={isConditional ? '7 5' : undefined}
+              strokeDasharray={style.strokeDasharray}
               style={{ pointerEvents: 'none', transition: 'stroke 300ms ease, stroke-width 300ms ease' }}
             />
             {isFlowing && (
               <path
                 d={geometry.path}
-                stroke="var(--moon-fg, #ffffff)"
+                stroke={style.color}
                 strokeWidth={width * 1.6}
                 fill="none"
                 strokeDasharray="4 24"

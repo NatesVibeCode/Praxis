@@ -174,6 +174,54 @@ def test_route_outcomes_merge_durable_metrics_with_local_overlay() -> None:
     assert store.provider_slugs() == ("anthropic", "openai")
 
 
+def test_route_outcomes_summary_includes_recent_health() -> None:
+    store = RouteOutcomeStore(
+        buffer_size=8,
+        metrics_view_factory=lambda: _EmptyMetricsView(),
+    )
+
+    store.record_outcome(
+        RouteOutcome(
+            provider_slug="openai",
+            model_slug="gpt-5.4",
+            adapter_type="cli_llm",
+            status="failed",
+            failure_code="verification_failed",
+            failure_category="verification_failed",
+            latency_ms=10,
+            recorded_at=_now(),
+        )
+    )
+    store.record_outcome(
+        RouteOutcome(
+            provider_slug="openai",
+            model_slug="gpt-5.4",
+            adapter_type="cli_llm",
+            status="succeeded",
+            failure_code=None,
+            failure_category="",
+            latency_ms=8,
+            recorded_at=_now(),
+        )
+    )
+
+    summary = store.summary(recent_limit=2, max_consecutive_failures=2)
+
+    assert summary["provider_count"] == 1
+    assert summary["healthy_provider_count"] == 1
+    assert summary["unhealthy_provider_count"] == 0
+    assert summary["provider_slugs"] == ["openai"]
+    assert summary["providers"][0]["provider_slug"] == "openai"
+    assert summary["providers"][0]["consecutive_failures"] == 1
+    assert summary["providers"][0]["healthy"] is True
+    assert [item["status"] for item in summary["providers"][0]["recent_outcomes"]] == [
+        "succeeded",
+        "failed",
+    ]
+    assert summary["providers"][0]["recent_outcomes"][0]["recorded_at"] == _now().isoformat()
+    assert summary["max_consecutive_failures"] == 2
+
+
 def test_route_outcomes_surface_observability_import_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -525,13 +525,21 @@ ONLY JSON."""
 
     @staticmethod
     def _call_haiku(prompt: str) -> str | None:
-        """Run Haiku fan-out work inside the unified sandbox contract."""
+        """Run fast fan-out work via OpenRouter (Claude Sonnet 4.6).
+
+        Historically this called api.anthropic.com/v1/messages directly with
+        ANTHROPIC_API_KEY. Per decision.2026-04-20.anthropic-cli-only-restored
+        (migration 181), direct Anthropic API calls are forbidden — Claude is
+        reached via OpenRouter only. The function name is retained to
+        minimize call-site churn; the underlying transport is now OpenRouter's
+        OpenAI-compatible chat completions endpoint.
+        """
         from runtime.workflow.execution_backends import execute_api
 
         sandbox_provider = "docker_local"
         transient_config = SimpleNamespace(
-            provider="anthropic",
-            model="claude-haiku-4-5-20251001",
+            provider="openrouter",
+            model="anthropic/claude-sonnet-4.6",
             max_output_tokens=4096,
             timeout_seconds=90,
             execution_transport="api",
@@ -539,7 +547,7 @@ ONLY JSON."""
             sandbox_policy=SimpleNamespace(
                 network_policy="provider_only",
                 workspace_materialization="copy",
-                secret_allowlist=("ANTHROPIC_API_KEY",),
+                secret_allowlist=("OPENROUTER_API_KEY",),
             ),
         )
         result = execute_api(
@@ -548,8 +556,8 @@ ONLY JSON."""
             workdir=str(Path(__file__).resolve().parents[3]),
         )
         if result.get("status") != "succeeded":
-            logger.warning("Haiku sandbox execution failed: %s", result.get("stderr", ""))
-            raise RuntimeError(str(result.get("stderr") or result.get("error_code") or "haiku_failed"))
+            logger.warning("Fast fan-out sandbox execution failed: %s", result.get("stderr", ""))
+            raise RuntimeError(str(result.get("stderr") or result.get("error_code") or "fast_fanout_failed"))
         return str(result.get("stdout") or "")
 
     def _get_cli_config(self, provider_slug: str, model_slug: str) -> dict | None:

@@ -424,8 +424,8 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
   const [edgeConditionValueText, setEdgeConditionValueText] = useState('true');
   const [edgeConditionLoading, setEdgeConditionLoading] = useState(false);
   const [edgeConditionError, setEdgeConditionError] = useState<string | null>(null);
-  const [failureGateLoading, setFailureGateLoading] = useState(false);
-  const [failureGateError, setFailureGateError] = useState<string | null>(null);
+  const [gateClearLoading, setGateClearLoading] = useState(false);
+  const [gateClearError, setGateClearError] = useState<string | null>(null);
   const [nodeTitle, setNodeTitle] = useState('');
   const [nodeSummary, setNodeSummary] = useState('');
   const [nodePrompt, setNodePrompt] = useState('');
@@ -648,9 +648,8 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
   ]);
 
   useEffect(() => {
-    if (!isFailureEdge) return;
-    setFailureGateError(null);
-  }, [isFailureEdge, buildEdge?.edge_id]);
+    setGateClearError(null);
+  }, [buildEdge?.edge_id]);
 
   useEffect(() => {
     if (!buildNode) return;
@@ -1255,25 +1254,35 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
     selectedEdge,
   ]);
 
-  const handleClearFailureGate = useCallback(async () => {
-    if (!selectedEdge || !buildGraph || !canCommitGraph || !buildEdge || !isFailureEdge) return;
-    setFailureGateLoading(true);
-    setFailureGateError(null);
+  const handleClearGate = useCallback(async () => {
+    if (!selectedEdge || !buildGraph || !canCommitGraph || !buildEdge) return;
+    setGateClearLoading(true);
+    setGateClearError(null);
     try {
       const edges = [...(buildGraph.edges || [])];
       const index = edges.findIndex((edge) => edge.edge_id === buildEdge.edge_id);
       if (index < 0) return;
 
-      const currentEdge = edges[index];
-      const nextEdge = withBuildEdgeRelease(currentEdge, null);
-      edges[index] = nextEdge;
+      edges[index] = withBuildEdgeRelease(edges[index], null);
+
+      // Conditional branches come in then/else pairs — clear the sibling too.
+      if (isConditionalEdge) {
+        const sourceNodeId = buildEdge.from_node_id;
+        for (let i = 0; i < edges.length; i += 1) {
+          if (i === index) continue;
+          const sibling = edges[i];
+          if (sibling.from_node_id !== sourceNodeId) continue;
+          if (normalizeBuildEdgeRelease(sibling).family !== 'conditional') continue;
+          edges[i] = withBuildEdgeRelease(sibling, null);
+        }
+      }
 
       const nextGraph = { ...buildGraph, edges };
       if (onCommitGraphAction) {
         await onCommitGraphAction(nextGraph, {
-          label: 'Clear failure gate',
-          reason: `Convert the connection from ${failureSourceLabel} to ${failureTargetLabel} back to a normal success path.`,
-          outcome: `${failureTargetLabel} now runs on the standard success path instead of only after failure.`,
+          label: 'Remove gate',
+          reason: `Remove the gate on the connection from ${edgeFromLabel || selectedEdge.from} to ${edgeToLabel || selectedEdge.to}.`,
+          outcome: `${edgeToLabel || selectedEdge.to} now runs on the standard success path.`,
           target: edgeTarget(selectedEdge, edgeFromLabel, edgeToLabel),
           changeSummary: ['Gate family', 'After success'],
         });
@@ -1281,9 +1290,9 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
         await onUpdateBuildGraph(nextGraph);
       }
     } catch (error: any) {
-      setFailureGateError(error.message || 'Failed to clear the failure gate.');
+      setGateClearError(error.message || 'Failed to remove the gate.');
     } finally {
-      setFailureGateLoading(false);
+      setGateClearLoading(false);
     }
   }, [
     buildEdge,
@@ -1291,9 +1300,7 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
     canCommitGraph,
     edgeFromLabel,
     edgeToLabel,
-    failureSourceLabel,
-    failureTargetLabel,
-    isFailureEdge,
+    isConditionalEdge,
     onCommitGraphAction,
     onUpdateBuildGraph,
     selectedEdge,
@@ -1336,21 +1343,9 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
             </div>
 
             {isFailureEdge && (
-              <>
-                <div className="moon-branch-editor__hint">
-                  Runs only when {failureSourceLabel} fails.
-                </div>
-                <div className="moon-dock-form__actions">
-                  <button
-                    className="moon-dock-form__btn"
-                    onClick={handleClearFailureGate}
-                    disabled={failureGateLoading || !buildGraph || !canCommitGraph}
-                  >
-                    {failureGateLoading ? <><span className="moon-spinner" /> Updating...</> : 'Make normal path'}
-                  </button>
-                </div>
-                {failureGateError && <div className="moon-dock-form__error">{failureGateError}</div>}
-              </>
+              <div className="moon-branch-editor__hint">
+                Runs only when {failureSourceLabel} fails.
+              </div>
             )}
 
             {isConditionalEdge && (
@@ -1434,6 +1429,21 @@ export function MoonNodeDetail({ node, content, workflowId, onMutate, onCommitAu
                   </button>
                 </div>
                 {edgeConditionError && <div className="moon-dock-form__error">{edgeConditionError}</div>}
+              </>
+            )}
+
+            {selectedEdge.gateState !== 'empty' && (
+              <>
+                <div className="moon-dock-form__actions">
+                  <button
+                    className="moon-dock-form__btn"
+                    onClick={handleClearGate}
+                    disabled={gateClearLoading || !buildGraph || !canCommitGraph}
+                  >
+                    {gateClearLoading ? <><span className="moon-spinner" /> Removing...</> : 'Remove gate'}
+                  </button>
+                </div>
+                {gateClearError && <div className="moon-dock-form__error">{gateClearError}</div>}
               </>
             )}
           </div>

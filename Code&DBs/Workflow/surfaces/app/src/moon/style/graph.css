@@ -65,6 +65,217 @@
   color: var(--moon-fg);
 }
 
+/* ==========================================================================
+   Node multiplicity: loop (sequential stack) + parallel (spatial stack)
+   --------------------------------------------------------------------------
+   A single spec node renders as a stack of three rings when it runs N times.
+   Loop offsets the back rings diagonally (up-right) — reads as time, a
+   receding deck. Parallel offsets them vertically — reads as space, a column
+   of workers running side-by-side. The main ring is untouched; the stack is
+   pure visual metadata layered behind it so hover/click/drag still target
+   the real node box.
+   ========================================================================== */
+
+.moon-graph-node__stack-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1.25px solid var(--moon-fg-muted, rgba(232, 232, 232, 0.55));
+  background: transparent;
+  pointer-events: none;
+  z-index: -1;
+  opacity: 0.6;
+  transition: transform 220ms cubic-bezier(0.23, 1, 0.32, 1), opacity 220ms ease;
+}
+
+/* Loop: diagonal offset, decreasing opacity = receding-in-time metaphor */
+.moon-graph-node--stack-loop .moon-graph-node__stack-ring--mid {
+  transform: translate(7px, -7px) scale(0.96);
+  opacity: 0.4;
+}
+.moon-graph-node--stack-loop .moon-graph-node__stack-ring--back {
+  transform: translate(13px, -13px) scale(0.92);
+  opacity: 0.22;
+}
+
+/* Parallel: vertical offset = workers stacked in space */
+.moon-graph-node--stack-parallel .moon-graph-node__stack-ring--mid {
+  transform: translate(0, 8px) scale(0.97);
+  opacity: 0.42;
+}
+.moon-graph-node--stack-parallel .moon-graph-node__stack-ring--back {
+  transform: translate(0, 16px) scale(0.94);
+  opacity: 0.24;
+}
+
+/* Hover bumps the stack slightly outward to signal the node is one of many */
+.moon-graph-node--stack:hover .moon-graph-node__stack-ring--mid {
+  opacity: 0.55;
+}
+.moon-graph-node--stack:hover .moon-graph-node__stack-ring--back {
+  opacity: 0.35;
+}
+
+/* Count pill — iteration count or "N\u00d7" placeholder. Upper-right corner
+   of the node box. Sized small, just readable. Background is a soft glass
+   bubble so the count reads cleanly over any ring state. */
+.moon-graph-node__count-pill {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 22px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid var(--moon-glass-border);
+  background: var(--moon-glass-bg);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--moon-fg);
+  pointer-events: none;
+  z-index: 3;
+  box-shadow: var(--moon-shadow-line-soft);
+}
+
+/* Family tints on the gate pod — keeps failure vs success instantly legible
+   even when the pod is collapsed. Coral for failure (the only color we leak
+   onto the canvas). */
+.moon-graph-gate--family-after_failure .moon-graph-gate__trigger {
+  border-color: var(--moon-danger, #ff8a6a);
+  color: var(--moon-danger, #ff8a6a);
+}
+.moon-graph-gate--family-after_failure .moon-graph-gate__icon {
+  color: var(--moon-danger, #ff8a6a);
+}
+.moon-graph-gate--family-after_success .moon-graph-gate__trigger {
+  border-color: var(--moon-accent-a30);
+}
+.moon-graph-gate--family-after_any .moon-graph-gate__trigger {
+  border-style: dotted;
+}
+.moon-graph-gate--family-conditional .moon-graph-gate__trigger {
+  border-style: dashed;
+}
+
+/* ==========================================================================
+   Node-scoped branch pod — the N-way fanout affordance
+   --------------------------------------------------------------------------
+   A single `+` pod pinned just past each step's right edge. Click it, pick a
+   family, and a new downstream node + edge is created with that guard. The
+   edge pod still handles *editing* an existing gate; this pod is the only
+   affordance for *adding another branch*.
+   ========================================================================== */
+
+.moon-node-branch-pod {
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.moon-node-branch-pod__trigger {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 1px dashed var(--moon-glass-border);
+  background: var(--moon-white-a03);
+  color: var(--moon-fg-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.35;
+  transition: opacity 180ms ease, transform 180ms ease, border-color 180ms ease, background 180ms ease, color 180ms ease;
+}
+
+.moon-graph-node:hover ~ .moon-node-branch-pod .moon-node-branch-pod__trigger,
+.moon-node-branch-pod:hover .moon-node-branch-pod__trigger,
+.moon-node-branch-pod--open .moon-node-branch-pod__trigger {
+  opacity: 1;
+  border-color: var(--moon-accent);
+  background: var(--moon-white-a05);
+  color: var(--moon-fg);
+  transform: scale(1.06);
+}
+
+.moon-node-branch-pod__menu {
+  position: absolute;
+  top: 32px;
+  left: -8px;
+  width: 240px;
+  padding: 10px;
+  border-radius: 14px;
+  border: 1px solid var(--moon-white-a12);
+  background: linear-gradient(180deg, var(--moon-shell-glass), var(--moon-surface-dense));
+  box-shadow: var(--moon-shadow-line-mid), var(--moon-shadow-float-soft);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  display: grid;
+  gap: 4px;
+  z-index: 10;
+}
+
+.moon-node-branch-pod__title {
+  padding: 4px 6px 8px;
+  font-size: var(--moon-font-size-xs);
+  font-weight: 700;
+  color: var(--moon-fg-muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--moon-white-a08);
+  margin-bottom: 4px;
+}
+
+.moon-node-branch-pod__option {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--moon-fg);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+.moon-node-branch-pod__option:hover {
+  background: var(--moon-white-a03);
+  border-color: var(--moon-accent-a30);
+  transform: translateX(2px);
+}
+
+.moon-node-branch-pod__option-label {
+  font-size: var(--moon-font-size-sm);
+  font-weight: 600;
+}
+
+.moon-node-branch-pod__option-hint {
+  font-size: 11px;
+  color: var(--moon-fg-muted);
+  line-height: 1.4;
+}
+
+/* Family accents on the menu options — a thin left-border tint so the eye
+   sees "these two are different kinds of branch" at a glance. */
+.moon-node-branch-pod__option--after_success { border-left: 2px solid var(--moon-accent); padding-left: 8px; }
+.moon-node-branch-pod__option--after_failure { border-left: 2px solid var(--moon-danger, #ff8a6a); padding-left: 8px; }
+.moon-node-branch-pod__option--conditional   { border-left: 2px dashed var(--moon-fg); padding-left: 8px; }
+.moon-node-branch-pod__option--after_any     { border-left: 2px dotted var(--moon-fg-muted); padding-left: 8px; }
+
 .moon-graph-gate {
   position: absolute;
   transform: translate(-50%, -50%);

@@ -94,12 +94,35 @@ class DataDictionaryClassificationsProjector(HeartbeatModule):
         t0 = time.monotonic()
         errors: list[str] = []
         entries = self._load_entries()
-        for label, fn in [
-            ("pii_name_heuristics",       lambda: self._project_pii(entries)),
-            ("credential_name_heuristics", lambda: self._project_credentials(entries)),
-            ("owner_name_heuristics",      lambda: self._project_owners(entries)),
-            ("structured_shape",           lambda: self._project_structured_shape(entries)),
-        ]:
+
+        # PII + credential heuristics are intentionally disabled. Praxis
+        # is internal infrastructure with no real customer PII, so auto-
+        # detection produced high-noise governance escalations. Operator-
+        # layer tags (source='operator') still drive governance when
+        # something genuinely needs the flag. Re-enable by adding the
+        # step back to the list.
+        enabled_steps: list[tuple[str, Any]] = [
+            ("owner_name_heuristics", lambda: self._project_owners(entries)),
+            ("structured_shape",      lambda: self._project_structured_shape(entries)),
+        ]
+
+        # Run disabled steps with an empty entry list so their projector-tag
+        # rows get pruned via replace_projected_classifications idempotence.
+        for retired_tag in (
+            "classification_pii_name_heuristics",
+            "classification_credential_name_heuristics",
+        ):
+            try:
+                apply_projected_classifications(
+                    self._conn,
+                    projector_tag=retired_tag,
+                    entries=[],
+                    source="auto",
+                )
+            except Exception:
+                pass
+
+        for label, fn in enabled_steps:
             try:
                 fn()
             except Exception:

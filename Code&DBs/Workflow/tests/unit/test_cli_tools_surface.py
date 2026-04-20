@@ -61,6 +61,27 @@ def test_tools_root_shows_quickstart() -> None:
     assert "workflow diagnose" in rendered
 
 
+def test_tools_describe_daily_heartbeat_smoke() -> None:
+    stdout = StringIO()
+
+    assert workflow_cli_main(["tools", "describe", "praxis_daily_heartbeat"], stdout=stdout) == 0
+
+    rendered = stdout.getvalue()
+    assert "praxis_daily_heartbeat" in rendered
+    assert "entrypoint: workflow heartbeat" in rendered
+    assert "alias:heartbeat" in rendered
+
+
+def test_commands_index_includes_daily_heartbeat() -> None:
+    stdout = StringIO()
+
+    assert workflow_cli_main(["commands"], stdout=stdout) == 0
+
+    rendered = stdout.getvalue()
+    assert "workflow heartbeat [--scope <scope>] [--pretty]" in rendered
+    assert "Run the daily external-health heartbeat" in rendered
+
+
 def test_tools_search_prioritizes_exact_alias_matches(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         tools_commands,

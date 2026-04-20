@@ -332,27 +332,37 @@ def _assess_change(conn: Any, change: FieldChange) -> ChangeImpact:
     rules = _rules_for(conn, change.object_kind)
     stws = _stewards_for(conn, change.object_kind)
 
-    pii_keys = {c.get("tag_key") for c in cls if c.get("tag_key") in {"pii", "sensitive"}}
+    # Only operator-layer PII/sensitive tags escalate severity to P0.
+    # Auto-detected heuristic tags would over-flag on a codebase that
+    # doesn't hold real customer PII; they stay informational.
+    def _is_operator_tag(c: dict[str, Any]) -> bool:
+        return str(c.get("effective_source") or c.get("source") or "") == "operator"
+
+    operator_pii_keys = {
+        c.get("tag_key") for c in cls
+        if c.get("tag_key") in {"pii", "sensitive"} and _is_operator_tag(c)
+    }
 
     if change.change_kind in ("drop_object", "drop_field"):
-        # Was the dropped surface PII / sensitive?
         if change.field_path:
             field_pii = any(
                 c.get("field_path") == change.field_path
                 and c.get("tag_key") in {"pii", "sensitive"}
+                and _is_operator_tag(c)
                 for c in cls
             )
             if field_pii:
                 pii_dropped = True
                 reasons.append(
-                    f"dropped field carried tag(s): {', '.join(sorted(pii_keys))}"
+                    f"dropped field carried operator-flagged tag(s): "
+                    f"{', '.join(sorted(operator_pii_keys))}"
                 )
         else:
-            if pii_keys:
+            if operator_pii_keys:
                 pii_dropped = True
                 reasons.append(
-                    f"dropped object carried object-level tag(s): "
-                    f"{', '.join(sorted(pii_keys))}"
+                    f"dropped object carried operator-flagged object-level "
+                    f"tag(s): {', '.join(sorted(operator_pii_keys))}"
                 )
 
     # Lineage downstream impact.

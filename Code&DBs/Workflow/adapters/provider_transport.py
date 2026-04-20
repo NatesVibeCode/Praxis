@@ -150,24 +150,22 @@ BUILTIN_PROVIDER_PROFILES: tuple[ProviderCLIProfile, ...] = (
         provider_slug="anthropic",
         binary="claude",
         prompt_mode="stdin",
-        default_model="claude-3-5-sonnet-latest",
-        api_endpoint="https://api.anthropic.com/v1/messages",
-        api_protocol_family="anthropic_messages",
-        api_key_env_vars=("ANTHROPIC_API_KEY",),
+        default_model="claude-sonnet-4-6",
+        # Anthropic is CLI-only (subscription, OAuth). Direct API endpoint and
+        # API key env var intentionally omitted per
+        # decision.2026-04-20.anthropic-cli-only-restored (migration 181).
+        # Nate has no ANTHROPIC_API_KEY; Claude is reached either via the
+        # `claude` binary (OAuth) or via OpenRouter (openrouter/anthropic/*).
+        api_endpoint=None,
+        api_protocol_family=None,
+        api_key_env_vars=(),
         adapter_economics={
             "cli_llm": {
                 "billing_mode": "subscription_included",
                 "budget_bucket": "anthropic_monthly",
                 "effective_marginal_cost": 0.0,
                 "prefer_prepaid": True,
-                "allow_payg_fallback": True,
-            },
-            "llm_task": {
-                "billing_mode": "metered_api",
-                "budget_bucket": "anthropic_api_payg",
-                "effective_marginal_cost": 1.0,
-                "prefer_prepaid": False,
-                "allow_payg_fallback": True,
+                "allow_payg_fallback": False,
             },
         },
         lane_policies={
@@ -176,12 +174,6 @@ BUILTIN_PROVIDER_PROFILES: tuple[ProviderCLIProfile, ...] = (
                 "execution_topology": "local_cli",
                 "transport_kind": "cli",
                 "policy_reason": "Admitted local CLI lane.",
-            },
-            "llm_task": {
-                "admitted_by_policy": True,
-                "execution_topology": "direct_http",
-                "transport_kind": "http",
-                "policy_reason": "Admitted direct HTTP lane.",
             },
         },
         base_flags=("-p", "--output-format", "json"),

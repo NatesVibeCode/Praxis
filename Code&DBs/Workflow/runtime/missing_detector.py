@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from enum import Enum
+from typing import Any
 
 
 # ---------------------------------------------------------------------------
@@ -187,6 +188,87 @@ class FindingPrioritizer:
         return scored[:max_surfaced]
 
 
+def build_content_health_report(
+    memory_engine: Any,
+    *,
+    stale_days: int = 30,
+    entity_limit: int = 500,
+    edge_limit: int = 2000,
+    max_surfaced: int = 5,
+) -> dict[str, Any]:
+    """Return the canonical content-health projection for an engine-backed graph.
+
+    This is the shared authority used by the MCP health tool and the HTTP
+    health/orient path. Keeping the scan shape here avoids drift between
+    surfaces.
+    """
+
+    detector = MissingContentDetector(stale_days=stale_days)
+    prioritizer = FindingPrioritizer()
+
+    try:
+        conn = memory_engine._connect() if memory_engine is not None else None
+    except Exception as exc:
+        return {"status": "error", "reason": str(exc)}
+
+    if conn is None:
+        return {"status": "skipped", "reason": "no memory engine connection"}
+
+    try:
+        entity_rows = list(conn.execute(
+            "SELECT id, entity_type, name, created_at, updated_at "
+            "FROM memory_entities WHERE archived = false "
+            f"ORDER BY updated_at DESC LIMIT {int(entity_limit)}",
+        ) or [])
+        edge_rows = list(conn.execute(
+            "SELECT source_id, target_id FROM memory_edges "
+            f"WHERE active = true LIMIT {int(edge_limit)}",
+        ) or [])
+        edge_ids = [
+            row["source_id"]
+            for row in edge_rows
+        ] + [
+            row["target_id"]
+            for row in edge_rows
+        ]
+        edge_entity_contexts = _entity_contexts(conn, edge_ids)
+        entities = [
+            {
+                "id": row["id"],
+                "type": row["entity_type"],
+                "name": row["name"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            }
+            for row in entity_rows
+        ]
+        edges = [
+            {
+                "source": row["source_id"],
+                "target": row["target_id"],
+                "source_entity": edge_entity_contexts.get(str(row["source_id"]), {}),
+                "target_entity": edge_entity_contexts.get(str(row["target_id"]), {}),
+            }
+            for row in edge_rows
+        ]
+        findings = detector.scan_all(entities, edges)
+        prioritized = prioritizer.prioritize(findings, max_surfaced=max_surfaced)
+        return {
+            "total_findings": len(findings),
+            "top_findings": [
+                {
+                    "finding_type": finding.finding_type.value,
+                    "description": finding.description,
+                    "severity": finding.severity,
+                }
+                for finding in prioritized
+            ],
+            "edges": edges,
+        }
+    except Exception as exc:
+        return {"status": "error", "reason": str(exc)}
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -219,3 +301,23 @@ def _parse_dt(value: str | datetime | None) -> datetime | None:
         except ValueError:
             continue
     return None
+
+
+def _entity_contexts(conn: Any, entity_ids: list[str]) -> dict[str, dict[str, Any]]:
+    unique_ids = [entity_id for entity_id in dict.fromkeys(entity_ids) if entity_id]
+    if not unique_ids:
+        return {}
+    rows = conn.execute(
+        "SELECT id, entity_type, name, content FROM memory_entities "
+        "WHERE id = ANY($1::text[])",
+        unique_ids,
+    )
+    return {
+        str(row["id"]): {
+            "entity_id": str(row["id"]),
+            "entity_type": str(row.get("entity_type") or ""),
+            "name": str(row.get("name") or ""),
+            "summary": str(row.get("content") or ""),
+        }
+        for row in rows or []
+    }

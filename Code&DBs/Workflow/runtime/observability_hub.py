@@ -202,9 +202,15 @@ class ObservabilityHub:
         panel.register_last_failure_category(failure_category or None)
         panel.register_last_activity_at(timestamp)
         panel.register_failure_categories(dict(self._failure_category_counts))
+        # BUG-C19968ED: only register a depth when the receipt actually carries
+        # the authoritative value stamped by runtime/workflow/_routing.py
+        # (top-level ``lineage_depth`` or nested ``lineage.lineage_depth``).
+        # The previous code fabricated ``1`` whenever ``parent_run_id`` was
+        # present but no depth was stamped, which collapsed the real lineage
+        # tree (2, 3, 4, …) down to a binary parent-present signal. Leave the
+        # panel at its prior depth in the "parent-present but depth-unknown"
+        # case rather than lying with a fabricated 1.
         lineage_depth = self._receipt_lineage_depth(receipt)
-        if lineage_depth is None and parent_run_id:
-            lineage_depth = 1
         if lineage_depth is not None:
             try:
                 panel.register_lineage_depth(lineage_depth)
@@ -258,9 +264,11 @@ class ObservabilityHub:
                 fallback_run_id = str(latest_receipt.get("run_id"))
             if latest_receipt.get("failure_category"):
                 fallback_failure_category = str(latest_receipt.get("failure_category"))
+            # BUG-C19968ED: same rule as ingest_receipt — only the authoritative
+            # stamped depth counts. Receipts with ``parent_run_id`` but no
+            # stamped depth collapse to the "unknown" sentinel (0), not the
+            # old fabricated 1.
             fallback_lineage_depth = self._receipt_lineage_depth(latest_receipt)
-            if fallback_lineage_depth is None and latest_receipt.get("parent_run_id"):
-                fallback_lineage_depth = 1
             if fallback_lineage_depth is None:
                 fallback_lineage_depth = 0
 

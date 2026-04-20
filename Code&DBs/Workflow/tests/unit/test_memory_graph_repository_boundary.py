@@ -74,6 +74,7 @@ class _RecordingRepository:
         self.embedding_ready_calls: list[tuple[str, str]] = []
         self.maintenance_touch_ids: list[str] = []
         self.absorb_calls: list[tuple[str, tuple[str, ...]]] = []
+        self.vector_neighbor_calls: list[tuple[str, tuple[tuple[str, object], ...], str, int]] = []
 
     def archive_entities(self, *, entity_ids):
         recorded = tuple(entity_ids)
@@ -113,6 +114,27 @@ class _RecordingRepository:
             "deleted_neighbor_rows": 1,
             "deleted_pending_intents": 0,
         }
+
+    def replace_vector_neighbor_projection(
+        self,
+        *,
+        source_entity_id,
+        neighbors,
+        policy_key,
+        embedding_version,
+    ):
+        recorded_neighbors = tuple(
+            tuple(sorted((str(key), value) for key, value in dict(neighbor).items()))
+            for neighbor in neighbors
+        )
+        recorded = (
+            str(source_entity_id),
+            recorded_neighbors,
+            str(policy_key),
+            int(embedding_version),
+        )
+        self.vector_neighbor_calls.append(recorded)
+        return len(recorded_neighbors)
 
 
 class _FakeVectorQuery:
@@ -444,6 +466,119 @@ def test_postgres_memory_graph_repository_deletes_edges_through_owned_delete():
             query,
             (["a"], ["b"], ["related_to"]),
         )
+    ]
+
+
+def test_postgres_memory_graph_repository_replaces_vector_neighbor_projection_through_owned_mutation():
+    delete_neighbors_query = _normalize_sql(
+        """
+        DELETE FROM memory_vector_neighbors WHERE source_entity_id = $1
+        """
+    )
+    delete_inferred_query = _normalize_sql(
+        """
+        DELETE FROM memory_inferred_edges
+        WHERE source_id = $1
+          AND inference_kind = 'vector_neighbor'
+        """
+    )
+    vector_insert_query = _normalize_sql(
+        """
+        INSERT INTO memory_vector_neighbors (
+            source_entity_id,
+            target_entity_id,
+            policy_key,
+            similarity,
+            rank,
+            embedding_version,
+            refreshed_at,
+            active
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, now(), true)
+        ON CONFLICT (source_entity_id, target_entity_id, policy_key) DO UPDATE
+        SET similarity = EXCLUDED.similarity,
+            rank = EXCLUDED.rank,
+            embedding_version = EXCLUDED.embedding_version,
+            refreshed_at = now(),
+            active = true
+        """
+    )
+    inferred_insert_query = _normalize_sql(
+        """
+        INSERT INTO memory_inferred_edges (
+            source_id,
+            target_id,
+            relation_type,
+            inference_kind,
+            confidence,
+            metadata,
+            evidence_count,
+            embedding_version,
+            created_at,
+            refreshed_at,
+            active
+        )
+        VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, now(), now(), true)
+        ON CONFLICT (source_id, target_id, relation_type, inference_kind) DO UPDATE
+        SET confidence = EXCLUDED.confidence,
+            metadata = EXCLUDED.metadata,
+            embedding_version = EXCLUDED.embedding_version,
+            evidence_count = EXCLUDED.evidence_count,
+            refreshed_at = now(),
+            active = true
+        """
+    )
+    conn = _FakeConn()
+    repository = PostgresMemoryGraphRepository(conn)
+
+    count = repository.replace_vector_neighbor_projection(
+        source_entity_id="entity-1",
+        neighbors=[
+            {"id": "entity-2", "similarity": 0.92},
+            {"id": "entity-3", "similarity": 0.81},
+        ],
+        policy_key="memory_entity.vector_neighbors",
+        embedding_version=4,
+    )
+
+    assert count == 2
+    assert conn.execute_calls == [
+        (delete_neighbors_query, ("entity-1",)),
+        (delete_inferred_query, ("entity-1",)),
+        (
+            vector_insert_query,
+            ("entity-1", "entity-2", "memory_entity.vector_neighbors", 0.92, 1, 4),
+        ),
+        (
+            vector_insert_query,
+            ("entity-1", "entity-3", "memory_entity.vector_neighbors", 0.81, 2, 4),
+        ),
+        (
+            inferred_insert_query,
+            (
+                "entity-1",
+                "entity-2",
+                "semantic_neighbor",
+                "vector_neighbor",
+                0.92,
+                '{"policy_key":"memory_entity.vector_neighbors","rank":1}',
+                1,
+                4,
+            ),
+        ),
+        (
+            inferred_insert_query,
+            (
+                "entity-1",
+                "entity-3",
+                "semantic_neighbor",
+                "vector_neighbor",
+                0.81,
+                '{"policy_key":"memory_entity.vector_neighbors","rank":2}',
+                1,
+                4,
+            ),
+        ),
     ]
 
 
@@ -823,6 +958,14 @@ def test_database_maintenance_refresh_neighbors_routes_touch_through_repository_
 
     assert result["status"] == "completed"
     assert result["message"] == "vector_neighbors:entity-1:0"
+    assert repository.vector_neighbor_calls == [
+        (
+            "entity-1",
+            (),
+            "memory_entity.vector_neighbors",
+            3,
+        )
+    ]
     assert repository.maintenance_touch_ids == ["entity-1"]
     assert all(not call[0].startswith("UPDATE memory_entities") for call in conn.execute_calls)
 

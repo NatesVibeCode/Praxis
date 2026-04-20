@@ -241,7 +241,37 @@ def find_by_tag(
 
 def classification_summary(conn: Any) -> dict[str, Any]:
     """Counts useful for health dashboards."""
-    return {"classifications_by_source": count_classifications_by_source(conn)}
+    return {
+        "classifications_by_source": count_classifications_by_source(conn),
+        "tag_catalog": tag_catalog(conn),
+    }
+
+
+def tag_catalog(conn: Any) -> list[dict[str, Any]]:
+    """Every distinct tag_key × tag_value × source with row counts.
+
+    The classifications table is a polymorphic tag store — multiple
+    independent tag categories coexist (pii / activity / ship_blocker /
+    decision_gap / etc). This view shows what's actually present so an
+    operator can see at a glance what categories are live.
+    """
+    rows = conn.execute(
+        """
+        SELECT tag_key, tag_value, source, COUNT(*)::int AS rows
+        FROM data_dictionary_classifications
+        GROUP BY tag_key, tag_value, source
+        ORDER BY tag_key, tag_value, source
+        """
+    )
+    return [
+        {
+            "tag_key": r.get("tag_key"),
+            "tag_value": r.get("tag_value") or "",
+            "source": r.get("source"),
+            "rows": int(r.get("rows") or 0),
+        }
+        for r in (rows or [])
+    ]
 
 
 __all__ = [
@@ -252,4 +282,5 @@ __all__ = [
     "describe_classifications",
     "find_by_tag",
     "set_operator_classification",
+    "tag_catalog",
 ]

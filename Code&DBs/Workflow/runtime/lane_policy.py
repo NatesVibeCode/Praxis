@@ -79,6 +79,7 @@ def admit_adapter_type(
     spend_pressure: str | None = None,
     budget_authority_unreachable: bool = False,
     budget_window_data_quality_error: bool = False,
+    allow_payg_fallback: bool | None = None,
 ) -> tuple[bool, str]:
     """Decide whether a route may use ``adapter_type`` for ``provider_slug``.
 
@@ -98,6 +99,14 @@ def admit_adapter_type(
                                           ``provider_budget_windows`` is
                                           failing; authority data is not
                                           trustworthy, fail closed
+    - ``lane.rejected.payg_fallback_disabled``
+                                        — paid lane, economics authority
+                                          declares ``allow_payg_fallback=
+                                          False`` for this lane; the PAYG
+                                          bucket is ineligible as a fallback
+                                          target so admission refuses the
+                                          metered route (closes
+                                          BUG-2A950857)
     - ``lane.admitted.no_policy``       — no policy row, fail open (pre-seed)
 
     ``spend_pressure`` is a hard gate for ``llm_task`` only: when the
@@ -119,6 +128,19 @@ def admit_adapter_type(
     authority owner has declared invalid (e.g. inverted window timestamps
     that would break ``ORDER BY window_ended_at DESC`` lookups). Paid
     lanes refuse rather than route off corrupt authority data.
+
+    ``allow_payg_fallback`` enforces the PAYG-fallback policy that the
+    economics authority already stores on every adapter row (see
+    :class:`adapters.provider_transport.AdapterEconomicsContract`). The
+    flag used to be advisory-only: surfaced through route decisions and
+    health, but no selection branch consulted it. Now ``llm_task`` (the
+    metered paid lane) refuses when the economics row for that lane has
+    ``allow_payg_fallback=False`` — i.e. the authority declares this PAYG
+    bucket ineligible as a fallback target. Passing ``None`` (the default)
+    preserves prior behavior for callers that don't carry the flag yet.
+    ``cli_llm`` is not gated by this flag: subscription-included lanes
+    declare ``allow_payg_fallback`` to describe fallback semantics of the
+    *paid* lane they sit alongside, not of themselves.
     """
     normalized = (adapter_type or "").strip().lower()
     if normalized not in KNOWN_ADAPTER_TYPES:
@@ -132,6 +154,12 @@ def admit_adapter_type(
         pressure = (spend_pressure or "").strip().lower()
         if pressure == "high":
             return False, "lane.rejected.budget_exhausted"
+        # BUG-2A950857: thread the authoritative allow_payg_fallback flag into
+        # admission. Explicit False from the economics authority means the
+        # operator-visible policy "PAYG fallback disabled" now binds at
+        # selection time, not just at observation time.
+        if allow_payg_fallback is False:
+            return False, "lane.rejected.payg_fallback_disabled"
 
     policy = policies.get(provider_slug)
     if policy is None:

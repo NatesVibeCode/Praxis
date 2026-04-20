@@ -114,15 +114,15 @@ def test_owner_immediate_fallback_when_nothing_inferred(monkeypatch) -> None:
 # pii_without_owner / sensitive_without_owner — permanent
 # ---------------------------------------------------------------------------
 
-def test_owner_permanent_always_files_architecture_policy(monkeypatch) -> None:
+def test_owner_permanent_does_not_suggest_decision_filing(monkeypatch) -> None:
+    """Decision-filing was pulled: it's theater for a one-person codebase."""
     monkeypatch.setattr(rem, "_namespace_owner_suggestion", lambda k: None)
     v = GovernanceViolation(policy="pii_without_owner", object_kind="table:users")
     plan = suggest_remediation(object(), v)
     kinds = [a["kind"] for a in plan["permanent"]]
-    assert "operator_decision" in kinds
-    # The decision_key should be deterministic and policy-keyed.
-    decision = next(a for a in plan["permanent"] if a["kind"] == "operator_decision")
-    assert "pii-requires-owner" in decision["command"]
+    assert "operator_decision" not in kinds
+    # The concrete, actionable suggestions remain.
+    assert {"code_change", "quality_rule"}.issubset(set(kinds))
 
 
 def test_owner_permanent_suggests_projector_extension_for_uncovered_namespace(
@@ -181,13 +181,14 @@ def test_rule_immediate_re_evaluate_has_highest_confidence() -> None:
     assert plan["immediate"][0]["confidence"] > plan["immediate"][-1]["confidence"]
 
 
-def test_rule_permanent_includes_code_change_and_policy() -> None:
+def test_rule_permanent_includes_code_change_and_heartbeat_config() -> None:
     v = GovernanceViolation(
         policy="error_rule_failing", object_kind="table:x", rule_kind="range",
     )
     plan = suggest_remediation(object(), v)
     kinds = {a["kind"] for a in plan["permanent"]}
-    assert {"code_change", "operator_decision"}.issubset(kinds)
+    assert {"code_change", "heartbeat_config"}.issubset(kinds)
+    assert "operator_decision" not in kinds
 
 
 # ---------------------------------------------------------------------------

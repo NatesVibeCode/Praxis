@@ -4,64 +4,78 @@ Complete installation and configuration reference.
 
 ## Prerequisites
 
-- Python 3.11+
+- **Python 3.14** — the native operator wrappers are pinned to 3.14. Earlier versions are not supported.
 - PostgreSQL 16+ with [pgvector](https://github.com/pgvector/pgvector) extension
-- Node.js 18+ (for dashboard UI only)
+- Node.js 18+ (Moon dashboard UI)
 - At least one LLM provider API key (Anthropic, OpenAI, Google, or DeepSeek)
+
+## One-command bootstrap (recommended)
+
+For fresh clones:
+
+```bash
+./scripts/bootstrap
+```
+
+This script is idempotent. It creates `.venv`, installs dependencies, symlinks `scripts/praxis` into `~/.local/bin`, runs `db-bootstrap` (full migration set), and runs the native self-hosted smoke. Skip the platform-specific instructions below unless you are debugging or intentionally diverging from it.
 
 ## Docker Setup
 
-The fastest path. Requires Docker and Docker Compose.
+Requires Docker and Docker Compose. The compose stack does **not** include its own database — it expects a host Postgres reachable via `host.docker.internal:5432` and a database named `praxis`.
 
 ```bash
-# Start the app services
+# Start the app services (semantic-backend + api-server)
 docker compose up -d
 
 # Wait for healthy
-docker compose ps  # should show "healthy"
+docker compose ps
 
-# The stack uses the host launchd Postgres instance at `postgresql://localhost:5432/praxis`.
-# It does not start its own database container.
-
-# Install Python deps
-pip install -r Code\&DBs/Workflow/requirements.runtime.txt
-
-# Run migrations
-WORKFLOW_DATABASE_URL=postgresql://localhost:5432/praxis \
-  python Code\&DBs/Workflow/storage/postgres/migrate.py
-
-# Copy and edit env
-cp .env.example .env
-# Add your API keys to .env
-
-# Launch
-WORKFLOW_DATABASE_URL=postgresql://localhost:5432/praxis \
-  python -m uvicorn surfaces.api.native_operator_surface:app \
-    --host 0.0.0.0 --port 8420
+# From the host, prepare the database and dependencies
+./scripts/bootstrap
 ```
+
+On Linux, `host.docker.internal` is not resolved by default. Either add `extra_hosts: ["host.docker.internal:host-gateway"]` to the compose services, or run the API natively via the path below.
 
 ## macOS Native Setup
 
-### Install Postgres with pgvector
+### Install Python 3.14 and Postgres
 
 ```bash
-brew install postgresql@16
-brew install pgvector
+brew install python@3.14 postgresql@16
 
 # Start Postgres
 brew services start postgresql@16
 
-# Create database and enable pgvector
+# Create the praxis database
 createdb praxis
+```
+
+### Install pgvector
+
+Homebrew does not ship a first-party `pgvector` formula. Use one of:
+
+```bash
+# Option A — pgvector tap (simplest if available for your setup)
+brew install pgvector/brew/pgvector
+
+# Option B — build from source against brew's Postgres 16
+git clone --branch v0.7.4 https://github.com/pgvector/pgvector.git /tmp/pgvector
+cd /tmp/pgvector
+PG_CONFIG=$(brew --prefix postgresql@16)/bin/pg_config make
+PG_CONFIG=$(brew --prefix postgresql@16)/bin/pg_config make install
+cd -
+
+# Then enable in the praxis database
 psql praxis -c "CREATE EXTENSION IF NOT EXISTS vector;"
 ```
 
+See the [pgvector install notes](https://github.com/pgvector/pgvector#installation-notes) if you hit errors.
+
 ### Store API Keys in Keychain
 
-Praxis reads API keys from macOS Keychain under the service name `praxis`:
+Praxis resolves keys in this precedence order: **macOS Keychain** (service `praxis`) → **environment variable**. On macOS, prefer Keychain — do not put real secrets in `.env`.
 
 ```bash
-# Store each key
 security add-generic-password -a "praxis" -s "praxis" -l "ANTHROPIC_API_KEY" \
   -w "sk-ant-..." -U
 
@@ -72,39 +86,45 @@ security add-generic-password -a "praxis" -s "praxis" -l "GEMINI_API_KEY" \
   -w "AI..." -U
 ```
 
-The runtime resolves keys via Keychain first, then falls back to environment variables.
-
 ### Install and Run
 
+The recommended path is `./scripts/bootstrap`. If you want to see the steps:
+
 ```bash
+# Create venv + install deps
+python3.14 -m venv .venv
+source .venv/bin/activate
 pip install -r Code\&DBs/Workflow/requirements.runtime.txt
 
-# Set database URL
-export WORKFLOW_DATABASE_URL=postgresql://$(whoami)@localhost:5432/praxis
+# Bootstrap the DB (migrations + bootstrap_only data)
+./scripts/native-bootstrap.sh
 
-# Run migrations
-python Code\&DBs/Workflow/storage/postgres/migrate.py
-
-# Launch
-python -m uvicorn surfaces.api.native_operator_surface:app \
-  --host 0.0.0.0 --port 8420
+# Launch the API server
+#   PYTHONPATH is REQUIRED — the API module is rooted at Code&DBs/Workflow
+PYTHONPATH="Code&DBs/Workflow" \
+  python -m uvicorn surfaces.api.native_operator_surface:app \
+    --host 0.0.0.0 --port 8420
 ```
 
 ## Linux Setup
 
-### Install Postgres with pgvector
+### Install Python 3.14 and Postgres with pgvector
 
 ```bash
-# Ubuntu/Debian
-sudo apt install postgresql-16 postgresql-16-pgvector
+# Ubuntu/Debian — 24.04+ ships python3.14 in deadsnakes or build from source
+sudo apt install software-properties-common
+sudo add-apt-repository ppa:deadsnakes/ppa
+sudo apt update
+sudo apt install python3.14 python3.14-venv postgresql-16 postgresql-16-pgvector
 
 sudo -u postgres createdb praxis
 sudo -u postgres psql praxis -c "CREATE EXTENSION IF NOT EXISTS vector;"
+sudo -u postgres psql -c "CREATE USER $(whoami) SUPERUSER;"   # so ./scripts/bootstrap can connect as your shell user
 ```
 
 ### Configure API Keys
 
-On Linux, use environment variables (no Keychain equivalent):
+On Linux, set environment variables (no Keychain equivalent). The runtime uses env vars directly:
 
 ```bash
 # Add to ~/.bashrc or ~/.profile
@@ -117,29 +137,36 @@ export DEEPSEEK_API_KEY="sk-..."
 ### Install and Run
 
 ```bash
+./scripts/bootstrap
+```
+
+Or manually:
+
+```bash
+python3.14 -m venv .venv
+source .venv/bin/activate
 pip install -r Code\&DBs/Workflow/requirements.runtime.txt
 
-export WORKFLOW_DATABASE_URL=postgresql://localhost:5432/praxis
+./scripts/native-bootstrap.sh
 
-python Code\&DBs/Workflow/storage/postgres/migrate.py
-
-python -m uvicorn surfaces.api.native_operator_surface:app \
-  --host 0.0.0.0 --port 8420
+PYTHONPATH="Code&DBs/Workflow" \
+  python -m uvicorn surfaces.api.native_operator_surface:app \
+    --host 0.0.0.0 --port 8420
 ```
 
 ## Database Bootstrap
 
-Migrations live in `Code&DBs/Databases/migrations/workflow/` (001-028). They run in order and are idempotent.
+Migrations live in `Code&DBs/Databases/migrations/workflow/` — the repo is currently at migration **189**. They run in order, are idempotent, and are split into `canonical` (always applied) and `bootstrap_only` (applied on fresh instances). The classification is authored by `_generated_workflow_migration_authority.py`.
 
 ```bash
-# Run all pending migrations
-python Code\&DBs/Workflow/storage/postgres/migrate.py
+# Apply everything — idempotent
+./scripts/native-bootstrap.sh
 
 # Verify
 psql praxis -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';"
 ```
 
-The schema includes: workflow runs, job state, execution leases, provider routing, knowledge graph, embeddings, operator control plane, bug tracking, and integration registry.
+The schema covers: workflow runs, job state, execution leases, provider routing, knowledge graph, embeddings, operator control plane (`operator_decisions`), bug tracking, and integration registry.
 
 ## API Key Configuration
 
@@ -216,26 +243,29 @@ Verify with: `praxis_health()`
 
 ## Verification
 
-Run the built-in health check:
+`./scripts/bootstrap` runs the smoke as its final step. To re-verify manually:
 
 ```bash
-# API health
+# Native smoke — exercises the self-hosted flow end to end
+./scripts/native-smoke.sh
+
+# API health (requires running API server)
 curl http://localhost:8420/health
 
-# Full status (requires running server)
+# Full status
 curl -X POST http://localhost:8420/orient
+
+# Via the canonical CLI frontdoor
+praxis workflow query "status"
+praxis workflow health
+praxis workflow tools list
 
 # Via MCP (in Claude Code)
 praxis_health()
 praxis_query(question="status")
-
-# Via the canonical CLI frontdoor
-workflow health
-workflow query "status"
-workflow tools list
 ```
 
-Expected output from `/orient`: database connection status, registered providers, active workflows, MCP tool count.
+Expected output from `/orient`: database connection status, registered providers, active workflows, MCP tool count, and current standing orders from `operator_decisions`.
 
 ## Troubleshooting
 

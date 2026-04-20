@@ -112,6 +112,20 @@ def test_launcher_status_endpoint_delegates_to_handler(monkeypatch) -> None:
     assert response.json() == expected
 
 
+def test_agent_sessions_surface_is_mounted(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(rest.agent_sessions_app, "AGENTS_DIR", tmp_path / "agents")
+
+    with TestClient(rest.app) as client:
+        index_response = client.get("/api/agent-sessions")
+        agents_response = client.get("/api/agent-sessions/agents")
+
+    assert index_response.status_code == 200
+    assert index_response.json()["service"] == "agent_sessions"
+    assert index_response.json()["base_path"] == "/api/agent-sessions"
+    assert agents_response.status_code == 200
+    assert agents_response.json() == []
+
+
 def test_launcher_recover_endpoint_returns_structured_payload(monkeypatch) -> None:
     monkeypatch.setattr(
         rest.launcher_handlers,

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from runtime.primitive_contracts import bug_query_default_open_only_list
 from surfaces.api.handlers import _bug_surface_contract as _bug_contract
 
 from ..runtime_context import get_current_workflow_mcp_context
@@ -201,8 +202,12 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     },
                     "open_only": {
                         "type": "boolean",
-                        "description": "When true, excludes FIXED/WONT_FIX/DEFERRED statuses.",
-                        "default": False,
+                        "description": (
+                            "When true, excludes FIXED/WONT_FIX/DEFERRED statuses. Default is "
+                            "sourced from runtime.primitive_contracts.bug_query_default_open_only_list() "
+                            "so all machine-facing bug surfaces share one authority (closes BUG-BAEC85C1)."
+                        ),
+                        "default": bug_query_default_open_only_list(),
                     },
                     "include_replay_state": {
                         "type": "boolean",

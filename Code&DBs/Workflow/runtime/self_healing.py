@@ -17,6 +17,7 @@ __all__ = [
     "OrchestrationFailureDiagnostic",
     "HealingRecommendation",
     "SelfHealingOrchestrator",
+    "derive_terminal_reason_code",
     "normalize_failure_code",
 ]
 
@@ -66,6 +67,55 @@ def normalize_failure_code(
     if normalized:
         return normalized
     return "unknown"
+
+
+# Attribute probe order for ``derive_terminal_reason_code``. Ordered so a
+# worker-emitted typed error's ``.reason_code`` wins over legacy ``.failure_code``
+# (from older adapters) and the generic Python/library ``.code``.
+_TERMINAL_REASON_CODE_ATTRS: tuple[str, ...] = (
+    "reason_code",
+    "failure_code",
+    "error_code",
+    "code",
+)
+
+
+def derive_terminal_reason_code(exc: BaseException, *, fallback: str) -> str:
+    """Canonical authority: map an exception to a stable terminal reason code.
+
+    This is the SINGLE place where worker-layer code is converted from a live
+    exception into a stable string reason_code for persistence. Previously
+    ``runtime/workflow/worker.py`` and ``runtime/workflow/_worker_loop.py``
+    each defined their own ``_worker_error_code`` helper — two independent
+    authorities for the same decision, each free to drift. Closes the worker
+    half of BUG-CBC73AB3 (failure-code authority split).
+
+    Order of authority:
+
+    1. If the exception carries one of the canonical typed-error attributes
+       (``reason_code``, ``failure_code``, ``error_code``, ``code``) with a
+       non-empty string value, that is the stable code.
+    2. Otherwise the caller-supplied ``fallback`` is used.
+
+    In both branches the result is run through :func:`normalize_failure_code`
+    with ``str(exc)`` as the stderr signal so that *wrapper* codes like
+    ``worker_exception`` are upgraded to a more specific inferred code when
+    the exception text clearly names the failure — e.g. the well-known
+    "failure_code … non-empty string" orchestration envelope error.
+
+    ``fallback`` must be a non-empty string; the caller's contract is that it
+    names the worker path (``worker_exception``, ``worker_future_exception``,
+    ``workflow_graph_execution_failed``) so operators can trace the origin.
+    """
+
+    fallback = str(fallback or "").strip()
+    if not fallback:
+        raise ValueError("derive_terminal_reason_code: fallback must be non-empty")
+    for attr in _TERMINAL_REASON_CODE_ATTRS:
+        value = getattr(exc, attr, None)
+        if isinstance(value, str) and value.strip():
+            return normalize_failure_code(value.strip(), str(exc))
+    return normalize_failure_code(fallback, str(exc))
 
 
 # ---------------------------------------------------------------------------

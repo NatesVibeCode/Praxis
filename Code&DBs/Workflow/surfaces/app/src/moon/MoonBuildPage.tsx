@@ -134,6 +134,21 @@ function gatePodLabel(edge: OrbitEdge, item?: CatalogItem | null): string {
   return edge.gateLabel || item?.label || 'Gate';
 }
 
+/**
+ * Glyph that reads the gate family at a glance. Keeps the canvas legible when
+ * multiple branches leave a node — eye picks out which branch is the failure
+ * path versus the condition versus the always path without reading labels.
+ */
+function gatePodGlyphType(edge: OrbitEdge): import('./moonBuildPresenter').GlyphType {
+  switch (edge.gateFamily) {
+    case 'conditional': return 'decompose';
+    case 'after_failure': return 'blocked';
+    case 'after_any': return 'summary';
+    case 'after_success': return 'validate';
+    default: return 'gate';
+  }
+}
+
 // Ring class from state
 function ringClass(node: OrbitNode, isSelected: boolean): string {
   const classes = [`moon-chain__ring`, `moon-chain__ring--${node.ringState}`];
@@ -315,6 +330,13 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
   const [catalog, setCatalog] = useState<CatalogItem[]>(getCatalog());
   const [moonGlowProfile, setMoonGlowProfile] = useState<MoonGlowProfile>(readMoonGlowProfile);
   const [mutationError, setMutationError] = useState<string | null>(null);
+  /**
+   * Which node has its branch-family picker open. A node-scoped picker is the
+   * single affordance for adding a new outgoing edge from an existing step
+   * (success / failure / any / conditional). It co-exists with the edge-pod
+   * picker that configures an *existing* edge's gate.
+   */
+  const [branchPickerNodeId, setBranchPickerNodeId] = useState<string | null>(null);
   const { show } = useToast();
   const persistedWorkflowId = useMemo(
     () => resolvePersistedWorkflowId(workflowId, payload),
@@ -824,6 +846,106 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
     }
   }, [commitMoonGraphAction, payload]);
 
+  /**
+   * Create a brand-new downstream step + edge from an existing source node,
+   * guarded by the picked gate family. This is the "branch again" affordance
+   * — unlike handleCreateBranch (which mutates an existing edge into a
+   * conditional then/else pair), this always adds a fresh sibling branch so
+   * a node can fan out to 3, 4, N next steps.
+   */
+  const handleCreateSiblingBranch = useCallback(async (sourceNodeId: string, gateFamily: string) => {
+    if (!payload?.build_graph) return;
+    try {
+      const graph = payload.build_graph;
+      const nodes = [...(graph.nodes || [])];
+      const edges = [...(graph.edges || [])];
+      const sourceNode = nodes.find(node => node.node_id === sourceNodeId);
+      if (!sourceNode) return;
+
+      const siblingCount = edges.filter(e => e.from_node_id === sourceNodeId).length;
+      const familyLabel = (() => {
+        switch (gateFamily) {
+          case 'conditional': return 'Condition';
+          case 'after_failure': return 'On failure';
+          case 'after_any': return 'On any';
+          default: return 'On success';
+        }
+      })();
+
+      const newNodeId = nextGraphNodeId(nodes, 'branch');
+      const newNode: BuildNode = {
+        node_id: newNodeId,
+        kind: 'step',
+        title: `${familyLabel} path`,
+        summary: `Runs from ${nodeDisplayName(sourceNode)} when the ${familyLabel.toLowerCase()} branch fires.`,
+        route: '',
+        status: '',
+      };
+      nodes.push(newNode);
+
+      const baseEdge: BuildEdge = {
+        edge_id: nextGraphEdgeId(edges, sourceNodeId, newNodeId),
+        kind: 'sequence',
+        from_node_id: sourceNodeId,
+        to_node_id: newNodeId,
+      };
+
+      let releasedEdge: BuildEdge;
+      if (gateFamily === 'conditional') {
+        const condition = cloneBranchCondition(null);
+        releasedEdge = withBuildEdgeRelease(baseEdge, {
+          family: 'conditional',
+          edge_type: 'conditional',
+          state: 'configured',
+          label: branchLabel('then') || 'Then',
+          branch_reason: 'then',
+          release_condition: cloneBranchCondition(condition),
+          config: {
+            condition: cloneBranchCondition(condition),
+            branch_side: siblingCount % 2 === 0 ? 'below' : 'above',
+          },
+        });
+      } else {
+        const edgeType: 'after_success' | 'after_failure' | 'after_any' =
+          gateFamily === 'after_failure' ? 'after_failure'
+            : gateFamily === 'after_any' ? 'after_any'
+              : 'after_success';
+        releasedEdge = withBuildEdgeRelease(baseEdge, {
+          family: gateFamily,
+          edge_type: edgeType,
+          state: 'configured',
+          label: familyLabel,
+          branch_reason: undefined,
+          release_condition: { kind: 'always' },
+          config: {},
+        });
+      }
+      edges.push(releasedEdge);
+
+      await commitMoonGraphAction({
+        label: 'Add branch',
+        reason: `Add a ${familyLabel.toLowerCase()} branch out of ${nodeDisplayName(sourceNode)}.`,
+        outcome: `${nodeDisplayName(sourceNode)} now has ${siblingCount + 1} outgoing branch${siblingCount === 0 ? '' : 'es'}.`,
+        target: nodeTarget(sourceNode),
+        changeSummary: ['Branch family', familyLabel],
+        nextPayload: {
+          ...payload,
+          build_graph: { ...graph, nodes, edges },
+        },
+        afterApply: () => {
+          setBranchPickerNodeId(null);
+          dispatch({ type: 'SELECT_NODE', nodeId: newNodeId });
+        },
+        afterUndo: () => {
+          setBranchPickerNodeId(null);
+          dispatch({ type: 'SELECT_NODE', nodeId: sourceNodeId });
+        },
+      });
+    } catch (err) {
+      setMutationError(err instanceof Error ? err.message : 'Mutation failed');
+    }
+  }, [commitMoonGraphAction, payload]);
+
   const handleApplyGate = useCallback(async (edgeId: string, gateFamily: string) => {
     if (!payload?.build_graph) return;
 
@@ -1246,6 +1368,18 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
       document.removeEventListener('mousedown', handlePointerDown);
     };
   }, [dismissSelectedEdgeMenus, state.selectedEdgeId]);
+
+  // Dismiss the node-scoped branch picker on any click outside its pod.
+  useEffect(() => {
+    if (!branchPickerNodeId) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest('.moon-node-branch-pod')) return;
+      setBranchPickerNodeId(null);
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, [branchPickerNodeId]);
   const edgeControls = useMemo(() => viewModel.edges.flatMap((edge) => {
     if (state.viewMode === 'run') return [];
     const geometry = getEdgeGeometry(edge, viewModel.layout);
@@ -1469,9 +1603,10 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                     return (
                       <div
                         key={control.edge.id}
-                        className={`moon-graph-gate moon-graph-gate--${control.tone}${isSelected ? ' moon-graph-gate--selected' : ''}${isDragOver ? ' moon-graph-gate--drag-over' : ''}`}
+                        className={`moon-graph-gate moon-graph-gate--${control.tone}${isSelected ? ' moon-graph-gate--selected' : ''}${isDragOver ? ' moon-graph-gate--drag-over' : ''}${control.edge.gateFamily ? ` moon-graph-gate--family-${control.edge.gateFamily}` : ''}`}
                         style={{ left: control.centerX, top: control.centerY }}
                         data-drop-edge={control.edge.id}
+                        data-gate-family={control.edge.gateFamily || undefined}
                       >
                           <button
                             type="button"
@@ -1483,7 +1618,7 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                             className={`moon-graph-gate__icon${isEmpty ? ' moon-graph-gate__icon--plus' : ''}`}
                             aria-hidden="true"
                           >
-                            {isEmpty ? '+' : <MoonGlyph type="gate" size={12} color="currentColor" />}
+                            {isEmpty ? '+' : <MoonGlyph type={control.gateItem?.icon || gatePodGlyphType(control.edge)} size={12} color="currentColor" />}
                           </span>
                           <span className="moon-graph-gate__trigger-label">{control.label}</span>
                         </button>
@@ -1563,24 +1698,113 @@ export function MoonBuildPage({ workflowId, runId, onBack, onWorkflowCreated, on
                       ? node.id === state.selectedRunJobId
                       : node.id === state.selectedNodeId;
                     const position = getMoonNodeCanvasPosition(node);
+                    const multiplicityAttr = node.multiplicity?.kind ?? null;
+                    const multiplicityCount = node.multiplicity?.count ?? null;
+                    const nodeClass = [
+                      'moon-graph-node',
+                      ringClass(node, isSelected),
+                      isSelected ? 'moon-graph-node--selected' : '',
+                      previewTargetId === node.id ? 'moon-graph-node--drag-over' : '',
+                      multiplicityAttr ? `moon-graph-node--stack moon-graph-node--stack-${multiplicityAttr}` : '',
+                    ].filter(Boolean).join(' ');
                     return (
                       <div
                         key={node.id}
-                        className={`moon-graph-node ${ringClass(node, isSelected)}${isSelected ? ' moon-graph-node--selected' : ''}${previewTargetId === node.id ? ' moon-graph-node--drag-over' : ''}`}
+                        className={nodeClass}
                         style={position}
                         data-drop-node={node.id}
+                        data-multiplicity={multiplicityAttr || undefined}
                         onClick={() => handleNodeClick(node.id, isSelected)}
                         onPointerDown={state.viewMode === 'run' ? undefined : e => startNodeDrag(e, node)}
                       >
+                        {/*
+                          Back rings for the multiplicity stack. Rendered as
+                          real siblings (not pseudo-elements) so the main ring
+                          keeps its flex centering for the glyph/index.
+                        */}
+                        {multiplicityAttr && (
+                          <>
+                            <span className="moon-graph-node__stack-ring moon-graph-node__stack-ring--back" aria-hidden="true" />
+                            <span className="moon-graph-node__stack-ring moon-graph-node__stack-ring--mid" aria-hidden="true" />
+                          </>
+                        )}
                         {showIcon(node) ? (
                           <MoonGlyph type={node.glyphType} size={22} color="#fff" />
                         ) : (
                           <span className="moon-chain__step-index">{node.dominantPathIndex >= 0 ? node.dominantPathIndex + 1 : ''}</span>
                         )}
+                        {multiplicityAttr && (
+                          <span className="moon-graph-node__count-pill" aria-label={`${multiplicityAttr} count`}>
+                            {multiplicityCount !== null
+                              ? `${multiplicityCount}\u00d7`
+                              : multiplicityAttr === 'loop' ? 'N\u00d7' : 'N\u2016'}
+                          </span>
+                        )}
                         <span className="moon-graph-node__label">{node.title}</span>
                       </div>
                     );
                   })}
+                  {/*
+                    Node-scoped branch pod. Sits just past a node's right edge
+                    and opens a family picker. Unlike the edge pod (which
+                    configures an existing edge), this one creates a new
+                    outgoing edge + downstream node — the affordance for
+                    branching a step 2, 3, N ways.
+                  */}
+                  {state.viewMode !== 'run' && viewModel.nodes
+                    .filter(node => node.kind === 'step')
+                    .map((node) => {
+                      const position = getMoonNodeCanvasPosition(node);
+                      const podLeft = position.left + MOON_LAYOUT.nodeSize + 10;
+                      const podTop = position.top + MOON_LAYOUT.nodeRadius - 14;
+                      const open = branchPickerNodeId === node.id;
+                      return (
+                        <div
+                          key={`branch-pod-${node.id}`}
+                          className={`moon-node-branch-pod${open ? ' moon-node-branch-pod--open' : ''}`}
+                          style={{ left: podLeft, top: podTop }}
+                          data-keep-edge-menu-open="true"
+                        >
+                          <button
+                            type="button"
+                            className="moon-node-branch-pod__trigger"
+                            aria-label={`Add branch from ${node.title}`}
+                            aria-expanded={open}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setBranchPickerNodeId(open ? null : node.id);
+                            }}
+                          >
+                            +
+                          </button>
+                          {open && (
+                            <div className="moon-node-branch-pod__menu" role="menu">
+                              <div className="moon-node-branch-pod__title">Branch from {node.title}</div>
+                              {[
+                                { family: 'after_success', label: 'On success', hint: 'Runs when this step succeeds.' },
+                                { family: 'after_failure', label: 'On failure', hint: 'Runs only when this step fails.' },
+                                { family: 'conditional',   label: 'Condition',  hint: 'Runs when a condition evaluates true.' },
+                                { family: 'after_any',     label: 'On any',     hint: 'Always runs, success or failure.' },
+                              ].map(opt => (
+                                <button
+                                  key={opt.family}
+                                  type="button"
+                                  role="menuitem"
+                                  className={`moon-node-branch-pod__option moon-node-branch-pod__option--${opt.family}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    void handleCreateSiblingBranch(node.id, opt.family);
+                                  }}
+                                >
+                                  <span className="moon-node-branch-pod__option-label">{opt.label}</span>
+                                  <span className="moon-node-branch-pod__option-hint">{opt.hint}</span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   {state.viewMode !== 'run' && (
                     <div
                       className={`moon-graph-append${previewTargetId === '__append__' ? ' moon-graph-append--drag-over' : ''}`}

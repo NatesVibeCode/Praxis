@@ -46,6 +46,20 @@ def tool_praxis_status_snapshot(params: dict) -> dict:
     )
 
 
+def tool_praxis_orient(params: dict) -> dict:
+    """Return the canonical orientation payload for a fresh agent or operator.
+
+    Delegates to ``surfaces.api.handlers.workflow_admin._handle_orient``, the
+    single HTTP authority behind POST /orient. One implementation, one shape,
+    no drift between MCP and HTTP consumers.
+    """
+
+    from surfaces.api.handlers.workflow_admin import _handle_orient
+
+    body = dict(params) if isinstance(params, dict) else {}
+    return _handle_orient(_subs, body)
+
+
 def tool_praxis_metrics_reset(params: dict) -> dict:
     """Reset observability metrics through explicit operator maintenance authority."""
 
@@ -215,6 +229,7 @@ def tool_praxis_operator_write(params: dict) -> dict:
             "approval_tag": params.get("approval_tag"),
             "reference_doc": params.get("reference_doc"),
             "outcome_gate": params.get("outcome_gate"),
+            "proof_kind": params.get("proof_kind"),
         },
     )
 
@@ -613,6 +628,35 @@ def tool_praxis_circuits(params: dict) -> dict:
 
 
 TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
+    "praxis_orient": (
+        tool_praxis_orient,
+        {
+            "description": (
+                "Fresh-agent orientation: returns the canonical orient payload "
+                "(standing orders, authority envelope, tool guidance, recent activity, "
+                "endpoints, health). The single best first call for any LLM agent or "
+                "operator waking up cold against Praxis. Delegates to the same authority "
+                "that serves POST /orient so HTTP and MCP consumers see identical shape.\n\n"
+                "USE WHEN: starting a new session, onboarding a new agent, or re-anchoring after long idle.\n\n"
+                "DO NOT USE: for deep subsystem inspection — use cluster-specific tools instead."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+            },
+            "cli": {
+                "surface": "operations",
+                "tier": "curated",
+                "recommended_alias": "orient",
+                "when_to_use": "Wake up against Praxis and get standing orders, authority envelope, tool guidance, and endpoints in one call.",
+                "when_not_to_use": "Do not use it for deep subsystem inspection; call cluster-specific tools instead.",
+                "risks": {"default": "read"},
+                "examples": [
+                    {"title": "Orient", "input": {}},
+                ],
+            },
+        },
+    ),
     "praxis_status_snapshot": (
         tool_praxis_status_snapshot,
         {
@@ -679,8 +723,12 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     },
                     "open_only": {
                         "type": "boolean",
-                        "description": "When true, only scan unresolved bugs.",
-                        "default": True,
+                        "description": (
+                            "When true, only scan unresolved bugs. Default is sourced from "
+                            "runtime.primitive_contracts.bug_query_default_open_only_backlog() so "
+                            "operator-facing bug surfaces share one authority (closes BUG-BAEC85C1)."
+                        ),
+                        "default": bug_query_default_open_only_backlog(),
                     },
                     "receipt_limit": {
                         "type": "integer",
@@ -905,8 +953,12 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     },
                     "open_only": {
                         "type": "boolean",
-                        "description": "When true, exclude resolved issues.",
-                        "default": True,
+                        "description": (
+                            "When true, exclude resolved issues. Default is sourced from "
+                            "runtime.primitive_contracts.bug_query_default_open_only_backlog() so "
+                            "operator-facing bug surfaces share one authority (closes BUG-BAEC85C1)."
+                        ),
+                        "default": bug_query_default_open_only_backlog(),
                     },
                     "status": {
                         "type": "string",
@@ -1006,6 +1058,16 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                     "approval_tag": {"type": "string"},
                     "reference_doc": {"type": "string"},
                     "outcome_gate": {"type": "string"},
+                    "proof_kind": {
+                        "type": "string",
+                        "enum": ["capability_delivered_by_decision_filing"],
+                        "description": (
+                            "Opt-in proof contract for capability rows whose deliverable IS a "
+                            "filed operator_decision (e.g. standing-order policy filings). When "
+                            "set, closeout requires only that the decision_ref points at a "
+                            "decided operator_decision row, not source_bug + validates_fix proof."
+                        ),
+                    },
                 },
                 "required": ["title", "intent_brief"],
             },

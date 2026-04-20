@@ -18,7 +18,23 @@ def project_failure_classification(
     is_transient: bool = False,
     stdout_preview: str = "",
 ) -> dict[str, Any] | None:
-    """Project one job failure classification from canonical failure semantics."""
+    """Project one job failure classification from canonical failure semantics.
+
+    Returns ``None`` when the classifier cannot produce a meaningful
+    classification. Read surfaces treat ``None`` as "classification
+    unavailable" and render accordingly — they do not substitute a default.
+
+    BUG-186B78D0: previously this function treated the sentinel string
+    ``"unknown"`` as a legitimate category and returned the classifier's
+    ``severity="low"`` fallback card for it, while any other unrecognized
+    code (where the classifier also returned ``category="unknown"``) fell
+    through to ``None``. Operators looking at dashboards saw ``severity=low``
+    for explicitly-unknown failures and (reasonably) dismissed them as
+    routine noise, even though the actual severity is unclassified and
+    could be arbitrarily high. Fix: an unknown classification fails closed
+    regardless of whether the input was literally ``"unknown"`` or some
+    other unrecognized code.
+    """
 
     normalized_category = str(failure_category or "").strip()
     if not normalized_category:
@@ -34,7 +50,11 @@ def project_failure_classification(
     except Exception:
         return None
 
-    if classification.get("category") == "unknown" and normalized_category != "unknown":
+    # Fail-closed when the classifier couldn't actually classify. The old
+    # asymmetric guard exempted the literal string "unknown" and returned a
+    # fabricated low-severity card; now both paths collapse to the same
+    # "classification unavailable" signal.
+    if classification.get("category") == "unknown":
         return None
 
     classification["category"] = normalized_category

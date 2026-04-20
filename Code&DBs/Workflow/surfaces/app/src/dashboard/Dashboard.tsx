@@ -94,6 +94,7 @@ interface DashboardProps {
   onNewWorkflow: () => void;
   onChat: () => void;
   onDescribe: () => void;
+  onOpenCosts: () => void;
 }
 
 interface WorkflowSection {
@@ -313,6 +314,7 @@ export function Dashboard({
   onNewWorkflow,
   onChat,
   onDescribe,
+  onOpenCosts,
 }: DashboardProps) {
   const { snapshot, loading, error, refresh } = useDashboardSnapshot();
   const [instanceFiles, setInstanceFiles] = useState<Array<{ id: string; filename: string }>>([]);
@@ -708,10 +710,15 @@ export function Dashboard({
                     <span>Runs today</span>
                     <strong>{loading ? '...' : summary.runs_24h}</strong>
                   </div>
-                  <div className="dash-hero-card__stat">
+                  <button
+                    type="button"
+                    className="dash-hero-card__stat dash-hero-card__stat--link"
+                    onClick={onOpenCosts}
+                    title="Open Cost Summary"
+                  >
                     <span>Spend</span>
                     <strong>{loading ? '...' : formatCurrency(summary.total_cost_24h)}</strong>
-                  </div>
+                  </button>
                   <div className="dash-hero-card__stat">
                     <span>Leaderboard</span>
                     <strong>{loading ? '...' : summary.models_online}</strong>

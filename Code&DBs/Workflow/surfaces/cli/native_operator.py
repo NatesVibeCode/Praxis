@@ -128,6 +128,7 @@ class RoadmapWriteCommand:
     approval_tag: str | None
     reference_doc: str | None
     outcome_gate: str | None
+    proof_kind: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -317,6 +318,7 @@ def _parse_roadmap_write(args: list[str]) -> RoadmapWriteCommand:
     approval_tag: str | None = None
     reference_doc: str | None = None
     outcome_gate: str | None = None
+    proof_kind: str | None = None
     action = "preview"
     index = 1
     while index < len(args):
@@ -372,6 +374,8 @@ def _parse_roadmap_write(args: list[str]) -> RoadmapWriteCommand:
             reference_doc = value
         elif flag == "--outcome-gate":
             outcome_gate = value
+        elif flag == "--proof-kind":
+            proof_kind = value
         else:
             raise ValueError(_usage())
         index += 2
@@ -386,7 +390,9 @@ def _parse_roadmap_write(args: list[str]) -> RoadmapWriteCommand:
             "[--lifecycle <idea|planned|claimed|completed>] "
             "[--tier <tier>] [--phase-ready|--not-phase-ready] "
             "[--approval-tag <tag>] [--reference-doc <path>] "
-            "[--outcome-gate <text>] [--validate|--commit]"
+            "[--outcome-gate <text>] "
+            "[--proof-kind <capability_delivered_by_decision_filing>] "
+            "[--validate|--commit]"
         )
     return RoadmapWriteCommand(
         action=action,
@@ -407,6 +413,7 @@ def _parse_roadmap_write(args: list[str]) -> RoadmapWriteCommand:
         approval_tag=approval_tag,
         reference_doc=reference_doc,
         outcome_gate=outcome_gate,
+        proof_kind=proof_kind,
     )
 
 
@@ -857,6 +864,7 @@ def main(
                     "approval_tag": command.approval_tag,
                     "reference_doc": command.reference_doc,
                     "outcome_gate": command.outcome_gate,
+                    "proof_kind": command.proof_kind,
                 },
             ),
         )

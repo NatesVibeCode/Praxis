@@ -342,12 +342,24 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             _example("Run the full health check", {}),
         ],
     ),
+    "praxis_daily_heartbeat": _tool(
+        surface="operations",
+        tier="advanced",
+        recommended_alias="heartbeat",
+        when_to_use="Run the daily external-health probe across providers, connectors, credentials, and MCP servers.",
+        when_not_to_use="Do not use it for knowledge-graph maintenance; use praxis_heartbeat for that cycle.",
+        risks={"default": "read"},
+        examples=[
+            _example("Run the full daily heartbeat", {"scope": "all"}),
+            _example("Probe credentials only", {"scope": "credentials"}),
+        ],
+    ),
     "praxis_heartbeat": _tool(
         surface="operations",
         tier="advanced",
         recommended_alias=None,
-        when_to_use="Check or run the knowledge-graph maintenance cycle.",
-        when_not_to_use="Do not use it as a replacement for workflow launch or session recall.",
+        when_to_use="Run or inspect the knowledge-graph maintenance cycle that syncs receipts, bugs, constraints, and memory projections.",
+        when_not_to_use="Do not use it for external provider or connector probes; use praxis_daily_heartbeat for that.",
         risks={"default": "read", "actions": {"status": "read", "run": "write"}},
         examples=[
             _example("Show last heartbeat status", {"action": "status"}),

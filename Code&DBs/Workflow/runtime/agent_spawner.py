@@ -54,8 +54,10 @@ class SpawnResult:
 # Provider readiness
 # ---------------------------------------------------------------------------
 
+# Anthropic is intentionally absent: the `claude` binary authenticates via
+# OAuth (subscription), not an API key. Readiness falls through to the CLI
+# binary check below. See decision.2026-04-20.anthropic-cli-only-restored.
 _PROVIDER_ENV_KEYS_FALLBACK: dict[str, list[str]] = {
-    "anthropic": ["ANTHROPIC_API_KEY"],
     "cursor": ["CURSOR_API_KEY"],
     "openai": ["OPENAI_API_KEY"],
     "google": ["GEMINI_API_KEY", "GOOGLE_API_KEY"],

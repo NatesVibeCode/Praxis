@@ -76,6 +76,13 @@
     --moon-accent-alt: var(--moon-palette-legacy-accent);
     --moon-glow: var(--moon-color-white);
     --moon-error: var(--moon-palette-error);
+    /*
+     * Solid danger token — the only color we let leak onto the canvas. Used
+     * on after_failure edges and their gate pods so "this is the failure
+     * path" reads at a glance without sacrificing the monochrome language.
+     * Softened from --moon-error so it reads as tint-of-concern, not alarm.
+     */
+    --moon-danger: #ff8a6a;
     --moon-gate-yellow: var(--moon-palette-amber);
     --moon-gate-green: var(--moon-palette-success);
     --moon-gate-red: var(--moon-palette-error);

@@ -33,7 +33,10 @@ from runtime.object_lifecycle import (
     delete_object_type,
     get_object_type,
     list_object_types,
+    list_object_fields,
+    retire_object_field,
     upsert_object_type,
+    upsert_object_field,
     update_object,
 )
 from runtime.file_storage import delete_file, get_file_content, list_files, save_file
@@ -2733,6 +2736,81 @@ def _handle_object_types_get(request: Any, path: str) -> None:
             return
 
         request._send_json(404, {"error": f"Unknown object-types endpoint: {path}"})
+    except Exception as exc:
+        request._send_json(500, {"error": str(exc)})
+
+
+def _handle_object_fields_get(request: Any, path: str) -> None:
+    try:
+        base_path = path.split("?", 1)[0]
+        params = _query_params(request.path)
+        include_retired = (params.get("include_retired") or ["false"])[0].strip().lower() in {
+            "1", "true", "yes", "on"
+        }
+        type_id = base_path.split("/api/object-types/", 1)[-1].split("/fields", 1)[0]
+        request._send_json(
+            200,
+            list_object_fields(
+                request.subsystems.get_pg_conn(),
+                type_id=type_id,
+                include_retired=include_retired,
+            ),
+        )
+    except ObjectLifecycleBoundaryError as exc:
+        request._send_json(exc.status_code, {"error": str(exc)})
+    except Exception as exc:
+        request._send_json(500, {"error": str(exc)})
+
+
+def _handle_object_fields_post(request: Any, path: str) -> None:
+    try:
+        body = _read_json_body(request)
+    except (json.JSONDecodeError, ValueError) as exc:
+        request._send_json(400, {"error": f"Invalid JSON: {exc}"})
+        return
+
+    base_path = path.split("?", 1)[0]
+    type_id = base_path.split("/api/object-types/", 1)[-1].split("/fields", 1)[0]
+    try:
+        request._send_json(
+            200,
+            upsert_object_field(
+                request.subsystems.get_pg_conn(),
+                type_id=type_id,
+                field_name=body.get("field_name") or body.get("name"),
+                field_kind=body.get("field_kind") or body.get("type"),
+                label=body.get("label", ""),
+                description=body.get("description", ""),
+                required=body.get("required", False),
+                default_value=body.get("default_value"),
+                options=body.get("options"),
+                display_order=body.get("display_order", 100),
+            ),
+        )
+    except ObjectLifecycleBoundaryError as exc:
+        request._send_json(exc.status_code, {"error": str(exc)})
+    except Exception as exc:
+        request._send_json(500, {"error": str(exc)})
+
+
+def _handle_object_fields_delete(request: Any, path: str) -> None:
+    base_path = path.split("?", 1)[0]
+    type_part, _, field_name = base_path.removeprefix("/api/object-types/").partition("/fields/")
+    if not type_part or not field_name:
+        request._send_json(404, {"error": f"Unknown object-type field endpoint: {path}"})
+        return
+
+    try:
+        request._send_json(
+            200,
+            retire_object_field(
+                request.subsystems.get_pg_conn(),
+                type_id=type_part,
+                field_name=field_name,
+            ),
+        )
+    except ObjectLifecycleBoundaryError as exc:
+        request._send_json(exc.status_code, {"error": str(exc)})
     except Exception as exc:
         request._send_json(500, {"error": str(exc)})
 

@@ -1,0 +1,344 @@
+{
+  "name": "Self-Report Feature Rollout — Agent Self-Attestation at Submit Time",
+  "phase": "W",
+  "queue_id": "self_report_feature_rollout_20260420",
+  "outcome_goal": "workflow_job_submissions has self_report (enum) and incomplete_items (jsonb) columns populated by submit tools; _execution_core.py routing branches on self_report to skip verify for unable_to_complete/refused_unsafe; disagreement dashboard query returns per-(model,workflow) rows; reviewer tool accepts approve_override_gate with evidence; and no spec can be registered without verify_command.",
+  "anti_requirements": [
+    "Do NOT modify bug-surface tables (bugs, bug_evidence_links, bug_recurrences, bug_lineage) — this feature touches workflow_job_submissions only.",
+    "Do NOT break existing submit callers — self_report column is nullable in the initial migration; required enforcement comes in a later job after auto-seal writes a default.",
+    "Do NOT expose verify_command text to the agent's execution_bundle — only outcome_goal is visible to agents (Goodhart protection).",
+    "Do NOT skip migration numbering — use 180 as the next available number.",
+    "Do NOT use _pg_test_conn.get_test_conn in any new tests — use rollback-isolated helpers per standing orders."
+  ],
+  "jobs": [
+    {
+      "label": "01_core_column_routing",
+      "agent": "auto/build",
+      "task_type": "build",
+      "description": "Add self_report + incomplete_items columns, plumb through tool→frontdoor→capture, branch routing in _execution_core.py",
+      "outcome_goal": "psql returns the self_report column on workflow_job_submissions; an agent can submit with self_report='completed_to_spec' and the value appears in the row; _execution_core.py:728 skips verify_command when self_report in ('unable_to_complete','refused_unsafe').",
+      "prompt": "Implement the core self_report plumbing across the submission stack.\n\n**Migration** — Code&DBs/Databases/migrations/workflow/180_workflow_submission_self_report.sql:\n- ALTER TABLE workflow_job_submissions ADD COLUMN self_report text NULL CHECK (self_report IS NULL OR self_report IN ('completed_to_spec','completed_spec_mismatch','unable_to_complete','refused_unsafe','no_claim'));\n- ALTER TABLE workflow_job_submissions ADD COLUMN incomplete_items jsonb NOT NULL DEFAULT '[]'::jsonb;\n- CREATE INDEX workflow_job_submissions_self_report_idx ON workflow_job_submissions (self_report) WHERE self_report IS NOT NULL;\n- Add COMMENT ON COLUMN rows documenting semantics.\n- Register in Code&DBs/Workflow/system_authority/workflow_migration_authority.json (canonical_manifest + policy_buckets.canonical + expected_objects) and regenerate via system_authority/generate_workflow_migration_authority.py.\n\n**Tool schema** — Code&DBs/Workflow/surfaces/mcp/tools/submission.py:\n- Add self_report property to all three submit tools (praxis_submit_code_change, praxis_submit_research_result, praxis_submit_artifact_bundle) with enum constraint (4 states; no_claim is not agent-facing). NULLABLE for now.\n- Add incomplete_items as array of {path, reason} objects.\n- Thread both through tool_praxis_submit_* wrappers into workflow_submission.submit_*.\n\n**Frontdoor** — Code&DBs/Workflow/surfaces/api/workflow_submission.py:\n- _submit() accepts self_report/incomplete_items kwargs, validates via _optional_text + enum whitelist, adds to payload.\n- submit_code_change/submit_research_result/submit_artifact_bundle signatures grow.\n\n**Capture** — Code&DBs/Workflow/runtime/workflow/submission_capture.py:\n- Add self_report, incomplete_items kwargs to the three submit functions (lines ~610-645) and thread into the INSERT at the _capture_submission helper.\n\n**Routing** — Code&DBs/Workflow/runtime/workflow/_execution_core.py line 728 (outcome gate block):\n- After _resolve_submission (line 711), read submission_state.self_report.\n- If self_report in ('unable_to_complete','refused_unsafe','no_claim'): set final_status='blocked' (for unable/no_claim) or 'halted_unsafe' (for refused_unsafe), skip the verify_cmd subprocess.run() entirely, log the skip.\n- Otherwise continue with existing verify path.\n- Add new status strings to whatever enum workflow_jobs.status uses; grep for existing status values to match.\n\n**Downstream-consumer inventory** — produce a markdown file at artifacts/workflow/self_report_status_consumers_inventory.md listing every site that reads workflow_jobs.status (grep for 'status ==' and 'final_status' in the runtime/ and surfaces/ trees). This inventory is the deliverable; callers that need updating to handle new statuses are called out.\n\n**Tests** — Code&DBs/Workflow/tests/unit/test_submission_self_report.py:\n- Round-trip test: submit with self_report, read back from DB.\n- Routing test: submit with self_report='unable_to_complete', assert verify_command is NOT invoked (mock subprocess.run).\n- Enum guard: submit with self_report='garbage' returns workflow_submission.invalid_input error.\n- Use rollback-isolated test conn per standing-orders policy.",
+      "read": [
+        "Code&DBs/Workflow/surfaces/mcp/tools/submission.py",
+        "Code&DBs/Workflow/surfaces/api/workflow_submission.py",
+        "Code&DBs/Workflow/runtime/workflow/submission_capture.py",
+        "Code&DBs/Workflow/runtime/workflow/_execution_core.py",
+        "Code&DBs/Databases/migrations/workflow/080_workflow_job_submissions.sql",
+        "Code&DBs/Workflow/system_authority/workflow_migration_authority.json",
+        "Code&DBs/Workflow/system_authority/generate_workflow_migration_authority.py"
+      ],
+      "write": [
+        "Code&DBs/Databases/migrations/workflow/180_workflow_submission_self_report.sql",
+        "Code&DBs/Workflow/system_authority/workflow_migration_authority.json",
+        "Code&DBs/Workflow/storage/_generated_workflow_migration_authority.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/submission.py",
+        "Code&DBs/Workflow/surfaces/api/workflow_submission.py",
+        "Code&DBs/Workflow/runtime/workflow/submission_capture.py",
+        "Code&DBs/Workflow/runtime/workflow/_execution_core.py",
+        "Code&DBs/Workflow/tests/unit/test_submission_self_report.py",
+        "artifacts/workflow/self_report_status_consumers_inventory.md"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && WORKFLOW_DATABASE_URL=postgresql://localhost:5432/praxis /Users/nate/.local/bin/praxis workflow schema apply --yes --json >/dev/null && psql postgresql://localhost:5432/praxis -tAc \"SELECT column_name FROM information_schema.columns WHERE table_name='workflow_job_submissions' AND column_name IN ('self_report','incomplete_items');\" | sort | tr '\\n' ',' | grep -q 'incomplete_items,self_report,' && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_submission_self_report.py' && test -f artifacts/workflow/self_report_status_consumers_inventory.md"
+    },
+    {
+      "label": "02_autoseal_no_claim_split",
+      "agent": "auto/build",
+      "task_type": "build",
+      "description": "Auto-seal path writes self_report='no_claim' when agent crashes/times out without submitting, distinct from agent-asserted 'unable_to_complete'",
+      "outcome_goal": "When _execution_core.py auto-seals a submission for an agent that didn't call submit (timeout/crash path around line 145-150), the sealed row has self_report='no_claim'. Agent-asserted submissions with self_report='unable_to_complete' remain a distinct value.",
+      "prompt": "Extend the auto-seal path so timeout/crash cases are distinguishable from agent self-assessments.\n\n**Target path** — Code&DBs/Workflow/runtime/workflow/_execution_core.py around line 145-150 (the auto-seal block that fires when an agent exits without calling submit):\n- When auto-sealing, write self_report='no_claim' and notes='auto-sealed: agent exited without submitting (cause=<timeout|crash|unknown>)'.\n- Distinguish timeout (subprocess.TimeoutExpired caught upstream) from crash (non-zero exit without submission) in the notes field.\n\n**Contract test** — Code&DBs/Workflow/tests/unit/test_submission_autoseal_no_claim.py:\n- Simulate a job where the agent never calls the submit tool.\n- Assert the sealed row has self_report='no_claim'.\n- Assert that downstream routing (from job 01) treats no_claim like unable_to_complete (skip verify, mark blocked).\n- Use rollback-isolated test conn.\n\nThis job is a prerequisite for job 03 (making self_report required) — the required enforcement cannot ship until every submission path, including auto-seal, populates the field.",
+      "read": [
+        "Code&DBs/Workflow/runtime/workflow/_execution_core.py",
+        "Code&DBs/Workflow/runtime/workflow/submission_capture.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/runtime/workflow/_execution_core.py",
+        "Code&DBs/Workflow/tests/unit/test_submission_autoseal_no_claim.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_submission_autoseal_no_claim.py'"
+    },
+    {
+      "label": "03_required_self_report",
+      "agent": "auto/build",
+      "task_type": "build",
+      "depends_on": ["01_core_column_routing", "02_autoseal_no_claim_split"],
+      "description": "Promote self_report from optional to required at the submit tool layer",
+      "outcome_goal": "praxis_submit_code_change without self_report returns workflow_submission.invalid_input; every new submission row has a non-null self_report; CHECK constraint on the column is tightened to NOT NULL via migration 181.",
+      "prompt": "Promote self_report to required after auto-seal (job 02) guarantees every path supplies a value.\n\n**Tool schemas** — Code&DBs/Workflow/surfaces/mcp/tools/submission.py:\n- Move self_report into the 'required' array of all three submit tool inputSchema blocks.\n\n**Frontdoor** — Code&DBs/Workflow/surfaces/api/workflow_submission.py:\n- _submit() raises SubmissionFrontdoorError (reason_code workflow_submission.invalid_input) when self_report is None/missing.\n\n**Migration 181** — Code&DBs/Databases/migrations/workflow/181_workflow_submission_self_report_required.sql:\n- UPDATE workflow_job_submissions SET self_report='no_claim' WHERE self_report IS NULL (backfill historicals);\n- ALTER TABLE workflow_job_submissions ALTER COLUMN self_report SET NOT NULL;\n- Tighten CHECK constraint to remove the 'IS NULL' branch.\n- Register migration in workflow_migration_authority.json and regenerate.\n\n**Tests** — Code&DBs/Workflow/tests/unit/test_submission_self_report_required.py:\n- Assert submit without self_report returns invalid_input.\n- Assert all enum values + no_claim are accepted.\n- Assert any other string is rejected.",
+      "read": [
+        "Code&DBs/Workflow/surfaces/mcp/tools/submission.py",
+        "Code&DBs/Workflow/surfaces/api/workflow_submission.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/surfaces/mcp/tools/submission.py",
+        "Code&DBs/Workflow/surfaces/api/workflow_submission.py",
+        "Code&DBs/Databases/migrations/workflow/181_workflow_submission_self_report_required.sql",
+        "Code&DBs/Workflow/system_authority/workflow_migration_authority.json",
+        "Code&DBs/Workflow/storage/_generated_workflow_migration_authority.py",
+        "Code&DBs/Workflow/tests/unit/test_submission_self_report_required.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && WORKFLOW_DATABASE_URL=postgresql://localhost:5432/praxis /Users/nate/.local/bin/praxis workflow schema apply --yes --json >/dev/null && psql postgresql://localhost:5432/praxis -tAc \"SELECT is_nullable FROM information_schema.columns WHERE table_name='workflow_job_submissions' AND column_name='self_report';\" | grep -q '^NO$' && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_submission_self_report_required.py'"
+    },
+    {
+      "label": "04_prompt_template_jsonmode",
+      "agent": "auto/build",
+      "task_type": "build",
+      "depends_on": ["01_core_column_routing", "03_required_self_report"],
+      "description": "Update default agent prompt template to instruct self_report selection and enforce via structured output where supported",
+      "outcome_goal": "Running an agent on a canned sample spec produces a submission with self_report populated with one of the four agent-facing enum values ≥95% of the time across 20 trial runs.",
+      "prompt": "Teach agents to populate self_report reliably.\n\n**Prompt template** — locate the default job-intro template (grep for 'acceptance_contract' or 'completion_contract' under Code&DBs/Workflow/runtime/workflow/; likely in _execution_core.py or a template module referenced there) and add a paragraph:\n\n\"When you call praxis_submit_code_change (or submit_research_result/submit_artifact_bundle), you MUST pass self_report with one of: 'completed_to_spec' (you did the work described and believe the spec was right), 'completed_spec_mismatch' (you did work you believe matches the intent, but the spec as literally written is wrong or incomplete — explain in notes), 'unable_to_complete' (you hit a blocker and did not finish — explain in notes), 'refused_unsafe' (executing this would cause real harm — explain in notes). Populate incomplete_items with any paths you could not complete.\"\n\n**Structured output** — for CLI agents that support JSON mode or constrained decoding, update the adapter in Code&DBs/Workflow/runtime/workflow/ (grep for _execute_cli and _execute_api) to declare the submit tool's self_report enum as a constrained field.\n\n**Eval harness** — artifacts/workflow/self_report_adoption_eval.py:\n- Launch 20 runs of a canned no-op spec (add to artifacts/workflow/self_report_adoption_probe.queue.json) against the default agent.\n- Read workflow_job_submissions.self_report for each run.\n- Assert ≥ 19/20 submissions have a non-null self_report ∈ {completed_to_spec, completed_spec_mismatch, unable_to_complete, refused_unsafe}.\n- Write a summary JSON at artifacts/workflow/self_report_adoption_result.json.",
+      "read": [
+        "Code&DBs/Workflow/runtime/workflow/_execution_core.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/runtime/workflow/",
+        "artifacts/workflow/self_report_adoption_eval.py",
+        "artifacts/workflow/self_report_adoption_probe.queue.json",
+        "artifacts/workflow/self_report_adoption_result.json"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 artifacts/workflow/self_report_adoption_eval.py && /opt/homebrew/bin/python3 -c \"import json; d=json.load(open('artifacts/workflow/self_report_adoption_result.json')); assert d['populated_rate'] >= 0.95, d\""
+    },
+    {
+      "label": "05_disagreement_dashboard",
+      "agent": "auto/build",
+      "task_type": "build",
+      "depends_on": ["01_core_column_routing", "03_required_self_report"],
+      "description": "View + query for (self_report × verify_result) disagreement rates, with push-alert hook",
+      "outcome_goal": "praxis workflow query 'self-report disagreement' returns a table of per-(model, workflow_id) disagreement rates; a digest writer emits a structured summary artifact that an operator notification hook consumes.",
+      "prompt": "Build the disagreement view and push path.\n\n**Migration 182** — Code&DBs/Databases/migrations/workflow/182_workflow_self_report_disagreement_view.sql:\n- CREATE VIEW workflow_self_report_disagreement AS SELECT model, workflow_id, job_label, self_report, final_status, error_code, COUNT(*) AS n, ...\n- Group by (model, workflow_id, self_report, final_status).\n- Compute disagreement_rate as share of rows with self_report='completed_to_spec' AND final_status='failed'.\n- Register migration as usual.\n\n**Query surface** — wire into praxis workflow query by adding a recognizer in the query catalog (search for an existing 'status' or 'bugs' query handler under surfaces/ and mirror the pattern). Phrase match: 'self-report disagreement', 'self report disagreement'.\n\n**Digest writer** — Code&DBs/Workflow/runtime/workflow/self_report_digest.py:\n- Function write_self_report_digest(since: datetime) -> Path that emits artifacts/workflow/self_report_digest_<ts>.json with top-N disagreement cells and spec names.\n- Include a threshold flag (disagreement_rate > 0.2 over ≥5 runs) for operator attention.\n\n**Tests** — tests/unit/test_self_report_disagreement.py:\n- Seed synthetic rows with known disagreement rates.\n- Assert the view returns expected aggregates.\n- Assert digest writer produces a valid artifact.",
+      "read": [
+        "Code&DBs/Workflow/runtime/workflow/_execution_core.py"
+      ],
+      "write": [
+        "Code&DBs/Databases/migrations/workflow/182_workflow_self_report_disagreement_view.sql",
+        "Code&DBs/Workflow/system_authority/workflow_migration_authority.json",
+        "Code&DBs/Workflow/storage/_generated_workflow_migration_authority.py",
+        "Code&DBs/Workflow/runtime/workflow/self_report_digest.py",
+        "Code&DBs/Workflow/surfaces/",
+        "Code&DBs/Workflow/tests/unit/test_self_report_disagreement.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && WORKFLOW_DATABASE_URL=postgresql://localhost:5432/praxis /Users/nate/.local/bin/praxis workflow schema apply --yes --json >/dev/null && psql postgresql://localhost:5432/praxis -tAc \"SELECT COUNT(*) FROM pg_views WHERE viewname='workflow_self_report_disagreement';\" | grep -q '^1$' && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_self_report_disagreement.py'"
+    },
+    {
+      "label": "06_enforce_verify_command_at_spec_creation",
+      "agent": "auto/build",
+      "task_type": "build",
+      "depends_on": ["01_core_column_routing", "03_required_self_report"],
+      "description": "Block spec registration if any job lacks verify_command (root-cause fix for gateless specs)",
+      "outcome_goal": "praxis workflow run <spec.json> rejects with a clear error when any job in the spec has no verify_command; existing specs already conforming continue to pass.",
+      "prompt": "Enforce verify_command at spec validation time — stop gateless specs from reaching the worker.\n\n**Validator** — locate the spec validation path (grep for 'verify_command' in Code&DBs/Workflow/runtime/workflow/; likely in spec_snapshot.py or a validate module referenced from praxis_workflow_validate). Add a check: for every job in spec.jobs, assert job.verify_command is a non-empty string. Reject with a structured error listing the offending job labels.\n\n**Exception policy** — if there is a legitimate reason a job can be gateless (e.g. architecture/planning jobs that produce a doc), require an explicit 'verify_exempt: true' flag and a 'verify_exempt_reason' string. Do not silently allow missing verify_commands.\n\n**Audit** — run validator over every existing spec under config/cascade/specs/. Write an audit report at artifacts/workflow/gateless_spec_audit_20260420.md listing specs that would fail the new check. Do NOT modify those specs in this job — surface the list.\n\n**Tests** — tests/unit/test_spec_verify_command_required.py:\n- Valid spec passes.\n- Spec with a job missing verify_command fails with a clear reason.\n- Spec with verify_exempt=true + reason passes.\n- Spec with verify_exempt=true but no reason fails.",
+      "read": [
+        "Code&DBs/Workflow/runtime/workflow/",
+        "config/cascade/specs/"
+      ],
+      "write": [
+        "Code&DBs/Workflow/runtime/workflow/",
+        "Code&DBs/Workflow/tests/unit/test_spec_verify_command_required.py",
+        "artifacts/workflow/gateless_spec_audit_20260420.md"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_spec_verify_command_required.py' && test -f artifacts/workflow/gateless_spec_audit_20260420.md"
+    },
+    {
+      "label": "07_expose_outcome_goal_only",
+      "agent": "auto/build",
+      "task_type": "build",
+      "depends_on": ["01_core_column_routing", "03_required_self_report"],
+      "description": "Expose outcome_goal to the agent's execution_bundle, deliberately NOT verify_command",
+      "outcome_goal": "An agent running a spec job can read outcome_goal from its execution_bundle/prompt, but verify_command is absent from anything the agent sees. Goodhart protection is documented in a comment at the exposure site.",
+      "prompt": "Thread outcome_goal into the agent's context without leaking verify_command.\n\n**Target path** — find where execution_bundle is assembled for the agent (_execution_core.py near line 642-684, execute_job's _execute_cli / _execute_api callsites). Today acceptance_contract and completion_contract are exposed. Add outcome_goal as a string field in execution_bundle (sourced from job.outcome_goal or spec_snapshot job.outcome_goal).\n\n**Do NOT** add verify_command to the bundle. Add an inline comment at the exposure site explaining the Goodhart rationale (the oracle must remain independent of the optimizer).\n\n**Prompt assembly** — update the prompt template so 'outcome_goal' is visible to the agent in its system/user prompt. Phrasing: 'Your work will be judged on whether it produces this observable outcome: <outcome_goal>. A separate verifier will check — you do not see the exact command.'\n\n**Tests** — tests/unit/test_execution_bundle_exposure.py:\n- Assert execution_bundle passed to the agent contains outcome_goal.\n- Assert execution_bundle passed to the agent does NOT contain verify_command (regression test).\n- Assert prompt text includes the outcome_goal string.",
+      "read": [
+        "Code&DBs/Workflow/runtime/workflow/_execution_core.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/runtime/workflow/_execution_core.py",
+        "Code&DBs/Workflow/tests/unit/test_execution_bundle_exposure.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_execution_bundle_exposure.py'"
+    },
+    {
+      "label": "08_crossrun_aggregation_view",
+      "agent": "auto/build",
+      "task_type": "build",
+      "depends_on": ["01_core_column_routing"],
+      "description": "Per-spec rollup of (self_report × verify_result) tuples; view-only, no auto-triggers",
+      "outcome_goal": "A view workflow_spec_self_report_rollup aggregates by spec_content_hash and returns counts per (self_report, final_status) cell; operator queries return rows and the top-N divergent specs.",
+      "prompt": "Build the per-spec aggregation view. Auto-filing bugs on thresholds comes in a later job (12) — this one is view-only so operators can observe patterns before automating.\n\n**Schema prerequisite** — ensure workflow_jobs or a related table captures a spec_content_hash per job (grep for spec_snapshot and content_hash). If no hash exists, add one in a small migration and populate it from spec JSON at run time. If the hash already exists, use it.\n\n**Migration 183** — Code&DBs/Databases/migrations/workflow/183_workflow_spec_self_report_rollup.sql:\n- CREATE VIEW workflow_spec_self_report_rollup AS SELECT spec_content_hash, workflow_id, self_report, final_status, COUNT(*) AS n, MAX(sealed_at) AS last_seen FROM workflow_job_submissions JOIN workflow_jobs USING (run_id, job_label) GROUP BY 1,2,3,4;\n- Register as usual.\n\n**Query phrase** — extend the query catalog so 'spec self-report rollup' returns the rollup with spec name and operator-friendly columns.\n\n**Tests** — tests/unit/test_spec_self_report_rollup.py: seed rows across multiple runs of the same spec, assert the rollup aggregates correctly.",
+      "read": [
+        "Code&DBs/Workflow/runtime/workflow/"
+      ],
+      "write": [
+        "Code&DBs/Databases/migrations/workflow/183_workflow_spec_self_report_rollup.sql",
+        "Code&DBs/Workflow/system_authority/workflow_migration_authority.json",
+        "Code&DBs/Workflow/storage/_generated_workflow_migration_authority.py",
+        "Code&DBs/Workflow/tests/unit/test_spec_self_report_rollup.py",
+        "Code&DBs/Workflow/surfaces/"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && WORKFLOW_DATABASE_URL=postgresql://localhost:5432/praxis /Users/nate/.local/bin/praxis workflow schema apply --yes --json >/dev/null && psql postgresql://localhost:5432/praxis -tAc \"SELECT COUNT(*) FROM pg_views WHERE viewname='workflow_spec_self_report_rollup';\" | grep -q '^1$' && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_spec_self_report_rollup.py'"
+    },
+    {
+      "label": "09_approve_override_gate",
+      "agent": "auto/build",
+      "task_type": "build",
+      "depends_on": ["01_core_column_routing"],
+      "description": "Grow praxis_review_submission with approve_override_gate decision requiring evidence citations",
+      "outcome_goal": "praxis_review_submission with decision='approve_override_gate' and non-empty evidence_refs succeeds; without evidence_refs it fails with invalid_input; the review row records the override decision separately from the submission's own self_report.",
+      "prompt": "Add an operator-override decision that closes the 'agent and gate disagree' resolution channel.\n\n**Tool schema** — Code&DBs/Workflow/surfaces/mcp/tools/submission.py praxis_review_submission:\n- Extend the decision enum: approve | request_changes | reject | approve_override_gate.\n- When decision == approve_override_gate, require evidence_refs (non-empty array of artifact/decision refs citing why the gate is wrong).\n\n**Frontdoor validator** — workflow_submission.py _review_submission: validate evidence_refs presence + shape for the override case. Reject otherwise.\n\n**Capture** — submission_capture.py: persist the new decision value and evidence_refs on the workflow_job_submission_reviews row. Ensure the existing CHECK constraint on decision accepts the new value (migration 184 to widen the check).\n\n**Migration 184** — Code&DBs/Databases/migrations/workflow/184_workflow_review_override_gate.sql:\n- ALTER TABLE workflow_job_submission_reviews DROP CONSTRAINT workflow_job_submission_reviews_decision_check;\n- ALTER TABLE workflow_job_submission_reviews ADD CONSTRAINT workflow_job_submission_reviews_decision_check CHECK (decision IN ('approve','request_changes','reject','approve_override_gate'));\n- Register as usual.\n\n**Tests** — tests/unit/test_review_override_gate.py:\n- approve_override_gate without evidence_refs → invalid_input.\n- approve_override_gate with evidence_refs → review row persisted.\n- Non-override decisions unchanged.",
+      "read": [
+        "Code&DBs/Workflow/surfaces/mcp/tools/submission.py",
+        "Code&DBs/Workflow/surfaces/api/workflow_submission.py",
+        "Code&DBs/Workflow/runtime/workflow/submission_capture.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/surfaces/mcp/tools/submission.py",
+        "Code&DBs/Workflow/surfaces/api/workflow_submission.py",
+        "Code&DBs/Workflow/runtime/workflow/submission_capture.py",
+        "Code&DBs/Databases/migrations/workflow/184_workflow_review_override_gate.sql",
+        "Code&DBs/Workflow/system_authority/workflow_migration_authority.json",
+        "Code&DBs/Workflow/storage/_generated_workflow_migration_authority.py",
+        "Code&DBs/Workflow/tests/unit/test_review_override_gate.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && WORKFLOW_DATABASE_URL=postgresql://localhost:5432/praxis /Users/nate/.local/bin/praxis workflow schema apply --yes --json >/dev/null && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_review_override_gate.py'"
+    },
+    {
+      "label": "10_trust_score_calibration",
+      "agent": "auto/build",
+      "task_type": "build",
+      "depends_on": ["05_disagreement_dashboard", "08_crossrun_aggregation_view"],
+      "description": "Per-agent/model trust score + periodic calibration sampling to avoid feedback-loop blind spot",
+      "outcome_goal": "A function trust_score(agent_id) returns a float in [0,1] computed from (claim × verify-agree × operator-override) rates over a rolling window; a scheduled sampler flags N random high-trust runs per day for mandatory human review regardless of verify outcome.",
+      "prompt": "Compute per-agent trust scores and schedule calibration sampling.\n\n**Migration 185** — Code&DBs/Databases/migrations/workflow/185_agent_trust_score.sql:\n- CREATE TABLE agent_trust_snapshots (agent_id text, model text, window_start timestamptz, window_end timestamptz, claim_count int, verify_agree_count int, operator_override_count int, trust_score real, computed_at timestamptz, PRIMARY KEY (agent_id, model, window_end));\n- Register as usual.\n\n**Computation** — Code&DBs/Workflow/runtime/workflow/trust_score.py:\n- compute_trust_score(agent_id, model, window_days=7) reads workflow_job_submissions JOIN workflow_job_submission_reviews; returns (score, components). Score = verify_agree_rate × (1 - operator_override_rate), with small-sample prior.\n- Snapshot function writes to agent_trust_snapshots.\n\n**Calibration sampler** — Code&DBs/Workflow/runtime/workflow/trust_score_calibration.py:\n- Function sample_calibration_runs(k=5) picks k high-trust runs (trust_score >= 0.9) from the last 24h and inserts a row into a new trust_calibration_queue table flagging them for mandatory human review regardless of pass/fail.\n- Include in migration 185.\n\n**Tests** — tests/unit/test_trust_score.py:\n- Seeded data produces expected score.\n- Calibration sampler selects high-trust runs only.\n- Override events reduce trust score.",
+      "read": [
+        "Code&DBs/Workflow/runtime/workflow/"
+      ],
+      "write": [
+        "Code&DBs/Databases/migrations/workflow/185_agent_trust_score.sql",
+        "Code&DBs/Workflow/system_authority/workflow_migration_authority.json",
+        "Code&DBs/Workflow/storage/_generated_workflow_migration_authority.py",
+        "Code&DBs/Workflow/runtime/workflow/trust_score.py",
+        "Code&DBs/Workflow/runtime/workflow/trust_score_calibration.py",
+        "Code&DBs/Workflow/tests/unit/test_trust_score.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && WORKFLOW_DATABASE_URL=postgresql://localhost:5432/praxis /Users/nate/.local/bin/praxis workflow schema apply --yes --json >/dev/null && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_trust_score.py'"
+    },
+    {
+      "label": "11_incomplete_items_field",
+      "agent": "auto/build",
+      "task_type": "build",
+      "depends_on": ["01_core_column_routing"],
+      "description": "Structured incomplete_items array instead of a 5th enum state for partial completion",
+      "outcome_goal": "Agents can submit with self_report='completed_to_spec' (or 'unable_to_complete') and incomplete_items=[{path: ..., reason: ...}, ...]; the field is readable in workflow_job_submissions and surfaced in the submission read API.",
+      "prompt": "Finalize the incomplete_items structured field (the column was created in job 01; this job wires the semantics, validation, and surface).\n\n**Shape** — incomplete_items is an array of objects: [{\"path\": \"<file_or_section>\", \"reason\": \"<short text>\"}, ...]. Enforced via JSON-schema check in the frontdoor.\n\n**Validator** — workflow_submission.py: validate incomplete_items shape (array of objects with required path + reason fields; empty array allowed).\n\n**Read surface** — get_submission returns incomplete_items in the response payload.\n\n**Prompt guidance** — update the agent prompt template (coordinating with job 04): 'If you did not complete everything the spec implies, list each unfinished item in incomplete_items with path and reason. This is orthogonal to self_report — you can be completed_to_spec with an empty incomplete_items, or unable_to_complete with a non-empty one.'\n\n**Tests** — tests/unit/test_incomplete_items.py:\n- Valid shape persists and reads back.\n- Array of non-objects rejected.\n- Empty array accepted.\n- Missing path/reason keys rejected.",
+      "read": [
+        "Code&DBs/Workflow/surfaces/api/workflow_submission.py",
+        "Code&DBs/Workflow/runtime/workflow/submission_capture.py"
+      ],
+      "write": [
+        "Code&DBs/Workflow/surfaces/api/workflow_submission.py",
+        "Code&DBs/Workflow/runtime/workflow/submission_capture.py",
+        "Code&DBs/Workflow/tests/unit/test_incomplete_items.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_incomplete_items.py'"
+    },
+    {
+      "label": "12_bug_surface_integration",
+      "agent": "auto/build",
+      "task_type": "build",
+      "depends_on": ["08_crossrun_aggregation_view"],
+      "description": "Auto-file a spec-level bug when completed_spec_mismatch exceeds threshold on the same spec_content_hash",
+      "outcome_goal": "When the rollup view (from job 08) shows ≥3 runs with self_report='completed_spec_mismatch' on the same spec_content_hash, a bug row is filed once (idempotent via dedup key = spec_content_hash + 'completed_spec_mismatch') in the Praxis bug surface with links to the offending submissions.",
+      "prompt": "Bridge the aggregation view to the bug surface with an explicit dedup key.\n\n**Filer** — Code&DBs/Workflow/runtime/workflow/self_report_bug_filer.py:\n- Function scan_and_file(threshold=3) queries workflow_spec_self_report_rollup, finds spec_content_hash rows with n >= threshold and self_report='completed_spec_mismatch'.\n- For each, check if a bug already exists with dedup_key = 'self_report_mismatch::<spec_content_hash>' (query praxis_bugs). If not, file one via the praxis_bugs tool with command='create', title referencing spec name, evidence_refs listing the N submission_ids.\n- Return a list of filed / skipped / errored entries.\n\n**Scheduler** — wire scan_and_file into the daily heartbeat path (grep for praxis_daily_heartbeat in Code&DBs/Workflow/; it appears in the deferred tool list, so a runtime entry exists).\n\n**Tests** — tests/unit/test_self_report_bug_filer.py (uses rollback-isolated bug-surface writes per standing orders):\n- Seed 3 completed_spec_mismatch rows on one spec_content_hash.\n- Run scan_and_file; assert one bug created with the dedup key.\n- Run again; assert no duplicate (idempotent).\n- Cite the bug-surface isolation policy in the test docstring.",
+      "read": [
+        "Code&DBs/Workflow/runtime/workflow/"
+      ],
+      "write": [
+        "Code&DBs/Workflow/runtime/workflow/self_report_bug_filer.py",
+        "Code&DBs/Workflow/tests/unit/test_self_report_bug_filer.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_self_report_bug_filer.py'"
+    },
+    {
+      "label": "13_downstream_propagation_halt_default",
+      "agent": "auto/build",
+      "task_type": "build",
+      "depends_on": ["01_core_column_routing"],
+      "description": "Propagate upstream self_report into downstream job execution_bundle with default=halt policy",
+      "outcome_goal": "When job A (upstream) submits with self_report='completed_spec_mismatch', dependent job B by default refuses to run; B's spec must include 'tolerate_upstream_concerns: true' to proceed with the upstream self_report visible in its execution_bundle as 'upstream_concerns'.",
+      "prompt": "Make downstream jobs aware of upstream self_reports with a safe-by-default halt policy.\n\n**DAG resolution** — locate the DAG traversal that picks the next runnable job (grep for 'depends_on' under runtime/workflow/). When resolving a job whose upstream has self_report in {'completed_spec_mismatch'}, check the downstream job spec for 'tolerate_upstream_concerns' (default false).\n- If tolerate_upstream_concerns is false: mark the downstream job status='halted_upstream_concerns' without running it.\n- If tolerate_upstream_concerns is true: proceed; thread upstream_concerns into the downstream execution_bundle with fields {upstream_label, self_report, notes}.\n\n**Spec validator** — extend validator (from job 06) to recognize tolerate_upstream_concerns as a valid optional field on jobs.\n\n**Tests** — tests/unit/test_downstream_propagation.py:\n- Upstream = completed_to_spec → downstream runs normally, no upstream_concerns in bundle.\n- Upstream = completed_spec_mismatch + downstream without tolerate → downstream halted_upstream_concerns.\n- Upstream = completed_spec_mismatch + downstream with tolerate=true → downstream runs with upstream_concerns populated.",
+      "read": [
+        "Code&DBs/Workflow/runtime/workflow/"
+      ],
+      "write": [
+        "Code&DBs/Workflow/runtime/workflow/",
+        "Code&DBs/Workflow/tests/unit/test_downstream_propagation.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_downstream_propagation.py'"
+    },
+    {
+      "label": "14_refused_unsafe_triage_queue",
+      "agent": "auto/build",
+      "task_type": "build",
+      "depends_on": ["01_core_column_routing"],
+      "description": "Route refused_unsafe submissions to an operator triage queue with SLA, not automatic hard-halt",
+      "outcome_goal": "A submission with self_report='refused_unsafe' creates a row in operator_safety_triage with sla_deadline and status='pending'; the spec_content_hash is NOT automatically blocked from other agents (avoids rogue-refusal lockout); the row surfaces in a praxis workflow query call.",
+      "prompt": "Build the operator triage path for refused_unsafe cases.\n\n**Migration 186** — Code&DBs/Databases/migrations/workflow/186_operator_safety_triage.sql:\n- CREATE TABLE operator_safety_triage (triage_id text PRIMARY KEY, submission_id text NOT NULL REFERENCES workflow_job_submissions, spec_content_hash text, agent_id text, self_report_notes text, status text CHECK (status IN ('pending','accepted_halt','dismissed','escalated')), sla_deadline timestamptz NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), resolved_at timestamptz, resolution_notes text);\n- Default SLA = 24h.\n- Register as usual.\n\n**Trigger** — in _execution_core.py (or post-seal hook), on self_report='refused_unsafe': insert into operator_safety_triage with sla_deadline = now() + 24h. Do NOT block the spec from other agents; that would enable rogue refusals to lock the spec space.\n\n**Query** — extend the query catalog: 'safety triage' returns pending triage rows sorted by sla_deadline.\n\n**Tests** — tests/unit/test_refused_unsafe_triage.py:\n- refused_unsafe submission creates one triage row with sla_deadline in the future.\n- Two refused_unsafe on same spec_content_hash create two triage rows (no auto-dedup; operator resolves).\n- Spec is NOT blocked from other agents (a later run against same spec still reaches the worker).",
+      "read": [
+        "Code&DBs/Workflow/runtime/workflow/_execution_core.py"
+      ],
+      "write": [
+        "Code&DBs/Databases/migrations/workflow/186_operator_safety_triage.sql",
+        "Code&DBs/Workflow/system_authority/workflow_migration_authority.json",
+        "Code&DBs/Workflow/storage/_generated_workflow_migration_authority.py",
+        "Code&DBs/Workflow/runtime/workflow/_execution_core.py",
+        "Code&DBs/Workflow/surfaces/",
+        "Code&DBs/Workflow/tests/unit/test_refused_unsafe_triage.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && WORKFLOW_DATABASE_URL=postgresql://localhost:5432/praxis /Users/nate/.local/bin/praxis workflow schema apply --yes --json >/dev/null && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_refused_unsafe_triage.py'"
+    },
+    {
+      "label": "15_second_opinion_routing",
+      "agent": "auto/build",
+      "task_type": "build",
+      "depends_on": ["10_trust_score_calibration"],
+      "description": "Opt-in auto-launch of same spec against a second model when completed_to_spec + verify fails, gated by trust score and per-spec compute budget",
+      "outcome_goal": "When a submission has self_report='completed_to_spec' and final_status='failed' AND agent trust_score >= 0.8 AND per-spec daily second-opinion budget not exhausted AND spec.second_opinion_enabled=true, a spawn workflow fires against a different provider/model and records the tie-break result.",
+      "prompt": "Implement gated second-opinion auto-routing.\n\n**Config fields** — add workflow-spec-level fields: second_opinion_enabled (bool, default false — opt-in), second_opinion_daily_budget (int, default 3). Stored alongside existing spec-level config.\n\n**Migration 187** — Code&DBs/Databases/migrations/workflow/187_second_opinion_ledger.sql:\n- CREATE TABLE second_opinion_launches (launch_id text PRIMARY KEY, original_run_id text, original_submission_id text, second_run_id text, spec_content_hash text, trigger_day date, original_agent_id text, second_agent_id text, original_verdict text, second_verdict text, created_at timestamptz DEFAULT now());\n- CREATE INDEX second_opinion_launches_spec_day_idx ON second_opinion_launches (spec_content_hash, trigger_day);\n- Register as usual.\n\n**Router** — Code&DBs/Workflow/runtime/workflow/second_opinion.py:\n- Function should_launch_second_opinion(submission, job_row, spec_config, trust_score) returns bool. Gate on: self_report='completed_to_spec', final_status='failed', trust_score >= 0.8, spec.second_opinion_enabled, budget remaining today.\n- Function launch_second_opinion(submission) spawns a new workflow run of the same spec with an explicit agent override to a different provider/model, records a second_opinion_launches row.\n- Wire as a post-seal hook after the outcome gate block in _execution_core.py.\n\n**Tests** — tests/unit/test_second_opinion.py:\n- Gate honors trust_score threshold.\n- Gate honors daily budget (3rd launch same day = skip).\n- Gate requires spec opt-in.\n- On launch, second_run has different agent_id from original.",
+      "read": [
+        "Code&DBs/Workflow/runtime/workflow/_execution_core.py",
+        "Code&DBs/Workflow/runtime/workflow/trust_score.py"
+      ],
+      "write": [
+        "Code&DBs/Databases/migrations/workflow/187_second_opinion_ledger.sql",
+        "Code&DBs/Workflow/system_authority/workflow_migration_authority.json",
+        "Code&DBs/Workflow/storage/_generated_workflow_migration_authority.py",
+        "Code&DBs/Workflow/runtime/workflow/second_opinion.py",
+        "Code&DBs/Workflow/runtime/workflow/_execution_core.py",
+        "Code&DBs/Workflow/tests/unit/test_second_opinion.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && WORKFLOW_DATABASE_URL=postgresql://localhost:5432/praxis /Users/nate/.local/bin/praxis workflow schema apply --yes --json >/dev/null && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_second_opinion.py'"
+    },
+    {
+      "label": "16_posthoc_revision_dual_status",
+      "agent": "auto/build",
+      "task_type": "build",
+      "depends_on": ["09_approve_override_gate"],
+      "description": "Dual-status tracking — original (agent+oracle) separate from effective (after operator override)",
+      "outcome_goal": "workflow_job_submissions exposes final_status_original (immutable, from agent+oracle) and final_status_effective (from latest review row, defaulting to original when no override); both are queryable; trust score computation (job 10) uses the ORIGINAL status, dashboards default to EFFECTIVE.",
+      "prompt": "Separate the operator-overridden ground truth from the oracle-claimed ground truth so analytics don't conflate them.\n\n**Migration 188** — Code&DBs/Databases/migrations/workflow/188_workflow_submission_dual_status.sql:\n- ALTER TABLE workflow_job_submissions ADD COLUMN final_status_original text;\n- Backfill final_status_original = final_status for existing rows (one-time UPDATE).\n- Add a computed VIEW workflow_submissions_dual_status AS SELECT s.*, COALESCE(r_latest.effective_status, s.final_status_original) AS final_status_effective FROM workflow_job_submissions s LEFT JOIN LATERAL (SELECT CASE WHEN decision='approve_override_gate' THEN 'succeeded' ELSE NULL END AS effective_status FROM workflow_job_submission_reviews WHERE submission_id=s.submission_id ORDER BY reviewed_at DESC LIMIT 1) r_latest ON true;\n- Register as usual.\n\n**Writer** — wherever final_status is set on workflow_job_submissions (grep for 'final_status' in submission_capture.py and _execution_core.py), also write final_status_original at seal time. final_status itself remains the 'current effective' status that the runtime reads.\n\n**Analytics update** — trust_score.py (from job 10): change the score computation to use final_status_original, not final_status. Add a comment explaining why (operator overrides shouldn't improve an agent's trust score on a case where the gate said fail).\n\n**Dashboards** — disagreement dashboard (job 05) default display uses final_status_effective with a toggle for original. Rollup view (job 08) exposes both.\n\n**Tests** — tests/unit/test_dual_status_tracking.py:\n- Seal a submission with final_status='failed'; assert final_status_original='failed'.\n- Insert an approve_override_gate review; assert final_status_effective='succeeded' while final_status_original stays 'failed'.\n- Trust score computation ignores the override (uses original).",
+      "read": [
+        "Code&DBs/Workflow/runtime/workflow/_execution_core.py",
+        "Code&DBs/Workflow/runtime/workflow/submission_capture.py",
+        "Code&DBs/Workflow/runtime/workflow/trust_score.py"
+      ],
+      "write": [
+        "Code&DBs/Databases/migrations/workflow/188_workflow_submission_dual_status.sql",
+        "Code&DBs/Workflow/system_authority/workflow_migration_authority.json",
+        "Code&DBs/Workflow/storage/_generated_workflow_migration_authority.py",
+        "Code&DBs/Workflow/runtime/workflow/submission_capture.py",
+        "Code&DBs/Workflow/runtime/workflow/_execution_core.py",
+        "Code&DBs/Workflow/runtime/workflow/trust_score.py",
+        "Code&DBs/Workflow/tests/unit/test_dual_status_tracking.py"
+      ],
+      "verify_command": "cd /Users/nate/Praxis && WORKFLOW_DATABASE_URL=postgresql://localhost:5432/praxis /Users/nate/.local/bin/praxis workflow schema apply --yes --json >/dev/null && PYTHONPATH='Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q 'Code&DBs/Workflow/tests/unit/test_dual_status_tracking.py'"
+    }
+  ]
+}

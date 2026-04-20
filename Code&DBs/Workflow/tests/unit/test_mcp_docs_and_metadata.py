@@ -11,13 +11,21 @@ def test_every_tool_has_complete_cli_metadata() -> None:
 
     for definition in catalog.values():
         assert definition.cli_surface
-        assert definition.cli_tier in {"stable", "advanced", "session"}
+        assert definition.cli_tier in {"stable", "advanced", "curated", "session"}
         assert definition.cli_entrypoint
         assert definition.cli_describe_command
         assert definition.cli_when_to_use
         assert definition.cli_when_not_to_use
         assert definition.cli_examples
         assert definition.risk_levels
+
+
+def test_daily_heartbeat_owns_the_heartbeat_alias() -> None:
+    catalog = get_tool_catalog()
+
+    assert catalog["praxis_daily_heartbeat"].cli_recommended_alias == "heartbeat"
+    assert catalog["praxis_daily_heartbeat"].cli_entrypoint == "workflow heartbeat"
+    assert catalog["praxis_heartbeat"].cli_recommended_alias is None
 
 
 def test_checked_in_mcp_docs_match_generated_catalog() -> None:

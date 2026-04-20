@@ -21,7 +21,7 @@ from ._claiming import claim_one, complete_job, reap_stale_claims, reap_stale_ru
 from ._execution_core import execute_job
 from runtime.execution_transport import resolve_execution_transport
 from runtime._workflow_database import resolve_runtime_database_url
-from runtime.self_healing import normalize_failure_code
+from runtime.self_healing import derive_terminal_reason_code
 from runtime.system_events import emit_system_event
 from storage.postgres.validators import PostgresConfigurationError
 
@@ -70,12 +70,11 @@ def _list_ready_graph_runs(
     return [dict(row) for row in rows or ()]
 
 
-def _worker_error_code(exc: BaseException, *, fallback: str) -> str:
-    for attr in ("failure_code", "reason_code", "error_code", "code"):
-        value = getattr(exc, attr, None)
-        if isinstance(value, str) and value.strip():
-            return normalize_failure_code(value.strip(), str(exc))
-    return normalize_failure_code(fallback, str(exc))
+# BUG-CBC73AB3: worker-layer exception→reason_code translation is owned by
+# ``runtime.self_healing.derive_terminal_reason_code``. Keeping this alias
+# preserves the call-site names in this module without re-creating a second
+# independent authority.
+_worker_error_code = derive_terminal_reason_code
 
 
 def _fail_graph_run_closed(

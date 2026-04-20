@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 from dataclasses import dataclass
-from typing import Protocol, Sequence
+from collections.abc import Mapping, Sequence
+from typing import Protocol
 
 if TYPE_CHECKING:
     from memory.engine import MemoryEngine
@@ -44,6 +45,16 @@ class MemoryGraphMutationRepository(Protocol):
         duplicate_entity_ids: Sequence[str],
     ) -> dict[str, object]:
         """Collapse exact-duplicate entities into the canonical survivor."""
+
+    def replace_vector_neighbor_projection(
+        self,
+        *,
+        source_entity_id: str,
+        neighbors: Sequence[Mapping[str, object]],
+        policy_key: str,
+        embedding_version: int,
+    ) -> int:
+        """Replace the vector-neighbor projection for one source entity."""
 
 
 def resolve_memory_graph_mutation_repository(

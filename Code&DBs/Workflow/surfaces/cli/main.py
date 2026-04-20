@@ -39,6 +39,7 @@ from .commands.authority import (
 from .commands.files import _files_command
 from .commands.handoff import _handoff_command
 from .commands.data import _data_command
+from .commands.heartbeat import _heartbeat_command
 from .commands.maintenance import _maintenance_command
 from .commands.operate import (
     _api_command,
@@ -181,6 +182,10 @@ _COMMAND_INDEX_ENTRIES: list[dict[str, str]] = [
     {
         "command": "workflow health|health-map|metrics|events|cache|circuits|slots|params|config|notifications|dashboard|api [routes|--host|--port]|routes|supervisor|capabilities|work",
         "description": "Operator and platform surfaces",
+    },
+    {
+        "command": "workflow heartbeat [--scope <scope>] [--pretty]",
+        "description": "Run the daily external-health heartbeat",
     },
     {"command": "workflow native-operator instance|health|db-health|bootstrap|db-bootstrap|smoke|inspect|status|graph-topology|graph-lineage|cockpit|route-disable|roadmap-write|work-item-closeout|roadmap-tree|provider-onboard|native-primary-cutover-gate", "description": "Repo-local operator surface"},
     {"command": "workflow roadmap view|status|scoreboard|graph|write|closeout", "description": "CQRS-native roadmap query/command frontdoor"},
@@ -452,6 +457,7 @@ def _workflow_arg_commands() -> dict[str, ArgsCommandHandler]:
         "discover": _discover_command,
         "artifacts": _artifacts_command,
         "health": _health_command,
+        "heartbeat": _heartbeat_command,
         "receipts": _receipts_command,
         "diagnose": _lazy_workflow_args_command("_diagnose_command"),
         "inspect-job": _lazy_workflow_args_command("_inspect_job_command"),
@@ -669,6 +675,7 @@ def _help_text() -> str:
             "  workflow work claim --subscription-id <id> --run-id <run_id>",
             "  workflow inspect <run_id>",
             "  workflow replay <run_id>",
+            "  workflow heartbeat [--scope <scope>] [--pretty]",
             "  workflow routes",
             "  workflow native-operator instance",
             "  workflow roadmap view",
@@ -687,7 +694,7 @@ def _help_text() -> str:
             "  workflow handoff <latest|lineage|status|history>",
             "  workflow schema|registry|object-type|object-field|object|catalog|files|reload|reconcile",
             "  workflow query|recall|discover|research|architecture|artifacts|bugs|costs|leaderboard|trust|fitness|trends|scope|risk|reviews|receipts",
-            "  workflow run|preview|run-status|status|active|scheduler|loop|debate|runs|manifest|triggers|retry|cancel|repair|heal|verify|verify-platform|pipeline|proof|queue|diagnose|inspect-job",
+            "  workflow run|preview|run-status|status|active|scheduler|loop|debate|runs|manifest|triggers|retry|cancel|repair|heal|verify|verify-platform|pipeline|proof|queue|diagnose|inspect-job|heartbeat",
             "  workflow inspect|replay|graph-topology|graph-lineage|topology|lineage",
             "  workflow health|health-map|metrics|events|cache|circuits|slots|params|config|notifications|dashboard|api [routes|--host|--port]|routes|supervisor|capabilities|work",
             "  workflow integrations",
@@ -696,6 +703,8 @@ def _help_text() -> str:
             "                                                  Integration management via the catalog-backed MCP tool",
             "  workflow maintenance",
             "                                                  Backfill failure classification fields from canonical receipts",
+            "  workflow heartbeat [--scope <scope>] [--pretty]",
+            "                                                  Run the daily external-health heartbeat",
             "  workflow native-operator instance|health|db-health|bootstrap|db-bootstrap|smoke|inspect|status|graph-topology|graph-lineage|cockpit|route-disable|roadmap-write|work-item-closeout|roadmap-tree|provider-onboard|native-primary-cutover-gate",
             "  workflow roadmap view|status|scoreboard|graph|write|closeout",
             "  workflow compile|github",

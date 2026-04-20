@@ -28,9 +28,29 @@ def _workflow_build_path(candidate: str) -> bool:
     return candidate.startswith("/api/workflows/") and "/build" in candidate[len("/api/workflows/") :]
 
 
+def _object_type_fields_path(candidate: str) -> bool:
+    path = candidate.split("?", 1)[0]
+    prefix = "/api/object-types/"
+    if not path.startswith(prefix):
+        return False
+    tail = path[len(prefix):]
+    return tail.endswith("/fields") and tail.count("/") == 1
+
+
+def _object_type_field_path(candidate: str) -> bool:
+    path = candidate.split("?", 1)[0]
+    prefix = "/api/object-types/"
+    if not path.startswith(prefix):
+        return False
+    tail = path[len(prefix):]
+    return "/fields/" in tail and tail.count("/") == 2
+
+
 QUERY_POST_ROUTES: list[RouteEntry] = [
     (_exact("/query"), _handler._handle_query_post),
     (_exact("/api/catalog/review-decisions"), _handler._handle_catalog_review_decisions_post),
+    (_exact("/api/object-types"), _handler._handle_object_types_post),
+    (_object_type_fields_path, _handler._handle_object_fields_post),
     (
         lambda candidate: candidate == "/api/documents"
         or (
@@ -52,6 +72,7 @@ QUERY_POST_ROUTES: list[RouteEntry] = [
 ]
 
 QUERY_PUT_ROUTES: list[RouteEntry] = [
+    (_prefix_single_segment("/api/object-types/"), _handler._handle_object_types_put),
     (_exact("/api/objects/update"), _handler._handle_objects_post),
     (_prefix_single_segment("/api/objects/"), _handler._handle_objects_put),
     (
@@ -89,6 +110,9 @@ QUERY_GET_ROUTES: list[RouteEntry] = [
     (_exact("/api/bugs/replay-ready"), _bugs._handle_bugs_replay_ready_get),
     (_exact("/api/bugs"), _bugs._handle_bugs_get),
     (_exact("/api/registries/search"), _handler._handle_registries_search_get),
+    (_exact("/api/object-types"), _handler._handle_object_types_get),
+    (_object_type_fields_path, _handler._handle_object_fields_get),
+    (_prefix_single_segment("/api/object-types/"), _handler._handle_object_types_get),
     (_prefix_suffix("/api/files/", "/content"), _handler._handle_files_get),
     (_exact("/api/files"), _handler._handle_files_get),
     (_exact("/api/documents"), _handler._handle_documents_get),
@@ -102,6 +126,8 @@ QUERY_GET_ROUTES: list[RouteEntry] = [
 ]
 
 QUERY_DELETE_ROUTES: list[RouteEntry] = [
+    (_object_type_field_path, _handler._handle_object_fields_delete),
+    (_prefix_single_segment("/api/object-types/"), _handler._handle_object_types_delete),
     (_exact("/api/objects/delete"), _handler._handle_objects_post),
     (_prefix_single_segment("/api/objects/"), _handler._handle_objects_delete),
     (_prefix_single_segment("/api/workflows/delete/"), _handler._handle_workflow_delete),

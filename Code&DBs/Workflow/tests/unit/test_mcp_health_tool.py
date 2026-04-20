@@ -113,6 +113,27 @@ def test_tool_dag_health_uses_workflow_database_env(monkeypatch) -> None:
     monkeypatch.setattr(health_tool, "workflow_database_url_for_repo", lambda repo_root, env=None: _fake_resolve(env=env))
     monkeypatch.setattr(health_tool, "get_context_cache", lambda: SimpleNamespace(stats=lambda: {"hit_rate": 0.0}))
     monkeypatch.setattr(health_tool, "_serialize", lambda value: value)
+    monkeypatch.setattr(
+        health_tool,
+        "get_route_outcomes",
+        lambda: SimpleNamespace(
+            summary=lambda **_kwargs: {
+                "provider_count": 1,
+                "healthy_provider_count": 1,
+                "unhealthy_provider_count": 0,
+                "provider_slugs": ["openai"],
+                "providers": [
+                    {
+                        "provider_slug": "openai",
+                        "consecutive_failures": 0,
+                        "healthy": True,
+                        "recent_outcomes": [],
+                    }
+                ],
+                "recent_limit": 3,
+            }
+        ),
+    )
     monkeypatch.setattr(missing_detector, "_now", lambda: datetime(2026, 4, 15, tzinfo=timezone.utc))
     monkeypatch.setattr(
         health_tool,
@@ -230,6 +251,21 @@ def test_tool_dag_health_uses_workflow_database_env(monkeypatch) -> None:
                 },
             }
         ],
+    }
+    assert result["route_outcomes"] == {
+        "provider_count": 1,
+        "healthy_provider_count": 1,
+        "unhealthy_provider_count": 0,
+        "provider_slugs": ["openai"],
+        "providers": [
+            {
+                "provider_slug": "openai",
+                "consecutive_failures": 0,
+                "healthy": True,
+                "recent_outcomes": [],
+            }
+        ],
+        "recent_limit": 3,
     }
 
 

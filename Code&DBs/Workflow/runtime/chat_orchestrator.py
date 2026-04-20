@@ -529,11 +529,21 @@ class ChatOrchestrator:
             decision_budget_window_data_quality_error = bool(
                 getattr(decision, "budget_window_data_quality_error", False)
             )
+            # BUG-2A950857: RouteEconomics.allow_payg_fallback is now consulted
+            # at admission. ``None`` for decisions that don't carry the attr
+            # (older paths / tests) keeps admission permissive.
+            raw_allow_payg_fallback = getattr(decision, "allow_payg_fallback", None)
+            decision_allow_payg_fallback = (
+                bool(raw_allow_payg_fallback)
+                if raw_allow_payg_fallback is not None
+                else None
+            )
             admitted, reason = admit_adapter_type(
                 lane_policies, provider, adapter_type,
                 spend_pressure=decision_pressure,
                 budget_authority_unreachable=decision_budget_unreachable,
                 budget_window_data_quality_error=decision_budget_window_data_quality_error,
+                allow_payg_fallback=decision_allow_payg_fallback,
             )
             if not admitted:
                 _log.info(

@@ -10,6 +10,7 @@ from runtime.engineering_observability import (
     build_code_hotspots,
     build_platform_observability,
 )
+from runtime.missing_detector import build_content_health_report
 from runtime.instance import native_instance_contract
 from runtime.primitive_contracts import (
     bug_status_sql_in_literal,
@@ -747,6 +748,12 @@ def _handle_health(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
     except Exception as exc:
         proof_payload = {"error": f"Could not compute proof metrics: {exc}"}
 
+    try:
+        memory_engine = getattr(subs, "get_memory_engine", lambda: None)()
+        content_health = build_content_health_report(memory_engine)
+    except Exception as exc:
+        content_health = {"status": "error", "reason": str(exc)}
+
     schema_authority: dict[str, Any]
     try:
         status = workflow_database_status(env=_workflow_env(subs))
@@ -784,6 +791,7 @@ def _handle_health(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
         },
         "operator_snapshot": _serialize(snap),
         "proof_metrics": proof_payload,
+        "content_health": content_health,
         "schema_authority": schema_authority,
         "dependency_truth": dependency_truth,
         "transport_support_summary": {

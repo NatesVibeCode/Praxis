@@ -121,6 +121,12 @@ class ProviderRegistryLoadTimeout(ProviderRegistryError):
 class RegistryLoadStatus(enum.Enum):
     UNLOADED = "unloaded"
     LOADED_FROM_DB = "loaded_from_db"
+    # BUG-F8283CC1: partial loads (some DB rows skipped due to parse errors)
+    # must not masquerade as authoritative. A degraded status keeps the
+    # successfully-parsed providers usable (routing continues to work) while
+    # making the degradation visible to operators rather than hiding it
+    # behind the clean "loaded_from_db" label.
+    LOADED_FROM_DB_PARTIAL = "loaded_from_db_partial"
     LOAD_FAILED = "load_failed"
 
 
@@ -135,6 +141,9 @@ _DB_LOAD_LOCK = threading.Lock()
 _load_status: RegistryLoadStatus = RegistryLoadStatus.UNLOADED
 _load_error: str | None = None
 _load_timestamp: float | None = None
+# BUG-F8283CC1: parse errors observed during the last load. Surfaces in
+# registry_health so partial-load degradation is visible rather than hidden.
+_load_skipped_rows: tuple[str, ...] = ()
 _LOAD_TIMEOUT_ENV = "PRAXIS_PROVIDER_REGISTRY_LOAD_TIMEOUT"
 _DEFAULT_LOAD_TIMEOUT = 30
 _DB_LOADED = False
@@ -186,7 +195,7 @@ def _require_database_url() -> str:
 
 
 def _record_load_failure(error: str, *, log_level: str, message: str) -> None:
-    global _load_status, _load_error, _load_timestamp, _DB_LOADED
+    global _load_status, _load_error, _load_timestamp, _DB_LOADED, _load_skipped_rows
 
     _clear_registry_state()
     if log_level == "error":
@@ -198,6 +207,7 @@ def _record_load_failure(error: str, *, log_level: str, message: str) -> None:
     _load_status = RegistryLoadStatus.LOAD_FAILED
     _load_error = error
     _load_timestamp = time.monotonic()
+    _load_skipped_rows = ()
     _DB_LOADED = True
 
 
@@ -463,7 +473,7 @@ def _load_failure_mappings(failure_rows: list[Any]) -> None:
 def _load_from_db() -> None:
     """Load provider CLI profiles from Postgres."""
 
-    global _DB_LOADED, _load_status, _load_error, _load_timestamp
+    global _DB_LOADED, _load_status, _load_error, _load_timestamp, _load_skipped_rows
     if _DB_LOADED:
         return
 
@@ -595,27 +605,49 @@ def _load_from_db() -> None:
         _load_adapter_config(config_rows)
         _load_failure_mappings(failure_rows)
 
-        _load_status = RegistryLoadStatus.LOADED_FROM_DB
-        _load_error = f"{len(parse_errors)} row(s) skipped" if parse_errors else None
+        # BUG-F8283CC1: A partial load — one or more DB rows skipped due to
+        # parse errors — must not surface as the clean "loaded_from_db"
+        # authoritative state. The successfully-parsed providers stay
+        # installed so routing keeps working, but the health surface reports
+        # the degraded status so operators see which rows are missing
+        # instead of assuming the registry is complete.
+        if parse_errors:
+            _load_status = RegistryLoadStatus.LOADED_FROM_DB_PARTIAL
+            _load_error = f"{len(parse_errors)} row(s) skipped"
+            _load_skipped_rows = tuple(parse_errors)
+        else:
+            _load_status = RegistryLoadStatus.LOADED_FROM_DB
+            _load_error = None
+            _load_skipped_rows = ()
         _load_timestamp = time.monotonic()
         _DB_LOADED = True
 
-        logger.info(
-            "provider execution registry: loaded %d provider(s) from DB%s",
-            len(loaded_registry),
-            f" ({len(parse_errors)} skipped)" if parse_errors else "",
-        )
+        if parse_errors:
+            logger.warning(
+                "provider execution registry: loaded %d provider(s) from DB with "
+                "%d row(s) skipped — partial load, authority incomplete (%s). "
+                "Closes BUG-F8283CC1.",
+                len(loaded_registry),
+                len(parse_errors),
+                "; ".join(parse_errors),
+            )
+        else:
+            logger.info(
+                "provider execution registry: loaded %d provider(s) from DB",
+                len(loaded_registry),
+            )
 
 
 def reload_from_db() -> None:
     """Force a fresh read of provider_cli_profiles on the next lookup."""
 
-    global _DB_LOADED, _load_status, _load_error, _load_timestamp
+    global _DB_LOADED, _load_status, _load_error, _load_timestamp, _load_skipped_rows
     with _DB_LOAD_LOCK:
         _DB_LOADED = False
         _load_status = RegistryLoadStatus.UNLOADED
         _load_error = None
         _load_timestamp = None
+        _load_skipped_rows = ()
     _load_from_db()
 
 
@@ -623,7 +655,18 @@ def registry_health() -> dict[str, Any]:
     """Return current load status, error details, and provider count."""
 
     _load_from_db()
-    authority_available = _load_status == RegistryLoadStatus.LOADED_FROM_DB
+    # ``authority_available`` remains True for partial loads because the
+    # providers that DID parse are still authoritative — routing can keep
+    # going for them. ``authority_complete`` is the stricter signal added by
+    # BUG-F8283CC1: True only when zero rows were skipped. Operator dashboards
+    # and the /health surface use ``authority_complete`` + ``skipped_rows`` to
+    # see that a partial load is in effect, rather than trusting the old
+    # ``status == "loaded_from_db"`` shortcut which hid the degradation.
+    authority_available = _load_status in {
+        RegistryLoadStatus.LOADED_FROM_DB,
+        RegistryLoadStatus.LOADED_FROM_DB_PARTIAL,
+    }
+    authority_complete = _load_status == RegistryLoadStatus.LOADED_FROM_DB
     return {
         "status": _load_status.value,
         "error": _load_error,
@@ -632,6 +675,8 @@ def registry_health() -> dict[str, Any]:
         "providers": sorted(_REGISTRY.keys()),
         "asyncpg_available": _ASYNCPG_AVAILABLE,
         "authority_available": authority_available,
+        "authority_complete": authority_complete,
+        "skipped_rows": list(_load_skipped_rows),
         "authority_source": "provider_cli_profiles" if authority_available else None,
         "fallback_active": False,
     }

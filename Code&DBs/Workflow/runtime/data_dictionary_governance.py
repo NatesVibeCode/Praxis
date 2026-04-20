@@ -98,12 +98,16 @@ class GovernanceViolation:
 # ---------------------------------------------------------------------------
 
 _SQL_UNOWNED_TAGS = """
+-- Only operator-layer pii/sensitive tags trip governance. Auto-detected
+-- heuristic tags are informational — if a human hasn't explicitly flagged
+-- the asset, don't file bugs about it.
 SELECT DISTINCT c.object_kind, c.tag_key
 FROM data_dictionary_classifications_effective c
 LEFT JOIN data_dictionary_stewardship_effective s
   ON s.object_kind = c.object_kind
  AND s.steward_kind = 'owner'
 WHERE c.tag_key IN ('pii', 'sensitive')
+  AND c.effective_source = 'operator'
   AND s.object_kind IS NULL
 ORDER BY c.object_kind, c.tag_key
 """
@@ -356,6 +360,8 @@ def run_governance_scan(
     tracker: BugTracker | None = None,
     *,
     dry_run: bool = False,
+    triggered_by: str = "heartbeat",
+    record_scan: bool = True,
 ) -> dict[str, Any]:
     """Scan for violations and optionally file bugs.
 
@@ -363,6 +369,12 @@ def run_governance_scan(
     the violations it found without filing anything. When `dry_run=False`
     and a tracker is supplied, every unique (policy, object, rule)
     without an already-open bug gets a new bug filed.
+
+    When `record_scan=True` (default) the scan is persisted as an
+    immutable audit row in `data_dictionary_governance_scans`, and every
+    newly-filed bug is linked back to that scan via `bug_evidence_links`
+    (evidence_kind='governance_scan'). Callers can set `record_scan=False`
+    for read-only previews that shouldn't leave an audit trail.
     """
     violations = scan_violations(conn)
 
@@ -378,6 +390,17 @@ def run_governance_scan(
 
     if dry_run or tracker is None:
         summary["dry_run"] = True
+        if record_scan:
+            _maybe_record_scan(
+                conn,
+                triggered_by=triggered_by,
+                dry_run=True,
+                total_violations=len(violations),
+                by_policy=by_policy,
+                violations=summary["violations"],
+                filed_bugs=[], bugs_skipped=0, bugs_errored=0,
+                summary_out=summary,
+            )
         return summary
 
     result = file_violation_bugs(conn, tracker, violations)
@@ -385,7 +408,77 @@ def run_governance_scan(
     summary["filed_bugs"] = result["filed"]
     summary["skipped_existing"] = result["skipped"]
     summary["filing_errors"] = result["errors"]
+
+    if record_scan:
+        _maybe_record_scan(
+            conn,
+            triggered_by=triggered_by,
+            dry_run=False,
+            total_violations=len(violations),
+            by_policy=by_policy,
+            violations=summary["violations"],
+            filed_bugs=result["filed"],
+            bugs_skipped=len(result["skipped"]),
+            bugs_errored=len(result["errors"]),
+            summary_out=summary,
+        )
     return summary
+
+
+def _maybe_record_scan(
+    conn: Any,
+    *,
+    triggered_by: str,
+    dry_run: bool,
+    total_violations: int,
+    by_policy: dict[str, int],
+    violations: list[dict[str, Any]],
+    filed_bugs: list[dict[str, Any]],
+    bugs_skipped: int,
+    bugs_errored: int,
+    summary_out: dict[str, Any],
+) -> None:
+    """Persist an audit row + link every newly-filed bug to this scan.
+
+    Failure here is non-fatal: audit loss must not crash governance. We
+    tuck the scan_id into `summary_out` when the write succeeds.
+    """
+    try:
+        from storage.postgres.data_dictionary_governance_scans_repository import (
+            insert_scan, link_bug_to_scan,
+        )
+
+        scan = insert_scan(
+            conn,
+            triggered_by=triggered_by,
+            dry_run=dry_run,
+            total_violations=total_violations,
+            bugs_filed=len(filed_bugs),
+            bugs_skipped=bugs_skipped,
+            bugs_errored=bugs_errored,
+            by_policy=by_policy,
+            violations=violations,
+            filed_bug_ids=[b["bug_id"] for b in filed_bugs if b.get("bug_id")],
+            metadata={},
+        )
+        summary_out["scan_id"] = scan["scan_id"]
+
+        # Back-link every NEW bug to this scan — so any bug viewer can see
+        # "discovered by <scan_id>" in the evidence list.
+        for b in filed_bugs:
+            bug_id = b.get("bug_id")
+            if not bug_id:
+                continue
+            try:
+                link_bug_to_scan(
+                    conn, bug_id=bug_id, scan_id=scan["scan_id"],
+                    role="discovered_by",
+                )
+            except Exception:
+                pass
+    except Exception:
+        # Audit is best-effort.
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -393,11 +486,64 @@ def run_governance_scan(
 # ---------------------------------------------------------------------------
 
 _SCORECARD_WEIGHTS = {
-    "owned_pct": 0.30,       # sensitive/pii assets with an owner
-    "classified_pct": 0.20,  # objects with any classification
-    "rule_coverage_pct": 0.30,  # objects with at least one enabled rule
-    "bug_inverse": 0.20,     # 1.0 minus fraction of objects with an open governance bug
+    "owned_pct": 0.25,       # sensitive/pii assets with an owner
+    "classified_pct": 0.15,  # objects with any classification
+    "rule_coverage_pct": 0.25,  # objects with at least one enabled rule
+    "bug_inverse": 0.15,     # 1.0 minus fraction of objects with an open governance bug
+    "wiring_pct": 0.20,      # 1.0 minus normalized hard-path + unwired-authority load
 }
+
+
+# Tuning constants for the wiring sub-score. Hard-paths are per-file
+# findings; 50+ hits counts as fully saturated pain. Unreferenced
+# decisions: 100+ is saturated. Code-orphans: 30+ saturated.
+_WIRING_SATURATION = {
+    "hard_paths": 50,
+    "unreferenced_decisions": 100,
+    "code_orphans": 30,
+}
+
+
+def _latest_wiring_snapshot(conn: Any) -> dict[str, int]:
+    rows = conn.execute(
+        """
+        SELECT hard_path_total,
+               absolute_user_paths,
+               hardcoded_localhost,
+               hardcoded_ports,
+               unreferenced_decisions,
+               code_orphan_tables
+        FROM data_dictionary_wiring_audit_snapshots
+        ORDER BY taken_at DESC
+        LIMIT 1
+        """
+    )
+    if not rows:
+        return {
+            "hard_path_total": 0, "absolute_user_paths": 0,
+            "hardcoded_localhost": 0, "hardcoded_ports": 0,
+            "unreferenced_decisions": 0, "code_orphan_tables": 0,
+        }
+    row = dict(rows[0])
+    return {k: int(row.get(k) or 0) for k in (
+        "hard_path_total", "absolute_user_paths",
+        "hardcoded_localhost", "hardcoded_ports",
+        "unreferenced_decisions", "code_orphan_tables",
+    )}
+
+
+def _wiring_pct(snapshot: dict[str, int]) -> float:
+    """Turn the three wiring counts into a 0..1 health metric.
+
+    Each count is compared to its saturation level and clamped. The
+    pct is the inverse average of the three normalized loads.
+    """
+    sat = _WIRING_SATURATION
+    hp_load   = min(1.0, snapshot["hard_path_total"] / max(1, sat["hard_paths"]))
+    ud_load   = min(1.0, snapshot["unreferenced_decisions"] / max(1, sat["unreferenced_decisions"]))
+    orph_load = min(1.0, snapshot["code_orphan_tables"] / max(1, sat["code_orphans"]))
+    avg_load = (hp_load + ud_load + orph_load) / 3.0
+    return max(0.0, 1.0 - avg_load)
 
 
 def _pct(n: int, d: int) -> float:
@@ -442,7 +588,8 @@ def compute_scorecard(conn: Any) -> dict[str, Any]:
     sensitive_rows = conn.execute(
         "SELECT COUNT(DISTINCT object_kind)::int AS c "
         "FROM data_dictionary_classifications_effective "
-        "WHERE tag_key IN ('pii', 'sensitive')"
+        "WHERE tag_key IN ('pii', 'sensitive') "
+        "  AND effective_source = 'operator'"
     )
     sensitive_objects = int(sensitive_rows[0]["c"]) if sensitive_rows else 0
 
@@ -451,7 +598,9 @@ def compute_scorecard(conn: Any) -> dict[str, Any]:
         "FROM data_dictionary_classifications_effective c "
         "LEFT JOIN data_dictionary_stewardship_effective s "
         "  ON s.object_kind = c.object_kind AND s.steward_kind = 'owner' "
-        "WHERE c.tag_key IN ('pii', 'sensitive') AND s.object_kind IS NULL"
+        "WHERE c.tag_key IN ('pii', 'sensitive') "
+        "  AND c.effective_source = 'operator' "
+        "  AND s.object_kind IS NULL"
     )
     unowned_sensitive = int(unowned_sensitive_rows[0]["c"]) if unowned_sensitive_rows else 0
 
@@ -483,11 +632,18 @@ def compute_scorecard(conn: Any) -> dict[str, Any]:
     rule_coverage_pct = _pct(objects_with_rule, total_objects)
     bug_inverse = 1.0 - _pct(open_governance_bugs, max(total_objects, 1))
 
+    # Wiring sub-score reads the most recent wiring-audit snapshot.
+    # The projector writes one every heartbeat; this makes the scorecard
+    # react to VPS-migration readiness without a separate API call.
+    wiring_snapshot = _latest_wiring_snapshot(conn)
+    wiring_pct = _wiring_pct(wiring_snapshot)
+
     compliance_score = round(
         owned_pct * _SCORECARD_WEIGHTS["owned_pct"]
         + classified_pct * _SCORECARD_WEIGHTS["classified_pct"]
         + rule_coverage_pct * _SCORECARD_WEIGHTS["rule_coverage_pct"]
-        + bug_inverse * _SCORECARD_WEIGHTS["bug_inverse"],
+        + bug_inverse * _SCORECARD_WEIGHTS["bug_inverse"]
+        + wiring_pct * _SCORECARD_WEIGHTS["wiring_pct"],
         4,
     )
 
@@ -528,11 +684,13 @@ def compute_scorecard(conn: Any) -> dict[str, Any]:
         "open_governance_bugs_by_policy": by_policy,
         "cluster_count": cluster_count,
         "bulk_fixes_available": bulk_fix_count,
+        "wiring_audit": wiring_snapshot,
         "metrics": {
             "owned_pct": round(owned_pct, 4),
             "classified_pct": round(classified_pct, 4),
             "rule_coverage_pct": round(rule_coverage_pct, 4),
             "bug_inverse": round(bug_inverse, 4),
+            "wiring_pct": round(wiring_pct, 4),
         },
         "weights": dict(_SCORECARD_WEIGHTS),
         "compliance_score": compliance_score,

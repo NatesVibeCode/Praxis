@@ -1,0 +1,132 @@
+{
+  "name": "praxis_llm_native_bundle",
+  "workflow_id": "praxis_llm_native_bundle",
+  "phase": "build",
+  "outcome_goal": "Land the four remaining LLM-native-surface upgrades on top of praxis_orient (skills-in-memory-graph, field-selector/chunking contract, declarative praxis_query router, semantic-edges read surface) and close with a review/bug-stomper job that wires cross-job integration points and files bugs for any gap.",
+  "anti_requirements": [
+    "Do not invent a new tool surface that duplicates _handle_orient or any existing catalog-backed authority.",
+    "Do not memorize a static tool table; read catalog.py for truth.",
+    "Do not bypass the operation catalog + _subsystems shape when adding MCP tools.",
+    "Do not write mock-backed unit tests for bug-surface writes — use rollback-isolated test helpers per test_isolation policy.",
+    "Do not commit code without passing unit tests for the new behavior."
+  ],
+  "target_repo": "/Users/nate/Praxis",
+  "workdir": "/Users/nate/Praxis",
+  "verify_refs": [
+    "PYTHONPATH='/Users/nate/Praxis/Code&DBs/Workflow' /opt/homebrew/bin/python3 -m pytest --noconftest -q /Users/nate/Praxis/Code&DBs/Workflow/tests/unit/test_operator_mcp_execution_gateway.py"
+  ],
+  "jobs": [
+    {
+      "label": "skills_in_memory_graph",
+      "agent": "openai/gpt-5.4",
+      "write_scope": [
+        "artifacts/workflow/llm_native_01_skills_in_graph_design.md",
+        "Code&DBs/Workflow/runtime/",
+        "Code&DBs/Workflow/surfaces/mcp/tools/",
+        "Code&DBs/Workflow/surfaces/",
+        "Code&DBs/Workflow/tests/unit/",
+        "Code&DBs/Databases/migrations/workflow/"
+      ],
+      "read_scope": [
+        "Skills/",
+        "Code&DBs/Workflow/surfaces/mcp/catalog.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/intent.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/discover.py",
+        "Code&DBs/Workflow/runtime/",
+        "Code&DBs/Workflow/memory/",
+        "Code&DBs/Databases/migrations/workflow/",
+        ".claude/CLAUDE.md"
+      ],
+      "prompt": "Goal: project every Skills/*/SKILL.md into the Praxis.db memory graph with vector embeddings so praxis_intent_match and praxis_discover can surface the right skill from a natural-language query like 'how do I manage bugs?'.\n\nDeliverables (all three are required for this job to count as done):\n1. Design doc at artifacts/workflow/llm_native_01_skills_in_graph_design.md covering: table/column shape (reuse semantic_assertions or add a skills_projection table if justified), projector boot path (where it runs, idempotency), embedding provider + refresh triggers, and how intent_match / discover wire to it.\n2. Implementation: a projector module (runtime/skills_projector.py or equivalent) that reads Skills/*/SKILL.md, extracts title + purpose + entrypoint tool names, produces embeddings, and upserts into the graph. Extend praxis_intent_match and praxis_discover to query skills alongside existing signals. Add the migration if a new table is required.\n3. Tests: a unit test proving the projector is idempotent and a unit test proving praxis_intent_match returns the bug-logging skill for a query like 'how do I manage bugs?'.\n\nConstraints: reuse existing embedding + graph plumbing (search first via praxis_discover). Follow 'Search Before Building' in .claude/CLAUDE.md. No mocks against bug-surface writers; if you touch bug-surface tests use the isolated helpers. The projector must be callable both from a CLI refresh path and from an automatic boot hook.\n\nOutcome gate: running the refresh + then `praxis workflow query 'how do I manage bugs?'` (or equivalent intent_match/discover call) must return Skills/praxis-bug-logging with its MCP tool entry points in the top results."
+    },
+    {
+      "label": "field_selectors_contract",
+      "agent": "openai/gpt-5.4",
+      "depends_on": ["skills_in_memory_graph"],
+      "write_scope": [
+        "artifacts/workflow/llm_native_02_field_selectors_design.md",
+        "Code&DBs/Workflow/runtime/response_contract.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/",
+        "Code&DBs/Workflow/tests/unit/test_response_contract.py",
+        "Code&DBs/Workflow/tests/unit/test_field_selectors_top_tools.py"
+      ],
+      "read_scope": [
+        "Code&DBs/Workflow/surfaces/mcp/catalog.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/",
+        "Code&DBs/Workflow/surfaces/api/handlers/workflow_admin.py",
+        "Code&DBs/Workflow/surfaces/api/rest.py",
+        "Code&DBs/Workflow/runtime/",
+        ".claude/CLAUDE.md",
+        "/Users/nate/.claude/projects/-Users-nate-Praxis/memory/feedback_valuable_not_overwhelming.md"
+      ],
+      "prompt": "Goal: design and apply one universal field-selector + paging response contract so LLM callers can request exactly the bytes they need from high-payload tools (praxis_workflow status, praxis_receipts, praxis_status_snapshot, praxis_query, praxis_data_dictionary, plus the top 10 overall by payload). The user has a standing feedback memory: valuable-not-overwhelming — lead with signal, omit noise.\n\nDeliverables (all three required):\n1. Design doc at artifacts/workflow/llm_native_02_field_selectors_design.md covering: the universal contract shape (e.g. `fields: [...]`, `include: [...]`, `exclude: [...]`, `page: {cursor, limit}`), how it interacts with existing tool inputSchemas, how sub-objects are selected (dotted paths? include-lists?), and the top-10 tool prioritization with payload size evidence.\n2. Implementation: a single runtime/response_contract.py helper that takes a dict + a selector spec and returns the projected/paged dict. Wire it into the top 10 highest-payload tools (identify via catalog.py + payload sampling). Keep the defaults unchanged — the selectors are opt-in so existing callers don't break.\n3. Tests: one unit test proving the contract handles nested fields + paging correctly, and one integration-style unit test asserting that calling praxis_workflow action=status with `fields=['run_id','status','health.likely_failed']` returns exactly that projection.\n\nConstraints: do NOT build per-tool ad-hoc selectors — one contract, reused. Search for existing projection helpers before adding new ones (praxis_discover). Do not change tool names or break existing input schemas.\n\nOutcome gate: an LLM caller can fetch just run_id+status+health.likely_failed from praxis_workflow status without post-processing, and the new unit tests pass."
+    },
+    {
+      "label": "declarative_query_router",
+      "agent": "openai/gpt-5.4",
+      "depends_on": ["field_selectors_contract"],
+      "write_scope": [
+        "artifacts/workflow/llm_native_03_declarative_query_design.md",
+        "Code&DBs/Workflow/runtime/query_router.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/query.py",
+        "Code&DBs/Workflow/tests/unit/test_declarative_query_router.py"
+      ],
+      "read_scope": [
+        "Code&DBs/Workflow/surfaces/mcp/catalog.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/query.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/operator.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/intent.py",
+        "Code&DBs/Workflow/runtime/",
+        ".claude/CLAUDE.md"
+      ],
+      "prompt": "Goal: upgrade praxis_query from keyword-heuristic routing to a declarative natural-language router. Questions like 'what are the open roadmap items?', 'what is the current health?', 'who owns the finance data dictionary domain?' must resolve to the right authority read-path (operator.roadmap_view, operator.status_snapshot, data_dictionary.stewardship, etc.) without the caller memorizing tool names.\n\nDeliverables (all three required):\n1. Design doc at artifacts/workflow/llm_native_03_declarative_query_design.md describing: the intent-classifier approach (reuse the embedding plumbing from job 1 where possible), the authority-binding table (intent → read-path tool alias + canonical argument shape), fallback behavior for ambiguous queries, and how this composes with the field-selector contract from job 2.\n2. Implementation: runtime/query_router.py with a small, testable classification + binding surface. Extend surfaces/mcp/tools/query.py so praxis_query accepts a plain natural-language string and delegates via the router. Keep the old keyword path as a fallback so no caller regresses.\n3. Tests: at least six unit tests covering representative intents ('open roadmap items', 'current health', 'recent bug activity', 'workflow run status for X', 'who owns domain Y', plus one ambiguous fallback case).\n\nConstraints: do NOT hardcode a big switch statement — use the intent/embedding surface or a small classifier. The authority binding table must live in one place (configurable / data-driven), not scattered across handlers. Reuse anything found via praxis_discover instead of building new.\n\nOutcome gate: `praxis workflow query 'what are the open roadmap items?'` returns structured data from operator_roadmap_view, and the six+ classification tests pass."
+    },
+    {
+      "label": "semantic_edges_readable",
+      "agent": "openai/gpt-5.4",
+      "depends_on": ["declarative_query_router"],
+      "write_scope": [
+        "artifacts/workflow/llm_native_04_semantic_edges_design.md",
+        "Code&DBs/Workflow/surfaces/mcp/tools/recall.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/semantic_query.py",
+        "Code&DBs/Workflow/surfaces/mcp/catalog.py",
+        "Code&DBs/Workflow/tests/unit/test_semantic_edges_readable.py"
+      ],
+      "read_scope": [
+        "Code&DBs/Workflow/surfaces/mcp/catalog.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/recall.py",
+        "Code&DBs/Workflow/surfaces/mcp/tools/",
+        "Code&DBs/Workflow/runtime/",
+        "Code&DBs/Workflow/memory/",
+        "Code&DBs/Databases/migrations/workflow/",
+        ".claude/CLAUDE.md"
+      ],
+      "prompt": "Goal: expose semantic_assertions edges as a first-class read surface. Today praxis_semantic_assertions / praxis_semantic_projection_refresh / praxis_semantic_bridges_backfill are writer/maintainer tools. There is no structured 'what does entity X relate to?' read. Fix that.\n\nDeliverables (all three required):\n1. Design doc at artifacts/workflow/llm_native_04_semantic_edges_design.md covering: decision between extending praxis_recall vs. adding a new praxis_semantic_query (argue the choice), the argument shape (entity id or natural-language anchor, edge-type filter, depth, paging), the structured return shape (edges with source/target/type/weight/provenance), and how it composes with the field-selector contract from job 2 and the declarative router from job 3.\n2. Implementation: whichever choice the design makes. If a new tool, register it in catalog.py with `praxis_` prefix and wire via surfaces/mcp/tools/. If extending recall, keep the existing recall shape backward compatible and add a semantic_edges branch.\n3. Tests: at least three unit tests — one proving a direct entity-to-entity edge lookup returns structured results, one proving edge-type filtering works, and one proving depth>1 traversal terminates and paginates.\n\nConstraints: must return structured edges (source, target, edge_type, confidence, provenance), not just text hits. Must accept the field-selector contract from job 2. If adding a new tool, it must also be reachable via the declarative router from job 3.\n\nOutcome gate: a caller can ask 'what does operator_decisions:architecture-policy::test-isolation::bug-surface-writes-require-rollback-isolation relate to?' and receive a structured edge list with provenance, and the three+ unit tests pass."
+    },
+    {
+      "label": "final_review_and_bug_stomp",
+      "agent": "openai/gpt-5.4",
+      "depends_on": [
+        "skills_in_memory_graph",
+        "field_selectors_contract",
+        "declarative_query_router",
+        "semantic_edges_readable"
+      ],
+      "write_scope": [
+        "artifacts/workflow/llm_native_05_final_review.md",
+        "Code&DBs/Workflow/surfaces/mcp/tools/",
+        "Code&DBs/Workflow/surfaces/api/handlers/workflow_admin.py",
+        "Code&DBs/Workflow/tests/unit/"
+      ],
+      "read_scope": [
+        "artifacts/workflow/llm_native_01_skills_in_graph_design.md",
+        "artifacts/workflow/llm_native_02_field_selectors_design.md",
+        "artifacts/workflow/llm_native_03_declarative_query_design.md",
+        "artifacts/workflow/llm_native_04_semantic_edges_design.md",
+        "Code&DBs/Workflow/",
+        ".claude/CLAUDE.md"
+      ],
+      "prompt": "Goal: review what jobs 1–4 produced, run the affected test suites, wire cross-job integration points, and file bugs via praxis_bugs for anything that is not yet landed or not yet integrated.\n\nDeliverables (all required):\n1. Closing report at artifacts/workflow/llm_native_05_final_review.md with four sections — per-job summary (what shipped, what the tests cover), cross-job integration checks (see below), residual gaps, and the exact list of bugs filed (with bug_ids).\n2. Cross-job wiring checks — verify and fix if broken:\n   - Job 2's field-selector contract is applied to any NEW tools added by jobs 1/3/4 (not just the original top-10 inventory).\n   - Job 1's intent matcher surfaces any NEW tools added by jobs 2/3/4, not just skills.\n   - Job 3's declarative router can route to the new semantic read tool from job 4.\n   - praxis_orient (_handle_orient) reflects the new capabilities — either via the capabilities[] array or via tool_guidance. If it doesn't, update _handle_orient to surface them.\n3. Run the affected test suites. At minimum: test_operator_mcp_execution_gateway.py, the four new test files from jobs 1–4, and any test file touched by the wiring fixes. Report pass/fail counts in the closing report.\n4. Bug filing — for every gap that is not shipped in this job, file a bug via `praxis workflow tools call praxis_bugs` per Skills/praxis-bug-logging. Include the bug_id in the closing report. Follow rollback-isolation policy — bug-surface test writes (if any) must use the isolated helpers.\n\nConstraints: this job is allowed to edit any file needed for wiring, but must be a small, tight set of edits — not a refactor. Follow the 'collapse and simplify' directive: if you're adding a shim layer, stop and fix the root cause instead. If a cross-job integration is broken and can be fixed in under ~50 lines, fix it; if it's bigger, file a bug and document why.\n\nOutcome gate: the closing report exists, all four design docs are linked, affected tests are green (or any red is filed as a bug with bug_id), and praxis_orient returns a payload that mentions the new capabilities."
+    }
+  ]
+}

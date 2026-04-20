@@ -101,6 +101,20 @@ export interface GraphLayout {
   height: number;
 }
 
+/**
+ * Multiplicity captures "this single spec node runs more than once" in two
+ * visually distinct shapes:
+ *   - loop: N runs in sequence (time axis). Node silhouette = diagonal stack.
+ *   - parallel: N runs concurrently (space axis). Node silhouette = vertical
+ *     stack.
+ * Count is the iteration/worker count when it can be derived from
+ * integration_args, or null when the spec leaves it dynamic.
+ */
+export interface NodeMultiplicity {
+  kind: 'loop' | 'parallel';
+  count: number | null;
+}
+
 export interface OrbitNode {
   id: string;
   kind: 'step' | 'gate' | 'state';
@@ -115,6 +129,9 @@ export interface OrbitNode {
   x: number;
   y: number;
   rank: number;
+  multiplicity: NodeMultiplicity | null;
+  /** Number of outgoing edges that leave this node in the graph. */
+  outgoingEdgeCount: number;
 }
 
 export interface OrbitEdge {
@@ -128,6 +145,18 @@ export interface OrbitEdge {
   gateFamily?: string;
   branchReason?: string;
   gateConfig?: Record<string, unknown>;
+  /**
+   * Total number of outgoing edges that share this edge's source node.
+   * When >= 2 the canvas treats these edges as a single fan bundle and can
+   * thin the strokes / render a fan-pivot glyph.
+   */
+  siblingCount: number;
+  /**
+   * Zero-based index of this edge among its source's outgoing edges, sorted
+   * by destination y-position. Used so styling (e.g. mid-fan thinning) can
+   * tell the outermost and innermost blades apart.
+   */
+  siblingIndex: number;
 }
 
 export interface DockContent {
@@ -185,6 +214,54 @@ const ROUTE_TO_GLYPH: Record<string, GlyphType> = {
   'trigger/webhook': 'webhook',
   'trigger/schedule': 'schedule',
 };
+
+/**
+ * Route strings that map to each multiplicity kind. Loop runs N iterations in
+ * sequence; fanout runs N workers in parallel. Both are represented as node
+ * routes in the workflow spec — the visual silhouette derives from this
+ * mapping, not from spec shape.
+ */
+const LOOP_ROUTES = new Set(['workflow.loop']);
+const PARALLEL_ROUTES = new Set(['workflow.fanout']);
+
+const LOOP_COUNT_KEYS = ['iterations', 'count', 'item_count', 'items'] as const;
+const PARALLEL_COUNT_KEYS = ['count', 'parallelism', 'worker_count', 'workers', 'fanout'] as const;
+
+function coerceCount(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    return Math.floor(value);
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const parsed = Number(trimmed);
+    if (Number.isFinite(parsed) && parsed > 0) return Math.floor(parsed);
+  }
+  if (Array.isArray(value)) return value.length > 0 ? value.length : null;
+  return null;
+}
+
+function readCount(args: Record<string, unknown> | undefined, keys: readonly string[]): number | null {
+  if (!args) return null;
+  for (const key of keys) {
+    const count = coerceCount(args[key]);
+    if (count !== null) return count;
+  }
+  return null;
+}
+
+function nodeToMultiplicity(node: BuildNode): NodeMultiplicity | null {
+  const route = (node.route || '').trim();
+  if (!route) return null;
+  const args = (node.integration_args as Record<string, unknown> | undefined) || undefined;
+  if (LOOP_ROUTES.has(route)) {
+    return { kind: 'loop', count: readCount(args, LOOP_COUNT_KEYS) };
+  }
+  if (PARALLEL_ROUTES.has(route)) {
+    return { kind: 'parallel', count: readCount(args, PARALLEL_COUNT_KEYS) };
+  }
+  return null;
+}
 
 function nodeToGlyph(node: BuildNode): GlyphType {
   if (node.kind === 'gate') return 'gate';
@@ -419,6 +496,12 @@ export function presentBuild(
     if (issue.node_id) issuesByNode.set(issue.node_id, (issuesByNode.get(issue.node_id) || 0) + 1);
   }
 
+  // Tally outgoing edges per source so a node knows how many branches it has.
+  const outgoingByNode = new Map<string, number>();
+  for (const e of rawEdges) {
+    outgoingByNode.set(e.from_node_id, (outgoingByNode.get(e.from_node_id) || 0) + 1);
+  }
+
   const nodes: OrbitNode[] = allOrdered.map((n) => {
     let ring = nodeToRingState(n, payload, activeNodeId);
 
@@ -439,8 +522,36 @@ export function presentBuild(
       x: layout.nodes.get(n.node_id)?.x ?? 0,
       y: layout.nodes.get(n.node_id)?.y ?? 0,
       rank: layout.nodes.get(n.node_id)?.rank ?? 0,
+      multiplicity: nodeToMultiplicity(n),
+      outgoingEdgeCount: outgoingByNode.get(n.node_id) || 0,
     };
   });
+
+  // Precompute sibling counts + indices so the edge list can report
+  // fan-position metadata to the renderer without a second pass downstream.
+  const siblingsBySource = new Map<string, string[]>();
+  for (const e of rawEdges) {
+    const bucket = siblingsBySource.get(e.from_node_id) || [];
+    bucket.push(e.edge_id);
+    siblingsBySource.set(e.from_node_id, bucket);
+  }
+  // Sort each bucket by the destination y so sibling order matches the visual
+  // top-to-bottom ordering of the fanned edges.
+  for (const bucket of siblingsBySource.values()) {
+    bucket.sort((a, b) => {
+      const ea = rawEdges.find(e => e.edge_id === a);
+      const eb = rawEdges.find(e => e.edge_id === b);
+      const ya = ea ? (layout.nodes.get(ea.to_node_id)?.y ?? 0) : 0;
+      const yb = eb ? (layout.nodes.get(eb.to_node_id)?.y ?? 0) : 0;
+      return ya - yb;
+    });
+  }
+  const siblingIndexById = new Map<string, { index: number; count: number }>();
+  for (const bucket of siblingsBySource.values()) {
+    for (let i = 0; i < bucket.length; i++) {
+      siblingIndexById.set(bucket[i], { index: i, count: bucket.length });
+    }
+  }
 
   // Gate state on edges
   const edges: OrbitEdge[] = rawEdges.map(e => {
@@ -453,6 +564,7 @@ export function presentBuild(
       else if (gs === 'configured' || release.family) gateState = 'configured';
       else gateState = 'proposed';
     }
+    const siblingMeta = siblingIndexById.get(e.edge_id) || { index: 0, count: 1 };
     return {
       id: e.edge_id,
       from: e.from_node_id,
@@ -464,6 +576,8 @@ export function presentBuild(
       gateFamily: release.family !== 'after_success' ? release.family : undefined,
       branchReason: release.branch_reason,
       gateConfig: release.config ? { ...release.config as Record<string, unknown> } : undefined,
+      siblingCount: siblingMeta.count,
+      siblingIndex: siblingMeta.index,
     };
   });
 

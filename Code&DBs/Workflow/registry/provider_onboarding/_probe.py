@@ -236,21 +236,14 @@ def _discover_api_models_impl(
         )
 
     if strategy == "anthropic_models_list":
-        data = _http_get_json(
-            "https://api.anthropic.com/v1/models",
-            headers={
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-            },
-            timeout_seconds=timeout_seconds,
-        )
-        return _normalize_unique(
-            [
-                str(item.get("id") or "").strip()
-                for item in data.get("data", [])
-                if isinstance(item, dict)
-            ]
-        )
+        # Direct calls to api.anthropic.com are forbidden per
+        # decision.2026-04-20.anthropic-cli-only-restored (migration 181).
+        # Anthropic access is CLI-only (OAuth/subscription); models reached
+        # via HTTP go through OpenRouter. Onboarding probes that try to
+        # discover anthropic models via the Messages API return empty so
+        # the onboarder falls through to a CLI-based or registry-backed
+        # discovery path.
+        return []
 
     if strategy == "google_models_list":
         models: list[str] = []

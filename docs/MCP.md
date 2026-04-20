@@ -1,6 +1,6 @@
 # Praxis MCP Tools
 
-Praxis exposes 63 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
+Praxis exposes 72 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
 
 CLI discovery is generated from the same catalog metadata:
 
@@ -15,16 +15,23 @@ CLI discovery is generated from the same catalog metadata:
 | Tool | Surface | Tier | Alias | Risks | Description |
 | --- | --- | --- | --- | --- | --- |
 | `praxis_discover` | `code` | `stable` | `workflow discover` | `read`, `write` | Find existing code that already does what you need — BEFORE writing new code. Uses hybrid retrieval: vector embeddings over AST-extracted behavioral fingerprints plus Postgres full-text search, fused with reciprocal rank fusion so you get both semantic and exact-ish matches even when naming differs. |
-| `praxis_data` | `data` | `stable` | `workflow data` | `dispatch`, `read`, `write` | Run deterministic data cleanup and reconciliation jobs: parse datasets, profile fields, filter records, sort rows, normalize values, repair rows, run repair loops, backfill missing values, redact sensitive fields, checkpoint state, replay cursor windows, approve plans, apply approved plans, validate contracts, transform records, join or merge sources, aggregate groups, split partitions, export shaped datasets, dedupe keys, route dead-letter rows, reconcile source vs target state, sync target state deterministically, generate workflow specs, and launch those jobs through Praxis. |
+| `praxis_data` | `data` | `stable` | `workflow data` | `launch`, `read`, `write` | Run deterministic data cleanup and reconciliation jobs: parse datasets, profile fields, filter records, sort rows, normalize values, repair rows, run repair loops, backfill missing values, redact sensitive fields, checkpoint state, replay cursor windows, approve plans, apply approved plans, validate contracts, transform records, join or merge sources, aggregate groups, split partitions, export shaped datasets, dedupe keys, route dead-letter rows, reconcile source vs target state, sync target state deterministically, generate workflow specs, and launch those jobs through Praxis. |
 | `praxis_artifacts` | `evidence` | `stable` | `workflow artifacts` | `read` | Browse and compare files produced by workflow sandbox runs. Each workflow job can write artifacts (code, logs, reports) — this tool lets you find, search, and diff them. |
-| `praxis_bugs` | `evidence` | `stable` | `workflow bugs` | `dispatch`, `read`, `write` | Track bugs in the platform's Postgres-backed bug tracker. List open bugs, file new ones, search by keyword, inspect similar historical fixes, replay a bug from canonical evidence, bulk backfill replay provenance, or resolve existing bugs. |
+| `praxis_bugs` | `evidence` | `stable` | `workflow bugs` | `launch`, `read`, `write` | Track bugs in the platform's Postgres-backed bug tracker. List open bugs, file new ones, search by keyword, inspect similar historical fixes, replay a bug from canonical evidence, bulk backfill replay provenance, or resolve existing bugs. |
 | `praxis_constraints` | `evidence` | `advanced` | - | `read` | View automatically-mined constraints from past workflow failures. The system learns rules like 'files in runtime/ must include imports' from repeated failures. |
 | `praxis_friction` | `evidence` | `advanced` | - | `read` | View the friction ledger — a record of every time a guardrail blocked or warned about an action (scope violations, secret leaks, policy bounces). |
 | `praxis_receipts` | `evidence` | `advanced` | - | `read` | Search through past workflow results and analyze costs. Every workflow run produces receipts — this tool lets you search them by keyword and analyze token/cost spending. |
 | `praxis_data_dictionary` | `general` | `advanced` | - | `read` | Unified data dictionary authority. Auto-projects field descriptors for every injected object (tables, object_types, integrations, datasets, ingest payloads, operator decisions, receipts, MCP tools). Operator overrides win over projected rows. |
-| `praxis_governance` | `governance` | `advanced` | - | `read` | Safety checks before dispatching work. Scan prompts for leaked secrets (API keys, tokens, passwords) or verify that a set of file paths falls within allowed scope. |
+| `praxis_data_dictionary_classifications` | `general` | `advanced` | - | `read` | Classification / tag authority for data dictionary objects. Auto-projected from name heuristics (PII detectors, credential tokens, owner columns) and structural type hints. Operator tags take precedence. |
+| `praxis_data_dictionary_drift` | `general` | `advanced` | - | `read` | Schema-drift detector for the data dictionary. Snapshots the field inventory each heartbeat, diffs successive snapshots, and reports cross-axis impact (PII dropped, downstream consumers affected, quality rules orphaned, stewards to notify). High-severity drift (P0/P1) auto-files dedupe-keyed governance bugs. |
+| `praxis_data_dictionary_governance` | `general` | `advanced` | - | `read` | Cross-axis governance compliance scan over the data dictionary. Checks three policies: (1) objects carrying a `pii` tag without an owner steward, (2) objects carrying a `sensitive` tag without an owner, (3) enabled rules with severity='error' whose latest run is fail/error. `scan` returns violations only; `enforce` additionally files dedupe-keyed bugs (decision_ref is `governance.<policy>.<object_kind>[.<rule_kind>]`). |
+| `praxis_data_dictionary_impact` | `general` | `advanced` | - | `read` | Cross-axis impact analysis for a data-dictionary object. Walks lineage in the given direction, then for every reached node reports effective tags, stewards, quality rules, and latest run status. Returns aggregate rollups (PII field count, failing-rule count, distinct owners + publishers) across the blast radius. |
+| `praxis_data_dictionary_lineage` | `general` | `advanced` | - | `read` | Directed lineage graph over data dictionary objects. Auto-projected from Postgres FK constraints, view dependencies, dataset_promotions, integration manifests, and MCP tool input schemas. Operator-authored edges take precedence. |
+| `praxis_data_dictionary_quality` | `general` | `advanced` | - | `read` | Declarative data-quality rules + their runs. Auto-projected from Postgres schema (NOT NULL, UNIQUE, FK referential checks) with operator overrides. |
+| `praxis_data_dictionary_stewardship` | `general` | `advanced` | - | `read` | Stewardship authority for data dictionary objects. Auto-projected from audit-column names, namespace prefix → service owner, and known projector modules. Operator stewards take precedence. |
+| `praxis_governance` | `governance` | `advanced` | - | `read` | Safety checks before launching a workflow. Scan prompts for leaked secrets (API keys, tokens, passwords) or verify that a set of file paths falls within allowed scope. |
 | `praxis_heal` | `governance` | `advanced` | - | `read` | Diagnose why a workflow job failed and get a recommended recovery action: retry (transient error), escalate (needs human attention), skip (non-critical), or halt (stop the pipeline). |
-| `praxis_integration` | `integration` | `advanced` | `workflow integration` | `dispatch`, `read`, `write` | Call, list, or describe registered integrations (API connectors, webhooks, and other external services). |
+| `praxis_integration` | `integration` | `advanced` | `workflow integration` | `launch`, `read`, `write` | Call, list, or describe registered integrations (API connectors, webhooks, and other external services). |
 | `praxis_provider_onboard` | `integration` | `advanced` | - | `read`, `write` | Onboard a CLI or API provider into Praxis Engine through one catalog-backed operation. Probes transport, discovers models, writes onboarding authority, and performs the canonical post-onboarding sync. |
 | `praxis_graph` | `knowledge` | `advanced` | - | `read` | Explore connections from one knowledge-graph entity. Shows what an entity depends on, what depends on it, and the blast radius of changes. |
 | `praxis_ingest` | `knowledge` | `advanced` | - | `write` | Store new information in the knowledge graph so it can be recalled later via praxis_recall. Content is automatically entity-extracted, deduplicated, and embedded for vector search. |
@@ -34,11 +41,13 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_authority_memory_refresh` | `operations` | `advanced` | - | `write` | Project authority FK data into memory_edges so the knowledge graph reflects real structure. Upserts canonical-class edges for roadmap parent_of/dependencies, roadmap resolves_bug, operator_object_relations, workflow build intent links, bug and issue lineage, bug evidence links, workflow job/chain relationships, and operator decision scopes. Idempotent; safe to re-run. |
 | `praxis_bug_replay_provenance_backfill` | `operations` | `advanced` | - | `write` | Backfill replay provenance from canonical bug and receipt authority. |
 | `praxis_circuits` | `operations` | `stable` | `workflow circuits` | `read`, `write` | Inspect effective circuit-breaker state or apply a durable manual override for one provider. |
+| `praxis_daily_heartbeat` | `operations` | `advanced` | `workflow heartbeat` | `read` | Run one daily-heartbeat probe cycle on demand and persist the results to heartbeat_runs + heartbeat_probe_snapshots. Probes cover provider CLI usage (claude/codex/gemini latency + token counts), connector liveness (catalog health), credential expiry (keychain/env API keys + OAuth tokens), and MCP server liveness (stdio initialize handshake). |
 | `praxis_dataset` | `operations` | `stable` | `workflow dataset` | `read`, `write` | Praxis dataset refinery: turn evidence-linked execution receipts into curated, lineage-preserving training and eval data for specialist SLMs (slm/review first). |
 | `praxis_diagnose` | `operations` | `stable` | `workflow diagnose` | `read` | Diagnose one workflow run by id. Combines the receipt, failure classification, and provider health into a single operator-facing report. |
 | `praxis_health` | `operations` | `stable` | `workflow health` | `read` | Full system health check — Postgres connectivity, disk space, operator panel state, workflow lane recommendations, context cache stats, memory graph health, and projection freshness (event-log cursors + process-cache refresh lag). |
 | `praxis_heartbeat` | `operations` | `advanced` | - | `read`, `write` | Run or check the knowledge graph maintenance cycle. The heartbeat syncs receipts, bugs, constraints, and friction events into the knowledge graph, mines relationships between entities, generates daily/weekly rollups, and archives stale nodes. |
 | `praxis_metrics_reset` | `operations` | `advanced` | - | `write` | Reset observability metrics through explicit operator maintenance authority. |
+| `praxis_orient` | `operations` | `curated` | `workflow orient` | `read` | Fresh-agent orientation: returns the canonical orient payload (standing orders, authority envelope, tool guidance, recent activity, endpoints, health). The single best first call for any LLM agent or operator waking up cold against Praxis. Delegates to the same authority that serves POST /orient so HTTP and MCP consumers see identical shape. |
 | `praxis_reload` | `operations` | `advanced` | - | `write` | Clear all in-process caches so DB and config changes take effect without restarting Claude Desktop. |
 | `praxis_semantic_bridges_backfill` | `operations` | `advanced` | - | `write` | Replay semantic bridges from canonical operator authority into semantic assertions. |
 | `praxis_semantic_projection_refresh` | `operations` | `advanced` | - | `write` | Refresh the semantic projection through explicit operator maintenance authority. |
@@ -64,7 +73,7 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_manifest_refine` | `planning` | `advanced` | - | `write` | Iterate on a previously generated app manifest. Apply user feedback to adjust layout, add/remove modules, change data sources, or modify behavior. |
 | `praxis_session` | `planning` | `advanced` | - | `read` | View or validate session carry-forward packs — compressed context snapshots that help new sessions pick up where previous ones left off. |
 | `praxis_query` | `query` | `stable` | `workflow query` | `read` | Ask any question about the system in plain English. This is the best starting point when you're unsure which tool to use — it automatically routes your question to the right subsystem. Think of it as a router, not as the deep authority for every domain. |
-| `praxis_research_workflow` | `research` | `advanced` | - | `dispatch`, `read` | Run a parallel multi-angle research workflow on any topic. One call generates a workflow spec (seed decomposition, N parallel research workers via replicate, synthesis) and launches it through the service bus. |
+| `praxis_research_workflow` | `research` | `advanced` | - | `launch`, `read` | Run a parallel multi-angle research workflow on any topic. One call generates a workflow spec (seed decomposition, N parallel research workers via replicate, synthesis) and launches it through the service bus. |
 | `praxis_context_shard` | `session` | `session` | - | `session` | Return the bounded execution shard for the current workflow MCP session. This is only valid inside workflow Docker jobs using the signed MCP bridge. |
 | `praxis_session_context` | `session` | `session` | - | `session` | Read or write persistent context on your agent session. Context survives across tool calls and is available on retry. |
 | `praxis_subscribe_events` | `session` | `session` | - | `session` | Pull build state events since the agent's last cursor position. Returns new events and advances the cursor. Call repeatedly to stay in sync with platform state changes. |
@@ -73,9 +82,9 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_submit_artifact_bundle` | `submissions` | `session` | - | `session` | Submit a sealed artifact bundle result for the current workflow MCP session. The session token owns run_id, workflow_id, and job_label. This tool never accepts those ids as input and returns structured errors instead of stack traces. |
 | `praxis_submit_code_change` | `submissions` | `session` | - | `session` | Submit a sealed code-change result for the current workflow MCP session. The session token owns run_id, workflow_id, and job_label. This tool never accepts those ids as input and returns structured errors instead of stack traces. |
 | `praxis_submit_research_result` | `submissions` | `session` | - | `session` | Submit a sealed research result for the current workflow MCP session. The session token owns run_id, workflow_id, and job_label. This tool never accepts those ids as input and returns structured errors instead of stack traces. |
-| `praxis_connector` | `workflow` | `advanced` | - | `dispatch`, `read`, `write` | Build API connectors for third-party applications. One call stamps a workflow spec and launches a 4-job pipeline (discover API → map objects → build client → review). |
-| `praxis_wave` | `workflow` | `advanced` | - | `dispatch`, `read`, `write` | Manage execution waves — groups of jobs with dependency ordering. Waves track which jobs are runnable (all dependencies met) and which are blocked. |
-| `praxis_workflow` | `workflow` | `advanced` | - | `dispatch`, `read`, `write` | Execute work by launching a workflow for LLM agents. This is the primary way to run tasks — building code, running tests, writing reviews, refactoring, and debates. |
+| `praxis_connector` | `workflow` | `advanced` | - | `launch`, `read`, `write` | Build API connectors for third-party applications. One call stamps a workflow spec and launches a 4-job pipeline (discover API → map objects → build client → review). |
+| `praxis_wave` | `workflow` | `advanced` | - | `launch`, `read`, `write` | Manage execution waves — groups of jobs with dependency ordering. Waves track which jobs are runnable (all dependencies met) and which are blocked. |
+| `praxis_workflow` | `workflow` | `advanced` | - | `launch`, `read`, `write` | Execute work by launching a workflow for LLM agents. This is the primary way to run tasks — building code, running tests, writing reviews, refactoring, and debates. |
 | `praxis_workflow_validate` | `workflow` | `advanced` | - | `read` | Dry-run a workflow spec to check for errors before executing it. Returns whether the spec is valid, how many jobs it contains, and which agents each job resolves to. |
 
 ## Tool Reference
@@ -111,8 +120,8 @@ Example input:
 
 - Surface: `data`
 - Tier: `stable`
-- Badges: `stable`, `data`, `alias:data`, `mutates-state`, `dispatches-work`
-- Risks: `dispatch`, `read`, `write`
+- Badges: `stable`, `data`, `alias:data`, `mutates-state`, `launches-work`
+- Risks: `launch`, `read`, `write`
 - CLI entrypoint: `workflow data`
 - CLI schema help: `workflow tools describe praxis_data`
 - When to use: Run deterministic parsing, normalization, validation, mapping, dedupe, or reconcile jobs and optionally launch them through the workflow engine.
@@ -158,8 +167,8 @@ Example input:
 
 - Surface: `evidence`
 - Tier: `stable`
-- Badges: `stable`, `evidence`, `alias:bugs`, `mutates-state`, `dispatches-work`
-- Risks: `dispatch`, `read`, `write`
+- Badges: `stable`, `evidence`, `alias:bugs`, `mutates-state`, `launches-work`
+- Risks: `launch`, `read`, `write`
 - CLI entrypoint: `workflow bugs`
 - CLI schema help: `workflow tools describe praxis_bugs`
 - When to use: Inspect the bug tracker, run keyword or hybrid search, file a new bug, or drive replay-ready bug workflows.
@@ -265,6 +274,155 @@ Example input:
 }
 ```
 
+#### `praxis_data_dictionary_classifications`
+
+- Surface: `general`
+- Tier: `advanced`
+- Badges: `advanced`, `general`
+- Risks: `read`
+- CLI entrypoint: `workflow tools call praxis_data_dictionary_classifications`
+- CLI schema help: `workflow tools describe praxis_data_dictionary_classifications`
+- When to use: Identify which fields carry PII / credentials / ownership labels, or override heuristic tags with operator authority.
+- When not to use: Not a field descriptor browser — use praxis_data_dictionary for field-level reads and operator overrides.
+- Selector: `action`; default `summary`; values `summary`, `describe`, `by_tag`, `set`, `clear`, `reproject`
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "action": "summary"
+}
+```
+
+#### `praxis_data_dictionary_drift`
+
+- Surface: `general`
+- Tier: `advanced`
+- Badges: `advanced`, `general`
+- Risks: `read`
+- CLI entrypoint: `workflow tools call praxis_data_dictionary_drift`
+- CLI schema help: `workflow tools describe praxis_data_dictionary_drift`
+- When to use: Before / after a migration; investigating whether a field deletion broke downstream consumers; auditing schema-change cadence.
+- When not to use: Don't use to inspect current schema (use praxis_data_dictionary). Don't use to find the blast radius of a *single* known object — use praxis_data_dictionary_impact instead.
+- Selector: `action`; default `latest`; values `latest`, `snapshot`, `history`, `diff`
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "action": "latest"
+}
+```
+
+#### `praxis_data_dictionary_governance`
+
+- Surface: `general`
+- Tier: `advanced`
+- Badges: `advanced`, `general`
+- Risks: `read`
+- CLI entrypoint: `workflow tools call praxis_data_dictionary_governance`
+- CLI schema help: `workflow tools describe praxis_data_dictionary_governance`
+- When to use: Governance review: before a release, or when investigating a data-governance complaint, run a dry scan to see which PII/sensitive objects lack owners and which error-severity rules are failing.
+- When not to use: Don't use as a substitute for the data-dictionary write tools (set_operator_classification / set_operator_steward) — this only reports, it does not fix the underlying governance gaps.
+- Selector: `action`; default `scan`; values `scan`, `enforce`, `scorecard`, `remediate`, `cluster`, `scans`, `scan_detail`, `scans_for_bug`, `pending`, `drain`
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "action": "scan"
+}
+```
+
+#### `praxis_data_dictionary_impact`
+
+- Surface: `general`
+- Tier: `advanced`
+- Badges: `advanced`, `general`
+- Risks: `read`
+- CLI entrypoint: `workflow tools call praxis_data_dictionary_impact`
+- CLI schema help: `workflow tools describe praxis_data_dictionary_impact`
+- When to use: Governance / change-safety review: surface who owns what, which nodes carry PII, which quality rules are currently failing, before making a schema change.
+- When not to use: Don't use for simple field-level reads — praxis_data_dictionary is faster. Don't use for pure lineage walks — the existing data-dictionary lineage tool returns just the graph.
+- Selector: none
+- Required args: `object_kind`
+
+Example input:
+
+```json
+{
+  "object_kind": "table:workflow_runs",
+  "direction": "downstream",
+  "max_depth": 3
+}
+```
+
+#### `praxis_data_dictionary_lineage`
+
+- Surface: `general`
+- Tier: `advanced`
+- Badges: `advanced`, `general`
+- Risks: `read`
+- CLI entrypoint: `workflow tools call praxis_data_dictionary_lineage`
+- CLI schema help: `workflow tools describe praxis_data_dictionary_lineage`
+- When to use: Trace which objects depend on or derive from a given object_kind.
+- When not to use: Not a field-level descriptor browser — use praxis_data_dictionary for field-level reads and operator overrides.
+- Selector: `action`; default `summary`; values `summary`, `describe`, `impact`, `set_edge`, `clear_edge`, `reproject`
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "action": "summary"
+}
+```
+
+#### `praxis_data_dictionary_quality`
+
+- Surface: `general`
+- Tier: `advanced`
+- Badges: `advanced`, `general`
+- Risks: `read`
+- CLI entrypoint: `workflow tools call praxis_data_dictionary_quality`
+- CLI schema help: `workflow tools describe praxis_data_dictionary_quality`
+- When to use: Add a declarative check to a field and track pass / fail over time.
+- When not to use: Not a generic SQL runner — use praxis_query for ad-hoc data inspection.
+- Selector: `action`; default `summary`; values `summary`, `list_rules`, `list_runs`, `run_history`, `set`, `clear`, `evaluate`, `reproject`
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "action": "summary"
+}
+```
+
+#### `praxis_data_dictionary_stewardship`
+
+- Surface: `general`
+- Tier: `advanced`
+- Badges: `advanced`, `general`
+- Risks: `read`
+- CLI entrypoint: `workflow tools call praxis_data_dictionary_stewardship`
+- CLI schema help: `workflow tools describe praxis_data_dictionary_stewardship`
+- When to use: Identify owners / approvers / publishers for data assets, or override heuristic stewardship with operator authority.
+- When not to use: Not for assigning work — use the bugs and roadmap tools for that. Stewardship is a labeling authority for data governance.
+- Selector: `action`; default `summary`; values `summary`, `describe`, `by_steward`, `set`, `clear`, `reproject`
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "action": "summary"
+}
+```
+
 ### Governance
 
 #### `praxis_governance`
@@ -318,8 +476,8 @@ Example input:
 
 - Surface: `integration`
 - Tier: `advanced`
-- Badges: `advanced`, `integration`, `alias:integration`, `mutates-state`, `dispatches-work`
-- Risks: `dispatch`, `read`, `write`
+- Badges: `advanced`, `integration`, `alias:integration`, `mutates-state`, `launches-work`
+- Risks: `launch`, `read`, `write`
 - CLI entrypoint: `workflow integration`
 - CLI schema help: `workflow tools describe praxis_integration`
 - When to use: List integrations, inspect one, validate credentials, or invoke an integration action.
@@ -345,7 +503,7 @@ Example input:
 - CLI entrypoint: `workflow tools call praxis_provider_onboard`
 - CLI schema help: `workflow tools describe praxis_provider_onboard`
 - When to use: Probe or onboard a new provider/model route into the platform.
-- When not to use: Do not use it for ordinary model selection or workflow dispatch.
+- When not to use: Do not use it for ordinary model selection or workflow launch.
 - Selector: `action`; default `probe`; values `probe`, `onboard`
 - Required args: `provider_slug`
 
@@ -533,6 +691,28 @@ Example input:
 }
 ```
 
+#### `praxis_daily_heartbeat`
+
+- Surface: `operations`
+- Tier: `advanced`
+- Badges: `advanced`, `operations`, `alias:heartbeat`
+- Risks: `read`
+- CLI entrypoint: `workflow heartbeat`
+- CLI schema help: `workflow tools describe praxis_daily_heartbeat`
+- When to use: Run the daily external-health probe across providers, connectors, credentials, and MCP servers.
+- When not to use: Do not use it for knowledge-graph maintenance; use praxis_heartbeat for that cycle.
+- Recommended alias: `workflow heartbeat`
+- Selector: none
+- Required args: (none)
+
+Example input:
+
+```json
+{
+  "scope": "all"
+}
+```
+
 #### `praxis_dataset`
 
 - Surface: `operations`
@@ -588,7 +768,7 @@ Example input:
 - Risks: `read`
 - CLI entrypoint: `workflow health`
 - CLI schema help: `workflow tools describe praxis_health`
-- When to use: Run a full preflight before dispatch or when the platform feels degraded.
+- When to use: Run a full preflight before workflow launch or when the platform feels degraded.
 - When not to use: Do not use it to inspect one specific workflow run.
 - Recommended alias: `workflow health`
 - Selector: none
@@ -608,8 +788,8 @@ Example input:
 - Risks: `read`, `write`
 - CLI entrypoint: `workflow tools call praxis_heartbeat`
 - CLI schema help: `workflow tools describe praxis_heartbeat`
-- When to use: Check or run the knowledge-graph maintenance cycle.
-- When not to use: Do not use it as a replacement for workflow dispatch or session recall.
+- When to use: Run or inspect the knowledge-graph maintenance cycle that syncs receipts, bugs, constraints, and memory projections.
+- When not to use: Do not use it for external provider or connector probes; use praxis_daily_heartbeat for that.
 - Selector: `action`; default `status`; values `run`, `status`
 - Required args: (none)
 
@@ -640,6 +820,26 @@ Example input:
 {
   "confirm": true
 }
+```
+
+#### `praxis_orient`
+
+- Surface: `operations`
+- Tier: `curated`
+- Badges: `curated`, `operations`, `alias:orient`
+- Risks: `read`
+- CLI entrypoint: `workflow orient`
+- CLI schema help: `workflow tools describe praxis_orient`
+- When to use: Wake up against Praxis and get standing orders, authority envelope, tool guidance, and endpoints in one call.
+- When not to use: Do not use it for deep subsystem inspection; call cluster-specific tools instead.
+- Recommended alias: `workflow orient`
+- Selector: none
+- Required args: (none)
+
+Example input:
+
+```json
+{}
 ```
 
 #### `praxis_reload`
@@ -712,7 +912,7 @@ Example input:
 - CLI entrypoint: `workflow tools call praxis_status_snapshot`
 - CLI schema help: `workflow tools describe praxis_status_snapshot`
 - When to use: Inspect workflow pass rate, failure mix, and in-flight run summaries from canonical receipts.
-- When not to use: Do not use it for deep run inspection or workflow dispatch.
+- When not to use: Do not use it for deep run inspection or workflow launch.
 - Selector: none
 - Required args: (none)
 
@@ -1000,7 +1200,7 @@ Example input:
 - CLI entrypoint: `workflow tools call praxis_run_scoreboard`
 - CLI schema help: `workflow tools describe praxis_run_scoreboard`
 - When to use: Inspect cutover readiness for one workflow run.
-- When not to use: Do not use it for workflow dispatch or global status.
+- When not to use: Do not use it for workflow launch or global status.
 - Selector: none
 - Required args: `run_id`
 
@@ -1065,7 +1265,7 @@ Example input:
 - Risks: `read`
 - CLI entrypoint: `workflow tools call praxis_decompose`
 - CLI schema help: `workflow tools describe praxis_decompose`
-- When to use: Break a large objective into workflow-sized micro-sprints before dispatch.
+- When to use: Break a large objective into workflow-sized micro-sprints before workflow launch.
 - When not to use: Do not use it to execute work or inspect historical run state.
 - Selector: none
 - Required args: `objective`
@@ -1193,8 +1393,8 @@ Example input:
 
 - Surface: `research`
 - Tier: `advanced`
-- Badges: `advanced`, `research`, `dispatches-work`
-- Risks: `dispatch`, `read`
+- Badges: `advanced`, `research`, `launches-work`
+- Risks: `launch`, `read`
 - CLI entrypoint: `workflow tools call praxis_research_workflow`
 - CLI schema help: `workflow tools describe praxis_research_workflow`
 - When to use: Launch or inspect fan-out research workflows for deeper multi-angle investigations.
@@ -1405,8 +1605,8 @@ Example input:
 
 - Surface: `workflow`
 - Tier: `advanced`
-- Badges: `advanced`, `workflow`, `mutates-state`, `dispatches-work`
-- Risks: `dispatch`, `read`, `write`
+- Badges: `advanced`, `workflow`, `mutates-state`, `launches-work`
+- Risks: `launch`, `read`, `write`
 - CLI entrypoint: `workflow tools call praxis_connector`
 - CLI schema help: `workflow tools describe praxis_connector`
 - When to use: Build, inspect, register, or verify third-party API connectors.
@@ -1427,8 +1627,8 @@ Example input:
 
 - Surface: `workflow`
 - Tier: `advanced`
-- Badges: `advanced`, `workflow`, `mutates-state`, `dispatches-work`
-- Risks: `dispatch`, `read`, `write`
+- Badges: `advanced`, `workflow`, `mutates-state`, `launches-work`
+- Risks: `launch`, `read`, `write`
 - CLI entrypoint: `workflow tools call praxis_wave`
 - CLI schema help: `workflow tools describe praxis_wave`
 - When to use: Observe or coordinate wave-based execution programs.
@@ -1448,8 +1648,8 @@ Example input:
 
 - Surface: `workflow`
 - Tier: `advanced`
-- Badges: `advanced`, `workflow`, `mutates-state`, `dispatches-work`
-- Risks: `dispatch`, `read`, `write`
+- Badges: `advanced`, `workflow`, `mutates-state`, `launches-work`
+- Risks: `launch`, `read`, `write`
 - CLI entrypoint: `workflow tools call praxis_workflow`
 - CLI schema help: `workflow tools describe praxis_workflow`
 - When to use: Run, preview, inspect, claim, acknowledge, retry, cancel, or list workflows through the MCP workflow surface.

@@ -97,6 +97,60 @@ def test_native_operator_roadmap_write_uses_shared_gate(monkeypatch) -> None:
     )
     assert captured["payload"]["lifecycle"] == "claimed"
     assert captured["payload"]["phase_ready"] is True
+    assert captured["payload"]["proof_kind"] is None
     assert payload["committed"] is True
     assert payload["operation_receipt"]["operation_name"] == "operator.roadmap_write"
     assert payload["normalized_payload"]["template"] == "hard_cutover_program"
+
+
+def test_native_operator_roadmap_write_forwards_proof_kind(monkeypatch) -> None:
+    """--proof-kind flag reaches the shared gate payload verbatim."""
+
+    captured: dict[str, object] = {}
+
+    def _execute_operation_from_env(*, env, operation_name: str, payload):
+        captured["payload"] = payload
+        return {
+            "action": payload["action"],
+            "normalized_payload": {"proof_kind": payload.get("proof_kind")},
+            "auto_fixes": [],
+            "warnings": [],
+            "blocking_errors": [],
+            "operation_receipt": {
+                "operation_name": operation_name,
+                "operation_kind": "command",
+            },
+            "preview": {"roadmap_items": [], "roadmap_item_dependencies": []},
+            "committed": False,
+        }
+
+    monkeypatch.setattr(native_operator, "resolve_native_instance", lambda env=None: _FakeInstance())
+    monkeypatch.setattr(
+        native_operator.operation_catalog_gateway,
+        "execute_operation_from_env",
+        _execute_operation_from_env,
+    )
+
+    stdout = StringIO()
+    assert (
+        workflow_cli_main(
+            [
+                "native-operator",
+                "roadmap-write",
+                "--title",
+                "Record standing-order decision X",
+                "--brief",
+                "This capability row's deliverable is a filed operator_decision",
+                "--item-kind",
+                "capability",
+                "--proof-kind",
+                "capability_delivered_by_decision_filing",
+            ],
+            env=_env(),
+            stdout=stdout,
+        )
+        == 0
+    )
+
+    assert captured["payload"]["proof_kind"] == "capability_delivered_by_decision_filing"
+    assert captured["payload"]["item_kind"] == "capability"

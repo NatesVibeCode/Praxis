@@ -40,6 +40,23 @@ class RouteOutcome:
     is_transient: bool | None = None
     run_id: str | None = None
 
+    def to_json(self) -> dict[str, Any]:
+        """Serialize the outcome for operator-facing JSON payloads."""
+        return {
+            "provider_slug": self.provider_slug,
+            "model_slug": self.model_slug,
+            "adapter_type": self.adapter_type,
+            "status": self.status,
+            "failure_code": self.failure_code,
+            "latency_ms": self.latency_ms,
+            "recorded_at": self.recorded_at.isoformat(),
+            "route_key": self.route_key,
+            "failure_category": self.failure_category,
+            "is_retryable": self.is_retryable,
+            "is_transient": self.is_transient,
+            "run_id": self.run_id,
+        }
+
 
 class RouteOutcomeAuthorityError(RuntimeError):
     """Raised when durable route-outcome authority is unavailable."""
@@ -240,6 +257,48 @@ class RouteOutcomeStore:
             )
             < max_consecutive_failures
         )
+
+    def summary(
+        self,
+        *,
+        recent_limit: int = 3,
+        max_consecutive_failures: int | None = None,
+    ) -> dict[str, Any]:
+        """Return an operator-friendly route health summary."""
+        provider_slugs = self.provider_slugs()
+        providers: list[dict[str, Any]] = []
+        healthy_count = 0
+        unhealthy_count = 0
+
+        for provider_slug in provider_slugs:
+            recent = self.recent_outcomes(provider_slug, limit=recent_limit)
+            consecutive_failures = self.consecutive_failures(provider_slug)
+            healthy = self.is_route_healthy(
+                provider_slug,
+                max_consecutive_failures=max_consecutive_failures,
+            )
+            if healthy:
+                healthy_count += 1
+            else:
+                unhealthy_count += 1
+            providers.append(
+                {
+                    "provider_slug": provider_slug,
+                    "consecutive_failures": consecutive_failures,
+                    "healthy": healthy,
+                    "recent_outcomes": [outcome.to_json() for outcome in recent],
+                }
+            )
+
+        return {
+            "provider_count": len(provider_slugs),
+            "healthy_provider_count": healthy_count,
+            "unhealthy_provider_count": unhealthy_count,
+            "provider_slugs": list(provider_slugs),
+            "providers": providers,
+            "recent_limit": recent_limit,
+            "max_consecutive_failures": max_consecutive_failures,
+        }
 
     def _recent_local_outcomes(
         self,

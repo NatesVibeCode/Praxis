@@ -944,20 +944,132 @@ def _config_command(args: list[str], *, stdout: TextIO) -> int:
 
 
 def _dashboard_command(args: list[str], *, stdout: TextIO) -> int:
-    """Handle `workflow dashboard [--json]` — print consolidated dashboard."""
-
-    from runtime.dashboard import build_dashboard, dashboard_as_json, format_dashboard
+    """Handle `workflow dashboard [--json]` — print the backend dashboard snapshot."""
 
     if args and args[0] in {"-h", "--help"}:
         stdout.write("usage: workflow dashboard [--json]\n")
         return 2
 
-    data = build_dashboard()
+    data = _backend_dashboard_payload()
     if "--json" in args:
-        stdout.write(dashboard_as_json(data) + "\n")
+        print_json(stdout, data)
     else:
-        stdout.write(format_dashboard(data) + "\n")
+        stdout.write(_render_backend_dashboard(data) + "\n")
     return 0
+
+
+def _backend_dashboard_payload() -> dict[str, Any]:
+    from types import SimpleNamespace
+
+    from surfaces.api.handlers import workflow_query as workflow_query_mod
+    from surfaces.mcp.subsystems import _subs
+
+    subsystems = SimpleNamespace(
+        get_pg_conn=_subs.get_pg_conn,
+        get_receipt_ingester=_subs.get_receipt_ingester,
+    )
+    return workflow_query_mod._build_dashboard_payload(subsystems)
+
+
+def _render_backend_dashboard(payload: dict[str, Any]) -> str:
+    summary = payload.get("summary")
+    if not isinstance(summary, dict):
+        return json.dumps(payload, indent=2, default=str)
+
+    workflow_counts = summary.get("workflow_counts")
+    queue = summary.get("queue")
+    sections = payload.get("sections")
+    leaderboard = payload.get("leaderboard")
+    recent_runs = payload.get("recent_runs")
+
+    lines: list[str] = []
+    health = summary.get("health")
+    health_label = str(health.get("label") if isinstance(health, dict) else health or "unknown")
+    lines.append("dashboard_summary:")
+    lines.append(f"  health={health_label}")
+
+    if isinstance(workflow_counts, dict):
+        lines.append(
+            "  workflows="
+            f"total={int(workflow_counts.get('total') or 0)} "
+            f"live={int(workflow_counts.get('live') or 0)} "
+            f"saved={int(workflow_counts.get('saved') or 0)} "
+            f"draft={int(workflow_counts.get('draft') or 0)}"
+        )
+
+    lines.append(
+        "  runs_24h="
+        f"{int(summary.get('runs_24h') or 0)} "
+        f"active_runs={int(summary.get('active_runs') or 0)} "
+        f"pass_rate_24h={float(summary.get('pass_rate_24h') or 0.0) * 100:.1f} "
+        f"total_cost_24h={float(summary.get('total_cost_24h') or 0.0):.4f}"
+    )
+
+    lines.append(
+        "  top_agent="
+        f"{str(summary.get('top_agent') or 'unknown')} "
+        f"models_online={int(summary.get('models_online') or 0)}"
+    )
+
+    if isinstance(queue, dict):
+        lines.append(
+            "queue:"
+            f" depth={int(queue.get('depth') or 0)}"
+            f" status={str(queue.get('status') or 'unknown')}"
+            f" utilization_pct={float(queue.get('utilization_pct') or 0.0):.1f}"
+            f" pending={int(queue.get('pending') or 0)}"
+            f" ready={int(queue.get('ready') or 0)}"
+            f" claimed={int(queue.get('claimed') or 0)}"
+            f" running={int(queue.get('running') or 0)}"
+        )
+        queue_error = str(queue.get("error") or "").strip()
+        if queue_error:
+            lines.append(f"  error={queue_error}")
+
+    if isinstance(sections, list) and sections:
+        section_bits: list[str] = []
+        for section in sections:
+            if not isinstance(section, dict):
+                continue
+            key = str(section.get("key") or "").strip()
+            count = int(section.get("count") or 0)
+            if key:
+                section_bits.append(f"{key}={count}")
+        if section_bits:
+            lines.append(f"sections: {' '.join(section_bits)}")
+
+    if isinstance(leaderboard, list) and leaderboard:
+        lines.append("leaderboard_top:")
+        for row in leaderboard[:5]:
+            if not isinstance(row, dict):
+                continue
+            provider_slug = str(row.get("provider_slug") or "").strip()
+            model_slug = str(row.get("model_slug") or "").strip()
+            if not (provider_slug or model_slug):
+                continue
+            agent_slug = "/".join(part for part in (provider_slug, model_slug) if part)
+            lines.append(
+                f"  {agent_slug}"
+                f" pass_rate_pct={float(row.get('pass_rate') or 0.0) * 100:.1f}"
+                f" total_workflows={int(row.get('total_workflows') or 0)}"
+            )
+
+    if isinstance(recent_runs, list) and recent_runs:
+        lines.append("recent_runs:")
+        for row in recent_runs[:5]:
+            if not isinstance(row, dict):
+                continue
+            run_id = str(row.get("run_id") or "").strip()
+            status = str(row.get("status") or "").strip()
+            completed_jobs = int(row.get("completed_jobs") or 0)
+            total_jobs = int(row.get("total_jobs") or 0)
+            total_cost = float(row.get("total_cost") or 0.0)
+            if run_id:
+                lines.append(
+                    f"  {run_id} {status} jobs={completed_jobs}/{total_jobs} cost_usd={total_cost:.4f}"
+                )
+
+    return "\n".join(lines) if lines else json.dumps(payload, indent=2, default=str)
 
 
 def _cache_command(args: list[str], *, stdout: TextIO) -> int:

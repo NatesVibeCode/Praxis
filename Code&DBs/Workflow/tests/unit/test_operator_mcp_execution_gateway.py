@@ -567,3 +567,49 @@ def test_mcp_issue_backlog_uses_operation_catalog_gateway(monkeypatch) -> None:
     assert result["operation_receipt"]["operation_name"] == "operator.issue_backlog"
     assert captured["operation_name"] == "operator.issue_backlog"
     assert captured["payload"] == {"limit": 12, "open_only": False, "status": "open"}
+
+
+def test_mcp_praxis_orient_delegates_to_rest_authority(monkeypatch) -> None:
+    """praxis_orient must delegate to the same _handle_orient that serves POST /orient.
+
+    Single authority for the orient payload prevents HTTP/MCP drift. The test
+    pins the delegation contract so a future refactor cannot silently re-inline
+    a parallel implementation.
+    """
+
+    captured: dict[str, object] = {}
+
+    sentinel_subs = object()
+    monkeypatch.setattr(operator, "_subs", sentinel_subs)
+
+    def _fake_handle_orient(subs, body):
+        captured["subs"] = subs
+        captured["body"] = body
+        return {
+            "platform": "praxis-workflow",
+            "standing_orders": [],
+            "tool_guidance": {},
+        }
+
+    from surfaces.api.handlers import workflow_admin
+
+    monkeypatch.setattr(workflow_admin, "_handle_orient", _fake_handle_orient)
+
+    result = operator.tool_praxis_orient({})
+
+    assert result["platform"] == "praxis-workflow"
+    assert captured["subs"] is sentinel_subs
+    assert captured["body"] == {}
+
+
+def test_mcp_praxis_orient_registered_in_catalog() -> None:
+    """praxis_orient must appear in the MCP catalog with the orient CLI alias."""
+
+    from surfaces.mcp.catalog import get_tool_catalog
+
+    catalog = get_tool_catalog()
+    assert "praxis_orient" in catalog
+    definition = catalog["praxis_orient"]
+    assert definition.cli_recommended_alias == "orient"
+    assert definition.cli_tier == "curated"
+    assert "read" in definition.risk_levels

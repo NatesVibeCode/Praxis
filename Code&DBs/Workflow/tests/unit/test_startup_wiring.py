@@ -20,6 +20,7 @@ sys.modules.setdefault("runtime", _runtime_pkg)
 from surfaces._subsystems_base import _BaseSubsystems
 import registry.integration_registry_sync as integration_registry_sync_mod
 import registry.native_runtime_profile_sync as native_runtime_profile_sync_mod
+import runtime.integrations.connector_registrar as connector_registrar_mod
 import runtime.capability_catalog as capability_catalog_mod
 import runtime.reference_catalog_seeder as reference_catalog_seeder_mod
 from registry.integration_registry_sync import sync_integration_registry
@@ -230,6 +231,11 @@ def test_startup_wiring_syncs_registry_before_reference_catalog_and_starts_heart
         lambda conn: events.append("native_runtime_profile") or ("praxis",),
     )
     monkeypatch.setattr(
+        connector_registrar_mod,
+        "sync_built_connectors",
+        lambda conn: events.append("connector_registry") or 1,
+    )
+    monkeypatch.setattr(
         reference_catalog_seeder_mod,
         "seed_reference_catalog",
         lambda conn: events.append("reference_catalog") or 1,
@@ -247,6 +253,7 @@ def test_startup_wiring_syncs_registry_before_reference_catalog_and_starts_heart
         "integration",
         "capability",
         "native_runtime_profile",
+        "connector_registry",
         "reference_catalog",
     ]
     assert subs._lifecycle.started is True
@@ -308,6 +315,11 @@ def test_boot_warns_when_registry_sync_steps_are_skipped(
         lambda conn: 1,
     )
     monkeypatch.setattr(
+        connector_registrar_mod,
+        "sync_built_connectors",
+        lambda conn: 1,
+    )
+    monkeypatch.setattr(
         reference_catalog_seeder_mod,
         "seed_reference_catalog",
         lambda conn: 1,
@@ -346,6 +358,11 @@ def test_startup_wiring_can_skip_heartbeat_background(monkeypatch) -> None:
         lambda conn: events.append("native_runtime_profile") or ("praxis",),
     )
     monkeypatch.setattr(
+        connector_registrar_mod,
+        "sync_built_connectors",
+        lambda conn: events.append("connector_registry") or 1,
+    )
+    monkeypatch.setattr(
         reference_catalog_seeder_mod,
         "seed_reference_catalog",
         lambda conn: events.append("reference_catalog") or 1,
@@ -362,6 +379,7 @@ def test_startup_wiring_can_skip_heartbeat_background(monkeypatch) -> None:
         "integration",
         "capability",
         "native_runtime_profile",
+        "connector_registry",
         "reference_catalog",
     ]
     assert subs._lifecycle.started is False

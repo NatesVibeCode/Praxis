@@ -180,7 +180,18 @@
     "173_schema_migrations.sql",
     "174_surface_catalog_trigger_icons.sql",
     "175_openrouter_primary_chat_engine.sql",
-    "176_data_dictionary_schema_snapshots.sql"
+    "176_data_dictionary_schema_snapshots.sql",
+    "177_data_dictionary_governance_scans.sql",
+    "178_data_dictionary_governance_change_ledger.sql",
+    "179_daily_heartbeat_snapshots.sql",
+    "180_remove_direct_anthropic_provider.sql",
+    "181_data_dictionary_wiring_audit_snapshots.sql",
+    "182_audit_exclusions.sql",
+    "182_restore_anthropic_cli_only.sql",
+    "183_codex_skip_git_repo_check.sql",
+    "184_anthropic_cli_candidates.sql",
+    "189_oversight_instrumentation.sql",
+    "190_surface_catalog_gate_icons.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -4662,7 +4673,163 @@
         "object_type": "index",
         "object_name": "idx_data_dictionary_schema_snapshot_fields_object"
       }
-    ]
+    ],
+    "177_data_dictionary_governance_scans.sql": [
+      {
+        "object_type": "table",
+        "object_name": "data_dictionary_governance_scans"
+      },
+      {
+        "object_type": "function",
+        "object_name": "notify_data_dictionary_governance_scans"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "trg_data_dictionary_governance_scans_notify"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_data_dictionary_governance_scans_scanned"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_data_dictionary_governance_scans_triggered"
+      }
+    ],
+    "178_data_dictionary_governance_change_ledger.sql": [
+      {
+        "object_type": "table",
+        "object_name": "data_dictionary_governance_change_ledger"
+      },
+      {
+        "object_type": "function",
+        "object_name": "gov_change_ledger_append"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "trg_gov_change_ledger_classifications"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "trg_gov_change_ledger_stewardship"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "trg_gov_change_ledger_quality_rules"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_gov_change_ledger_pending"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_gov_change_ledger_object"
+      }
+    ],
+    "179_daily_heartbeat_snapshots.sql": [
+      {
+        "object_type": "table",
+        "object_name": "heartbeat_runs"
+      },
+      {
+        "object_type": "table",
+        "object_name": "heartbeat_probe_snapshots"
+      },
+      {
+        "object_type": "index",
+        "object_name": "heartbeat_runs_scope_started_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "heartbeat_runs_triggered_started_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "heartbeat_probe_snapshots_kind_subject_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "heartbeat_probe_snapshots_run_idx"
+      },
+      {
+        "object_type": "index",
+        "object_name": "heartbeat_probe_snapshots_kind_status_captured_idx"
+      },
+      {
+        "object_type": "view",
+        "object_name": "v_provider_usage_snapshots"
+      },
+      {
+        "object_type": "view",
+        "object_name": "v_connector_liveness_snapshots"
+      },
+      {
+        "object_type": "view",
+        "object_name": "v_credential_expiry_snapshots"
+      },
+      {
+        "object_type": "view",
+        "object_name": "v_mcp_liveness_snapshots"
+      }
+    ],
+    "180_remove_direct_anthropic_provider.sql": [],
+    "181_data_dictionary_wiring_audit_snapshots.sql": [
+      {
+        "object_type": "table",
+        "object_name": "data_dictionary_wiring_audit_snapshots"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_data_dictionary_wiring_audit_snapshots_taken"
+      }
+    ],
+    "182_restore_anthropic_cli_only.sql": [],
+    "183_codex_skip_git_repo_check.sql": [],
+    "184_anthropic_cli_candidates.sql": [],
+    "182_audit_exclusions.sql": [],
+    "189_oversight_instrumentation.sql": [
+      {
+        "object_type": "table",
+        "object_name": "policy_drift_events"
+      },
+      {
+        "object_type": "table",
+        "object_name": "autonomy_chain_ledger"
+      },
+      {
+        "object_type": "table",
+        "object_name": "session_blast_radius"
+      },
+      {
+        "object_type": "table",
+        "object_name": "session_blast_radius_policy"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_policy_drift_events_detected_at"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_policy_drift_events_unresolved"
+      },
+      {
+        "object_type": "index",
+        "object_name": "uniq_autonomy_chain_ledger_active_singleton"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_autonomy_chain_ledger_history"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_session_blast_radius_active"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_session_blast_radius_run"
+      }
+    ],
+    "190_surface_catalog_gate_icons.sql": []
   },
   "policy_buckets": {
     "canonical": [
@@ -4846,7 +5013,18 @@
       "173_schema_migrations.sql",
       "174_surface_catalog_trigger_icons.sql",
       "175_openrouter_primary_chat_engine.sql",
-      "176_data_dictionary_schema_snapshots.sql"
+      "176_data_dictionary_schema_snapshots.sql",
+      "177_data_dictionary_governance_scans.sql",
+      "178_data_dictionary_governance_change_ledger.sql",
+      "179_daily_heartbeat_snapshots.sql",
+      "180_remove_direct_anthropic_provider.sql",
+      "181_data_dictionary_wiring_audit_snapshots.sql",
+      "182_audit_exclusions.sql",
+      "182_restore_anthropic_cli_only.sql",
+      "183_codex_skip_git_repo_check.sql",
+      "184_anthropic_cli_candidates.sql",
+      "189_oversight_instrumentation.sql",
+      "190_surface_catalog_gate_icons.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",
@@ -4975,6 +5153,10 @@
     "107": [
       "107_name_cleanup_praxis_branding.sql",
       "107_workflow_notifications_resource_telemetry.sql"
+    ],
+    "182": [
+      "182_audit_exclusions.sql",
+      "182_restore_anthropic_cli_only.sql"
     ]
   }
 }

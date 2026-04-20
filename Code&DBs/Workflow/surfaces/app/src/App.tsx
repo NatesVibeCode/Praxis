@@ -108,6 +108,12 @@ const ManifestEditorPage = React.lazy(() =>
   }))
 );
 
+const AtlasPage = React.lazy(() =>
+  import('./atlas/AtlasPage').then(m => ({ default: m.AtlasPage })).catch(() => ({
+    default: () => <SurfaceFallback title="Atlas unavailable." copy="The atlas surface failed to load." />
+  }))
+);
+
 function SurfacePlaceholder({ title }: { title: string }) {
   return (
     <div className="app-shell__fallback">
@@ -504,6 +510,7 @@ export function AppShell() {
           onNewWorkflow={() => openBuild({ workflowId: null, intent: null, seed: null, view: 'moon' })}
           onChat={() => setChatOpen(true)}
           onDescribe={() => openBuild({ workflowId: null, intent: '__compose__', seed: null, view: 'moon' })}
+          onOpenCosts={() => activateTab('costs')}
         />
       );
     }
@@ -542,6 +549,10 @@ export function AppShell() {
           onEditManifest={(manifestId) => openManifestEditor(manifestId)}
         />
       );
+    }
+
+    if (activeSurface.category === 'static' && activeSurface.id === 'atlas') {
+      return <AtlasPage />;
     }
 
     if (activeSurface.category === 'dynamic' && activeSurface.kind === 'run-detail' && activeSurface.dynamicTab.runId) {

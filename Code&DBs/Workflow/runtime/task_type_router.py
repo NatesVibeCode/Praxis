@@ -1095,6 +1095,15 @@ class TaskTypeRouter:
             budget_window_data_quality_error = bool(
                 row.get("budget_window_data_quality_error", False)
             )
+            # BUG-2A950857: thread the economics-authority PAYG fallback flag
+            # into admission. ``None`` when the row is missing the key (legacy
+            # rows, tests with synthetic rows) → admission stays permissive.
+            raw_allow_payg_fallback = row.get("allow_payg_fallback")
+            allow_payg_fallback = (
+                bool(raw_allow_payg_fallback)
+                if raw_allow_payg_fallback is not None
+                else None
+            )
             admitted, reason = admit_adapter_type(
                 policies,
                 provider,
@@ -1102,6 +1111,7 @@ class TaskTypeRouter:
                 spend_pressure=spend_pressure,
                 budget_authority_unreachable=budget_authority_unreachable,
                 budget_window_data_quality_error=budget_window_data_quality_error,
+                allow_payg_fallback=allow_payg_fallback,
             )
             if admitted:
                 kept.append(row)

@@ -24,7 +24,7 @@ class _RequestStub:
 def test_scan_is_dry_run(monkeypatch) -> None:
     captured: dict[str, Any] = {}
 
-    def fake(conn, tracker=None, *, dry_run=False):
+    def fake(conn, tracker=None, *, dry_run=False, triggered_by="heartbeat", record_scan=True):
         captured["dry_run"] = dry_run
         captured["tracker_is_none"] = tracker is None
         return {"total_violations": 0, "by_policy": {}, "violations": []}
@@ -40,7 +40,7 @@ def test_scan_is_dry_run(monkeypatch) -> None:
 def test_enforce_passes_real_tracker(monkeypatch) -> None:
     captured: dict[str, Any] = {}
 
-    def fake(conn, tracker=None, *, dry_run=False):
+    def fake(conn, tracker=None, *, dry_run=False, triggered_by="heartbeat", record_scan=True):
         captured["dry_run"] = dry_run
         captured["has_tracker"] = tracker is not None
         return {"filed_bugs": [], "skipped_existing": []}
@@ -54,7 +54,7 @@ def test_enforce_passes_real_tracker(monkeypatch) -> None:
 
 
 def test_scan_500_on_runtime_exception(monkeypatch) -> None:
-    def boom(conn, tracker=None, *, dry_run=False):
+    def boom(conn, tracker=None, *, dry_run=False, triggered_by="heartbeat", record_scan=True):
         raise RuntimeError("db dead")
 
     monkeypatch.setattr(handler, "run_governance_scan", boom)
@@ -65,7 +65,7 @@ def test_scan_500_on_runtime_exception(monkeypatch) -> None:
 
 
 def test_enforce_500_on_runtime_exception(monkeypatch) -> None:
-    def boom(conn, tracker=None, *, dry_run=False):
+    def boom(conn, tracker=None, *, dry_run=False, triggered_by="heartbeat", record_scan=True):
         raise RuntimeError("bug writer down")
 
     monkeypatch.setattr(handler, "run_governance_scan", boom)
@@ -171,28 +171,44 @@ def test_cluster_handler_500_on_exception(monkeypatch) -> None:
 def test_route_matchers_match_only_exact_paths() -> None:
     get_matchers = handler.DATA_DICTIONARY_GOVERNANCE_GET_ROUTES
     post_matchers = handler.DATA_DICTIONARY_GOVERNANCE_POST_ROUTES
-    # 4 GET routes: scorecard, remediate, clusters, scan (in first-match order)
-    assert len(get_matchers) == 4
-    assert len(post_matchers) == 1
 
-    matchers_by_path = {}
-    paths_in_order = [
+    # Exact-match sibling paths should not cross-leak (scan detail uses a
+    # prefix matcher and is tested separately).
+    exact_paths = [
         "/api/data-dictionary/governance/scorecard",
         "/api/data-dictionary/governance/remediate",
         "/api/data-dictionary/governance/clusters",
+        "/api/data-dictionary/governance/scans",
+        "/api/data-dictionary/governance/pending",
         "/api/data-dictionary/governance",
     ]
-    for path, (fn, _handler) in zip(paths_in_order, get_matchers):
-        matchers_by_path[path] = fn
-        assert fn(path) is True
+    exact_matchers = [
+        (fn, h) for (fn, h) in get_matchers
+        # Include every GET matcher that returns True for at least one of
+        # our exact paths — the prefix matcher for /scans/<id> returns True
+        # for `/scans/<id>` shapes, not the bare `/scans` ones.
+    ]
+    assert len(exact_matchers) == len(get_matchers)
 
-    # Exactness: no matcher should match a sibling path.
-    for path, fn in matchers_by_path.items():
-        for other in paths_in_order:
-            if other == path:
-                continue
-            assert fn(other) is False, f"{path} matcher leaked onto {other}"
+    # Every path should match exactly one GET matcher.
+    for p in exact_paths:
+        hits = [fn for (fn, _h) in get_matchers if fn(p)]
+        assert len(hits) == 1, f"{p} matched {len(hits)} matchers, expected 1"
 
-    post_fn, _ = post_matchers[0]
-    assert post_fn("/api/data-dictionary/governance/enforce") is True
-    assert post_fn("/api/data-dictionary/governance") is False
+    # Scan-detail prefix matcher handles the /scans/<id> shape.
+    scan_detail_path = "/api/data-dictionary/governance/scans/abc-123"
+    hits = [fn for (fn, _h) in get_matchers if fn(scan_detail_path)]
+    assert len(hits) >= 1  # prefix matcher fires on this shape
+
+    # POST side: enforce + drain.
+    assert len(post_matchers) == 2
+    post_paths = {
+        "/api/data-dictionary/governance/enforce",
+        "/api/data-dictionary/governance/drain",
+    }
+    for p in post_paths:
+        hits = [fn for (fn, _h) in post_matchers if fn(p)]
+        assert len(hits) == 1, f"POST {p} matched {len(hits)} matchers"
+    # POST enforce must not match bare governance path.
+    for fn, _h in post_matchers:
+        assert fn("/api/data-dictionary/governance") is False

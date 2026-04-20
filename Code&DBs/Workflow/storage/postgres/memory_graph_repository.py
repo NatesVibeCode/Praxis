@@ -278,6 +278,124 @@ class PostgresMemoryGraphRepository:
                 return dict(parsed)
         return {}
 
+    def replace_vector_neighbor_projection(
+        self,
+        *,
+        source_entity_id: str,
+        neighbors: Sequence[Mapping[str, Any]],
+        policy_key: str,
+        embedding_version: int,
+    ) -> int:
+        normalized_source_id = _require_text(source_entity_id, field_name="source_entity_id")
+        normalized_policy_key = _require_text(policy_key, field_name="policy_key")
+        normalized_embedding_version = int(embedding_version)
+
+        self._conn.execute(
+            "DELETE FROM memory_vector_neighbors WHERE source_entity_id = $1",
+            normalized_source_id,
+        )
+        self._conn.execute(
+            """
+            DELETE FROM memory_inferred_edges
+            WHERE source_id = $1
+              AND inference_kind = 'vector_neighbor'
+            """,
+            normalized_source_id,
+        )
+
+        normalized_neighbors: list[tuple[str, float, int]] = []
+        for index, neighbor in enumerate(neighbors, start=1):
+            if not isinstance(neighbor, Mapping):
+                continue
+            target_id = _require_text(neighbor.get("id"), field_name=f"neighbors[{index}].id")
+            similarity = float(neighbor.get("similarity") or 0.0)
+            normalized_neighbors.append((target_id, similarity, index))
+
+        if normalized_neighbors:
+            vector_rows = [
+                (
+                    normalized_source_id,
+                    target_id,
+                    normalized_policy_key,
+                    similarity,
+                    rank,
+                    normalized_embedding_version,
+                )
+                for target_id, similarity, rank in normalized_neighbors
+            ]
+            inferred_rows = [
+                (
+                    normalized_source_id,
+                    target_id,
+                    "semantic_neighbor",
+                    "vector_neighbor",
+                    similarity,
+                    _encode_jsonb(
+                        {
+                            "policy_key": normalized_policy_key,
+                            "rank": rank,
+                        },
+                        field_name="metadata",
+                    ),
+                    1,
+                    normalized_embedding_version,
+                )
+                for target_id, similarity, rank in normalized_neighbors
+            ]
+
+            for row in vector_rows:
+                self._conn.execute(
+                    """
+                    INSERT INTO memory_vector_neighbors (
+                        source_entity_id,
+                        target_entity_id,
+                        policy_key,
+                        similarity,
+                        rank,
+                        embedding_version,
+                        refreshed_at,
+                        active
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, now(), true)
+                    ON CONFLICT (source_entity_id, target_entity_id, policy_key) DO UPDATE
+                    SET similarity = EXCLUDED.similarity,
+                        rank = EXCLUDED.rank,
+                        embedding_version = EXCLUDED.embedding_version,
+                        refreshed_at = now(),
+                        active = true
+                    """,
+                    *row,
+                )
+            for row in inferred_rows:
+                self._conn.execute(
+                    """
+                    INSERT INTO memory_inferred_edges (
+                        source_id,
+                        target_id,
+                        relation_type,
+                        inference_kind,
+                        confidence,
+                        metadata,
+                        evidence_count,
+                        embedding_version,
+                        created_at,
+                        refreshed_at,
+                        active
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, now(), now(), true)
+                    ON CONFLICT (source_id, target_id, relation_type, inference_kind) DO UPDATE
+                    SET confidence = EXCLUDED.confidence,
+                        metadata = EXCLUDED.metadata,
+                        embedding_version = EXCLUDED.embedding_version,
+                        evidence_count = EXCLUDED.evidence_count,
+                        refreshed_at = now(),
+                        active = true
+                    """,
+                    *row,
+                )
+
+        return len(normalized_neighbors)
+
     def upsert_edge(self, *, edge: Edge) -> bool:
         try:
             self._conn.execute(

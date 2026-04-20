@@ -595,110 +595,22 @@ class DatabaseMaintenanceProcessor:
             score_alias="similarity",
         )
 
-        self._conn.execute(
-            "DELETE FROM memory_vector_neighbors WHERE source_entity_id = $1",
-            intent.subject_id,
+        neighbor_count = self._memory_graph_repository.replace_vector_neighbor_projection(
+            source_entity_id=str(intent.subject_id),
+            neighbors=neighbors,
+            policy_key="memory_entity.vector_neighbors",
+            embedding_version=embedding_version,
         )
-        self._conn.execute(
-            """
-            DELETE FROM memory_inferred_edges
-            WHERE source_id = $1
-              AND inference_kind = 'vector_neighbor'
-            """,
-            intent.subject_id,
-        )
-
-        if neighbors:
-            vector_rows = []
-            inferred_rows = []
-            for rank, neighbor in enumerate(neighbors, start=1):
-                similarity = float(neighbor["similarity"] or 0.0)
-                target_id = str(neighbor["id"])
-                vector_rows.append(
-                    (
-                        str(intent.subject_id),
-                        target_id,
-                        "memory_entity.vector_neighbors",
-                        similarity,
-                        rank,
-                        embedding_version,
-                    )
-                )
-                inferred_rows.append(
-                    (
-                        str(intent.subject_id),
-                        target_id,
-                        "semantic_neighbor",
-                        "vector_neighbor",
-                        similarity,
-                        json.dumps(
-                            {
-                                "policy_key": "memory_entity.vector_neighbors",
-                                "rank": rank,
-                            }
-                        ),
-                        1,
-                        embedding_version,
-                    )
-                )
-            self._conn.execute_many(
-                """
-                INSERT INTO memory_vector_neighbors (
-                    source_entity_id,
-                    target_entity_id,
-                    policy_key,
-                    similarity,
-                    rank,
-                    embedding_version,
-                    refreshed_at,
-                    active
-                )
-                VALUES ($1, $2, $3, $4, $5, $6, now(), true)
-                ON CONFLICT (source_entity_id, target_entity_id, policy_key) DO UPDATE
-                SET similarity = EXCLUDED.similarity,
-                    rank = EXCLUDED.rank,
-                    embedding_version = EXCLUDED.embedding_version,
-                    refreshed_at = now(),
-                    active = true
-                """,
-                vector_rows,
-            )
-            self._conn.execute_many(
-                """
-                INSERT INTO memory_inferred_edges (
-                    source_id,
-                    target_id,
-                    relation_type,
-                    inference_kind,
-                    confidence,
-                    metadata,
-                    evidence_count,
-                    embedding_version,
-                    created_at,
-                    refreshed_at,
-                    active
-                )
-                VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, now(), now(), true)
-                ON CONFLICT (source_id, target_id, relation_type, inference_kind) DO UPDATE
-                SET confidence = EXCLUDED.confidence,
-                    metadata = EXCLUDED.metadata,
-                    embedding_version = EXCLUDED.embedding_version,
-                    evidence_count = EXCLUDED.evidence_count,
-                    refreshed_at = now(),
-                    active = true
-                """,
-                inferred_rows,
-            )
 
         self._memory_graph_repository.touch_entity_maintenance(
             entity_id=str(intent.subject_id),
         )
         return {
             "status": "completed",
-            "message": f"vector_neighbors:{intent.subject_id}:{len(neighbors)}",
+            "message": f"vector_neighbors:{intent.subject_id}:{neighbor_count}",
             "outcome": {
                 "entity_id": intent.subject_id,
-                "neighbor_count": len(neighbors),
+                "neighbor_count": neighbor_count,
                 "embedding_version": embedding_version,
             },
         }

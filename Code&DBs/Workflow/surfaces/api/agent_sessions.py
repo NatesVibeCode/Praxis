@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -48,6 +47,20 @@ class CreateAgentRequest(BaseModel):
 
 class SendMessageRequest(BaseModel):
     prompt: str
+
+
+@app.get("/")
+async def service_index() -> dict[str, Any]:
+    return {
+        "ok": True,
+        "service": "agent_sessions",
+        "routes": [
+            "/agents",
+            "/agents/{agent_id}/messages",
+            "/agents/{agent_id}/stream",
+            "/agents/{agent_id}",
+        ],
+    }
 
 
 def _now_iso() -> str:
@@ -422,4 +435,6 @@ async def list_agents() -> list[dict[str, Any]]:
 
 
 if __name__ == "__main__":
+    import uvicorn
+
     uvicorn.run(app, host="127.0.0.1", port=8421)

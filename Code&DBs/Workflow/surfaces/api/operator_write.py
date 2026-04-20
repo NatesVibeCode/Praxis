@@ -496,6 +496,7 @@ def _acceptance_payload(
     phase_order: str,
     reference_doc: str | None,
     must_have: tuple[str, ...],
+    proof_kind: str | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "tier": tier,
@@ -507,6 +508,8 @@ def _acceptance_payload(
     }
     if reference_doc:
         payload["reference_doc"] = reference_doc
+    if proof_kind:
+        payload["proof_kind"] = proof_kind
     return payload
 
 
@@ -3078,6 +3081,7 @@ class OperatorControlFrontdoor:
         approval_tag: str | None,
         reference_doc: str | None,
         outcome_gate: str | None,
+        proof_kind: str | None,
     ) -> dict[str, Any]:
         now = _now()
         normalized_action = _normalize_roadmap_action(action)
@@ -3198,6 +3202,20 @@ class OperatorControlFrontdoor:
         if decision_ref is None:
             auto_fixes.append(f"decision_ref generated: {normalized_decision_ref}")
 
+        normalized_proof_kind = _optional_text(proof_kind, field_name="proof_kind")
+        if normalized_proof_kind is not None:
+            if normalized_proof_kind != _CAPABILITY_DELIVERED_BY_DECISION_FILING:
+                blocking_errors.append(
+                    f"unsupported proof_kind '{normalized_proof_kind}': only "
+                    f"'{_CAPABILITY_DELIVERED_BY_DECISION_FILING}' is currently recognized"
+                )
+            elif normalized_item_kind != "capability":
+                blocking_errors.append(
+                    f"proof_kind '{_CAPABILITY_DELIVERED_BY_DECISION_FILING}' "
+                    "requires item_kind='capability' (decision-filing closeout is "
+                    "only valid for capability rows)"
+                )
+
         root_roadmap_item_id = (
             f"{normalized_parent}.{normalized_slug}"
             if normalized_parent is not None
@@ -3224,6 +3242,7 @@ class OperatorControlFrontdoor:
             phase_order=root_phase_order,
             reference_doc=normalized_reference_doc,
             must_have=(normalized_intent_brief,),
+            proof_kind=normalized_proof_kind,
         )
 
         root_item = _roadmap_item_payload(
@@ -3332,6 +3351,7 @@ class OperatorControlFrontdoor:
             "approval_tag": normalized_approval_tag,
             "reference_doc": normalized_reference_doc,
             "outcome_gate": normalized_outcome_gate,
+            "proof_kind": normalized_proof_kind,
             "root_phase_order": root_phase_order,
         }
 
@@ -3370,6 +3390,7 @@ class OperatorControlFrontdoor:
         approval_tag: str | None = None,
         reference_doc: str | None = None,
         outcome_gate: str | None = None,
+        proof_kind: str | None = None,
     ) -> dict[str, Any]:
         conn = await self.connect_database(env)
         try:
@@ -3394,6 +3415,7 @@ class OperatorControlFrontdoor:
                 approval_tag=approval_tag,
                 reference_doc=reference_doc,
                 outcome_gate=outcome_gate,
+                proof_kind=proof_kind,
             )
             if preview["blocking_errors"] or preview["action"] != "commit":
                 preview["committed"] = False
@@ -4460,6 +4482,7 @@ class OperatorControlFrontdoor:
         approval_tag: str | None = None,
         reference_doc: str | None = None,
         outcome_gate: str | None = None,
+        proof_kind: str | None = None,
         env: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
         return await self._roadmap_write(
@@ -4483,6 +4506,7 @@ class OperatorControlFrontdoor:
             approval_tag=approval_tag,
             reference_doc=reference_doc,
             outcome_gate=outcome_gate,
+            proof_kind=proof_kind,
         )
 
     async def reconcile_work_item_closeout_async(
@@ -5112,6 +5136,7 @@ class OperatorControlFrontdoor:
         approval_tag: str | None = None,
         reference_doc: str | None = None,
         outcome_gate: str | None = None,
+        proof_kind: str | None = None,
         env: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
         return _run_async(
@@ -5135,6 +5160,7 @@ class OperatorControlFrontdoor:
                 approval_tag=approval_tag,
                 reference_doc=reference_doc,
                 outcome_gate=outcome_gate,
+                proof_kind=proof_kind,
                 env=env,
             ),
             message=(
@@ -6154,6 +6180,7 @@ async def aroadmap_write(
     approval_tag: str | None = None,
     reference_doc: str | None = None,
     outcome_gate: str | None = None,
+    proof_kind: str | None = None,
     env: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Write one roadmap item or packaged roadmap program through the default async frontdoor."""
@@ -6178,6 +6205,7 @@ async def aroadmap_write(
         approval_tag=approval_tag,
         reference_doc=reference_doc,
         outcome_gate=outcome_gate,
+        proof_kind=proof_kind,
         env=env,
     )
 

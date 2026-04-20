@@ -15,10 +15,31 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable
 
+from runtime.primitive_contracts import (
+    bug_query_default_open_only_backlog,
+    bug_query_default_open_only_list,
+)
+
 from .cli_metadata import CLI_TOOL_METADATA
 
 _TOOLS_ROOT = Path(__file__).resolve().parent / "tools"
 _MCP_SERVER_ID = "praxis-workflow-mcp"
+
+# BUG-BAEC85C1: the MCP ``TOOLS`` literal is parsed via ``ast.literal_eval``
+# so the catalog loader can ingest tool schemas without importing the tool
+# modules. That purity gate also blocks primitive calls — a schema that
+# says ``"default": bug_query_default_open_only_list()`` becomes a
+# ``Call`` AST node, not a ``Constant``, and ``literal_eval`` rejects it.
+# To unify the bug-surface ``open_only`` default at one authority while
+# keeping the loader's no-import guarantee, we resolve a tightly scoped
+# whitelist of primitive calls in the metadata AST to their literal
+# values before handing the tree to ``literal_eval``. Any primitive that
+# ever needs to surface as a schema default must be explicitly added
+# here — unknown calls still fail closed.
+_SCHEMA_PRIMITIVE_RESOLVERS: dict[str, Callable[[], Any]] = {
+    "bug_query_default_open_only_list": bug_query_default_open_only_list,
+    "bug_query_default_open_only_backlog": bug_query_default_open_only_backlog,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -401,6 +422,31 @@ def _tool_paths() -> list[Path]:
     )
 
 
+class _PrimitiveCallResolver(ast.NodeTransformer):
+    """Rewrite whitelisted primitive calls to literal constants in-place.
+
+    The MCP tool catalog parser uses ``ast.literal_eval`` on the ``TOOLS``
+    metadata dict (see module docstring). That keeps the catalog a pure
+    data read. But it forbids any non-literal default — including calls
+    to canonical-default primitives from ``runtime.primitive_contracts``,
+    which is exactly where bug-surface ``open_only`` defaults live. This
+    transformer resolves the whitelisted primitive calls to their values
+    so the surface code can still cite the primitive as the authority
+    without introducing literal drift (BUG-BAEC85C1).
+    """
+
+    def visit_Call(self, node: ast.Call) -> ast.AST:  # noqa: N802 - ast API
+        self.generic_visit(node)
+        if not isinstance(node.func, ast.Name):
+            return node
+        resolver = _SCHEMA_PRIMITIVE_RESOLVERS.get(node.func.id)
+        if resolver is None:
+            return node
+        if node.args or node.keywords:
+            return node  # only the zero-arg form is safe to fold
+        return ast.copy_location(ast.Constant(value=resolver()), node)
+
+
 def _load_tool_defs(path: Path) -> list[McpToolDefinition]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     tools_node: ast.AST | None = None
@@ -436,6 +482,8 @@ def _load_tool_defs(path: Path) -> list[McpToolDefinition]:
         handler_node, metadata_node = value_node.elts
         if not isinstance(handler_node, ast.Name):
             raise ValueError(f"Tool handler for {tool_name} in {path} must be a named function")
+        metadata_node = _PrimitiveCallResolver().visit(metadata_node)
+        ast.fix_missing_locations(metadata_node)
         metadata = ast.literal_eval(metadata_node)
         if not isinstance(metadata, dict):
             raise ValueError(f"Tool metadata for {tool_name} in {path} must be a dict literal")

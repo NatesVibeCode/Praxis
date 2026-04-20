@@ -134,6 +134,126 @@ describe('MoonNodeDetail', () => {
     expect(onApplyGate).toHaveBeenCalledWith('edge-trigger-next', 'after_failure');
   });
 
+  test('Remove gate clears conditional branch pair and commits a normal release', async () => {
+    const onCommitGraphAction = vi.fn().mockResolvedValue(undefined);
+
+    const selectedEdge: OrbitEdge = {
+      id: 'edge-trigger-next',
+      from: 'node-trigger',
+      to: 'node-next',
+      kind: 'sequence',
+      isOnDominantPath: true,
+      gateState: 'configured',
+      gateLabel: 'Then',
+      gateFamily: 'conditional',
+      branchReason: 'then',
+    };
+
+    const buildGraph: NonNullable<BuildPayload['build_graph']> = {
+      nodes: [
+        { node_id: 'node-trigger', kind: 'step', title: 'Webhook' },
+        { node_id: 'node-next', kind: 'step', title: 'Next step' },
+        { node_id: 'node-else', kind: 'step', title: 'Else path' },
+      ],
+      edges: [
+        {
+          edge_id: 'edge-trigger-next',
+          kind: 'sequence',
+          from_node_id: 'node-trigger',
+          to_node_id: 'node-next',
+          release: {
+            family: 'conditional',
+            edge_type: 'conditional',
+            state: 'configured',
+            label: 'Then',
+            branch_reason: 'then',
+            release_condition: { field: 'should_continue', op: 'equals', value: true },
+            config: { condition: { field: 'should_continue', op: 'equals', value: true } },
+          },
+        },
+        {
+          edge_id: 'edge-trigger-else',
+          kind: 'sequence',
+          from_node_id: 'node-trigger',
+          to_node_id: 'node-else',
+          release: {
+            family: 'conditional',
+            edge_type: 'conditional',
+            state: 'configured',
+            label: 'Else',
+            branch_reason: 'else',
+            release_condition: {
+              op: 'not',
+              conditions: [{ field: 'should_continue', op: 'equals', value: true }],
+            },
+            config: { condition: { field: 'should_continue', op: 'equals', value: true } },
+          },
+        },
+      ],
+    };
+
+    render(
+      <MoonNodeDetail
+        node={null}
+        content={null}
+        workflowId={null}
+        onMutate={vi.fn()}
+        onClose={vi.fn()}
+        selectedEdge={selectedEdge}
+        edgeFromLabel="Webhook"
+        edgeToLabel="Next step"
+        onApplyGate={vi.fn()}
+        gateItems={[]}
+        buildGraph={buildGraph}
+        onCommitGraphAction={onCommitGraphAction}
+      />,
+    );
+
+    const removeButton = screen.getByRole('button', { name: 'Remove gate' });
+    fireEvent.click(removeButton);
+
+    await vi.waitFor(() => expect(onCommitGraphAction).toHaveBeenCalledTimes(1));
+
+    const [committedGraph, meta] = onCommitGraphAction.mock.calls[0];
+    expect(meta.label).toBe('Remove gate');
+    const byId: Record<string, any> = Object.fromEntries(
+      (committedGraph.edges || []).map((edge: any) => [edge.edge_id, edge]),
+    );
+    expect(byId['edge-trigger-next'].release.family).toBe('after_success');
+    // Paired conditional sibling is cleared in the same commit.
+    expect(byId['edge-trigger-else'].release.family).toBe('after_success');
+  });
+
+  test('Remove gate is not offered when the edge is already ungated', () => {
+    const selectedEdge: OrbitEdge = {
+      id: 'edge-plain',
+      from: 'node-a',
+      to: 'node-b',
+      kind: 'sequence',
+      isOnDominantPath: true,
+      gateState: 'empty',
+    };
+
+    render(
+      <MoonNodeDetail
+        node={null}
+        content={null}
+        workflowId={null}
+        onMutate={vi.fn()}
+        onClose={vi.fn()}
+        selectedEdge={selectedEdge}
+        edgeFromLabel="A"
+        edgeToLabel="B"
+        onApplyGate={vi.fn()}
+        gateItems={[]}
+        buildGraph={{ nodes: [], edges: [] }}
+        onCommitGraphAction={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Remove gate' })).not.toBeInTheDocument();
+  });
+
   test('renders block contract string lists as data fields with values from the build graph', () => {
     const node: OrbitNode = {
       id: 'n-step',

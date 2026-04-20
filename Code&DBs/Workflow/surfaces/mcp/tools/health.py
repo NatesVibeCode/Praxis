@@ -6,6 +6,9 @@ from typing import Any
 from runtime.engineering_observability import build_trend_observability
 from runtime.dependency_contract import dependency_truth_report
 from runtime.context_cache import get_context_cache
+from runtime.missing_detector import build_content_health_report
+from runtime.workflow import get_route_outcomes
+from registry.config_registry import get_config as get_registry_config
 from registry.provider_execution_registry import registry_health as provider_registry_health
 from surfaces.api.operator_read import (
     build_transport_support_summary,
@@ -15,27 +18,6 @@ from surfaces.api.operator_read import (
 from surfaces._workflow_database import workflow_database_url_for_repo
 from ..subsystems import _subs, REPO_ROOT, workflow_database_env
 from ..helpers import _serialize
-
-
-def _entity_contexts(conn: Any, entity_ids: list[str]) -> dict[str, dict[str, Any]]:
-    unique_ids = [entity_id for entity_id in dict.fromkeys(entity_ids) if entity_id]
-    if not unique_ids:
-        return {}
-    rows = conn.execute(
-        "SELECT id, entity_type, name, content FROM memory_entities "
-        "WHERE id = ANY($1::text[])",
-        unique_ids,
-    )
-    return {
-        str(row["id"]): {
-            "entity_id": str(row["id"]),
-            "entity_type": str(row.get("entity_type") or ""),
-            "name": str(row.get("name") or ""),
-            "summary": str(row.get("content") or ""),
-        }
-        for row in rows or []
-    }
-
 
 def tool_praxis_health(params: dict, _progress_emitter=None) -> dict:
     """Run health probes, return preflight + operator snapshot + lane recommendation."""
@@ -85,64 +67,8 @@ def tool_praxis_health(params: dict, _progress_emitter=None) -> dict:
     dependency_truth = dependency_truth_report(scope="all")
     trend_observability = build_trend_observability()
     try:
-        from runtime.missing_detector import FindingPrioritizer, MissingContentDetector
-
-        detector = MissingContentDetector(stale_days=30)
-        prioritizer = FindingPrioritizer()
-        engine = _subs.get_memory_engine()
-        conn = engine._connect()
-        if conn is None:
-            content_health = {"status": "skipped", "reason": "no memory engine connection"}
-        else:
-            # Cap queries to avoid timeout on large graphs
-            entity_rows = conn.execute(
-                "SELECT id, entity_type, name, created_at, updated_at "
-                "FROM memory_entities WHERE archived = false "
-                "ORDER BY updated_at DESC LIMIT 500"
-            )
-            edge_rows = conn.execute(
-                "SELECT source_id, target_id FROM memory_edges "
-                "WHERE active = true LIMIT 2000"
-            )
-            edge_entity_contexts = _entity_contexts(
-                conn,
-                [row["source_id"] for row in edge_rows] + [row["target_id"] for row in edge_rows],
-            )
-            entities = [
-                {
-                    "id": row["id"],
-                    "type": row["entity_type"],
-                    "name": row["name"],
-                    "created_at": row["created_at"],
-                    "updated_at": row["updated_at"],
-                }
-                for row in entity_rows
-            ]
-            edges = [
-                {
-                    "source": row["source_id"],
-                    "target": row["target_id"],
-                    "source_entity": edge_entity_contexts.get(str(row["source_id"]), {}),
-                    "target_entity": edge_entity_contexts.get(str(row["target_id"]), {}),
-                }
-                for row in edge_rows
-            ]
-            findings = detector.detect_stale_topics(entities)
-            findings.extend(detector.detect_weekly_gaps(entities))
-            findings.extend(detector.detect_orphaned_actions(entities, edges))
-            prioritized = prioritizer.prioritize(findings, max_surfaced=5)
-            content_health = {
-                "total_findings": len(findings),
-                "top_findings": [
-                    {
-                        "finding_type": finding.finding_type.value,
-                        "description": finding.description,
-                        "severity": finding.severity,
-                    }
-                    for finding in prioritized
-                ],
-                "edges": edges,
-            }
+        memory_engine = getattr(_subs, "get_memory_engine", lambda: None)()
+        content_health = build_content_health_report(memory_engine)
     except Exception as exc:
         content_health = {"status": "error", "reason": str(exc)}
 
@@ -153,6 +79,20 @@ def tool_praxis_health(params: dict, _progress_emitter=None) -> dict:
         projection_freshness: Any = [sample.to_json() for sample in freshness_samples]
     except Exception as exc:
         projection_freshness = {"status": "error", "reason": str(exc)}
+
+    try:
+        route_outcomes = get_route_outcomes()
+        try:
+            max_consecutive_failures = get_registry_config().get_int(
+                "health.max_consecutive_failures"
+            )
+        except Exception:
+            max_consecutive_failures = 1
+        route_outcomes_summary: Any = route_outcomes.summary(
+            max_consecutive_failures=max_consecutive_failures,
+        )
+    except Exception as exc:
+        route_outcomes_summary = {"status": "error", "reason": str(exc)}
 
     return {
         "preflight": {
@@ -186,6 +126,7 @@ def tool_praxis_health(params: dict, _progress_emitter=None) -> dict:
         "content_health": content_health,
         "trend_observability": trend_observability,
         "projection_freshness": projection_freshness,
+        "route_outcomes": route_outcomes_summary,
     }
 
 
@@ -239,7 +180,8 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "workflow lane recommendations, context cache stats, memory graph health, and "
                 "projection freshness (event-log cursors + process-cache refresh lag).\n\n"
                 "USE WHEN: starting a session, things seem broken, or you want to verify the platform "
-                "is ready before launching a workflow. No parameters needed.\n\n"
+                "is ready before launching a workflow. Includes route-outcome health, so you can see "
+                "which provider routes are actually failing. No parameters needed.\n\n"
                 "EXAMPLE: praxis_health()\n\n"
                 "DO NOT USE: for workflow pass/fail rates (use praxis_status_snapshot), or for operator-level "
                 "detail (use explicit tools like praxis_run_status or praxis_graph_projection)."

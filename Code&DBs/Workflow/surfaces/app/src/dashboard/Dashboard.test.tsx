@@ -143,6 +143,7 @@ describe('Dashboard', () => {
         onNewWorkflow={() => undefined}
         onChat={() => undefined}
         onDescribe={() => undefined}
+        onOpenCosts={() => undefined}
       />,
     );
 

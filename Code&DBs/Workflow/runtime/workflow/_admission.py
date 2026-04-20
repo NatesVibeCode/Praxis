@@ -997,6 +997,15 @@ def _apply_write_scope_auto_dependencies(spec) -> None:
         ) from exc
 
     step_id_to_path = {step.step_id: step.file_path for step in plan.steps}
+    # Spec order is authoritative: auto-derived edges must flow forward in
+    # declared order so a later-indexed job can never be injected as a
+    # parent of an earlier-indexed one. Without this guard the StepCompiler's
+    # file-level DAG (which has no concept of job order) silently produced
+    # reverse-direction edges that created cycles in workflow_job_edges,
+    # which stalled admission forever (every ready_at stayed NULL).
+    job_order_index = {
+        job.get("label"): idx for idx, job in enumerate(spec.jobs) if job.get("label")
+    }
     auto_deps: dict[str, set[str]] = {}
     for step in plan.steps:
         child_labels = file_to_job_labels.get(step.file_path, set())
@@ -1008,12 +1017,26 @@ def _apply_write_scope_auto_dependencies(spec) -> None:
                 continue
             for parent_label in file_to_job_labels.get(dep_path, set()):
                 for child_label in child_labels:
-                    if parent_label != child_label:
-                        auto_deps.setdefault(child_label, set()).add(parent_label)
+                    if parent_label == child_label:
+                        continue
+                    parent_idx = job_order_index.get(parent_label)
+                    child_idx = job_order_index.get(child_label)
+                    if parent_idx is None or child_idx is None:
+                        continue
+                    if parent_idx >= child_idx:
+                        # Reverse-direction edge — spec author already
+                        # ordered these; skip to preserve acyclicity.
+                        continue
+                    auto_deps.setdefault(child_label, set()).add(parent_label)
 
+    # Only auto-populate depends_on when the author did not declare any.
+    # Treat an explicit empty list `depends_on: []` as "I have no parents
+    # and I do not want the auto-dep heuristic" — distinguishing it from
+    # a missing key. Previously `not []` was True, so explicit-empty still
+    # triggered the heuristic.
     for job in spec.jobs:
         label = job.get("label")
-        if label in auto_deps and not job.get("depends_on"):
+        if label in auto_deps and job.get("depends_on") is None:
             job["depends_on"] = sorted(auto_deps[label])
 
 
@@ -1708,6 +1731,17 @@ def _do_submit_workflow(
         )
 
     # 3. Wire dependency edges
+    #
+    # Fail-closed cycle check: admission must NEVER wire an edge whose
+    # parent comes later in spec order than its child. Such an edge
+    # creates a dependency cycle — no job's predecessors can ever all
+    # become terminal, so `ready_at` stays NULL forever and the run
+    # sits queued. We previously saw this produced by
+    # _apply_write_scope_auto_dependencies deriving file-level edges
+    # without respecting spec order; the fix there is in place, but we
+    # enforce the invariant at the write site so any future derivation
+    # path that regresses on this cannot silently stall a workflow.
+    label_order_index = {label: idx for idx, (_, label, _) in enumerate(job_rows)}
     expected_edges: set[tuple[int, int]] = set()
     for job_id, label, depends_on in job_rows:
         remaining_depends_on = [dep for dep in depends_on if dep not in replayed_labels]
@@ -1723,6 +1757,19 @@ def _do_submit_workflow(
                 raise RuntimeError(
                     "workflow submit failed closed while wiring dependency edges: "
                     f"missing parent mapping for {dep_label!r} -> {label!r}",
+                )
+            parent_idx = label_order_index.get(dep_label)
+            child_idx = label_order_index.get(label)
+            if (
+                parent_idx is not None
+                and child_idx is not None
+                and parent_idx >= child_idx
+            ):
+                raise RuntimeError(
+                    "workflow submit failed closed: dependency edge would "
+                    f"create a cycle (parent={dep_label!r} idx={parent_idx}, "
+                    f"child={label!r} idx={child_idx}). depends_on for child: "
+                    f"{list(depends_on)!r}. Spec ordering must be forward-only.",
                 )
             expected_edges.add((parent_id, job_id))
             conn.execute(

@@ -208,6 +208,73 @@ def test_data_dictionary_frontdoor_uses_canonical_alias(monkeypatch: pytest.Monk
     assert "integration" in rendered
 
 
+def test_dashboard_frontdoor_uses_backend_dashboard_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_backend_dashboard_payload():
+        captured["called"] = True
+        return {
+            "summary": {
+                "health": {"label": "Healthy"},
+                "workflow_counts": {"total": 12, "live": 3, "saved": 5, "draft": 4},
+                "runs_24h": 7,
+                "active_runs": 2,
+                "pass_rate_24h": 0.875,
+                "total_cost_24h": 1.2345,
+                "top_agent": "anthropic/claude-test",
+                "models_online": 4,
+                "queue": {
+                    "depth": 4,
+                    "status": "ok",
+                    "utilization_pct": 50.0,
+                    "pending": 1,
+                    "ready": 2,
+                    "claimed": 0,
+                    "running": 1,
+                    "error": None,
+                },
+            },
+            "sections": [
+                {"key": "live", "count": 3},
+                {"key": "saved", "count": 5},
+                {"key": "draft", "count": 4},
+            ],
+            "leaderboard": [
+                {
+                    "provider_slug": "anthropic",
+                    "model_slug": "claude-test",
+                    "pass_rate": 0.95,
+                    "total_workflows": 10,
+                }
+            ],
+            "recent_runs": [
+                {
+                    "run_id": "run-1",
+                    "status": "running",
+                    "completed_jobs": 1,
+                    "total_jobs": 3,
+                    "total_cost": 0.125,
+                }
+            ],
+        }
+
+    monkeypatch.setattr(operate_commands, "_backend_dashboard_payload", _fake_backend_dashboard_payload)
+
+    stdout = StringIO()
+    assert workflow_cli_main(["dashboard"], stdout=stdout) == 0
+
+    assert captured == {"called": True}
+    rendered = stdout.getvalue()
+    assert "dashboard_summary:" in rendered
+    assert "health=Healthy" in rendered
+    assert "workflows=total=12 live=3 saved=5 draft=4" in rendered
+    assert "queue: depth=4 status=ok utilization_pct=50.0 pending=1 ready=2 claimed=0 running=1" in rendered
+    assert "leaderboard_top:" in rendered
+    assert "anthropic/claude-test pass_rate_pct=95.0 total_workflows=10" in rendered
+    assert "recent_runs:" in rendered
+    assert "run-1 running jobs=1/3 cost_usd=0.1250" in rendered
+
+
 def test_integration_frontdoor_lists_registered_integrations(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
