@@ -12,6 +12,8 @@ __pycache__/
 
 # Database files (keep migrations, ignore data)
 Code&DBs/Databases/postgres-dev/data/
+Code&DBs/Databases/postgres-dev/data.corrupt-*/
+Code&DBs/Databases/postgres-dev/data.backup-*/
 Code&DBs/Databases/postgres-dev/log/
 Code&DBs/Databases/dispatch-state/
 
