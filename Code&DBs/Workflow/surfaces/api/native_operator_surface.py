@@ -64,11 +64,16 @@ from storage.postgres import PostgresConfigurationError
 
 from ._operator_helpers import (
     _json_compatible,
-    _normalize_as_of as _shared_normalize_as_of,
     _now,
     _run_async as _shared_run_async,
 )
-from ._payload_contract import optional_text, require_text
+from ._payload_contract import optional_text
+from runtime.validation import (
+    normalize_as_of as _shared_normalize_as_of,
+    require_datetime as _shared_require_datetime,
+    require_mapping as _shared_require_mapping,
+    require_text as _shared_require_text,
+)
 from .frontdoor import status as frontdoor_status
 from .operator_read import NativeOperatorQueryFrontdoor, query_operator_surface
 
@@ -117,20 +122,18 @@ def _run_async(awaitable: Awaitable[Any]) -> Any:
 def _normalize_as_of(value: datetime) -> datetime:
     return _shared_normalize_as_of(
         value,
-        error_type=NativeOperatorSurfaceError,
+        error_factory=NativeOperatorSurfaceError,
         reason_code="native_operator_surface.invalid_as_of",
     )
 
 
 def _require_text(value: object, *, field_name: str) -> str:
-    try:
-        return require_text(value, field_name=field_name)
-    except ValueError as exc:
-        raise NativeOperatorSurfaceError(
-            "native_operator_surface.invalid_row",
-            str(exc),
-            details={"field": field_name, "value_type": type(value).__name__},
-        ) from exc
+    return _shared_require_text(
+        value,
+        field_name=field_name,
+        error_factory=NativeOperatorSurfaceError,
+        reason_code="native_operator_surface.invalid_row",
+    )
 
 
 def _text(value: object) -> str | None:
@@ -166,29 +169,23 @@ def _normalize_ids(
 
 
 def _require_mapping(value: object, *, field_name: str) -> Mapping[str, Any]:
-    if not isinstance(value, Mapping):
-        raise NativeOperatorSurfaceError(
-            "native_operator_surface.invalid_row",
-            f"{field_name} must be a mapping",
-            details={"field": field_name, "value_type": type(value).__name__},
-        )
-    return value
+    return _shared_require_mapping(
+        value,
+        field_name=field_name,
+        error_factory=NativeOperatorSurfaceError,
+        reason_code="native_operator_surface.invalid_row",
+    )
 
 
 def _require_datetime(value: object, *, field_name: str) -> datetime:
-    if not isinstance(value, datetime):
-        raise NativeOperatorSurfaceError(
-            "native_operator_surface.invalid_row",
-            f"{field_name} must be a datetime",
-            details={"field": field_name, "value_type": type(value).__name__},
-        )
-    if value.tzinfo is None or value.utcoffset() is None:
-        raise NativeOperatorSurfaceError(
-            "native_operator_surface.invalid_row",
-            f"{field_name} must be timezone-aware",
-            details={"field": field_name},
-        )
-    return value.astimezone(timezone.utc)
+    return _shared_require_datetime(
+        value,
+        field_name=field_name,
+        error_factory=NativeOperatorSurfaceError,
+        reason_code="native_operator_surface.invalid_row",
+        require_timezone=True,
+        coerce_utc=True,
+    )
 
 
 def _parse_datetime(value: object, *, field_name: str) -> datetime:

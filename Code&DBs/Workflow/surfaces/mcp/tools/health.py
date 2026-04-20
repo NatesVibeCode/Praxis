@@ -239,7 +239,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "workflow lane recommendations, context cache stats, memory graph health, and "
                 "projection freshness (event-log cursors + process-cache refresh lag).\n\n"
                 "USE WHEN: starting a session, things seem broken, or you want to verify the platform "
-                "is ready before dispatching work. No parameters needed.\n\n"
+                "is ready before launching a workflow. No parameters needed.\n\n"
                 "EXAMPLE: praxis_health()\n\n"
                 "DO NOT USE: for workflow pass/fail rates (use praxis_status_snapshot), or for operator-level "
                 "detail (use explicit tools like praxis_run_status or praxis_graph_projection)."

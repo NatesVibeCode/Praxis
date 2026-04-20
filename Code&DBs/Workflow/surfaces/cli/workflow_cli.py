@@ -453,6 +453,32 @@ def cmd_validate(args: argparse.Namespace) -> int:
         print(result.get("error") or "Invalid workflow: one or more agent routes could not be resolved")
         return 1
 
+    if getattr(args, "check_gates", False):
+        from runtime.workflow.capability_preflight import (
+            any_blocking,
+            preflight_spec_jobs,
+        )
+
+        jobs = list(raw.get("jobs") or [])
+        worker_image = getattr(args, "worker_image", None) or "praxis-worker:latest"
+        print()
+        print(f"Capability preflight (worker={worker_image}):")
+        reports = preflight_spec_jobs(jobs, worker_image=worker_image)
+        if not reports:
+            print("  (no verify_commands to check)")
+        for report in reports:
+            verdict = report.result.verdict.upper()
+            print(f"  [{verdict}] {report.label}: {report.result.reason}")
+            if report.result.verdict == "reject":
+                tail = (report.result.stderr_tail or report.result.stdout_tail or "").strip()
+                if tail:
+                    first = tail.splitlines()[-1][:200]
+                    print(f"      last: {first}")
+        if any_blocking(reports):
+            print()
+            print("Capability preflight REJECTED one or more verify_commands.")
+            return 1
+
     return 0
 
 

@@ -19,6 +19,7 @@ def test_top_level_help_mentions_authority_frontdoors() -> None:
     rendered = stdout.getvalue()
     assert "workflow schema|registry|object-type|object-field|object|catalog|files|reload|reconcile" in rendered
     assert "workflow handoff <latest|lineage|status|history>" in rendered
+    assert "workflow maintenance backfill-failure-categories --yes" in rendered
 
 
 def test_schema_help_is_available() -> None:

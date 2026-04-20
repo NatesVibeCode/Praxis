@@ -7,11 +7,9 @@ from pathlib import Path
 from typing import Any
 import difflib
 import hashlib
-import os
 
 from runtime.sandbox_artifacts import ArtifactStore
-
-_IGNORED_MANIFEST_DIRS = frozenset({".git", "__pycache__", ".pytest_cache", ".mypy_cache"})
+from runtime.sandbox_runtime import _workspace_manifest as _sandbox_workspace_manifest
 
 
 def _hash_file(path: Path) -> str | None:
@@ -43,22 +41,15 @@ def _diff_artifact_ref(patch_text: str) -> str | None:
 
 
 def _workspace_manifest(workspace_root: str) -> dict[str, list[int]]:
-    manifest: dict[str, list[int]] = {}
-    root_path = Path(workspace_root)
-    if not root_path.exists():
-        return manifest
-    for dirpath, dirnames, filenames in os.walk(root_path):
-        dirnames[:] = [name for name in dirnames if name not in _IGNORED_MANIFEST_DIRS]
-        current_dir = Path(dirpath)
-        for filename in filenames:
-            absolute = current_dir / filename
-            try:
-                stat = absolute.stat()
-            except OSError:
-                continue
-            relpath = absolute.relative_to(root_path).as_posix()
-            manifest[relpath] = [int(stat.st_size), int(stat.st_mtime_ns)]
-    return manifest
+    # Delegate to the canonical sandbox-runtime manifest builder so both
+    # sides of the submission diff honor identical ignore semantics
+    # (git-aware when the root is a git checkout, minimal hardcoded
+    # fallback otherwise). Tuple-to-list conversion preserves this
+    # function's public return type.
+    return {
+        relpath: [int(size), int(mtime_ns)]
+        for relpath, (size, mtime_ns) in _sandbox_workspace_manifest(workspace_root).items()
+    }
 
 
 def _scope_allows_path(path: str, write_scope: Sequence[str]) -> bool:

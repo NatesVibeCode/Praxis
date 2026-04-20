@@ -49,7 +49,11 @@ from ._frontdoor_serialize import (
     _submission_summary_from_row,
 )
 from ._operator_helpers import _json_compatible, _now, _run_async as _shared_run_async
-from ._payload_contract import require_text
+from runtime.validation import (
+    require_int as _shared_require_int,
+    require_mapping as _shared_require_mapping,
+    require_text as _shared_require_text,
+)
 
 
 class NativeFrontdoorError(RuntimeError):
@@ -244,13 +248,13 @@ def _run_async(awaitable: Awaitable[Any]) -> Any:
 
 
 def _require_mapping(value: object, *, field_name: str) -> Mapping[str, Any]:
-    if not isinstance(value, Mapping):
-        raise NativeFrontdoorError(
-            "frontdoor.invalid_request",
-            f"{field_name} must be an object",
-            details={"field": field_name, "value_type": type(value).__name__},
-        )
-    return value
+    return _shared_require_mapping(
+        value,
+        field_name=field_name,
+        error_factory=NativeFrontdoorError,
+        reason_code="frontdoor.invalid_request",
+        mapping_label="object",
+    )
 
 
 async def _load_run_jobs_with_submission_summary(
@@ -293,24 +297,21 @@ async def _load_run_jobs_with_submission_summary(
 
 
 def _require_text(value: object, *, field_name: str) -> str:
-    try:
-        return require_text(value, field_name=field_name)
-    except ValueError as exc:
-        raise NativeFrontdoorError(
-            "frontdoor.invalid_request",
-            str(exc),
-            details={"field": field_name, "value_type": type(value).__name__},
-        ) from exc
+    return _shared_require_text(
+        value,
+        field_name=field_name,
+        error_factory=NativeFrontdoorError,
+        reason_code="frontdoor.invalid_request",
+    )
 
 
 def _require_int(value: object, *, field_name: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise NativeFrontdoorError(
-            "frontdoor.invalid_request",
-            f"{field_name} must be an integer",
-            details={"field": field_name, "value_type": type(value).__name__},
-        )
-    return value
+    return _shared_require_int(
+        value,
+        field_name=field_name,
+        error_factory=NativeFrontdoorError,
+        reason_code="frontdoor.invalid_request",
+    )
 
 
 def _node_from_mapping(index: int, payload: Mapping[str, Any]) -> WorkflowNodeContract:

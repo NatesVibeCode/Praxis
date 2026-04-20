@@ -3,7 +3,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-WORKFLOW_DIR="$REPO_ROOT/CodeDBs/Workflow"
+# Use the canonical repo tree first, but keep the legacy symlink path in the
+# import search path for compatibility with older tests and subprocess checks.
+WORKFLOW_DIR="$REPO_ROOT/Code&DBs/Workflow"
+WORKFLOW_DIR_LEGACY="$REPO_ROOT/CodeDBs/Workflow"
 PYTHON_BIN="${PYTHON_BIN:-$(command -v python3.14 || command -v python3.13 || command -v python3)}"
 COMMAND_NAME="${PRAXIS_COMMAND_NAME:-praxis}"
 SERVICE_MANAGER_PATH="${PRAXIS_SERVICE_MANAGER_PATH:-scripts/praxis}"
@@ -207,7 +210,7 @@ run_local_alpha() {
                 esac
             done
             ensure_workflow_database_env
-            PYTHONPATH="$SCRIPT_DIR:$WORKFLOW_DIR${PYTHONPATH:+:$PYTHONPATH}" \
+            PYTHONPATH="$SCRIPT_DIR:$WORKFLOW_DIR:$WORKFLOW_DIR_LEGACY${PYTHONPATH:+:$PYTHONPATH}" \
             WORKFLOW_DATABASE_URL="${WORKFLOW_DATABASE_URL}" \
             PRAXIS_ALPHA_SERVICES_READY="$services_ready" \
             PRAXIS_ALPHA_STATE_FILE="$state_file" \
@@ -239,7 +242,7 @@ PY
                 esac
             done
             ensure_workflow_database_env
-            PYTHONPATH="$SCRIPT_DIR:$WORKFLOW_DIR${PYTHONPATH:+:$PYTHONPATH}" \
+            PYTHONPATH="$SCRIPT_DIR:$WORKFLOW_DIR:$WORKFLOW_DIR_LEGACY${PYTHONPATH:+:$PYTHONPATH}" \
             WORKFLOW_DATABASE_URL="${WORKFLOW_DATABASE_URL}" \
             PRAXIS_ALPHA_RUN_ID="$run_id" \
                 "$PYTHON_BIN" - <<'PY'
@@ -662,13 +665,13 @@ EOF
 }
 
 if [ "${1:-}" = "agent-run" ]; then
-    export PYTHONPATH="$WORKFLOW_DIR${PYTHONPATH:+:$PYTHONPATH}"
+    export PYTHONPATH="$WORKFLOW_DIR:$WORKFLOW_DIR_LEGACY${PYTHONPATH:+:$PYTHONPATH}"
     exec python3 -m runtime.praxis_supervisor --repo-root "$REPO_ROOT" run
 fi
 
 if [ "${1:-}" = "workflow" ]; then
     shift
-    export PYTHONPATH="$WORKFLOW_DIR${PYTHONPATH:+:$PYTHONPATH}"
+    export PYTHONPATH="$WORKFLOW_DIR:$WORKFLOW_DIR_LEGACY${PYTHONPATH:+:$PYTHONPATH}"
     case "${1:-help}" in
       run-managed)
         shift

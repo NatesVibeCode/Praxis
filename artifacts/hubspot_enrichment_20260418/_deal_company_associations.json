@@ -1,0 +1,137 @@
+{
+  "completedAt": "2026-04-20T02:20:29.882Z",
+  "status": "COMPLETE",
+  "startedAt": "2026-04-20T02:20:29.874Z",
+  "results": [
+    {
+      "from": {
+        "id": "321391997644"
+      },
+      "to": [
+        {
+          "toObjectId": 318851289788,
+          "associationTypes": [
+            {
+              "category": "HUBSPOT_DEFINED",
+              "typeId": 341,
+              "label": null
+            },
+            {
+              "category": "HUBSPOT_DEFINED",
+              "typeId": 5,
+              "label": "Primary"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "from": {
+        "id": "321368681199"
+      },
+      "to": [
+        {
+          "toObjectId": 318907970292,
+          "associationTypes": [
+            {
+              "category": "HUBSPOT_DEFINED",
+              "typeId": 341,
+              "label": null
+            },
+            {
+              "category": "HUBSPOT_DEFINED",
+              "typeId": 5,
+              "label": "Primary"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "from": {
+        "id": "321359147763"
+      },
+      "to": [
+        {
+          "toObjectId": 318838098674,
+          "associationTypes": [
+            {
+              "category": "HUBSPOT_DEFINED",
+              "typeId": 341,
+              "label": null
+            },
+            {
+              "category": "HUBSPOT_DEFINED",
+              "typeId": 5,
+              "label": "Primary"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "from": {
+        "id": "321397381861"
+      },
+      "to": [
+        {
+          "toObjectId": 318863886019,
+          "associationTypes": [
+            {
+              "category": "HUBSPOT_DEFINED",
+              "typeId": 341,
+              "label": null
+            },
+            {
+              "category": "HUBSPOT_DEFINED",
+              "typeId": 5,
+              "label": "Primary"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "from": {
+        "id": "321397381862"
+      },
+      "to": [
+        {
+          "toObjectId": 318907970293,
+          "associationTypes": [
+            {
+              "category": "HUBSPOT_DEFINED",
+              "typeId": 341,
+              "label": null
+            },
+            {
+              "category": "HUBSPOT_DEFINED",
+              "typeId": 5,
+              "label": "Primary"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "status": "error",
+      "category": "OBJECT_NOT_FOUND",
+      "subCategory": "crm.associations.NO_ASSOCIATIONS_FOUND",
+      "message": "No company is associated with deal 321253303026.",
+      "context": {
+        "fromObjectId": [
+          "321253303026"
+        ],
+        "fromObjectType": [
+          "deal"
+        ],
+        "toObjectType": [
+          "company"
+        ]
+      }
+    }
+  ],
+  "numErrors": 1
+}

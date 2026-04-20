@@ -1,6 +1,11 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { useLiveRunSnapshot } from '../dashboard/useLiveRunSnapshot';
 import type { RunJob, RunStatus, RecentRun, RunDetail } from '../dashboard/useLiveRunSnapshot';
+import {
+  runJobsPath,
+  runsRecentPath,
+  workflowRunStreamPath,
+} from '../dashboard/runApi';
 import { triggerWorkflow } from '../shared/buildController';
 
 interface Props {
@@ -77,7 +82,7 @@ export function MoonRunPanel({ runId, workflowId, onClose, onSwitchRun }: Props)
   // Load run history for this workflow
   useEffect(() => {
     if (!workflowId) return;
-    fetch(`/api/runs/recent?limit=10`)
+    fetch(runsRecentPath(10))
       .then(r => r.json())
       .then((runs: RecentRun[]) => {
         setHistory(runs.filter(r => r.run_id !== runId).slice(0, 5));
@@ -90,7 +95,7 @@ export function MoonRunPanel({ runId, workflowId, onClose, onSwitchRun }: Props)
       return undefined;
     }
 
-    const es = new EventSource(`/api/workflow-runs/${encodeURIComponent(runId)}/stream`);
+    const es = new EventSource(workflowRunStreamPath(runId));
     es.onmessage = (event) => {
       let data: RunStreamEvent;
       try {
@@ -159,7 +164,7 @@ export function MoonRunPanel({ runId, workflowId, onClose, onSwitchRun }: Props)
     setExpandedJob(job.id);
     setJobOutput(null);
     try {
-      const resp = await fetch(`/api/runs/${encodeURIComponent(runId)}/jobs/${job.id}`);
+      const resp = await fetch(runJobsPath(runId, job.id));
       if (resp.ok) {
         const data = await resp.json();
         setJobOutput(data.output || data.stdout_preview || 'No output');

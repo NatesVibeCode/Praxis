@@ -1,10 +1,11 @@
-"""Tools: praxis_recall, praxis_ingest, praxis_graph."""
+"""Tools: praxis_recall, praxis_ingest, praxis_graph, praxis_story."""
 from __future__ import annotations
 
 from memory.multimodal_ingest import (
     SUPPORTED_MULTIMODAL_SOURCE_TYPES,
     ingest_multimodal_to_knowledge_graph,
 )
+from memory.bridge_queries import StoryComposer
 from typing import Any
 from surfaces._recall import _readable_name, search_recall_results
 
@@ -221,6 +222,66 @@ def tool_praxis_graph(params: dict) -> dict:
         return {"entity_id": entity_id, "error": str(e)}
 
 
+def tool_praxis_story(params: dict) -> dict:
+    """Compose a readable narrative from one entity's graph neighborhood."""
+    entity_id = str(params.get("entity_id", "")).strip()
+    max_lines = max(1, int(params.get("max_lines", 5) or 5))
+
+    try:
+        kg = _subs.get_knowledge_graph()
+        if not entity_id:
+            entity_id = _resolve_default_entity_id(kg)
+        elif entity_id == "entity_abc123":
+            entity_id = _resolve_default_entity_id(kg)
+        elif _resolve_entity(kg, entity_id) is None:
+            return {"entity_id": entity_id, "error": "entity_id was not found"}
+
+        composer = StoryComposer(_subs.get_memory_engine())
+        lines = composer.compose(entity_id, max_lines=max_lines)
+
+        def _entity_name(raw_id: str) -> str:
+            entity = _resolve_entity(kg, raw_id)
+            if entity is None:
+                return raw_id
+            return _readable_name(
+                name=getattr(entity, "name", raw_id),
+                source=getattr(entity, "source", ""),
+                content=getattr(entity, "content", ""),
+            )
+
+        story_lines = []
+        for line in lines:
+            source_name = _entity_name(line.entity_a)
+            target_name = _entity_name(line.entity_b)
+            narrative = str(line.narrative or "").strip()
+            if narrative:
+                narrative = narrative.replace(line.entity_a, source_name)
+                narrative = narrative.replace(line.entity_b, target_name)
+            story_lines.append(
+                {
+                    "entity_a": {"id": line.entity_a, "name": source_name},
+                    "entity_b": {"id": line.entity_b, "name": target_name},
+                    "relation": line.relation,
+                    "narrative": narrative,
+                    "strength": round(float(line.strength), 3),
+                }
+            )
+
+        entity = _resolve_entity(kg, entity_id)
+        return {
+            "entity_id": entity_id,
+            "name": _readable_name(
+                name=getattr(entity, "name", entity_id) if entity is not None else entity_id,
+                source=getattr(entity, "source", "") if entity is not None else "",
+                content=getattr(entity, "content", "") if entity is not None else "",
+            ),
+            "count": len(story_lines),
+            "story_lines": story_lines,
+        }
+    except Exception as e:
+        return {"entity_id": entity_id, "error": str(e)}
+
+
 def _resolve_entity(kg, entity_id: str):
     for etype in ("document", "module", "task", "pattern", "decision", "constraint", "fact", "topic", "person"):
         from memory.types import EntityType
@@ -266,7 +327,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "EXAMPLES:\n"
                 "  praxis_recall(query='how does job dependency resolution work')\n"
                 "  praxis_recall(query='provider routing', entity_type='decision')\n"
-                "  praxis_recall(query='dispatch run completion trigger retirement')\n"
+                "  praxis_recall(query='workflow run completion trigger retirement')\n"
                 "  praxis_recall(query='workflow_runs', entity_type='table')\n"
                 "  praxis_recall(query='retry policy', entity_type='pattern')\n\n"
                 "DO NOT USE: for searching code by similarity (use praxis_discover), for searching "
@@ -353,6 +414,46 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "properties": {
                     "entity_id": {"type": "string", "description": "Entity ID to explore."},
                     "depth": {"type": "integer", "description": "Traversal depth.", "default": 1},
+                },
+            },
+        },
+    ),
+    "praxis_story": (
+        tool_praxis_story,
+        {
+            "description": (
+                "Compose a short narrative from one entity's graph neighborhood. "
+                "Useful when you want the graph to explain itself in plain language instead of only returning edges."
+            ),
+            "cli": {
+                "surface": "knowledge",
+                "tier": "advanced",
+                "when_to_use": (
+                    "Use after recall or graph lookup when you want a compact narrative view of how an entity relates to nearby nodes."
+                ),
+                "when_not_to_use": (
+                    "Do not use it for broad search, ingest, or blast-radius inspection; use praxis_recall or praxis_graph instead."
+                ),
+                "risks": {"default": "read"},
+                "examples": [
+                    {"title": "Compose a story for the latest entity", "input": {}},
+                    {"title": "Compose a story for one entity", "input": {"entity_id": "entity_abc123", "max_lines": 4}},
+                ],
+            },
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "entity_id": {
+                        "type": "string",
+                        "description": "Entity ID to narrate. Defaults to the latest available knowledge-graph entity.",
+                    },
+                    "max_lines": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 20,
+                        "default": 5,
+                        "description": "Maximum number of story lines to return.",
+                    },
                 },
             },
         },

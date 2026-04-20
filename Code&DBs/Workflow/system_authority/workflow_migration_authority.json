@@ -179,7 +179,8 @@
     "172_data_dictionary_stewardship.sql",
     "173_schema_migrations.sql",
     "174_surface_catalog_trigger_icons.sql",
-    "175_openrouter_primary_chat_engine.sql"
+    "175_openrouter_primary_chat_engine.sql",
+    "176_data_dictionary_schema_snapshots.sql"
   ],
   "expected_objects": {
     "001_v1_control_plane.sql": [
@@ -4631,7 +4632,37 @@
       }
     ],
     "174_surface_catalog_trigger_icons.sql": [],
-    "175_openrouter_primary_chat_engine.sql": []
+    "175_openrouter_primary_chat_engine.sql": [],
+    "176_data_dictionary_schema_snapshots.sql": [
+      {
+        "object_type": "table",
+        "object_name": "data_dictionary_schema_snapshots"
+      },
+      {
+        "object_type": "table",
+        "object_name": "data_dictionary_schema_snapshot_fields"
+      },
+      {
+        "object_type": "function",
+        "object_name": "notify_data_dictionary_schema_snapshots"
+      },
+      {
+        "object_type": "trigger",
+        "object_name": "trg_data_dictionary_schema_snapshots_notify"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_data_dictionary_schema_snapshots_taken"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_data_dictionary_schema_snapshots_fingerprint"
+      },
+      {
+        "object_type": "index",
+        "object_name": "idx_data_dictionary_schema_snapshot_fields_object"
+      }
+    ]
   },
   "policy_buckets": {
     "canonical": [
@@ -4814,7 +4845,8 @@
       "172_data_dictionary_stewardship.sql",
       "173_schema_migrations.sql",
       "174_surface_catalog_trigger_icons.sql",
-      "175_openrouter_primary_chat_engine.sql"
+      "175_openrouter_primary_chat_engine.sql",
+      "176_data_dictionary_schema_snapshots.sql"
     ],
     "bootstrap_only": [
       "043_workflow_runtime_notification_sync_rename.sql",

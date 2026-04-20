@@ -201,6 +201,7 @@ def test_build_modules_include_semantic_projection_refresh_when_conn(tmp_path, m
     assert "semantic_projection_refresh" in module_names
     assert "authority_memory_refresh" in module_names
     assert "operator_decision_projection_refresh" in module_names
+    assert "codebase_index" in module_names
     assert "bug_candidates_refresh" not in module_names
 
 

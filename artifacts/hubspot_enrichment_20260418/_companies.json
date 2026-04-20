@@ -1,0 +1,82 @@
+{
+  "completedAt": "2026-04-20T02:20:30.577Z",
+  "status": "COMPLETE",
+  "startedAt": "2026-04-20T02:20:30.553Z",
+  "results": [
+    {
+      "id": "318907970292",
+      "properties": {
+        "createdate": "2026-04-19T01:39:08.246Z",
+        "domain": "fabrikam.ai",
+        "hs_lastmodifieddate": "2026-04-19T01:40:16.942Z",
+        "hs_object_id": "318907970292",
+        "industry": "COMPUTER_SOFTWARE",
+        "name": "Fabrikam Analytics"
+      },
+      "createdAt": "2026-04-19T01:39:08.246Z",
+      "updatedAt": "2026-04-19T01:40:16.942Z",
+      "archived": false,
+      "url": "https://app-na2.hubspot.com/contacts/245942113/record/0-2/318907970292"
+    },
+    {
+      "id": "318838098674",
+      "properties": {
+        "createdate": "2026-04-19T01:39:07.877Z",
+        "domain": "contoso-eng.com",
+        "hs_lastmodifieddate": "2026-04-19T01:40:16.890Z",
+        "hs_object_id": "318838098674",
+        "industry": "MACHINERY",
+        "name": "Contoso Engineering"
+      },
+      "createdAt": "2026-04-19T01:39:07.877Z",
+      "updatedAt": "2026-04-19T01:40:16.890Z",
+      "archived": false,
+      "url": "https://app-na2.hubspot.com/contacts/245942113/record/0-2/318838098674"
+    },
+    {
+      "id": "318863886019",
+      "properties": {
+        "createdate": "2026-04-19T01:39:07.417Z",
+        "domain": "northwindtraders.com",
+        "hs_lastmodifieddate": "2026-04-19T01:40:17.053Z",
+        "hs_object_id": "318863886019",
+        "industry": "RETAIL",
+        "name": "Northwind Traders"
+      },
+      "createdAt": "2026-04-19T01:39:07.417Z",
+      "updatedAt": "2026-04-19T01:40:17.053Z",
+      "archived": false,
+      "url": "https://app-na2.hubspot.com/contacts/245942113/record/0-2/318863886019"
+    },
+    {
+      "id": "318851289788",
+      "properties": {
+        "createdate": "2026-04-19T01:39:08.939Z",
+        "domain": "wingtiplogistics.com",
+        "hs_lastmodifieddate": "2026-04-19T01:40:20.055Z",
+        "hs_object_id": "318851289788",
+        "industry": "LOGISTICS_AND_SUPPLY_CHAIN",
+        "name": "Wingtip Logistics"
+      },
+      "createdAt": "2026-04-19T01:39:08.939Z",
+      "updatedAt": "2026-04-19T01:40:20.055Z",
+      "archived": false,
+      "url": "https://app-na2.hubspot.com/contacts/245942113/record/0-2/318851289788"
+    },
+    {
+      "id": "318907970293",
+      "properties": {
+        "createdate": "2026-04-19T01:39:08.639Z",
+        "domain": "tailspin.io",
+        "hs_lastmodifieddate": "2026-04-19T01:40:20.055Z",
+        "hs_object_id": "318907970293",
+        "industry": "COMPUTER_SOFTWARE",
+        "name": "Tailspin Cloud"
+      },
+      "createdAt": "2026-04-19T01:39:08.639Z",
+      "updatedAt": "2026-04-19T01:40:20.055Z",
+      "archived": false,
+      "url": "https://app-na2.hubspot.com/contacts/245942113/record/0-2/318907970293"
+    }
+  ]
+}

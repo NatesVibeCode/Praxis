@@ -161,7 +161,7 @@ The public HTTP contract lives under `/v1`. The internal route catalog remains a
 **Key components:**
 
 - **Spec Compiler** -- Parses `.queue.json` files, validates DAG structure, resolves agent routes, expands fan-out primitives, and lowers to a `WorkflowRequest` graph.
-- **Workflow Engine** -- Manages execution lifecycle: claiming jobs via leases, dispatching to provider adapters, tracking status, handling retries and timeouts.
+- **Workflow Engine** -- Manages execution lifecycle: claiming jobs via leases, routing work to provider adapters, tracking status, handling retries and timeouts.
 - **Provider Adapters** -- Unified interface (`ProviderAdapterContract`) for each LLM provider. Handles authentication, API protocols, token budgets, and response parsing.
 - **Storage** -- Postgres with pgvector. Stores workflow state, execution history, knowledge graph, embeddings, operator control plane, and bug tracking.
 - **MCP Server** -- Exposes engine capabilities as MCP tools for integration with Claude Code and other clients.

@@ -756,9 +756,25 @@ def execute_job(
                     cwd=execution_workdir,
                 )
                 if verify_result.returncode != 0:
+                    # Distinguish gate-couldn't-run (infra/spec bug — don't retry,
+                    # don't waste provider budget) from gate-ran-and-failed (agent
+                    # output problem — retry). rc 126/127 = command not found or
+                    # not executable. Shell error text also matches when the
+                    # command itself fails to spawn.
+                    stderr_lc = (verify_result.stderr or "").lower()
+                    gate_broken = (
+                        verify_result.returncode in (126, 127)
+                        or "command not found" in stderr_lc
+                        or "no such file or directory" in stderr_lc
+                    )
                     final_status = "failed"
-                    final_error_code = "outcome_gate_failed"
-                    gate_msg = f"Outcome gate failed: {outcome_goal or verify_cmd}"
+                    final_error_code = (
+                        "outcome_gate_broken" if gate_broken else "outcome_gate_failed"
+                    )
+                    gate_label = (
+                        "Outcome gate broken" if gate_broken else "Outcome gate failed"
+                    )
+                    gate_msg = f"{gate_label}: {outcome_goal or verify_cmd}"
                     if verify_result.stderr:
                         gate_msg += f"\n{verify_result.stderr[:500]}"
                     if verify_result.stdout:
@@ -769,8 +785,20 @@ def execute_job(
                             str(result.get("stderr") or "") + f"\n{gate_msg}"
                         ).strip(),
                     }
+                    # Include stderr tail in the log line so `docker logs` shows
+                    # the real cause (e.g. "command not found") instead of just
+                    # the requirement text, which misleads operators into
+                    # thinking the agent produced bad output.
+                    stderr_tail = (verify_result.stderr or verify_result.stdout or "").strip().splitlines()
+                    last_line = stderr_tail[-1][:200] if stderr_tail else ""
                     logger.warning(
-                        "Outcome gate failed for %s/%s: %s", run_id, label, outcome_goal or verify_cmd,
+                        "%s for %s/%s (rc=%s): %s | stderr_tail=%r",
+                        gate_label,
+                        run_id,
+                        label,
+                        verify_result.returncode,
+                        outcome_goal or verify_cmd,
+                        last_line,
                     )
                 else:
                     logger.info(
@@ -786,8 +814,25 @@ def execute_job(
                         + f"\nOutcome gate timed out after 60s: {verify_cmd}"
                     ).strip(),
                 }
+                logger.warning(
+                    "Outcome gate timed out for %s/%s after 60s: %s",
+                    run_id, label, verify_cmd[:200],
+                )
             except Exception as exc:
-                logger.warning("Outcome gate error for %s/%s: %s", run_id, label, exc)
+                # Gate subprocess itself couldn't spawn — treat as broken, not failed.
+                final_status = "failed"
+                final_error_code = "outcome_gate_broken"
+                result = {
+                    **result,
+                    "stderr": (
+                        str(result.get("stderr") or "")
+                        + f"\nOutcome gate broken (subprocess spawn failed): {exc}"
+                    ).strip(),
+                }
+                logger.warning(
+                    "Outcome gate broken for %s/%s (spawn failed): %s",
+                    run_id, label, exc,
+                )
 
     # Write receipt to disk (preserves existing artifact flow)
     output_path = _write_output(execution_repo_root, run_id, job_id, label, result)

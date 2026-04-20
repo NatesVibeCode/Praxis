@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from policy._authority_validation import (
+from runtime.validation import (
     require_mapping as _shared_require_mapping,
     require_text as _shared_require_text,
 )

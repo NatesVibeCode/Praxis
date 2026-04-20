@@ -16,6 +16,60 @@ from runtime.notifications import dispatch_notification_payload
 
 logger = logging.getLogger(__name__)
 
+_PLATFORM_INTEGRATIONS: tuple[dict[str, Any], ...] = (
+    {
+        "id": "praxis-dispatch",
+        "name": "Praxis Dispatch",
+        "description": "Submit workflow jobs, inspect status, and search receipts.",
+        "provider": "praxis",
+        "capabilities": (
+            {"action": "dispatch_job", "description": "Submit a workflow job to the Praxis Engine runtime"},
+            {"action": "check_status", "description": "Inspect the status of an existing workflow run."},
+            {"action": "search_receipts", "description": "Search historical workflow runs and receipts."},
+        ),
+        "auth_status": "connected",
+        "icon": "bolt",
+        "mcp_server_id": None,
+        "manifest_source": "platform",
+    },
+    {
+        "id": "notifications",
+        "name": "Notifications",
+        "description": "Send notification messages through the platform notification channel.",
+        "provider": "praxis",
+        "capabilities": ({"action": "send", "description": "Send a notification message."},),
+        "auth_status": "connected",
+        "icon": "bell",
+        "mcp_server_id": None,
+        "manifest_source": "platform",
+    },
+    {
+        "id": "webhook",
+        "name": "Webhook",
+        "description": "Post structured payloads to external HTTP endpoints.",
+        "provider": "http",
+        "capabilities": ({"action": "post", "description": "POST a payload to an external HTTP endpoint."},),
+        "auth_status": "connected",
+        "icon": "webhook",
+        "mcp_server_id": None,
+        "manifest_source": "platform",
+    },
+    {
+        "id": "workflow",
+        "name": "Workflow",
+        "description": "Invoke registered workflows from the runtime control plane.",
+        "provider": "praxis",
+        "capabilities": (
+            {"action": "invoke", "description": "Invoke a registered workflow by workflow id."},
+            {"action": "cancel", "description": "Cancel an in-flight workflow run by run id."},
+        ),
+        "auth_status": "connected",
+        "icon": "workflow",
+        "mcp_server_id": None,
+        "manifest_source": "platform",
+    },
+)
+
 
 def _as_text(value: object) -> str:
     return value.strip() if isinstance(value, str) else ""
@@ -637,6 +691,27 @@ def execute_workflow_cancel(args: dict[str, Any], pg: Any) -> dict[str, Any]:
     }
 
 
+def projected_platform_integrations() -> list[dict[str, Any]]:
+    """Return registry rows for platform-owned built-in integrations."""
+
+    rows: list[dict[str, Any]] = []
+    for integration in _PLATFORM_INTEGRATIONS:
+        rows.append(
+            {
+                "id": integration["id"],
+                "name": integration["name"],
+                "description": integration["description"],
+                "provider": integration["provider"],
+                "capabilities": [dict(cap) for cap in integration["capabilities"]],
+                "auth_status": integration["auth_status"],
+                "icon": integration["icon"],
+                "mcp_server_id": integration["mcp_server_id"],
+                "manifest_source": integration["manifest_source"],
+            }
+        )
+    return rows
+
+
 __all__ = [
     "execute_notification",
     "execute_workflow_invoke",
@@ -644,4 +719,5 @@ __all__ = [
     "execute_dispatch_job",
     "execute_check_status",
     "execute_search_receipts",
+    "projected_platform_integrations",
 ]

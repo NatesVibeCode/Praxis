@@ -1,0 +1,120 @@
+#!/bin/bash
+# praxis-agent — talk to the local agent_sessions service.
+# Requires: curl, jq. Base URL: http://127.0.0.1:8421.
+
+set -euo pipefail
+
+BASE="${PRAXIS_AGENT_URL:-http://127.0.0.1:8421}"
+
+usage() {
+  cat <<'EOF'
+praxis-agent — control the local Claude agent-session service
+
+  praxis-agent new [--title TITLE] "<prompt>"
+      Spawn a new agent and fire the first turn.
+      Prints the agent_id, then streams the first reply.
+
+  praxis-agent send <agent_id> "<prompt>"
+      Send a message to an existing agent; prints the reply.
+
+  praxis-agent tail <agent_id>
+      Follow the live SSE stream for an in-flight turn.
+
+  praxis-agent list
+      Show all agents with last activity and running status.
+
+Environment:
+  PRAXIS_AGENT_URL   override base URL (default http://127.0.0.1:8421)
+EOF
+}
+
+die() { echo "praxis-agent: $*" >&2; exit 1; }
+
+http_json() {
+  # usage: http_json METHOD PATH [body_json]
+  local method="$1" path="$2" body="${3:-}"
+  if [ -n "$body" ]; then
+    curl -sS -X "$method" -H 'Content-Type: application/json' -d "$body" "$BASE$path"
+  else
+    curl -sS -X "$method" "$BASE$path"
+  fi
+}
+
+cmd_new() {
+  local title=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --title) title="$2"; shift 2 ;;
+      --) shift; break ;;
+      -*) die "unknown flag: $1" ;;
+      *) break ;;
+    esac
+  done
+  [ $# -ge 1 ] || { usage >&2; exit 2; }
+  local prompt="$*"
+  local body
+  body=$(jq -cn --arg title "$title" --arg prompt "$prompt" \
+    '{title: ($title | select(length>0)), prompt: $prompt} | with_entries(select(.value != null))')
+  local resp
+  resp=$(http_json POST /agents "$body") || die "POST /agents failed"
+  local agent_id
+  agent_id=$(echo "$resp" | jq -r '.agent_id // empty')
+  [ -n "$agent_id" ] || { echo "$resp" >&2; die "no agent_id in response"; }
+  echo "agent_id=$agent_id"
+  # Reply to the initial prompt is processed synchronously by POST /agents in
+  # most implementations; if the response includes .reply, print it.
+  echo "$resp" | jq -r '.reply // empty' | sed '/^$/d' || true
+}
+
+cmd_send() {
+  [ $# -ge 2 ] || { usage >&2; exit 2; }
+  local agent_id="$1"; shift
+  local prompt="$*"
+  local body
+  body=$(jq -cn --arg p "$prompt" '{prompt: $p}')
+  local resp
+  resp=$(http_json POST "/agents/$agent_id/messages" "$body") || die "POST /messages failed"
+  echo "$resp" | jq -r '.reply // (. | @json)'
+}
+
+cmd_tail() {
+  [ $# -ge 1 ] || { usage >&2; exit 2; }
+  local agent_id="$1"
+  curl -sS -N "$BASE/agents/$agent_id/stream" | \
+    while IFS= read -r line; do
+      case "$line" in
+        data:*)
+          payload="${line#data:}"
+          payload="${payload# }"
+          if [ -n "$payload" ]; then
+            echo "$payload" | jq -c . 2>/dev/null || echo "$payload"
+          fi
+          ;;
+      esac
+    done
+}
+
+cmd_list() {
+  http_json GET /agents | jq -r '
+    (if type == "array" then . else (.agents // []) end) as $rows |
+    if ($rows | length) == 0 then
+      "no agents"
+    else
+      (["agent_id","title","last_activity","running"]),
+      ($rows[] | [.agent_id, (.title // "-"), (.last_activity // "-"), ((.running // false) | tostring)])
+      | @tsv
+    end' | column -t -s $'\t'
+}
+
+sub="${1:-}"
+[ -n "$sub" ] || { usage; exit 2; }
+shift
+
+case "$sub" in
+  new)    cmd_new "$@" ;;
+  send)   cmd_send "$@" ;;
+  tail)   cmd_tail "$@" ;;
+  list)   cmd_list "$@" ;;
+  -h|--help|help) usage ;;
+  *) usage >&2; exit 2 ;;
+esac

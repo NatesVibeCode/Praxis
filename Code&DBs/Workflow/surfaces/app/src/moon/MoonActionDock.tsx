@@ -262,10 +262,13 @@ export function MoonActionDock({
       </div>
 
       {(hasDefinition || hasGraphSteps) && (
-        <div style={{ marginTop: 16 }}>
+        <div className="moon-action__save-card">
           <div className="moon-dock__section-label">Save</div>
-          <div className="moon-dock__item-desc">State: {buildState}</div>
-          <button className="moon-dock-form__btn" onClick={handleCommit} disabled={loading || (!hasDefinition && !hasGraphSteps)}>
+          <div className="moon-action__save-row">
+            <span className="moon-action__state-label">State</span>
+            <span className="moon-action__state-value">{buildState}</span>
+          </div>
+          <button className="moon-dock-form__btn moon-action__save-button" onClick={handleCommit} disabled={loading || (!hasDefinition && !hasGraphSteps)}>
             {loading && action === 'commit' ? 'Saving...' : 'Save draft'}
           </button>
         </div>
@@ -275,7 +278,7 @@ export function MoonActionDock({
       {success && <div className="moon-action__success">{success}</div>}
 
       {/* Draggable catalog — drag items onto chain nodes or edges */}
-      <div style={{ marginTop: 24 }}>
+      <div className="moon-action__catalog-section">
         <MoonSurfaceReviewPanel
           catalogItems={catalogEnvelope.items}
           sourcePolicies={catalogEnvelope.sourcePolicies}
@@ -283,7 +286,27 @@ export function MoonActionDock({
         />
         <MoonIntegrationsPanel />
         <MoonDataDictionaryPanel />
-        <div className="moon-dock__section-label">Catalog</div>
+        <div className="moon-action__catalog-header">
+          <div>
+            <div className="moon-dock__section-label">Catalog</div>
+            <div className="moon-action__catalog-subtitle">Core actions available to this builder.</div>
+          </div>
+          <span className="moon-action__catalog-count">{primaryCatalog.length}</span>
+        </div>
+        <div className="moon-action__catalog-stats" aria-label="Catalog surface summary">
+          <div className="moon-action__catalog-stat">
+            <span>{surfaceStats.stepCore}<small>/{surfaceStats.stepTotal}</small></span>
+            <em>core steps</em>
+          </div>
+          <div className="moon-action__catalog-stat">
+            <span>{surfaceStats.gateCore}<small>/{surfaceStats.gateTotal}</small></span>
+            <em>core gates</em>
+          </div>
+          <div className="moon-action__catalog-stat">
+            <span>{surfaceStats.stepOther + surfaceStats.gateOther}</span>
+            <em>other</em>
+          </div>
+        </div>
         <div className="moon-catalog__filters">
           {filterableFamilies.map(f => (
             <button
@@ -295,12 +318,12 @@ export function MoonActionDock({
         </div>
         
         {suggestedLoading && (
-          <div className="moon-dock__item-desc" style={{ padding: '8px 0' }}>
+          <div className="moon-action__suggestion-loading">
             <span className="moon-spinner" /> Finding suggestions...
           </div>
         )}
         {suggestedCatalogIds.length > 0 && !familyFilter && (
-          <div style={{ marginBottom: 32 }}>
+          <div className="moon-action__suggestions">
             <div className="moon-dock__section-label">Suggested next</div>
             <div className="moon-dock__catalog-grid">
               {suggestedCatalogIds.map(id => {
@@ -314,7 +337,7 @@ export function MoonActionDock({
 
         {primaryCatalog.length > 0 && (
           <>
-            <div className="moon-dock__catalog-grid" style={{ marginTop: 12 }}>
+            <div className="moon-dock__catalog-grid moon-action__primary-catalog-grid">
               {primaryCatalog.map(({ item, truth, policy }) => renderCatalogButton(item, policy.detail, truth.badge, truth.category))}
             </div>
           </>

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ChartView } from '../primitives/ChartView';
 import { DataTable } from '../primitives/DataTable';
 import { StatsRow } from '../primitives/StatsRow';
+import { runsRecentPath } from './runApi';
 import './dashboard.css';
 
 interface CostSummary {
@@ -52,7 +53,7 @@ function useCostsSnapshot() {
       setError(null);
       const [summaryResponse, runsResponse] = await Promise.all([
         fetch('/api/costs'),
-        fetch('/api/runs/recent?limit=12'),
+        fetch(runsRecentPath(12)),
       ]);
       if (!summaryResponse.ok) {
         throw new Error(`Cost summary unavailable (${summaryResponse.status})`);

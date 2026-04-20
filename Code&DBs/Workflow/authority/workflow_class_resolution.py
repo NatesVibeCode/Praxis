@@ -17,7 +17,7 @@ from typing import Any
 
 import asyncpg
 
-from policy._authority_validation import (
+from runtime.validation import (
     normalize_as_of as _shared_normalize_as_of,
     require_text as _shared_require_text,
 )

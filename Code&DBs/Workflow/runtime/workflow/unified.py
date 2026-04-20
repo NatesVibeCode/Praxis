@@ -47,6 +47,7 @@ from ._shared import (  # noqa: F401
 # ── Routing and touch-key ────────────────────────────────────────────────
 from ._routing import (  # noqa: F401
     _build_request_envelope,
+    ClaimRouteBlockedError,
     _derive_touch_keys,
     _failure_zone_lookup,
     _job_has_touch_conflict,

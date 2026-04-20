@@ -491,6 +491,20 @@ def compute_scorecard(conn: Any) -> dict[str, Any]:
         4,
     )
 
+    # Cluster leverage — how many distinct root causes the open bugs
+    # collapse to. Surfaces as "N bugs / M clusters" so operators see
+    # whether one big fix can retire a chunk of the backlog.
+    try:
+        from runtime.data_dictionary_governance_clustering import cluster_violations
+
+        vs = scan_violations(conn)
+        clusters = cluster_violations(conn, vs)
+        cluster_count = len(clusters)
+        bulk_fix_count = sum(1 for c in clusters if c.cluster_fix)
+    except Exception:
+        cluster_count = 0
+        bulk_fix_count = 0
+
     # Letter grade for quick eyeballing.
     if compliance_score >= 0.9:
         grade = "A"
@@ -512,6 +526,8 @@ def compute_scorecard(conn: Any) -> dict[str, Any]:
         "unowned_sensitive": unowned_sensitive,
         "open_governance_bugs": open_governance_bugs,
         "open_governance_bugs_by_policy": by_policy,
+        "cluster_count": cluster_count,
+        "bulk_fixes_available": bulk_fix_count,
         "metrics": {
             "owned_pct": round(owned_pct, 4),
             "classified_pct": round(classified_pct, 4),

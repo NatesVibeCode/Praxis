@@ -169,19 +169,99 @@ def _compile_index_snapshot(
     )
 
 
-def test_call_llm_compile_uses_medium_refine_route_by_default(monkeypatch) -> None:
+def test_call_llm_compile_resolves_via_task_type_routing(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    def _fake_submit(conn, spec):
-        captured["conn"] = conn
-        captured["spec"] = spec
-        return {"run_id": "run.compile.medium"}
+    def _fake_call_llm(request):
+        captured["request_provider"] = request.provider_slug
+        captured["request_model"] = request.model_slug
+        captured["request_endpoint"] = request.endpoint_uri
+        captured["request_protocol"] = request.protocol_family
+        captured["request_api_key"] = request.api_key
+        return SimpleNamespace(
+            content=json.dumps(
+                {
+                    "title": "Support Mail",
+                    "prose": "Use @gmail/search before triage-agent reviews the queue.",
+                    "authority": "",
+                    "sla": {},
+                    "capabilities": [],
+                }
+            ),
+        )
 
-    monkeypatch.delenv("WORKFLOW_REFINE_AGENT_ROUTE", raising=False)
+    class _StubDecision(SimpleNamespace):
+        pass
+
+    class _StubRouter:
+        def __init__(self, pg):
+            captured["router_pg"] = pg
+
+        def resolve_failover_chain(self, slug):
+            captured["router_slug"] = slug
+            return [
+                _StubDecision(
+                    provider_slug="sample-broker",
+                    model_slug="vendor/some-model",
+                    adapter_type="llm_task",
+                ),
+            ]
+
+    def _fake_endpoint(provider, model):
+        captured["endpoint_provider"] = provider
+        captured["endpoint_model"] = model
+        return "https://broker.example/v1/chat/completions"
+
+    def _fake_protocol(provider):
+        captured["protocol_provider"] = provider
+        return "openai_chat_completions"
+
+    def _fake_env_vars(provider):
+        captured["env_vars_provider"] = provider
+        return ["SAMPLE_BROKER_API_KEY"]
+
+    def _fake_resolve_secret(name, *, env=None):
+        captured.setdefault("secret_names", []).append(name)
+        return "sk-test"
+
+    def _fake_get_pool():
+        return object()
+
+    class _FakeSyncConn:
+        def __init__(self, pool):
+            captured["conn_pool"] = pool
+
     monkeypatch.setitem(
         sys.modules,
-        "runtime.workflow.unified",
-        SimpleNamespace(submit_workflow_inline=_fake_submit),
+        "adapters.llm_client",
+        SimpleNamespace(LLMRequest=SimpleNamespace, call_llm=_fake_call_llm),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "adapters.keychain",
+        SimpleNamespace(resolve_secret=_fake_resolve_secret),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "registry.provider_execution_registry",
+        SimpleNamespace(
+            resolve_api_endpoint=_fake_endpoint,
+            resolve_api_protocol_family=_fake_protocol,
+            resolve_api_key_env_vars=_fake_env_vars,
+        ),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "runtime.task_type_router",
+        SimpleNamespace(TaskTypeRouter=_StubRouter),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "storage.postgres.connection",
+        SimpleNamespace(
+            SyncPostgresConnection=_FakeSyncConn,
+            get_workflow_pool=_fake_get_pool,
+        ),
     )
 
     result = compiler._call_llm_compile(
@@ -190,9 +270,16 @@ def test_call_llm_compile_uses_medium_refine_route_by_default(monkeypatch) -> No
         conn=_WorkflowCompileConn(),
     )
 
-    spec = captured["spec"]
-    assert isinstance(spec, dict)
-    assert spec["jobs"][0]["agent"] == "auto/medium"
+    assert captured["router_slug"] == "auto/build"
+    assert captured["endpoint_provider"] == "sample-broker"
+    assert captured["endpoint_model"] == "vendor/some-model"
+    assert captured["protocol_provider"] == "sample-broker"
+    assert captured["env_vars_provider"] == "sample-broker"
+    assert captured["secret_names"] == ["SAMPLE_BROKER_API_KEY"]
+    assert captured["request_provider"] == "sample-broker"
+    assert captured["request_model"] == "vendor/some-model"
+    assert captured["request_protocol"] == "openai_chat_completions"
+    assert captured["request_api_key"] == "sk-test"
     assert result["title"] == "Support Mail"
     assert result["prose"] == "Use @gmail/search before triage-agent reviews the queue."
 

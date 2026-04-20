@@ -10,7 +10,8 @@
       "inputs": {
         "task_name": "seed",
         "input_payload": {
-          "step": 0
+          "step": 0,
+          "allow_passthrough_echo": true
         }
       },
       "expected_outputs": {
@@ -36,6 +37,11 @@
           {
             "label": "then_path",
             "adapter_type": "deterministic_task",
+            "inputs": {
+              "input_payload": {
+                "allow_passthrough_echo": true
+              }
+            },
             "expected_outputs": {
               "path": "then"
             }
@@ -45,6 +51,11 @@
           {
             "label": "else_path",
             "adapter_type": "deterministic_task",
+            "inputs": {
+              "input_payload": {
+                "allow_passthrough_echo": true
+              }
+            },
             "expected_outputs": {
               "path": "else"
             }
@@ -58,6 +69,11 @@
       "depends_on": [
         "route_if"
       ],
+      "inputs": {
+        "input_payload": {
+          "allow_passthrough_echo": true
+        }
+      },
       "expected_outputs": {
         "done": true
       }

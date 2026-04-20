@@ -164,6 +164,54 @@ _ROADMAP_BUG_CLOSEOUT_RELATION_KINDS = frozenset(
         "resolves_bug",
     }
 )
+_CAPABILITY_DELIVERED_BY_DECISION_FILING = "capability_delivered_by_decision_filing"
+
+
+def _roadmap_acceptance_proof_kind(value: object) -> str | None:
+    """Return acceptance_criteria.proof_kind when the roadmap row opts into
+    capability-delivered-by-decision-filing closeout. Returns None otherwise.
+
+    Narrow on purpose: closeout-by-decision-ref is opt-in per roadmap row so the
+    default gate still requires source_bug_id + validates_fix proof. Operators
+    set acceptance_criteria.proof_kind = 'capability_delivered_by_decision_filing'
+    on rows whose deliverable IS the decision itself (e.g. standing-order policy
+    filings where the decision row is the artifact).
+
+    acceptance_criteria is canonically a JSON object but some historical rows
+    stored a JSON array. This helper accepts either shape: a top-level object,
+    or an array whose first mapping-valued element carries the marker.
+    """
+
+    candidate: Any = value
+    if isinstance(candidate, (bytes, bytearray)):
+        try:
+            candidate = candidate.decode("utf-8")
+        except UnicodeDecodeError:
+            return None
+    if isinstance(candidate, str):
+        text = candidate.strip()
+        if not text:
+            return None
+        try:
+            import json as _json
+
+            candidate = _json.loads(text)
+        except ValueError:
+            return None
+    if isinstance(candidate, Mapping):
+        proof_kind = candidate.get("proof_kind")
+    elif isinstance(candidate, (list, tuple)):
+        proof_kind = None
+        for element in candidate:
+            if isinstance(element, Mapping) and "proof_kind" in element:
+                proof_kind = element.get("proof_kind")
+                break
+    else:
+        return None
+    if not isinstance(proof_kind, str):
+        return None
+    proof_kind = proof_kind.strip()
+    return proof_kind or None
 
 
 _require_text = require_text
@@ -3467,7 +3515,10 @@ class OperatorControlFrontdoor:
                         title,
                         status,
                         lifecycle,
+                        item_kind,
                         source_bug_id,
+                        decision_ref,
+                        acceptance_criteria,
                         completed_at,
                         updated_at
                     FROM roadmap_items
@@ -3487,7 +3538,10 @@ class OperatorControlFrontdoor:
                     title,
                     status,
                     lifecycle,
+                    item_kind,
                     source_bug_id,
+                    decision_ref,
+                    acceptance_criteria,
                     completed_at,
                     updated_at
                 FROM roadmap_items
@@ -3498,6 +3552,49 @@ class OperatorControlFrontdoor:
                 list(source_bug_ids),
             )
         )
+
+    async def _fetch_decision_proof_for_closeout(
+        self,
+        conn: _Connection,
+        *,
+        decision_refs: tuple[str, ...],
+    ) -> dict[str, Mapping[str, Any]]:
+        """Return {decision_ref: decision_row} for refs that resolve to a decided operator_decision.
+
+        A roadmap_items.decision_ref is accepted as capability-delivered proof if it
+        resolves (by operator_decision_id or by decision_key) to an operator_decisions
+        row with status='decided' and is still effective (effective_to is NULL or future).
+        """
+
+        if not decision_refs:
+            return {}
+        rows = await conn.fetch(
+            """
+            SELECT
+                operator_decision_id,
+                decision_key,
+                decision_kind,
+                decision_status,
+                title,
+                effective_from,
+                effective_to,
+                decided_at
+            FROM operator_decisions
+            WHERE (operator_decision_id = ANY($1::text[])
+                   OR decision_key = ANY($1::text[]))
+              AND decision_status = 'decided'
+              AND (effective_to IS NULL OR effective_to > now())
+            """,
+            list(decision_refs),
+        )
+        ref_set = set(decision_refs)
+        resolved: dict[str, Mapping[str, Any]] = {}
+        for row in rows:
+            payload = dict(row)
+            for key in (str(payload["operator_decision_id"]), str(payload["decision_key"])):
+                if key in ref_set and key not in resolved:
+                    resolved[key] = payload
+        return resolved
 
     async def _fetch_roadmap_bug_relation_rows_for_closeout(
         self,
@@ -3636,6 +3733,25 @@ class OperatorControlFrontdoor:
                     for row in rows
                 )
             }
+            capability_decision_refs = tuple(
+                ref
+                for ref in dict.fromkeys(
+                    str(row["decision_ref"])
+                    for row in scoped_roadmap_rows
+                    if row.get("item_kind") == "capability"
+                    and row.get("decision_ref") is not None
+                    and str(row.get("decision_ref") or "").strip()
+                    and _roadmap_acceptance_proof_kind(
+                        row.get("acceptance_criteria")
+                    )
+                    == _CAPABILITY_DELIVERED_BY_DECISION_FILING
+                )
+                if ref
+            )
+            decision_proof_by_ref = await self._fetch_decision_proof_for_closeout(
+                conn,
+                decision_refs=capability_decision_refs,
+            )
             now = _now()
 
             bug_candidates: list[dict[str, Any]] = []
@@ -3752,11 +3868,71 @@ class OperatorControlFrontdoor:
                         }
                     )
                     continue
+                decision_ref_value = (
+                    str(row.get("decision_ref") or "").strip() or None
+                )
+                item_kind = str(row.get("item_kind") or "").strip()
+                acceptance_criteria_value = row.get("acceptance_criteria")
+                proof_kind_value = _roadmap_acceptance_proof_kind(
+                    acceptance_criteria_value
+                )
+                declares_decision_filing_proof = (
+                    proof_kind_value == _CAPABILITY_DELIVERED_BY_DECISION_FILING
+                )
+                decision_proof = (
+                    decision_proof_by_ref.get(decision_ref_value)
+                    if (
+                        decision_ref_value is not None
+                        and item_kind == "capability"
+                        and declares_decision_filing_proof
+                    )
+                    else None
+                )
+                if (
+                    row.get("completed_at") is None
+                    and source_bug_id is None
+                    and decision_proof is not None
+                ):
+                    roadmap_candidates.append(
+                        {
+                            "roadmap_item_id": roadmap_item_id,
+                            "source_bug_id": None,
+                            "source_bug_link_source": None,
+                            "source_bug_relation_id": None,
+                            "current_status": str(row["status"]),
+                            "current_lifecycle": str(row["lifecycle"]),
+                            "next_status": _ROADMAP_COMPLETED_STATUS,
+                            "next_lifecycle": _ROADMAP_COMPLETED_LIFECYCLE,
+                            "reason_codes": [
+                                "capability_delivered_by_decision_filing_proof_present",
+                            ],
+                            "evidence_refs": [
+                                {
+                                    "kind": "operator_decision",
+                                    "ref": str(decision_proof["operator_decision_id"]),
+                                    "role": "capability_delivered_decision",
+                                    "decision_key": str(decision_proof["decision_key"]),
+                                    "decision_kind": str(decision_proof["decision_kind"]),
+                                    "decision_status": str(decision_proof["decision_status"]),
+                                }
+                            ],
+                        }
+                    )
+                    continue
                 reason_codes = []
                 if row.get("completed_at") is not None:
                     reason_codes.append("already_completed")
                 if source_bug_id is None:
-                    reason_codes.append("missing_source_bug")
+                    if (
+                        item_kind == "capability"
+                        and declares_decision_filing_proof
+                        and decision_ref_value is not None
+                    ):
+                        reason_codes.append(
+                            "capability_decision_filing_proof_not_decided"
+                        )
+                    else:
+                        reason_codes.append("missing_source_bug")
                 elif source_bug_id not in proof_bug_ids:
                     reason_codes.append(
                         "relation_bug_missing_passed_fix_verification"
@@ -3772,6 +3948,9 @@ class OperatorControlFrontdoor:
                             "source_bug_relation_id": source_bug_relation_id,
                             "current_status": str(row["status"]),
                             "current_lifecycle": str(row["lifecycle"]),
+                            "item_kind": item_kind or None,
+                            "decision_ref": decision_ref_value,
+                            "proof_kind": proof_kind_value,
                             "reason_codes": reason_codes,
                         }
                     )

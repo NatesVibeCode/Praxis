@@ -71,13 +71,19 @@ Use `--kill-if-idle` only when a run is clearly unhealthy and idle.
 
 ## Naming Convention
 
-Per `PUBLIC_NAMING.md`:
+Live in Praxis.db under
+`architecture-policy::public-naming::workflow-vocabulary-convention` and
+`architecture-policy::public-naming::dispatch-historical-exceptions`
+(`operator_decisions`). Snapshot:
 
 - **Praxis** — the product/suite brand
 - **Praxis Engine** — the workflow execution runtime
 - **Praxis.db** — the Postgres-backed data authority
 - **workflow** — the domain noun (workflow specs, workflow runs, workflow jobs)
+- **launch** — the verb for starting a workflow run (never "dispatch")
 - MCP tools use the `praxis_` prefix
+
+Inspect exceptions with `praxis workflow query "public naming exceptions"`.
 
 ## Tests
 

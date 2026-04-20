@@ -11,6 +11,7 @@ from ._shared import (
     _TERMINAL_JOB_STATUSES,
 )
 from ._routing import (
+    ClaimRouteBlockedError,
     _job_has_touch_conflict,
     _record_task_route_outcome,
     _select_claim_route,
@@ -242,18 +243,29 @@ def claim_one(conn: SyncPostgresConnection, worker_id: str) -> dict | None:
             continue
         try:
             resolved_agent = _select_claim_route(conn, job)
-        except RuntimeProfileAdmissionError as exc:
+        except (RuntimeProfileAdmissionError, ClaimRouteBlockedError) as exc:
+            # Both exceptions carry a stable .reason_code and are handled the
+            # same way: fail the ready job closed so downstream retry/self-
+            # healing cannot re-select a forbidden candidate. A blocked-route
+            # denial sets failure_category=routing_blocked rather than
+            # authority_missing so observability can distinguish "we don't
+            # know the authority" from "authority said no". (BUG-32194458.)
             logger.error(
                 "Claim rejected for job %s (%s): %s",
                 job.get("id"),
                 job.get("label"),
                 exc,
             )
+            if isinstance(exc, ClaimRouteBlockedError):
+                failure_category = "routing_blocked"
+            else:
+                failure_category = "authority_missing"
             _fail_unclaimable_ready_job(
                 conn,
                 job,
                 error_code=exc.reason_code,
                 stdout_preview=str(exc),
+                failure_category=failure_category,
             )
             continue
         rows = conn.execute(

@@ -14,7 +14,7 @@ export type GlyphType =
   | 'research' | 'classify' | 'draft' | 'notify' | 'review' | 'tool' | 'blocked'
   | 'analyze' | 'decompose' | 'diff' | 'chat' | 'spec' | 'build' | 'test'
   | 'deploy' | 'data' | 'metric' | 'render' | 'adversarial' | 'validate'
-  | 'idea' | 'summary';
+  | 'idea' | 'summary' | 'webhook' | 'schedule';
 
 /**
  * Type vocabulary: a *token* (word-boundary match) found in a label maps
@@ -47,7 +47,9 @@ const TYPE_TOKEN_TO_GLYPH: Record<string, GlyphType> = {
   notify: 'notify', alert: 'notify', email: 'notify',
   trigger: 'trigger',
   human: 'human',
-  tool: 'tool', api: 'tool', webhook: 'tool',
+  tool: 'tool', api: 'tool',
+  webhook: 'webhook', hook: 'webhook',
+  schedule: 'schedule', cron: 'schedule', clock: 'schedule', timer: 'schedule',
   summary: 'summary', report: 'summary', record: 'summary', register: 'summary',
 };
 
@@ -180,8 +182,8 @@ function branchSideScore(edge: BuildEdge): number {
 
 const ROUTE_TO_GLYPH: Record<string, GlyphType> = {
   'trigger': 'trigger',
-  'trigger/webhook': 'notify',
-  'trigger/schedule': 'metric',
+  'trigger/webhook': 'webhook',
+  'trigger/schedule': 'schedule',
 };
 
 function nodeToGlyph(node: BuildNode): GlyphType {

@@ -283,10 +283,16 @@ def rerank_rows(rows: list[Any], prefer_cost: bool, policy: "TaskRoutePolicy") -
         scored_rows.append((result.total_score - health_penalty - stability_penalty, row))
 
     if prefer_cost:
-        scored_rows.sort(key=lambda item: item[0], reverse=True)
+        scored_rows.sort(
+            key=lambda item: (
+                0 if str(item[1].get("route_source") or "derived") == "explicit" else 1,
+                -item[0],
+            ),
+        )
     else:
         scored_rows.sort(
             key=lambda item: (
+                0 if str(item[1].get("route_source") or "derived") == "explicit" else 1,
                 0 if str(item[1].get("billing_mode") or "") in _PREPAID_BILLING_MODES else 1,
                 -item[0],
             ),

@@ -4,6 +4,11 @@
   display: grid;
   grid-template-columns: minmax(280px, 320px) minmax(0, 1fr);
   color: var(--text);
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.024) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px);
+  background-size: 48px 48px;
+  background-position: -1px -1px;
 }
 
 .dash-sidebar {
@@ -17,11 +22,12 @@
   margin: 18px 0 18px 18px;
   padding: 20px;
   border: 1px solid var(--shell-border);
-  border-radius: 28px;
+  border-radius: 12px;
   background:
-    radial-gradient(circle at top, rgba(243, 238, 228, 0.09), transparent 38%),
-    radial-gradient(circle at 100% 0, rgba(88, 166, 255, 0.05), transparent 24%),
+    linear-gradient(90deg, rgba(243, 238, 228, 0.06), transparent 1px),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 22%),
     linear-gradient(180deg, rgba(18, 18, 18, 0.98), rgba(10, 10, 10, 0.99));
+  background-size: 56px 100%, 100% 100%, 100% 100%;
   box-shadow: var(--card-shadow);
   overflow: hidden;
 }
@@ -71,7 +77,7 @@
 .wf-card__stat-label {
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.16em;
+  letter-spacing: 0;
   text-transform: uppercase;
   color: var(--text-muted);
 }
@@ -79,11 +85,12 @@
 .dash-sidebar__brand-copy strong {
   font-size: 18px;
   line-height: 1.1;
+  overflow-wrap: anywhere;
 }
 
 .dash-sidebar__overview {
   padding: 18px;
-  border-radius: 22px;
+  border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: linear-gradient(180deg, rgba(243, 238, 228, 0.09), rgba(255, 255, 255, 0.02));
 }
@@ -92,7 +99,7 @@
   margin-top: 8px;
   font-size: 24px;
   line-height: 1;
-  letter-spacing: -0.04em;
+  letter-spacing: 0;
   color: var(--text);
 }
 
@@ -101,6 +108,59 @@
   font-size: 13px;
   line-height: 1.6;
   color: var(--text-muted);
+}
+
+.dash-sidebar__spine {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.dash-sidebar__spine-row {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 26px;
+}
+
+.dash-sidebar__spine-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.3);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.04);
+}
+
+.dash-sidebar__spine-dot--healthy {
+  background: var(--success);
+  box-shadow: 0 0 0 3px rgba(63, 185, 80, 0.1);
+}
+
+.dash-sidebar__spine-dot--warning {
+  background: var(--warning);
+  box-shadow: 0 0 0 3px rgba(210, 153, 34, 0.1);
+}
+
+.dash-sidebar__spine-dot--danger {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px rgba(248, 81, 73, 0.1);
+}
+
+.dash-sidebar__spine-label {
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.dash-sidebar__spine-row strong {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: right;
+  overflow-wrap: anywhere;
 }
 
 .dash-sidebar__overview-grid {
@@ -112,7 +172,7 @@
 
 .dash-sidebar__overview-stat {
   padding: 12px;
-  border-radius: 16px;
+  border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.07);
   background: rgba(255, 255, 255, 0.03);
 }
@@ -152,7 +212,7 @@
   width: 100%;
   padding: 10px 12px;
   border: none;
-  border-radius: 14px;
+  border-radius: 8px;
   background: transparent;
   color: var(--text);
   text-align: left;
@@ -233,7 +293,7 @@
 .dash-panel__action,
 .dash-empty__action,
 .wf-card__btn {
-  border-radius: 16px;
+  border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.03);
   color: var(--text);
@@ -316,7 +376,7 @@
   grid-template-columns: minmax(0, 1.5fr) minmax(320px, 0.9fr);
   gap: 20px;
   padding: 28px;
-  border-radius: 32px;
+  border-radius: 14px;
   position: relative;
   overflow: hidden;
 }
@@ -331,18 +391,16 @@
 .dash-hero::before {
   inset: 0;
   background:
-    radial-gradient(circle at 18% 18%, rgba(243, 238, 228, 0.08), transparent 26%),
-    radial-gradient(circle at 95% 0%, rgba(88, 166, 255, 0.08), transparent 18%);
+    linear-gradient(90deg, rgba(243, 238, 228, 0.12), transparent 1px),
+    linear-gradient(180deg, rgba(243, 238, 228, 0.08), transparent 1px);
+  background-size: 72px 72px;
+  mask-image: linear-gradient(90deg, rgba(0, 0, 0, 0.52), transparent 72%);
 }
 
 .dash-hero::after {
-  right: 24px;
-  top: 24px;
-  width: 160px;
-  height: 160px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(255, 255, 255, 0.07), transparent 68%);
-  filter: blur(6px);
+  inset: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  border-radius: 10px;
 }
 
 .dash-hero > * {
@@ -352,9 +410,9 @@
 
 .dash-hero__title {
   margin-top: 12px;
-  font-size: clamp(34px, 5vw, 56px);
+  font-size: clamp(34px, 3.5rem, 54px);
   line-height: 0.94;
-  letter-spacing: -0.07em;
+  letter-spacing: 0;
 }
 
 .dash-hero__desc {
@@ -409,8 +467,9 @@
   background: rgba(255, 255, 255, 0.04);
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0;
   text-transform: uppercase;
+  overflow-wrap: anywhere;
 }
 
 .dash-pill--neutral {
@@ -455,7 +514,7 @@
 
 .dash-hero-card {
   padding: 18px;
-  border-radius: 24px;
+  border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
@@ -469,7 +528,7 @@
   margin-top: 8px;
   font-size: 28px;
   line-height: 1;
-  letter-spacing: -0.05em;
+  letter-spacing: 0;
 }
 
 .dash-hero-card__copy {
@@ -486,7 +545,7 @@
 .dash-hero-card__stat {
   flex: 1 1 140px;
   padding: 12px;
-  border-radius: 16px;
+  border-radius: 8px;
   background: rgba(0, 0, 0, 0.24);
   border: 1px solid rgba(255, 255, 255, 0.06);
 }
@@ -512,7 +571,7 @@
 
 .dash-guidance__item {
   padding: 12px 14px;
-  border-radius: 16px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.06);
 }
@@ -538,7 +597,7 @@
 
 .dash-metric {
   padding: 20px;
-  border-radius: 24px;
+  border-radius: 10px;
   position: relative;
   overflow: hidden;
   backdrop-filter: blur(12px);
@@ -548,7 +607,8 @@
   margin-top: 10px;
   font-size: 22px;
   line-height: 1.15;
-  letter-spacing: -0.04em;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
 }
 
 .dash-metric__detail {
@@ -590,7 +650,7 @@
 .dash-section,
 .dash-panel {
   padding: 22px;
-  border-radius: 28px;
+  border-radius: 12px;
   position: relative;
   overflow: hidden;
 }
@@ -620,7 +680,7 @@
   margin-top: 8px;
   font-size: 24px;
   line-height: 1;
-  letter-spacing: -0.04em;
+  letter-spacing: 0;
 }
 
 .dash-section__copy {
@@ -637,7 +697,7 @@
   min-height: 58px;
   display: grid;
   place-items: center;
-  border-radius: 18px;
+  border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.04);
   font-size: 20px;
@@ -662,7 +722,7 @@
 .dash-empty {
   margin-top: 18px;
   padding: 22px;
-  border-radius: 22px;
+  border-radius: 10px;
   border: 1px dashed rgba(255, 255, 255, 0.16);
   background: rgba(255, 255, 255, 0.035);
 }
@@ -699,7 +759,7 @@
   flex-direction: column;
   gap: 16px;
   padding: 18px;
-  border-radius: 22px;
+  border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
   transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
@@ -726,7 +786,8 @@
   margin-top: 8px;
   font-size: 18px;
   line-height: 1.2;
-  letter-spacing: -0.03em;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
 }
 
 .wf-card__desc {
@@ -745,7 +806,7 @@
   border: 1px solid transparent;
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0;
   text-transform: uppercase;
 }
 
@@ -787,7 +848,7 @@
 
 .wf-card__stat {
   padding: 12px;
-  border-radius: 16px;
+  border-radius: 8px;
   background: rgba(0, 0, 0, 0.24);
   border: 1px solid rgba(255, 255, 255, 0.06);
 }
@@ -831,7 +892,7 @@
   gap: 12px;
   align-items: center;
   padding: 14px;
-  border-radius: 18px;
+  border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.035);
   color: inherit;
@@ -891,7 +952,7 @@
   gap: 12px;
   align-items: center;
   padding: 14px;
-  border-radius: 18px;
+  border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.035);
 }
@@ -970,7 +1031,7 @@
   .dash-panel,
   .dash-section,
   .dash-metric {
-    border-radius: 22px;
+    border-radius: 12px;
   }
 
   .dash-content,

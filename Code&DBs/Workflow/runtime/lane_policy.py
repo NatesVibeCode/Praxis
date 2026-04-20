@@ -78,6 +78,7 @@ def admit_adapter_type(
     *,
     spend_pressure: str | None = None,
     budget_authority_unreachable: bool = False,
+    budget_window_data_quality_error: bool = False,
 ) -> tuple[bool, str]:
     """Decide whether a route may use ``adapter_type`` for ``provider_slug``.
 
@@ -91,6 +92,12 @@ def admit_adapter_type(
                                         — paid lane, budget-window authority
                                           table is missing (schema drift);
                                           fail closed per BUG-2D3AECF3
+    - ``lane.rejected.budget_window_data_quality_error``
+                                        — paid lane, latest quality run for
+                                          an error-severity rule on
+                                          ``provider_budget_windows`` is
+                                          failing; authority data is not
+                                          trustworthy, fail closed
     - ``lane.admitted.no_policy``       — no policy row, fail open (pre-seed)
 
     ``spend_pressure`` is a hard gate for ``llm_task`` only: when the
@@ -104,6 +111,14 @@ def admit_adapter_type(
     routes would turn schema drift into silent paid-lane opening. Refused
     with reason ``lane.rejected.budget_authority_unreachable`` so the
     trace surfaces the authority gap explicitly.
+
+    ``budget_window_data_quality_error`` extends the same fail-closed
+    doctrine to data quality: even when the authority table is reachable,
+    an error-severity quality rule on ``provider_budget_windows`` with a
+    failing latest run means the rows themselves are in a state the
+    authority owner has declared invalid (e.g. inverted window timestamps
+    that would break ``ORDER BY window_ended_at DESC`` lookups). Paid
+    lanes refuse rather than route off corrupt authority data.
     """
     normalized = (adapter_type or "").strip().lower()
     if normalized not in KNOWN_ADAPTER_TYPES:
@@ -112,6 +127,8 @@ def admit_adapter_type(
     if normalized == "llm_task":
         if budget_authority_unreachable:
             return False, "lane.rejected.budget_authority_unreachable"
+        if budget_window_data_quality_error:
+            return False, "lane.rejected.budget_window_data_quality_error"
         pressure = (spend_pressure or "").strip().lower()
         if pressure == "high":
             return False, "lane.rejected.budget_exhausted"

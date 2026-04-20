@@ -101,7 +101,7 @@ export async function compileDefinition(
   return postBuildMutation(workflowId, 'bootstrap', {
     prose,
     title: opts?.title,
-    enable_llm: false,
+    enable_llm: true,
   });
 }
 

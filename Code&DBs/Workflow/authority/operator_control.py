@@ -17,7 +17,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any
 
-from policy._authority_validation import (
+from runtime.validation import (
     normalize_as_of as _shared_normalize_as_of,
     require_datetime as _shared_require_datetime,
     require_mapping as _shared_require_mapping,

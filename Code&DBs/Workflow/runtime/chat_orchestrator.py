@@ -526,10 +526,14 @@ class ChatOrchestrator:
             decision_budget_unreachable = bool(
                 getattr(decision, "budget_authority_unreachable", False)
             )
+            decision_budget_window_data_quality_error = bool(
+                getattr(decision, "budget_window_data_quality_error", False)
+            )
             admitted, reason = admit_adapter_type(
                 lane_policies, provider, adapter_type,
                 spend_pressure=decision_pressure,
                 budget_authority_unreachable=decision_budget_unreachable,
+                budget_window_data_quality_error=decision_budget_window_data_quality_error,
             )
             if not admitted:
                 _log.info(

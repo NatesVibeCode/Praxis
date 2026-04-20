@@ -50,11 +50,28 @@ services:
       WORKFLOW_DATABASE_URL: postgresql://nate@host.docker.internal:5432/praxis
       WORKFLOW_EMBEDDING_BACKEND: service
       WORKFLOW_EMBEDDING_SERVICE_URL: http://semantic-backend:8421
-      CURSOR_API_KEY: ${CURSOR_API_KEY:-}
       PYTHONPATH: "/workspace/Code&DBs/Workflow"
       PRAXIS_API_HOST: 0.0.0.0
       PRAXIS_API_PORT: 8420
       PRAXIS_API_RELOAD: "0"
+      # Integration secrets hydrated from host Keychain at compose-up time
+      # (bin/praxis-compose-env exports account="praxis" services into shell).
+      # The MCP bridge runs inside this container, so integration HTTP calls
+      # from workers (via host.docker.internal:8420/mcp → praxis_integration)
+      # need these present in the container env. Keychain is unreachable from
+      # Linux, so this passthrough is the single authorized hydration channel.
+      HUBSPOT_ACCESS_TOKEN: ${HUBSPOT_ACCESS_TOKEN:-}
+      BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      HTTPBIN_DEMO_TOKEN: ${HTTPBIN_DEMO_TOKEN:-}
+      CURSOR_API_KEY: ${CURSOR_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      # Provider auth single-authority: blank stale Anthropic API key so the
+      # OAuth subscription rail (CLAUDE_CODE_OAUTH_TOKEN) wins if the bridge
+      # ever spawns Anthropic-authenticated calls. See
+      # architecture-policy::providers::provider-auth-mode-single-authority.
+      ANTHROPIC_API_KEY: ""
+      ANTHROPIC_AUTH_TOKEN: ""
     working_dir: /workspace
     volumes:
       - .:/workspace
@@ -118,9 +135,14 @@ services:
       PYTHONPATH: "/workspace/Code&DBs/Workflow"
       PRAXIS_CLI_AUTH_HOME: /Users/nate
       PRAXIS_WORKFLOW_MCP_URL: http://host.docker.internal:8420/mcp
+      # Single Anthropic auth authority: ~/.claude/.credentials.json is
+      # mounted into the worker and is the only source of truth. We blank
+      # every env-based Anthropic auth rail so the CLI cannot pick up a
+      # stale shell or .env token that drifts from the credentials file.
+      # See architecture-policy::providers::provider-auth-mode-single-authority.
       ANTHROPIC_API_KEY: ""
       ANTHROPIC_AUTH_TOKEN: ""
-      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      CLAUDE_CODE_OAUTH_TOKEN: ""
     working_dir: /workspace
     volumes:
       - .:/workspace

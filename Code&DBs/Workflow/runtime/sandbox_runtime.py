@@ -50,6 +50,12 @@ def _parse_docker_mem_str(mem_str: str) -> int:
         return 0
 _CLOUDFLARE_SANDBOX_URL_ENV = "PRAXIS_CLOUDFLARE_SANDBOX_URL"
 _CLOUDFLARE_SANDBOX_TOKEN_ENV = "PRAXIS_CLOUDFLARE_SANDBOX_TOKEN"
+# Fallback-only ignore set, used when the source root isn't a git checkout.
+# For git checkouts, `_workspace_file_entries` uses `git ls-files` to honor
+# `.gitignore`, `.git/info/exclude`, and `core.excludesFile` — so anything a
+# developer already told git to ignore (node_modules, .venv, postgres-dev/data,
+# build outputs, etc.) is auto-excluded from workspace hydration. This set
+# only covers the narrow case of non-git source roots; keep it minimal.
 _IGNORED_MANIFEST_DIRS = frozenset({".git", "__pycache__", ".pytest_cache", ".mypy_cache"})
 _EMPTY_WORKSPACE_MATERIALIZATION = "none"
 
@@ -60,6 +66,10 @@ _EMPTY_WORKSPACE_MATERIALIZATION = "none"
 # --permission-mode bypassPermissions (blocked under root).
 _CLI_AUTH_MOUNTS: tuple[tuple[frozenset[str], str, str], ...] = (
     (frozenset({"openai"}), ".codex/auth.json", "/home/praxis-agent/.codex/auth.json"),
+    # Claude Code reads OAuth tokens from ~/.claude/.credentials.json on Linux
+    # (the Keychain equivalent on macOS). The .claude.json file alongside it is
+    # session/projects state — useful but not sufficient for auth. Mount both.
+    (frozenset({"anthropic"}), ".claude/.credentials.json", "/home/praxis-agent/.claude/.credentials.json"),
     (frozenset({"anthropic"}), ".claude.json", "/home/praxis-agent/.claude.json"),
     (frozenset({"google", "gemini"}), ".gemini/oauth_creds.json", "/home/praxis-agent/.gemini/oauth_creds.json"),
     (frozenset({"google", "gemini"}), ".gemini/google_accounts.json", "/home/praxis-agent/.gemini/google_accounts.json"),
@@ -402,19 +412,12 @@ def _ensure_text(path: str) -> str | None:
 
 def _workspace_manifest(root: str) -> dict[str, tuple[int, int]]:
     manifest: dict[str, tuple[int, int]] = {}
-    root_path = Path(root)
-    if not root_path.exists():
-        return manifest
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [name for name in dirnames if name not in _IGNORED_MANIFEST_DIRS]
-        for filename in filenames:
-            absolute = Path(dirpath) / filename
-            try:
-                stat = absolute.stat()
-            except OSError:
-                continue
-            relpath = absolute.relative_to(root_path).as_posix()
-            manifest[relpath] = (stat.st_size, stat.st_mtime_ns)
+    for relpath, absolute in _workspace_file_entries(root):
+        try:
+            stat = absolute.stat()
+        except OSError:
+            continue
+        manifest[relpath] = (stat.st_size, stat.st_mtime_ns)
     return manifest
 
 
@@ -449,32 +452,93 @@ def _normalize_workspace_overlay_files(
     return tuple(normalized)
 
 
+def _git_tracked_relpaths(root: str) -> list[str] | None:
+    """Return relative POSIX paths for files git considers part of the workspace.
+
+    Uses `git ls-files --cached --others --exclude-standard` — that's
+    tracked files plus untracked files not matched by `.gitignore`,
+    `.git/info/exclude`, or `core.excludesFile`. Returns None if the
+    root isn't inside a git checkout (caller should fall back to
+    `os.walk` + `_IGNORED_MANIFEST_DIRS`).
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    stdout = result.stdout or b""
+    entries = stdout.split(b"\0")
+    paths: list[str] = []
+    for raw in entries:
+        if not raw:
+            continue
+        try:
+            decoded = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            decoded = raw.decode("utf-8", errors="surrogateescape")
+        paths.append(decoded)
+    return paths
+
+
+def _workspace_file_entries(root: str) -> list[tuple[str, Path]]:
+    """Enumerate (relpath, absolute_path) tuples for all files to hydrate.
+
+    Honors `.gitignore` when `root` is a git checkout. Falls back to
+    `os.walk` with `_IGNORED_MANIFEST_DIRS` otherwise.
+    """
+    root_path = Path(root)
+    if not root_path.exists():
+        return []
+
+    tracked = _git_tracked_relpaths(root)
+    if tracked is not None:
+        entries: list[tuple[str, Path]] = []
+        for relpath in tracked:
+            absolute = root_path / relpath
+            # git ls-files may report paths for files that were deleted
+            # but not yet staged; skip anything that no longer exists.
+            if not absolute.is_file():
+                continue
+            entries.append((PurePosixPath(relpath).as_posix(), absolute))
+        return entries
+
+    # Fallback: non-git workspace. Use the minimal hardcoded ignore set.
+    entries = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [name for name in dirnames if name not in _IGNORED_MANIFEST_DIRS]
+        current_dir = Path(dirpath)
+        for filename in filenames:
+            absolute = current_dir / filename
+            relpath = absolute.relative_to(root_path).as_posix()
+            entries.append((relpath, absolute))
+    return entries
+
+
 def _workspace_snapshot_ref(
     root: str,
     *,
     overlay_files: Sequence[Mapping[str, str]] | None = None,
 ) -> str:
     """Return a stable content-addressed ref for one hydrated workspace input."""
-    entries: list[tuple[str, str]] = []
-    root_path = Path(root)
     normalized_overlays = _normalize_workspace_overlay_files(overlay_files)
     overlay_paths = {overlay["relative_path"] for overlay in normalized_overlays}
-    if root_path.exists():
-        for dirpath, dirnames, filenames in os.walk(root):
-            dirnames[:] = [name for name in dirnames if name not in _IGNORED_MANIFEST_DIRS]
-            current_dir = Path(dirpath)
-            for filename in filenames:
-                absolute = current_dir / filename
-                relpath = absolute.relative_to(root_path).as_posix()
-                if relpath in overlay_paths:
-                    continue
-                try:
-                    content_hash = hashlib.sha256(absolute.read_bytes()).hexdigest()
-                except OSError as exc:
-                    raise RuntimeError(
-                        f"workspace snapshot fingerprint could not read {absolute}"
-                    ) from exc
-                entries.append((relpath, content_hash))
+    entries: list[tuple[str, str]] = []
+    for relpath, absolute in _workspace_file_entries(root):
+        if relpath in overlay_paths:
+            continue
+        try:
+            content_hash = hashlib.sha256(absolute.read_bytes()).hexdigest()
+        except OSError as exc:
+            raise RuntimeError(
+                f"workspace snapshot fingerprint could not read {absolute}"
+            ) from exc
+        entries.append((relpath, content_hash))
     for overlay in normalized_overlays:
         entries.append(
             (
@@ -527,30 +591,42 @@ def _write_workspace_snapshot_archive(
     hydrated_files = 0
     normalized_overlays = _normalize_workspace_overlay_files(overlay_files)
     overlay_paths = {overlay["relative_path"] for overlay in normalized_overlays}
+    file_entries = sorted(
+        (
+            (relpath, absolute)
+            for relpath, absolute in _workspace_file_entries(source_root)
+            if relpath not in overlay_paths
+        ),
+        key=lambda item: item[0],
+    )
+    # Materialize the set of parent directories we need to represent in the
+    # tar so the extracted tree preserves structure. Using a set keeps it
+    # O(files) and lets us emit directories in sorted order before their
+    # contents (required by tar semantics).
+    directories: set[str] = set()
+    for relpath, _absolute in file_entries:
+        parent = PurePosixPath(relpath).parent
+        while parent != PurePosixPath("."):
+            directories.add(parent.as_posix())
+            parent = parent.parent
     with tarfile.open(archive_target, mode="w:gz") as archive:
         archive.add(source_root, arcname="workspace", recursive=False)
-        for dirpath, dirnames, filenames in os.walk(source_root):
-            dirnames[:] = sorted(name for name in dirnames if name not in _IGNORED_MANIFEST_DIRS)
-            filenames = sorted(filenames)
-            current_dir = Path(dirpath)
-            relative_dir = current_dir.relative_to(source)
-            if relative_dir != Path("."):
-                archive.add(
-                    str(current_dir),
-                    arcname=str(PurePosixPath("workspace") / relative_dir.as_posix()),
-                    recursive=False,
-                )
-            for filename in filenames:
-                absolute = current_dir / filename
-                relpath = absolute.relative_to(source).as_posix()
-                if relpath in overlay_paths:
-                    continue
-                archive.add(
-                    str(absolute),
-                    arcname=str(PurePosixPath("workspace") / relpath),
-                    recursive=False,
-                )
-                hydrated_files += 1
+        for relative_dir in sorted(directories):
+            absolute_dir = source / relative_dir
+            if not absolute_dir.is_dir():
+                continue
+            archive.add(
+                str(absolute_dir),
+                arcname=str(PurePosixPath("workspace") / relative_dir),
+                recursive=False,
+            )
+        for relpath, absolute in file_entries:
+            archive.add(
+                str(absolute),
+                arcname=str(PurePosixPath("workspace") / relpath),
+                recursive=False,
+            )
+            hydrated_files += 1
         for overlay in normalized_overlays:
             relative_path = overlay["relative_path"]
             content_bytes = overlay["content"].encode("utf-8")
@@ -618,21 +694,14 @@ def _cached_workspace_snapshot_archive(snapshot: WorkspaceSnapshot) -> Workspace
 
 
 def _hydrate_copy(source_root: str, destination_root: str) -> int:
-    copied = 0
-    source = Path(source_root)
     destination = Path(destination_root)
     destination.mkdir(parents=True, exist_ok=True)
-    for dirpath, dirnames, filenames in os.walk(source_root):
-        dirnames[:] = [name for name in dirnames if name not in _IGNORED_MANIFEST_DIRS]
-        source_dir = Path(dirpath)
-        relative_dir = source_dir.relative_to(source)
-        target_dir = destination / relative_dir
-        target_dir.mkdir(parents=True, exist_ok=True)
-        for filename in filenames:
-            source_file = source_dir / filename
-            target_file = target_dir / filename
-            shutil.copy2(source_file, target_file)
-            copied += 1
+    copied = 0
+    for relpath, absolute in _workspace_file_entries(source_root):
+        target_file = destination / relpath
+        target_file.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(absolute, target_file)
+        copied += 1
     return copied
 
 

@@ -1,4 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  runDetailPath,
+  runsRecentPath,
+  workflowRunStreamPath,
+} from './runApi';
 
 export type RunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 
@@ -111,7 +116,7 @@ const TERMINAL_RUN_STATUSES = new Set<RunStatus>(['succeeded', 'failed', 'cancel
 const FALLBACK_REFRESH_INTERVAL_MS = 10_000;
 
 export async function loadRunSnapshot(runId: string): Promise<RunDetail> {
-  const detailResponse = await fetch(`/api/runs/${encodeURIComponent(runId)}`);
+  const detailResponse = await fetch(runDetailPath(runId));
   if (detailResponse.ok) {
     return (await detailResponse.json()) as RunDetail;
   }
@@ -120,7 +125,7 @@ export async function loadRunSnapshot(runId: string): Promise<RunDetail> {
     throw new Error(`Failed to load run ${runId} (${detailResponse.status})`);
   }
 
-  const recentResponse = await fetch('/api/runs/recent?limit=100');
+  const recentResponse = await fetch(runsRecentPath(100));
   if (!recentResponse.ok) {
     throw new Error(`Run ${runId} was not found.`);
   }
@@ -188,7 +193,7 @@ export function useLiveRunSnapshot(runId: string | null): LiveRunSnapshotState {
       return undefined;
     }
 
-    const streamUrl = `/api/workflow-runs/${encodeURIComponent(runId)}/stream`;
+    const streamUrl = workflowRunStreamPath(runId);
     if (typeof window === 'undefined' || typeof window.EventSource !== 'function') {
       setStreamStatus('idle');
       return undefined;

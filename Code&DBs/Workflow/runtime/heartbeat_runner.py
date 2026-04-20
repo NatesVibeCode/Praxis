@@ -646,6 +646,41 @@ class _DatasetStalenessReconcileModule(HeartbeatModule):
         return _ok(self.name, t0)
 
 
+class _DataDictionaryGovernanceModule(HeartbeatModule):
+    """Heartbeat adapter for governance compliance scans.
+
+    Scans the data-dictionary axes for policy violations (unowned PII,
+    unowned sensitive assets, failing error-severity rules) and files
+    dedupe-keyed bugs for any new ones.
+    """
+
+    def __init__(self, conn) -> None:
+        self._conn = conn
+
+    @property
+    def name(self) -> str:
+        return "data_dictionary_governance"
+
+    def run(self) -> HeartbeatModuleResult:
+        t0 = time.monotonic()
+        try:
+            from runtime.bug_tracker import BugTracker
+            from runtime.data_dictionary_governance import run_governance_scan
+
+            tracker = BugTracker(self._conn)
+            result = run_governance_scan(self._conn, tracker, dry_run=False)
+        except Exception as exc:
+            return _fail(self.name, t0, str(exc))
+
+        errors = result.get("filing_errors") or []
+        if errors:
+            error_msg = "; ".join(
+                f"{e.get('decision_ref')}: {e.get('error')}" for e in errors[:3]
+            )
+            return _fail(self.name, t0, error_msg)
+        return _ok(self.name, t0)
+
+
 class _RateLimitProbeModule(HeartbeatModule):
     """Heartbeat adapter for provider rate-limit health probes."""
 
@@ -712,9 +747,38 @@ class HeartbeatRunner:
             self._rate_limit_probe_module = _RateLimitProbeModule()
         return self._rate_limit_probe_module
 
+    @staticmethod
+    def _usable_embedder(embedder: object | None) -> object | None:
+        if embedder is None:
+            return None
+        if hasattr(embedder, "embed"):
+            return embedder
+        return None
+
     def build_modules(self) -> list[HeartbeatModule]:
         """Create all heartbeat modules wired to the memory engine."""
+        from memory.data_dictionary_classifications_projector import (
+            DataDictionaryClassificationsProjector,
+        )
+        from memory.data_dictionary_classifications_propagation_projector import (
+            DataDictionaryClassificationsPropagationProjector,
+        )
+        from memory.data_dictionary_lineage_projector import (
+            DataDictionaryLineageProjector,
+        )
         from memory.data_dictionary_projector import DataDictionaryProjector
+        from memory.data_dictionary_quality_projector import (
+            DataDictionaryQualityProjector,
+        )
+        from memory.data_dictionary_quality_policy_projector import (
+            DataDictionaryQualityPolicyProjector,
+        )
+        from memory.data_dictionary_stewardship_projector import (
+            DataDictionaryStewardshipProjector,
+        )
+        from memory.data_dictionary_drift_projector import (
+            DataDictionaryDriftProjector,
+        )
         from memory.sync import MemorySync
         from memory.relationship_miner import RelationshipMiner
         from memory.rollup_generator import RollupGenerator
@@ -741,6 +805,14 @@ class HeartbeatRunner:
                 MemorySync(self._conn, self._engine),
                 SchemaProjector(self._conn, self._engine),
                 DataDictionaryProjector(self._conn),
+                DataDictionaryLineageProjector(self._conn),
+                DataDictionaryClassificationsProjector(self._conn),
+                DataDictionaryClassificationsPropagationProjector(self._conn),
+                DataDictionaryQualityProjector(self._conn),
+                DataDictionaryQualityPolicyProjector(self._conn),
+                DataDictionaryStewardshipProjector(self._conn),
+                DataDictionaryDriftProjector(self._conn),
+                _DataDictionaryGovernanceModule(self._conn),
                 _DatabaseMaintenanceModule(self._conn, embedder=self._embedder),
                 _AutoReviewFlushModule(self._conn),
                 _IdempotencyLedgerReaperModule(self._conn),
@@ -754,15 +826,20 @@ class HeartbeatRunner:
                 _DatasetCurationRefreshModule(workflow_env=self._workflow_env),
                 _DatasetStalenessReconcileModule(workflow_env=self._workflow_env),
             ])
-            if self._embedder is not None:
-                from runtime.codebase_index_module import CodebaseIndexModule
-                from memory.knowledge_graph import KnowledgeGraph
+            from runtime.codebase_index_module import CodebaseIndexModule
+            from memory.knowledge_graph import KnowledgeGraph
 
-                repo_root = str(_resolve_repo_root_for_codebase_index())
-                kg = KnowledgeGraph(conn=self._conn, embedder=self._embedder)
-                modules.append(CodebaseIndexModule(
-                    self._conn, repo_root, knowledge_graph=kg,
-                ))
+            repo_root = str(_resolve_repo_root_for_codebase_index())
+            kg_embedder = self._usable_embedder(self._embedder)
+            kg = KnowledgeGraph(conn=self._conn, embedder=kg_embedder)
+            modules.append(
+                CodebaseIndexModule(
+                    self._conn,
+                    repo_root,
+                    knowledge_graph=kg,
+                    index_codebase_enabled=kg_embedder is not None,
+                )
+            )
             modules.append(_CronHeartbeatModule(self._conn))
             modules.append(_TriggerEvaluatorModule(self._conn))
             modules.append(_WorkflowChainEvaluatorModule(self._conn))

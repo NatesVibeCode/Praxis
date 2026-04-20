@@ -601,8 +601,11 @@ export function AppShell() {
                       onClick={() => activateTab(tab.id)}
                       className="app-shell__tab-button"
                     >
-                      <span className="app-shell__tab-kind">{tab.kind}</span>
-                      <span className="app-shell__tab-label">{tab.label}</span>
+                      <span className="app-shell__tab-glyph" aria-hidden="true">{tab.kind.slice(0, 1)}</span>
+                      <span className="app-shell__tab-copy">
+                        <span className="app-shell__tab-kind">{tab.kind}</span>
+                        <span className="app-shell__tab-label">{tab.label}</span>
+                      </span>
                     </button>
                     {tab.closable && (
                       <button
@@ -611,7 +614,7 @@ export function AppShell() {
                         onClick={() => closeTab(tab.id)}
                         className="app-shell__tab-close"
                       >
-                        x
+                        <span className="app-shell__tab-close-icon" aria-hidden="true" />
                       </button>
                     )}
                   </div>
@@ -630,8 +633,11 @@ export function AppShell() {
                 aria-haspopup="dialog"
                 aria-expanded={commandMenuOpen}
               >
-                <span className="app-shell__action-kicker">Workspace</span>
-                <span>New</span>
+                <span className="app-shell__action-icon app-shell__action-icon--new" aria-hidden="true" />
+                <span className="app-shell__action-copy">
+                  <span className="app-shell__action-kicker">Workspace</span>
+                  <span>New</span>
+                </span>
               </button>
             </div>
             <button
@@ -639,8 +645,11 @@ export function AppShell() {
               onClick={() => setChatOpen((open) => !open)}
               className={`app-shell__action-button ${chatOpen ? 'app-shell__action-button--active' : ''}`}
             >
-              <span className="app-shell__action-kicker">Cmd/Ctrl + K</span>
-              <span>Chat</span>
+              <span className="app-shell__action-icon app-shell__action-icon--chat" aria-hidden="true" />
+              <span className="app-shell__action-copy">
+                <span className="app-shell__action-kicker">Cmd/Ctrl + K</span>
+                <span>Chat</span>
+              </span>
             </button>
           </div>
         </header>

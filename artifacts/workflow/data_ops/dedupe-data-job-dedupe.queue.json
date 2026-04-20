@@ -1,0 +1,78 @@
+{
+  "name": "dedupe-data-job",
+  "workflow_id": "dedupe-data-job-dedupe",
+  "phase": "execute",
+  "outcome_goal": "Run deterministic data operation dedupe",
+  "anti_requirements": [
+    "Do not modify unrelated files",
+    "Do not read or write outside the declared workspace root"
+  ],
+  "jobs": [
+    {
+      "label": "dedupe-data-job",
+      "agent": "integration/praxis_data/dedupe",
+      "integration_id": "praxis_data",
+      "integration_action": "dedupe",
+      "integration_args": {
+        "schema_version": 1,
+        "operation": "dedupe",
+        "job_name": "dedupe-data-job",
+        "workspace_root": "/Users/nate/Praxis",
+        "workspace_ref": null,
+        "scope_ref": null,
+        "input": {
+          "records": [
+            {
+              "email": "a@example.com"
+            }
+          ]
+        },
+        "secondary_input": {},
+        "predicates": [],
+        "predicate_mode": "all",
+        "sort": [],
+        "rules": {},
+        "repairs": {},
+        "backfill": {},
+        "redactions": {},
+        "schema": {},
+        "checks": [],
+        "mapping": {},
+        "checkpoint": {},
+        "plan": {},
+        "approval": {},
+        "field_map": {},
+        "fields": [],
+        "drop_fields": [],
+        "keys": [
+          "email"
+        ],
+        "left_keys": [],
+        "right_keys": [],
+        "compare_fields": [],
+        "group_by": [],
+        "aggregations": [],
+        "partitions": [],
+        "strategy": "first",
+        "order_field": null,
+        "split_by_field": null,
+        "cursor_field": null,
+        "after": null,
+        "before": null,
+        "approved_by": null,
+        "approval_reason": null,
+        "join_kind": "inner",
+        "merge_mode": "full",
+        "precedence": "right",
+        "split_mode": "first_match",
+        "include_unmatched": true,
+        "left_prefix": null,
+        "right_prefix": null,
+        "sync_mode": "upsert",
+        "max_passes": 3,
+        "batch_size": null,
+        "output": {}
+      }
+    }
+  ]
+}

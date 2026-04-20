@@ -1,0 +1,47 @@
+[
+  {
+    "id": "318838098674",
+    "name": "Contoso Engineering",
+    "domain": "contoso-eng.com",
+    "industry": "MACHINERY",
+    "deal_ids": [
+      "321359147763"
+    ]
+  },
+  {
+    "id": "318907970292",
+    "name": "Fabrikam Analytics",
+    "domain": "fabrikam.ai",
+    "industry": "COMPUTER_SOFTWARE",
+    "deal_ids": [
+      "321368681199"
+    ]
+  },
+  {
+    "id": "318863886019",
+    "name": "Northwind Traders",
+    "domain": "northwindtraders.com",
+    "industry": "RETAIL",
+    "deal_ids": [
+      "321397381861"
+    ]
+  },
+  {
+    "id": "318907970293",
+    "name": "Tailspin Cloud",
+    "domain": "tailspin.io",
+    "industry": "COMPUTER_SOFTWARE",
+    "deal_ids": [
+      "321397381862"
+    ]
+  },
+  {
+    "id": "318851289788",
+    "name": "Wingtip Logistics",
+    "domain": "wingtiplogistics.com",
+    "industry": "LOGISTICS_AND_SUPPLY_CHAIN",
+    "deal_ids": [
+      "321391997644"
+    ]
+  }
+]

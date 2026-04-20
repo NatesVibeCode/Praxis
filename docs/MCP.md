@@ -1,6 +1,6 @@
 # Praxis MCP Tools
 
-Praxis exposes 62 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
+Praxis exposes 63 catalog-backed tools via the [Model Context Protocol](https://modelcontextprotocol.io/).
 
 CLI discovery is generated from the same catalog metadata:
 
@@ -30,7 +30,8 @@ CLI discovery is generated from the same catalog metadata:
 | `praxis_ingest` | `knowledge` | `advanced` | - | `write` | Store new information in the knowledge graph so it can be recalled later via praxis_recall. Content is automatically entity-extracted, deduplicated, and embedded for vector search. |
 | `praxis_recall` | `knowledge` | `stable` | `workflow recall` | `read` | Search the platform's knowledge graph for information about modules, functions, decisions, patterns, bugs, constraints, people, or any previously ingested content. Returns ranked results with confidence scores and how each result was found (text match, graph traversal, or vector similarity). |
 | `praxis_research` | `knowledge` | `stable` | - | `read` | Search the knowledge graph specifically for research findings and analysis results. Lighter-weight than praxis_recall — focused on retrieving prior research. |
-| `praxis_authority_memory_refresh` | `operations` | `advanced` | - | `write` | Project authority FKs into memory_edges so the knowledge graph reflects actual structure. Upserts canonical-class edges for roadmap parent_of, roadmap resolves_bug, operator_object_relations mirror, and workflow_build_intent implements_build. Idempotent; safe to re-run. |
+| `praxis_story` | `knowledge` | `advanced` | - | `read` | Compose a short narrative from one entity's graph neighborhood. Useful when you want the graph to explain itself in plain language instead of only returning edges. |
+| `praxis_authority_memory_refresh` | `operations` | `advanced` | - | `write` | Project authority FK data into memory_edges so the knowledge graph reflects real structure. Upserts canonical-class edges for roadmap parent_of/dependencies, roadmap resolves_bug, operator_object_relations, workflow build intent links, bug and issue lineage, bug evidence links, workflow job/chain relationships, and operator decision scopes. Idempotent; safe to re-run. |
 | `praxis_bug_replay_provenance_backfill` | `operations` | `advanced` | - | `write` | Backfill replay provenance from canonical bug and receipt authority. |
 | `praxis_circuits` | `operations` | `stable` | `workflow circuits` | `read`, `write` | Inspect effective circuit-breaker state or apply a durable manual override for one provider. |
 | `praxis_dataset` | `operations` | `stable` | `workflow dataset` | `read`, `write` | Praxis dataset refinery: turn evidence-linked execution receipts into curated, lineage-preserving training and eval data for specialist SLMs (slm/review first). |
@@ -447,6 +448,25 @@ Example input:
   "action": "search",
   "query": "provider routing performance"
 }
+```
+
+#### `praxis_story`
+
+- Surface: `knowledge`
+- Tier: `advanced`
+- Badges: `advanced`, `knowledge`
+- Risks: `read`
+- CLI entrypoint: `workflow tools call praxis_story`
+- CLI schema help: `workflow tools describe praxis_story`
+- When to use: Compose a short narrative from one entity's graph neighborhood when plain edges are too flat.
+- When not to use: Do not use it for ranked search or blast-radius inspection; use recall or graph first.
+- Selector: none
+- Required args: (none)
+
+Example input:
+
+```json
+{}
 ```
 
 ### Operations

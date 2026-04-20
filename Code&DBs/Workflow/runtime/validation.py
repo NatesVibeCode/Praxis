@@ -1,4 +1,14 @@
-"""Shared validation helpers for policy authority modules."""
+"""Shared validation helpers for runtime and surface modules.
+
+This is the single canonical home for text, integer, boolean, datetime, and
+mapping validation. Callers pass their own ``error_factory`` + ``reason_code``
+so the error shape matches each surface's existing contract (no swallowing of
+callers' exception types).
+
+Roadmap: ``roadmap_item.extract.shared.validation.layer.from.surfaces.and.runtime``.
+Historical path ``policy/_authority_validation.py`` was the earlier location
+for these helpers; callers now import from ``runtime.validation`` directly.
+"""
 
 from __future__ import annotations
 
@@ -75,6 +85,27 @@ def require_text(
             details=payload,
         )
     return value.strip()
+
+
+def optional_text(
+    value: object,
+    *,
+    field_name: str,
+    error_factory: ErrorFactory[_ErrorT],
+    reason_code: str,
+    details: Mapping[str, Any] | None = None,
+    include_value_type: bool = True,
+) -> str | None:
+    if value is None:
+        return None
+    return require_text(
+        value,
+        field_name=field_name,
+        error_factory=error_factory,
+        reason_code=reason_code,
+        details=details,
+        include_value_type=include_value_type,
+    )
 
 
 def require_int(
@@ -186,3 +217,38 @@ def require_mapping(
     if normalize_keys:
         return {str(key): normalized_value[key] for key in normalized_value}
     return normalized_value
+
+
+def coerce_text_sequence(
+    value: object,
+    *,
+    field_name: str,
+    error_factory: ErrorFactory[_ErrorT],
+    reason_code: str,
+    details: Mapping[str, Any] | None = None,
+    include_value_type: bool = True,
+) -> tuple[str, ...]:
+    """Return a tuple of non-empty stripped strings from a list/tuple of values."""
+    if not isinstance(value, (list, tuple)):
+        payload = dict(details or {})
+        payload["field"] = field_name
+        if include_value_type:
+            payload["value_type"] = type(value).__name__
+        _raise_validation_error(
+            error_factory,
+            reason_code,
+            f"{field_name} must be a list of strings",
+            details=payload,
+        )
+    items: list[str] = []
+    for index, raw in enumerate(value):
+        items.append(
+            require_text(
+                raw,
+                field_name=f"{field_name}[{index}]",
+                error_factory=error_factory,
+                reason_code=reason_code,
+                include_value_type=include_value_type,
+            )
+        )
+    return tuple(items)

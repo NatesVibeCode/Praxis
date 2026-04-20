@@ -19,7 +19,7 @@
         <key>PYTHONPATH</key>
         <string>/Users/nate/Praxis/Code&amp;DBs/Workflow</string>
         <key>WORKFLOW_DATABASE_URL</key>
-        <string>postgresql://postgres@praxis-postgres-1.orb.local:5432/praxis</string>
+        <string>postgresql://localhost:5432/praxis</string>
     </dict>
 
     <key>StartInterval</key>

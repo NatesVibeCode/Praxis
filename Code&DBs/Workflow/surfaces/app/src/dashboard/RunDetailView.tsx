@@ -7,6 +7,7 @@ import {
   RunGraph as RunGraphData,
   useLiveRunSnapshot,
 } from './useLiveRunSnapshot';
+import { runJobsPath } from './runApi';
 import { RunGraphView } from '../shared/RunGraphView';
 
 export interface RunDetailViewProps {
@@ -116,7 +117,7 @@ function parseStructuredOutput(job: RunJob, detail?: JobDetail): string {
 }
 
 async function fetchJobDetail(runId: string, jobId: number): Promise<JobDetail> {
-  const response = await fetch(`/api/runs/${encodeURIComponent(runId)}/jobs/${jobId}`);
+  const response = await fetch(runJobsPath(runId, jobId));
   if (!response.ok) {
     throw new Error(`Failed to load job ${jobId} (${response.status})`);
   }

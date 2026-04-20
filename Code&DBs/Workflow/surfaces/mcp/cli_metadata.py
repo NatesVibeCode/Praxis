@@ -66,8 +66,8 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
                 "patch_resume": "write",
                 "resolve": "write",
                 "attach_evidence": "write",
-                "replay": "dispatch",
-                "backfill_replay": "dispatch",
+                "replay": "launch",
+                "backfill_replay": "launch",
             },
         },
         examples=[
@@ -118,13 +118,13 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         when_to_use="Build, inspect, register, or verify third-party API connectors.",
         when_not_to_use="Do not use it for invoking an existing integration at runtime.",
         risks={
-            "default": "dispatch",
+            "default": "launch",
             "actions": {
-                "build": "dispatch",
+                "build": "launch",
                 "list": "read",
                 "get": "read",
                 "register": "write",
-                "verify": "dispatch",
+                "verify": "launch",
             },
         },
         examples=[
@@ -167,7 +167,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
                 "sync": "write",
                 "run": "write",
                 "workflow_spec": "write",
-                "launch": "dispatch",
+                "launch": "launch",
             },
         },
         examples=[
@@ -221,7 +221,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         surface="planning",
         tier="stable",
         recommended_alias=None,
-        when_to_use="Break a large objective into workflow-sized micro-sprints before dispatch.",
+        when_to_use="Break a large objective into workflow-sized micro-sprints before workflow launch.",
         when_not_to_use="Do not use it to execute work or inspect historical run state.",
         risks={"default": "read"},
         examples=[
@@ -304,6 +304,21 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             ),
         ],
     ),
+    "praxis_story": _tool(
+        surface="knowledge",
+        tier="advanced",
+        recommended_alias=None,
+        when_to_use="Compose a short narrative from one entity's graph neighborhood when plain edges are too flat.",
+        when_not_to_use="Do not use it for ranked search or blast-radius inspection; use recall or graph first.",
+        risks={"default": "read"},
+        examples=[
+            _example("Compose a story for the latest entity", {}),
+            _example(
+                "Compose a story for one entity",
+                {"entity_id": "entity_abc123", "max_lines": 4},
+            ),
+        ],
+    ),
     "praxis_heal": _tool(
         surface="governance",
         tier="advanced",
@@ -320,7 +335,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         surface="operations",
         tier="stable",
         recommended_alias="health",
-        when_to_use="Run a full preflight before dispatch or when the platform feels degraded.",
+        when_to_use="Run a full preflight before workflow launch or when the platform feels degraded.",
         when_not_to_use="Do not use it to inspect one specific workflow run.",
         risks={"default": "read"},
         examples=[
@@ -332,7 +347,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         tier="advanced",
         recommended_alias=None,
         when_to_use="Check or run the knowledge-graph maintenance cycle.",
-        when_not_to_use="Do not use it as a replacement for workflow dispatch or session recall.",
+        when_not_to_use="Do not use it as a replacement for workflow launch or session recall.",
         risks={"default": "read", "actions": {"status": "read", "run": "write"}},
         examples=[
             _example("Show last heartbeat status", {"action": "status"}),
@@ -364,7 +379,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
                 "describe": "read",
                 "test_credentials": "read",
                 "health": "read",
-                "call": "dispatch",
+                "call": "launch",
                 "create": "write",
                 "set_secret": "write",
                 "reload": "write",
@@ -606,7 +621,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         tier="advanced",
         recommended_alias=None,
         when_to_use="Probe or onboard a new provider/model route into the platform.",
-        when_not_to_use="Do not use it for ordinary model selection or workflow dispatch.",
+        when_not_to_use="Do not use it for ordinary model selection or workflow launch.",
         risks={"default": "read", "actions": {"probe": "read", "onboard": "write"}},
         examples=[
             _example("Probe a provider", {"action": "probe", "provider_slug": "openrouter", "transport": "api"}),
@@ -678,7 +693,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         recommended_alias=None,
         when_to_use="Launch or inspect fan-out research workflows for deeper multi-angle investigations.",
         when_not_to_use="Do not use it for single-shot questions where recall or query is enough.",
-        risks={"default": "dispatch", "actions": {"list": "read", "run": "dispatch"}},
+        risks={"default": "launch", "actions": {"list": "read", "run": "launch"}},
         examples=[
             _example("Launch a research workflow", {"action": "run", "topic": "best practices for durable MCP transports", "workers": 8}),
         ],
@@ -772,7 +787,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             "actions": {
                 "observe": "read",
                 "next": "read",
-                "start": "dispatch",
+                "start": "launch",
                 "record": "write",
             },
         },
@@ -789,7 +804,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
         when_to_use="Run, preview, inspect, claim, acknowledge, retry, cancel, or list workflows through the MCP workflow surface.",
         when_not_to_use="Do not use it for natural-language questions or health checks.",
         risks={
-            "default": "dispatch",
+            "default": "launch",
             "actions": {
                 "claim": "read",
                 "acknowledge": "write",
@@ -798,9 +813,9 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
                 "list": "read",
                 "notifications": "read",
                 "preview": "read",
-                "run": "dispatch",
-                "retry": "dispatch",
-                "cancel": "dispatch",
+                "run": "launch",
+                "retry": "launch",
+                "cancel": "launch",
             },
         },
         examples=[
@@ -809,7 +824,7 @@ CLI_TOOL_METADATA: dict[str, dict[str, Any]] = {
             _example("Preview execution inputs", {"action": "preview", "spec_path": "config/specs/example.queue.json"}),
             _example(
                 "Read claimable worker work",
-                {"action": "claim", "subscription_id": "dispatch:worker:bridge", "run_id": "dispatch_001"},
+                {"action": "claim", "subscription_id": "workflow:worker:bridge", "run_id": "workflow_001"},
             ),
             _example(
                 "Acknowledge a worker batch",

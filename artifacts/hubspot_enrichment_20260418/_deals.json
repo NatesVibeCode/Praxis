@@ -1,0 +1,107 @@
+{
+  "total": 6,
+  "results": [
+    {
+      "id": "321253303026",
+      "properties": {
+        "amount": "1000.0",
+        "closedate": "2024-01-03T09:37:11.118Z",
+        "createdate": "2026-04-17T16:47:41.894Z",
+        "dealname": "HubSpot - Sales Consulting (Sample Deal)",
+        "dealstage": "3521087206",
+        "hs_lastmodifieddate": "2026-04-17T21:44:18.364Z",
+        "hs_object_id": "321253303026",
+        "pipeline": "default"
+      },
+      "createdAt": "2026-04-17T16:47:41.894Z",
+      "updatedAt": "2026-04-17T21:44:18.364Z",
+      "archived": false,
+      "url": "https://app-na2.hubspot.com/contacts/245942113/record/0-3/321253303026"
+    },
+    {
+      "id": "321397381861",
+      "properties": {
+        "amount": "42000",
+        "closedate": "2026-06-30T00:00:00Z",
+        "createdate": "2026-04-19T01:40:00.805Z",
+        "dealname": "Northwind \u2014 Platform Pilot",
+        "dealstage": "3521087209",
+        "hs_lastmodifieddate": "2026-04-19T01:41:08.442Z",
+        "hs_object_id": "321397381861",
+        "pipeline": "default"
+      },
+      "createdAt": "2026-04-19T01:40:00.805Z",
+      "updatedAt": "2026-04-19T01:41:08.442Z",
+      "archived": false,
+      "url": "https://app-na2.hubspot.com/contacts/245942113/record/0-3/321397381861"
+    },
+    {
+      "id": "321359147763",
+      "properties": {
+        "amount": "180000",
+        "closedate": "2026-06-30T00:00:00Z",
+        "createdate": "2026-04-19T01:40:01.375Z",
+        "dealname": "Contoso \u2014 Enterprise Rollout",
+        "dealstage": "3521087210",
+        "hs_lastmodifieddate": "2026-04-19T01:41:08.442Z",
+        "hs_object_id": "321359147763",
+        "pipeline": "default"
+      },
+      "createdAt": "2026-04-19T01:40:01.375Z",
+      "updatedAt": "2026-04-19T01:41:08.442Z",
+      "archived": false,
+      "url": "https://app-na2.hubspot.com/contacts/245942113/record/0-3/321359147763"
+    },
+    {
+      "id": "321368681199",
+      "properties": {
+        "amount": "12000",
+        "closedate": "2026-06-30T00:00:00Z",
+        "createdate": "2026-04-19T01:40:01.851Z",
+        "dealname": "Fabrikam \u2014 Seed Tier",
+        "dealstage": "3521087207",
+        "hs_lastmodifieddate": "2026-04-19T01:41:09.230Z",
+        "hs_object_id": "321368681199",
+        "pipeline": "default"
+      },
+      "createdAt": "2026-04-19T01:40:01.851Z",
+      "updatedAt": "2026-04-19T01:41:09.230Z",
+      "archived": false,
+      "url": "https://app-na2.hubspot.com/contacts/245942113/record/0-3/321368681199"
+    },
+    {
+      "id": "321397381862",
+      "properties": {
+        "amount": "65000",
+        "closedate": "2026-06-30T00:00:00Z",
+        "createdate": "2026-04-19T01:40:02.260Z",
+        "dealname": "Tailspin \u2014 Seat Expansion",
+        "dealstage": "3521087211",
+        "hs_lastmodifieddate": "2026-04-19T01:41:11.465Z",
+        "hs_object_id": "321397381862",
+        "pipeline": "default"
+      },
+      "createdAt": "2026-04-19T01:40:02.260Z",
+      "updatedAt": "2026-04-19T01:41:11.465Z",
+      "archived": false,
+      "url": "https://app-na2.hubspot.com/contacts/245942113/record/0-3/321397381862"
+    },
+    {
+      "id": "321391997644",
+      "properties": {
+        "amount": "24000",
+        "closedate": "2026-06-30T00:00:00Z",
+        "createdate": "2026-04-19T01:40:02.701Z",
+        "dealname": "Wingtip \u2014 Logistics Pilot",
+        "dealstage": "3521087208",
+        "hs_lastmodifieddate": "2026-04-19T01:41:11.465Z",
+        "hs_object_id": "321391997644",
+        "pipeline": "default"
+      },
+      "createdAt": "2026-04-19T01:40:02.701Z",
+      "updatedAt": "2026-04-19T01:41:11.465Z",
+      "archived": false,
+      "url": "https://app-na2.hubspot.com/contacts/245942113/record/0-3/321391997644"
+    }
+  ]
+}

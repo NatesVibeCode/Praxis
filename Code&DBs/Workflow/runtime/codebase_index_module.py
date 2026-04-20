@@ -162,11 +162,19 @@ def _summarize_index_errors(errors: object, *, limit: int = 3) -> str:
 class CodebaseIndexModule(HeartbeatModule):
     """Keeps discovery index and knowledge graph dependency map current."""
 
-    def __init__(self, conn, repo_root: str, *, knowledge_graph=None) -> None:
+    def __init__(
+        self,
+        conn,
+        repo_root: str,
+        *,
+        knowledge_graph=None,
+        index_codebase_enabled: bool = True,
+    ) -> None:
         self._conn = conn
         self._repo_root = repo_root
         self._workflow_root = str(code_tree_root(Path(repo_root)) / "Workflow")
         self._kg = knowledge_graph
+        self._index_codebase_enabled = index_codebase_enabled
         self._last_graph_hash: str | None = None
 
     def _ensure_conn(self):
@@ -196,21 +204,27 @@ class CodebaseIndexModule(HeartbeatModule):
         errors: list[str] = []
 
         # Phase 1: Update discovery index (vector embeddings)
-        try:
-            from runtime.module_indexer import ModuleIndexer
-            conn = self._ensure_conn()
-            indexer = ModuleIndexer(conn=conn, repo_root=self._repo_root)
-            index_result = indexer.index_codebase()
-            if str(index_result.get("observability_state") or "complete") != "complete":
-                detail = _summarize_index_errors(index_result.get("errors"))
-                if not detail:
-                    detail = "partial indexing failure"
-                errors.append(f"discovery index degraded: {detail}")
-        except Exception as exc:
-            errors.append(f"discovery index: {exc}")
+        if self._index_codebase_enabled:
+            try:
+                from runtime.module_indexer import ModuleIndexer
+
+                conn = self._ensure_conn()
+                indexer = ModuleIndexer(conn=conn, repo_root=self._repo_root)
+                index_result = indexer.index_codebase()
+                if str(index_result.get("observability_state") or "complete") != "complete":
+                    detail = _summarize_index_errors(index_result.get("errors"))
+                    if not detail:
+                        detail = "partial indexing failure"
+                    errors.append(f"discovery index degraded: {detail}")
+            except Exception as exc:
+                errors.append(f"discovery index: {exc}")
 
         # Phase 2: Rebuild AST dependency graph if source changed
         try:
+            if self._kg is None:
+                from memory.knowledge_graph import KnowledgeGraph
+
+                self._kg = KnowledgeGraph(conn=self._ensure_conn())
             subsystems, edges = _extract_dependency_map(self._workflow_root)
             skip = {"tests"}
             docs: dict[str, str] = {}

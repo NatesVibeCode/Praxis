@@ -404,6 +404,40 @@ def _classify_credential_error(failure_code: str, *, outputs: dict | None = None
 
 def _classify_verification_error(failure_code: str, *, outputs: dict | None = None) -> FailureClassification | None:
     """Check if failure is a verification failure."""
+    # Gate couldn't run at all — spec/infrastructure bug (e.g. verify_command
+    # points at a binary that doesn't exist in the worker container). Retrying
+    # this just wastes provider budget and re-surfaces the same misleading
+    # "outcome_gate_failed" signal. Terminal, non-retryable.
+    if failure_code == "outcome_gate_broken":
+        return FailureClassification(
+            category=FailureCategory.VERIFICATION_FAILED,
+            is_retryable=False,
+            is_transient=False,
+            recommended_action=(
+                "Verify the job's verify_command can run in the worker container "
+                "(e.g. avoid host-only paths like /opt/homebrew/bin/python3; "
+                "use PATH-resolved binaries)."
+            ),
+            severity="high",
+        )
+    # Gate ran and asserted false — agent produced output that doesn't meet the
+    # contract. Retry with backoff (same or failover agent).
+    if failure_code == "outcome_gate_failed":
+        return FailureClassification(
+            category=FailureCategory.VERIFICATION_FAILED,
+            is_retryable=True,
+            is_transient=True,
+            recommended_action="Agent output did not meet outcome_goal. Retry (same model) or failover.",
+            severity="medium",
+        )
+    if failure_code == "outcome_gate_timeout":
+        return FailureClassification(
+            category=FailureCategory.TIMEOUT,
+            is_retryable=True,
+            is_transient=True,
+            recommended_action="verify_command exceeded 60s timeout. Retry or simplify the gate.",
+            severity="medium",
+        )
     if "verification" in failure_code or failure_code == "verification.failed":
         return FailureClassification(
             category=FailureCategory.VERIFICATION_FAILED,

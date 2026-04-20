@@ -39,6 +39,7 @@ from .commands.authority import (
 from .commands.files import _files_command
 from .commands.handoff import _handoff_command
 from .commands.data import _data_command
+from .commands.maintenance import _maintenance_command
 from .commands.operate import (
     _api_command,
     _cache_command,
@@ -156,6 +157,7 @@ _COMMAND_INDEX_ENTRIES: list[dict[str, str]] = [
     {"command": "workflow integration [list|describe|health|test|call|create|secret|reload|help]", "description": "Integration management via the catalog-backed MCP tool"},
     {"command": "workflow dictionary <list|describe|set-override|clear-override|reproject>", "description": "Unified data dictionary authority"},
     {"command": "workflow authority-memory refresh", "description": "Refresh authority FK projection into memory_edges"},
+    {"command": "workflow maintenance <backfill-failure-categories|help>", "description": "Backfill failure classification fields from canonical receipts"},
     {"command": "workflow data <action>", "description": "Deterministic data cleanup, validation, and workflow launch"},
     {"command": "workflow authority-index", "description": "Print the concept→code→DB→surface index"},
     {
@@ -354,6 +356,18 @@ def _validate_command(args: list[str], *, stdout: TextIO) -> int:
 
     def _configure(parser: argparse.ArgumentParser) -> None:
         parser.add_argument("spec", help="Path to .queue.json spec file")
+        parser.add_argument(
+            "--check-gates",
+            action="store_true",
+            help="Dry-run each job's verify_command inside praxis-worker:latest to catch "
+            "gates that reference capabilities the worker lacks (missing modules, "
+            "missing binaries, host-only paths). Requires docker.",
+        )
+        parser.add_argument(
+            "--worker-image",
+            default="praxis-worker:latest",
+            help="Worker image to preflight against (default: praxis-worker:latest).",
+        )
 
     return _run_legacy_compat_command(
         args,
@@ -479,6 +493,7 @@ def _workflow_arg_commands() -> dict[str, ArgsCommandHandler]:
         "routes": lambda args, *, stdout: _api_command(["routes", *args], stdout=stdout),
         "integrations": lambda args, *, stdout: _api_command(["integrations", *args], stdout=stdout),
         "integration": _integrations_command,
+        "maintenance": _maintenance_command,
         "supervisor": _supervisor_command,
         "tools": _tools_command,
         "dictionary": _data_dictionary_command,
@@ -646,6 +661,7 @@ def _help_text() -> str:
             "  workflow decompose 'build real-time notifications'",
             "  workflow data profile artifacts/data/users.csv",
             "  workflow authority-index",
+            "  workflow maintenance backfill-failure-categories --yes",
             "  workflow files list --scope instance",
             "  workflow handoff latest --artifact-kind packet_lineage --revision-ref <ref>",
             "  workflow schema status",
@@ -661,6 +677,7 @@ def _help_text() -> str:
             "  workflow tools [list|search|describe|call|help]",
             "  workflow dictionary <list|describe|set-override|clear-override|reproject>",
             "  workflow authority-memory refresh",
+            "  workflow maintenance <backfill-failure-categories|help>",
             "  workflow integration [list|describe|health|test|call|create|secret|reload|help]",
             "  workflow data <action>",
             "  workflow authority-index",
@@ -677,6 +694,8 @@ def _help_text() -> str:
             "                                                  Scoped route discovery for /api/integrations",
             "  workflow integration",
             "                                                  Integration management via the catalog-backed MCP tool",
+            "  workflow maintenance",
+            "                                                  Backfill failure classification fields from canonical receipts",
             "  workflow native-operator instance|health|db-health|bootstrap|db-bootstrap|smoke|inspect|status|graph-topology|graph-lineage|cockpit|route-disable|roadmap-write|work-item-closeout|roadmap-tree|provider-onboard|native-primary-cutover-gate",
             "  workflow roadmap view|status|scoreboard|graph|write|closeout",
             "  workflow compile|github",
@@ -687,6 +706,7 @@ def _help_text() -> str:
             "Tip: run `workflow help run-status` for per-run status and idle recovery.",
             "Tip: run `workflow integrations` or `workflow api integrations` for the integration route scope.",
             "Tip: run `workflow integration` for integration management.",
+            "Tip: run `workflow maintenance backfill-failure-categories --yes` to repair failure classification projections.",
             "Tip: run `workflow api data-dictionary` for the data dictionary route scope.",
             "Tip: run `workflow help tools`, `workflow help mcp`, or `workflow mcp` for catalog-backed tool discovery.",
             "Tip: run `workflow help <command>` or `workflow <command> --help` for command-specific usage.",

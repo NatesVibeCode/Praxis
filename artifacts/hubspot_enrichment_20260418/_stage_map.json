@@ -1,0 +1,42 @@
+{
+  "3521087206": {
+    "label": "Initial outreach",
+    "isClosed": "false",
+    "probability": "0.1"
+  },
+  "3521087207": {
+    "label": "Needs assessment",
+    "isClosed": "false",
+    "probability": "0.3"
+  },
+  "3521087208": {
+    "label": "Solution proposal",
+    "isClosed": "false",
+    "probability": "0.4"
+  },
+  "3521087209": {
+    "label": "Solution presentation",
+    "isClosed": "false",
+    "probability": "0.6"
+  },
+  "3521087210": {
+    "label": "Objection handling",
+    "isClosed": "false",
+    "probability": "0.8"
+  },
+  "3521087211": {
+    "label": "Finalizing terms",
+    "isClosed": "false",
+    "probability": "0.9"
+  },
+  "3521087212": {
+    "label": "Closed won",
+    "isClosed": "true",
+    "probability": "1.0"
+  },
+  "3521087213": {
+    "label": "Closed lost",
+    "isClosed": "true",
+    "probability": "0.0"
+  }
+}

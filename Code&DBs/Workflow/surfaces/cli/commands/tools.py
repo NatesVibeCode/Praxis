@@ -227,7 +227,7 @@ def _tools_help_text(topic: str | None = None) -> str:
                 "usage: workflow tools call <tool|alias> [--input-json <json> | --input-file <path>] [--workflow-token <token>] [--yes] [--json]",
                 "",
                 "Execute a tool directly from the catalog.",
-                "Tip: add --yes for write or dispatch tools; add --workflow-token when the catalog requires it.",
+                "Tip: add --yes for write or launch tools; add --workflow-token when the catalog requires it.",
             ]
         )
     return "\n".join(

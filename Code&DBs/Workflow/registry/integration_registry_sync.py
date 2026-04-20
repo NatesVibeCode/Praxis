@@ -13,73 +13,10 @@ from typing import Any
 import json
 
 import runtime.integration_manifest as integration_manifest
+from runtime.integrations.platform import projected_platform_integrations
 from surfaces.mcp.catalog import projected_mcp_integrations
 
 logger = logging.getLogger(__name__)
-
-
-_STATIC_INTEGRATIONS: list[dict[str, Any]] = [
-    {
-        "id": "praxis-dispatch",
-        "name": "Praxis Dispatch",
-        "description": "Submit workflow jobs, inspect status, and search receipts.",
-        "provider": "praxis",
-        "capabilities": [
-            {
-                "action": "dispatch_job",
-                "description": "Submit a workflow job to the Praxis Engine runtime",
-            },
-            {
-                "action": "check_status",
-                "description": "Inspect the status of an existing workflow run.",
-            },
-            {
-                "action": "search_receipts",
-                "description": "Search historical workflow runs and receipts.",
-            },
-        ],
-        "auth_status": "connected",
-        "icon": "bolt",
-        "mcp_server_id": None,
-    },
-    {
-        "id": "notifications",
-        "name": "Notifications",
-        "description": "Send notification messages through the platform notification channel.",
-        "provider": "praxis",
-        "capabilities": [
-            {"action": "send", "description": "Send a notification message."},
-        ],
-        "auth_status": "connected",
-        "icon": "bell",
-        "mcp_server_id": None,
-    },
-    {
-        "id": "webhook",
-        "name": "Webhook",
-        "description": "Post structured payloads to external HTTP endpoints.",
-        "provider": "http",
-        "capabilities": [
-            {"action": "post", "description": "POST a payload to an external HTTP endpoint."},
-        ],
-        "auth_status": "connected",
-        "icon": "webhook",
-        "mcp_server_id": None,
-    },
-    {
-        "id": "workflow",
-        "name": "Workflow",
-        "description": "Invoke registered workflows from the runtime control plane.",
-        "provider": "praxis",
-        "capabilities": [
-            {"action": "invoke", "description": "Invoke a registered workflow by workflow id."},
-            {"action": "cancel", "description": "Cancel an in-flight workflow run by run id."},
-        ],
-        "auth_status": "connected",
-        "icon": "workflow",
-        "mcp_server_id": None,
-    },
-]
 
 
 def sync_integration_registry(conn: Any) -> int:
@@ -182,7 +119,7 @@ def sync_integration_registry(conn: Any) -> int:
 
 
 def _all_integration_rows() -> tuple[list[dict[str, Any]], list[str]]:
-    rows = list(_STATIC_INTEGRATIONS)
+    rows = list(projected_platform_integrations())
     manifest_errors: list[str] = []
     try:
         manifest_dir = Path(getattr(integration_manifest, "_MANIFEST_DIR"))

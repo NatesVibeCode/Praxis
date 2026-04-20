@@ -50,7 +50,8 @@ function readinessLabel(ok: boolean | undefined, positive: string = 'Ready'): st
 }
 
 function serviceTone(ok: boolean | undefined): string {
-  return ok === false ? 'launcher-card launcher-card--degraded' : 'launcher-card launcher-card--healthy';
+  if (ok === undefined) return 'launcher-card launcher-card--checking';
+  return ok ? 'launcher-card launcher-card--healthy' : 'launcher-card launcher-card--degraded';
 }
 
 export function LauncherFrontdoor() {
@@ -118,6 +119,46 @@ export function LauncherFrontdoor() {
   }, [loadStatus, recovering, status]);
 
   const readinessCards = useMemo(() => {
+    if (!status) {
+      return [
+        {
+          title: APP_CONFIG.databaseName,
+          detail: 'Database truth and schema authority',
+          ok: undefined,
+          meta: 'Checking',
+        },
+        {
+          title: 'Praxis API',
+          detail: 'Suite API and launcher origin',
+          ok: undefined,
+          meta: 'Checking',
+        },
+        {
+          title: APP_CONFIG.engineName,
+          detail: 'Workflow execution lane and orient surface',
+          ok: undefined,
+          meta: 'Checking',
+        },
+        {
+          title: 'MCP Bridge',
+          detail: 'Always-on /mcp JSON-RPC surface',
+          ok: undefined,
+          meta: 'Checking',
+        },
+        {
+          title: 'Praxis UI',
+          detail: 'Suite shell mounted at /app',
+          ok: undefined,
+          meta: 'Checking',
+        },
+        {
+          title: 'Dependency Truth',
+          detail: 'Runtime manifest completeness',
+          ok: undefined,
+          meta: 'Checking',
+        },
+      ];
+    }
     const doctor = status?.doctor ?? {};
     const databaseReady = Boolean(doctor.database_reachable)
       && Boolean(doctor.workflow_operational ?? doctor.schema_bootstrapped);
@@ -164,6 +205,25 @@ export function LauncherFrontdoor() {
   }, [status]);
 
   const serviceList = status?.services ?? [];
+  const readyCount = readinessCards.filter((card) => card.ok === true).length;
+  const attentionCount = readinessCards.filter((card) => card.ok === false).length;
+  const checkingCount = readinessCards.filter((card) => card.ok === undefined).length;
+  const platformTone = error
+    ? 'degraded'
+    : loading || recovering || checkingCount > 0
+      ? 'checking'
+      : status?.ready
+        ? 'healthy'
+        : 'degraded';
+  const platformLabel = error
+    ? 'Offline'
+    : recovering
+      ? 'Recovering'
+      : loading || checkingCount > 0
+        ? 'Checking'
+        : status?.ready
+          ? 'Ready'
+          : 'Degraded';
 
   // Auto-navigate to the app when healthy — launcher becomes a pass-through
   useEffect(() => {
@@ -176,10 +236,14 @@ export function LauncherFrontdoor() {
     <div className="launcher-shell">
       <div className="launcher-backdrop" />
       <div className="launcher-page">
-        <section className="launcher-hero">
+        <section className={`launcher-hero launcher-hero--${platformTone}`}>
           <div className="launcher-hero-grid">
             <div className="launcher-logo-panel">
               <img className="launcher-logo" src={praxisLockup} alt="Praxis logo" />
+              <div className="launcher-logo-caption">
+                <span>Authority</span>
+                <strong>{APP_CONFIG.databaseName}</strong>
+              </div>
             </div>
 
             <div className="launcher-copy-panel">
@@ -191,9 +255,7 @@ export function LauncherFrontdoor() {
                     Suite shell for {APP_CONFIG.engineName} execution and {APP_CONFIG.databaseName} state truth.
                   </p>
                 </div>
-                {status?.ready && (
-                  <div className="launcher-pill launcher-pill--healthy">Ready</div>
-                )}
+                <div className={`launcher-pill launcher-pill--${platformTone}`}>{platformLabel}</div>
               </div>
 
               <div className="launcher-authority-strip">
@@ -208,6 +270,10 @@ export function LauncherFrontdoor() {
                 <div className="launcher-authority-item">
                   <span>Data</span>
                   <strong>{APP_CONFIG.databaseName}</strong>
+                </div>
+                <div className="launcher-authority-item">
+                  <span>Readiness</span>
+                  <strong>{readyCount}/{readinessCards.length} bound</strong>
                 </div>
               </div>
 
@@ -235,8 +301,17 @@ export function LauncherFrontdoor() {
                 </button>
               </div>
 
-              <div className="launcher-statusline">
-                {loading ? 'Checking suite status...' : error ? error : recoveryMessage || 'Praxis authority connected.'}
+              <div className="launcher-statusline" aria-live="polite">
+                <span className={`launcher-statusline__dot launcher-statusline__dot--${platformTone}`} />
+                <span>
+                  {loading
+                    ? 'Checking suite status...'
+                    : error
+                      ? error
+                      : recoveryMessage || (attentionCount > 0
+                        ? `${attentionCount} readiness check${attentionCount === 1 ? '' : 's'} need recovery.`
+                        : 'Praxis authority connected.')}
+                </span>
               </div>
             </div>
           </div>
@@ -264,17 +339,26 @@ export function LauncherFrontdoor() {
           </div>
 
           <div className="launcher-service-list">
-            {serviceList.map((service) => (
-              <div key={service.label} className="launcher-service-row">
-                <div>
-                  <div className="launcher-service-name">{service.name}</div>
-                  <div className="launcher-service-label">{service.label}</div>
+            {serviceList.length > 0 ? (
+              serviceList.map((service) => (
+                <div key={service.label} className="launcher-service-row">
+                  <div className="launcher-service-copy">
+                    <span className={`launcher-service-dot launcher-service-dot--${service.state}`} />
+                    <div>
+                      <div className="launcher-service-name">{service.name}</div>
+                      <div className="launcher-service-label">{service.label}</div>
+                    </div>
+                  </div>
+                  <div className={`launcher-service-state launcher-service-state--${service.state}`}>
+                    {service.port ? `:${service.port}` : 'internal'} · {service.state}
+                  </div>
                 </div>
-                <div className={`launcher-service-state launcher-service-state--${service.state}`}>
-                  {service.port ? `:${service.port}` : 'internal'} · {service.state}
-                </div>
+              ))
+            ) : (
+              <div className="launcher-service-empty">
+                {loading ? 'Waiting for service inventory...' : 'No runtime services reported by launcher status.'}
               </div>
-            ))}
+            )}
           </div>
         </section>
       </div>

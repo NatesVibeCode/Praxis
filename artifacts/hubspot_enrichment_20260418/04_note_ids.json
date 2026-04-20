@@ -1,0 +1,32 @@
+[
+  {
+    "deal_id": "321397381861",
+    "contact_id": "473425843951",
+    "note_id": "365243591357",
+    "hubspot_status": "succeeded"
+  },
+  {
+    "deal_id": "321359147763",
+    "contact_id": "473543177959",
+    "note_id": "365253818064",
+    "hubspot_status": "succeeded"
+  },
+  {
+    "deal_id": "321368681199",
+    "contact_id": "473551135437",
+    "note_id": "365248936638",
+    "hubspot_status": "succeeded"
+  },
+  {
+    "deal_id": "321397381862",
+    "contact_id": "473553053417",
+    "note_id": "365248628415",
+    "hubspot_status": "succeeded"
+  },
+  {
+    "deal_id": "321391997644",
+    "contact_id": "473543177965",
+    "note_id": "365253818066",
+    "hubspot_status": "succeeded"
+  }
+]

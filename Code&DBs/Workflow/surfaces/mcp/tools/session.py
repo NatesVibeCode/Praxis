@@ -126,7 +126,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "bugs, constraints, and friction events into the knowledge graph, mines relationships "
                 "between entities, generates daily/weekly rollups, and archives stale nodes.\n\n"
                 "USE WHEN: the knowledge graph seems stale, or you want to trigger a maintenance "
-                "cycle after a batch of dispatches.\n\n"
+                "cycle after a batch of workflow runs.\n\n"
                 "EXAMPLES:\n"
                 "  Run maintenance:  praxis_heartbeat(action='run')\n"
                 "  Check last run:   praxis_heartbeat(action='status')"

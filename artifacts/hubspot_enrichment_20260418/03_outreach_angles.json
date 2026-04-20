@@ -1,0 +1,42 @@
+[
+  {
+    "deal_id": "321397381861",
+    "contact_id": "473425843951",
+    "company_id": "318863886019",
+    "deal_name": "Northwind \u2014 Platform Pilot",
+    "stage_label": "Solution presentation",
+    "angle_markdown": "## Outreach Angle — Northwind Traders (generic — no signals)\n\n> **Data-quality flag:** \"Northwind Traders\" is a Microsoft fictional company name. The domain `northwindtraders.com` 301-redirects to `microsoft.com`. This CRM record is almost certainly test/seed data and should not receive automated outreach.\n\n**Hook:** Before presenting a platform solution to Priya Kapoor, we need to confirm this is a real prospect — every public signal indicates \"Northwind Traders\" is a Microsoft sample-database entity, not an operating retailer.\n\n**Why now:** The deal is at *Solution presentation* stage, meaning a live demo or proposal deck may already be in preparation. Investing further effort without validating the record wastes AE time and distorts pipeline reporting.\n\n**Recommended next step:** Flag this record for CRM data-quality review. If the contact is real (e.g., imported from an event list and auto-matched to the wrong company), re-associate them with their actual employer before any outreach."
+  },
+  {
+    "deal_id": "321359147763",
+    "contact_id": "473543177959",
+    "company_id": "318838098674",
+    "deal_name": "Contoso \u2014 Enterprise Rollout",
+    "stage_label": "Objection handling",
+    "angle_markdown": "## Outreach Angle — Contoso Engineering (generic — no signals)\n\n> **Data-quality flag:** \"Contoso\" is Microsoft's canonical fictional company name, used in demos and documentation since the 1990s. The domain `contoso-eng.com` does not resolve (DNS failure). No real machinery company operates under this identity.\n\n**Hook:** Sofia Rinaldi's deal is in objection handling at $180K — the highest value in the pipeline — but the company behind it does not appear to exist outside Microsoft training materials.\n\n**Why now:** At *Objection handling*, the AE is investing significant cycles addressing concerns and negotiating terms. If the record is synthetic, this effort is entirely wasted and the pipeline is inflated by $180K.\n\n**Recommended next step:** Immediately verify the contact's identity. If Sofia Rinaldi is a real person at a real company, update the company record with verified firmographics and re-run enrichment. If not, mark the deal as disqualified and remove from forecast."
+  },
+  {
+    "deal_id": "321368681199",
+    "contact_id": "473551135437",
+    "company_id": "318907970292",
+    "deal_name": "Fabrikam \u2014 Seed Tier",
+    "stage_label": "Needs assessment",
+    "angle_markdown": "## Outreach Angle — Fabrikam Analytics (generic — no signals)\n\n> **Data-quality flag:** \"Fabrikam\" is a Microsoft placeholder company name, recently retired in favor of \"Zava\" (Dec 2025). The domain `fabrikam.ai` does not resolve. No real software company operates under this identity.\n\n**Hook:** Before running a needs assessment with Lena Voss, confirm this $12K seed-tier opportunity is attached to a real company — all research points to a Microsoft demo entity, not an operating analytics firm.\n\n**Why now:** At *Needs assessment*, the cost of a misidentified record is still low — no proposal has been drafted and no demo has been scheduled. This is the cheapest stage to catch bad data.\n\n**Recommended next step:** Send a brief verification email to `lena@fabrikam.ai` to confirm deliverability. If it bounces, archive the deal. If it delivers, ask Lena to confirm her company name and website so the record can be corrected before discovery."
+  },
+  {
+    "deal_id": "321397381862",
+    "contact_id": "473553053417",
+    "company_id": "318907970293",
+    "deal_name": "Tailspin \u2014 Seat Expansion",
+    "stage_label": "Finalizing terms",
+    "angle_markdown": "## Outreach Angle — Tailspin Cloud (generic — no signals)\n\n> **Data-quality flag:** \"Tailspin\" is a Microsoft demo brand (\"Tailspin Toys,\" \"Tailspin Space Game\"). The domain `tailspin.io` returns no indexable content. No real software company called \"Tailspin Cloud\" could be identified.\n\n**Hook:** Aya Nakamura's $65K seat expansion is at *Finalizing terms* — the most advanced stage in the pipeline — yet the company cannot be verified through any public source.\n\n**Why now:** At *Finalizing terms*, contract language and pricing are being locked. If this record is synthetic, sending a contract creates legal and operational overhead for a deal that will never close. Conversely, if the company is real but stealth, this is the moment to lock in correct legal entity details.\n\n**Recommended next step:** Before issuing final terms, require the contact to confirm the legal entity name, billing address, and domain. If no response within 5 business days, escalate to sales leadership for pipeline review."
+  },
+  {
+    "deal_id": "321391997644",
+    "contact_id": "473543177965",
+    "company_id": "318851289788",
+    "deal_name": "Wingtip \u2014 Logistics Pilot",
+    "stage_label": "Solution proposal",
+    "angle_markdown": "## Outreach Angle — Wingtip Logistics (generic — no signals)\n\n> **Data-quality flag:** \"Wingtip\" is a Microsoft demo brand (\"Wingtip Tickets,\" Azure SaaS samples). The domain `wingtiplogistics.com` does not resolve (DNS failure). No real logistics company operates under this name.\n\n**Hook:** Before drafting a solution proposal for Mei Zhou, validate whether this $24K logistics pilot is attached to a real company — the domain is dead and the brand name matches a known Microsoft placeholder.\n\n**Why now:** At *Solution proposal*, the team is about to invest in a tailored proposal document. Catching a bad record now avoids wasted solution-engineering hours and keeps the pipeline clean.\n\n**Recommended next step:** Cross-reference Mei Zhou's email (`mei.zhou@wingtiplogistics.com`) against bounce logs or send a lightweight verification message. If the contact is real, update the company record with verified details before investing in a proposal."
+  }
+]

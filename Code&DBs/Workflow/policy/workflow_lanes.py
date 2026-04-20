@@ -18,7 +18,7 @@ import asyncpg
 
 from storage.migrations import WorkflowMigrationError, workflow_migration_statements
 
-from ._authority_validation import (
+from runtime.validation import (
     normalize_as_of as _shared_normalize_as_of,
     require_bool as _shared_require_bool,
     require_int as _shared_require_int,

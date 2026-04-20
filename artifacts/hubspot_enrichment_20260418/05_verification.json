@@ -1,0 +1,37 @@
+[
+  {
+    "note_id": "365243591357",
+    "live_exists": true,
+    "body_matches": false,
+    "deal_assoc_ok": true,
+    "contact_assoc_ok": true
+  },
+  {
+    "note_id": "365253818064",
+    "live_exists": true,
+    "body_matches": false,
+    "deal_assoc_ok": true,
+    "contact_assoc_ok": true
+  },
+  {
+    "note_id": "365248936638",
+    "live_exists": true,
+    "body_matches": false,
+    "deal_assoc_ok": true,
+    "contact_assoc_ok": true
+  },
+  {
+    "note_id": "365248628415",
+    "live_exists": true,
+    "body_matches": false,
+    "deal_assoc_ok": true,
+    "contact_assoc_ok": true
+  },
+  {
+    "note_id": "365253818066",
+    "live_exists": true,
+    "body_matches": false,
+    "deal_assoc_ok": true,
+    "contact_assoc_ok": true
+  }
+]

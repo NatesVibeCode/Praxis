@@ -226,7 +226,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "View automatically-mined constraints from past workflow failures. The system learns "
                 "rules like 'files in runtime/ must include imports' from repeated failures.\n\n"
                 "USE WHEN: you want to see what the system has learned from failures, or check if "
-                "specific files have known constraints before dispatching work that touches them.\n\n"
+                "specific files have known constraints before launching a workflow that touches them.\n\n"
                 "EXAMPLES:\n"
                 "  List all constraints:  praxis_constraints(action='list')\n"
                 "  Check before writing:  praxis_constraints(action='for_scope', write_paths=['runtime/workflow/unified.py'])"

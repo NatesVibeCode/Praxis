@@ -38,7 +38,7 @@ def tool_praxis_integration(params: dict) -> dict:
     return {"error": f"Unknown action: {action}. Use 'call', 'list', 'describe', 'test_credentials', 'health', 'create', 'set_secret', or 'reload'."}
 
 
-# ── Thin dispatchers calling registry functions ──────────────────────
+# ── Thin wrappers calling registry functions ─────────────────────────
 
 
 def _call_integration(params: dict, conn: SyncPostgresConnection) -> dict:
@@ -251,7 +251,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "integration_action='list_payments', args={'limit': 10})\n\n"
                 "Integrations are registered via praxis_connector (build + register) or TOML manifests. "
                 "Use action='list' to discover what's available before calling.\n\n"
-                "DO NOT USE: for workflow dispatch (use praxis_workflow), or for building new "
+                "DO NOT USE: for workflow launch (use praxis_workflow), or for building new "
                 "connectors (use praxis_connector)."
             ),
             "inputSchema": {

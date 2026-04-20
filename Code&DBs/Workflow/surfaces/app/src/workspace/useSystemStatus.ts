@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { runsRecentPath } from '../dashboard/runApi';
 
 export interface RecentRun {
   run_id: string;
@@ -73,7 +74,7 @@ export function useSystemStatus(): SystemStatus {
       const [statusRes, leaderboardRes, runsRes] = await Promise.all([
         fetch('/api/status').then(r => r.ok ? r.json() : null).catch(() => null),
         fetch('/api/leaderboard').then(r => r.ok ? r.json() : null).catch(() => null),
-        fetch('/api/runs/recent?limit=20').then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch(runsRecentPath(20)).then(r => r.ok ? r.json() : null).catch(() => null),
       ]);
 
       const s = statusRes ?? {};

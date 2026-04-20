@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from policy._authority_validation import (
+from runtime.validation import (
     normalize_as_of,
     require_datetime,
     require_mapping,

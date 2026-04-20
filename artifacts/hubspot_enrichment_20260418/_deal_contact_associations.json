@@ -1,0 +1,112 @@
+{
+  "completedAt": "2026-04-20T02:20:29.534Z",
+  "status": "COMPLETE",
+  "startedAt": "2026-04-20T02:20:29.522Z",
+  "results": [
+    {
+      "from": {
+        "id": "321391997644"
+      },
+      "to": [
+        {
+          "toObjectId": 473543177965,
+          "associationTypes": [
+            {
+              "category": "HUBSPOT_DEFINED",
+              "typeId": 3,
+              "label": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "from": {
+        "id": "321368681199"
+      },
+      "to": [
+        {
+          "toObjectId": 473551135437,
+          "associationTypes": [
+            {
+              "category": "HUBSPOT_DEFINED",
+              "typeId": 3,
+              "label": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "from": {
+        "id": "321359147763"
+      },
+      "to": [
+        {
+          "toObjectId": 473543177959,
+          "associationTypes": [
+            {
+              "category": "HUBSPOT_DEFINED",
+              "typeId": 3,
+              "label": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "from": {
+        "id": "321397381861"
+      },
+      "to": [
+        {
+          "toObjectId": 473425843951,
+          "associationTypes": [
+            {
+              "category": "HUBSPOT_DEFINED",
+              "typeId": 3,
+              "label": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "from": {
+        "id": "321397381862"
+      },
+      "to": [
+        {
+          "toObjectId": 473553053417,
+          "associationTypes": [
+            {
+              "category": "HUBSPOT_DEFINED",
+              "typeId": 3,
+              "label": null
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "status": "error",
+      "category": "OBJECT_NOT_FOUND",
+      "subCategory": "crm.associations.NO_ASSOCIATIONS_FOUND",
+      "message": "No contact is associated with deal 321253303026.",
+      "context": {
+        "fromObjectId": [
+          "321253303026"
+        ],
+        "fromObjectType": [
+          "deal"
+        ],
+        "toObjectType": [
+          "contact"
+        ]
+      }
+    }
+  ],
+  "numErrors": 1
+}

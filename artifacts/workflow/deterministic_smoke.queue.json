@@ -10,7 +10,8 @@
       "inputs": {
         "task_name": "prepare",
         "input_payload": {
-          "step": 0
+          "step": 0,
+          "allow_passthrough_echo": true
         }
       },
       "expected_outputs": {
@@ -23,7 +24,8 @@
       "inputs": {
         "task_name": "admit",
         "input_payload": {
-          "step": 1
+          "step": 1,
+          "allow_passthrough_echo": true
         }
       },
       "expected_outputs": {

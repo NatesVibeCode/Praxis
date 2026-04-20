@@ -153,11 +153,22 @@ class BudgetAuthoritySnapshot:
     * ``windows_by_provider_ref`` — lookup by ``provider.{provider_slug}``;
       used by the explicit ``provider/model`` path that cannot assume a
       policy id is known. Without this, BUG-6B34915A re-emerges.
+
+    ``data_quality_ok`` is ``False`` when at least one enabled
+    ``severity='error'`` quality rule on ``table:provider_budget_windows``
+    has a latest run in ``('fail', 'error')``. The authority-owner has
+    declared such rows invalid, so paid-lane admission must refuse rather
+    than route off data the operator has flagged as broken. Orthogonal to
+    ``reachable``: the table can be present (reachable=True) yet carry
+    rows that violate an operator-layer invariant (data_quality_ok=False).
+    Missing quality infrastructure fails *open* on this axis — the
+    authority-reachability gate remains the primary guard.
     """
 
     windows_by_provider_policy: Mapping[str, Mapping[str, Any]]
     windows_by_provider_ref: Mapping[str, Mapping[str, Any]]
     reachable: bool
+    data_quality_ok: bool = True
 
     @classmethod
     def unreachable(cls) -> "BudgetAuthoritySnapshot":
@@ -203,6 +214,52 @@ class BudgetAuthoritySnapshot:
         )
 
 
+_SQL_BUDGET_WINDOW_FAILING_ERROR_RULES = """
+WITH latest AS (
+    SELECT DISTINCT ON (object_kind, field_path, rule_kind)
+        object_kind, field_path, rule_kind, status
+    FROM data_dictionary_quality_runs
+    WHERE object_kind = 'table:provider_budget_windows'
+    ORDER BY object_kind, field_path, rule_kind, started_at DESC
+)
+SELECT COUNT(*) AS failing
+FROM data_dictionary_quality_rules_effective r
+JOIN latest l
+  ON l.object_kind = r.object_kind
+ AND l.field_path = r.field_path
+ AND l.rule_kind = r.rule_kind
+WHERE r.object_kind = 'table:provider_budget_windows'
+  AND r.severity = 'error'
+  AND r.enabled = TRUE
+  AND l.status IN ('fail', 'error')
+"""
+
+
+def _load_budget_window_data_quality_ok(
+    conn: "SyncPostgresConnection",
+) -> bool:
+    """True iff no error-severity quality rule on provider_budget_windows is failing.
+
+    Fails *open* on missing quality infrastructure (sqlstate 42P01) — the
+    authority-reachability gate on ``load_budget_authority_snapshot`` is the
+    primary fail-closed guard, so a missing quality table must not compound
+    it into a blanket paid-lane refusal.
+    """
+    try:
+        rows = conn.execute(_SQL_BUDGET_WINDOW_FAILING_ERROR_RULES)
+    except PostgresError as exc:
+        if getattr(exc, "sqlstate", None) == _UNDEFINED_TABLE_SQLSTATE:
+            return True
+        raise
+    for row in rows or []:
+        try:
+            failing = int(row.get("failing") or 0)
+        except (TypeError, ValueError):
+            failing = 0
+        return failing == 0
+    return True
+
+
 def load_budget_authority_snapshot(
     conn: "SyncPostgresConnection",
 ) -> BudgetAuthoritySnapshot:
@@ -212,6 +269,11 @@ def load_budget_authority_snapshot(
     both ``provider_policy_id`` and ``provider_ref`` so consumers can look up
     by whichever axis they already have. Callers never need to know the
     policy-id mapping.
+
+    Also reads the latest data-quality status for
+    ``table:provider_budget_windows`` so paid-lane admission can refuse when
+    an operator-layer invariant has been broken. Quality-infra missing fails
+    open on that axis — see :func:`_load_budget_window_data_quality_ok`.
 
     If ``provider_budget_windows`` is missing (sqlstate ``42P01``), returns
     :meth:`BudgetAuthoritySnapshot.unreachable` so downstream paid-lane
@@ -252,10 +314,12 @@ def load_budget_authority_snapshot(
             by_policy[policy_id] = frozen
         if provider_ref:
             by_ref[provider_ref] = frozen
+    data_quality_ok = _load_budget_window_data_quality_ok(conn)
     return BudgetAuthoritySnapshot(
         windows_by_provider_policy=MappingProxyType(by_policy),
         windows_by_provider_ref=MappingProxyType(by_ref),
         reachable=True,
+        data_quality_ok=data_quality_ok,
     )
 
 
@@ -282,6 +346,11 @@ def resolve_route_economics(
     :func:`runtime.lane_policy.admit_adapter_type` can refuse paid lanes when
     ``provider_budget_windows`` is gone (schema drift). Auto and explicit
     paths both route through here, so the gate is uniform.
+
+    ``budget_window_data_quality_error`` propagates the authority-corrupt
+    state on the same axis: table reachable, but an operator-declared
+    invariant on its rows is failing. Paid-lane admission refuses rather
+    than route off corrupt authority data.
     """
     if default_adapter is None:
         default_adapter = resolve_default_adapter_type(provider_slug)
@@ -292,6 +361,7 @@ def resolve_route_economics(
     )
     spend_pressure = budget_spend_pressure(budget_window)
     authority_unreachable = not budget_authority.reachable
+    data_quality_error = not budget_authority.data_quality_ok
 
     candidate_adapters: list[str] = []
     normalized_adapter_type = (adapter_type or "").strip().lower()
@@ -339,6 +409,7 @@ def resolve_route_economics(
             "prefer_prepaid": economics["prefer_prepaid"],
             "allow_payg_fallback": economics["allow_payg_fallback"],
             "budget_authority_unreachable": authority_unreachable,
+            "budget_window_data_quality_error": data_quality_error,
         })
 
     options.sort(

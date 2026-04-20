@@ -430,6 +430,34 @@ export function Dashboard({
       && !run.spec_name?.startsWith('fix_bugs')
       && !run.spec_name?.startsWith('hardening_'),
   );
+  const queueTone = summary.queue.status === 'critical'
+    ? 'danger'
+    : summary.queue.status === 'warning'
+      ? 'warning'
+      : summary.queue.status === 'ok'
+        ? 'healthy'
+        : 'neutral';
+  const stateSpine = [
+    {
+      label: 'Health',
+      value: loading ? '...' : health.label,
+      tone: health.tone,
+    },
+    {
+      label: 'Queue',
+      value: loading
+        ? '...'
+        : summary.queue.error
+          ? 'Probe error'
+          : `${summary.queue.depth} waiting`,
+      tone: queueTone,
+    },
+    {
+      label: 'Runs',
+      value: loading ? '...' : `${summary.active_runs} active`,
+      tone: summary.active_runs > 0 ? 'warning' : 'neutral',
+    },
+  ];
   const hasWorkflows = summary.workflow_counts.total > 0;
   const heroTitle = hasWorkflows
     ? 'Operate workflows with explicit control.'
@@ -540,6 +568,15 @@ export function Dashboard({
           <div className="dash-sidebar__overview-title">{APP_CONFIG.engineName}</div>
           <div className="dash-sidebar__overview-copy">
             One visible place to launch, inspect, and recover workflow lanes without losing the shape of the system.
+          </div>
+          <div className="dash-sidebar__spine" aria-label="Control state">
+            {stateSpine.map((row) => (
+              <div key={row.label} className="dash-sidebar__spine-row">
+                <span className={`dash-sidebar__spine-dot dash-sidebar__spine-dot--${row.tone}`} />
+                <span className="dash-sidebar__spine-label">{row.label}</span>
+                <strong>{row.value}</strong>
+              </div>
+            ))}
           </div>
           <div className="dash-sidebar__overview-grid">
             <div className="dash-sidebar__overview-stat">

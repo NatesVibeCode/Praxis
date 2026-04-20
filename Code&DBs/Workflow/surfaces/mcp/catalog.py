@@ -135,8 +135,8 @@ class McpToolDefinition:
             badges.append("session-only")
         if "write" in self.risk_levels:
             badges.append("mutates-state")
-        if "dispatch" in self.risk_levels:
-            badges.append("dispatches-work")
+        if "launch" in self.risk_levels:
+            badges.append("launches-work")
         return tuple(badges)
 
     def cli_search_text(self) -> str:

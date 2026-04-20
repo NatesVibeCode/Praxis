@@ -2624,6 +2624,162 @@ async def data_dictionary_list_get(request: Request) -> Response:
 async def data_dictionary_reproject_post(request: Request) -> Response:
     return await _route_to_handler(request)
 
+# Lineage routes must be declared BEFORE the generic
+# `/api/data-dictionary/{object_kind:path}` wildcard so FastAPI's path-matcher
+# routes them to the lineage handlers rather than the generic describe handler.
+@app.get("/api/data-dictionary/lineage")
+async def data_dictionary_lineage_summary_get(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+@app.post("/api/data-dictionary/lineage/reproject")
+async def data_dictionary_lineage_reproject_post(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+@app.put("/api/data-dictionary/lineage")
+async def data_dictionary_lineage_set_edge_put(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+@app.delete("/api/data-dictionary/lineage")
+async def data_dictionary_lineage_clear_edge_delete(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+@app.get("/api/data-dictionary/lineage/{object_kind:path}")
+async def data_dictionary_lineage_describe_get(request: Request, object_kind: str) -> Response:
+    return await _route_to_handler(request)
+
+# Classifications routes: same ordering constraint as lineage — declare
+# BEFORE the generic /api/data-dictionary/{object_kind:path} wildcard.
+@app.get("/api/data-dictionary/classifications")
+async def data_dictionary_classifications_summary_get(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+@app.get("/api/data-dictionary/classifications/by-tag")
+async def data_dictionary_classifications_by_tag_get(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+@app.post("/api/data-dictionary/classifications/reproject")
+async def data_dictionary_classifications_reproject_post(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+@app.put("/api/data-dictionary/classifications")
+async def data_dictionary_classifications_set_put(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+@app.delete("/api/data-dictionary/classifications")
+async def data_dictionary_classifications_clear_delete(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+@app.get("/api/data-dictionary/classifications/{object_kind:path}")
+async def data_dictionary_classifications_describe_get(request: Request, object_kind: str) -> Response:
+    return await _route_to_handler(request)
+
+# Quality routes: declare BEFORE the generic /api/data-dictionary/{path} wildcard.
+@app.get("/api/data-dictionary/quality")
+async def data_dictionary_quality_summary_get(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+@app.get("/api/data-dictionary/quality/rules")
+async def data_dictionary_quality_rules_get(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+@app.get("/api/data-dictionary/quality/runs")
+async def data_dictionary_quality_runs_get(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+@app.get("/api/data-dictionary/quality/runs/{object_kind}/{rule_kind}")
+async def data_dictionary_quality_run_history_get(
+    request: Request, object_kind: str, rule_kind: str,
+) -> Response:
+    return await _route_to_handler(request)
+
+@app.post("/api/data-dictionary/quality/reproject")
+async def data_dictionary_quality_reproject_post(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+@app.post("/api/data-dictionary/quality/evaluate")
+async def data_dictionary_quality_evaluate_post(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+@app.put("/api/data-dictionary/quality")
+async def data_dictionary_quality_set_put(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+@app.delete("/api/data-dictionary/quality")
+async def data_dictionary_quality_clear_delete(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+# Stewardship axis — declared before the generic `/api/data-dictionary/{object_kind:path}`
+# wildcard so these specific routes are not swallowed by the describe handler.
+@app.get("/api/data-dictionary/stewardship")
+async def data_dictionary_stewardship_summary_get(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+@app.get("/api/data-dictionary/stewardship/by-steward")
+async def data_dictionary_stewardship_by_steward_get(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+@app.get("/api/data-dictionary/stewardship/{object_kind:path}")
+async def data_dictionary_stewardship_describe_get(
+    request: Request, object_kind: str,
+) -> Response:
+    return await _route_to_handler(request)
+
+@app.post("/api/data-dictionary/stewardship/reproject")
+async def data_dictionary_stewardship_reproject_post(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+@app.put("/api/data-dictionary/stewardship")
+async def data_dictionary_stewardship_set_put(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+@app.delete("/api/data-dictionary/stewardship")
+async def data_dictionary_stewardship_clear_delete(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+# Impact axis (cross-axis blast-radius) — declared before the generic
+# `/api/data-dictionary/{object_kind:path}` wildcard.
+@app.get("/api/data-dictionary/impact/{object_kind:path}")
+async def data_dictionary_impact_get(request: Request, object_kind: str) -> Response:
+    return await _route_to_handler(request)
+
+# Governance compliance axis — declared before the generic wildcard.
+@app.get("/api/data-dictionary/governance")
+async def data_dictionary_governance_get(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+@app.get("/api/data-dictionary/governance/scorecard")
+async def data_dictionary_governance_scorecard_get(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+@app.get("/api/data-dictionary/governance/remediate")
+async def data_dictionary_governance_remediate_get(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+@app.get("/api/data-dictionary/governance/clusters")
+async def data_dictionary_governance_clusters_get(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+# Drift axis (schema-snapshot detector) — declared before generic wildcard.
+@app.get("/api/data-dictionary/drift")
+async def data_dictionary_drift_get(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+@app.get("/api/data-dictionary/drift/snapshots")
+async def data_dictionary_drift_snapshots_get(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+@app.get("/api/data-dictionary/drift/diff")
+async def data_dictionary_drift_diff_get(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+@app.post("/api/data-dictionary/drift/snapshot")
+async def data_dictionary_drift_snapshot_post(request: Request) -> Response:
+    return await _route_to_handler(request)
+
+@app.post("/api/data-dictionary/governance/enforce")
+async def data_dictionary_governance_enforce_post(request: Request) -> Response:
+    return await _route_to_handler(request)
+
 @app.get("/api/data-dictionary/{object_kind:path}")
 async def data_dictionary_describe_get(request: Request, object_kind: str) -> Response:
     return await _route_to_handler(request)

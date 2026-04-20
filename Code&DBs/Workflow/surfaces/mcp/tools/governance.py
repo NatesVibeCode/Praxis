@@ -75,7 +75,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
         tool_praxis_governance,
         {
             "description": (
-                "Safety checks before dispatching work. Scan prompts for leaked secrets (API keys, "
+                "Safety checks before launching a workflow. Scan prompts for leaked secrets (API keys, "
                 "tokens, passwords) or verify that a set of file paths falls within allowed scope.\n\n"
                 "USE WHEN: you're about to submit a workflow prompt and want to verify it doesn't contain "
                 "secrets, or you want to check if write paths are within allowed boundaries.\n\n"

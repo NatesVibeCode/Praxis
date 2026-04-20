@@ -30,6 +30,7 @@
           "task_name": "seed_contract",
           "input_payload": {
             "probe": "runtime_regression_probe",
+            "allow_passthrough_echo": true,
             "contract": {
               "must_exercise": [
                 "deterministic tooling",

@@ -8,6 +8,7 @@ _REPO_ROOT = str(Path(__file__).resolve().parents[4])
 if str(_WORKFLOW_ROOT) not in sys.path:
     sys.path.insert(0, str(_WORKFLOW_ROOT))
 
+import runtime.codebase_index_module as codebase_index_module
 from runtime.codebase_index_module import CodebaseIndexModule
 from surfaces.mcp.tools.discover import tool_praxis_discover
 
@@ -81,6 +82,47 @@ def test_run_fails_when_indexer_reports_degraded_observability(monkeypatch) -> N
 
     assert result.ok is False
     assert result.error == "discovery index degraded: src/writer.py/module/writer: write lane offline"
+
+
+def test_run_skips_vector_index_when_disabled(monkeypatch) -> None:
+    class _Conn:
+        def execute(self, query: str, *args):
+            return []
+
+    class _FakeKnowledgeGraph:
+        def __init__(self) -> None:
+            self.ingests: list[tuple[str, str, str]] = []
+
+        def ingest(self, *, kind: str, content: str, source: str, metadata=None):
+            self.ingests.append((kind, content, source))
+            return {"kind": kind, "content": content, "source": source}
+
+    def _unexpected_indexer(*_args, **_kwargs):
+        raise AssertionError("ModuleIndexer should not be constructed when indexing is disabled")
+
+    monkeypatch.setattr("runtime.module_indexer.ModuleIndexer", _unexpected_indexer)
+    monkeypatch.setattr(
+        codebase_index_module,
+        "_extract_dependency_map",
+        lambda _workflow_root: ({"runtime": {"runtime/module.py": {"classes": [], "deps": []}}}, []),
+    )
+    monkeypatch.setattr(
+        codebase_index_module,
+        "_build_subsystem_doc",
+        lambda name, mods, edges: f"{name}:{len(mods)}:{len(edges)}",
+    )
+
+    module = CodebaseIndexModule(
+        conn=_Conn(),
+        repo_root=_REPO_ROOT,
+        knowledge_graph=_FakeKnowledgeGraph(),
+        index_codebase_enabled=False,
+    )
+
+    result = module.run()
+
+    assert result.ok is True
+    assert result.error is None
 
 
 class _ProgressEmitter:

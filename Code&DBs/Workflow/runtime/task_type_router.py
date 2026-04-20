@@ -310,6 +310,12 @@ class TaskRouteDecision:
     # _apply_lane_policy) must refuse paid lanes when this is set —
     # see runtime.lane_policy.admit_adapter_type.
     budget_authority_unreachable: bool = False
+    # True iff an error-severity quality rule on provider_budget_windows
+    # has a latest run in ('fail','error') — authority data is in a state
+    # the operator has declared invalid. Same fail-closed treatment as
+    # budget_authority_unreachable, reason code
+    # lane.rejected.budget_window_data_quality_error.
+    budget_window_data_quality_error: bool = False
 
 
 @dataclass(frozen=True)
@@ -1043,6 +1049,9 @@ class TaskTypeRouter:
                 budget_authority_unreachable=bool(
                     row.get("budget_authority_unreachable", False)
                 ),
+                budget_window_data_quality_error=bool(
+                    row.get("budget_window_data_quality_error", False)
+                ),
             )
             for row in rows
         ]
@@ -1083,12 +1092,16 @@ class TaskTypeRouter:
             budget_authority_unreachable = bool(
                 row.get("budget_authority_unreachable", False)
             )
+            budget_window_data_quality_error = bool(
+                row.get("budget_window_data_quality_error", False)
+            )
             admitted, reason = admit_adapter_type(
                 policies,
                 provider,
                 adapter_type,
                 spend_pressure=spend_pressure,
                 budget_authority_unreachable=budget_authority_unreachable,
+                budget_window_data_quality_error=budget_window_data_quality_error,
             )
             if admitted:
                 kept.append(row)

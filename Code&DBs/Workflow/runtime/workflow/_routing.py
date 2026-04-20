@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "ClaimRouteBlockedError",
     "_build_request_envelope",
     "_derive_touch_keys",
     "_job_has_touch_conflict",
@@ -40,6 +41,34 @@ __all__ = [
     "_task_route_candidate_meta",
     "_blocked_candidates_for_task",
 ]
+
+
+class ClaimRouteBlockedError(RuntimeError):
+    """Raised when every task-type-permitted candidate is explicitly blocked.
+
+    Closes BUG-32194458: previously ``_select_claim_route`` treated an empty
+    permitted set as advisory and fell back to the original failover chain,
+    which returned a forbidden route. Failing closed here forces ``claim_one``
+    to route the job through ``_fail_unclaimable_ready_job`` so the block is
+    honored end-to-end instead of re-surfacing as a silent selection.
+
+    Mirrors the shape of :class:`registry.runtime_profile_admission.RuntimeProfileAdmissionError`
+    so the claim path can catch both with one handler and write a stable
+    ``reason_code`` onto the job.
+    """
+
+    def __init__(
+        self,
+        reason_code: str,
+        message: str,
+        *,
+        blocked_candidates: tuple[str, ...] = (),
+        task_type: str = "",
+    ) -> None:
+        super().__init__(message)
+        self.reason_code = reason_code
+        self.blocked_candidates = tuple(blocked_candidates)
+        self.task_type = task_type
 
 
 def _record_task_route_outcome(
@@ -546,13 +575,27 @@ def _select_claim_route(conn: SyncPostgresConnection, job: dict) -> str:
     )
     if not route_meta:
         # No permitted models found for this task type among candidates.
-        # Filter available down to models that are explicitly permitted
-        # (or have no routing row at all — legacy models without explicit
-        # task_type_routing entries are allowed through).
+        # Filter available down to models that have no explicit permitted=false
+        # block. Legacy models without any task_type_routing row fall through
+        # as advisory-allowed.
         blocked = _blocked_candidates_for_task(conn, route_task_type, available)
         fallback = [c for c in available if c not in blocked]
         if not fallback:
-            fallback = available  # all blocked — degrade to original chain
+            # Every candidate is explicitly blocked for this task type. Fail
+            # closed (BUG-32194458): do NOT silently reinstate the original
+            # chain, because that returns a forbidden route and makes the
+            # task_type_routing block meaningless. Raise so the claim path
+            # surfaces the denial via _fail_unclaimable_ready_job.
+            raise ClaimRouteBlockedError(
+                "routing.all_candidates_blocked",
+                (
+                    f"all candidates {sorted(available)} are blocked "
+                    f"(permitted=false) for task_type={route_task_type!r}; "
+                    "claim refused. Closes BUG-32194458."
+                ),
+                blocked_candidates=tuple(sorted(blocked)),
+                task_type=route_task_type,
+            )
         return min(
             fallback,
             key=lambda candidate: (
