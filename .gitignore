@@ -19,6 +19,11 @@ Code&DBs/Databases/dispatch-state/
 
 # Local config
 .mcp.json
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+.claude/worktrees/
+.venv/
+venv/
 
 # Artifacts (generated)
 artifacts/sandboxes/

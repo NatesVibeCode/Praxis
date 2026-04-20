@@ -524,7 +524,12 @@ def _load_from_db() -> None:
             return
 
         loaded_registry: dict[str, ProviderCLIProfile] = {}
-        loaded_aliases: dict[str, str] = {}
+        # alias -> set of provider_slugs that claim it. Collected first, then
+        # validated: any alias claimed by >1 distinct slug fails the load
+        # closed (BUG-49388D90). A provider can safely claim the same alias
+        # multiple times (e.g. binary == an entry in aliases) because set
+        # dedupes.
+        alias_claimants: dict[str, set[str]] = {}
         parse_errors: list[str] = []
         for row in rows:
             try:
@@ -535,16 +540,9 @@ def _load_from_db() -> None:
                 logger.warning("provider execution registry: skipping bad row %s: %s", slug, exc)
                 continue
             loaded_registry[profile.provider_slug] = profile
-            loaded_aliases[profile.binary] = profile.provider_slug
+            alias_claimants.setdefault(profile.binary, set()).add(profile.provider_slug)
             for alias in profile.aliases:
-                if alias in loaded_aliases and loaded_aliases[alias] != profile.provider_slug:
-                    logger.warning(
-                        "provider execution registry: alias %r collision (%s overwrites %s)",
-                        alias,
-                        profile.provider_slug,
-                        loaded_aliases[alias],
-                    )
-                loaded_aliases[alias] = profile.provider_slug
+                alias_claimants.setdefault(alias, set()).add(profile.provider_slug)
 
         if not loaded_registry:
             _record_load_failure(
@@ -557,6 +555,38 @@ def _load_from_db() -> None:
                 ),
             )
             return
+
+        # BUG-49388D90: detect alias ownership conflicts before installing.
+        # If two distinct provider_slugs claim the same alias or binary, the
+        # old code wrote loaded_aliases[alias] = second_slug and silently
+        # remapped resolve_provider_from_alias by DB row order. Fail closed
+        # instead so operators must disambiguate at the authority level.
+        conflicts: dict[str, tuple[str, ...]] = {
+            alias: tuple(sorted(claimants))
+            for alias, claimants in alias_claimants.items()
+            if len(claimants) > 1
+        }
+        if conflicts:
+            formatted = "; ".join(
+                f"{alias!r}:{list(claimants)}" for alias, claimants in sorted(conflicts.items())
+            )
+            _record_load_failure(
+                f"{len(conflicts)} alias ownership conflict(s)",
+                log_level="error",
+                message=(
+                    "provider execution registry: alias ownership conflicts "
+                    "between provider rows — load refused to prevent silent "
+                    f"last-writer-wins remap (aliases: {formatted}). "
+                    "Closes BUG-49388D90."
+                ),
+            )
+            return
+
+        # Single-claimant aliases are safe to install.
+        loaded_aliases: dict[str, str] = {
+            alias: next(iter(claimants))
+            for alias, claimants in alias_claimants.items()
+        }
 
         _REGISTRY.clear()
         _REGISTRY.update(loaded_registry)
