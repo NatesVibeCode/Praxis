@@ -18,8 +18,11 @@ from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 from .health_map import HealthMapper
+from .primitive_contracts import bug_open_status_values
 from .risk_scoring import RiskScorer
 from .trend_detector import TrendDetector, format_trends
+
+_OPEN_BUG_STATUSES: frozenset[str] = frozenset(bug_open_status_values())
 
 DEFAULT_SCAN_ROOTS: tuple[str, ...] = ("runtime", "surfaces/api", "surfaces/cli")
 DEFAULT_BUG_PACKET_LIMIT = 100
@@ -284,7 +287,7 @@ def build_code_hotspots(
                 for file_path in paths:
                     rollup = bug_rollups[file_path]
                     rollup["bug_ids"].add(item["bug_id"])
-                    if item["status"] in {"OPEN", "IN_PROGRESS"}:
+                    if item["status"] in _OPEN_BUG_STATUSES:
                         rollup["open_bug_count"] += 1
                     if item["has_regression_after_fix"]:
                         rollup["regression_count"] += 1

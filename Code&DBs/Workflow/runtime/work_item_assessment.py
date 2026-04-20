@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from runtime.bug_evidence import EVIDENCE_ROLE_VALIDATES_FIX
+from runtime.bug_tracker import BugStatus
 
 
 _VALIDATING_EVIDENCE_ROLES = frozenset({EVIDENCE_ROLE_VALIDATES_FIX})
@@ -489,7 +490,7 @@ def assess_work_items(
             workflow_run_activity=normalized_run_activity,
             assessed_at=assessed_at,
             idle_timeout=idle_timeout,
-            declared_claimed=str(bug.get("status") or "").strip().upper() == "IN_PROGRESS",
+            declared_claimed=str(bug.get("status") or "").strip().upper() == BugStatus.IN_PROGRESS.value,
         )
         reason_codes.extend(activity["reason_codes"])
         promotion_state = (

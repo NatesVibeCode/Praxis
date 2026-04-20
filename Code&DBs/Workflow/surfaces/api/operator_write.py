@@ -34,7 +34,7 @@ from runtime.cache_invalidation import (
     CACHE_KIND_ROUTE_AUTHORITY_SNAPSHOT,
     aemit_cache_invalidation,
 )
-from runtime.bug_tracker import BugCategory, afile_bug
+from runtime.bug_tracker import BugCategory, BugStatus, afile_bug
 from runtime.circuit_breaker import invalidate_circuit_breaker_override_cache
 from runtime.event_log import CHANNEL_DATASET, CHANNEL_SEMANTIC_ASSERTION, aemit
 from runtime.instance import NativeWorkflowInstance, resolve_native_instance
@@ -3663,7 +3663,7 @@ class OperatorControlFrontdoor:
                         {
                             "bug_id": bug_id,
                             "current_status": str(row["status"]),
-                            "next_status": "FIXED",
+                            "next_status": BugStatus.FIXED.value,
                             "reason_codes": ["explicit_passed_fix_proof_present"],
                             "evidence_refs": evidence_refs,
                             "resolution_summary": _closeout_resolution_summary(
