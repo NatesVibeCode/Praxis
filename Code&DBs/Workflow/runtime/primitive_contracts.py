@@ -327,6 +327,8 @@ def build_state_semantics_contract() -> dict[str, Any]:
 def build_proof_ref_contract() -> dict[str, Any]:
     """Project the proof-ref primitive shape used by repair and closeout paths."""
 
+    from runtime.bug_evidence import ALLOWED_EVIDENCE_KINDS, ALLOWED_EVIDENCE_ROLES
+
     return {
         "kind": "proof_ref_contract",
         "authority": "receipts + bug evidence + operator decisions",
@@ -342,6 +344,8 @@ def build_proof_ref_contract() -> dict[str, Any]:
             "verification_run",
             "healing_run",
         ],
+        "allowed_evidence_kinds": sorted(ALLOWED_EVIDENCE_KINDS),
+        "allowed_evidence_roles": sorted(ALLOWED_EVIDENCE_ROLES),
         "required_fields": ["ref_kind", "ref_id", "evidence_role"],
         "repair_extensions": ["before_state_ref", "after_state_ref", "reason_code"],
         "replay_ref": {

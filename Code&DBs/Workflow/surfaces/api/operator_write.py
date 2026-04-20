@@ -28,6 +28,7 @@ from policy.native_primary_cutover import (
     NativePrimaryCutoverRuntime,
     PostgresNativePrimaryCutoverRepository,
 )
+from runtime.bug_evidence import EVIDENCE_ROLE_VALIDATES_FIX
 from runtime.cache_invalidation import (
     CACHE_KIND_CIRCUIT_BREAKER_OVERRIDE,
     CACHE_KIND_ROUTE_AUTHORITY_SNAPSHOT,
@@ -150,7 +151,7 @@ _ROADMAP_SEMANTIC_PREDICATE_SPECS: dict[str, dict[str, object]] = {
         ),
     },
 }
-_BUG_CLOSEOUT_EVIDENCE_ROLE = "validates_fix"
+_BUG_CLOSEOUT_EVIDENCE_ROLE = EVIDENCE_ROLE_VALIDATES_FIX
 _ROADMAP_COMPLETED_STATUS = "completed"
 _ROADMAP_DEFAULT_LIFECYCLE = "planned"
 _ROADMAP_CLAIMED_LIFECYCLE = "claimed"

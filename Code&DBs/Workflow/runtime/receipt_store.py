@@ -18,6 +18,7 @@ from runtime.receipt_provenance import (
     build_write_manifest,
     extract_write_paths,
 )
+from runtime.bug_evidence import EVIDENCE_ROLE_OBSERVED_IN
 from runtime.failure_classifier import classify_failure
 from runtime.friction_ledger import FrictionLedger, FrictionType
 from runtime.bug_tracker import BugTracker, BugCategory, BugSeverity, build_failure_signature
@@ -353,7 +354,7 @@ def _run_post_receipt_hooks(payload: dict[str, Any], *, conn) -> None:
                         bug_id,
                         evidence_kind="receipt",
                         evidence_ref=receipt_id,
-                        evidence_role="observed_in",
+                        evidence_role=EVIDENCE_ROLE_OBSERVED_IN,
                         created_by="receipt_store",
                         notes=f"Observed failure {failure_code}.",
                     )
@@ -365,7 +366,7 @@ def _run_post_receipt_hooks(payload: dict[str, Any], *, conn) -> None:
                         bug_id,
                         evidence_kind="run",
                         evidence_ref=run_id,
-                        evidence_role="observed_in",
+                        evidence_role=EVIDENCE_ROLE_OBSERVED_IN,
                         created_by="receipt_store",
                         notes=f"Observed failing run {run_id}.",
                     )

@@ -451,7 +451,7 @@ def resolve_bug_payload(
             bug_id,
             evidence_kind="verification_run",
             evidence_ref=verification_run_id,
-            evidence_role="validates_fix",
+            evidence_role=_bug_evidence.EVIDENCE_ROLE_VALIDATES_FIX,
             created_by=str(body.get("created_by") or created_by_default).strip() or created_by_default,
             notes=_optional_text(body.get("notes"))
             or f"Passed verifier {verifier_ref} during FIXED resolution.",

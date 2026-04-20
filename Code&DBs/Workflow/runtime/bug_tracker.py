@@ -16,6 +16,11 @@ if TYPE_CHECKING:
     from runtime.embedding_service import EmbeddingService
 
 from runtime import bug_evidence as _bug_evidence
+from runtime.bug_evidence import (
+    ALLOWED_EVIDENCE_KINDS as _ALLOWED_EVIDENCE_KINDS,
+    ALLOWED_EVIDENCE_ROLES as _ALLOWED_EVIDENCE_ROLES,
+    EVIDENCE_ROLE_VALIDATES_FIX,
+)
 from runtime.primitive_contracts import (
     bug_resolved_status_values_with_legacy,
     bug_status_legacy_resolved_aliases,
@@ -27,8 +32,6 @@ from runtime.payload_coercion import json_object as _json_object, json_list as _
 
 _BUG_BLAST_RADIUS_WINDOW_SQL = "7 days"
 _TAG_VALUE_PATTERN = re.compile(r"[^a-z0-9._:/-]+")
-_ALLOWED_EVIDENCE_KINDS = frozenset({"receipt", "run", "verification_run", "healing_run"})
-_ALLOWED_EVIDENCE_ROLES = frozenset({"observed_in", "attempted_fix", "validates_fix"})
 _VERIFICATION_SUCCESS_STATUSES = frozenset({"passed", "succeeded", "success", "ok"})
 
 
@@ -900,7 +903,7 @@ class BugTracker:
     ) -> tuple[list[dict[str, Any]], str | None]:
         evidence_rows, evidence_error = self._list_evidence_with_error(
             bug_id,
-            evidence_role="validates_fix",
+            evidence_role=EVIDENCE_ROLE_VALIDATES_FIX,
         )
         if evidence_error:
             return [], evidence_error
@@ -1542,12 +1545,12 @@ class BugTracker:
         validate_fix_links = [
             evidence
             for evidence in evidence_links
-            if evidence.get("evidence_role") == "validates_fix"
+            if evidence.get("evidence_role") == EVIDENCE_ROLE_VALIDATES_FIX
         ]
         attempted_fix_links = [
             evidence
             for evidence in evidence_links
-            if evidence.get("evidence_role") == "attempted_fix"
+            if evidence.get("evidence_role") == _bug_evidence.EVIDENCE_ROLE_ATTEMPTED_FIX
         ]
         observed_links = [
             evidence

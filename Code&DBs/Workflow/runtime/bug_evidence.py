@@ -46,8 +46,34 @@ def build_query_error(
 
 
 _BUG_BLAST_RADIUS_WINDOW_SQL = "7 days"
-_ALLOWED_EVIDENCE_KINDS = frozenset({"receipt", "run", "verification_run", "healing_run"})
-_ALLOWED_EVIDENCE_ROLES = frozenset({"observed_in", "attempted_fix", "validates_fix"})
+
+# Canonical evidence role / kind names. Consumers MUST import the named
+# constants (or the allowed-set) rather than hand-roll the literal strings so
+# this module stays the single naming source for bug-evidence proof refs.
+EVIDENCE_ROLE_OBSERVED_IN = "observed_in"
+EVIDENCE_ROLE_ATTEMPTED_FIX = "attempted_fix"
+EVIDENCE_ROLE_VALIDATES_FIX = "validates_fix"
+ALLOWED_EVIDENCE_ROLES: frozenset[str] = frozenset(
+    {EVIDENCE_ROLE_OBSERVED_IN, EVIDENCE_ROLE_ATTEMPTED_FIX, EVIDENCE_ROLE_VALIDATES_FIX}
+)
+
+EVIDENCE_KIND_RECEIPT = "receipt"
+EVIDENCE_KIND_RUN = "run"
+EVIDENCE_KIND_VERIFICATION_RUN = "verification_run"
+EVIDENCE_KIND_HEALING_RUN = "healing_run"
+ALLOWED_EVIDENCE_KINDS: frozenset[str] = frozenset(
+    {
+        EVIDENCE_KIND_RECEIPT,
+        EVIDENCE_KIND_RUN,
+        EVIDENCE_KIND_VERIFICATION_RUN,
+        EVIDENCE_KIND_HEALING_RUN,
+    }
+)
+
+# Legacy private aliases kept so existing internal references continue to
+# resolve; prefer the public names above for new code.
+_ALLOWED_EVIDENCE_KINDS = ALLOWED_EVIDENCE_KINDS
+_ALLOWED_EVIDENCE_ROLES = ALLOWED_EVIDENCE_ROLES
 _VERIFICATION_SUCCESS_STATUSES = frozenset({"passed", "succeeded", "success", "ok"})
 _SIGNATURE_ANCHOR_FIELDS = failure_identity_fields()
 

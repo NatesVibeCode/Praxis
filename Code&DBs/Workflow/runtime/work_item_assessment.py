@@ -11,8 +11,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from runtime.bug_evidence import EVIDENCE_ROLE_VALIDATES_FIX
 
-_VALIDATING_EVIDENCE_ROLES = frozenset({"validates_fix"})
+
+_VALIDATING_EVIDENCE_ROLES = frozenset({EVIDENCE_ROLE_VALIDATES_FIX})
 _FRESHNESS_FRESH = "fresh"
 _FRESHNESS_NEEDS_REVIEW = "needs_review"
 _FRESHNESS_STALE = "stale"

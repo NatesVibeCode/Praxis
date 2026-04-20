@@ -17,6 +17,11 @@ from typing import Any, TYPE_CHECKING
 
 import runtime.verifier_bug_bridge as _verifier_bug_bridge
 import runtime.verifier_builtins as _verifier_builtins
+from runtime.bug_evidence import (
+    EVIDENCE_ROLE_ATTEMPTED_FIX,
+    EVIDENCE_ROLE_OBSERVED_IN,
+    EVIDENCE_ROLE_VALIDATES_FIX,
+)
 
 if TYPE_CHECKING:
     from storage.postgres.connection import SyncPostgresConnection
@@ -547,7 +552,7 @@ def _maybe_promote_verifier_bug(
         bug_id=bug.bug_id,
         evidence_kind="verification_run",
         evidence_ref=verification_run_id,
-        evidence_role="observed_in",
+        evidence_role=EVIDENCE_ROLE_OBSERVED_IN,
         notes=f"Verifier {verifier.verifier_ref} reported {status}.",
         conn=conn,
     )
@@ -600,7 +605,7 @@ def _maybe_promote_healer_bug(
         bug_id=bug.bug_id,
         evidence_kind="healing_run",
         evidence_ref=healing_run_id,
-        evidence_role="observed_in",
+        evidence_role=EVIDENCE_ROLE_OBSERVED_IN,
         notes=f"Healer {healer.healer_ref} reported {status}.",
         conn=conn,
     )
@@ -633,7 +638,7 @@ def _maybe_resolve_verifier_bug(
         bug_id=bug.bug_id,
         evidence_kind="healing_run",
         evidence_ref=healing_run_id,
-        evidence_role="attempted_fix",
+        evidence_role=EVIDENCE_ROLE_ATTEMPTED_FIX,
         notes=f"Healer run repaired verifier target {target_kind}:{target_ref or 'global'}.",
         conn=conn,
     )
@@ -643,7 +648,7 @@ def _maybe_resolve_verifier_bug(
             bug_id=bug.bug_id,
             evidence_kind="verification_run",
             evidence_ref=verification_run_id,
-            evidence_role="validates_fix",
+            evidence_role=EVIDENCE_ROLE_VALIDATES_FIX,
             notes=f"Verifier {verifier_ref} passed after healing.",
             conn=conn,
         )
