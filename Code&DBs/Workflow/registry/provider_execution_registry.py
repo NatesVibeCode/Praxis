@@ -32,6 +32,7 @@ __all__ = [
     "ProviderRegistryLoadError",
     "ProviderRegistrySchemaError",
     "ProviderRegistryDataError",
+    "ProviderRegistryAliasConflictError",
     "ProviderRegistryLoadTimeout",
     "RegistryLoadStatus",
     "reload_from_db",
@@ -87,6 +88,30 @@ class ProviderRegistrySchemaError(ProviderRegistryError):
 
 class ProviderRegistryDataError(ProviderRegistryError):
     """Row data failed validation."""
+
+
+class ProviderRegistryAliasConflictError(ProviderRegistryDataError):
+    """Two or more provider rows claim the same alias/binary.
+
+    Closes BUG-49388D90. Previously the loader logged a warning and overwrote
+    ``loaded_aliases[alias]`` last-writer-wins, which silently remapped
+    ``resolve_provider_from_alias(...)`` based on DB row order. That turned
+    alias ownership into an implicit routing switch. Now the loader fails
+    closed: any alias claimed by >1 distinct ``provider_slug`` refuses the
+    entire load so operators must disambiguate rather than getting unlucky.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        conflicts: dict[str, tuple[str, ...]] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.conflicts = {
+            alias: tuple(claimants)
+            for alias, claimants in (conflicts or {}).items()
+        }
 
 
 class ProviderRegistryLoadTimeout(ProviderRegistryError):
