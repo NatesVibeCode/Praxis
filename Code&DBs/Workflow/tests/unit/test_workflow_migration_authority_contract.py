@@ -25,6 +25,40 @@ WORKFLOW_ROOT = REPO_ROOT / "Code&DBs" / "Workflow"
 MIGRATION_ROOT = REPO_ROOT / "Code&DBs" / "Databases" / "migrations" / "workflow"
 
 
+# Allowlist of bootstrap_only migrations that deliberately declare no
+# expected_objects because they do not produce durable schema — renames,
+# drops, data seeds, and branding/name cleanups. Any new bootstrap_only
+# entry with empty expected_objects must be reviewed and explicitly added
+# here, preventing the bucket from silently becoming a catch-all dumping
+# ground again (closes decision.2026-04-19 bootstrap_only-entries-declare-
+# or-retire).
+_NON_DURABLE_BOOTSTRAP_ONLY_ALLOWLIST: frozenset[str] = frozenset(
+    {
+        "043_workflow_runtime_notification_sync_rename.sql",
+        "045_workflow_authority_rename.sql",
+        "046_workflow_surface_rename.sql",
+        "051_integration_registry_authority.sql",
+        "056_native_runtime_profile_authority_repair.sql",
+        "057_remove_legacy_dispatch_completion_triggers.sql",
+        "058_retire_stale_legacy_runner_runs.sql",
+        "061_drop_stale_dispatch_completion_function.sql",
+        "062_add_research_task_type_route_profile.sql",
+        "063_drop_system_events_processed.sql",
+        "063_remove_stale_anthropic_provider_disabled_eligibility.sql",
+        "064_prune_stale_completion_functions.sql",
+        "065_daily_maintenance_review_dispatch.sql",
+        "067_rename_maintenance_start_terms.sql",
+        "068_rename_maintenance_start_config_keys.sql",
+        "091_openrouter_deepseek_onboarding.sql",
+        "093_deepseek_direct_provider.sql",
+        "099_webhook_notify_trigger.sql",
+        "101_analysis_classify_routing.sql",
+        "107_name_cleanup_praxis_branding.sql",
+        "107_workflow_notifications_resource_telemetry.sql",
+    }
+)
+
+
 def test_generated_workflow_authority_matches_json_spec_without_db_bootstrap() -> None:
     spec = json.loads(
         (WORKFLOW_ROOT / "system_authority" / "workflow_migration_authority.json").read_text(
@@ -150,4 +184,48 @@ def test_validate_tie_break_coverage_accepts_real_spec_without_db_bootstrap() ->
     _validate_tie_break_coverage(
         full_bootstrap_filenames=full_bootstrap_set,
         tie_break_order=WORKFLOW_MIGRATION_TIE_BREAK_ORDER,
+    )
+
+
+def test_bootstrap_only_entries_either_declare_objects_or_are_allowlisted() -> None:
+    """bootstrap_only migrations must declare expected_objects or be allowlisted.
+
+    The bucket previously served as a cosmetic dumping ground: all 97 entries
+    carried empty expected_objects and therefore escaped readiness-gating.
+    The reclassification commit promoted 76 durable-schema migrations to
+    canonical and left 21 non-durable ones (renames, drops, data seeds) in
+    bootstrap_only with intentionally empty expected_objects. This test pins
+    those 21 so:
+
+      * adding a new bootstrap_only entry with empty expected_objects now
+        requires an explicit allowlist update — forcing human review that
+        the migration really has no durable schema effect; and
+      * removing or reclassifying an existing allowlist entry must also
+        update the allowlist — preventing silent drift.
+
+    Pins decision.2026-04-19.bootstrap-only-entries-declare-or-retire.
+    """
+    current_empty_bootstrap_only = frozenset(
+        migration
+        for migration in WORKFLOW_POLICY_BUCKETS["bootstrap_only"]
+        if not WORKFLOW_MIGRATION_EXPECTED_OBJECTS.get(migration)
+    )
+
+    assert current_empty_bootstrap_only == _NON_DURABLE_BOOTSTRAP_ONLY_ALLOWLIST
+
+
+def test_non_durable_bootstrap_only_allowlist_members_remain_in_bucket() -> None:
+    """Every allowlisted migration must still sit in bootstrap_only.
+
+    Catches the case where an allowlisted migration is silently reclassified
+    or removed without updating the pin — the allowlist would then reference
+    stale file names that no longer correspond to bootstrap_only entries.
+    """
+    bootstrap_only_set = frozenset(WORKFLOW_POLICY_BUCKETS["bootstrap_only"])
+    orphans = _NON_DURABLE_BOOTSTRAP_ONLY_ALLOWLIST - bootstrap_only_set
+
+    assert not orphans, (
+        "Allowlisted non-durable bootstrap_only migrations no longer sit in "
+        "the bootstrap_only bucket — remove them from the allowlist or "
+        "reclassify them explicitly:\n  - " + "\n  - ".join(sorted(orphans))
     )
