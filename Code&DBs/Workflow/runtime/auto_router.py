@@ -59,6 +59,21 @@ for _c in _CANDIDATES:
 
 _AUTO_TIER_FALLBACK_ORDER = ("mid", "frontier", "economy")
 
+# Boundary mapping between the DB tier vocabulary and the runtime tier
+# vocabulary. provider_model_candidates.route_tier is constrained to
+# ('high', 'medium', 'low') by migration 046 and its historical seeds
+# (091_openrouter_deepseek_onboarding, 093_deepseek_direct_provider, etc.).
+# The runtime routing code and sync scripts speak ('frontier', 'mid',
+# 'economy'). This map translates at the I/O edge so we don't silently
+# drop every DB row (which was the behaviour before this entry existed).
+# A full rename would require editing every historical migration and is
+# rejected under the append-only migration policy.
+_DB_ROUTE_TIER_TO_RUNTIME = {
+    "high": "frontier",
+    "medium": "mid",
+    "low": "economy",
+}
+
 # ---------------------------------------------------------------------------
 # DB-backed candidate loading
 # ---------------------------------------------------------------------------
@@ -97,8 +112,17 @@ async def _load_candidates_async() -> tuple[RouteCandidate, ...]:
         model_slug = row["model_slug"]
         priority = row["priority"]
 
-        tier = str(row.get("route_tier") or "").strip().lower()
-        if tier not in ("frontier", "mid", "economy"):
+        db_tier = str(row.get("route_tier") or "").strip().lower()
+        tier = _DB_ROUTE_TIER_TO_RUNTIME.get(db_tier)
+        if tier is None:
+            # Unknown tier value — fail-skip rather than silently substituting
+            # a fallback, so a new tier surfaces as a rejection in logs.
+            _log.warning(
+                "auto_router: dropping candidate %s/%s with unknown route_tier=%r",
+                provider_slug,
+                model_slug,
+                db_tier,
+            )
             continue
 
         candidates.append(RouteCandidate(
