@@ -69,13 +69,13 @@
       flex-direction: column;
       align-items: flex-start;
       margin-bottom: 64px;
-      margin-left: -14px; /* optical: pull logo left so PRAXIS aligns with hero text */
     }
 
     .logomark {
-      width: 280px;
+      width: 240px;
       height: auto;
       flex-shrink: 0;
+      display: block;
     }
 
 
@@ -188,8 +188,8 @@
     }
 
     @media (max-width: 520px) {
-      header.brand { margin-bottom: 48px; margin-left: -10px; }
-      .logomark { width: 220px; }
+      header.brand { margin-bottom: 48px; }
+      .logomark { width: 180px; }
       form.capture { flex-direction: column; }
       button[type="submit"] { width: 100%; }
       .meta { flex-direction: column; gap: 8px; }
@@ -204,7 +204,7 @@
   <div class="wrap">
     <header class="brand">
       <!-- Praxis premium logo lockup: mark + PRAXIS wordmark, inverted for dark bg -->
-      <svg class="logomark" viewBox="80 80 340 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Praxis Engine">
+      <svg class="logomark" viewBox="108 93 292 327" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Praxis Engine">
         <g fill="none" stroke="currentColor" stroke-linejoin="miter" stroke-linecap="square">
           <path d="M 130 100 L 370 100 L 370 188 M 370 252 L 370 340 L 130 340 L 130 252 M 130 188 L 130 100" stroke-width="10" />
           <line x1="130" y1="220" x2="370" y2="220" stroke-width="7" />
