@@ -6,12 +6,19 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Dict, Optional, Tuple
 
+from runtime.posture import Posture
+
 
 @dataclass(frozen=True)
 class LaneCue:
-    """Recommended operator posture with reasoning."""
+    """Recommended operator posture with reasoning.
 
-    recommended_posture: str  # 'observe' | 'operate' | 'build'
+    ``recommended_posture`` is the string value of a ``runtime.posture.Posture``
+    member. Producers MUST assign via ``Posture.X.value`` rather than a raw
+    literal so the posture authority remains the single naming source.
+    """
+
+    recommended_posture: str
     confidence: float  # 0.0 - 1.0
     reasons: Tuple[str, ...]
     degraded_cause: Optional[str] = None
@@ -57,7 +64,7 @@ class OperatorPanel:
         self._loop_warnings: int = 0
         self._write_conflicts: int = 0
         self._governance_blocks: int = 0
-        self._posture: str = "observe"
+        self._posture: str = Posture.OBSERVE.value
         self._posture_explicit: bool = False
 
     # ---- registration methods ------------------------------------------------
@@ -156,7 +163,7 @@ class OperatorPanel:
             reasons.append(degraded_cause)
             confidence = min(0.6 + 0.1 * len(open_cbs), 1.0)
             return LaneCue(
-                recommended_posture="observe",
+                recommended_posture=Posture.OBSERVE.value,
                 confidence=confidence,
                 reasons=tuple(reasons),
                 degraded_cause=degraded_cause,
@@ -167,7 +174,7 @@ class OperatorPanel:
             reasons.append(degraded_cause)
             confidence = 0.9 - self._recent_pass_rate  # worse rate -> higher conf
             return LaneCue(
-                recommended_posture="observe",
+                recommended_posture=Posture.OBSERVE.value,
                 confidence=round(min(max(confidence, 0.5), 1.0), 2),
                 reasons=tuple(reasons),
                 degraded_cause=degraded_cause,
@@ -184,7 +191,7 @@ class OperatorPanel:
 
         if reasons:
             return LaneCue(
-                recommended_posture="operate",
+                recommended_posture=Posture.OPERATE.value,
                 confidence=0.7,
                 reasons=tuple(reasons),
                 degraded_cause=degraded_cause,
@@ -194,7 +201,7 @@ class OperatorPanel:
         if self._recent_pass_rate > 0.8:
             reasons.append("system healthy, pass rate above 80%")
             return LaneCue(
-                recommended_posture="build",
+                recommended_posture=Posture.BUILD.value,
                 confidence=round(self._recent_pass_rate, 2),
                 reasons=tuple(reasons),
                 degraded_cause=None,
@@ -203,7 +210,7 @@ class OperatorPanel:
         # --- safe default -----------------------------------------------------
         reasons.append("no clear signal, defaulting to operate")
         return LaneCue(
-            recommended_posture="operate",
+            recommended_posture=Posture.OPERATE.value,
             confidence=0.5,
             reasons=tuple(reasons),
             degraded_cause=None,
