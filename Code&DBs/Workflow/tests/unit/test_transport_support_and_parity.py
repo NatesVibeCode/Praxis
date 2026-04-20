@@ -431,7 +431,15 @@ def test_cursor_profile_is_registered_from_db_authority(monkeypatch) -> None:
     assert provider_registry_mod.supports_adapter("cursor", "cli_llm") is False
 
 
-def test_resolve_adapter_economics_defaults_optional_flags_for_sparse_authority() -> None:
+def test_resolve_adapter_economics_rejects_sparse_authority_rows() -> None:
+    """Sparse adapter_economics rows must fail closed (BUG-8DAA5468).
+
+    Previously ``prefer_prepaid`` and ``allow_payg_fallback`` were silently
+    defaulted to False when absent — and the router layer independently
+    defaulted again, so any layer changing its default would silently
+    disagree with its sibling. The contract now refuses sparse rows so the
+    authority split cannot re-emerge.
+    """
     profiles = _builtin_profiles_map()
     openai_profile = profiles["openai"]
     profiles["openai"] = replace(
@@ -446,17 +454,15 @@ def test_resolve_adapter_economics_defaults_optional_flags_for_sparse_authority(
         },
     )
 
-    economics = provider_transport.resolve_adapter_economics(
-        "openai",
-        "llm_task",
-        profiles=profiles,
-    )
-
-    assert economics["billing_mode"] == "metered_api"
-    assert economics["budget_bucket"] == "openai_api_payg"
-    assert economics["effective_marginal_cost"] == 1.0
-    assert economics["prefer_prepaid"] is False
-    assert economics["allow_payg_fallback"] is False
+    with pytest.raises(provider_transport.AdapterEconomicsAuthorityError) as excinfo:
+        provider_transport.resolve_adapter_economics(
+            "openai",
+            "llm_task",
+            profiles=profiles,
+        )
+    message = str(excinfo.value)
+    assert "allow_payg_fallback" in message
+    assert "prefer_prepaid" in message
 
 
 def test_cursor_local_profile_is_registered_for_local_cli(monkeypatch) -> None:
@@ -1033,27 +1039,44 @@ def test_route_economics_preserves_zero_cost_for_prepaid_lanes(monkeypatch) -> N
     assert economics["allow_payg_fallback"] is True
 
 
-def test_route_economics_defaults_missing_payg_fallback_to_false(monkeypatch) -> None:
+def test_route_economics_rejects_sparse_authority_at_transport_contract(monkeypatch) -> None:
+    """Sparse economics rows fail at the contract gate (BUG-8DAA5468).
+
+    Previously ``resolve_route_economics`` silently defaulted missing
+    ``allow_payg_fallback`` to False — duplicating the defaulting logic
+    in ``provider_transport.resolve_adapter_economics`` and letting the
+    two layers drift. With the :class:`AdapterEconomicsContract`, sparse
+    rows raise before they can reach the routing surface, so no caller
+    ever sees a partially-specified economics dict.
+    """
     import runtime.routing_economics as routing_economics_mod
 
-    monkeypatch.setattr(routing_economics_mod, "resolve_adapter_economics", lambda provider_slug, adapter_type: {
-        "billing_mode": "subscription_included",
-        "budget_bucket": f"{provider_slug}_monthly",
-        "effective_marginal_cost": 0.0,
-        "prefer_prepaid": True,
-    })
-    monkeypatch.setattr(routing_economics_mod, "supports_adapter", lambda provider_slug, adapter_type: True)
+    def _sparse_profile_economics(provider_slug: str, adapter_type: str):
+        # Simulates what would happen if a sparse DB row survived into the
+        # transport layer: the contract rejects it there, and that error
+        # propagates out of resolve_route_economics unchanged.
+        raise provider_transport.AdapterEconomicsAuthorityError(
+            f"adapter_economics for {provider_slug}/{adapter_type} "
+            "must set ['allow_payg_fallback', 'prefer_prepaid']"
+        )
 
-    economics = routing_economics_mod.resolve_route_economics(
-        provider_slug="openai",
-        adapter_type=None,
-        provider_policy_id=None,
-        raw_cost_per_m_tokens=8.75,
-        budget_authority=routing_economics_mod.BudgetAuthoritySnapshot.empty(),
-        default_adapter="cli_llm",
+    monkeypatch.setattr(
+        routing_economics_mod, "resolve_adapter_economics", _sparse_profile_economics
+    )
+    monkeypatch.setattr(
+        routing_economics_mod, "supports_adapter", lambda provider_slug, adapter_type: True
     )
 
-    assert economics["allow_payg_fallback"] is False
+    with pytest.raises(provider_transport.AdapterEconomicsAuthorityError) as excinfo:
+        routing_economics_mod.resolve_route_economics(
+            provider_slug="openai",
+            adapter_type=None,
+            provider_policy_id=None,
+            raw_cost_per_m_tokens=8.75,
+            budget_authority=routing_economics_mod.BudgetAuthoritySnapshot.empty(),
+            default_adapter="cli_llm",
+        )
+    assert "allow_payg_fallback" in str(excinfo.value)
 
 
 def test_route_economics_prefers_prepaid_adapter_over_metered_default(monkeypatch) -> None:

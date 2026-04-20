@@ -326,15 +326,18 @@ def resolve_route_economics(
                 effective_marginal_cost *= 3.0
             elif spend_pressure == "high":
                 effective_marginal_cost *= 10.0
+        # economics is produced by provider_transport.AdapterEconomicsContract,
+        # so prefer_prepaid / allow_payg_fallback are guaranteed present and
+        # typed — no local defaulting (closes BUG-8DAA5468).
         options.append({
             "adapter_type": candidate_adapter_type,
             "billing_mode": billing_mode,
-            "budget_bucket": str(economics.get("budget_bucket") or "unknown"),
+            "budget_bucket": str(economics["budget_bucket"]),
             "effective_marginal_cost": effective_marginal_cost,
             "spend_pressure": spend_pressure,
             "budget_status": str((budget_window or {}).get("budget_status") or ""),
-            "prefer_prepaid": bool(economics.get("prefer_prepaid", False)),
-            "allow_payg_fallback": bool(economics.get("allow_payg_fallback", False)),
+            "prefer_prepaid": economics["prefer_prepaid"],
+            "allow_payg_fallback": economics["allow_payg_fallback"],
             "budget_authority_unreachable": authority_unreachable,
         })
 

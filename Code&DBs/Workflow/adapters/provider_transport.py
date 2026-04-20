@@ -16,12 +16,133 @@ import logging
 import os
 import shutil
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from .provider_types import ProviderAdapterContract, ProviderCLIProfile
 
 KNOWN_LLM_ADAPTER_TYPES = frozenset({"cli_llm", "llm_task"})
 _DEFAULT_PROVIDER_PRIORITY: tuple[str, ...] = ("openai", "anthropic", "google", "cursor", "cursor_local")
+
+
+class AdapterEconomicsAuthorityError(RuntimeError):
+    """Raised when provider adapter_economics authority is missing or sparse.
+
+    Used for structural gaps (unknown provider, no row for adapter_type, and
+    missing authority fields on a row that exists). Distinct from
+    ``RuntimeError`` so callers that specifically want to treat sparse
+    authority as a routing-surface error — not a generic unexpected-exception
+    — can catch it narrowly.
+    """
+
+
+# Fields that the adapter_economics row MUST set. Sparse rows (missing or
+# non-bool values) are rejected here instead of silently defaulting so that
+# both provider_transport.resolve_adapter_economics and
+# runtime.routing_economics.resolve_route_economics read one shared
+# answer — closes BUG-8DAA5468.
+_REQUIRED_ECONOMICS_BOOL_FIELDS: tuple[str, ...] = (
+    "prefer_prepaid",
+    "allow_payg_fallback",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class AdapterEconomicsContract:
+    """Typed, validated economics for one (provider, adapter_type) pair.
+
+    Single source of truth for the economics fields consumed by route
+    selection (``runtime.routing_economics``), health surfaces
+    (``runtime.health``), and operator observability. Sparse rows that omit
+    authority fields (``prefer_prepaid``, ``allow_payg_fallback``) are
+    rejected at construction so downstream consumers never need to default —
+    the authority speaks or we fail closed.
+
+    Previously both ``resolve_adapter_economics`` and
+    ``resolve_route_economics`` ran ``bool(raw.get(field, False))`` against
+    the same rows. Duplicated defaulting meant any future layer that
+    changed its default would silently disagree with its sibling — exactly
+    the BUG-8DAA5468 failure mode. Centralizing the contract eliminates the
+    possibility.
+    """
+
+    provider_slug: str
+    adapter_type: str
+    billing_mode: str
+    budget_bucket: str
+    effective_marginal_cost: float
+    prefer_prepaid: bool
+    allow_payg_fallback: bool
+
+    @classmethod
+    def from_raw(
+        cls,
+        *,
+        provider_slug: str,
+        adapter_type: str,
+        raw: Mapping[str, Any],
+    ) -> "AdapterEconomicsContract":
+        """Validate and construct from a raw adapter_economics row.
+
+        Raises :class:`AdapterEconomicsAuthorityError` when any required
+        field is missing or has an unusable type. This is the only
+        construction path — consumers must never build the contract from
+        hand-rolled dicts.
+        """
+        missing_core: list[str] = []
+        for core_field in ("billing_mode", "budget_bucket", "effective_marginal_cost"):
+            if core_field not in raw or raw[core_field] is None:
+                missing_core.append(core_field)
+        if missing_core:
+            raise AdapterEconomicsAuthorityError(
+                f"adapter_economics for {provider_slug}/{adapter_type} "
+                f"missing required fields: {sorted(missing_core)}"
+            )
+
+        missing_bools: list[str] = []
+        non_bool_fields: list[str] = []
+        for bool_field in _REQUIRED_ECONOMICS_BOOL_FIELDS:
+            if bool_field not in raw or raw[bool_field] is None:
+                missing_bools.append(bool_field)
+            elif not isinstance(raw[bool_field], bool):
+                non_bool_fields.append(bool_field)
+        if missing_bools:
+            raise AdapterEconomicsAuthorityError(
+                f"adapter_economics for {provider_slug}/{adapter_type} "
+                f"must set {sorted(missing_bools)}; sparse rows are rejected "
+                "so paid-lane fallback policy cannot silently flip. "
+                "Closes BUG-8DAA5468."
+            )
+        if non_bool_fields:
+            raise AdapterEconomicsAuthorityError(
+                f"adapter_economics for {provider_slug}/{adapter_type} "
+                f"fields {sorted(non_bool_fields)} must be bool"
+            )
+
+        return cls(
+            provider_slug=provider_slug,
+            adapter_type=adapter_type,
+            billing_mode=str(raw["billing_mode"]),
+            budget_bucket=str(raw["budget_bucket"]),
+            effective_marginal_cost=float(raw["effective_marginal_cost"]),
+            prefer_prepaid=bool(raw["prefer_prepaid"]),
+            allow_payg_fallback=bool(raw["allow_payg_fallback"]),
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        """Serialize to the legacy dict surface for consumers mid-migration.
+
+        New code should read typed attributes directly; this shape exists
+        only so that surfaces already returning a dict (JSON-ish payloads)
+        don't have to change shape.
+        """
+        return {
+            "billing_mode": self.billing_mode,
+            "budget_bucket": self.budget_bucket,
+            "effective_marginal_cost": self.effective_marginal_cost,
+            "prefer_prepaid": self.prefer_prepaid,
+            "allow_payg_fallback": self.allow_payg_fallback,
+        }
 
 
 BUILTIN_PROVIDER_PROFILES: tuple[ProviderCLIProfile, ...] = (
@@ -575,38 +696,61 @@ def default_model_for_provider(
     return model or None
 
 
+def resolve_adapter_economics_contract(
+    provider_slug: str,
+    adapter_type: str,
+    *,
+    profiles: Mapping[str, ProviderCLIProfile],
+) -> AdapterEconomicsContract:
+    """Return the typed economics contract for one (provider, adapter_type).
+
+    This is the single construction path for economics authority. Both the
+    legacy :func:`resolve_adapter_economics` dict surface and
+    :func:`runtime.routing_economics.resolve_route_economics` now derive from
+    this contract, which closes BUG-8DAA5468 (authority split defaulting
+    ``allow_payg_fallback`` in two places).
+    """
+    profile = profiles.get(provider_slug)
+    if profile is None:
+        raise AdapterEconomicsAuthorityError(
+            f"provider execution registry has no profile for {provider_slug!r}"
+        )
+
+    lane_policy = resolve_lane_policy(provider_slug, adapter_type, profiles=profiles)
+    if not lane_policy or not bool(lane_policy.get("admitted_by_policy")):
+        raise AdapterEconomicsAuthorityError(
+            f"provider execution registry adapter not admitted by policy for {provider_slug}/{adapter_type}"
+        )
+
+    adapter_defaults = profile.adapter_economics or {}
+    if adapter_type not in adapter_defaults:
+        raise AdapterEconomicsAuthorityError(
+            f"provider execution registry missing authoritative adapter_economics for {provider_slug}/{adapter_type}"
+        )
+    return AdapterEconomicsContract.from_raw(
+        provider_slug=provider_slug,
+        adapter_type=adapter_type,
+        raw=adapter_defaults[adapter_type],
+    )
+
+
 def resolve_adapter_economics(
     provider_slug: str,
     adapter_type: str,
     *,
     profiles: Mapping[str, ProviderCLIProfile],
 ) -> dict[str, Any]:
-    profile = profiles.get(provider_slug)
-    if profile is None:
-        raise RuntimeError(f"provider execution registry has no profile for {provider_slug!r}")
+    """Legacy dict surface — delegates to the contract constructor.
 
-    lane_policy = resolve_lane_policy(provider_slug, adapter_type, profiles=profiles)
-    if not lane_policy or not bool(lane_policy.get("admitted_by_policy")):
-        raise RuntimeError(
-            f"provider execution registry adapter not admitted by policy for {provider_slug}/{adapter_type}"
-        )
-
-    adapter_defaults = profile.adapter_economics or {}
-    if adapter_type not in adapter_defaults:
-        raise RuntimeError(
-            f"provider execution registry missing authoritative adapter_economics for {provider_slug}/{adapter_type}"
-        )
-    economics = dict(adapter_defaults[adapter_type])
-    return {
-        "billing_mode": str(economics["billing_mode"]),
-        "budget_bucket": str(economics["budget_bucket"]),
-        "effective_marginal_cost": float(economics["effective_marginal_cost"]),
-        # Older DB-backed authority rows may omit optional economics hints.
-        # Normalize them here so health and routing surfaces stay inspectable
-        # instead of crashing on sparse metadata.
-        "prefer_prepaid": bool(economics.get("prefer_prepaid", False)),
-        "allow_payg_fallback": bool(economics.get("allow_payg_fallback", False)),
-    }
+    Retained for consumers that still interoperate with raw dicts (JSON
+    payloads, observability surfaces). Internally resolves the same typed
+    :class:`AdapterEconomicsContract`, so the sparse-row rejection in
+    :meth:`AdapterEconomicsContract.from_raw` is the single authority gate.
+    """
+    contract = resolve_adapter_economics_contract(
+        provider_slug, adapter_type, profiles=profiles
+    )
+    return contract.as_dict()
 
 
 def resolve_api_endpoint(
