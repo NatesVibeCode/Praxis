@@ -32,11 +32,6 @@ from runtime.chat_store import ChatStore
 
 _log = logging.getLogger(__name__)
 
-_DEFAULT_ENDPOINTS = {
-    "openai": "https://api.openai.com/v1/chat/completions",
-    "anthropic": "https://api.anthropic.com/v1/messages",
-}
-
 _MAX_TOOL_ITERATIONS = 5
 _MAX_HISTORY_TOKENS = 100_000
 _CHARS_PER_TOKEN = 4.0
@@ -555,21 +550,24 @@ class ChatOrchestrator:
                 )
                 continue
 
-            endpoint = _DEFAULT_ENDPOINTS.get(provider, _DEFAULT_ENDPOINTS["openai"])
+            endpoint = _resolve_http_endpoint(provider, model)
+            if endpoint is None:
+                rejections.append(f"{provider}/{model}:no_registered_endpoint")
+                continue
             api_key = _resolve_api_key(provider, required=False)
-            if endpoint and api_key:
-                routes.append(
-                    ResolvedChatRoute(
-                        provider_slug=provider,
-                        model_slug=model,
-                        adapter_type=adapter_type,
-                        endpoint_uri=endpoint,
-                        api_key=api_key,
-                        supports_tool_loop=True,
-                    )
-                )
-            else:
+            if not api_key:
                 rejections.append(f"{provider}/{model}:no_api_key")
+                continue
+            routes.append(
+                ResolvedChatRoute(
+                    provider_slug=provider,
+                    model_slug=model,
+                    adapter_type=adapter_type,
+                    endpoint_uri=endpoint,
+                    api_key=api_key,
+                    supports_tool_loop=True,
+                )
+            )
 
         routes = _prioritize_last_good_cli_route(routes)
         if not routes:
@@ -630,6 +628,30 @@ def _resolve_api_key(provider: str, *, required: bool = True) -> str | None:
     if required:
         raise RuntimeError(f"no configured API key env var is set for provider {provider!r}")
     return None
+
+
+def _resolve_http_endpoint(provider: str, model: str | None = None) -> str | None:
+    """Resolve a provider HTTP endpoint from the provider_cli_profiles registry.
+
+    Returns None when the registry has no endpoint for the provider; callers
+    surface that as a route rejection rather than silently falling back to a
+    hardcoded URL.
+    """
+
+    from registry.provider_execution_registry import resolve_api_endpoint
+
+    try:
+        endpoint = resolve_api_endpoint(provider, model)
+    except Exception as exc:  # registry load failures must not crash chat routing
+        _log.warning(
+            "registry endpoint lookup failed for %s/%s: %s",
+            provider,
+            model,
+            exc,
+        )
+        return None
+    value = str(endpoint or "").strip()
+    return value or None
 
 
 def _prioritize_last_good_cli_route(routes: list[ResolvedChatRoute]) -> list[ResolvedChatRoute]:

@@ -182,6 +182,91 @@ def test_send_message_prefers_http_lane_when_cli_route_is_sticky(monkeypatch) ->
     assert [message["role"] for message in store.messages] == ["user", "assistant"]
 
 
+def test_resolve_route_chain_reads_endpoint_from_registry_without_hardcoded_fallback(monkeypatch) -> None:
+    """Non-openai providers must resolve endpoints via provider_cli_profiles, not a hardcoded dict."""
+
+    monkeypatch.setattr(
+        chat_orchestrator_mod.importlib,
+        "import_module",
+        lambda _name: SimpleNamespace(TaskTypeRouter=_FakeRouter),
+    )
+    monkeypatch.setattr(
+        "runtime.chat_orchestrator._resolve_api_key",
+        lambda provider, *, required=True: f"{provider}-key",
+    )
+    monkeypatch.setattr(
+        "runtime.chat_orchestrator._resolve_http_endpoint",
+        lambda provider, model=None: {
+            "google": "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+            "anthropic": "https://api.anthropic.com/v1/messages",
+        }.get(provider),
+    )
+    monkeypatch.setattr(
+        "runtime.chat_orchestrator.resolve_binary",
+        lambda _provider: None,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "runtime.lane_policy.load_provider_lane_policies",
+        lambda _pg: {},
+    )
+    _FakeRouter.result = [
+        SimpleNamespace(provider_slug="google", model_slug="gemini-2.5-pro", adapter_type="llm_task"),
+        SimpleNamespace(provider_slug="anthropic", model_slug="claude-sonnet-4-5", adapter_type="llm_task"),
+    ]
+
+    orchestrator = ChatOrchestrator(object(), _REPO_ROOT)
+    routes = orchestrator._resolve_route_chain()
+
+    by_provider = {route.provider_slug: route.endpoint_uri for route in routes}
+    assert by_provider["google"] == "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    assert by_provider["anthropic"] == "https://api.anthropic.com/v1/messages"
+
+
+def test_resolve_route_chain_rejects_provider_with_no_registered_endpoint(monkeypatch) -> None:
+    """An unknown provider falls through as no_registered_endpoint instead of silently using openai."""
+
+    monkeypatch.setattr(
+        chat_orchestrator_mod.importlib,
+        "import_module",
+        lambda _name: SimpleNamespace(TaskTypeRouter=_FakeRouter),
+    )
+    monkeypatch.setattr(
+        "runtime.chat_orchestrator._resolve_api_key",
+        lambda provider, *, required=True: f"{provider}-key",
+    )
+    monkeypatch.setattr(
+        "runtime.chat_orchestrator._resolve_http_endpoint",
+        lambda provider, model=None: None,
+    )
+    monkeypatch.setattr(
+        "runtime.lane_policy.load_provider_lane_policies",
+        lambda _pg: {},
+    )
+    _FakeRouter.result = [
+        SimpleNamespace(provider_slug="unregistered", model_slug="model-x", adapter_type="llm_task"),
+    ]
+
+    orchestrator = ChatOrchestrator(object(), _REPO_ROOT)
+
+    try:
+        orchestrator._resolve_route_chain()
+    except RuntimeError as exc:
+        assert "no_registered_endpoint" in str(exc)
+    else:  # pragma: no cover - must not pass
+        raise AssertionError("expected RuntimeError with no_registered_endpoint rejection")
+
+
+def test_chat_orchestrator_has_no_hardcoded_endpoints_constant() -> None:
+    """Guardrail: a future edit must not resurrect the hardcoded endpoint dict."""
+
+    import inspect
+
+    source = inspect.getsource(chat_orchestrator_mod)
+    assert "_DEFAULT_ENDPOINTS" not in source, "hardcoded endpoint dict resurfaced in chat_orchestrator"
+    assert "resolve_api_endpoint" in source, "registry-backed endpoint resolution must stay wired"
+
+
 def test_send_message_streaming_prefers_http_lane_when_cli_route_is_sticky(monkeypatch) -> None:
     store = _FakeChatStore()
     orchestrator = ChatOrchestrator(object(), _REPO_ROOT, chat_store=store)
