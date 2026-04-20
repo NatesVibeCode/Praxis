@@ -3,8 +3,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
+from runtime.primitive_contracts import bug_query_default_open_only_backlog
 from runtime.semantic_projection_subscriber import consume_semantic_projection_events
 from storage.postgres.workflow_runtime_repository import reset_observability_metrics
 
@@ -21,7 +22,7 @@ class ResetMetricsCommand(BaseModel):
 
 class BackfillBugReplayProvenanceCommand(BaseModel):
     limit: int | None = None
-    open_only: bool = True
+    open_only: bool = Field(default_factory=bug_query_default_open_only_backlog)
     receipt_limit: int = 1
 
     @field_validator("limit", mode="before")

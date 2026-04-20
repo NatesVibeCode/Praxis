@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from runtime.primitive_contracts import bug_query_default_open_only_list
+
 from .._payload_contract import (
     coerce_query_bool,
     coerce_query_int,
@@ -64,7 +66,7 @@ def _handle_bugs_get(request: Any, path: str) -> None:
         open_only = coerce_query_bool(
             params.get("open_only"),
             field_name="open_only",
-            default=False,
+            default=bug_query_default_open_only_list(),
         )
         status = coerce_query_text(
             params.get("status"),

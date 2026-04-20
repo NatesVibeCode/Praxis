@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 from typing import Any, TextIO
 
+from runtime.primitive_contracts import bug_query_default_open_only_backlog
 from surfaces.cli._db import cli_sync_conn
 from surfaces.cli.mcp_tools import (
     get_definition,
@@ -865,7 +866,7 @@ def _bugs_command(args: list[str], *, stdout: TextIO) -> int:
     status_filter = None
     severity_filter = None
     limit = 25
-    open_only = True
+    open_only = bug_query_default_open_only_backlog()
     as_json = False
     params: dict[str, object] = {}
     i = 0

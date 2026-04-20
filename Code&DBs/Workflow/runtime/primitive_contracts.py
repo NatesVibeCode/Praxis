@@ -167,6 +167,31 @@ def bug_status_sql_equals_literal(status: str, *, column: str = "status") -> str
     return f"UPPER({column_text}) = '{status_text}'"
 
 
+def bug_query_default_open_only_list() -> bool:
+    """Default ``open_only`` for generic bug list queries.
+
+    Machine-facing surfaces (API ``GET /bugs``, API ``POST /bugs``/``search``,
+    MCP ``praxis_bugs`` generic tool) expose the full bug set by default.
+    Callers narrow with ``open_only=True`` or ``status=<canonical>`` when they
+    need the open-work view.
+    """
+
+    return False
+
+
+def bug_query_default_open_only_backlog() -> bool:
+    """Default ``open_only`` for operator-backlog bug queries.
+
+    Operator-facing surfaces (CLI ``praxis workflow bugs list``,
+    ``praxis_issue_backlog``, ``praxis_bug_replay_provenance_backfill``,
+    ``praxis_replay_ready_bugs``) show the actionable open-work slice by
+    default. An explicit ``--all`` / ``open_only=False`` flag widens the
+    view to include resolved history.
+    """
+
+    return True
+
+
 def failure_identity_fields() -> tuple[str, ...]:
     """Return the canonical failure-identity field order from the contract."""
 
@@ -320,6 +345,28 @@ def build_state_semantics_contract() -> dict[str, Any]:
                 "runtime.primitive_contracts.bug_status_sql_in_literal"
             ),
             "normalization": "strip, uppercase, replace '-' with '_'",
+            "query_defaults": {
+                "list": {
+                    "open_only": bug_query_default_open_only_list(),
+                    "consumer": "machine-facing: API /bugs, MCP praxis_bugs",
+                    "helper": (
+                        "runtime.primitive_contracts."
+                        "bug_query_default_open_only_list"
+                    ),
+                },
+                "backlog": {
+                    "open_only": bug_query_default_open_only_backlog(),
+                    "consumer": (
+                        "operator-facing: CLI workflow bugs list, "
+                        "praxis_issue_backlog, praxis_bug_replay_provenance_backfill, "
+                        "praxis_replay_ready_bugs"
+                    ),
+                    "helper": (
+                        "runtime.primitive_contracts."
+                        "bug_query_default_open_only_backlog"
+                    ),
+                },
+            },
         },
     }
 
@@ -405,6 +452,8 @@ def build_orient_primitive_contracts(
 
 __all__ = [
     "bug_open_status_values",
+    "bug_query_default_open_only_backlog",
+    "bug_query_default_open_only_list",
     "bug_resolved_status_values",
     "bug_resolved_status_values_with_legacy",
     "bug_status_legacy_resolved_aliases",

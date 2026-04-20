@@ -6,6 +6,10 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from runtime import bug_evidence as _bug_evidence
+from runtime.primitive_contracts import (
+    bug_query_default_open_only_backlog,
+    bug_query_default_open_only_list,
+)
 
 
 BugSerializer = Callable[[Any], dict[str, Any]]
@@ -145,7 +149,7 @@ def list_bugs_payload(
     title_like = body.get("title_like")
     include_replay_state = bool(body.get("include_replay_state", False))
     replay_ready_only = bool(body.get("replay_ready_only", False))
-    open_only = bool(body.get("open_only", False))
+    open_only = bool(body.get("open_only", bug_query_default_open_only_list()))
     tags = _normalize_tags(body.get("tags"))
     exclude_tags = _normalize_tags(body.get("exclude_tags"))
 
@@ -255,7 +259,7 @@ def search_bugs_payload(
         category=parse_category(bt_mod, body.get("category")),
         tags=_normalize_tags(body.get("tags")),
         exclude_tags=_normalize_tags(body.get("exclude_tags")),
-        open_only=bool(body.get("open_only", False)),
+        open_only=bool(body.get("open_only", bug_query_default_open_only_list())),
         **filter_kwargs,
     )
     if include_replay_state:
@@ -344,7 +348,9 @@ def backfill_replay_payload(
         "backfill": serialize(
             bt.bulk_backfill_replay_provenance(
                 limit=limit,
-                open_only=bool(body.get("open_only", True)),
+                open_only=bool(
+                    body.get("open_only", bug_query_default_open_only_backlog())
+                ),
                 receipt_limit=max(1, int(body.get("receipt_limit", 1) or 1)),
             )
         )

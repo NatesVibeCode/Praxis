@@ -5,8 +5,9 @@ from datetime import datetime, timezone
 import json
 from typing import Any
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
+from runtime.primitive_contracts import bug_query_default_open_only_backlog
 from runtime.quality_views import load_failure_category_zones
 from runtime.queue_admission import (
     DEFAULT_QUEUE_CRITICAL_THRESHOLD,
@@ -114,7 +115,7 @@ class QueryOperatorStatusSnapshot(BaseModel):
 
 class QueryOperatorIssueBacklog(BaseModel):
     limit: int = 50
-    open_only: bool = True
+    open_only: bool = Field(default_factory=bug_query_default_open_only_backlog)
     status: str | None = None
 
     @field_validator("limit", mode="before")
@@ -331,7 +332,7 @@ def handle_query_replay_ready_bugs(
         bt_mod=bt_mod,
         body={
             "limit": query.limit,
-            "open_only": True,
+            "open_only": bug_query_default_open_only_backlog(),
             "replay_ready_only": True,
         },
         serialize_bug=_bug_to_dict,

@@ -178,3 +178,93 @@ def test_state_semantics_contract_projects_predicates() -> None:
     predicates = bug_section["status_predicates"]
     assert predicates["OPEN"]["is_open"] is True
     assert predicates["FIXED"]["is_resolved"] is True
+
+
+def test_bug_query_default_open_only_helpers_pin_two_policies() -> None:
+    """Pin the two canonical bug-query open_only defaults and their semantic roles.
+
+    Machine-facing list surfaces (API /bugs, MCP praxis_bugs) default open_only
+    to False so generic consumers can see the full bug set. Operator-backlog
+    surfaces (CLI workflow bugs list, praxis_issue_backlog,
+    praxis_bug_replay_provenance_backfill) default open_only to True so the
+    actionable slice is the zero-flag path.
+
+    Changing either default must be a deliberate contract move, not an
+    incidental edit to a handler.
+    """
+    from runtime.primitive_contracts import (
+        bug_query_default_open_only_backlog,
+        bug_query_default_open_only_list,
+        build_state_semantics_contract,
+    )
+
+    assert bug_query_default_open_only_list() is False
+    assert bug_query_default_open_only_backlog() is True
+
+    contract = build_state_semantics_contract()
+    query_defaults = contract["bug"]["query_defaults"]
+    assert query_defaults["list"]["open_only"] is False
+    assert query_defaults["backlog"]["open_only"] is True
+    assert (
+        query_defaults["list"]["helper"]
+        == "runtime.primitive_contracts.bug_query_default_open_only_list"
+    )
+    assert (
+        query_defaults["backlog"]["helper"]
+        == "runtime.primitive_contracts.bug_query_default_open_only_backlog"
+    )
+
+
+def test_bug_query_default_open_only_consumers_route_through_authority() -> None:
+    """Every surface that declares a bug-query open_only default must import the authority helper.
+
+    Hand-rolled ``open_only=True``/``False`` defaults would re-diverge the
+    machine-vs-operator contract. This test walks the known consumer files and
+    asserts each imports one of the authority helpers.
+    """
+    consumers: tuple[tuple[str, tuple[str, ...]], ...] = (
+        (
+            "surfaces/api/handlers/_bug_surface_contract.py",
+            (
+                "bug_query_default_open_only_list",
+                "bug_query_default_open_only_backlog",
+            ),
+        ),
+        (
+            "surfaces/api/handlers/_query_bugs.py",
+            ("bug_query_default_open_only_list",),
+        ),
+        (
+            "surfaces/api/handlers/workflow_query_core.py",
+            ("bug_query_default_open_only_backlog",),
+        ),
+        (
+            "surfaces/mcp/tools/operator.py",
+            ("bug_query_default_open_only_backlog",),
+        ),
+        (
+            "surfaces/cli/commands/query.py",
+            ("bug_query_default_open_only_backlog",),
+        ),
+        (
+            "runtime/operations/queries/operator_observability.py",
+            ("bug_query_default_open_only_backlog",),
+        ),
+        (
+            "runtime/operations/commands/operator_maintenance.py",
+            ("bug_query_default_open_only_backlog",),
+        ),
+    )
+
+    missing: list[str] = []
+    for relative, required_names in consumers:
+        path = _WORKFLOW_ROOT / relative
+        assert path.is_file(), f"consumer file missing: {relative}"
+        source = path.read_text(encoding="utf-8")
+        for name in required_names:
+            if name not in source:
+                missing.append(f"{relative}: missing import of {name}")
+    assert not missing, (
+        "bug-query open_only consumers must route through the authority "
+        "helpers in runtime.primitive_contracts:\n  - " + "\n  - ".join(missing)
+    )

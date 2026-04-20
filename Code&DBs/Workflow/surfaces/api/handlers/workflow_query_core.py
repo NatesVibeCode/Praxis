@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from runtime.primitive_contracts import bug_query_default_open_only_backlog
 from storage.postgres.validators import PostgresConfigurationError
 
 from surfaces._workflow_database import workflow_database_url_for_repo
@@ -323,7 +324,7 @@ def handle_query(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
             operation_name="operator.issue_backlog",
             payload={
                 "limit": 25,
-                "open_only": True,
+                "open_only": bug_query_default_open_only_backlog(),
             },
         )
         backlog["routed_to"] = "issue_backlog"
@@ -1533,7 +1534,9 @@ def handle_operator_view(subs: Any, body: dict[str, Any]) -> dict[str, Any]:
     elif view == "issue_backlog":
         payload = {
             "limit": max(1, int(body.get("limit", 50) or 50)),
-            "open_only": bool(body.get("open_only", True)),
+            "open_only": bool(
+                body.get("open_only", bug_query_default_open_only_backlog())
+            ),
             "status": _optional_text(body.get("status")),
         }
     else:

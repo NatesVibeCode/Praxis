@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from runtime.operation_catalog_gateway import execute_operation_from_subsystems
+from runtime.primitive_contracts import bug_query_default_open_only_backlog
 
 from ..subsystems import _subs
 
@@ -64,7 +65,9 @@ def tool_praxis_bug_replay_provenance_backfill(params: dict) -> dict:
         operation_name="operator.bug_replay_provenance_backfill",
         payload={
             "limit": params.get("limit"),
-            "open_only": bool(params.get("open_only", True)),
+            "open_only": bool(
+                params.get("open_only", bug_query_default_open_only_backlog())
+            ),
             "receipt_limit": params.get("receipt_limit", 1),
         },
     )
@@ -169,7 +172,9 @@ def tool_praxis_issue_backlog(params: dict) -> dict:
         operation_name="operator.issue_backlog",
         payload={
             "limit": int(params.get("limit", 50) or 50),
-            "open_only": bool(params.get("open_only", True)),
+            "open_only": bool(
+                params.get("open_only", bug_query_default_open_only_backlog())
+            ),
             "status": params.get("status"),
         },
     )
@@ -622,7 +627,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "surface": "operations",
                 "tier": "advanced",
                 "when_to_use": "Inspect workflow pass rate, failure mix, and in-flight run summaries from canonical receipts.",
-                "when_not_to_use": "Do not use it for deep run inspection or workflow dispatch.",
+                "when_not_to_use": "Do not use it for deep run inspection or workflow launch.",
                 "risks": {"default": "read"},
                 "examples": [
                     {"title": "Show 24h status", "input": {"since_hours": 24}},
@@ -806,7 +811,7 @@ TOOLS: dict[str, tuple[callable, dict[str, Any]]] = {
                 "surface": "operator",
                 "tier": "advanced",
                 "when_to_use": "Inspect cutover readiness for one workflow run.",
-                "when_not_to_use": "Do not use it for workflow dispatch or global status.",
+                "when_not_to_use": "Do not use it for workflow launch or global status.",
                 "risks": {"default": "read"},
                 "examples": [
                     {"title": "Read run scoreboard", "input": {"run_id": "run_123"}},
